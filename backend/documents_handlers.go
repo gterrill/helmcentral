@@ -252,6 +252,14 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusRequestEntityTooLarge, errNoteBodyTooLarge.Error()
 	case errors.Is(err, errNotANote):
 		return http.StatusConflict, errNotANote.Error()
+	// errNotAManual and errManualNotTopLevel back the manuals feature
+	// (manuals_store.go): both are the same kind of "a specific, expected
+	// condition, not a database failure" sentinel as errNotANote just
+	// above, so they map the same way - 409, the store's own message.
+	case errors.Is(err, errNotAManual):
+		return http.StatusConflict, errNotAManual.Error()
+	case errors.Is(err, errManualNotTopLevel):
+		return http.StatusConflict, errManualNotTopLevel.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -798,7 +806,7 @@ func patchDocumentHandler(c echo.Context) error {
 		}
 	}
 
-	doc, err := globalDocumentStore.PatchDocument(id, title, notes, tags, folderID, moveFolder)
+	doc, err := globalDocumentStore.PatchDocument(id, title, notes, tags, folderID, moveFolder, nil)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}

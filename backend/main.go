@@ -720,6 +720,15 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/notes", tierRead, listNotesHandler},
 		{http.MethodGet, "/api/notes/:id", tierRead, getNoteHandler},
 
+		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116): a
+		// manual is a document_folders row with role='manual'
+		// (manuals_store.go). "/api/manuals/:id/tree" registered after the
+		// bare "/api/manuals" for readability only - see the read-tier
+		// comment above the document library's own routes on why Echo's
+		// router never needs that ordering.
+		{http.MethodGet, "/api/manuals", tierRead, listManualsHandler},
+		{http.MethodGet, "/api/manuals/:id/tree", tierRead, manualTreeHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -796,6 +805,13 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
 		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
 		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
+
+		// Manuals writes (plan "Notes and the Boat's Manual" §4, ADR
+		// 0114/0116). DELETE clears the role flag only - see
+		// clearManualHandler's own doc comment (manuals_handlers.go).
+		{http.MethodPost, "/api/manuals", tierWrite, createManualHandler},
+		{http.MethodDelete, "/api/manuals/:id", tierWrite, clearManualHandler},
+		{http.MethodPost, "/api/manuals/:id/reorder", tierWrite, reorderManualHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},

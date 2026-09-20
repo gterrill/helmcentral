@@ -318,17 +318,24 @@ func createNoteHandler(c echo.Context) error {
 // ── PATCH /api/notes/:id ─────────────────────────────────────────────────
 
 // applyNoteMetadata lands the database-only side of a note PATCH:
-// title/tags/folder via PatchDocument (documents_store.go - the exact same
-// call patchDocumentHandler uses; the operator-annotation `notes` column
-// is always passed nil, since nothing about the notes feature ever touches
-// it), and note_type/note_type_source via SetNoteTypeIfNotOperator when
-// setType is true. Skips the PatchDocument call entirely when none of
-// title/tags/folder are present, so a PATCH that only touches "type" (or
-// nothing database-side beyond what ReplaceNoteBody's own caller already
-// committed) doesn't open a pointless transaction.
-func applyNoteMetadata(id string, title *string, tags []string, folderID *string, moveFolder bool, setType bool, noteType, noteTypeSource string) error {
-	if title != nil || tags != nil || moveFolder {
-		if _, err := globalDocumentStore.PatchDocument(id, title, nil, tags, folderID, moveFolder); err != nil {
+// title/tags/folder/sort_index via PatchDocument (documents_store.go - the
+// exact same call patchDocumentHandler uses; the operator-annotation
+// `notes` column is always passed nil, since nothing about the notes
+// feature ever touches it), and note_type/note_type_source via
+// SetNoteTypeIfNotOperator when setType is true. Skips the PatchDocument
+// call entirely when none of title/tags/folder/sort_index are present, so
+// a PATCH that only touches "type" (or nothing database-side beyond what
+// ReplaceNoteBody's own caller already committed) doesn't open a pointless
+// transaction.
+//
+// sort_index is what makes "file this note into a manual at position 3"
+// (plan §4's "promotion gets no endpoint" - it's this PATCH) land
+// atomically with the folder move that files it there in the first place:
+// PatchDocument applies folder_id and sort_index in the SAME transaction,
+// so a request carrying both either takes both or neither.
+func applyNoteMetadata(id string, title *string, tags []string, folderID *string, moveFolder bool, sortIndex *int, setType bool, noteType, noteTypeSource string) error {
+	if title != nil || tags != nil || moveFolder || sortIndex != nil {
+		if _, err := globalDocumentStore.PatchDocument(id, title, nil, tags, folderID, moveFolder, sortIndex); err != nil {
 			return err
 		}
 	}
@@ -343,10 +350,13 @@ func applyNoteMetadata(id string, title *string, tags []string, folderID *string
 // patchNoteHandler is PATCH /api/notes/:id: a presence-aware
 // map[string]json.RawMessage body, the same idiom patchDocumentHandler
 // uses (documents_handlers.go) - a field absent from the JSON is left
-// untouched. Five fields are recognised: title, tags, folder_id (a move,
+// untouched. Six fields are recognised: title, tags, folder_id (a move,
 // null clears it to root - identical semantics to patchDocumentHandler's
-// own), type (an explicit note_type override, always source='operator')
-// and body (a full replacement of the note's text).
+// own), sort_index (this note's position among its new siblings - plan §4's
+// manual promotion is this same PATCH with folder_id and sort_index
+// together, not a dedicated endpoint), type (an explicit note_type
+// override, always source='operator') and body (a full replacement of the
+// note's text).
 //
 // This is the edit protocol's home (plan §1), the riskiest part of this
 // phase. Step 1: title/type/tags/body all feed the note's frontmatter, so
@@ -385,6 +395,7 @@ func patchNoteHandler(c echo.Context) error {
 	var folderID *string
 	var moveFolder bool
 	var noteTypeOverride *string
+	var sortIndex *int
 
 	if v, ok := raw["title"]; ok {
 		var s string
@@ -434,6 +445,18 @@ func patchNoteHandler(c echo.Context) error {
 			return writeDocumentError(c, errNoteBodyTooLarge)
 		}
 		bodyPatch = &s
+	}
+	// sort_index is plan §4's promotion path: "file this note into a manual
+	// at position 3" is this PATCH with folder_id AND sort_index together,
+	// not a dedicated endpoint (manuals_handlers.go's own doc comment says
+	// why). It never feeds the note's rendered frontmatter - only
+	// title/type/tags/body do - so it plays no part in needsRender below.
+	if v, ok := raw["sort_index"]; ok {
+		var n int
+		if err := json.Unmarshal(v, &n); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid sort_index"})
+		}
+		sortIndex = &n
 	}
 
 	needsRender := title != nil || tags != nil || noteTypeOverride != nil || bodyPatch != nil
@@ -492,7 +515,7 @@ func patchNoteHandler(c echo.Context) error {
 		// Nothing about the serialised bytes changed - see this
 		// function's own doc comment on why. Only the database side of
 		// whatever was actually patched needs to land.
-		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, setType, resolvedType, resolvedSource); err != nil {
+		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource); err != nil {
 			return writeDocumentError(c, err)
 		}
 	} else {
@@ -573,7 +596,7 @@ func patchNoteHandler(c echo.Context) error {
 			return writeDocumentError(c, err)
 		}
 
-		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, setType, resolvedType, resolvedSource); err != nil {
+		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource); err != nil {
 			return writeDocumentError(c, err)
 		}
 

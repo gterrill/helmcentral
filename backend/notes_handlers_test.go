@@ -155,7 +155,7 @@ func TestListNotesHandler_FiledZeroIsTheInbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFolder: %v", err)
 	}
-	if _, err := globalDocumentStore.PatchDocument(filed.ID, nil, nil, nil, &folder.ID, true); err != nil {
+	if _, err := globalDocumentStore.PatchDocument(filed.ID, nil, nil, nil, &folder.ID, true, nil); err != nil {
 		t.Fatalf("PatchDocument (file into folder): %v", err)
 	}
 
@@ -385,6 +385,44 @@ func TestPatchNoteHandler_FolderOnlyMoveDoesNotTouchTheBlob(t *testing.T) {
 	}
 	if entries := documentsDirEntries(t); len(entries) != 1 {
 		t.Fatalf("expected still exactly one blob on disk after a folder-only move, got %v", entries)
+	}
+}
+
+// TestPatchNoteHandler_SortIndexLandsAtomicallyWithFolderMove pins plan
+// §4's "promotion gets no endpoint" - filing a note into a manual at a
+// given position is this exact PATCH, folder_id and sort_index together,
+// not a dedicated manuals endpoint. Neither field touches the note's
+// rendered frontmatter, so the blob must not change either.
+func TestPatchNoteHandler_SortIndexLandsAtomicallyWithFolderMove(t *testing.T) {
+	withTestDocumentStore(t)
+	created := mustCreateTestNote(t, "file me at a position", "")
+	manual, err := globalDocumentStore.CreateManual("Operations Manual")
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/notes/"+created.ID,
+		`{"folder_id":"`+manual.ID+`","sort_index":3}`, created.ID)
+	if err := patchNoteHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Document documentJSON `json:"document"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Document.SHA256 != created.SHA256 {
+		t.Fatalf("expected sha256 unchanged: before=%q after=%q", created.SHA256, resp.Document.SHA256)
+	}
+	if resp.Document.FolderID == nil || *resp.Document.FolderID != manual.ID {
+		t.Fatalf("expected the note filed into %q, got %v", manual.ID, resp.Document.FolderID)
+	}
+	if resp.Document.SortIndex != 3 {
+		t.Fatalf("expected sort_index 3, got %d", resp.Document.SortIndex)
 	}
 }
 

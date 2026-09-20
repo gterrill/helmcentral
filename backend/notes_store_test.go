@@ -101,6 +101,69 @@ func TestApplyDocumentStoreMigrations_PreMigrationRowsBackfillToKindFile(t *test
 	}
 }
 
+// TestApplyDocumentStoreMigrations_PreMigrationLibraryStillListsInNameOrder
+// is the Verification section's own required case for the manuals feature
+// (plan §2/§3): ListFolder now orders by sort_index before name, and every
+// row on a database that predates this migration backfills sort_index to
+// its DEFAULT 0 (the same backfill the test above pins for kind). A boat's
+// real, years-old documents.sqlite must list exactly as it always has -
+// alphabetically - the very first time it's opened under the new code, not
+// only after every row is individually reordered by hand.
+func TestApplyDocumentStoreMigrations_PreMigrationLibraryStillListsInNameOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "documents.sqlite")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	for _, stmt := range preNotesDocumentsSchema {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("create pre-notes schema: %v", err)
+		}
+	}
+	now := time.Now().Unix()
+	// Two folders and two documents, inserted in the OPPOSITE of
+	// alphabetical order - if sort_index's absence from this pre-migration
+	// schema didn't backfill cleanly to 0 for every row, this would sort
+	// however insertion order (or something else) left it instead.
+	if _, err := raw.Exec(`INSERT INTO document_folders (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"folder-zebra", "Zebra", now, now); err != nil {
+		t.Fatalf("insert pre-migration folder: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO document_folders (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"folder-anchor", "Anchor", now, now); err != nil {
+		t.Fatalf("insert pre-migration folder: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO documents (id, sha256, filename, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"doc-zebra", "sha-zebra", "z-doc.pdf", now, now); err != nil {
+		t.Fatalf("insert pre-migration document: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO documents (id, sha256, filename, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"doc-anchor", "sha-anchor", "a-doc.pdf", now, now); err != nil {
+		t.Fatalf("insert pre-migration document: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	store, err := newDocumentStore(path)
+	if err != nil {
+		t.Fatalf("newDocumentStore on a pre-notes database: %v", err)
+	}
+	defer store.Close()
+
+	folders, docs, err := store.ListFolder(nil)
+	if err != nil {
+		t.Fatalf("ListFolder: %v", err)
+	}
+	if len(folders) != 2 || folders[0].Name != "Anchor" || folders[1].Name != "Zebra" {
+		t.Fatalf("expected plain alphabetical order (Anchor, Zebra), got %+v", folders)
+	}
+	if len(docs) != 2 || docs[0].Filename != "a-doc.pdf" || docs[1].Filename != "z-doc.pdf" {
+		t.Fatalf("expected plain alphabetical order (a-doc.pdf, z-doc.pdf), got %+v", docs)
+	}
+}
+
 func TestApplyDocumentStoreMigrations_IdempotentAcrossTwoOpens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "documents.sqlite")
 

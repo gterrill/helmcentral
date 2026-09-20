@@ -1790,15 +1790,20 @@ func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
 }
 
 // PatchDocument applies patchDocumentHandler's whole PATCH body in ONE
-// transaction: title/notes/tags (updateMetaTx) and, when moveFolder is
-// true, folder_id (moveDocumentsTx for the single id). A bad folder_id
-// therefore rejects the whole request - it can never leave title/notes/
-// tags committed on their own. Document-not-found is checked before any
-// write regardless of which fields are present, so it always takes
-// precedence over a bad folder_id. The meta chunk is rebuilt once: by
-// moveDocumentsTx when a move happened (it always rebuilds the ids it
-// touches), or explicitly here otherwise.
-func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool) (document, error) {
+// transaction: title/notes/tags (updateMetaTx), when moveFolder is true
+// folder_id (moveDocumentsTx for the single id), and, when sortIndex is
+// non-nil, sort_index (plan §2 - a note's own promotion into a manual at a
+// given position, patchNoteHandler's "folder_id AND sort_index together" PATCH,
+// plus general enough that a plain document could be repositioned the same
+// way later). A bad folder_id therefore rejects the whole request - it can
+// never leave title/notes/tags/sort_index committed on their own.
+// Document-not-found is checked before any write regardless of which
+// fields are present, so it always takes precedence over a bad folder_id.
+// The meta chunk is rebuilt once: by moveDocumentsTx when a move happened
+// (it always rebuilds the ids it touches), or explicitly here otherwise.
+// sort_index never feeds the meta chunk (it isn't searchable text), so a
+// sort_index-only patch needs no rebuild of its own.
+func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool, sortIndex *int) (document, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1815,7 +1820,11 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
 			return document{}, err
 		}
-	} else {
+	} else if !moveFolder && sortIndex == nil {
+		// Nothing else below performs its own existence check in this
+		// combination (no move, no sort_index) - this is the only place
+		// that would otherwise happen, e.g. a PATCH body that only carried
+		// fields this handler doesn't recognise.
 		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
 		if err != nil {
 			return document{}, fmt.Errorf("patch document: check document: %w", err)
@@ -1831,6 +1840,16 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		}
 	} else if metaChanged {
 		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+			return document{}, err
+		}
+	}
+
+	if sortIndex != nil {
+		res, err := tx.Exec(`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ?`, *sortIndex, now.Unix(), id)
+		if err != nil {
+			return document{}, fmt.Errorf("patch document: sort index: %w", err)
+		}
+		if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
 			return document{}, err
 		}
 	}
@@ -2486,8 +2505,14 @@ func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []docume
 		parentKey = *parentID
 	}
 
+	// ORDER BY sort_index first, name second (plan §2): sort_index is 0 on
+	// every row until an operator actually reorders a manual's tree
+	// (ReorderManualChildren, manuals_store.go), so this is purely additive -
+	// a library that predates the manuals feature, where every sibling ties
+	// at 0, still lists exactly as it always did, alphabetically
+	// (TestDocumentStore_ListFolderOrdersByNameWhenEverySortIndexIsZero).
 	folderRows, err := s.db.Query(
-		`SELECT id, parent_id, name, created_at, updated_at FROM document_folders WHERE COALESCE(parent_id,'') = ? ORDER BY lower(name)`,
+		`SELECT id, parent_id, name, created_at, updated_at FROM document_folders WHERE COALESCE(parent_id,'') = ? ORDER BY sort_index, lower(name)`,
 		parentKey,
 	)
 	if err != nil {
@@ -2516,7 +2541,11 @@ func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []docume
 		return nil, nil, fmt.Errorf("list folder: %w", scanErr)
 	}
 
-	docRows, err := s.db.Query(`SELECT `+documentColumns+` FROM documents WHERE COALESCE(folder_id,'') = ? ORDER BY lower(filename)`, parentKey)
+	// Same sort_index-then-name ordering as the subfolder query above - a
+	// manual's children are a mix of subfolders and directly-filed documents
+	// (a photographed data plate is a legitimate section, plan §2), and both
+	// halves of ListFolder's result have to agree on what "position 3" means.
+	docRows, err := s.db.Query(`SELECT `+documentColumns+` FROM documents WHERE COALESCE(folder_id,'') = ? ORDER BY sort_index, lower(filename)`, parentKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list folder: documents: %w", err)
 	}
