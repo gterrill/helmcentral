@@ -5,6 +5,7 @@ import {
   Folder,
   FolderPlus,
   Image as ImageIcon,
+  Info,
   Loader2,
   MoreVertical,
   Pencil,
@@ -67,6 +68,7 @@ import {
   type DocumentRecord,
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
+import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
 import { cn } from '@/lib/utils'
 
 // ADR 0106 F1: the Documents panel. All data (folder browsing, search, tags,
@@ -76,16 +78,6 @@ import { cn } from '@/lib/utils'
 
 const SEARCH_DEBOUNCE_MS = 250
 const OCR_COST_PER_PAGE_USD = 0.002 // documentsOCRCostPerPageUSD, backend/documents_enrich.go
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function documentDisplayName(doc: DocumentRecord): string {
-  return doc.title.trim() !== '' ? doc.title : doc.filename
-}
 
 // Same shape as assistant-thread.tsx's stagedDocumentStatusLabel (ADR 0106
 // F2's composer chip label) - duplicated locally rather than imported/shared,
@@ -101,16 +93,6 @@ function stagedUploadStatusLabel(item: StagedDocument): string {
     case 'failed':
       return item.error ?? 'Failed'
   }
-}
-
-function mimeLabel(mime: string): string {
-  if (mime === 'application/pdf') return 'PDF'
-  if (mime.startsWith('image/')) return 'Image'
-  if (mime === 'text/csv') return 'CSV'
-  if (mime === 'application/json') return 'JSON'
-  if (mime === 'text/markdown') return 'Markdown'
-  if (mime.startsWith('text/')) return 'Text'
-  return 'File'
 }
 
 function rowIcon(mime: string) {
@@ -178,9 +160,55 @@ interface MoveTarget {
  * reuses useDocuments the same way the panel itself does - the picker is
  * just another folder view, and moves want the operator to be able to
  * descend into a destination the same way browsing does. */
-function FolderPicker({ onPick }: { onPick: (folderId: string | null) => void }) {
+function FolderPicker({
+  onPick,
+  onFolderCreated,
+}: {
+  onPick: (folderId: string | null) => void
+  /** Review finding: the picker owns its own useDocuments(pickerFolderId)
+   * instance, entirely separate from the panel's own - so a folder created
+   * here used to refresh only the picker's view. Cancel the dialog and the
+   * panel's own listing had never heard of it: missing from the table, and
+   * a second attempt from the toolbar's New folder button hit a 409 for a
+   * folder the operator couldn't see. This just tells the caller a folder
+   * was created; DocumentsPanel below refreshes its own listing in
+   * response, leaving the picker's own descend-into-it behaviour (below)
+   * unchanged. */
+  onFolderCreated: () => void
+}) {
   const [pickerFolderId, setPickerFolderId] = useState<string | null>(null)
   const picker = useDocuments(pickerFolderId)
+
+  // ADR 0115 §6: create-here, so a move no longer has to be
+  // abandoned to go make the destination first. Goes through the picker's
+  // own createFolder (same useDocuments instance as the browser above), so
+  // the new folder shows up in whatever listing this picker is already
+  // rendering - then descends into it (setPickerFolderId) so "Move here"
+  // immediately means the folder just made, rather than leaving the
+  // operator to notice it in the list and click it themselves.
+  const [newFolderName, setNewFolderName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const submitCreate = async () => {
+    const name = newFolderName.trim()
+    if (name === '' || creating) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const created = await picker.createFolder(name, pickerFolderId)
+      setPickerFolderId(created.id)
+      setNewFolderName('')
+      onFolderCreated()
+    } catch (err) {
+      // AGENTS.md fallback policy: the server's own message (e.g. the 409
+      // "folder name already exists") rather than an invented one, and the
+      // picker stays right where it was - the operator didn't ask to move
+      // anywhere, only to create a folder that turned out to already exist.
+      setCreateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -221,6 +249,20 @@ function FolderPicker({ onPick }: { onPick: (folderId: string | null) => void })
           ))}
         </div>
       </ScrollArea>
+      <div className="flex items-center gap-2">
+        <Input
+          aria-label="New folder name"
+          placeholder="New folder name"
+          value={newFolderName}
+          onChange={(e) => setNewFolderName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitCreate() } }}
+          className="flex-1"
+        />
+        <Button type="button" variant="outline" disabled={newFolderName.trim() === '' || creating} onClick={() => { void submitCreate() }}>
+          Create folder
+        </Button>
+      </div>
+      {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
       <Button type="button" onClick={() => onPick(pickerFolderId)}>Move here</Button>
     </div>
   )
@@ -237,9 +279,16 @@ export interface DocumentsPanelProps {
   /** A document to open in the viewer as soon as the panel mounts - how a
    * Mate attachment chip's link (assistant-thread.tsx) lands here. */
   initialDocumentId?: string | null
+  /** ADR 0115 §2: opens the Details page (document-details-page.tsx)
+   * for one document - from the row menu's Details… item and from the
+   * viewer Sheet's own Details button. App.tsx wires this to
+   * setDocumentsEditId, the same way onFolderChange wires into its own
+   * documentsFolderId state. Optional so every existing test that renders
+   * this panel without it (nothing to navigate to) keeps working unchanged. */
+  onEditDocument?: (id: string) => void
 }
 
-export function DocumentsPanel({ initialFolderId = null, onFolderChange, initialDocumentId = null }: DocumentsPanelProps) {
+export function DocumentsPanel({ initialFolderId = null, onFolderChange, initialDocumentId = null, onEditDocument }: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const documents = useDocuments(folderId)
   // No attachment cap here (review finding, use-document-uploads.ts:173):
@@ -720,14 +769,13 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                 <TableHead>Status</TableHead>
                 <TableHead>Tags</TableHead>
                 <TableHead>Size</TableHead>
-                <TableHead>Cost</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {folderRows.length === 0 && documentRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                     Nothing here yet. Upload a file or create a folder.
                   </TableCell>
                 </TableRow>
@@ -745,7 +793,11 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                       {folder.name}
                     </button>
                   </TableCell>
-                  <TableCell />
+                  {/* Status, Tags and Size are document-only columns - a
+                      folder row still needs a placeholder cell for each of
+                      the header's six columns, or the actions cell below
+                      shifts left under "Size" and the real w-10 actions
+                      column sits empty (review finding). */}
                   <TableCell />
                   <TableCell />
                   <TableCell />
@@ -797,13 +849,13 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                       </div>
                     </TableCell>
                     <TableCell>{formatBytes(doc.size_bytes)}</TableCell>
-                    <TableCell>{doc.index_cost_usd > 0 ? `$${doc.index_cost_usd.toFixed(3)}` : '--'}</TableCell>
                     <TableCell>
                       <DocumentRowMenu
                         doc={doc}
                         onOpen={() => setViewerId(doc.id)}
                         onDownload={() => { void runAction(() => downloadDocument(doc.id, doc.filename)) }}
                         onRename={() => { setRenameTarget({ kind: 'document', id: doc.id, name }); setRenameValue(name) }}
+                        onDetails={() => onEditDocument?.(doc.id)}
                         onMove={() => setMoveTarget({ ids: [doc.id], label: name })}
                         onReindex={() => setReindexTarget({ id: doc.id, name, pageCount: doc.page_count, mime: doc.mime })}
                         onDelete={() => setDeleteTarget({ kind: 'document', id: doc.id, name })}
@@ -867,7 +919,12 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
             <DialogTitle>Move {moveTarget?.label}</DialogTitle>
             <DialogDescription>Pick the destination folder.</DialogDescription>
           </DialogHeader>
-          {moveTarget && <FolderPicker onPick={(destination) => { void submitMove(destination) }} />}
+          {moveTarget && (
+            <FolderPicker
+              onPick={(destination) => { void submitMove(destination) }}
+              onFolderCreated={() => { void documents.refresh() }}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
@@ -946,6 +1003,10 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
               <Button type="button" size="sm" variant="outline" onClick={() => { void runAction(() => downloadDocument(viewerDoc.id, viewerDoc.filename)) }}>
                 <Download className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                 Download
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => onEditDocument?.(viewerDoc.id)}>
+                <Info className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                Details
               </Button>
             </div>
           )}
@@ -1058,6 +1119,7 @@ function DocumentRowMenu({
   onOpen,
   onDownload,
   onRename,
+  onDetails,
   onMove,
   onReindex,
   onDelete,
@@ -1066,6 +1128,7 @@ function DocumentRowMenu({
   onOpen: () => void
   onDownload: () => void
   onRename: () => void
+  onDetails: () => void
   onMove: () => void
   onReindex: () => void
   onDelete: () => void
@@ -1087,6 +1150,13 @@ function DocumentRowMenu({
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onRename}>
           <Pencil className="h-4 w-4" aria-hidden="true" /> Rename
+        </DropdownMenuItem>
+        {/* Rename stays the fast path for a title-only fix (ADR 0115 §3);
+            Details… is the slower path onto the full metadata page - notes,
+            tags, the read-only indexing facts - so it sits right after
+            Rename rather than buried past Move/Reindex. */}
+        <DropdownMenuItem onClick={onDetails}>
+          <Info className="h-4 w-4" aria-hidden="true" /> Details…
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onMove}>Move…</DropdownMenuItem>
         <DropdownMenuItem onClick={onReindex}>

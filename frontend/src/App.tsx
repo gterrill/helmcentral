@@ -35,12 +35,14 @@ import { AlarmBanner } from '@/components/alarm-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import type { SettingsPageHandle } from '@/components/settings/settings-page'
+import type { DocumentDetailsPageHandle } from '@/components/document-details-page'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
 
 const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
 const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsPanel = lazy(() => import('@/components/documents-panel').then((mod) => ({ default: mod.DocumentsPanel })))
+const DocumentDetailsPage = lazy(() => import('@/components/document-details-page').then((mod) => ({ default: mod.DocumentDetailsPage })))
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
@@ -345,6 +347,13 @@ export function App() {
   const gaugeAges = useGaugeAges()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
+  // ADR 0115 §2 review finding: the Details page holds its own explicit
+  // Save/Discard draft (document-details-page.tsx), and used to let any
+  // navigation throw it away unasked. This is that page's half of exactly
+  // the same guard settingsDirty/settingsPageRef already give Settings,
+  // generalized below rather than reinvented.
+  const [documentDetailsDirty, setDocumentDetailsDirty] = useState(false)
+  const documentDetailsPageRef = useRef<DocumentDetailsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
   const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
   const [saveAndContinueError, setSaveAndContinueError] = useState<string | null>(null)
@@ -363,28 +372,70 @@ export function App() {
       setPendingNavigation(() => navigate)
       return false
     }
+    // ADR 0115 §2's Details-page guard, generalized from the Settings guard
+    // above: any navigation to a DIFFERENT panel while a dirty Details page
+    // is open stashes it the same way. Navigating to 'documents' itself is
+    // deliberately not caught here - the one call site that actually leaves
+    // Details while staying on the 'documents' panel (the page's own
+    // breadcrumb Back, and a Back/Forward landing on a different Details id
+    // or the bare listing) has no "leaving documents" signal for this check
+    // to key off, so it goes through its own small guard instead
+    // (requestBackFromDocumentDetails, right below).
+    if (activePanel === 'documents' && targetPanel !== 'documents' && documentDetailsDirty) {
+      setPendingNavigation(() => navigate)
+      return false
+    }
     navigate()
     return true
-  }, [activePanel, settingsDirty])
+  }, [activePanel, settingsDirty, documentDetailsDirty])
+
+  // The page's own breadcrumb Back (document-details-page.tsx's onBack) and
+  // a Back/Forward that changes which Details page - or none - is open both
+  // stay on the 'documents' panel, so requestNavigate's targetPanel check
+  // above can never see a difference to catch for either of them. Same
+  // stash-and-return-false shape as requestNavigate, just without the panel
+  // comparison it can't use here.
+  const requestBackFromDocumentDetails = useCallback((navigate: () => void): boolean => {
+    if (documentDetailsDirty) {
+      setPendingNavigation(() => navigate)
+      return false
+    }
+    navigate()
+    return true
+  }, [documentDetailsDirty])
+
+  // Which dirty page pendingNavigation (if any) is guarding, for the
+  // dialog's copy and for handleSaveAndContinue below - derived from
+  // activePanel rather than stored alongside the stashed navigate() itself.
+  // The two dirty pages are mutually exclusive (activePanel can't be both
+  // 'settings' and 'documents' at once), and activePanel stays exactly where
+  // it was when requestNavigate/requestBackFromDocumentDetails stashed the
+  // navigation, right up until the dialog resolves one way or the other.
+  const dirtyPageLabel = activePanel === 'settings' ? 'Settings' : 'Details'
 
   const handleSaveAndContinue = useCallback(async () => {
     setIsSavingBeforeNavigate(true)
     setSaveAndContinueError(null)
     try {
-      await settingsPageRef.current?.save()
+      if (activePanel === 'settings') {
+        await settingsPageRef.current?.save()
+      } else {
+        await documentDetailsPageRef.current?.save()
+      }
       pendingNavigation?.()
       setPendingNavigation(null)
     } catch (err) {
-      // Stay on the page so the user can fix it and retry. The Settings
-      // page renders its own error banner too, but this dialog is modal and
-      // covers it — without repeating the reason here, a rejected save (e.g.
-      // POST /api/settings refusing an unreachable SignalK address) looks
-      // like the button simply did nothing.
-      setSaveAndContinueError(err instanceof Error ? err.message : 'Unable to save settings')
+      // Stay on the page so the user can fix it and retry. Both pages render
+      // their own error banner too, but this dialog is modal and covers it -
+      // without repeating the reason here, a rejected save (e.g. POST
+      // /api/settings refusing an unreachable SignalK address, or a document
+      // PATCH rejecting a duplicate title) looks like the button simply did
+      // nothing.
+      setSaveAndContinueError(err instanceof Error ? err.message : `Unable to save the ${dirtyPageLabel} page`)
     } finally {
       setIsSavingBeforeNavigate(false)
     }
-  }, [pendingNavigation])
+  }, [pendingNavigation, activePanel, dirtyPageLabel])
 
   // settingsDirty is only meaningful while the Settings page is actually
   // mounted and reporting it via onDirtyChange. Once the user has left
@@ -532,6 +583,30 @@ export function App() {
   // panel once as an initial prop rather than tracked in App state at all:
   // nothing here needs to know which document is open, only which folder.
   const [documentsFolderId, setDocumentsFolderId] = useState<string | null>(initialLocation.documentFolderId ?? null)
+  // ADR 0115 §2: which document's Details page is open (the
+  // `/documents/<id>` route, app-location.ts's documentEditId), or null for
+  // the ordinary listing. Same precedent as ADR 0112's wallDisplaysSlug just
+  // below - one panel owning an index/editor split, seeded from the deep
+  // link the same way.
+  const [documentsEditId, setDocumentsEditId] = useState<string | null>(initialLocation.documentEditId ?? null)
+
+  // documentDetailsDirty (declared up with settingsDirty) is only meaningful
+  // while the Details page is actually mounted and reporting it via
+  // onDirtyChange - mirrors settingsDirty's own clearing effect above, kept
+  // as a separate effect down here (rather than folded into that one)
+  // because it needs documentsEditId, which isn't declared until this point
+  // in the component. "No longer rendered" is leaving the 'documents' panel
+  // entirely OR documentsEditId going back to null - both unmount
+  // DocumentDetailsPage (see documentsLeftOnceRef's own comment below on
+  // why documentsEditId, not just activePanel, decides what's on screen
+  // here), and DocumentDetailsPage stops calling onDirtyChange the moment it
+  // unmounts, so nothing else would ever reset this otherwise.
+  useEffect(() => {
+    if (activePanel !== 'documents' || documentsEditId === null) {
+      setDocumentDetailsDirty(false)
+    }
+  }, [activePanel, documentsEditId])
+
   // ADR 0112: which display the management panel is editing, or null for its
   // index. Seeded from the deep link the same way documentsFolderId is.
   const [wallDisplaysSlug, setWallDisplaysSlug] = useState<string | null>(initialLocation.displayEditSlug ?? null)
@@ -558,8 +633,19 @@ export function App() {
   // actual panel-switch signal instead means it only ever flips on a real
   // departure from Documents, independent of how many times React
   // re-renders while the operator stays on it.
+  //
+  // Also trips while the Details page is open (ADR 0115 §2):
+  // activePanel stays 'documents' the whole time an operator goes from the
+  // listing to a document's Details page and back, so without this
+  // documentsEditId check, DocumentsPanel unmounting for the Details page
+  // and remounting on the way back (activePanelContent switches between two
+  // different component types under the one Suspense boundary - see the
+  // comment on that Suspense below) would still see the latch un-tripped
+  // and hand the fresh mount initialLocation.documentId again, reopening a
+  // Mate attachment chip's ?document= viewer the operator had already seen
+  // and dismissed before ever visiting Details.
   const documentsLeftOnceRef = useRef(false)
-  if (activePanel !== 'documents') documentsLeftOnceRef.current = true
+  if (activePanel !== 'documents' || documentsEditId !== null) documentsLeftOnceRef.current = true
   // The sheet's own active conversation (mate-answer-toast plan): mirrors
   // matePanelConversationId above, but for the sheet rather than the panel -
   // MateSheet reports it the same way AssistantDrawer already reports
@@ -718,6 +804,7 @@ export function App() {
     }
     if (loc.panel === 'documents') {
       setDocumentsFolderId(loc.documentFolderId ?? null)
+      setDocumentsEditId(loc.documentEditId ?? null)
     }
   }, [pages, pagesLoading, setActivePageId])
 
@@ -755,6 +842,7 @@ export function App() {
       conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
       displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
       documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
+      documentEditId: activePanel === 'documents' ? documentsEditId : null,
     }, ctx)
     // documents is the one panel whose canonical URL can carry a query
     // string (?folder=) - pathname alone is never enough to tell it apart
@@ -769,14 +857,15 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, wallDisplaysSlug, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, documentsEditId, wallDisplaysSlug, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
-  // page still gets to veto the navigation exactly as a sidebar click
-  // would — window.location has already moved to the previous entry by the
-  // time this fires, so without the re-push below, a guarded Back would
-  // leave the bar on the destination while the guard dialog (and Settings
-  // itself) stay on screen.
+  // (or, ADR 0115 §2, a dirty Documents Details) page still gets to veto the
+  // navigation exactly as a sidebar click would - window.location has
+  // already moved to the previous entry by the time this fires, so without
+  // the re-push below, a guarded Back would leave the bar on the
+  // destination while the guard dialog (and the dirty page itself) stay on
+  // screen.
   useEffect(() => {
     const handlePopState = () => {
       if (!shellVisible) return
@@ -795,16 +884,46 @@ export function App() {
         // the state change requestNavigate is about to (maybe) apply.
         window.history.replaceState(null, '', formatAppLocation(parsed, ctx))
       }
-      if (!requestNavigate(parsed.panel, () => applyAppLocation(parsed))) {
-        // Guarded: the browser already moved off Settings, so push it back —
-        // the bar has to agree with the panel still on screen while the
-        // confirmation dialog is up.
-        window.history.pushState(null, '', formatAppLocation({ panel: 'settings', section: settingsSection }, ctx))
+      // ADR 0115 §2 review finding: a Back/Forward that stays on the
+      // 'documents' panel but changes (or clears) which Details page is
+      // open never differs in `targetPanel` the way every other navigation
+      // this guard covers does - requestNavigate's panel-level check can't
+      // see it, for exactly the same reason the page's own breadcrumb Back
+      // can't (see requestBackFromDocumentDetails's own comment). This is
+      // the single most common way Back actually leaves a dirty Details
+      // page (opening it always pushes a new entry over the listing, so one
+      // Back press lands here, not on some other panel), so it's routed
+      // through that same small guard instead of requestNavigate.
+      const leavingDetailsWithinDocuments = activePanel === 'documents' && parsed.panel === 'documents'
+        && (parsed.documentEditId ?? null) !== documentsEditId
+      const navigated = leavingDetailsWithinDocuments
+        ? requestBackFromDocumentDetails(() => applyAppLocation(parsed))
+        : requestNavigate(parsed.panel, () => applyAppLocation(parsed))
+      if (!navigated) {
+        // Guarded: the browser already moved off whichever page is actually
+        // still on screen (Settings, or a dirty Documents Details page), so
+        // push its own URL back - the bar has to agree with what's still
+        // rendered while the confirmation dialog is up. Built the same way
+        // the sync effect above builds `next`, rather than hardcoded to
+        // Settings, now that this guard also covers a dirty Details page.
+        window.history.pushState(null, '', formatAppLocation({
+          panel: activePanel,
+          pageId: activePageId,
+          section: settingsSection,
+          conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
+          displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
+          documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
+          documentEditId: activePanel === 'documents' ? documentsEditId : null,
+        }, ctx))
       }
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [shellVisible, isDisplay, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
+  }, [
+    shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, applyAppLocation,
+    activePanel, activePageId, settingsSection, matePanelConversationId, wallDisplaysSlug,
+    documentsFolderId, documentsEditId, pages, pagesLoading, canAdmin,
+  ])
 
   // If admin access ends (or was never established) while Settings happens
   // to be open, drop back to the dashboard. The sync effect above then sees
@@ -2249,12 +2368,33 @@ export function App() {
         )
       }
       case 'documents': {
+        // ADR 0115 §2: the listing and the Details page are one
+        // panel, the same index/editor split ADR 0112's wall-displays branch
+        // above already uses - which one renders is just the presence of
+        // documentsEditId, resolved by the Details page itself rather than
+        // App keeping a second piece of resolved-document state in step.
+        if (documentsEditId !== null) {
+          return (
+            <DocumentDetailsPage
+              ref={documentDetailsPageRef}
+              documentId={documentsEditId}
+              onDirtyChange={setDocumentDetailsDirty}
+              // Routed through requestBackFromDocumentDetails rather than a
+              // bare setDocumentsEditId(null) - review finding: this call
+              // site stays on the 'documents' panel, so requestNavigate's
+              // own targetPanel check (used everywhere else) would never
+              // catch a dirty Details page being left this way.
+              onBack={() => { requestBackFromDocumentDetails(() => setDocumentsEditId(null)) }}
+            />
+          )
+        }
         const documentDeepLinkId = documentsLeftOnceRef.current ? null : (initialLocation.documentId ?? null)
         return (
           <DocumentsPanel
             initialFolderId={documentsFolderId}
             onFolderChange={setDocumentsFolderId}
             initialDocumentId={documentDeepLinkId}
+            onEditDocument={setDocumentsEditId}
           />
         )
       }
@@ -2748,7 +2888,9 @@ export function App() {
           <AlertDialogHeader>
             <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
             <AlertDialogDescription>
-              You have unsaved changes on the Settings page. Save them before leaving, or discard them?
+              {/* dirtyPageLabel: 'Settings' or 'Details' (ADR 0115 §2) -
+                  whichever page's guard actually stashed this navigation. */}
+              You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
             </AlertDialogDescription>
           </AlertDialogHeader>
           {saveAndContinueError && (

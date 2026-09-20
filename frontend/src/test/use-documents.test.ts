@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
-import { useDocuments } from '@/hooks/use-documents'
+import { useDocument, useDocuments } from '@/hooks/use-documents'
 
 // ADR 0106 F1: use-documents.ts owns folder browsing, search, tags and every
 // document/folder write for the Documents panel. Fetch is stubbed with a
@@ -39,6 +39,10 @@ function docPayload(overrides: Record<string, unknown> = {}) {
     summary: '',
     status: 'pending',
     stage: 'extract',
+    indexed_with: '',
+    error: '',
+    index_model: '',
+    index_cost_usd: 0,
     tags: [],
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -889,4 +893,107 @@ describe('useDocuments', () => {
     expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(1)
   })
 
+})
+
+// ADR 0115 §2: the Details page's own data hook - one document by
+// id, not a folder listing. Fetch-stubbing follows this file's own routedFetch
+// convention above rather than a sequence of mockResolvedValueOnce calls.
+describe('useDocument', () => {
+  it('fetches the document for the given id on mount', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', title: 'Impeller kit' })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocument('doc-1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.document).toMatchObject({ id: 'doc-1', title: 'Impeller kit' })
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/documents/doc-1')).toBe(true)
+  })
+
+  // AGENTS.md fallback policy: the server's own message, not an invented
+  // "document not found" string - documentByIDHandler (backend/documents_handlers.go)
+  // already returns exactly this body for an unknown id.
+  it('a 404 lands the server\'s own message in error', async () => {
+    const { fn } = routedFetch({
+      'GET /api/documents/doc-missing': () => failed(404, 'document not found'),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocument('doc-missing'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe('document not found')
+    expect(result.current.document).toBeNull()
+  })
+
+  it('patch PATCHes exactly the fields passed and returns the server\'s document', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1' })),
+      'PATCH /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', title: 'Impeller kit', notes: 'spares aboard' })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocument('doc-1'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let returned
+    await act(async () => {
+      returned = await result.current.patch({ title: 'Impeller kit', notes: 'spares aboard', tags: [] })
+    })
+
+    expect(returned).toMatchObject({ title: 'Impeller kit', notes: 'spares aboard' })
+    const patchCall = calls.find((c) => c.method === 'PATCH')
+    expect(patchCall?.body).toEqual({ title: 'Impeller kit', notes: 'spares aboard', tags: [] })
+    await waitFor(() => expect(result.current.document).toMatchObject({ title: 'Impeller kit', notes: 'spares aboard' }))
+  })
+
+  // Review finding: this hook fetched once per id and never again, so the
+  // Details page never saw a pending document finish - it showed
+  // "Reading…"/`--`/"$0.0000" forever while the listing behind it (polled by
+  // useDocuments' own hasPending effect) kept moving. Same gate, same
+  // POLL_INTERVAL_MS, and the same "keyed on the derived boolean, not the
+  // object" reasoning as that effect's own comment.
+  it('re-fetches the document every 3s while it is pending, and stops once it is not', async () => {
+    let indexed = false
+    const { fn, calls } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', status: indexed ? 'indexed' : 'pending' })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    // Fake timers from the very start, same reasoning as useDocuments' own
+    // pending-poll test above: the poll is armed by an effect that runs as
+    // soon as the mount fetch resolves.
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocument('doc-1'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.document?.status).toBe('pending')
+
+    calls.length = 0
+    indexed = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.document?.status).toBe('indexed')
+
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('an already-indexed document is never polled', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', status: 'indexed' })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocument('doc-1'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.document?.status).toBe('indexed')
+
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls).toHaveLength(0)
+  })
 })

@@ -368,6 +368,25 @@ describe('DocumentsPanel', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
+  // Review finding (documents-panel.tsx:779): removing the Cost column
+  // dropped one <TableHead> but two placeholder <TableCell />s from the
+  // folder row, so a folder row emitted 5 cells against the header's 6 -
+  // the kebab menu landed under "Size" and the actions column sat empty.
+  it('a folder row has as many cells as the header has columns, with the actions button in the last cell', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
+    }))
+
+    render(<DocumentsPanel />)
+
+    const headerCells = screen.getAllByRole('columnheader')
+    const folderRow = screen.getByRole('button', { name: 'Manuals' }).closest('tr')
+    expect(folderRow).not.toBeNull()
+    const rowCells = within(folderRow!).getAllByRole('cell')
+    expect(rowCells).toHaveLength(headerCells.length)
+    expect(within(rowCells[rowCells.length - 1]).getByRole('button', { name: /actions for manuals/i })).toBeInTheDocument()
+  })
+
   it('shows a failed document\'s own error', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({
       documents: [doc({ status: 'failed', error: 'could not read PDF' })],
@@ -376,6 +395,54 @@ describe('DocumentsPanel', () => {
     render(<DocumentsPanel />)
 
     expect(screen.getByText('could not read PDF')).toBeInTheDocument()
+  })
+
+  // ADR 0115 §1: the per-row indexing cost moves to the new Details
+  // page (document-details-page.test.tsx), which is the only place an
+  // operator can already see index_cost_usd's four-decimal figure - the
+  // listing itself never needs to justify a receipt at a glance, and a
+  // three-decimal column here was rounding a $0.0012 charge down to $0.001.
+  it('has no Cost column, and does not render index_cost_usd, in the listing', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ index_cost_usd: 0.0123 })],
+    }))
+
+    render(<DocumentsPanel />)
+
+    expect(screen.queryByRole('columnheader', { name: /cost/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/0\.0123/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$0\.012/)).not.toBeInTheDocument()
+  })
+
+  // ADR 0115 §2: Details… opens the new full-panel metadata page
+  // (document-details-page.test.tsx covers what that page itself does) -
+  // this only pins that the row menu hands App.tsx the right id.
+  it('the row menu\'s Details item calls onEditDocument with that document\'s id', () => {
+    const onEditDocument = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ id: 'doc-7', filename: 'receipt.pdf' })],
+    }))
+
+    render(<DocumentsPanel onEditDocument={onEditDocument} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /details/i }))
+
+    expect(onEditDocument).toHaveBeenCalledWith('doc-7')
+  })
+
+  it('the viewer\'s Details button calls onEditDocument for the open document', () => {
+    const onEditDocument = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ id: 'doc-7', filename: 'receipt.pdf' })],
+    }))
+
+    render(<DocumentsPanel onEditDocument={onEditDocument} />)
+
+    fireEvent.click(screen.getByText('receipt.pdf'))
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+
+    expect(onEditDocument).toHaveBeenCalledWith('doc-7')
   })
 
   it('delete asks for confirmation before calling deleteDocument', async () => {
@@ -483,6 +550,111 @@ describe('DocumentsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move here' }))
 
     await waitFor(() => expect(moveDocuments).toHaveBeenCalledWith(['doc-1', 'doc-2'], null))
+  })
+
+  // ADR 0115 §6: a move no longer has to be abandoned to go create
+  // the destination folder first - the picker gets its own create-here row.
+  describe('creating a folder from the Move dialog', () => {
+    // src/test/setup.ts deletes Element.prototype.getAnimations globally so
+    // Base UI's Dialog/AlertDialog/Tabs close synchronously under this
+    // suite's fireEvent-driven assertions (see that file's own comment).
+    // FolderPicker's ScrollArea (@base-ui/react/scroll-area) hits a
+    // different, unguarded call to the same API on mount - it schedules a
+    // 0ms timeout that unconditionally calls viewport.getAnimations() to
+    // recompute thumb geometry after any subtree animation - and unlike the
+    // Dialog/Tabs code, it doesn't feature-detect a missing implementation
+    // first. That timeout only gets a chance to actually fire (as an
+    // unhandled exception, since it's a bare timer callback, not something
+    // these tests await) once a test's own await gives the event loop room
+    // to run it - which only these two tests below do, by waiting on the
+    // create-folder round trip. A local stub, scoped to just this describe
+    // block and removed again afterwards, satisfies ScrollArea's mount
+    // effect without weakening the global shim the rest of the suite
+    // depends on for Dialog/Tabs.
+    beforeEach(() => {
+      Element.prototype.getAnimations = () => []
+    })
+    afterEach(() => {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations
+    })
+
+    it('creates the folder and descends into it, ready for Move here', async () => {
+      const createFolder = vi.fn().mockResolvedValue({ id: 'f9', name: '2026', parent_id: null })
+      // The picker owns its own useDocuments(pickerFolderId) instance
+      // (FolderPicker's own doc comment) - keyed by folderId so the
+      // breadcrumb reflects wherever createFolder's setPickerFolderId(created.id)
+      // just sent it, the same way the panel's own folder navigation does.
+      mockedUseDocuments.mockImplementation((folderId) => {
+        if (folderId === 'f9') {
+          return makeDocumentsMock({ path: [{ id: 'f9', name: '2026', parent_id: null }], createFolder })
+        }
+        return makeDocumentsMock({ documents: [doc({ filename: 'receipt.pdf' })], createFolder })
+      })
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /^move/i }))
+
+      fireEvent.change(screen.getByRole('textbox', { name: /new folder name/i }), { target: { value: '2026' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create folder' }))
+
+      await waitFor(() => expect(createFolder).toHaveBeenCalledWith('2026', null))
+      expect(await screen.findByText('2026')).toBeInTheDocument()
+    })
+
+    // Review finding: the picker owns its own useDocuments(pickerFolderId)
+    // instance, so a folder it creates used to refresh only the picker -
+    // cancelling the dialog left the panel's own listing never having heard
+    // of it, invisible in the table, with a second attempt from the
+    // toolbar's New folder button hitting a 409 for a folder the operator
+    // could not see. A single shared mock object stands in for both
+    // useDocuments instances here (unlike the test above, which needs two
+    // distinct ones to prove the picker's own descend-into-it behaviour) -
+    // this test only cares that creating a folder reaches the panel's own
+    // `refresh`, which nothing in either component calls on its own without
+    // the fix.
+    it('creating a folder from the Move dialog also refreshes the panel\'s own listing', async () => {
+      const createFolder = vi.fn().mockResolvedValue({ id: 'f9', name: '2026', parent_id: null })
+      const refresh = vi.fn()
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ filename: 'receipt.pdf' })],
+        createFolder,
+        refresh,
+      }))
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /^move/i }))
+
+      fireEvent.change(screen.getByRole('textbox', { name: /new folder name/i }), { target: { value: '2026' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create folder' }))
+
+      await waitFor(() => expect(createFolder).toHaveBeenCalledWith('2026', null))
+      await waitFor(() => expect(refresh).toHaveBeenCalled())
+    })
+
+    it('a rejected create shows the server\'s message and moves nothing', async () => {
+      const createFolder = vi.fn().mockRejectedValue(new Error('folder name already exists'))
+      const moveDocuments = vi.fn()
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ filename: 'receipt.pdf' })],
+        createFolder,
+        moveDocuments,
+      }))
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /^move/i }))
+
+      fireEvent.change(screen.getByRole('textbox', { name: /new folder name/i }), { target: { value: '2026' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create folder' }))
+
+      expect(await screen.findByText('folder name already exists')).toBeInTheDocument()
+      expect(moveDocuments).not.toHaveBeenCalled()
+    })
   })
 
   it('bulk delete also asks for confirmation before deleting every selected document', async () => {

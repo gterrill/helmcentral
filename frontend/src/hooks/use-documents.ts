@@ -511,3 +511,95 @@ export function useDocuments(folderId: string | null) {
     moveDocuments,
   }
 }
+
+// ADR 0115 §2: the Details page (document-details-page.tsx) edits
+// exactly one document, resolved by the `/documents/<id>` route rather than
+// found in whatever folder happens to be open (a Mate attachment chip or a
+// stale breadcrumb can link to a document filed anywhere) - so it gets its
+// own small hook rather than a second consumer digging through useDocuments'
+// folder-scoped `documents` array. `id === null` (the Details route not
+// actually resolved to anything yet) clears state and fetches nothing, the
+// same shape useDocuments(folderId) already gives folderId.
+export function useDocument(id: string | null): {
+  document: DocumentRecord | null
+  loading: boolean
+  error: string | null
+  refresh: () => Promise<void>
+  patch: (patch: DocumentPatch) => Promise<DocumentRecord>
+} {
+  const [document, setDocument] = useState<DocumentRecord | null>(null)
+  const [loading, setLoading] = useState(id !== null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Same ordering guard as useDocuments' own refresh() above, and for the
+  // same reason: a GET for an id the operator has since navigated away from
+  // (or a second refresh() fired before the first lands) must not have its
+  // late reply overwrite whatever a newer call already set.
+  const seqRef = useRef(0)
+
+  const refresh = useCallback(async () => {
+    if (id === null) {
+      seqRef.current += 1
+      setDocument(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+    const seq = (seqRef.current += 1)
+    setLoading(true)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(id)}`)
+      if (!res.ok) {
+        // AGENTS.md fallback policy: the server's own message (e.g.
+        // documentByIDHandler's "document not found"), never an invented
+        // "something went wrong" standing in for it.
+        const payload = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? `HTTP ${res.status}`)
+      }
+      const data = (await res.json()) as DocumentRecord
+      if (seq !== seqRef.current) return
+      setDocument(data)
+      setError(null)
+    } catch (err) {
+      if (seq !== seqRef.current) return
+      setDocument(null)
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (seq === seqRef.current) setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  // Review finding: this hook fetched once per id and never again, so the
+  // Details page never saw a pending document finish reading - it sat on
+  // "Reading…"/`--`/"$0.0000"/"Not yet" forever while the listing behind it
+  // kept moving. Same POLL_INTERVAL_MS and the same "keyed on the derived
+  // boolean, not the object" reasoning as useDocuments' own hasPending
+  // effect above: a poll response that leaves `pending` true must not tear
+  // down and restart the timer.
+  const pending = document?.status === 'pending'
+  useEffect(() => {
+    if (!pending) return
+    const intervalId = setInterval(() => { void refresh() }, POLL_INTERVAL_MS)
+    return () => clearInterval(intervalId)
+  }, [pending, refresh])
+
+  // Goes through the same submitJSON every other write in this file uses, so
+  // a rejection (a duplicate title, a folder that no longer exists) carries
+  // the server's own message. Deliberately not wrapped in a try/catch here:
+  // the caller (document-details-page.tsx's Save) is the one that has to
+  // show the failure and keep the draft intact, so the rejection has to
+  // reach it rather than be swallowed at this layer.
+  const patch = useCallback(async (patchBody: DocumentPatch) => {
+    // AGENTS.md fallback policy: no id to PATCH is a caller bug (the Details
+    // page never renders its Save button before a document has loaded), not
+    // a case to paper over with a request to a malformed URL.
+    if (id === null) throw new Error('useDocument: no document id to patch')
+    const updated = await submitJSON<DocumentRecord>(`${apiBaseUrl}/api/documents/${encodeURIComponent(id)}`, 'PATCH', patchBody)
+    setDocument(updated)
+    return updated
+  }, [id])
+
+  return { document, loading, error, refresh, patch }
+}
