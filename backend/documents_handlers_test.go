@@ -331,6 +331,39 @@ func TestUploadDocumentHandler_UnknownFolderIDReturns400AndRemovesFile(t *testin
 	}
 }
 
+// ── GET /api/documents/:id ───────────────────────────────────────────────
+
+// TestGetDocumentHandler_ZeroValueFieldsAreNotOmitted guards against
+// documentJSON's `,omitempty` tags dropping a real zero value from the wire
+// the same way an unset field would be - a document read locally with Mate
+// off (index_cost_usd genuinely 0), no notes typed yet, filed nowhere and
+// never indexed is the ordinary case, not an edge one, and
+// document-details-page.tsx renders index_cost_usd.toFixed(4) and notes
+// unconditionally (DocumentRecord types both as always-present). An omitted
+// key there is not the same thing as a zero value to that page.
+func TestGetDocumentHandler_ZeroValueFieldsAreNotOmitted(t *testing.T) {
+	withTestDocumentStore(t)
+	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-get-zero-values", Filename: "blank.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/documents/"+doc.ID, "", doc.ID)
+	if err := getDocumentHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{`"index_cost_usd":0`, `"notes":""`, `"folder_id":null`, `"indexed_at":null`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected response to carry %s rather than omit the field, got %s", want, body)
+		}
+	}
+}
+
 // ── GET /api/documents/:id/content ──────────────────────────────────────
 
 func TestDocumentContentHandler_InlinePDFWithSecurityHeaders(t *testing.T) {

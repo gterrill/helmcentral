@@ -128,27 +128,38 @@ type documentTagJSON struct {
 // separately, on purpose, possibly paginated) and it folds OperatorTags/
 // SuggestedTags into one ordered slice instead of exposing the two-source
 // split as two JSON arrays.
+//
+// ADR 0115 §7: every field below is unconditional (no `,omitempty`), including the
+// pointers: use-documents.ts's DocumentRecord declares all of them as
+// always-present (folder_id and indexed_at as `| null`, everything else as
+// a plain scalar), and document-details-page.tsx renders several of them
+// directly - index_cost_usd.toFixed(4), notes in a controlled Textarea. A
+// zero cost, an empty note and an unfiled, never-indexed document are real
+// values the client needs to render, not absent ones, and `,omitempty`
+// cannot tell "genuinely zero" apart from "unset" - it drops both, which
+// left the frontend decoding an absent key as `undefined` rather than the
+// 0/""/null its own types promise.
 type documentJSON struct {
 	ID           string            `json:"id"`
 	SHA256       string            `json:"sha256"`
-	FolderID     *string           `json:"folder_id,omitempty"`
+	FolderID     *string           `json:"folder_id"`
 	Filename     string            `json:"filename"`
-	Title        string            `json:"title,omitempty"`
-	Notes        string            `json:"notes,omitempty"`
-	MIME         string            `json:"mime,omitempty"`
-	SizeBytes    int64             `json:"size_bytes,omitempty"`
-	PageCount    int               `json:"page_count,omitempty"`
-	Summary      string            `json:"summary,omitempty"`
+	Title        string            `json:"title"`
+	Notes        string            `json:"notes"`
+	MIME         string            `json:"mime"`
+	SizeBytes    int64             `json:"size_bytes"`
+	PageCount    int               `json:"page_count"`
+	Summary      string            `json:"summary"`
 	Status       string            `json:"status"`
 	Stage        string            `json:"stage"`
-	IndexedWith  string            `json:"indexed_with,omitempty"`
-	Error        string            `json:"error,omitempty"`
-	IndexModel   string            `json:"index_model,omitempty"`
-	IndexCostUSD float64           `json:"index_cost_usd,omitempty"`
+	IndexedWith  string            `json:"indexed_with"`
+	Error        string            `json:"error"`
+	IndexModel   string            `json:"index_model"`
+	IndexCostUSD float64           `json:"index_cost_usd"`
 	Tags         []documentTagJSON `json:"tags"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
-	IndexedAt    *time.Time        `json:"indexed_at,omitempty"`
+	IndexedAt    *time.Time        `json:"indexed_at"`
 }
 
 func toDocumentJSON(d document) documentJSON {
