@@ -407,6 +407,62 @@ boat. If manuals get created and left empty aboard, that is the first thing to
 revisit, and it is cheap, because an outline is only a folder tree and some
 placeholder notes.
 
+## Addendum (2026-09-20): one surface, not two
+
+Not a reversal. "A note is a document, folders are the manual" is exactly as
+true today as it was above; what changed is which UI surfaces render that
+substrate, described in the "Two things aboard are called a manual, and both
+keep the word" section as "the Documents panel and the Manuals panel
+respectively," alongside a since-deleted Notes panel for the inbox.
+
+Phases 1, 2b and 3 shipped that as three sidebar rows: Documents for
+uploaded files, Notes for the unfiled inbox, Manuals for authored manuals.
+Once built, the split did not hold up against the decision this ADR already
+made. The data model joined notes and manuals to the document table on
+purpose — a note is `kind='note'`, a manual is `document_folders.role
+='manual'` — and the UI then put the joined table back into three separate
+places to browse it from. An operator learning the app had to learn that a
+"document," a "note" and a "manual" were three different things worth three
+different sidebar rows, when the schema underneath them says they are one
+thing wearing three hats.
+
+[ADR 0119](0119-capture-is-an-action-not-a-place.md) now covers where
+capture lives once Notes stops being a panel. What is left here: Documents
+renders all three. A folder browses as a plain list or, when it carries
+`role='manual'`, as the ordered tree and reading view this ADR already
+specified — no second navigation surface for the same choice, since browsing
+between manuals is just browsing between folders the ordinary way once a
+Manual-kind folder is visually marked in the listing. A note opens through
+the same viewer as any other document, gated on `kind='note'` for whether an
+Edit toggle reaches the WYSIWYG editor
+([ADR 0117](0117-markdown-is-the-storage-format-not-the-authoring-format.md)).
+"Unfiled notes" (`kind='note' AND folder_id IS NULL`) becomes a filter chip
+over that same listing rather than a place with its own inbox screen — the
+drain-the-inbox loop and its visible count survive intact, because the count
+is just how many rows currently match the filter.
+
+Nothing on the backend moved. `GET /api/notes`, `/api/manuals` and their
+siblings are unchanged; this addendum is a frontend composition change only,
+recorded here because it is this ADR's own consequence that changed, not
+because the decision it recorded did.
+
+The plan's Risk 4 — "two new sidebar rows land right after the sidebar was
+deliberately reordered," weighed against "one Notes row with a Manuals tab"
+— is retired outright rather than resolved either way. Its own framing
+("different objects, different rows") does not survive contact with a
+Documents panel that already lists folders, uploaded PDFs and notes side by
+side in one table: they were never different enough objects to need
+separate rows, only different enough to need an icon (note type) and a
+folder flag (manual) to tell them apart at a glance.
+
+A note-type *filter* was built alongside that icon and then removed before
+this shipped. It was the wrong axis: a library folder holds mostly
+uploaded files, whose note type is empty by definition, so filtering by
+type is inapplicable to most of what is on screen and empties the listing
+rather than narrowing it. The type is worth **seeing** on a row and is not
+a useful way to slice a mixed library; the Unfiled notes view already
+covers the one case that genuinely wanted a notes-only listing.
+
 ## Related
 
 - [ADR 0106](0106-documents-in-the-binary.md) is the store this builds on.
@@ -415,4 +471,6 @@ placeholder notes.
   behind `hc-doc:`.
 - [ADR 0117](0117-markdown-is-the-storage-format-not-the-authoring-format.md)
   covers why the editor is WYSIWYG when the file is Markdown.
+- [ADR 0119](0119-capture-is-an-action-not-a-place.md) covers where capture
+  lives now that Notes is not a panel, and the `Auto` type default.
 - ADR 0118 will cover checklist runs, when that phase ships.

@@ -338,6 +338,11 @@ function doc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     indexed_at: '2026-01-01T00:00:00Z',
+    kind: 'file',
+    note_type: '',
+    note_type_source: '',
+    pinned: false,
+    sort_index: 0,
     ...overrides,
   }
 }

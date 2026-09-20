@@ -43,6 +43,12 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   'anchor-watch': { page: 'features/anchor-watch' },
   alarms: { page: 'features/alarms' },
   assistant: { page: 'features/assistant' },
+  // Revision "one panel, not three" (2026-09-20): Documents now renders
+  // capture, notes and manuals as well as the file library, so its help
+  // target covers docs/features/documents.md AND the dedicated
+  // notes-and-the-manual.md page is reached from within that page's own
+  // links rather than a second PANEL_HELP_TARGETS row - there is no longer
+  // a second panel for a second row to point at.
   documents: { page: 'features/documents' },
   // Reachable, unlike the two below: the management surface (ADR 0112)
   // mounts the ordinary header, so its Help affordance resolves here.

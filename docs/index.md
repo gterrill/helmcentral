@@ -28,6 +28,9 @@ meets your needs.
 - [Documents](features/documents.md), a searchable library for manuals,
   receipts and logs, with OCR, summaries and tags once Mate reads a scan or
   a photo. Built and working; no Documents panel in the dashboard yet.
+- [Notes and the manual](features/notes-and-the-manual.md), somewhere to write
+  down what you know about the boat in one action, and assemble it into an
+  operations manual the crew and the next owner can follow.
 - [Inventory tracking](features/inventory-tracking.md), designed but not yet built.
 
 ## How-to guides
@@ -43,6 +46,10 @@ Steps for specific tasks.
 - [Add a Nearby map](how-to/add-a-nearby-map.md)
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
+- [Start a ship's manual](how-to/start-a-ships-manual.md), what belongs in one
+  and what the builder's handbook already covers.
+- [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
+  filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
 - [Development](how-to/development.md), running the stack, tests and release builds.

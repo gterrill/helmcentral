@@ -1,17 +1,21 @@
 import {
   Download,
+  Eye,
   File,
   FileText,
   Folder,
   FolderPlus,
   Image as ImageIcon,
   Info,
+  Library,
   Loader2,
   MoreVertical,
   Pencil,
+  Plus,
   RefreshCw,
   Trash2,
   Upload as UploadIcon,
+  Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
 
@@ -49,6 +53,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -68,8 +75,19 @@ import {
   type DocumentRecord,
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
+import { useManuals } from '@/hooks/use-manuals'
+import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
+import type { HelpTarget } from '@/lib/help-links'
+import type { NoteLink } from '@/lib/note-links'
+import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
+
+import { ManualFolderView } from './documents/manual-folder-view'
+import { NoteTypeIconButton } from './documents/note-type-icon-button'
+import { UnfiledNotesView } from './documents/unfiled-notes-view'
+import { NoteEditor } from './note-editor'
+import { NoteMarkdown } from './note-markdown'
 
 // ADR 0106 F1: the Documents panel. All data (folder browsing, search, tags,
 // every write) comes from useDocuments(folderId); uploads reuse
@@ -286,9 +304,44 @@ export interface DocumentsPanelProps {
    * documentsFolderId state. Optional so every existing test that renders
    * this panel without it (nothing to navigate to) keeps working unchanged. */
   onEditDocument?: (id: string) => void
+  /** Revision "one panel, not three" (2026-09-20): which section (a
+   * document node in the current folder's manual tree) is open in
+   * ManualFolderView's reading pane - `?section=`, seeded and mirrored the
+   * same way onFolderChange/initialFolderId are. Meaningless unless the
+   * current folder is a manual (ManualFolderView is the only thing that
+   * ever reads it), same as app-location.ts's own documentSectionId. */
+  initialSectionId?: string | null
+  onSectionChange?: (id: string | null) => void
+  /** ADR 0119: opens the global capture sheet - the same one the header
+   * action/Alt+N shortcut open, App.tsx's onCaptureNote wired straight to
+   * its own setCaptureOpen(true). Optional so a test that never clicks
+   * New → Note doesn't need it, same pattern as onEditDocument above. */
+  onCaptureNote?: (type?: NoteType) => void
+  /** Opens the in-app help at a given target - passed straight through the
+   * "What to put in it" link in EmptyManualsState's replacement (the
+   * revision drops the dedicated empty state, but a Manual-kind folder can
+   * still want to link to the how-to). Optional, same reasoning as the
+   * deleted manuals-panel.tsx's own onOpenHelp. */
+  onOpenHelp?: (target: HelpTarget) => void
 }
 
-export function DocumentsPanel({ initialFolderId = null, onFolderChange, initialDocumentId = null, onEditDocument }: DocumentsPanelProps) {
+// Revision "one panel, not three" (2026-09-20): docs/features/notes-and-the-manual.md
+// is the how-to for what a Manual-kind folder is and how to start one -
+// linked from the New folder dialog's Manual checkbox, since the concept
+// (ordering, Arrange, a reading view) needs a sentence nothing in a
+// checkbox label can carry.
+const MANUAL_HOWTO_HELP_TARGET: HelpTarget = { page: 'how-to/start-a-ships-manual' }
+
+export function DocumentsPanel({
+  initialFolderId = null,
+  onFolderChange,
+  initialDocumentId = null,
+  onEditDocument,
+  initialSectionId = null,
+  onSectionChange,
+  onCaptureNote,
+  onOpenHelp,
+}: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const documents = useDocuments(folderId)
   // No attachment cap here (review finding, use-document-uploads.ts:173):
@@ -297,8 +350,31 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
   // file for a large dropped batch.
   const uploads = useDocumentUploads(folderId, { maxAttachments: NO_ATTACHMENT_CAP, sequential: true })
 
+  // ── Manual-kind folders (revision "one panel, not three") ─────────────
+  // The library-wide list of manuals - the ONLY way to know a folder is a
+  // manual at all: GET /api/document-folders never serialises
+  // document_folders.role (ordinary folder browsing has never needed it),
+  // so this is a second hook instance purely for its `manuals` array,
+  // exactly the pattern the deleted notes-panel.tsx's own FileNotePicker
+  // already used (`useManuals(null)` for the id set). Its own tree fetch is
+  // always a no-op (manualId: null), so this costs one GET /api/manuals,
+  // not a wasted tree fetch on every folder browsed.
+  const manualsList = useManuals(null)
+  const isCurrentFolderManual = folderId !== null && manualsList.manuals.some((m) => m.id === folderId)
+  const manualFolderIds = useMemo(() => new Set(manualsList.manuals.map((m) => m.id)), [manualsList.manuals])
+
+  // ── Unfiled notes saved view + the viewer's note editing (revision) ────
+  // One useNotes() instance serves three things: the "Unfiled notes" view
+  // and its visible count (unfiledOnly: true governs refresh()'s own
+  // query), the type-override dropdown on its rows, and the general
+  // viewer's Edit/Save for ANY note (patchNote/getNote work on any note id
+  // regardless of the list filter) - see the "the viewer" section below.
+  const unfiled = useNotes({ unfiledOnly: true })
+  const [view, setView] = useState<'browse' | 'unfiled'>('browse')
+
   const navigate = useCallback((id: string | null) => {
     setFolderId(id)
+    setView('browse') // browsing a folder always leaves the Unfiled notes view
     onFolderChange?.(id)
   }, [onFolderChange])
 
@@ -321,6 +397,34 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
       setFolderId(initialFolderId)
     }
   }, [initialFolderId])
+
+  // ── section (ManualFolderView's reading pane, `?section=`) ──────────────
+  // Same re-sync-on-prop-change pattern as initialFolderId above, and for
+  // the identical reason (Back/Forward hands this panel a new prop rather
+  // than remounting it).
+  const [sectionId, setSectionIdState] = useState<string | null>(initialSectionId)
+  const setSectionId = useCallback((id: string | null) => {
+    setSectionIdState(id)
+    onSectionChange?.(id)
+  }, [onSectionChange])
+  const previousInitialSectionIdRef = useRef(initialSectionId)
+  useEffect(() => {
+    const previous = previousInitialSectionIdRef.current
+    previousInitialSectionIdRef.current = initialSectionId
+    if (initialSectionId !== previous) setSectionIdState(initialSectionId)
+  }, [initialSectionId])
+  // A section id is only meaningful against the tree it was picked from -
+  // leaving it set while navigating to a DIFFERENT folder would point a
+  // freshly opened manual's reading pane at a section that (probably)
+  // isn't even in its tree. Skips the very first run (the ref already holds
+  // the just-mounted folderId), or this would immediately clear a section
+  // id this panel was seeded with, on mount, before it's ever rendered.
+  const previousFolderIdForSectionRef = useRef(folderId)
+  useEffect(() => {
+    const previous = previousFolderIdForSectionRef.current
+    previousFolderIdForSectionRef.current = folderId
+    if (folderId !== previous) setSectionId(null)
+  }, [folderId, setSectionId])
 
   // ── search ────────────────────────────────────────────────────────────
   const [query, setQuery] = useState('')
@@ -398,13 +502,20 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
   // ── new folder ────────────────────────────────────────────────────────
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  // "Creating a folder offers the kind" (revision "one panel, not three") -
+  // only meaningful at the root (folderId === null): a manual must be
+  // top-level (backend's errManualNotTopLevel), so the checkbox itself is
+  // hidden rather than offering a choice that would always 409.
+  const [newFolderIsManual, setNewFolderIsManual] = useState(false)
   const submitNewFolder = async () => {
     const name = newFolderName.trim()
     if (name === '') return
     await runAction(async () => {
-      await documents.createFolder(name, folderId)
+      const created = await documents.createFolder(name, folderId)
+      if (newFolderIsManual) await manualsList.flagManual(created.id)
       setNewFolderOpen(false)
       setNewFolderName('')
+      setNewFolderIsManual(false)
     })
   }
 
@@ -437,6 +548,11 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
       }
       setMoveTarget(null)
       setSelectedIds(new Set())
+      // A moved id may have been an unfiled note draining out of the inbox
+      // (File… on an Unfiled notes row, revision "one panel, not three") -
+      // always refreshed rather than tracked per-id, the same "simpler over
+      // cleverer" trade the rest of this file already makes for uploads.
+      void unfiled.refresh()
     })
   }
 
@@ -463,6 +579,7 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
         setSelectedIds(new Set())
       }
       setDeleteTarget(null)
+      void unfiled.refresh() // a deleted document may have been an unfiled note
     })
   }
 
@@ -535,6 +652,45 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
       .finally(() => setViewerLoading(false))
   }, [viewerDoc, viewerId])
 
+  // ── editing a note from the general viewer (revision "one panel, not
+  // three") - the Edit toggle NoteEditor is reachable through, moved out of
+  // the deleted notes-panel.tsx's reader sheet. Opening a DIFFERENT
+  // document always lands back in the read-only view - an editing session
+  // belongs to the document that was open when it started.
+  const [viewerEditing, setViewerEditing] = useState(false)
+  useEffect(() => { setViewerEditing(false) }, [viewerId])
+  const [viewerSaveError, setViewerSaveError] = useState<string | null>(null)
+  const { patchNote: patchViewerNote } = unfiled
+  const handleSaveViewerNote = useCallback(async (body: string) => {
+    if (!viewerId) return
+    try {
+      const updated = await patchViewerNote(viewerId, { body })
+      setViewerText(updated.body)
+      setViewerSaveError(null)
+      setViewerEditing(false)
+    } catch (err) {
+      setViewerSaveError(err instanceof Error ? err.message : String(err))
+      throw err // NoteEditor keeps its dirty flag on a failed save
+    }
+  }, [viewerId, patchViewerNote])
+
+  // A link inside a rendered note's markdown (ADR 0116). GET /api/documents/:id
+  // and its /text sibling work on any document id regardless of kind, so
+  // both hc-note: and hc-doc: links resolve the same way here: switch the
+  // viewer to that id, reusing the exact fetches above rather than needing
+  // note-specific ones. An anchor scrolls within whatever is already
+  // rendered. `external`/`unsafe` never reach here - note-markdown-impl.tsx
+  // handles both itself.
+  const handleNoteNavigate = useCallback((link: NoteLink) => {
+    if (link.kind === 'note' || link.kind === 'document') {
+      setViewerId(link.id)
+      return
+    }
+    if (link.kind === 'anchor') {
+      document.getElementById(link.hash)?.scrollIntoView({ block: 'start' })
+    }
+  }, [])
+
   // ── upload ───────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const handleFilesSelected = (e: ChangeEvent<HTMLInputElement>) => {
@@ -568,7 +724,15 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
   }, [uploads.items, uploads, documents])
 
   const folderRows = useMemo(() => documents.folders, [documents.folders])
-  const documentRows = useMemo(() => documents.documents, [documents.documents])
+  // No note-type facet here. One was built and removed: a library folder
+  // holds mostly kind='file' rows (PDFs, photos, the builder's handbook),
+  // so a type filter is inapplicable to most of what is on screen and
+  // silently empties the listing when a facet is active. The type is still
+  // worth SEEING on a note row - that is the pre-attentive icon column, and
+  // it stays - but it is not a useful axis to slice a mixed library on. The
+  // Unfiled notes view already covers the one case that genuinely wanted a
+  // notes-only listing.
+  const documentRows = documents.documents
   const allDocumentsSelected = documentRows.length > 0 && documentRows.every((d) => selectedIds.has(d.id))
 
   const contentUrlFor = (id: string) => `${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/content`
@@ -631,10 +795,61 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
           </BreadcrumbList>
         </Breadcrumb>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setNewFolderOpen(true)}>
-            <FolderPlus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            New folder
-          </Button>
+          {/* Revision "one panel, not three": ONE New menu, replacing the
+              old plain "New folder" button and, briefly, a separate Add
+              Note split button beside it. Two adjacent create controls in
+              one toolbar was the wrong shape - everything this panel
+              creates now hangs off a single verb, with Folder first
+              (Manual is a checkbox inside its dialog when browsing the
+              root) and Note carrying its kinds in a submenu.
+
+              Auto leads that submenu, and picking it sends no `type` at
+              all so the Go classifier answers (ADR 0119). The submenu does
+              cost a hover before Auto, which is why the GLOBAL header
+              action and Alt+N still exist and still open capture on Auto
+              in one press - that is the path R1 is about. This menu is the
+              discoverable path, not the fast one. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button type="button" variant="outline" size="sm">
+                  <Plus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                  New
+                </Button>
+              }
+            />
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setNewFolderOpen(true)}>
+                <FolderPlus className="h-4 w-4" aria-hidden="true" /> Folder
+              </DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Pencil className="h-4 w-4" aria-hidden="true" /> Note
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => onCaptureNote?.()}>
+                    <Sparkles className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> Auto
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {NOTE_TYPE_ORDER.map((type) => {
+                    const meta = NOTE_TYPE_META[type]
+                    const Icon = meta.icon
+                    // The catch-all kind is labelled "Note" everywhere else,
+                    // which is fine when the question is "what kind of note
+                    // is this". Here it would read New > Note > Note, so it
+                    // says "Plain note" in this one menu. The stored value
+                    // is 'note' either way - this is a label, not a type.
+                    const label = type === 'note' ? 'Plain note' : meta.label
+                    return (
+                      <DropdownMenuItem key={type} onClick={() => onCaptureNote?.(type)}>
+                        <Icon className={cn('h-4 w-4', meta.className)} aria-hidden="true" /> {label}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button type="button" size="sm" onClick={() => fileInputRef.current?.click()}>
             <UploadIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Upload
@@ -678,6 +893,20 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
             ))}
           </ToggleGroup>
         )}
+        {/* "Unfiled notes" as a saved view, not a place (revision) -
+            kind='note' AND folder_id IS NULL, preserving the deleted
+            notes-panel.tsx's drain-the-inbox loop and its visible count
+            without owning a sidebar row. */}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-pressed={view === 'unfiled'}
+          className={cn(view === 'unfiled' && 'border-primary/40 bg-primary/10 text-primary')}
+          onClick={() => setView((prev) => (prev === 'unfiled' ? 'browse' : 'unfiled'))}
+        >
+          Unfiled notes ({unfiled.notes.length})
+        </Button>
         <EmbeddingsStatusRow status={documents.embeddingsStatus} onIndexClick={handleIndexClick} />
       </div>
 
@@ -752,6 +981,22 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
               folderLabelFor={folderLabelFor}
             />
           </>
+        ) : view === 'unfiled' ? (
+          <UnfiledNotesView
+            notes={unfiled.notes}
+            loading={unfiled.loading}
+            onOpen={setViewerId}
+            onSetType={(id, type) => { void runAction(() => unfiled.patchNote(id, { type })) }}
+            onFile={(id, title) => setMoveTarget({ ids: [id], label: title })}
+          />
+        ) : isCurrentFolderManual && folderId !== null ? (
+          <ManualFolderView
+            folderId={folderId}
+            sectionId={sectionId}
+            onSectionChange={setSectionId}
+            onDemoted={() => { void manualsList.refreshManuals() }}
+            onNavigateDocument={setViewerId}
+          />
         ) : (
           <Table>
             <TableHeader>
@@ -780,40 +1025,56 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                   </TableCell>
                 </TableRow>
               )}
-              {folderRows.map((folder) => (
-                <TableRow key={folder.id}>
-                  <TableCell />
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => navigate(folder.id)}
-                      className="flex items-center gap-2 text-left font-medium hover:underline"
-                    >
-                      <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      {folder.name}
-                    </button>
-                  </TableCell>
-                  {/* Status, Tags and Size are document-only columns - a
-                      folder row still needs a placeholder cell for each of
-                      the header's six columns, or the actions cell below
-                      shifts left under "Size" and the real w-10 actions
-                      column sits empty (review finding). */}
-                  <TableCell />
-                  <TableCell />
-                  <TableCell />
-                  <TableCell>
-                    <FolderRowMenu
-                      folder={folder}
-                      onRename={() => { setRenameTarget({ kind: 'folder', id: folder.id, name: folder.name }); setRenameValue(folder.name) }}
-                      onMove={() => setMoveTarget({ ids: [folder.id], label: folder.name })}
-                      onDelete={() => setDeleteTarget({ kind: 'folder', id: folder.id, name: folder.name })}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
+              {folderRows.map((folder) => {
+                const isManual = manualFolderIds.has(folder.id)
+                return (
+                  <TableRow key={folder.id}>
+                    <TableCell />
+                    <TableCell>
+                      <button
+                        type="button"
+                        onClick={() => navigate(folder.id)}
+                        className="flex items-center gap-2 text-left font-medium hover:underline"
+                      >
+                        {/* Library, not Folder, for a Manual-kind folder -
+                            the only way to see that from the OUTSIDE
+                            (browsing its parent) at all, since
+                            GET /api/document-folders never serialises
+                            document_folders.role. */}
+                        {isManual ? (
+                          <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        ) : (
+                          <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        )}
+                        {folder.name}
+                      </button>
+                    </TableCell>
+                    {/* Status, Tags and Size are document-only columns - a
+                        folder row still needs a placeholder cell for each
+                        of the header's six columns, or the actions cell
+                        below shifts left under "Size" and the real w-10
+                        actions column sits empty (review finding). */}
+                    <TableCell />
+                    <TableCell />
+                    <TableCell />
+                    <TableCell>
+                      <FolderRowMenu
+                        folder={folder}
+                        isManual={isManual}
+                        canPromote={folderId === null}
+                        onRename={() => { setRenameTarget({ kind: 'folder', id: folder.id, name: folder.name }); setRenameValue(folder.name) }}
+                        onMove={() => setMoveTarget({ ids: [folder.id], label: folder.name })}
+                        onDelete={() => setDeleteTarget({ kind: 'folder', id: folder.id, name: folder.name })}
+                        onPromote={() => { void runAction(() => manualsList.flagManual(folder.id)) }}
+                        onDemote={() => { void runAction(() => manualsList.clearManual(folder.id)) }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
               {documentRows.map((doc) => {
-                const Icon = rowIcon(doc.mime)
                 const name = documentDisplayName(doc)
+                const MimeIcon = rowIcon(doc.mime)
                 return (
                   <TableRow key={doc.id}>
                     <TableCell>
@@ -824,19 +1085,30 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                       />
                     </TableCell>
                     <TableCell>
-                      <button
-                        type="button"
-                        onClick={() => setViewerId(doc.id)}
-                        className="flex flex-col items-start gap-0.5 text-left"
-                      >
-                        <span className="flex items-center gap-2 font-medium hover:underline">
-                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                          {name}
-                        </span>
-                        {doc.status === 'failed' && doc.error && (
-                          <span className="text-xs text-destructive">{doc.error}</span>
+                      <div className="flex items-center gap-2">
+                        {/* The pre-attentive type icon column (revision
+                            "Note types as a facet") - a note row's icon is
+                            its own hit target opening a type-override menu,
+                            same gesture as the Unfiled notes view's rows
+                            (unfiled.patchNote works on any note id
+                            regardless of filing state). A plain kind='file'
+                            row keeps the ordinary mime-based icon, inert. */}
+                        {doc.kind === 'note' ? (
+                          <NoteTypeIconButton noteType={doc.note_type} onSetType={(type) => { void runAction(() => unfiled.patchNote(doc.id, { type })) }} />
+                        ) : (
+                          <MimeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                         )}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setViewerId(doc.id)}
+                          className="flex flex-col items-start gap-0.5 text-left"
+                        >
+                          <span className="font-medium hover:underline">{name}</span>
+                          {doc.status === 'failed' && doc.error && (
+                            <span className="text-xs text-destructive">{doc.error}</span>
+                          )}
+                        </button>
+                      </div>
                     </TableCell>
                     <TableCell>{statusBadge(doc)}</TableCell>
                     <TableCell>
@@ -870,7 +1142,7 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
       </div>
 
       {/* ── New folder ─────────────────────────────────────────────── */}
-      <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
+      <Dialog open={newFolderOpen} onOpenChange={(open) => { setNewFolderOpen(open); if (!open) setNewFolderIsManual(false) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New folder</DialogTitle>
@@ -884,6 +1156,25 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
             onKeyDown={(e) => { if (e.key === 'Enter') void submitNewFolder() }}
             autoFocus
           />
+          {/* "Creating a folder offers the kind" - only at the root, since
+              only a top-level folder can ever become a manual. */}
+          {folderId === null && (
+            <div className="flex items-center gap-2">
+              <Checkbox id="documents-new-folder-manual" checked={newFolderIsManual} onCheckedChange={(checked) => setNewFolderIsManual(checked === true)} />
+              <Label htmlFor="documents-new-folder-manual" className="text-sm font-normal">
+                Manual - ordered, with a reading view
+              </Label>
+              {onOpenHelp && (
+                <button
+                  type="button"
+                  onClick={() => onOpenHelp(MANUAL_HOWTO_HELP_TARGET)}
+                  className="text-xs font-semibold uppercase tracking-[0.1em] text-primary hover:underline"
+                >
+                  What to put in it
+                </button>
+              )}
+            </div>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setNewFolderOpen(false)}>Cancel</Button>
             <Button type="button" onClick={() => { void submitNewFolder() }}>Create</Button>
@@ -1008,17 +1299,58 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                 <Info className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                 Details
               </Button>
+              {/* The Edit toggle NoteEditor is reachable through (moved out
+                  of the deleted notes-panel.tsx's reader sheet) - gated on
+                  kind='note', not just mime==='text/markdown': an uploaded
+                  .md FILE has the same mime but no PATCH /api/notes/:id
+                  route to save through (409 errNotANote). */}
+              {viewerDoc.kind === 'note' && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setViewerEditing((prev) => !prev)}>
+                  {viewerEditing ? (
+                    <>
+                      <Eye className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Read
+                    </>
+                  ) : (
+                    <>
+                      <Pencil className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Edit
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-auto rounded-md border">
             {viewerLoading && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
+            {viewerSaveError && <p role="alert" className="p-4 text-sm text-destructive">{viewerSaveError}</p>}
             {!viewerLoading && viewerDoc?.mime === 'application/pdf' && (
               <iframe title={documentDisplayName(viewerDoc)} src={contentUrlFor(viewerDoc.id)} className="h-full min-h-[70vh] w-full" />
             )}
             {!viewerLoading && viewerDoc?.mime.startsWith('image/') && (
               <img src={contentUrlFor(viewerDoc.id)} alt={documentDisplayName(viewerDoc)} className="max-w-full" />
             )}
-            {!viewerLoading && viewerDoc && !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf' && (
+            {/* ADR 0116: a filed note is a document with mime: 'text/markdown'.
+                Routed through the same NoteMarkdown the deleted
+                notes-panel.tsx's own reader used, so a note reads the same
+                way wherever it's opened from. text/plain, text/csv and
+                application/json stay literal text - a CSV or a JSON blob
+                rendered as markdown would be actively misleading, not an
+                upgrade. Swapped for NoteEditor (ADR 0117) while editing a
+                real note (kind='note'); an uploaded .md FILE has no editor
+                to swap to (see the Edit toggle's own comment above), so it
+                stays read-only regardless of viewerEditing. */}
+            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerEditing && (
+              <div className="p-1">
+                <NoteEditor key={viewerDoc.id} value={viewerText ?? ''} onSave={handleSaveViewerNote} />
+              </div>
+            )}
+            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && !(viewerDoc.kind === 'note' && viewerEditing) && (
+              <div className="p-4">
+                <NoteMarkdown content={viewerText ?? ''} onNavigate={handleNoteNavigate} />
+              </div>
+            )}
+            {!viewerLoading && viewerDoc && viewerDoc.mime !== 'text/markdown' && !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf' && (
               <pre className="whitespace-pre-wrap p-4 text-sm">{viewerText ?? ''}</pre>
             )}
           </div>
@@ -1173,14 +1505,27 @@ function DocumentRowMenu({
 
 function FolderRowMenu({
   folder,
+  isManual,
+  canPromote,
   onRename,
   onMove,
   onDelete,
+  onPromote,
+  onDemote,
 }: {
   folder: DocumentFolder
+  /** Whether this folder already carries document_folders.role='manual' -
+   * decides Promote vs. Demote (revision "one panel, not three"). */
+  isManual: boolean
+  /** Only a top-level folder can ever become a manual (backend's own
+   * errManualNotTopLevel) - true exactly when this row is being browsed at
+   * the root, since every folder listed there IS top-level by definition. */
+  canPromote: boolean
   onRename: () => void
   onMove: () => void
   onDelete: () => void
+  onPromote: () => void
+  onDemote: () => void
 }) {
   return (
     <DropdownMenu>
@@ -1196,6 +1541,19 @@ function FolderRowMenu({
           <Pencil className="h-4 w-4" aria-hidden="true" /> Rename
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onMove}>Move…</DropdownMenuItem>
+        {/* Promote/demote: a folder's kind, not a destructive act either
+            way - "moves and deletes nothing" (POST/DELETE /api/manuals),
+            so this is a direct toggle like Rename/Move above, not a
+            confirmation dialog like Delete below. */}
+        {isManual ? (
+          <DropdownMenuItem onClick={onDemote}>
+            <Library className="h-4 w-4" aria-hidden="true" /> Stop treating as manual
+          </DropdownMenuItem>
+        ) : canPromote ? (
+          <DropdownMenuItem onClick={onPromote}>
+            <Library className="h-4 w-4" aria-hidden="true" /> Treat as a manual
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={onDelete}>
           <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete
