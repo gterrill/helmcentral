@@ -710,6 +710,16 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
 		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
 
+		// Notes (plan "Notes and the Boat's Manual", ADR 0114): a note is a
+		// documents row with kind='note' (notes_store.go), so it shares the
+		// document library's store, folders, tags, search and this route
+		// table's tiers wholesale. "/api/notes/:id" registered after the
+		// bare "/api/notes" for readability only - see the read-tier
+		// comment above the document library's own routes on why Echo's
+		// router never needs that ordering.
+		{http.MethodGet, "/api/notes", tierRead, listNotesHandler},
+		{http.MethodGet, "/api/notes/:id", tierRead, getNoteHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -782,6 +792,10 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/document-folders", tierWrite, createDocumentFolderHandler},
 		{http.MethodPatch, "/api/document-folders/:id", tierWrite, patchDocumentFolderHandler},
 		{http.MethodDelete, "/api/document-folders/:id", tierWrite, deleteDocumentFolderHandler},
+
+		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
+		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
+		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
