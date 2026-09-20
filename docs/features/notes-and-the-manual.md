@@ -134,6 +134,39 @@ within the group it sits in. A manual can hold subfolders as well as
 sections, the same way any folder can, so a long manual can be split into
 chapters rather than left as one long list.
 
+## Running a checklist
+
+Any note written as a checklist, ticked lines starting `- [ ]`, can be run
+rather than just read. **Start checklist** appears wherever that note is
+open, in Documents' own viewer or inside a manual's reading pane, and swaps
+the page for one large tick-off list: full-width rows, a big checkbox on
+each one, sized for a thumb rather than a cursor. Tap a row anywhere along
+its width to tick it, not just the box itself.
+
+A run remembers where you are. Walk away from a genset shutdown at item
+four and come back to it later, and **Start checklist** picks up exactly
+there: it shows when you started and how many are done, and lands you back
+on the first thing still unticked rather than making you scroll to find
+your place. Nothing about opening or closing the note itself starts a run;
+only tapping **Start checklist** does.
+
+A run is not a copy of the checklist. It is the current note, plus which
+lines you have ticked, so editing an unrelated step (fixing a typo,
+reordering the list) never disturbs a tick already made. Only a step
+whose own wording actually changes loses its tick, and when that happens
+it is never silently dropped or silently carried over as still done: it
+moves into its own **Re-check** group, showing the wording it was ticked
+against, so you can see what changed and tick the new version yourself.
+Bolding a word or fixing punctuation in a step does not count as a change
+here; only the words themselves do.
+
+**Complete checklist** closes out the run. **Abandon checklist** stops it
+without finishing, for a run started by mistake or overtaken by events;
+either way, the record of what was ticked and when stays with the boat, it
+is only ever cleared by deleting the note itself. Finishing or abandoning a
+run does not touch the note. The next time anyone taps **Start checklist**,
+it opens fresh and unticked, ready to be run again.
+
 ## What this is not
 
 Notes and manuals are not the **Help** in the sidebar, which is

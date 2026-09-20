@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import type { ChecklistItem, ChecklistRun } from './use-checklist-run'
 import type { DocumentTag } from './use-documents'
 
 // Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Notes inbox's data
@@ -48,15 +49,22 @@ export interface NoteRecord {
   sort_index: number
 }
 
-// GET /api/notes/:id and every write below return this same shape
+// GET /api/notes/:id and every write below return this same general shape
 // (notes_handlers.go's own comment: "one call serving both an editor and a
-// read-only view") - the note's metadata plus its body, read fresh off
-// disk. Phase 2 builds no editor, so every caller here only ever reads
-// `body`; PATCH's own `body` field is still exposed on NotePatch below for
-// Phase 2b (and the source-toggle escape hatch it adds) to use unchanged.
+// reader") - the note's metadata plus its body, read fresh off disk.
+// checklist/active_run (Phase 4, plan §4/ADR 0118) are GET /api/notes/:id's
+// own addition only - createNoteHandler/patchNoteHandler still answer
+// {document, body} alone, so both are typed optional here rather than
+// promising every caller a field only the read path actually sends.
+// checklist is [] on GET for a note with no checkbox items; active_run is
+// null until the operator starts one - "you haven't started one yet" is a
+// normal state, not an error, the same footing every other "nothing yet"
+// response in this codebase gets.
 export interface NoteDetail {
   document: NoteRecord
   body: string
+  checklist?: ChecklistItem[]
+  active_run?: ChecklistRun | null
 }
 
 export interface CreateNoteInput {

@@ -7,6 +7,7 @@ import {
   Eye,
   FileText,
   Folder,
+  ListChecks,
   Pencil,
   type LucideIcon,
 } from 'lucide-react'
@@ -19,6 +20,7 @@ import type { NoteLink } from '@/lib/note-links'
 import { noteTypeMeta } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
 
+import { ChecklistRunner } from './checklist-runner'
 import { NoteEditor } from '../note-editor'
 import { NoteMarkdown } from '../note-markdown'
 
@@ -100,21 +102,39 @@ export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemot
   const [sectionBody, setSectionBody] = useState<string | null>(null)
   const [sectionBodyLoading, setSectionBodyLoading] = useState(false)
   const [sectionBodyError, setSectionBodyError] = useState<string | null>(null)
+  // Whether the CURRENT section's body has any checklist items at all
+  // (GET /api/notes/:id's own `checklist` field, plan §4) - all
+  // ManualReadingPane needs to decide whether "Start checklist" belongs on
+  // screen; the runner itself (checklist-runner.tsx) fetches its own run
+  // state once started.
+  const [sectionHasChecklist, setSectionHasChecklist] = useState(false)
   const { getNote } = notes
   useEffect(() => {
     if (!selectedNode || selectedNode.kind !== 'note') {
       setSectionBody(null)
       setSectionBodyError(null)
+      setSectionHasChecklist(false)
       return
     }
     let cancelled = false
     setSectionBodyLoading(true)
     getNote(selectedNode.id)
-      .then((detail) => { if (!cancelled) { setSectionBody(detail.body); setSectionBodyError(null) } })
+      .then((detail) => {
+        if (cancelled) return
+        setSectionBody(detail.body)
+        setSectionBodyError(null)
+        setSectionHasChecklist((detail.checklist?.length ?? 0) > 0)
+      })
       .catch((err) => { if (!cancelled) setSectionBodyError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (!cancelled) setSectionBodyLoading(false) })
     return () => { cancelled = true }
   }, [selectedNode, getNote])
+
+  // A checklist run is its own mode of this reading pane, not a panel
+  // (plan §7) - reset whenever a DIFFERENT section is selected, the same
+  // way ManualReadingPane's own `editing` state resets on node.id below.
+  const [runningChecklist, setRunningChecklist] = useState(false)
+  useEffect(() => { setRunningChecklist(false) }, [selectedNode?.id])
 
   // Anchor links still scroll within this pane; a note/document link always
   // opens in the shared viewer Sheet (documents-panel.tsx's own setViewerId,
@@ -184,6 +204,10 @@ export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemot
             body={sectionBody}
             loading={sectionBodyLoading}
             error={sectionBodyError}
+            hasChecklist={sectionHasChecklist}
+            runningChecklist={runningChecklist}
+            onStartChecklist={() => setRunningChecklist(true)}
+            onExitChecklist={() => setRunningChecklist(false)}
             onNavigate={handleNavigate}
             onSave={handleSaveSection}
             onBack={() => onSectionChange(null)}
@@ -350,6 +374,10 @@ function ManualReadingPane({
   body,
   loading,
   error,
+  hasChecklist,
+  runningChecklist,
+  onStartChecklist,
+  onExitChecklist,
   onNavigate,
   onSave,
   onBack,
@@ -358,6 +386,16 @@ function ManualReadingPane({
   body: string | null
   loading: boolean
   error: string | null
+  /** Whether the CURRENT section's body has any checklist items - gates
+   * whether "Start checklist" appears at all (plan §7's reading pane:
+   * "plus Start checklist when the note has checkbox items"). */
+  hasChecklist: boolean
+  /** A checklist run is a MODE of this pane, not a navigation elsewhere -
+   * true swaps the reading/editing view below for ChecklistRunner in
+   * place. */
+  runningChecklist: boolean
+  onStartChecklist: () => void
+  onExitChecklist: () => void
   onNavigate: (link: NoteLink) => void
   onSave: (markdown: string) => Promise<void>
   onBack: () => void
@@ -406,24 +444,38 @@ function ManualReadingPane({
         </div>
       )}
 
-      {node && node.type === 'document' && node.kind === 'note' && (
+      {node && node.type === 'document' && node.kind === 'note' && runningChecklist && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-md border">
+          <ChecklistRunner noteId={node.id} noteTitle={node.name} onExit={onExitChecklist} />
+        </div>
+      )}
+
+      {node && node.type === 'document' && node.kind === 'note' && !runningChecklist && (
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-foreground">{node.name}</h3>
             {!loading && !error && body !== null && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setEditing((prev) => !prev)}>
-                {editing ? (
-                  <>
-                    <Eye className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                    Read
-                  </>
-                ) : (
-                  <>
-                    <Pencil className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                    Edit
-                  </>
+              <div className="flex items-center gap-2">
+                {hasChecklist && !editing && (
+                  <Button type="button" variant="outline" size="sm" onClick={onStartChecklist}>
+                    <ListChecks className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                    Start checklist
+                  </Button>
                 )}
-              </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setEditing((prev) => !prev)}>
+                  {editing ? (
+                    <>
+                      <Eye className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Read
+                    </>
+                  ) : (
+                    <>
+                      <Pencil className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Edit
+                    </>
+                  )}
+                </Button>
+              </div>
             )}
           </div>
           {loading && <p className="text-sm text-muted-foreground">Loading…</p>}

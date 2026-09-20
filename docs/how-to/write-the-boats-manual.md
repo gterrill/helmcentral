@@ -118,6 +118,39 @@ checklist pointing at the fuel valve layout, rather than as a substitute for
 saying the thing in place. A reader following a chain of links at 0300 is a
 reader who has not been told what to do.
 
+## 7. Run a checklist
+
+Write a procedure as a checklist and it can be run, not just read. In the
+note editor's toolbar, use the **Task list** button (or type `- [ ]` at the
+start of a line if you are in the raw Markdown view) for each step:
+
+```
+- [ ] Close the raw water seacock
+- [ ] Shut the fuel valve at the tank
+- [ ] Flip the battery isolators off
+```
+
+Open the note anywhere it reads - Documents' own viewer, or a manual's
+reading pane - and **Start checklist** appears above it. It swaps the page
+for a full-width tick-off list sized for a thumb, not a cursor. Tap a step
+to tick it, in any order; **Complete checklist** closes the run out when
+you are done, and **Abandon checklist** stops it early without finishing.
+
+Get interrupted partway through and the note holds your place. Tap **Start
+checklist** again and it picks up exactly where you left off: how many
+steps are done, and the first one still unticked, without making you scan
+the list to find it.
+
+Editing the note while a run is under way does not disturb it, as long as
+the step's own wording is unchanged - reordering steps, fixing a typo
+elsewhere, adding a new step above, none of it moves or clears a tick.
+Only reword the ticked step itself and that one tick moves into a
+**Re-check** group, showing the old wording next to the new step, so
+nothing gets silently counted as done when it was written differently to
+what actually got checked off. Completing or abandoning a run does not
+touch the note either - the next **Start checklist** begins a fresh,
+unticked run.
+
 ## Keeping it useful
 
 Notes stay searchable wherever they are filed, so a manual section and the

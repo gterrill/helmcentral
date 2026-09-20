@@ -42,6 +42,18 @@ vi.mock('@/components/note-editor', () => ({
     </div>
   ),
 }))
+// checklist-runner.tsx has its own full coverage against a mocked
+// use-checklist-run (checklist-runner.test.tsx) - this file only needs to
+// prove the viewer's Start checklist toggle reaches it with the right
+// note, and that Back exits the runner mode without abandoning the run.
+vi.mock('@/components/documents/checklist-runner', () => ({
+  ChecklistRunner: ({ noteId, noteTitle, onExit }: { noteId: string; noteTitle: string; onExit: () => void }) => (
+    <div>
+      <p>checklist runner: {noteId} ({noteTitle})</p>
+      <button type="button" onClick={onExit}>Back</button>
+    </div>
+  ),
+}))
 
 const mockedUseDocuments = vi.mocked(useDocuments)
 const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
@@ -1285,6 +1297,76 @@ describe('DocumentsPanel', () => {
       await screen.findByText('raw log output')
 
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    })
+  })
+
+  // Plan §7 / ADR 0118: "Start checklist" is the general viewer's own
+  // route into the checklist runner - a mode of this same Sheet, gated on
+  // GET /api/notes/:id's own `checklist` field (use-notes.ts's getNote).
+  describe('the viewer: running a checklist', () => {
+    it('shows Start checklist for a note with checklist items, and Back returns to reading', async () => {
+      const getNote = vi.fn().mockResolvedValue({
+        document: note(),
+        body: '- [ ] Seacocks open',
+        checklist: [{ item_key: 'k1', occurrence: 0, text: 'Seacocks open', depth: 0 }],
+      })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: '- [ ] Seacocks open' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      const startButton = await screen.findByRole('button', { name: /Start checklist/ })
+      fireEvent.click(startButton)
+
+      expect(screen.getByText('checklist runner: note-1 (Genset start-up)')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+      expect(screen.queryByText(/checklist runner:/)).not.toBeInTheDocument()
+    })
+
+    it('does not show Start checklist for a note with no checklist items', async () => {
+      const getNote = vi.fn().mockResolvedValue({ document: note(), body: 'Ring Dave about the mooring.', checklist: [] })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Ring Dave about the mooring.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'ring-dave.md', title: 'Ring Dave', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Ring Dave' }))
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
+    })
+
+    it('a plain file (kind file) never shows Start checklist', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log', kind: 'file' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+      await screen.findByText('raw log output')
+
+      expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
     })
   })
 })

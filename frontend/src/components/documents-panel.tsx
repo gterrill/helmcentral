@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Info,
   Library,
+  ListChecks,
   Loader2,
   MoreVertical,
   Pencil,
@@ -83,6 +84,7 @@ import type { NoteLink } from '@/lib/note-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
 
+import { ChecklistRunner } from './documents/checklist-runner'
 import { ManualFolderView } from './documents/manual-folder-view'
 import { NoteTypeIconButton } from './documents/note-type-icon-button'
 import { UnfiledNotesView } from './documents/unfiled-notes-view'
@@ -673,6 +675,39 @@ export function DocumentsPanel({
       throw err // NoteEditor keeps its dirty flag on a failed save
     }
   }, [viewerId, patchViewerNote])
+
+  // ── running a checklist from the general viewer (plan §7, ADR 0118) - a
+  // MODE of this same Sheet, not a navigation elsewhere. viewerText above
+  // comes from the generic /api/documents/:id/text (any mime, any kind), so
+  // whether this document even HAS a checklist has to come from the notes-
+  // specific GET /api/notes/:id instead (its own `checklist` field) -
+  // fetched here rather than folded into the fetch above, since it's only
+  // ever relevant for kind='note'.
+  const [viewerHasChecklist, setViewerHasChecklist] = useState(false)
+  const { getNote: getViewerNote } = unfiled
+  useEffect(() => {
+    if (!viewerDoc || viewerDoc.kind !== 'note') {
+      setViewerHasChecklist(false)
+      return
+    }
+    let cancelled = false
+    // Promise.resolve(...) rather than calling getViewerNote's own promise
+    // directly: it's a mocked jest-style fn in most of this file's own
+    // tests (vi.mock('@/hooks/use-notes')), and plenty of them never bother
+    // stubbing a resolved value for a getNote() call they aren't testing -
+    // this must degrade to "no checklist" rather than throw on a bare
+    // vi.fn()'s undefined return.
+    Promise.resolve(getViewerNote(viewerDoc.id))
+      .then((detail) => { if (!cancelled) setViewerHasChecklist((detail?.checklist?.length ?? 0) > 0) })
+      .catch(() => { if (!cancelled) setViewerHasChecklist(false) })
+    return () => { cancelled = true }
+  }, [viewerDoc, getViewerNote])
+
+  // Reset whenever a DIFFERENT document opens - a running checklist belongs
+  // to the document that was open when it started, the same rule
+  // viewerEditing's own reset above follows.
+  const [viewerChecklistRunning, setViewerChecklistRunning] = useState(false)
+  useEffect(() => { setViewerChecklistRunning(false) }, [viewerId])
 
   // A link inside a rendered note's markdown (ADR 0116). GET /api/documents/:id
   // and its /text sibling work on any document id regardless of kind, so
@@ -1299,12 +1334,26 @@ export function DocumentsPanel({
                 <Info className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                 Details
               </Button>
+              {/* Start checklist is a MODE of this same Sheet (plan §7,
+                  ADR 0118) - gated on kind='note' (a checklist only ever
+                  makes sense against a note's own body) and viewerHasChecklist
+                  (GET /api/notes/:id's own `checklist` field), and hidden
+                  while already editing or running - both would otherwise
+                  compete for the same content area below. */}
+              {viewerDoc.kind === 'note' && viewerHasChecklist && !viewerEditing && !viewerChecklistRunning && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setViewerChecklistRunning(true)}>
+                  <ListChecks className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                  Start checklist
+                </Button>
+              )}
               {/* The Edit toggle NoteEditor is reachable through (moved out
                   of the deleted notes-panel.tsx's reader sheet) - gated on
                   kind='note', not just mime==='text/markdown': an uploaded
                   .md FILE has the same mime but no PATCH /api/notes/:id
-                  route to save through (409 errNotANote). */}
-              {viewerDoc.kind === 'note' && (
+                  route to save through (409 errNotANote). Hidden while a
+                  checklist is running - the same "one mode at a time" rule
+                  as Start checklist above. */}
+              {viewerDoc.kind === 'note' && !viewerChecklistRunning && (
                 <Button type="button" size="sm" variant="outline" onClick={() => setViewerEditing((prev) => !prev)}>
                   {viewerEditing ? (
                     <>
@@ -1340,12 +1389,19 @@ export function DocumentsPanel({
                 real note (kind='note'); an uploaded .md FILE has no editor
                 to swap to (see the Edit toggle's own comment above), so it
                 stays read-only regardless of viewerEditing. */}
-            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerEditing && (
+            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerChecklistRunning && (
+              <ChecklistRunner
+                noteId={viewerDoc.id}
+                noteTitle={documentDisplayName(viewerDoc)}
+                onExit={() => setViewerChecklistRunning(false)}
+              />
+            )}
+            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerEditing && !viewerChecklistRunning && (
               <div className="p-1">
                 <NoteEditor key={viewerDoc.id} value={viewerText ?? ''} onSave={handleSaveViewerNote} />
               </div>
             )}
-            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && !(viewerDoc.kind === 'note' && viewerEditing) && (
+            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && !viewerChecklistRunning && !(viewerDoc.kind === 'note' && viewerEditing) && (
               <div className="p-4">
                 <NoteMarkdown content={viewerText ?? ''} onNavigate={handleNoteNavigate} />
               </div>

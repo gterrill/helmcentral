@@ -37,6 +37,20 @@ vi.mock('@/components/note-editor', () => ({
   ),
 }))
 
+// checklist-runner.tsx has its own full coverage (checklist-runner.test.tsx)
+// against a mocked use-checklist-run - this file only needs to prove
+// ManualFolderView's "Start checklist" reaches it with the right note, and
+// that Back exits the runner mode back to the reading view, so it stands in
+// the same lightweight fake shape as the NoteEditor mock above.
+vi.mock('@/components/documents/checklist-runner', () => ({
+  ChecklistRunner: ({ noteId, noteTitle, onExit }: { noteId: string; noteTitle: string; onExit: () => void }) => (
+    <div>
+      <p>checklist runner: {noteId} ({noteTitle})</p>
+      <button type="button" onClick={onExit}>Back</button>
+    </div>
+  ),
+}))
+
 const mockedUseManuals = vi.mocked(useManuals)
 const mockedUseNotes = vi.mocked(useNotes)
 
@@ -182,6 +196,49 @@ describe('ManualFolderView: reading and editing a section', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(patchNote).toHaveBeenCalledWith('n1', { body: 'Open the seacock first. edited' }))
+  })
+})
+
+describe('ManualFolderView: checklist runner (plan §7, ADR 0118)', () => {
+  it('shows Start checklist when the section has checklist items, and opens the runner', async () => {
+    const getNote = vi.fn().mockResolvedValue({
+      document: docNode(),
+      body: '- [ ] Seacocks open\n- [ ] Check bilge',
+      checklist: [
+        { item_key: 'k1', occurrence: 0, text: 'Seacocks open', depth: 0 },
+        { item_key: 'k2', occurrence: 0, text: 'Check bilge', depth: 0 },
+      ],
+    })
+    mockedUseManuals.mockReturnValue(makeManualsMock({ tree: rootTree([docNode({ id: 'n1', name: 'Genset shutdown' })]) }))
+    mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+
+    render(<ManualFolderView folderId="m1" sectionId="n1" onSectionChange={vi.fn()} onDemoted={vi.fn()} onNavigateDocument={vi.fn()} />)
+    await screen.findByText('Seacocks open')
+
+    const startButton = screen.getByRole('button', { name: /Start checklist/ })
+    fireEvent.click(startButton)
+
+    expect(screen.getByText('checklist runner: n1 (Genset shutdown)')).toBeInTheDocument()
+
+    // Back exits the runner MODE, back to the reading view - it does not
+    // navigate away from the section.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByText('Seacocks open')).toBeInTheDocument()
+  })
+
+  it('hides Start checklist when the section has no checklist items', async () => {
+    const getNote = vi.fn().mockResolvedValue({
+      document: docNode(),
+      body: 'Fuel return is the inboard valve.',
+      checklist: [],
+    })
+    mockedUseManuals.mockReturnValue(makeManualsMock({ tree: rootTree([docNode({ id: 'n1', name: 'Fuel valves' })]) }))
+    mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+
+    render(<ManualFolderView folderId="m1" sectionId="n1" onSectionChange={vi.fn()} onDemoted={vi.fn()} onNavigateDocument={vi.fn()} />)
+    await screen.findByText('Fuel return is the inboard valve.')
+
+    expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
   })
 })
 
