@@ -25,7 +25,9 @@ help-stage:
 # need its own `npm ci` before vitest or tsc would run at all. It gets a
 # symlink to this checkout's copy instead, which is correct as long as the
 # branch does not change frontend/package-lock.json, and makes the worktree
-# usable a second after it is created rather than a few minutes.
+# usable a second after it is created rather than a few minutes. frontend's
+# .gitignore lists node_modules without a trailing slash so this link is
+# ignored; a slash there matches directories only and leaves it untracked.
 #
 # That symlink points at shared state: `npm install` run inside the worktree
 # writes into THIS checkout's node_modules, for every session using it. If the

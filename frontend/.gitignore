@@ -1,4 +1,9 @@
-node_modules/
+# No trailing slash, deliberately: `node_modules/` matches directories only,
+# and `make worktree` gives each extra checkout a node_modules SYMLINK to the
+# main one. Git records a symlink as a symlink, not a directory, so the
+# slashed form left it untracked in every worktree - one `git add -A` from
+# committing an absolute path off this machine.
+node_modules
 dist/
 
 # tsc -b output. vite.config.js in particular is resolved by Vite AHEAD of
