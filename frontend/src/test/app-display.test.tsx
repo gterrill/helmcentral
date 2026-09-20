@@ -280,6 +280,10 @@ vi.mock('@/hooks/use-alarms', () => ({
   useAlarms: () => ({ alarms: mockAlarmsState.alarms, worst: 'normal', acknowledge: vi.fn(), silence: vi.fn() }),
   collisionAlarmStatesByVessel: () => new Map(),
   findAnchorDragAlarm: () => null,
+  // display-status-badge.tsx now ranks its pill's alarms through
+  // severity.ts's worstZoneState (ADR 0116), which reads this constant
+  // straight off the real module rather than through the mocked hook above.
+  ALARM_STATES: ['normal', 'alert', 'warn', 'alarm', 'emergency'],
 }))
 
 vi.mock('@/hooks/use-routes', () => ({

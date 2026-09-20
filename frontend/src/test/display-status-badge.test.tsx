@@ -42,7 +42,21 @@ describe('DisplayStatusBadge', () => {
     render(<DisplayStatusBadge alarms={[alarm()]} />)
     const pill = screen.getByTestId('display-alarm-pill')
     expect(pill).toHaveTextContent('1 alarm')
-    expect(pill.className).toMatch(/destructive/)
+    // alarm()'s default state is 'alarm', which the severity ladder (ADR
+    // 0116) paints red rather than the flat destructive token every rung
+    // used to share regardless of severity.
+    expect(pill.className).toContain('border-red-500')
+  })
+
+  // ADR 0116: the pill used to paint every unacknowledged alarm the same
+  // destructive red as an emergency; a warn-only alarm on the wall now
+  // reads amber instead.
+  test('shows amber, not destructive, classes for a warn-only unacknowledged alarm', () => {
+    mockStatus.value = 'connected'
+    render(<DisplayStatusBadge alarms={[alarm({ state: 'warn' })]} />)
+    const pill = screen.getByTestId('display-alarm-pill')
+    expect(pill.className).toContain('border-amber-500')
+    expect(pill.className).not.toContain('destructive')
   })
 
   test('shows a muted pill once every shown alarm is acknowledged', () => {

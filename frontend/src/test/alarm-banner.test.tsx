@@ -63,7 +63,10 @@ describe('AlarmBanner', () => {
 
     const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('Anchor dragging')
-    expect(banner.className).toMatch(/destructive/)
+    // makeAlarm()'s default state is 'alarm', which the severity ladder
+    // (ADR 0116) paints red rather than the flat destructive token every
+    // rung used to share regardless of how bad the alarm actually was.
+    expect(banner.className).toContain('border-red-500')
   })
 
   // P0 regression: the board must never go back to looking calm while a
@@ -118,7 +121,7 @@ describe('AlarmBanner', () => {
 
     const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('Loud one')
-    expect(banner.className).toMatch(/destructive/)
+    expect(banner.className).toContain('border-red-500')
   })
 
   it('opens the alarms panel from the View button in either variant', () => {
@@ -186,6 +189,97 @@ describe('AlarmBanner triage', () => {
     const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('1 emergency')
     expect(banner).toHaveTextContent('Fire')
+  })
+})
+
+// ADR 0116: the banner used to paint every unacknowledged alarm the same
+// flat destructive red regardless of severity, so a multi-day forecast gale
+// warning read identically to a dragging anchor. It now joins the four-rung
+// ladder (frontend/src/lib/severity.ts) the rest of the board already uses.
+describe('AlarmBanner severity ladder', () => {
+  it('paints a warn alarm amber, not destructive red', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'warn' })] })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('border-amber-500')
+    expect(banner.className).toContain('bg-amber-500/10')
+    expect(banner.className).not.toContain('border-destructive')
+    expect(banner.className).not.toContain('bg-destructive/10')
+    expect(banner.className).not.toContain('text-destructive')
+  })
+
+  it('paints an alert alarm sky blue, distinct from both amber and destructive', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'alert' })] })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('border-sky-500')
+    expect(banner.className).not.toContain('amber')
+    expect(banner.className).not.toContain('destructive')
+  })
+
+  it('paints an alarm-state alarm red', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'alarm' })] })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('border-red-500')
+    expect(banner.className).toContain('bg-red-500/10')
+  })
+
+  it('fills an emergency solid deep red, a different class string than a plain alarm', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'emergency' })] })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('bg-red-700')
+    expect(banner.className).toContain('text-white')
+    // Distinct from 'alarm', which only tints at 10% rather than filling.
+    expect(banner.className).not.toContain('bg-red-500/10')
+  })
+
+  it('paints the worst rung when the shown set is mixed, and still counts every state in the headline', () => {
+    renderBanner({
+      alarms: [
+        makeAlarm({ rule_id: 'warn-1', label: 'High bilge', state: 'warn' }),
+        makeAlarm({ rule_id: 'alarm-1', label: 'Anchor dragging', state: 'alarm' }),
+      ],
+    })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('border-red-500')
+    expect(banner).toHaveTextContent('1 alarm · 1 warn')
+  })
+
+  it('carries the rung on the icon as a second, non-colour channel: warn', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'warn' })] })
+
+    expect(screen.getByTestId('alarm-banner-icon')).toHaveAttribute('data-severity', 'warn')
+  })
+
+  it('carries the rung on the icon as a second, non-colour channel: alert', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'alert' })] })
+
+    expect(screen.getByTestId('alarm-banner-icon')).toHaveAttribute('data-severity', 'alert')
+  })
+
+  it('carries the rung on the icon as a second, non-colour channel: emergency', () => {
+    renderBanner({ alarms: [makeAlarm({ state: 'emergency' })] })
+
+    expect(screen.getByTestId('alarm-banner-icon')).toHaveAttribute('data-severity', 'emergency')
+  })
+
+  it('keeps the muted grey fill and text once acknowledged, but keeps the worst rung border colour', () => {
+    renderBanner({
+      alarms: [
+        makeAlarm({ rule_id: 'warn-1', label: 'High bilge', state: 'warn', phase: 'acknowledged', silenced: true, can_acknowledge: false }),
+        makeAlarm({ rule_id: 'alarm-1', label: 'Anchor dragging', state: 'alarm', phase: 'acknowledged', silenced: true, can_acknowledge: false }),
+      ],
+    })
+
+    const banner = screen.getByRole('alert')
+    expect(banner.className).toContain('bg-muted')
+    expect(banner.className).toContain('text-muted-foreground')
+    // Worst shown rung is 'alarm' (red), even though the fill itself is grey.
+    expect(banner.className).toContain('border-red-500')
+    expect(banner).toHaveTextContent('all acknowledged, still live')
   })
 })
 

@@ -1,10 +1,11 @@
-import { TriangleAlert } from 'lucide-react'
+import { Info, OctagonAlert, TriangleAlert } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ALARM_STATES, type ActiveAlarm, type AlarmState } from '@/hooks/use-alarms'
 import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { alarmConditionSentence } from '@/lib/alarm-display'
+import { severityBorderClass, severityFieldClass } from '@/lib/severity'
 import { cn } from '@/lib/utils'
 
 interface AlarmBannerProps {
@@ -101,6 +102,11 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
   const shown = worstFirst(loud ? unacknowledged : alarms)
 
   const [first] = shown
+  // `shown` is already worst-first, so its own first entry's state is the
+  // worst rung on the board right now - the one the container colour and
+  // the icon below both key off, same as the headline and condition
+  // sentence already do.
+  const worst = first.state
   const counts = countsByState(shown)
   // e.g. "1 ALARM · 2 WARN" — worst state first, matching the order `shown`
   // and its labels below are already sorted into.
@@ -147,17 +153,35 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
   const forecastDetailsUrl = forecastWarningDetailsUrl(forecastWarnings, first.path)
   const sentence = alarmConditionSentence(first, { forecastDetailsLinked: forecastDetailsUrl !== null })
 
+  // ADR 0116: colour used to say only "something is unacknowledged", not how
+  // bad it is, so a forecast gale warning sitting for three days painted the
+  // same destructive red as a dragging anchor. Loud, the container takes the
+  // worst rung's full tinted triple (severityFieldClass); a warn banner and
+  // an emergency banner are now visibly different things. Muted (everything
+  // shown has been acknowledged, but is still live), the fill goes back to
+  // grey - "acknowledged" always reads as calmer than "unacknowledged" - but
+  // the border keeps the worst rung's colour rather than falling back to the
+  // plain neutral one, so "it's only a warn, acknowledged" still reads
+  // differently at a glance than "it's an alarm, acknowledged". Reusing
+  // severityBorderClass (the tile-edge ladder) for that border rather than a
+  // second copy of the same hues: `|| 'border-border'` covers the states it
+  // has no opinion on (its default is an empty string, meant for "no
+  // border" on a tile edge, which is not an option here).
+  const fieldClass = loud ? severityFieldClass(worst) : cn(severityBorderClass(worst) || 'border-border', 'bg-muted text-muted-foreground')
+
+  // The icon repeats the rung in a second channel besides colour (shape, and
+  // the data-severity attribute below it rides on) - the same reasoning
+  // severity.ts's own header comment gives for splitting warn and alert onto
+  // different hues in the first place: colour alone is not a channel every
+  // operator or every screen renders identically.
+  const AlarmIcon = worst === 'alert' ? Info : worst === 'warn' ? TriangleAlert : OctagonAlert
+
   return (
     <div
       role="alert"
-      className={cn(
-        'flex min-w-0 items-center gap-3 rounded-lg border px-4 py-3 shadow-xs',
-        loud
-          ? 'border-destructive bg-destructive/10 text-destructive'
-          : 'border-border bg-muted text-muted-foreground',
-      )}
+      className={cn('flex min-w-0 items-center gap-3 rounded-lg border px-4 py-3 shadow-xs', fieldClass)}
     >
-      <TriangleAlert className="size-5 shrink-0" aria-hidden="true" />
+      <AlarmIcon className="size-5 shrink-0" aria-hidden="true" data-testid="alarm-banner-icon" data-severity={worst} />
       <div className="min-w-0 flex-1">
         {/* The counts keep the tracked uppercase idiom; the labels do not. An
             alarm's label is a SignalK path (`radar.fur6424a.guardzone.1`),
@@ -179,8 +203,10 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
         <div className="flex min-w-0 items-baseline gap-1 text-xs">
           <span className="min-w-0 truncate">{sentence}</span>
           {forecastDetailsUrl && (
-            // Text colour is inherited from the container above (destructive
-            // while loud, muted-foreground once acknowledged), so only the
+            // Text colour is inherited from the container above (the worst
+            // rung's own colour while loud, muted-foreground once
+            // acknowledged - white on the filled emergency background,
+            // since that is what inherited white gives it), so only the
             // underline needs adding here to read as a link on either
             // background - same idiom as forecast-warning-notice.tsx's own
             // link, which sets the colour itself only because that component

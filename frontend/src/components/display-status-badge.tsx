@@ -2,6 +2,7 @@ import { Lock, TriangleAlert, WifiOff } from 'lucide-react'
 import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 import type { ScreenWakeLockStatus } from '@/hooks/use-screen-wake-lock'
+import { severityBorderClass, severityFieldClass, worstZoneState } from '@/lib/severity'
 import { cn } from '@/lib/utils'
 
 interface DisplayStatusBadgeProps {
@@ -31,6 +32,11 @@ export function DisplayStatusBadge({ alarms, wakeLockStatus }: DisplayStatusBadg
   const connected = status === 'connected'
   const unacknowledged = alarms.filter((alarm) => alarm.phase !== 'acknowledged')
   const wakeLockTrouble = wakeLockStatus === 'unsupported' || wakeLockStatus === 'denied'
+  // Same worst-rung question AlarmBanner asks of its own `shown` set: while
+  // anything is unacknowledged the pill only has to answer for those, once
+  // everything has been acked the muted variant still needs a rung to draw
+  // its border from.
+  const worst = worstZoneState((unacknowledged.length > 0 ? unacknowledged : alarms).map((alarm) => alarm.state))
 
   if (connected && alarms.length === 0 && !wakeLockTrouble) return null
 
@@ -49,17 +55,21 @@ export function DisplayStatusBadge({ alarms, wakeLockStatus }: DisplayStatusBadg
         </span>
       )}
       {alarms.length > 0 && (
-        // ADR 0080: alarm colour is reserved for state that actually needs
-        // looking at. Loud (destructive red) while anything is unacknowledged,
+        // ADR 0080 rations alarm colour to state that actually needs looking
+        // at; ADR 0116 makes the colour itself say how bad that state is,
+        // the same severity ladder AlarmBanner now paints, so a warn-only
+        // alarm on the wall doesn't shout the same red an emergency does.
+        // Loud (worst rung's tinted triple) while anything is unacknowledged,
         // muted once everything showing has been acked but is still live —
-        // the same "acknowledged, still live" distinction AlarmBanner draws.
+        // the same "acknowledged, still live" distinction AlarmBanner draws,
+        // with the border alone keeping the worst rung's colour there too.
         <span
           data-testid="display-alarm-pill"
           className={cn(
             'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em]',
             unacknowledged.length > 0
-              ? 'border-destructive bg-destructive/10 text-destructive'
-              : 'border-border bg-muted text-muted-foreground',
+              ? severityFieldClass(worst)
+              : cn(severityBorderClass(worst) || 'border-border', 'bg-muted text-muted-foreground'),
           )}
         >
           <TriangleAlert className="h-3 w-3" aria-hidden="true" />

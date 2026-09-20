@@ -127,6 +127,40 @@ export function worstZoneState(states: Array<ZoneState | null | undefined>): Zon
 }
 
 /**
+ * The full-width tinted FIELD ladder (ADR 0116): border, background and text
+ * together, for a surface that paints its whole box in the rung's colour
+ * rather than only a chip of text (severityClass) or a ring segment
+ * (severityFill). The alarm banner and the wall kiosk's status pill both
+ * used to paint every unacknowledged alarm the same flat destructive red
+ * regardless of state, so a multi-day forecast gale warning looked exactly
+ * like a dragging anchor. Same hues as severityBorderClass elsewhere in this
+ * file - sky for alert, amber for warn, red for alarm - and emergency fills
+ * solid rather than merely tinting, the same call severityClass already
+ * makes for the one state SignalK will not let the operator acknowledge
+ * away.
+ *
+ * default falls through to a neutral border/muted-fill/muted-text triple:
+ * both callers reuse it for their own "acknowledged, still live" variant,
+ * which swaps this triple's fill back to muted but keeps the rung's own
+ * border (see each component's comment for why the border survives
+ * acknowledgement and the fill doesn't).
+ */
+export function severityFieldClass(state: AlarmState | string | null): string {
+  switch (state) {
+    case 'alert':
+      return 'border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+    case 'warn':
+      return 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+    case 'alarm':
+      return 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-400'
+    case 'emergency':
+      return 'border-red-700 bg-red-700 text-white'
+    default:
+      return 'border-border bg-muted text-muted-foreground'
+  }
+}
+
+/**
  * The tile-edge border ladder (ADR 0081). Null and `normal` draw no border,
  * on the same rationed-colour principle as the rest of the board: colour is
  * spent only once a tile actually has something to say.
