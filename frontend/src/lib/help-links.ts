@@ -1,5 +1,12 @@
 import type { AppLocation, PanelId } from '@/lib/app-location'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
+import { normalizePath, slugifyHeading } from '@/lib/markdown-links'
+
+// slugifyHeading and normalizePath now live in markdown-links.ts (note-links.ts
+// needs the slugger too, and importing a help module from a notes module would
+// be the wrong dependency direction). Re-exported here unchanged so every
+// existing import of these two names from '@/lib/help-links' keeps working.
+export { slugifyHeading, normalizePath }
 
 // ADR 0095: the in-app help. Pure and React-free, like app-location.ts and
 // mate-screen.ts - it turns app state into "where in the help does this
@@ -36,6 +43,12 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   'anchor-watch': { page: 'features/anchor-watch' },
   alarms: { page: 'features/alarms' },
   assistant: { page: 'features/assistant' },
+  // Revision "one panel, not three" (2026-09-20): Documents now renders
+  // capture, notes and manuals as well as the file library, so its help
+  // target covers docs/features/documents.md AND the dedicated
+  // notes-and-the-manual.md page is reached from within that page's own
+  // links rather than a second PANEL_HELP_TARGETS row - there is no longer
+  // a second panel for a second row to point at.
   documents: { page: 'features/documents' },
   // Reachable, unlike the two below: the management surface (ADR 0112)
   // mounts the ordinary header, so its Help affordance resolves here.
@@ -83,25 +96,6 @@ export function helpTargetFor(location: AppLocation): HelpTarget {
   return PANEL_HELP_TARGETS[location.panel]
 }
 
-// GitHub's own heading-slug algorithm (what every ##/### heading's anchor id
-// is on github.com, and so what every relative doc link's #hash already
-// assumes): lowercase, drop anything that isn't a letter, digit, space or
-// hyphen, then turn each space into a hyphen. Consecutive hyphens are NOT
-// collapsed - "Battery & Power" loses only the "&", leaving the space on
-// each side, which is why its slug is "battery--power" with two hyphens.
-//
-// No duplicate heading text exists anywhere in docs/ today, so the
-// "-1", "-2", ... suffix GitHub (and github-slugger) appends to a repeated
-// heading is never exercised and deliberately not implemented here - adding
-// a second heading with the same text anywhere in the help pages needs this
-// revisited, not silently mismatched.
-export function slugifyHeading(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9 -]/g, '')
-    .replace(/ /g, '-')
-}
-
 /** Where a link found inside a rendered help page's markdown should go. */
 export type HelpLink =
   | { kind: 'anchor'; hash: string }
@@ -125,21 +119,6 @@ function splitHash(href: string): [string, string | undefined] {
 function pageDirectory(pageId: string): string {
   const index = pageId.lastIndexOf('/')
   return index === -1 ? '' : pageId.slice(0, index)
-}
-
-// A tiny posix path normaliser (no node:path - this module stays
-// browser-safe): resolves "." and ".." segments against the segments before
-// them. Never throws on a ".." that runs off the front; it just stops
-// popping, which is exactly what leaving docs/ entirely from a shallow page
-// needs to do.
-function normalizePath(path: string): string {
-  const segments: string[] = []
-  for (const part of path.split('/')) {
-    if (part === '' || part === '.') continue
-    if (part === '..') segments.pop()
-    else segments.push(part)
-  }
-  return segments.join('/')
 }
 
 const HELP_PAGE_PATH = /^docs\/(features|how-to|reference)\/(.+)\.md$/

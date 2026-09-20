@@ -120,6 +120,19 @@ being handed the file. That search is the same one the Documents panel's own
 search box runs, words and meaning together, so a question phrased nothing
 like the manual's own wording still lands on the right page.
 
+That one search covers everything in the library at once: uploaded manuals,
+your own captured notes, receipts, photos of a data plate. There's no
+separate search that only looks inside your authored manuals, even though a
+boat's own [operations manual](notes-and-the-manual.md) lives in that same
+library. It's tempting to want one, but the question that sounds like it
+needs it is the one it would get wrong: ask "what does the manual say about
+the impeller" and on most boats that means the engine's own PDF, not the
+operations manual you wrote by hand, so a search scoped to just your own
+manual would answer confidently from the wrong book. Mate is told which
+manuals exist and roughly what's in each (see below), and reaches for the
+same library-wide search either way, narrowed to the right folder when a
+question is obviously about one manual in particular.
+
 See [Documents](documents.md) for what gets indexed, what it costs, file
 types and limits, and how folders and tags work.
 
@@ -200,6 +213,31 @@ Mate is told to prefer these notes over its own general knowledge about a
 place. There's no separate rules screen or anchorage database to maintain:
 if you know a piece of local knowledge well enough to write it as a
 sentence, it goes here.
+
+That field is one blob for the whole boat, sent whole every time. For a
+single fact rather than a paragraph, pin a note instead (see [Notes and the
+manual](notes-and-the-manual.md)): open it in Documents and use **Pin for
+Mate**. A pinned note's title and full text ride along on every question
+too, and get the same "prefer this over general knowledge" treatment the
+settings field does, without editing a shared paragraph every time you want
+to add or retire one fact. Pin sparingly - a handful of notes and a few
+thousand characters between them actually reach Mate, and going over that is
+loud rather than silent: the prompt says outright how many notes it left out
+rather than truncating one mid-sentence.
+
+Traffic runs the other way too. When an answer is worth keeping - a
+procedure Mate has just walked you through, a figure it worked out - **Save
+as note** under that answer keeps it, without retyping. Mate does not write
+it: the note is created by your tap, lands unfiled like any other capture,
+and you file or edit it afterwards. Mate has no tool that can write
+anything, which is deliberate and explained below.
+
+Mate is also always told which manuals exist and, for each, the names of its
+top-level sections - "Operations Manual (Before Leaving, Getting Underway),
+Crew Training (Watchkeeping)" - so it knows which book to point you at by
+name. It's an index, not the manual's content: the actual reading still goes
+through the same document search everything else in the library uses (see
+[Documents](#documents) above for why there's no manual-specific search).
 
 ## Conversations and cost
 

@@ -153,6 +153,19 @@ describe('parseAppLocation', () => {
     })
   })
 
+  // Revision "one panel, not three" (2026-09-20): /notes and /manuals are
+  // gone - a note opens through the existing ?document= (it's a document
+  // with kind='note'), and a manual is addressed by ?folder=<id> like any
+  // other folder, since a manual IS a folder. ?section=<id> is the only new
+  // piece: which node in that folder's manual tree is open in the reading
+  // pane, meaningless without a folder the same way manualSectionId used to
+  // be meaningless without a manual.
+  it('parses /documents?folder=<id>&section=<id> as that folder with a section open', () => {
+    expect(parseAppLocation('/documents?folder=f1&section=s1')).toEqual({
+      panel: 'documents', documentFolderId: 'f1', documentId: null, documentSectionId: 's1',
+    })
+  })
+
   it('parses /mate as the Mate panel', () => {
     expect(parseAppLocation('/mate')).toEqual({ panel: 'assistant', conversationId: null })
   })
@@ -305,6 +318,21 @@ describe('formatAppLocation', () => {
   it('encodes the Details page document id', () => {
     expect(formatAppLocation({ panel: 'documents', documentEditId: 'a b' }, ctx)).toBe('/documents/a%20b')
   })
+
+  // Revision "one panel, not three" (2026-09-20): a section within a
+  // Manual-kind folder (documents-panel.tsx's own ManualFolderView) is
+  // addressed the same way a document deep link is - a query param on the
+  // existing /documents route, since a manual IS a folder rather than a
+  // panel of its own.
+  it('formats a folder with a section open as /documents?folder=<id>&section=<id>', () => {
+    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1', documentSectionId: 's1' }, ctx)).toBe(
+      '/documents?folder=f1&section=s1',
+    )
+  })
+
+  it('drops a section with no folder open - it is meaningless on its own', () => {
+    expect(formatAppLocation({ panel: 'documents', documentFolderId: null, documentSectionId: 's1' }, ctx)).toBe('/documents')
+  })
 })
 
 describe('parse/format fixed point', () => {
@@ -314,6 +342,7 @@ describe('parse/format fixed point', () => {
     '/display', '/display/flybridge',
     '/wall-displays', '/wall-displays/flybridge',
     '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
+    '/documents?folder=f1&section=s1',
     '/documents/doc-1', '/documents/doc-1?folder=f1',
   ]
 
@@ -357,6 +386,7 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/display/flybridge', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents?folder=f1', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/documents?folder=f1&section=s1', baseCtx)).toBe(true)
   })
 
   it('is false for the legacy /assistant alias because canonical is /mate', () => {

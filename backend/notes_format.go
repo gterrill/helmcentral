@@ -1,0 +1,407 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// This file is the note-on-disk serialisation format (plan §1): a note's
+// bytes are a normal blob in DOCUMENTS_DIR, named by the sha256 of exactly
+// what renderNoteFile produces - frontmatter plus body, nothing else. That
+// makes the bytes themselves the note's identity (§1's "sha256 UNIQUE
+// collisions" section), which is why rendering has to be byte-deterministic
+// rather than merely "produces equivalent YAML": the same (meta, body)
+// pair, rendered twice, five minutes apart, on two different machines, must
+// come out bit-for-bit identical, or an edit that changed nothing would
+// still mint a new sha256, a spurious reindex and (once Mate is on) an
+// unnecessary embedding charge.
+
+// noteFrontmatterDelimiter is the fence line every note file opens with,
+// and (on its own line, later in the file) closes with. parseNoteFile
+// fails loudly if a file doesn't begin with exactly this - a note file
+// with no frontmatter at all is not a note this codebase ever wrote.
+const noteFrontmatterDelimiter = "---\n"
+
+// noteFrontmatter is the YAML shape rendered between the two "---" fences.
+// Field order here IS the field order on disk - yaml.v3 marshals a struct's
+// fields in declaration order, not alphabetically or by map iteration,
+// which is what makes "explicit field order id/title/type/tags/created"
+// (plan §1) a one-line guarantee rather than something renderNoteFile has
+// to enforce by hand. Tags carries the `,flow` tag option so it serialises
+// as `tags: [genset, engine-room]` (a single line, portable to read) rather
+// than yaml.v3's default one-item-per-line block style. Created is a
+// pre-formatted RFC3339 string, not time.Time: yaml.v3 has its own opinion
+// about how to encode a time.Time (and quotes an RFC3339-shaped plain
+// scalar to keep it unambiguously a string either way), and formatting it
+// ourselves, once, in renderNoteFile, is one fewer place that opinion could
+// silently change between yaml.v3 versions and break byte-stability.
+type noteFrontmatter struct {
+	ID      string   `yaml:"id"`
+	Title   string   `yaml:"title"`
+	Type    string   `yaml:"type"`
+	Tags    []string `yaml:"tags,flow"`
+	Created string   `yaml:"created"`
+}
+
+// noteFileMeta is renderNoteFile/parseNoteFile's shared, typed view of a
+// note's frontmatter - noteFrontmatter with Created as an actual time.Time,
+// for every caller that isn't the YAML encoder/decoder itself. ID IS
+// documents.id (plan §1): a note's frontmatter carries the exact primary
+// key its database row uses, so a note file handed to a next owner, or fed
+// back through this same parser after a hand edit, always names the row it
+// belongs to.
+type noteFileMeta struct {
+	ID      string
+	Title   string
+	Type    string
+	Tags    []string
+	Created time.Time
+}
+
+// renderNoteFile serialises meta and body into a note's on-disk bytes:
+// "---\n", the YAML frontmatter, "---\n", then body right-trimmed of
+// trailing whitespace plus exactly one trailing "\n". Tags are sorted here
+// (not by the caller) so two notes carrying the same tag set in a different
+// order render identically - "tags sorted on the way in" (plan §1)."
+//
+// LF only: this function never emits "\r\n" (yaml.v3 doesn't either, and
+// body's own trailing whitespace is trimmed away by TrimRight below before
+// the single "\n" is added back), so a note authored on this codebase's own
+// Linux/armv7 targets round-trips identically regardless of what platform
+// last touched it.
+func renderNoteFile(meta noteFileMeta, body string) []byte {
+	tags := append([]string{}, meta.Tags...)
+	sort.Strings(tags)
+
+	fm := noteFrontmatter{
+		ID:    meta.ID,
+		Title: meta.Title,
+		Type:  meta.Type,
+		Tags:  tags,
+		// Truncate to whole seconds before formatting: documents.created_at
+		// is stored as a Unix second count (documents_store.go), so a
+		// caller that renders straight from a freshly-read database row
+		// already has second precision. A caller that instead passes a
+		// wall-clock time.Now() with sub-second precision (notes_handlers.go,
+		// building the very first render before the row exists) gets
+		// truncated here too, so the value it goes on to pass as the
+		// document's own CreatedAt matches the frontmatter it just wrote,
+		// rather than losing precision only on the database side and
+		// silently drifting the two apart.
+		Created: meta.Created.UTC().Truncate(time.Second).Format(time.RFC3339),
+	}
+
+	yamlBytes, err := yaml.Marshal(fm)
+	if err != nil {
+		// yaml.Marshal can only fail on a value it cannot encode at all
+		// (a channel, a func, a cyclic map) - noteFrontmatter is nothing
+		// but strings and a []string, which can never trigger that. A
+		// panic here would be a bug in this function, not a runtime
+		// condition either caller (notes_handlers.go, twice) could
+		// meaningfully recover from - simpler for both to let
+		// renderNoteFile return []byte outright than to thread an error
+		// return through two call sites for a case that cannot happen.
+		panic(fmt.Sprintf("notes: render note file: %v", err))
+	}
+
+	trimmedBody := strings.TrimRight(body, " \t\r\n")
+
+	var buf bytes.Buffer
+	buf.WriteString(noteFrontmatterDelimiter)
+	buf.Write(yamlBytes)
+	buf.WriteString("---\n")
+	buf.WriteString(trimmedBody)
+	buf.WriteString("\n")
+	return buf.Bytes()
+}
+
+// splitFrontmatterFence locates the frontmatter block at the start of s:
+// ok is false unless s begins with exactly "---\n" AND a line consisting
+// of exactly "---" appears somewhere after it. yamlPart is everything
+// between the two fences (not including either fence line); body is
+// everything after the closing fence's own line (its trailing "\n", if
+// any, consumed). The closing fence is found structurally - as a whole
+// line, not merely the substring "---" - so it works whether the
+// frontmatter is empty (fences back to back), the very last thing in the
+// file (no body at all), or the ordinary case with content on both sides.
+//
+// Shared by parseNoteFile (which treats ok=false as a hard error - a file
+// this codebase wrote always has both fences) and
+// stripLeadingYAMLFrontmatter in documents_extract.go (which treats
+// ok=false as "not frontmatter at all", leaving the text alone - see that
+// function's own comment on why an un-closed leading "---" is an ordinary
+// Markdown horizontal rule, not a malformed note).
+func splitFrontmatterFence(s string) (yamlPart, body string, ok bool) {
+	if !strings.HasPrefix(s, noteFrontmatterDelimiter) {
+		return "", "", false
+	}
+	rest := s[len(noteFrontmatterDelimiter):]
+
+	// The closing fence is the very first line of rest: an empty
+	// frontmatter block, either with nothing after it at all (rest is
+	// exactly "---") or with body content following on the next line.
+	if rest == "---" {
+		return "", "", true
+	}
+	if strings.HasPrefix(rest, "---\n") {
+		return "", rest[len("---\n"):], true
+	}
+
+	// The general case: the closing fence is a later line, preceded by the
+	// previous line's own "\n".
+	if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
+		return rest[:idx+1], rest[idx+len("\n---\n"):], true
+	}
+	// The closing fence is the last line of the file, with no trailing
+	// newline after it (no body at all, and the file itself doesn't end
+	// in a blank line).
+	if strings.HasSuffix(rest, "\n---") {
+		return rest[:len(rest)-len("---")], "", true
+	}
+
+	return "", "", false
+}
+
+// errNoteFileFrontmatterMissing and errNoteFileFrontmatterUnclosed are
+// parseNoteFile's two "this isn't a note file this codebase wrote" errors -
+// kept as sentinels (rather than ad hoc fmt.Errorf calls at each call site)
+// so a caller that wants to distinguish them from a YAML/timestamp parse
+// failure further down can, though today's callers (notes_handlers.go) just
+// log-and-500 either way: a document row whose blob doesn't parse as a note
+// is a disk/database drift the fallback policy says to surface, not to work
+// around.
+var (
+	errNoteFileFrontmatterMissing  = errors.New(`note file does not begin with a "---" frontmatter delimiter`)
+	errNoteFileFrontmatterUnclosed = errors.New(`note file frontmatter has no closing "---" delimiter`)
+)
+
+// parseNoteFile is renderNoteFile's inverse: given a note's on-disk bytes,
+// it returns the frontmatter (Created parsed back to a time.Time) and the
+// body exactly as splitFrontmatterFence found it - NOT re-trimmed, so a
+// caller comparing parseNoteFile(renderNoteFile(meta, body)) against the
+// original body sees precisely what rendering did to it (trailing
+// whitespace collapsed to one "\n"), rather than a second independent trim
+// masking a bug in renderNoteFile's own.
+//
+// Fails loudly (AGENTS.md's fallback policy) rather than returning a
+// best-effort partial parse: a file that doesn't begin with "---\n", or
+// whose frontmatter is never closed, or whose YAML or created timestamp
+// doesn't parse, is not a note this codebase's own renderNoteFile ever
+// produced - most likely a hand-edited blob gone wrong, which is exactly
+// the case plan §1 says must surface rather than be quietly reinterpreted.
+func parseNoteFile(b []byte) (noteFileMeta, string, error) {
+	s := string(b)
+	if !strings.HasPrefix(s, noteFrontmatterDelimiter) {
+		return noteFileMeta{}, "", errNoteFileFrontmatterMissing
+	}
+
+	yamlPart, body, ok := splitFrontmatterFence(s)
+	if !ok {
+		return noteFileMeta{}, "", errNoteFileFrontmatterUnclosed
+	}
+
+	var fm noteFrontmatter
+	if err := yaml.Unmarshal([]byte(yamlPart), &fm); err != nil {
+		return noteFileMeta{}, "", fmt.Errorf("parse note frontmatter: %w", err)
+	}
+
+	created, err := time.Parse(time.RFC3339, fm.Created)
+	if err != nil {
+		return noteFileMeta{}, "", fmt.Errorf("parse note frontmatter created timestamp %q: %w", fm.Created, err)
+	}
+
+	return noteFileMeta{
+		ID:      fm.ID,
+		Title:   fm.Title,
+		Type:    fm.Type,
+		Tags:    fm.Tags,
+		Created: created.UTC(),
+	}, body, nil
+}
+
+// deriveNoteTitle picks a title for a note that didn't get one explicitly
+// (POST /api/notes' "title" field is optional - plan §4, and §9's no-Mate
+// path table: "first ATX heading, else first line to 80 chars"). body is
+// assumed non-empty (notes_handlers.go rejects an empty body before this is
+// ever called) but this is defensive about an all-whitespace body anyway,
+// returning "" rather than panicking or indexing past the end - a caller
+// that somehow reaches this with nothing usable gets an empty title, the
+// same as an operator who left the title field blank on a document that
+// has no fallback either.
+func deriveNoteTitle(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if heading, ok := strings.CutPrefix(trimmed, "#"); ok {
+			// An ATX heading: strip every leading "#" (H1..H6 all count)
+			// and the required space after them.
+			heading = strings.TrimLeft(heading, "#")
+			heading = strings.TrimSpace(heading)
+			if heading != "" {
+				return truncateNoteTitle(heading, 80)
+			}
+			// "#" with nothing after it isn't a usable heading - fall
+			// through to the first-line rule below using this same line.
+		}
+		return truncateNoteTitle(trimmed, 80)
+	}
+	return ""
+}
+
+// truncateNoteTitle cuts s to at most n runes (not bytes - a title is
+// operator-facing text that may well contain multi-byte characters, and
+// cutting mid-rune would corrupt the last character rather than just
+// shortening the string).
+func truncateNoteTitle(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// ── checklist items (plan §3) ────────────────────────────────────────────
+//
+// A checklist run's ticks are keyed to an item's own normalised PLAIN TEXT,
+// never its position in the list and never its raw Markdown - reordering
+// the list, or editing a line that isn't this one, must never invalidate a
+// tick. This section is the Go side of that contract: parseChecklistItems
+// reads the current body into an ordered list of items (each with a
+// content-derived key and a within-run-unique occurrence, for the case
+// where two items normalise to the same text), and normalizeChecklistItemText
+// is what computes that key's input.
+//
+// normalizeChecklistItemText is an INDEPENDENT implementation of the exact
+// rule frontend/src/lib/checklist-item-text.ts states and implements for
+// the editor's own round-trip test - not a port of it, and nothing here
+// imports that file (there is no Go/TS shared module in this codebase).
+// Both sides commit to the plan's own wording ("strip the leading task
+// marker, strip inline emphasis/code delimiters, collapse internal
+// whitespace, trim") as the spec they each implement against, and
+// TestNormalizeChecklistItemText (notes_format_test.go) runs the identical
+// fixture lines the TS test does so the two cannot quietly drift apart.
+//
+// No lookbehind anywhere (AGENTS.md / check-entry-chunk.mjs): Go's RE2
+// engine cannot express one at all, which makes this constraint automatic
+// here rather than a discipline to maintain, unlike the TS side.
+
+// checklistLeadingTaskMarker matches a GFM task-list marker at the very
+// start of an (already indent-trimmed) line: "- [ ]", "- [x]", "* [X]".
+// Mirrors checklist-item-text.ts's own LEADING_TASK_MARKER token for
+// token - same characters, same "\s*" leniency around the marker - so a
+// line normalises identically on both sides of the API even though nothing
+// here imports that file.
+var checklistLeadingTaskMarker = regexp.MustCompile(`^[-*]\s*\[[ xX]\]\s*`)
+
+// checklistInlineMarkChars is the three inline-mark delimiter characters
+// the note editor's enabled node set (ADR 0117) can emit around a word:
+// `**bold**`/`*italic*` (both use `*`) and backtick-fenced inline code.
+// Stripped outright rather than matched as paired delimiters, for the identical reason
+// checklist-item-text.ts gives: a checklist item is one short line of plain
+// prose, not general Markdown, so there is no legitimate literal asterisk
+// or backtick inside one this would wrongly eat - and even getting that
+// wrong costs a spurious "re-check this" flag, never silent data loss.
+var checklistInlineMarkChars = regexp.MustCompile("[*_`]")
+
+// normalizeChecklistItemText normalises one checklist item's source line
+// (with or without its leading "- [ ]"/"- [x]" marker) to the plain text a
+// run's tick is keyed against.
+func normalizeChecklistItemText(line string) string {
+	withoutMarker := checklistLeadingTaskMarker.ReplaceAllString(line, "")
+	withoutMarks := checklistInlineMarkChars.ReplaceAllString(withoutMarker, "")
+	return strings.Join(strings.Fields(withoutMarks), " ")
+}
+
+// checklistItemLine matches a whole (indent-trimmed) line that IS a GFM
+// task-list item, as opposed to a line that merely contains the substring
+// "[x]" somewhere in its prose (a checklist run must never treat "Note:
+// flip the switch [x] before starting" as an item - it doesn't open with
+// the marker at all, so it never matches this). Deliberately the same
+// "[-*]\s*\[...\]" shape as checklistLeadingTaskMarker above, so a line
+// this matches and a line that marker strips are always the same set of
+// lines.
+var checklistItemLine = regexp.MustCompile(`^[-*]\s*\[[ xX]\]`)
+
+// checklistItem is one line of a note's body parsed as a checklist item:
+// Key is the sha256 (hex) of Text (normalizeChecklistItemText's output),
+// Occurrence is which same-Key line this is within the body (0 for the
+// first, 1 for the second identical line, and so on - matching
+// note_checklist_run_ticks' own PRIMARY KEY (run_id, item_key, occurrence),
+// plan §3), and Depth is the item's nesting level under whatever list item
+// contains it.
+type checklistItem struct {
+	Key        string `json:"item_key"`
+	Occurrence int    `json:"occurrence"`
+	Text       string `json:"text"`
+	Depth      int    `json:"depth"`
+}
+
+// checklistIndentWidth turns a line's leading whitespace into a column
+// count (a tab counts as 4 columns, matching common Markdown renderers'
+// own tab-stop convention) so checklistItemDepth's "two columns per level"
+// rule behaves the same whether a note was typed with spaces or tabs.
+func checklistIndentWidth(indent string) int {
+	width := 0
+	for _, r := range indent {
+		if r == '\t' {
+			width += 4
+		} else {
+			width++
+		}
+	}
+	return width
+}
+
+// checklistItemDepth converts an indent's column width (checklistIndentWidth)
+// into a nesting depth, two columns per level - the conventional GFM nested
+// list indent, and the one a note authored through the WYSIWYG editor (ADR
+// 0117) or hand-typed with "  " per level both produce.
+func checklistItemDepth(indent string) int {
+	return checklistIndentWidth(indent) / 2
+}
+
+// parseChecklistItems reads body's checklist items in document order: every
+// line that is a GFM task-list item ("- [ ]", "- [x]", "* [ ]", at any
+// nesting depth), skipping every line that is not - including a line that
+// merely contains "[x]" somewhere in ordinary prose, or in a plain bullet
+// with no checkbox at all. `[x]` vs `[ ]` in the body itself is read by
+// NOTHING here: parseChecklistItems reports only which lines ARE items,
+// their text and their occurrence, never a checked state - plan §3's "the
+// note is the template; the run is the state" applies at exactly this
+// boundary. A caller that wants "does this note have a checklist at all"
+// checks len(items) > 0; a caller that wants tick state joins this against
+// a run's own ticks (checklist_runs_store.go).
+func parseChecklistItems(body string) []checklistItem {
+	var items []checklistItem
+	occurrenceByKey := map[string]int{}
+
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimLeft(line, " \t")
+		if !checklistItemLine.MatchString(trimmed) {
+			continue
+		}
+		indent := line[:len(line)-len(trimmed)]
+
+		text := normalizeChecklistItemText(trimmed)
+		key := sha256Hex([]byte(text))
+		occurrence := occurrenceByKey[key]
+		occurrenceByKey[key] = occurrence + 1
+
+		items = append(items, checklistItem{
+			Key:        key,
+			Occurrence: occurrence,
+			Text:       text,
+			Depth:      checklistItemDepth(indent),
+		})
+	}
+	return items
+}

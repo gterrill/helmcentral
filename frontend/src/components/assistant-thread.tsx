@@ -1,5 +1,6 @@
-import { ArrowUp, Loader2, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
+import { toast } from 'sonner'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
@@ -18,6 +19,7 @@ import {
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
+import { useNotes } from '@/hooks/use-notes'
 import { formatAppLocation } from '@/lib/app-location'
 import { cn } from '@/lib/utils'
 
@@ -101,6 +103,55 @@ function MessageAttachmentChips({ attachments }: { attachments: AssistantMessage
         </a>
       ))}
     </div>
+  )
+}
+
+/**
+ * Saves one of Mate's answers as a note, verbatim.
+ *
+ * This is what replaced a `draft_note` tool. A tool would have had to
+ * either write (breaking runToolRound's read-only contract, which is the
+ * justification for running a round's calls concurrently without locking)
+ * or hand back a draft plus an id for the UI to save - and a retried or
+ * cancelled call would produce duplicate notes with no idempotency key,
+ * which `sha256 UNIQUE` cannot catch because two drafts of the same text
+ * get different UUIDs. A button on a message that already exists has
+ * neither problem, and Mate still writes nothing.
+ *
+ * The body is the answer as-is. The backend derives a title from the first
+ * line and classifies it (classifyNoteType, no network), so this asks the
+ * operator for nothing at the moment they are least inclined to answer.
+ */
+function SaveAsNoteButton({ content }: { content: string }) {
+  const notes = useNotes()
+  const [saving, setSaving] = useState(false)
+
+  const save = useCallback(async () => {
+    const body = content.trim()
+    if (body === '') return
+    setSaving(true)
+    try {
+      await notes.createNote({ body })
+      toast('Saved to Notes. It is unfiled until you put it somewhere.')
+    } catch (err) {
+      // AGENTS.md fallback policy: the server's own message, verbatim.
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }, [content, notes])
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={saving}
+      onClick={() => { void save() }}
+    >
+      <NotebookPen className="h-3.5 w-3.5" data-icon="inline-start" aria-hidden="true" />
+      Save as note
+    </Button>
   )
 }
 
@@ -347,12 +398,30 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 <AssistantMarkdown content={message.content} />
                               </BubbleContent>
                             </Bubble>
-                            <MessageFooter
-                              className="tabular-nums"
-                              title={formatMessageFooterTitle(message)}
-                            >
-                              {formatMessageFooter(message)}
-                            </MessageFooter>
+                            <div className="flex items-center gap-2">
+                              <MessageFooter
+                                className="tabular-nums"
+                                title={formatMessageFooterTitle(message)}
+                              >
+                                {formatMessageFooter(message)}
+                              </MessageFooter>
+                              {/* The small answer to what a draft_note tool
+                                  would have done (plan phase 6, cut): Mate
+                                  never writes anything, the operator's tap
+                                  does. No new tool, so runToolRound's
+                                  read-only contract stays intact, and no
+                                  chance of a retried tool call duplicating
+                                  a note.
+                                  Creates the note outright rather than
+                                  opening the capture sheet: Mate is often
+                                  itself a sheet, and stacking two is worse
+                                  than saving verbatim and trimming later
+                                  from Documents - which is what capture is
+                                  for anyway. */}
+                              {canWrite && (
+                                <SaveAsNoteButton content={message.content} />
+                              )}
+                            </div>
                           </MessageContent>
                         </Message>
                       )}

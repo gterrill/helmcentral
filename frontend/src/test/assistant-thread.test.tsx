@@ -5,6 +5,26 @@ import { AssistantThread } from '@/components/assistant-thread'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { useNotes } from '@/hooks/use-notes'
+
+// The thread creates a note directly (no sheet) when the operator saves an
+// answer - Mate is often itself a sheet, so opening the capture sheet over
+// it would stack two, and capture is meant to cost nothing anyway.
+vi.mock('@/hooks/use-notes')
+const mockedUseNotes = vi.mocked(useNotes)
+type NotesMock = ReturnType<typeof useNotes>
+function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
+  return {
+    notes: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    getNote: vi.fn(),
+    createNote: vi.fn(),
+    patchNote: vi.fn(),
+    ...overrides,
+  }
+}
 
 // AssistantThread (ADR 0093) is a pure view over whatever conversations/chat
 // hook results its caller hands it - both AssistantDrawer (the panel) and
@@ -729,5 +749,55 @@ describe('AssistantThread', () => {
       expect(group).not.toBeNull()
       expect(group as HTMLElement).toContainElement(chips)
     })
+  })
+})
+
+// "Save as note" on an assistant message: the deliberately small answer to
+// what a draft_note tool would have done (plan phase 6, cut). Mate returns
+// something worth keeping - a procedure it just walked through, a figure it
+// worked out - and this keeps it without retyping, without a write-capable
+// tool, and without Mate ever writing anything itself. The operator's tap
+// is still what creates the note.
+describe('AssistantThread: save an answer as a note', () => {
+  it('creates a note from that message and confirms it', async () => {
+    const createNote = vi.fn().mockResolvedValue({
+      document: { id: 'n-1', title: 'Blue Pearl Bay first, on the flood.' },
+      body: 'Blue Pearl Bay first, on the flood.',
+    })
+    mockedUseNotes.mockReturnValue(makeNotesMock({ createNote }))
+
+    const conversations = buildConversations({ messages: [assistantMessage()] })
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save as note' }))
+
+    await waitFor(() => {
+      expect(createNote).toHaveBeenCalledWith({ body: 'Blue Pearl Bay first, on the flood.' })
+    })
+  })
+
+  // Every other write affordance in this app is gated the same way, and a
+  // read-only viewer being offered a button that 403s is worse than no
+  // button at all.
+  it('is absent without write permission', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const conversations = buildConversations({ messages: [assistantMessage()] })
+
+    render(<AssistantThread canWrite={false} conversations={conversations} chat={buildChat()} />)
+
+    expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
+  })
+
+  // A user's own message is already theirs - they typed it. The affordance
+  // is for Mate's answers.
+  it('is not offered on the operator\'s own messages', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const conversations = buildConversations({
+      messages: [assistantMessage({ id: 'u1', role: 'user', content: 'where should we anchor?' })],
+    })
+
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
   })
 })

@@ -832,7 +832,7 @@ func TestDocumentStore_PatchDocumentBadFolderIDLeavesTitleUnchanged(t *testing.T
 
 	newTitle := "New Title"
 	badFolder := "does-not-exist"
-	_, err := store.PatchDocument(doc.ID, &newTitle, nil, nil, &badFolder, true)
+	_, err := store.PatchDocument(doc.ID, &newTitle, nil, nil, &badFolder, true, nil)
 	if !errors.Is(err, errFolderNotFound) {
 		t.Fatalf("expected errFolderNotFound, got %v", err)
 	}
@@ -853,9 +853,50 @@ func TestDocumentStore_PatchDocumentUnknownIDTakesPrecedenceOverBadFolderID(t *t
 	store := newTestDocumentStore(t)
 	newTitle := "New Title"
 	badFolder := "does-not-exist"
-	_, err := store.PatchDocument("does-not-exist", &newTitle, nil, nil, &badFolder, true)
+	_, err := store.PatchDocument("does-not-exist", &newTitle, nil, nil, &badFolder, true, nil)
 	if !errors.Is(err, errDocumentNotFound) {
 		t.Fatalf("expected errDocumentNotFound to take precedence over errFolderNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_PatchDocumentSortIndexAppliesAtomicallyWithFolderMove
+// pins the notes promotion path (plan §4: "file this note into a manual at
+// position 3" is PATCH /api/notes/:id {folder_id, sort_index}, which lands
+// through this exact method): a bad folder_id must reject the sort_index
+// change too, in the same transaction, not apply one and reject the other.
+func TestDocumentStore_PatchDocumentSortIndexAppliesAtomicallyWithFolderMove(t *testing.T) {
+	store := newTestDocumentStore(t)
+	folder, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	doc := mustInsertDocument(t, store, "sha-patch-sortindex", "a.pdf", nil)
+
+	sortIndex := 3
+	updated, err := store.PatchDocument(doc.ID, nil, nil, nil, &folder.ID, true, &sortIndex)
+	if err != nil {
+		t.Fatalf("PatchDocument: %v", err)
+	}
+	if updated.SortIndex != 3 {
+		t.Fatalf("expected sort_index 3, got %d", updated.SortIndex)
+	}
+	if updated.FolderID == nil || *updated.FolderID != folder.ID {
+		t.Fatalf("expected the folder move to land in the same call, got %+v", updated.FolderID)
+	}
+
+	badFolder := "does-not-exist"
+	otherSortIndex := 9
+	_, err = store.PatchDocument(doc.ID, nil, nil, nil, &badFolder, true, &otherSortIndex)
+	if !errors.Is(err, errFolderNotFound) {
+		t.Fatalf("expected errFolderNotFound, got %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.SortIndex != 3 {
+		t.Fatalf("expected sort_index to remain 3 when the folder move is rejected, got %d", got.SortIndex)
 	}
 }
 
@@ -1134,6 +1175,86 @@ func TestDocumentStore_ListFolderReturnsSubfoldersThenDocuments(t *testing.T) {
 	}
 	if len(rootDocs) != 1 || rootDocs[0].Filename != "root.pdf" {
 		t.Fatalf("expected root.pdf at the root, got %+v", rootDocs)
+	}
+}
+
+// TestDocumentStore_ListFolderOrdersBySortIndexThenNameFallsBackToNameWhenEqual
+// pins plan §2's ordering rule for ListFolder itself (the manuals feature's
+// only change to a pre-existing, general-purpose method): sort_index first,
+// lower(name)/lower(filename) as the tiebreak. sort_index is set with a raw
+// UPDATE (the same whitebox idiom other tests in this file use, e.g.
+// notes_store_test.go's force_ocr seeding) because nothing at this layer
+// yet writes it directly to a folder outside the manuals feature
+// (manuals_store.go's ReorderManualChildren) - this test's job is ListFolder's
+// ORDER BY, not that other feature.
+func TestDocumentStore_ListFolderOrdersBySortIndexThenNameFallsBackToNameWhenEqual(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	zebra, err := store.CreateFolder("Zebra", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	anchor, err := store.CreateFolder("Anchor", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE document_folders SET sort_index = 0 WHERE id = ?`, zebra.ID); err != nil {
+		t.Fatalf("seed sort_index: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE document_folders SET sort_index = 1 WHERE id = ?`, anchor.ID); err != nil {
+		t.Fatalf("seed sort_index: %v", err)
+	}
+
+	zebraDoc := mustInsertDocument(t, store, "sha-order-z", "z-doc.pdf", nil)
+	aDoc := mustInsertDocument(t, store, "sha-order-a", "a-doc.pdf", nil)
+	if _, err := store.db.Exec(`UPDATE documents SET sort_index = 1 WHERE id = ?`, zebraDoc.ID); err != nil {
+		t.Fatalf("seed sort_index: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE documents SET sort_index = 0 WHERE id = ?`, aDoc.ID); err != nil {
+		t.Fatalf("seed sort_index: %v", err)
+	}
+
+	subfolders, docs, err := store.ListFolder(nil)
+	if err != nil {
+		t.Fatalf("ListFolder: %v", err)
+	}
+	// Zebra (sort_index 0) must sort ahead of Anchor (sort_index 1) despite
+	// the alphabetical tiebreak going the other way.
+	if len(subfolders) != 2 || subfolders[0].ID != zebra.ID || subfolders[1].ID != anchor.ID {
+		t.Fatalf("expected Zebra (sort_index 0) then Anchor (sort_index 1), got %+v", subfolders)
+	}
+	if len(docs) != 2 || docs[0].ID != aDoc.ID || docs[1].ID != zebraDoc.ID {
+		t.Fatalf("expected a-doc.pdf (sort_index 0) then z-doc.pdf (sort_index 1), got %+v", docs)
+	}
+}
+
+// TestDocumentStore_ListFolderOrdersByNameWhenEverySortIndexIsZero is the
+// Verification section's own required case: a pre-manuals-feature library,
+// where every row's sort_index is still its DEFAULT 0, must list in exactly
+// the alphabetical order it always has - sort_index being first in the
+// ORDER BY must never change behaviour for a library that has never
+// reordered anything.
+func TestDocumentStore_ListFolderOrdersByNameWhenEverySortIndexIsZero(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	if _, err := store.CreateFolder("Zebra", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := store.CreateFolder("Anchor", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	mustInsertDocument(t, store, "sha-namefallback-z", "z-doc.pdf", nil)
+	mustInsertDocument(t, store, "sha-namefallback-a", "a-doc.pdf", nil)
+
+	subfolders, docs, err := store.ListFolder(nil)
+	if err != nil {
+		t.Fatalf("ListFolder: %v", err)
+	}
+	if len(subfolders) != 2 || subfolders[0].Name != "Anchor" || subfolders[1].Name != "Zebra" {
+		t.Fatalf("expected plain alphabetical order (Anchor, Zebra), got %+v", subfolders)
+	}
+	if len(docs) != 2 || docs[0].Filename != "a-doc.pdf" || docs[1].Filename != "z-doc.pdf" {
+		t.Fatalf("expected plain alphabetical order (a-doc.pdf, z-doc.pdf), got %+v", docs)
 	}
 }
 

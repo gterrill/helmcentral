@@ -160,6 +160,19 @@ type documentJSON struct {
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	IndexedAt    *time.Time        `json:"indexed_at"`
+
+	// Kind/NoteType/NoteTypeSource/Pinned/SortIndex back the notes feature
+	// (notes_store.go). Unconditional, like every field above, for the
+	// reason ADR 0115 §7 gives: use-notes.ts and use-documents.ts declare
+	// all five as always-present, and `,omitempty` cannot tell "genuinely
+	// zero" apart from "unset". On a kind='file' row these are all their
+	// zero value, which is a real answer the client renders (an unpinned,
+	// unordered, untyped file) rather than an absent one.
+	Kind           string `json:"kind"`
+	NoteType       string `json:"note_type"`
+	NoteTypeSource string `json:"note_type_source"`
+	Pinned         bool   `json:"pinned"`
+	SortIndex      int    `json:"sort_index"`
 }
 
 func toDocumentJSON(d document) documentJSON {
@@ -191,6 +204,12 @@ func toDocumentJSON(d document) documentJSON {
 		CreatedAt:    d.CreatedAt,
 		UpdatedAt:    d.UpdatedAt,
 		IndexedAt:    d.IndexedAt,
+
+		Kind:           d.Kind,
+		NoteType:       d.NoteType,
+		NoteTypeSource: d.NoteTypeSource,
+		Pinned:         d.Pinned,
+		SortIndex:      d.SortIndex,
 	}
 }
 
@@ -215,6 +234,47 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusConflict, errFolderNotEmpty.Error()
 	case errors.Is(err, errFolderNameInvalid):
 		return http.StatusBadRequest, errFolderNameInvalid.Error()
+	// errDocumentDuplicate predates the notes feature (Insert's own
+	// sha256-collision check, documents_store.go) but fell through to 500
+	// here until now - harmless while the only caller that could ever
+	// trigger it (uploadDocumentHandler) always intercepted it itself
+	// before this function ever saw it. ReplaceNoteBody's own collision
+	// check (notes_store.go, plan §1's residual UUID-collision case) is
+	// the first caller that reaches documentErrorStatus WITH this
+	// sentinel still on the error, so it needs a real mapping now: 409,
+	// naming the colliding document's id (already baked into err's own
+	// message by the store method that returned it).
+	case errors.Is(err, errDocumentDuplicate):
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, errNoteBodyEmpty):
+		return http.StatusBadRequest, errNoteBodyEmpty.Error()
+	case errors.Is(err, errNoteBodyTooLarge):
+		return http.StatusRequestEntityTooLarge, errNoteBodyTooLarge.Error()
+	case errors.Is(err, errNotANote):
+		return http.StatusConflict, errNotANote.Error()
+	case errors.Is(err, errNoteChangedUnderfoot):
+		return http.StatusConflict, errNoteChangedUnderfoot.Error()
+	// errNotAManual and errManualNotTopLevel back the manuals feature
+	// (manuals_store.go): both are the same kind of "a specific, expected
+	// condition, not a database failure" sentinel as errNotANote just
+	// above, so they map the same way - 409, the store's own message.
+	case errors.Is(err, errNotAManual):
+		return http.StatusConflict, errNotAManual.Error()
+	case errors.Is(err, errManualNotTopLevel):
+		return http.StatusConflict, errManualNotTopLevel.Error()
+	// Checklist runs (plan §3, ADR 0118, checklist_runs_store.go): a run or
+	// item id the store doesn't recognise is 404 (the same footing
+	// errDocumentNotFound already gets); a note with nothing to run, or a
+	// run that is already completed/abandoned, is 409 - a real, expected
+	// conflict, not a database failure.
+	case errors.Is(err, errChecklistRunNotFound):
+		return http.StatusNotFound, errChecklistRunNotFound.Error()
+	case errors.Is(err, errChecklistItemNotFound):
+		return http.StatusNotFound, errChecklistItemNotFound.Error()
+	case errors.Is(err, errNoteHasNoChecklist):
+		return http.StatusConflict, errNoteHasNoChecklist.Error()
+	case errors.Is(err, errChecklistRunClosed):
+		return http.StatusConflict, errChecklistRunClosed.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -761,7 +821,7 @@ func patchDocumentHandler(c echo.Context) error {
 		}
 	}
 
-	doc, err := globalDocumentStore.PatchDocument(id, title, notes, tags, folderID, moveFolder)
+	doc, err := globalDocumentStore.PatchDocument(id, title, notes, tags, folderID, moveFolder, nil)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}

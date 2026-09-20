@@ -4,6 +4,10 @@ import { render, screen, fireEvent, within, act, waitFor } from '@testing-librar
 import { DocumentsPanel } from '@/components/documents-panel'
 import { useDocuments } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
+import { useManuals } from '@/hooks/use-manuals'
+import { useNotes } from '@/hooks/use-notes'
+import type { ManualTreeNode } from '@/hooks/use-manuals'
+import type { NoteRecord } from '@/hooks/use-notes'
 
 // ADR 0106 F1: DocumentsPanel is tested against mocked hooks (App-level test
 // convention - see e.g. app-sidebar-navigation.test.tsx), not real fetch:
@@ -11,12 +15,50 @@ import { useDocumentUploads } from '@/hooks/use-document-uploads'
 // the real request/response wiring. This file is about what the panel does
 // with whatever the hooks report - rendering, navigation, selection,
 // confirmations - not the network.
+//
+// Revision "one panel, not three" (2026-09-20) folds the deleted
+// notes-panel.tsx/manuals-panel.tsx coverage in here too, so useNotes and
+// useManuals are now mocked the identical way those two files mocked them -
+// findManualTreeNode is left real (a pure helper the component calls
+// directly), same reasoning as the deleted files' own comment on it.
 
 vi.mock('@/hooks/use-documents')
 vi.mock('@/hooks/use-document-uploads')
+vi.mock('@/hooks/use-notes')
+vi.mock('@/hooks/use-manuals', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-manuals')>()
+  return { ...actual, useManuals: vi.fn() }
+})
+// note-editor.tsx is the lazy-loaded Plate-based WYSIWYG editor (ADR 0117) -
+// its own round-trip/golden-file coverage lives in note-editor.test.tsx. This
+// file only needs to prove the viewer's Edit toggle reaches it and that Save
+// goes through use-notes.ts's patchNote, so it stands in a lightweight fake
+// exposing exactly that contract.
+vi.mock('@/components/note-editor', () => ({
+  NoteEditor: ({ value, onSave }: { value: string; onSave: (body: string) => void | Promise<void> }) => (
+    <div>
+      <p>editor: {value}</p>
+      <button type="button" onClick={() => { void onSave(`${value} edited`) }}>Save</button>
+    </div>
+  ),
+}))
+// checklist-runner.tsx has its own full coverage against a mocked
+// use-checklist-run (checklist-runner.test.tsx) - this file only needs to
+// prove the viewer's Start checklist toggle reaches it with the right
+// note, and that Back exits the runner mode without abandoning the run.
+vi.mock('@/components/documents/checklist-runner', () => ({
+  ChecklistRunner: ({ noteId, noteTitle, onExit }: { noteId: string; noteTitle: string; onExit: () => void }) => (
+    <div>
+      <p>checklist runner: {noteId} ({noteTitle})</p>
+      <button type="button" onClick={onExit}>Back</button>
+    </div>
+  ),
+}))
 
 const mockedUseDocuments = vi.mocked(useDocuments)
 const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
+const mockedUseManuals = vi.mocked(useManuals)
+const mockedUseNotes = vi.mocked(useNotes)
 
 type DocumentsMock = ReturnType<typeof useDocuments>
 type UploadsMock = ReturnType<typeof useDocumentUploads>
@@ -87,6 +129,11 @@ function doc(overrides: Partial<import('@/hooks/use-documents').DocumentRecord> 
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     indexed_at: '2026-01-01T00:00:00Z',
+    kind: 'file',
+    note_type: '',
+    note_type_source: '',
+    pinned: false,
+    sort_index: 0,
     ...overrides,
   }
 }
@@ -102,10 +149,89 @@ function embeddingsStatus(overrides: Partial<import('@/hooks/use-documents').Doc
   }
 }
 
+type ManualsMock = ReturnType<typeof useManuals>
+type NotesMock = ReturnType<typeof useNotes>
+
+function makeManualsMock(overrides: Partial<ManualsMock> = {}): ManualsMock {
+  return {
+    manuals: [],
+    manualsLoading: false,
+    manualsError: null,
+    refreshManuals: vi.fn(),
+    tree: null,
+    treeLoading: false,
+    treeError: null,
+    refreshTree: vi.fn(),
+    createManual: vi.fn(),
+    flagManual: vi.fn(),
+    clearManual: vi.fn(),
+    reorder: vi.fn(),
+    ...overrides,
+  }
+}
+
+function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
+  return {
+    notes: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    // A note's body now comes from GET /api/notes/:id, not from the
+    // chunk-reassembling /text endpoint, so the default has to resolve -
+    // an un-stubbed getNote would make every viewer test fail on an
+    // undefined detail rather than on what it is actually asserting.
+    getNote: vi.fn().mockResolvedValue({ document: note(), body: 'Open the seacock first.' }),
+    createNote: vi.fn(),
+    patchNote: vi.fn(),
+    ...overrides,
+  }
+}
+
+function note(overrides: Partial<NoteRecord> = {}): NoteRecord {
+  return {
+    id: 'note-1',
+    sha256: 'abc123',
+    folder_id: null,
+    filename: 'Genset start-up.md',
+    title: 'Genset start-up',
+    notes: '',
+    mime: 'text/markdown',
+    size_bytes: 256,
+    page_count: 0,
+    summary: '',
+    status: 'indexed',
+    stage: 'done',
+    indexed_with: '',
+    error: '',
+    index_model: '',
+    index_cost_usd: 0,
+    tags: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    indexed_at: '2026-01-01T00:00:00Z',
+    kind: 'note',
+    note_type: 'procedure',
+    note_type_source: 'auto',
+    pinned: false,
+    sort_index: 0,
+    ...overrides,
+  }
+}
+
+function docNode(overrides: Partial<ManualTreeNode> = {}): ManualTreeNode {
+  return {
+    type: 'document', id: 'n1', name: 'Genset start-up', sort_index: 0, updated_at: '2026-01-01T00:00:00Z',
+    kind: 'note', note_type: 'procedure',
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockedUseDocuments.mockReturnValue(makeDocumentsMock())
   mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
+  mockedUseManuals.mockReturnValue(makeManualsMock())
+  mockedUseNotes.mockReturnValue(makeNotesMock())
 })
 
 afterEach(() => {
@@ -443,6 +569,49 @@ describe('DocumentsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Details' }))
 
     expect(onEditDocument).toHaveBeenCalledWith('doc-7')
+  })
+
+  // ADR 0116: a filed note is a document with mime: 'text/markdown', and the
+  // viewer renders it through NoteMarkdown - the same renderer the Notes
+  // panel's own reader uses - rather than the raw <pre> every other text
+  // mime still gets. This makes a note readable from Documents too, and
+  // exercises text/markdown's frontmatter-stripped body (extractTextFile,
+  // backend) rendering as actual markdown rather than as literal text.
+  describe('the viewer', () => {
+    it('renders a text/markdown document through NoteMarkdown, not a <pre>', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the **seacock** first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up' })],
+      }))
+
+      const { container } = render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+
+      await screen.findByText(/Open the/)
+      expect(screen.getByText('seacock')).toBeInTheDocument() // ** rendered as emphasis, not literal asterisks
+      expect(container.querySelector('pre')).toBeNull()
+    })
+
+    it('still renders a plain text/plain document through the raw <pre>', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output, unformatted' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+
+      const pre = await screen.findByText('raw log output, unformatted')
+      expect(pre.tagName).toBe('PRE')
+    })
   })
 
   it('delete asks for confirmation before calling deleteDocument', async () => {
@@ -869,6 +1038,442 @@ describe('DocumentsPanel', () => {
 
       expect(screen.getByText('OpenRouter: 429 rate limited')).toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  // Revision "one panel, not three" (2026-09-20): capture is a global
+  // action reachable two ways (ADR 0119) - the header/Alt+N path is
+  // app-sidebar-navigation.test.tsx's job (it owns the sheet); this only
+  // proves Documents' own New → Note menu item reaches the SAME callback
+  // prop App.tsx wires to it.
+  describe('capture: New → Note', () => {
+    // One New menu, Folder first, Note carrying its kinds in a submenu.
+    // Auto leads that submenu and must pass NO kind, so the backend's own
+    // classifier answers rather than the menu guessing on the operator's
+    // behalf (ADR 0119).
+    it('New → Note → Auto calls onCaptureNote with no kind', async () => {
+      const onCaptureNote = vi.fn()
+      render(<DocumentsPanel onCaptureNote={onCaptureNote} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Auto' }))
+
+      expect(onCaptureNote).toHaveBeenCalledWith()
+    })
+
+    it('New → Note → a kind passes that kind', async () => {
+      const onCaptureNote = vi.fn()
+      render(<DocumentsPanel onCaptureNote={onCaptureNote} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Quirk' }))
+
+      expect(onCaptureNote).toHaveBeenCalledWith('quirk')
+    })
+
+    it('offers every kind the classifier can produce, Auto first', async () => {
+      render(<DocumentsPanel onCaptureNote={vi.fn()} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+
+      for (const label of ['Auto', 'Contact', 'Procedure', 'Spec', 'Quirk', 'Recipe', 'Plain note']) {
+        expect(await screen.findByRole('menuitem', { name: label })).toBeInTheDocument()
+      }
+    })
+
+    it('has no second create control beside New', () => {
+      render(<DocumentsPanel onCaptureNote={vi.fn()} />)
+
+      expect(screen.queryByRole('button', { name: 'Add Note' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Choose note type' })).not.toBeInTheDocument()
+    })
+
+    it('New → Folder still opens the ordinary new-folder dialog', () => {
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+
+      expect(screen.getByRole('dialog')).toHaveTextContent('New folder')
+    })
+  })
+
+  // The pre-attentive type icon column (revision §"Note types as a facet")
+  // on an ordinary document row, and the client-side facet filter beside
+  // the existing tag ToggleGroup - there is no `?type=` on the plain
+  // folder-browse/list endpoints, only on /api/notes, so this filters
+  // whatever useDocuments already returned rather than issuing a second
+  // fetch.
+  describe('note type: the pre-attentive icon column', () => {
+    it("a kind='note' row shows its note_type icon, not the generic file icon", () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', filename: 'Ring Dave.md', title: 'Ring Dave', mime: 'text/markdown', kind: 'note', note_type: 'contact' })],
+      }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.getByRole('button', { name: /change type: currently contact/i })).toBeInTheDocument()
+    })
+
+    // One trigger, not six toggle buttons. Six icon+label buttons sat in
+    // the same row as New and Upload and read as actions rather than as a
+    // filter; this pins the collapse so it cannot quietly regress.
+  })
+
+  // "Unfiled notes" as a saved view (kind='note' AND folder_id IS NULL,
+  // GET /api/notes?filed=0) - a Documents filter, not a place: this proves
+  // it lists only what useNotes({unfiledOnly:true}) reports and shows a
+  // visible count, preserving the deleted notes-panel.tsx's drain-the-inbox
+  // loop without owning a sidebar row.
+  describe('Unfiled notes saved view', () => {
+    it('shows the unfiled count and, once active, lists only those notes', () => {
+      mockedUseNotes.mockReturnValue(makeNotesMock({
+        notes: [note({ id: 'note-1', title: 'Ring Dave' }), note({ id: 'note-2', title: 'Ring the yard' })],
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'filed-1', filename: 'filed.pdf', title: 'Filed doc' })],
+      }))
+
+      render(<DocumentsPanel />)
+
+      const toggle = screen.getByRole('button', { name: /unfiled notes/i })
+      expect(toggle).toHaveTextContent('2')
+      expect(screen.getByText('Filed doc')).toBeInTheDocument()
+
+      fireEvent.click(toggle)
+
+      expect(screen.getByText('Ring Dave')).toBeInTheDocument()
+      expect(screen.getByText('Ring the yard')).toBeInTheDocument()
+      expect(screen.queryByText('Filed doc')).not.toBeInTheDocument()
+    })
+
+    it('File… on an unfiled row opens the same Move dialog a document row uses', () => {
+      mockedUseNotes.mockReturnValue(makeNotesMock({
+        notes: [note({ id: 'note-1', title: 'Ring Dave' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: /unfiled notes/i }))
+      fireEvent.click(screen.getByRole('button', { name: 'File "Ring Dave"' }))
+
+      expect(screen.getByRole('dialog')).toHaveTextContent('Move')
+    })
+  })
+
+  // A Manual-kind folder (document_folders.role='manual') renders ordering
+  // and Arrange in place of the ordinary table; a plain folder stays the
+  // table. Promotion/demotion (POST/DELETE /api/manuals) are reachable from
+  // the folder row menu and from inside the manual view itself.
+  describe('Manual-kind folders', () => {
+    it('a manual folder shows ordering and Arrange; a plain folder shows the ordinary table instead', () => {
+      mockedUseManuals.mockReturnValue(makeManualsMock({
+        manuals: [{ id: 'm1', name: 'Operations Manual', document_count: 1, updated_at: '2026-01-01T00:00:00Z' }],
+        tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [docNode()] },
+      }))
+
+      const { rerender } = render(<DocumentsPanel initialFolderId="m1" />)
+      expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument()
+      expect(screen.getByText('Genset start-up')).toBeInTheDocument()
+
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'doc-1', filename: 'receipt.pdf' })],
+      }))
+      rerender(<DocumentsPanel initialFolderId="f-plain" />)
+      expect(screen.queryByRole('button', { name: 'Arrange' })).not.toBeInTheDocument()
+      expect(screen.getByRole('table')).toBeInTheDocument()
+    })
+
+    it('promoting a top-level folder calls flagManual', async () => {
+      const flagManual = vi.fn().mockResolvedValue({ id: 'f1', name: 'Contacts', document_count: 0, updated_at: '2026-01-01T00:00:00Z' })
+      mockedUseManuals.mockReturnValue(makeManualsMock({ flagManual }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        folders: [{ id: 'f1', name: 'Contacts', parent_id: null }],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: /actions for contacts/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /treat as a manual/i }))
+
+      await waitFor(() => expect(flagManual).toHaveBeenCalledWith('f1'))
+    })
+
+    it('demoting from inside the manual view calls clearManual', async () => {
+      const clearManual = vi.fn().mockResolvedValue(undefined)
+      mockedUseManuals.mockReturnValue(makeManualsMock({
+        manuals: [{ id: 'm1', name: 'Operations Manual', document_count: 0, updated_at: '2026-01-01T00:00:00Z' }],
+        tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [] },
+        clearManual,
+      }))
+
+      render(<DocumentsPanel initialFolderId="m1" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Stop treating as manual' }))
+
+      await waitFor(() => expect(clearManual).toHaveBeenCalledWith('m1'))
+    })
+
+    it('demoting from the folder row menu (browsing the root) also calls clearManual', async () => {
+      const clearManual = vi.fn().mockResolvedValue(undefined)
+      mockedUseManuals.mockReturnValue(makeManualsMock({
+        manuals: [{ id: 'm1', name: 'Operations Manual', document_count: 0, updated_at: '2026-01-01T00:00:00Z' }],
+        clearManual,
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        folders: [{ id: 'm1', name: 'Operations Manual', parent_id: null }],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: /actions for operations manual/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /stop treating as manual/i }))
+
+      await waitFor(() => expect(clearManual).toHaveBeenCalledWith('m1'))
+    })
+
+    it('the New folder dialog offers a Manual checkbox at the root, and flags the created folder', async () => {
+      const createFolder = vi.fn().mockResolvedValue({ id: 'new-1', name: 'Crew Training', parent_id: null })
+      const flagManual = vi.fn().mockResolvedValue({ id: 'new-1', name: 'Crew Training', document_count: 0, updated_at: '2026-01-01T00:00:00Z' })
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ createFolder }))
+      mockedUseManuals.mockReturnValue(makeManualsMock({ flagManual }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Crew Training' } })
+      fireEvent.click(screen.getByRole('checkbox', { name: /manual/i }))
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+      await waitFor(() => expect(createFolder).toHaveBeenCalledWith('Crew Training', null))
+      await waitFor(() => expect(flagManual).toHaveBeenCalledWith('new-1'))
+    })
+
+    it('does not offer the Manual checkbox when creating a folder inside another folder', () => {
+      render(<DocumentsPanel initialFolderId="parent-1" />)
+      fireEvent.click(screen.getByRole('button', { name: 'New' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+
+      expect(screen.queryByRole('checkbox', { name: /manual/i })).not.toBeInTheDocument()
+    })
+  })
+
+  // "Opening a note in Documents' viewer must reach the editor" - the Edit
+  // toggle is the only way NoteEditor is reachable from the general viewer,
+  // and Save must go through use-notes.ts's patchNote, not a raw fetch.
+  describe('the viewer: editing a note', () => {
+    it('a note opens in the editor and saves through patchNote', async () => {
+      const patchNote = vi.fn().mockResolvedValue({ document: note(), body: 'Open the seacock first. edited' })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ patchNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      expect(screen.getByText('editor: Open the seacock first.')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { body: 'Open the seacock first. edited' }))
+    })
+
+    // GET /api/documents/:id/text reassembles the INDEXED CHUNKS, and
+    // splitMarkdownSections lifts each heading into its own column and
+    // drops it from the chunk's text. So a note read through /text comes
+    // back with every "#" line gone - fine for search, catastrophic as the
+    // seed for an editor whose Save replaces the note's whole body.
+    //
+    // A note's real bytes come from GET /api/notes/:id (readNoteBody, off
+    // disk). This asserts the viewer uses that, by making the two sources
+    // disagree and requiring the note's own heading to win.
+    it('reads a note from its own bytes, not from the reassembled chunks', async () => {
+      const realBody = '# Genset start-up\n\nOpen the seacock first.\n'
+      const getNote = vi.fn().mockResolvedValue({
+        document: note({ id: 'note-1', title: 'Genset start-up' }),
+        body: realBody,
+      })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      // What the chunk endpoint would return: heading stripped.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      expect(screen.getByText(/editor:.*# Genset start-up/)).toBeInTheDocument()
+    })
+
+    it('a plain file (kind file) never shows an Edit toggle', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log', kind: 'file' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+      await screen.findByText('raw log output')
+
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    })
+  })
+
+  // Plan §8: pinning a note is the only operator-facing way documents.pinned
+  // (already a real column, already on the wire) ever becomes true - without
+  // it, Mate's pinned-notes prompt feature has no way to ever hold anything.
+  // Lives in the viewer, the one place "where a note is read".
+  describe('the viewer: pinning a note for Mate', () => {
+    it('an unpinned note offers "Pin for Mate", which PATCHes pinned:true', async () => {
+      const patchNote = vi.fn().mockResolvedValue({ document: note({ pinned: true }), body: 'Open the seacock first.' })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ patchNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note', pinned: false })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin for Mate' }))
+
+      await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { pinned: true }))
+      await screen.findByRole('button', { name: 'Unpin' })
+    })
+
+    it('a pinned note offers "Unpin", which PATCHes pinned:false', async () => {
+      const patchNote = vi.fn().mockResolvedValue({ document: note({ pinned: false }), body: 'Open the seacock first.' })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ patchNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note', pinned: true })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Unpin' }))
+
+      await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { pinned: false }))
+      await screen.findByRole('button', { name: 'Pin for Mate' })
+    })
+
+    it('a plain file (kind file) never shows a pin control', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log', kind: 'file' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+      await screen.findByText('raw log output')
+
+      expect(screen.queryByRole('button', { name: 'Pin for Mate' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Unpin' })).not.toBeInTheDocument()
+    })
+  })
+
+  // Plan §7 / ADR 0118: "Start checklist" is the general viewer's own
+  // route into the checklist runner - a mode of this same Sheet, gated on
+  // GET /api/notes/:id's own `checklist` field (use-notes.ts's getNote).
+  describe('the viewer: running a checklist', () => {
+    it('shows Start checklist for a note with checklist items, and Back returns to reading', async () => {
+      const getNote = vi.fn().mockResolvedValue({
+        document: note(),
+        body: '- [ ] Seacocks open',
+        checklist: [{ item_key: 'k1', occurrence: 0, text: 'Seacocks open', depth: 0 }],
+      })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: '- [ ] Seacocks open' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      const startButton = await screen.findByRole('button', { name: /Start checklist/ })
+      fireEvent.click(startButton)
+
+      expect(screen.getByText('checklist runner: note-1 (Genset start-up)')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+      expect(screen.queryByText(/checklist runner:/)).not.toBeInTheDocument()
+    })
+
+    it('does not show Start checklist for a note with no checklist items', async () => {
+      const getNote = vi.fn().mockResolvedValue({ document: note(), body: 'Ring Dave about the mooring.', checklist: [] })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Ring Dave about the mooring.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'ring-dave.md', title: 'Ring Dave', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Ring Dave' }))
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
+    })
+
+    it('a plain file (kind file) never shows Start checklist', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log', kind: 'file' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+      await screen.findByText('raw log output')
+
+      expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
     })
   })
 })

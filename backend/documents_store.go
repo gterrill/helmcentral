@@ -64,6 +64,37 @@ type document struct {
 	// text).
 	OperatorTags  []string `json:"operator_tags,omitempty"`
 	SuggestedTags []string `json:"suggested_tags,omitempty"`
+
+	// Kind, NoteType, NoteTypeSource, Pinned and SortIndex back the notes
+	// feature (plan "Notes and the Boat's Manual", ADR 0114): a note is a
+	// documents row with Kind='note' rather than a separate table, so it
+	// shares folders, tags, chunks, FTS5 search and read_document with
+	// every uploaded file for free. Added by applyDocumentStoreMigrations
+	// below - see that function's doc comment for why they are NOT part of
+	// the documents CREATE TABLE text a few lines down, even though a
+	// freshly created database ends up with them either way.
+	//
+	// Kind is "file" or "note" - defaulted to "file" by Insert when a
+	// caller (every pre-existing upload-path caller) leaves it unset, so
+	// this field's zero value never has to appear in this file's dozens of
+	// existing document{...} literals. NoteType is one of
+	// classifyNoteType's five categories, or "" for an unclassified note
+	// (and always "" for kind='file'). NoteTypeSource records who set
+	// NoteType last - "operator" beats "mate" beats "auto", enforced by
+	// SetNoteTypeIfNotOperator (notes_store.go), not by a database CHECK
+	// (SQLite has no way to express "IN (...) only when kind='note'" via
+	// ALTER TABLE ADD COLUMN - see the schema comment on kind below).
+	// Pinned and SortIndex are schema-only in this phase: the columns and
+	// their CHECK/DEFAULT exist so a later phase (the manual's ordered
+	// tree, and a pinned note riding in Mate's prompt) doesn't need its
+	// own migration, but nothing in this codebase writes Pinned yet, and
+	// SortIndex's only current writer is the DEFAULT 0 every row is born
+	// with.
+	Kind           string `json:"kind"`
+	NoteType       string `json:"note_type,omitempty"`
+	NoteTypeSource string `json:"note_type_source,omitempty"`
+	Pinned         bool   `json:"pinned,omitempty"`
+	SortIndex      int    `json:"sort_index,omitempty"`
 }
 
 // documentFolder is one row of document_folders: a virtual folder that
@@ -277,6 +308,11 @@ func newDocumentStore(dbPath string) (*documentStore, error) {
 		}
 	}
 
+	if err := applyDocumentStoreMigrations(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &documentStore{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
@@ -324,6 +360,28 @@ var documentStoreSchema = []string{
 		updated_at     INTEGER NOT NULL,
 		indexed_at     INTEGER
 	)`,
+	// kind/note_type/note_type_source/pinned/sort_index (documents) and
+	// sort_index/role (document_folders) - the notes feature's columns
+	// (ADR 0114) - are deliberately NOT listed in either CREATE TABLE
+	// above, even though every database ends up with them from its very
+	// first open. applyDocumentStoreMigrations (below newDocumentStore)
+	// adds them, unconditionally, on every open: CREATE TABLE IF NOT
+	// EXISTS is a complete no-op against a table that already exists on
+	// disk (SQLite never diffs an existing table's columns against new
+	// CREATE TABLE text), so on a database that predates this feature -
+	// every boat's actual documents.sqlite - listing the columns here
+	// would do nothing at all; only ALTER TABLE reaches an
+	// already-materialised table. Keeping them out of the CREATE TABLE
+	// text entirely (rather than listing them here ALSO, redundantly, for
+	// a fresh database) means there is exactly one place that defines
+	// these columns, matching the idiom this migration itself follows
+	// (alarm_log_store.go's notification_queue.rule_id).
+	//
+	// SQLite also cannot express a table-level CHECK coupling kind and
+	// note_type (e.g. "note_type only non-empty when kind='note'") - ALTER
+	// TABLE ADD COLUMN cannot add table-level CHECKs at all, only a
+	// per-column one, so that pairing is enforced in Go (InsertNote/
+	// SetNoteTypeIfNotOperator, notes_store.go) instead.
 	`CREATE INDEX IF NOT EXISTS documents_folder_id ON documents (folder_id)`,
 	// NextPending's oldest-pending-first scan.
 	`CREATE INDEX IF NOT EXISTS documents_status_created_at ON documents (status, created_at)`,
@@ -391,6 +449,113 @@ var documentStoreSchema = []string{
 		created_at INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS document_chunk_embeddings_model ON document_chunk_embeddings (model)`,
+
+	// Checklist runs (plan "Notes and the Boat's Manual" §3, ADR 0118): a
+	// run stores WHICH items are ticked, never the item list itself - the
+	// current note body is always the item list (parseChecklistItems,
+	// notes_format.go). Added straight into this schema (not
+	// applyDocumentStoreMigrations below) because both tables are brand
+	// new - CREATE TABLE IF NOT EXISTS is already the correct idiom for a
+	// table that has never existed on any boat's documents.sqlite, unlike
+	// the notes/manuals columns below, which had to be ALTER TABLE'd onto
+	// an ALREADY-EXISTING documents table.
+	`CREATE TABLE IF NOT EXISTS note_checklist_runs (
+		id            TEXT PRIMARY KEY,
+		document_id   TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		source_sha256 TEXT NOT NULL,
+		started_at    INTEGER NOT NULL,
+		completed_at  INTEGER,
+		abandoned_at  INTEGER
+	)`,
+	`CREATE INDEX IF NOT EXISTS note_checklist_runs_document
+		ON note_checklist_runs (document_id, started_at DESC)`,
+	// The whole "resume, don't duplicate" story: at most one row per
+	// document_id where both completed_at and abandoned_at are still NULL.
+	// StartOrResumeChecklistRun (checklist_runs_store.go) reads FOR this
+	// row before ever inserting, but the index is what makes that read
+	// authoritative rather than merely conventional.
+	`CREATE UNIQUE INDEX IF NOT EXISTS note_checklist_runs_active
+		ON note_checklist_runs (document_id) WHERE completed_at IS NULL AND abandoned_at IS NULL`,
+
+	// One row per ticked item, keyed to the item's own normalised TEXT
+	// (item_key = sha256 hex of normalizeChecklistItemText's output,
+	// notes_format.go) plus occurrence (which same-key line within the
+	// body this is - duplicate identical lines stay distinct). Deliberately
+	// NOT keyed to position: reordering the body, or editing a line that
+	// isn't this one, must never touch this row. text is a second copy of
+	// what was ticked, kept here (not re-derived) purely so a tick whose
+	// key later vanishes from the body can still show the operator what it
+	// used to say - the "edited since you ticked it - re-check" surface,
+	// which is the entire reason this column exists rather than the run
+	// storing bare keys.
+	`CREATE TABLE IF NOT EXISTS note_checklist_run_ticks (
+		run_id     TEXT NOT NULL REFERENCES note_checklist_runs(id) ON DELETE CASCADE,
+		item_key   TEXT NOT NULL,
+		occurrence INTEGER NOT NULL DEFAULT 0,
+		text       TEXT NOT NULL,
+		checked_at INTEGER NOT NULL,
+		PRIMARY KEY (run_id, item_key, occurrence)
+	)`,
+}
+
+// applyDocumentStoreMigrations adds columns that arrived after this store's
+// tables first shipped, to a database that predates them - the exact ALTER
+// TABLE idiom at alarm_log_store.go:311 (ensureQueueTable's rule_id
+// column): tolerate ONLY an error containing "duplicate column name" (a
+// previous run of this same function already added it - every database
+// this codebase opens, fresh or not, runs this on every startup), and
+// return every other error, since anything else is a real, unexplained
+// failure to open the store with.
+//
+// Called by newDocumentStore AFTER the documentStoreSchema loop above, on
+// every open - cheap (each ALTER is a single fast metadata change on
+// modern SQLite, and the tolerated-duplicate path doesn't even do that
+// much work) and the only place any documents.sqlite, new or years old,
+// ever gets these columns.
+//
+// The three CREATE INDEX statements at the end are deliberately not part
+// of documentStoreSchema even though they are indexes IF NOT EXISTS just
+// like every other one there: they index kind/pinned/role, columns this
+// very function is what adds to an existing database. Running them in
+// documentStoreSchema (which executes BEFORE this function, by the calling
+// order newDocumentStore uses) would work on a brand new database, where
+// CREATE TABLE just created those columns - but fail with "no such
+// column" against a real, already-existing documents.sqlite, where
+// CREATE TABLE IF NOT EXISTS is a no-op and only the ALTER statements
+// below actually add them. Keeping the indexes here, after the ALTERs
+// that guarantee their columns exist either way, is correct on both a
+// fresh database and an upgraded one.
+func applyDocumentStoreMigrations(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'file' CHECK (kind IN ('file','note'))`,
+		`ALTER TABLE documents ADD COLUMN note_type TEXT NOT NULL DEFAULT '' CHECK (note_type IN ('','contact','quirk','spec','procedure','recipe','note'))`,
+		`ALTER TABLE documents ADD COLUMN note_type_source TEXT NOT NULL DEFAULT '' CHECK (note_type_source IN ('','auto','operator','mate'))`,
+		`ALTER TABLE documents ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1))`,
+		`ALTER TABLE documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE document_folders ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE document_folders ADD COLUMN role TEXT NOT NULL DEFAULT '' CHECK (role IN ('','manual'))`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("apply document store migrations: %w", err)
+		}
+	}
+
+	// Partial (WHERE pinned = 1 / WHERE role <> '') because both columns
+	// are overwhelmingly their own default on every row - a plain index
+	// over pinned or role would spend most of its space indexing rows no
+	// query for "the pinned ones" or "the manual folders" will ever match.
+	indexStmts := []string{
+		`CREATE INDEX IF NOT EXISTS documents_kind_folder ON documents (kind, folder_id)`,
+		`CREATE INDEX IF NOT EXISTS documents_pinned ON documents (pinned) WHERE pinned = 1`,
+		`CREATE INDEX IF NOT EXISTS document_folders_role ON document_folders (role) WHERE role <> ''`,
+	}
+	for _, stmt := range indexStmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("apply document store migrations: create index: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *documentStore) Close() error {
@@ -402,10 +567,14 @@ func (s *documentStore) Close() error {
 
 // documentColumns is every documents column in the exact order scanDocument
 // expects, shared by every query that reads a full document row so the two
-// never drift apart.
+// never drift apart. kind/note_type/note_type_source/pinned/sort_index
+// (applyDocumentStoreMigrations) are listed last, after every column that
+// predates the notes feature, purely so a diff against the pre-notes
+// version of this constant reads as a pure addition.
 const documentColumns = `id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count,
 	summary, markdown, status, stage, enrich, force_ocr, indexed_with, error,
-	index_model, index_cost_usd, reindex_seq, created_at, updated_at, indexed_at`
+	index_model, index_cost_usd, reindex_seq, created_at, updated_at, indexed_at,
+	kind, note_type, note_type_source, pinned, sort_index`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, letting
 // scanDocument read either a single QueryRow result or one row of a Query
@@ -419,12 +588,13 @@ func scanDocument(row rowScanner) (document, error) {
 	var folderID sql.NullString
 	var indexedAt sql.NullInt64
 	var createdAt, updatedAt int64
-	var enrich, forceOCR int
+	var enrich, forceOCR, pinned int
 
 	if err := row.Scan(
 		&d.ID, &d.SHA256, &folderID, &d.Filename, &d.Title, &d.Notes, &d.MIME, &d.SizeBytes, &d.PageCount,
 		&d.Summary, &d.Markdown, &d.Status, &d.Stage, &enrich, &forceOCR, &d.IndexedWith, &d.Error,
 		&d.IndexModel, &d.IndexCostUSD, &d.ReindexSeq, &createdAt, &updatedAt, &indexedAt,
+		&d.Kind, &d.NoteType, &d.NoteTypeSource, &pinned, &d.SortIndex,
 	); err != nil {
 		return document{}, err
 	}
@@ -435,6 +605,7 @@ func scanDocument(row rowScanner) (document, error) {
 	}
 	d.Enrich = enrich != 0
 	d.ForceOCR = forceOCR != 0
+	d.Pinned = pinned != 0
 	d.CreatedAt = time.Unix(createdAt, 0).UTC()
 	d.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	if indexedAt.Valid {
@@ -781,6 +952,19 @@ func (s *documentStore) rebuildMetaChunksUnderFolderTx(tx *sql.Tx, folderID stri
 // callers check errors.Is(err, errDocumentDuplicate) and use the returned
 // document's id rather than paying for a second OCR pass over identical
 // bytes.
+//
+// doc.ID and doc.CreatedAt, if the caller already set them, are used as-is
+// instead of being generated here - the one difference from every field
+// above, and needed only by InsertNote (notes_store.go). A note's
+// frontmatter bakes in its own id and created timestamp BEFORE the row
+// exists (they're part of what gets hashed into the note's content-
+// addressed sha256 - plan §1), so InsertNote has to hand Insert the exact
+// id/timestamp it already rendered, not receive a fresh pair back that
+// would no longer match the bytes on disk. Every pre-existing caller
+// leaves both fields at their zero value (ID: "", CreatedAt: time.Time{}),
+// so this is purely additive: doc.ID == "" still means "assign a new
+// uuid", and doc.CreatedAt.IsZero() still means "stamp it now", exactly as
+// before.
 func (s *documentStore) Insert(doc document) (document, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -807,12 +991,24 @@ func (s *documentStore) Insert(doc document) (document, error) {
 	}
 
 	now := s.now()
-	doc.ID = uuid.NewString()
+	if doc.ID == "" {
+		doc.ID = uuid.NewString()
+	}
+	if doc.Kind == "" {
+		// Every caller before the notes feature (uploadDocumentHandler, and
+		// every test fixture in this package) never sets Kind at all -
+		// defaulting it here, rather than requiring each of them to spell
+		// out Kind: "file", is what keeps this change purely additive. Only
+		// InsertNote (notes_store.go) ever sets it explicitly, to "note".
+		doc.Kind = "file"
+	}
 	doc.Status = "pending"
 	doc.Stage = "extract"
 	doc.IndexedWith = ""
 	doc.Error = ""
-	doc.CreatedAt = now
+	if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
 	doc.UpdatedAt = now
 	doc.IndexedAt = nil
 	initialTags := doc.OperatorTags
@@ -824,11 +1020,12 @@ func (s *documentStore) Insert(doc document) (document, error) {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(
-		`INSERT INTO documents (id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count, summary, markdown, status, stage, enrich, force_ocr, indexed_with, error, index_model, index_cost_usd, created_at, updated_at, indexed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO documents (id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count, summary, markdown, status, stage, enrich, force_ocr, indexed_with, error, index_model, index_cost_usd, created_at, updated_at, indexed_at, kind, note_type, note_type_source, pinned, sort_index)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		doc.ID, doc.SHA256, nullableString(doc.FolderID), doc.Filename, doc.Title, doc.Notes, doc.MIME, doc.SizeBytes, doc.PageCount,
 		doc.Summary, doc.Markdown, doc.Status, doc.Stage, boolToInt(doc.Enrich), boolToInt(doc.ForceOCR), doc.IndexedWith, doc.Error,
-		doc.IndexModel, doc.IndexCostUSD, now.Unix(), now.Unix(), nil,
+		doc.IndexModel, doc.IndexCostUSD, doc.CreatedAt.Unix(), now.Unix(), nil,
+		doc.Kind, doc.NoteType, doc.NoteTypeSource, boolToInt(doc.Pinned), doc.SortIndex,
 	); err != nil {
 		return document{}, fmt.Errorf("insert document: %w", err)
 	}
@@ -1640,15 +1837,20 @@ func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
 }
 
 // PatchDocument applies patchDocumentHandler's whole PATCH body in ONE
-// transaction: title/notes/tags (updateMetaTx) and, when moveFolder is
-// true, folder_id (moveDocumentsTx for the single id). A bad folder_id
-// therefore rejects the whole request - it can never leave title/notes/
-// tags committed on their own. Document-not-found is checked before any
-// write regardless of which fields are present, so it always takes
-// precedence over a bad folder_id. The meta chunk is rebuilt once: by
-// moveDocumentsTx when a move happened (it always rebuilds the ids it
-// touches), or explicitly here otherwise.
-func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool) (document, error) {
+// transaction: title/notes/tags (updateMetaTx), when moveFolder is true
+// folder_id (moveDocumentsTx for the single id), and, when sortIndex is
+// non-nil, sort_index (plan §2 - a note's own promotion into a manual at a
+// given position, patchNoteHandler's "folder_id AND sort_index together" PATCH,
+// plus general enough that a plain document could be repositioned the same
+// way later). A bad folder_id therefore rejects the whole request - it can
+// never leave title/notes/tags/sort_index committed on their own.
+// Document-not-found is checked before any write regardless of which
+// fields are present, so it always takes precedence over a bad folder_id.
+// The meta chunk is rebuilt once: by moveDocumentsTx when a move happened
+// (it always rebuilds the ids it touches), or explicitly here otherwise.
+// sort_index never feeds the meta chunk (it isn't searchable text), so a
+// sort_index-only patch needs no rebuild of its own.
+func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool, sortIndex *int) (document, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1665,7 +1867,11 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
 			return document{}, err
 		}
-	} else {
+	} else if !moveFolder && sortIndex == nil {
+		// Nothing else below performs its own existence check in this
+		// combination (no move, no sort_index) - this is the only place
+		// that would otherwise happen, e.g. a PATCH body that only carried
+		// fields this handler doesn't recognise.
 		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
 		if err != nil {
 			return document{}, fmt.Errorf("patch document: check document: %w", err)
@@ -1681,6 +1887,16 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		}
 	} else if metaChanged {
 		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+			return document{}, err
+		}
+	}
+
+	if sortIndex != nil {
+		res, err := tx.Exec(`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ?`, *sortIndex, now.Unix(), id)
+		if err != nil {
+			return document{}, fmt.Errorf("patch document: sort index: %w", err)
+		}
+		if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
 			return document{}, err
 		}
 	}
@@ -2336,8 +2552,14 @@ func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []docume
 		parentKey = *parentID
 	}
 
+	// ORDER BY sort_index first, name second (plan §2): sort_index is 0 on
+	// every row until an operator actually reorders a manual's tree
+	// (ReorderManualChildren, manuals_store.go), so this is purely additive -
+	// a library that predates the manuals feature, where every sibling ties
+	// at 0, still lists exactly as it always did, alphabetically
+	// (TestDocumentStore_ListFolderOrdersByNameWhenEverySortIndexIsZero).
 	folderRows, err := s.db.Query(
-		`SELECT id, parent_id, name, created_at, updated_at FROM document_folders WHERE COALESCE(parent_id,'') = ? ORDER BY lower(name)`,
+		`SELECT id, parent_id, name, created_at, updated_at FROM document_folders WHERE COALESCE(parent_id,'') = ? ORDER BY sort_index, lower(name)`,
 		parentKey,
 	)
 	if err != nil {
@@ -2366,7 +2588,11 @@ func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []docume
 		return nil, nil, fmt.Errorf("list folder: %w", scanErr)
 	}
 
-	docRows, err := s.db.Query(`SELECT `+documentColumns+` FROM documents WHERE COALESCE(folder_id,'') = ? ORDER BY lower(filename)`, parentKey)
+	// Same sort_index-then-name ordering as the subfolder query above - a
+	// manual's children are a mix of subfolders and directly-filed documents
+	// (a photographed data plate is a legitimate section, plan §2), and both
+	// halves of ListFolder's result have to agree on what "position 3" means.
+	docRows, err := s.db.Query(`SELECT `+documentColumns+` FROM documents WHERE COALESCE(folder_id,'') = ? ORDER BY sort_index, lower(filename)`, parentKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list folder: documents: %w", err)
 	}

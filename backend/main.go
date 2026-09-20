@@ -710,6 +710,30 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
 		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
 
+		// Notes (plan "Notes and the Boat's Manual", ADR 0114): a note is a
+		// documents row with kind='note' (notes_store.go), so it shares the
+		// document library's store, folders, tags, search and this route
+		// table's tiers wholesale. "/api/notes/:id" registered after the
+		// bare "/api/notes" for readability only - see the read-tier
+		// comment above the document library's own routes on why Echo's
+		// router never needs that ordering.
+		{http.MethodGet, "/api/notes", tierRead, listNotesHandler},
+		{http.MethodGet, "/api/notes/:id", tierRead, getNoteHandler},
+
+		// Checklist runs (plan "Notes and the Boat's Manual" §3/§4, ADR
+		// 0118): a run stores which of a note's checklist items are
+		// ticked (checklist_runs_store.go), never the item list itself.
+		{http.MethodGet, "/api/notes/:id/checklist-runs/active", tierRead, getActiveChecklistRunHandler},
+
+		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116): a
+		// manual is a document_folders row with role='manual'
+		// (manuals_store.go). "/api/manuals/:id/tree" registered after the
+		// bare "/api/manuals" for readability only - see the read-tier
+		// comment above the document library's own routes on why Echo's
+		// router never needs that ordering.
+		{http.MethodGet, "/api/manuals", tierRead, listManualsHandler},
+		{http.MethodGet, "/api/manuals/:id/tree", tierRead, manualTreeHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -782,6 +806,33 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/document-folders", tierWrite, createDocumentFolderHandler},
 		{http.MethodPatch, "/api/document-folders/:id", tierWrite, patchDocumentFolderHandler},
 		{http.MethodDelete, "/api/document-folders/:id", tierWrite, deleteDocumentFolderHandler},
+
+		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
+		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
+		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
+		// Backfills for the operator who enables Mate, or upgrades the
+		// classifier, after notes already exist (plan §9's "no-Mate path").
+		// Static segments, not "/:id" routes - no ordering issue with the
+		// PATCH above either way (Echo's router: static > param > any, see
+		// the read-tier comment above the document library's own routes).
+		{http.MethodPost, "/api/notes/classify/backfill", tierWrite, notesClassifyBackfillHandler},
+		{http.MethodPost, "/api/notes/enrich/backfill", tierWrite, notesEnrichBackfillHandler},
+
+		// Checklist runs writes (plan "Notes and the Boat's Manual" §3/§4,
+		// ADR 0118). DELETE clears abandoned_at only - see
+		// abandonChecklistRunHandler's own doc comment
+		// (checklist_runs_handlers.go).
+		{http.MethodPost, "/api/notes/:id/checklist-runs", tierWrite, createChecklistRunHandler},
+		{http.MethodPatch, "/api/checklist-runs/:runId/items", tierWrite, tickChecklistItemHandler},
+		{http.MethodPost, "/api/checklist-runs/:runId/complete", tierWrite, completeChecklistRunHandler},
+		{http.MethodDelete, "/api/checklist-runs/:runId", tierWrite, abandonChecklistRunHandler},
+
+		// Manuals writes (plan "Notes and the Boat's Manual" §4, ADR
+		// 0114/0116). DELETE clears the role flag only - see
+		// clearManualHandler's own doc comment (manuals_handlers.go).
+		{http.MethodPost, "/api/manuals", tierWrite, createManualHandler},
+		{http.MethodDelete, "/api/manuals/:id", tierWrite, clearManualHandler},
+		{http.MethodPost, "/api/manuals/:id/reorder", tierWrite, reorderManualHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},

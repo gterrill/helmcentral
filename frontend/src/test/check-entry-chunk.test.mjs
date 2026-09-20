@@ -7,6 +7,7 @@ import {
   findModuleEntryScriptSrc,
   extractStaticImportSpecifiers,
   walkStaticImportGraph,
+  findForbiddenEagerChunks,
 } from '../../scripts/check-entry-chunk.mjs'
 
 // This is the guard from frontend/scripts/check-entry-chunk.mjs that fails
@@ -344,5 +345,69 @@ describe('static-import closure vs. scanForViolations', () => {
 
     const lazyEntry = violationsByChunk.find((entry) => entry.chunkPath.endsWith('lazy-bad.js'))
     expect(lazyEntry).toBeUndefined()
+  })
+})
+
+// This is the guard added for ADR 0117 (Phase 2b, the note editor): unlike
+// the lookbehind scan above, this doesn't inspect a chunk's CONTENTS at
+// all - it asserts by FILENAME that a codeSplitting group reserved for a
+// lazy-only dependency graph (editor-vendor: Slate plus Plate, this
+// project's largest bundle split yet) never turns up among the chunks
+// walkStaticImportGraph found reachable by a static import.
+describe('findForbiddenEagerChunks', () => {
+  it('flags a chunk whose filename starts with a forbidden group name plus a hyphen (the real Vite/rolldown naming shape)', () => {
+    const chunkPaths = [
+      '/dist/assets/index-ABC123.js',
+      '/dist/assets/editor-vendor-DEF456.js',
+    ]
+
+    expect(findForbiddenEagerChunks(chunkPaths, ['editor-vendor'])).toEqual([
+      '/dist/assets/editor-vendor-DEF456.js',
+    ])
+  })
+
+  it('does not flag a chunk that merely contains the forbidden name as a substring elsewhere in its path', () => {
+    // A chunk named for something that happens to start with the same
+    // prefix but isn't THIS group (e.g. a hypothetical "editor-vendor-2"
+    // feature) would still true-positive under a bare substring test; this
+    // fixture instead checks the more common false-positive shape - the
+    // forbidden name appearing earlier in the path, not as the chunk's own
+    // filename prefix.
+    const chunkPaths = ['/dist/editor-vendor-project/assets/index-ABC123.js']
+
+    expect(findForbiddenEagerChunks(chunkPaths, ['editor-vendor'])).toEqual([])
+  })
+
+  it('returns an empty array when nothing is forbidden', () => {
+    const chunkPaths = ['/dist/assets/index-ABC123.js', '/dist/assets/ui-vendor-XYZ.js']
+
+    expect(findForbiddenEagerChunks(chunkPaths, ['editor-vendor'])).toEqual([])
+  })
+
+  it('end to end: a forbidden chunk reached by a STATIC import from the entry chunk is caught, one reached only dynamically is not', () => {
+    const distDir = mkdtempSync(join(tmpdir(), 'check-entry-chunk-test-'))
+    try {
+      const write = (relPath, content) => {
+        const filePath = join(distDir, relPath)
+        mkdirSync(dirname(filePath), { recursive: true })
+        writeFileSync(filePath, content)
+        return filePath
+      }
+
+      const entryPath = write(
+        'assets/entry.js',
+        'import"./editor-vendor-BAD1.js";const lazy=()=>import(`./editor-vendor-OK2.js`);',
+      )
+      write('assets/editor-vendor-BAD1.js', 'console.log(1);')
+      write('assets/editor-vendor-OK2.js', 'console.log(2);')
+
+      const chunkPaths = walkStaticImportGraph(entryPath, distDir)
+      const forbidden = findForbiddenEagerChunks(chunkPaths, ['editor-vendor'])
+
+      expect(forbidden).toHaveLength(1)
+      expect(forbidden[0]).toBe(entryPath.replace('entry.js', 'editor-vendor-BAD1.js'))
+    } finally {
+      rmSync(distDir, { recursive: true, force: true })
+    }
   })
 })

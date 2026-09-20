@@ -44,6 +44,17 @@ export interface AppLocation {
    * no fallback to "the first display", which would silently put one
    * display's geometry on another screen. */
   displaySlug?: string | null
+  /** Revision "one panel, not three" (2026-09-20): which section (a document
+   * node in documentFolderId's manual tree, when that folder carries
+   * document_folders.role='manual') is open in the reading pane rendered by
+   * documents-panel.tsx's ManualFolderView, `/documents?folder=<id>&section=<id>`.
+   * Meaningless without documentFolderId also set - formatAppLocation only
+   * ever emits it alongside `folder=`, the same "meaningless on its own"
+   * rule the deleted /manuals route's own manualSectionId used to follow.
+   * A note (unfiled or filed) opens through the existing documentId above
+   * instead of a field of its own - it is a document with kind='note', and
+   * `/documents?document=<id>` already addresses any document by id. */
+  documentSectionId?: string | null
   /** ADR 0112: the wall-displays management editor's `/wall-displays/<slug>`
    * segment (the "editor" name, not "displaySlug", keeps it from being
    * confused with the wall route's field above). null on a bare
@@ -141,10 +152,18 @@ export function parseAppLocation(pathname: string): AppLocation {
         return { panel: 'documents', documentEditId, documentFolderId, documentId: null }
       }
     }
+    // `section` (revision "one panel, not three", 2026-09-20) is only ever
+    // meaningful alongside a folder - a manual IS a folder, so its reading
+    // pane's open section has nowhere to attach without one. Omitted
+    // entirely (not even a null key) when absent, so every existing
+    // toEqual fixture for this branch that predates `section` keeps
+    // matching unchanged.
+    const documentSectionId = params.get('section')
     return {
       panel: 'documents',
       documentFolderId,
       documentId: params.get('document'),
+      ...(documentSectionId !== null ? { documentSectionId } : {}),
     }
   }
 
@@ -209,6 +228,9 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     const params = new URLSearchParams()
     if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
     if (loc.documentId) params.set('document', loc.documentId)
+    // section is meaningless without folder - see the doc comment on
+    // documentSectionId above - so it is never emitted on its own.
+    if (loc.documentFolderId && loc.documentSectionId) params.set('section', loc.documentSectionId)
     const qs = params.toString()
     return qs ? `/documents?${qs}` : '/documents'
   }

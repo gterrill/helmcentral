@@ -667,13 +667,26 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // from inside a goroutine below is serialised through mu.
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
-// get_tides, estimate_passage, read_help) only reads: none of them writes
-// to the conversation store, settings, or any other shared state, so
-// running a round's calls in parallel needs no locking beyond r.emit's own
-// and failures' own (see assistantToolFailures's doc comment for why that
-// one is not just guarded by this round's local mu). If a future tool ever
-// needs to mutate shared state, it must either take its own lock or be
-// called out here as one that has to run serially.
+// get_tides, estimate_passage, read_help, search_documents, read_document)
+// only reads: none of them writes to the conversation store, settings, the
+// document store, or any other shared state, so running a round's calls in
+// parallel needs no locking beyond r.emit's own and failures' own (see
+// assistantToolFailures's doc comment for why that one is not just guarded
+// by this round's local mu).
+//
+// This is a RULE, not an observation about the tools that happen to exist
+// today. A write-capable tool was designed and deliberately not built: the
+// notes feature wanted a `draft_note`, and the affordance shipped as a
+// "Save as note" button on an assistant message instead (ADR 0116/0119),
+// precisely so this contract holds. Mate drafts nothing and writes
+// nothing; the operator's tap creates the note. A retried or cancelled
+// tool call would also have produced duplicate notes with no idempotency
+// key - something sha256 UNIQUE cannot catch, since two drafts of the same
+// text carry different UUIDs and so hash differently.
+//
+// If a future tool ever does need to mutate shared state, it must either
+// take its own lock or be called out here as one that has to run
+// serially - and whoever adds it should read the paragraph above first.
 func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, error) {
 	for _, call := range calls {
 		if call.ID == "" {

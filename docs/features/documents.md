@@ -15,6 +15,10 @@ attached straight from Mate's composer - see
 [Documents](assistant.md#documents) on the Mate page - and a chip on a past
 message opens the same viewer this panel uses.
 
+Two rows in that same listing are worth their own page: notes you capture
+yourself, and folders marked as a manual for reading front to back. See
+[Notes and the manual](notes-and-the-manual.md).
+
 ## What gets indexed, and what it costs
 
 Text files, and PDFs with a real text layer already in them (the kind

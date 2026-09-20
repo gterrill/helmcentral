@@ -78,7 +78,7 @@
 // and trust than adding a dependency on that unstable a foundation.
 
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const MAX_REGEX_LITERAL_SCAN = 4096
@@ -518,6 +518,53 @@ export function walkStaticImportGraph(entryChunkPath, distDir) {
   return chunkPaths
 }
 
+// PER-MODULE CHUNK NAME ASSERTION
+// --------------------------------
+// The lookbehind scan above is a mechanical property of source text - it
+// catches ANY dependency that introduces the pattern, known or not. This
+// second guard is narrower and deliberate: certain vite.config.ts
+// `codeSplitting.groups` chunks are named for dependency graphs that must
+// NEVER load eagerly regardless of what syntax they contain, because their
+// sheer size (not a parse error) is the risk. `editor-vendor`
+// (frontend/vite.config.ts, ADR 0117) is the first of these - Slate plus
+// Plate, the note editor's dependency graph, by far the largest this
+// project has ever put behind a React.lazy() boundary. A regression here
+// wouldn't blank the kiosk the way a lookbehind literal does; it would just
+// make the kiosk (an ODROID on WPE WebKit, ADR 0088/0110) download and
+// parse several hundred KB of a rich-text editor it never opens, on every
+// boot, forever - silent enough that nobody would notice until someone
+// measured kiosk cold-start time.
+//
+// This is a straightforward name check on eagerly-loaded chunks'
+// FILENAMES, not their contents - the codeSplitting group's `name` field
+// becomes the chunk's filename prefix (`<name>-<hash>.js`, verified against
+// this project's own `dist/assets/` output for every existing group:
+// `dashboard-vendor-*.js`, `chart-vendor-*.js`, `markdown-vendor-*.js`,
+// ...), so a chunk reachable by a STATIC import (walkStaticImportGraph's
+// own result, exactly the set the lookbehind scan above already treats as
+// "loads eagerly") whose filename starts with a forbidden group's name is
+// definitive proof that group ended up in the eager graph - no source
+// inspection needed, unlike the lookbehind case.
+const FORBIDDEN_EAGER_CHUNK_NAME_PREFIXES = ['editor-vendor']
+
+/**
+ * Filters `chunkPaths` (as returned by walkStaticImportGraph - i.e. every
+ * chunk reachable by a STATIC import from the entry chunk) down to the ones
+ * whose filename starts with one of `forbiddenNamePrefixes` - a
+ * `codeSplitting.groups` chunk name (vite.config.ts) that must never load
+ * eagerly.
+ *
+ * @param {string[]} chunkPaths
+ * @param {string[]} forbiddenNamePrefixes
+ * @returns {string[]}
+ */
+export function findForbiddenEagerChunks(chunkPaths, forbiddenNamePrefixes) {
+  return chunkPaths.filter((chunkPath) => {
+    const name = basename(chunkPath)
+    return forbiddenNamePrefixes.some((prefix) => name.startsWith(`${prefix}-`) || name === `${prefix}.js`)
+  })
+}
+
 function formatViolation(violation, chunkPath) {
   return (
     `Regex lookbehind assertion "${violation.pattern}" found in ${chunkPath}\n` +
@@ -554,6 +601,27 @@ function main() {
     chunkPaths = walkStaticImportGraph(entryChunkPath, distDir)
   } catch (err) {
     console.error(`check-entry-chunk: ${err.message}`)
+    process.exit(1)
+    return
+  }
+
+  const forbiddenEagerChunks = findForbiddenEagerChunks(chunkPaths, FORBIDDEN_EAGER_CHUNK_NAME_PREFIXES)
+  if (forbiddenEagerChunks.length > 0) {
+    console.error(
+      `check-entry-chunk: FAILED - found ${forbiddenEagerChunks.length} chunk(s) reachable by a STATIC ` +
+        `import from the entry chunk whose name marks them as a chunk that must never load eagerly:`,
+    )
+    console.error('')
+    for (const chunkPath of forbiddenEagerChunks) console.error(`  ${chunkPath}`)
+    console.error('')
+    console.error(
+      'These chunk names (vite.config.ts codeSplitting.groups) are reserved for dependency graphs this ' +
+        "project deliberately keeps behind a React.lazy() boundary - editor-vendor is the note editor's " +
+        "own Plate/Slate dependency tree (ADR 0117), which the wall-display kiosk never opens. Something " +
+        'now imports it (or a module the group\'s test() also matches) via a static `import`/`export ... ' +
+        'from`, not a dynamic `import()`, pulling the whole graph into the startup bundle. Find the static ' +
+        'import chain and move it behind a dynamic import() instead.',
+    )
     process.exit(1)
     return
   }

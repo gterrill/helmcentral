@@ -40,6 +40,18 @@ export interface DocumentRecord {
   created_at: string
   updated_at: string
   indexed_at: string | null
+  // Revision "one panel, not three" (2026-09-20): documentJSON
+  // (backend/documents_handlers.go) has always sent these five fields
+  // unconditionally on every document, including a plain kind='file' row -
+  // use-notes.ts's own NoteRecord already types them, this listing just
+  // never had a reason to read them until Documents itself started
+  // rendering the note-type facet and icon column. Not a backend change:
+  // the wire shape is unchanged, only this type catches up to it.
+  kind: string
+  note_type: string
+  note_type_source: string
+  pinned: boolean
+  sort_index: number
 }
 
 export interface DocumentFolder {

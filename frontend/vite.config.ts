@@ -180,7 +180,20 @@ export default defineConfig(({ mode }) => ({
                 id.includes('react-grid-layout') ||
                 id.includes('react-resizable') ||
                 id.includes('@base-ui') ||
-                id.includes('@floating-ui'),
+                // Path-segment, not a bare `id.includes('@floating-ui')`:
+                // @base-ui/react only reaches @floating-ui/react-dom (and
+                // its own @floating-ui/dom -> @floating-ui/core chain), not
+                // the separate @floating-ui/react package - `npm ls
+                // @floating-ui/react` shows the only thing in this project
+                // that depends on it is @platejs/floating (note-editor-
+                // impl.tsx's lazy chunk, ADR 0117). A loose substring match
+                // would sweep that one into this EAGER chunk right alongside
+                // the ones @base-ui/react genuinely needs, the identical
+                // "manualChunks groups by module id, not import graph
+                // reachability" trap chart-vendor's own comment describes.
+                id.includes('/node_modules/@floating-ui/core/') ||
+                id.includes('/node_modules/@floating-ui/dom/') ||
+                id.includes('/node_modules/@floating-ui/react-dom/'),
             },
             {
               // recharts split out of dashboard-vendor on purpose (kiosk
@@ -212,6 +225,43 @@ export default defineConfig(({ mode }) => ({
                 // silently route it into markdown-vendor instead of
                 // ui-vendor.
                 id.includes('/node_modules/marked/'),
+            },
+            {
+              // The note editor's own dependency graph (note-editor-
+              // impl.tsx, reached only through note-editor.tsx's
+              // React.lazy() - ADR 0117, this task's kiosk guard). By far
+              // the largest chunk this project has ever split out: Slate
+              // plus Plate. A dedicated, NAMED group (rather than letting
+              // it fall through to rolldown's automatic chunking) is what
+              // lets scripts/check-entry-chunk.mjs assert by name that
+              // nothing eagerly-loaded ever pulls this chunk in - automatic
+              // chunking gives every lazy dependency graph an unpredictable
+              // hashed name with nothing stable to assert against.
+              //
+              // @floating-ui/react (not @floating-ui/core/dom/react-dom -
+              // see dashboard-vendor's own comment on the distinction)
+              // arrives via @platejs/floating and belongs here, not in
+              // dashboard-vendor, because nothing eager uses it.
+              //
+              // @radix-ui/react-slot and @radix-ui/react-compose-refs
+              // (platejs -> @udecode/react-utils) are deliberately NOT
+              // listed here. Both are ref/prop-merging utilities with no
+              // portal, focus-trap or dismiss layer of their own (verified
+              // via `npm ls` when this dependency was added - see
+              // note-editor-impl.tsx's own module comment and ADR 0117), so
+              // ADR 0117's Risk 7 concern - two focus/portal/dismiss models
+              // in one app - does not apply, and there's no reason to name
+              // them: with nothing eager importing them either, rolldown's
+              // automatic chunking already keeps them out of the startup
+              // bundle same as everything else this project deliberately
+              // leaves unmatched (see the "No catch-all group" note below).
+              name: 'editor-vendor',
+              priority: 3,
+              test: (id) =>
+                id.includes('/node_modules/platejs/') ||
+                id.includes('/node_modules/@platejs/') ||
+                id.includes('/node_modules/@udecode/') ||
+                id.includes('/node_modules/@floating-ui/react/'),
             },
             {
               name: 'ui-vendor',
