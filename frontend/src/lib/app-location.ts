@@ -25,6 +25,18 @@ export interface AppLocation {
    * initialLocation, rather than feeding it back in on every render the way
    * it does documentFolderId - see that effect's own comment. */
   documentId?: string | null
+  /** ADR 0115 §2: the Details page's `/documents/<documentId>`
+   * segment - a full-panel page for one document's metadata (title, notes,
+   * tags, the read-only indexing facts), reached from the listing rather
+   * than the viewer's ?document= dialog above. Absent on the ordinary browse
+   * shape (that shape's own three keys - panel/documentFolderId/documentId -
+   * are unchanged so existing `toEqual` tests keep passing), present and the
+   * others null'd out whenever the Details page is what the route names.
+   * documentFolderId still carries the current folder on this shape too
+   * (see formatAppLocation's own comment) - without it, Back out of the
+   * Details page would land the listing at the root rather than the folder
+   * it was opened from. */
+  documentEditId?: string | null
   /** ADR 0110: the wall display route's `/display/<slug>` segment. null on
    * a bare `/display` (and absent everywhere else). Never validated against
    * the configured displays here — an unknown or absent slug is a distinct,
@@ -112,11 +124,26 @@ export function parseAppLocation(pathname: string): AppLocation {
   // ADR 0106 F1: the current folder and, on a deep link from a Mate
   // attachment chip, a document to open in the viewer - both optional and
   // independent of each other, so query params rather than a path segment.
+  //
+  // ADR 0115 §2: a second path segment names the Details page
+  // instead - `/documents/<documentId>` - since that page has its own URL
+  // (unlike the viewer, which is a dialog over the listing, not a
+  // navigation). A segment present but unusable (fails to decode, or decodes
+  // to '') falls back to the ordinary browse shape below rather than a
+  // half-parsed Details route, the same tolerance decodeSegment's other
+  // callers already have for a mistyped or stale link.
   if (first === 'documents') {
     const params = new URLSearchParams(search)
+    const documentFolderId = params.get('folder')
+    if (second !== undefined) {
+      const documentEditId = decodeSegment(second)
+      if (documentEditId !== null && documentEditId !== '') {
+        return { panel: 'documents', documentEditId, documentFolderId, documentId: null }
+      }
+    }
     return {
       panel: 'documents',
-      documentFolderId: params.get('folder'),
+      documentFolderId,
       documentId: params.get('document'),
     }
   }
@@ -165,6 +192,20 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
   }
 
   if (loc.panel === 'documents') {
+    // The Details page's folder is carried as a query param on the SAME
+    // /documents/<id> path segment shape the ordinary browse form uses -
+    // deliberately, so Back out of the page (which restores documentFolderId
+    // but clears documentEditId - see App.tsx's applyAppLocation) lands on
+    // the folder the operator actually came from rather than the root.
+    // documentId (the viewer deep link) is never serialized alongside a
+    // Details page: the two are mutually exclusive destinations, and
+    // App.tsx's own URL sync effect only ever sets one or the other.
+    if (loc.documentEditId) {
+      const params = new URLSearchParams()
+      if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
+      const qs = params.toString()
+      return qs ? `/documents/${encodeURIComponent(loc.documentEditId)}?${qs}` : `/documents/${encodeURIComponent(loc.documentEditId)}`
+    }
     const params = new URLSearchParams()
     if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
     if (loc.documentId) params.set('document', loc.documentId)

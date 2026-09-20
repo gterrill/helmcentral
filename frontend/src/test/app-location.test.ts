@@ -120,6 +120,39 @@ describe('parseAppLocation', () => {
     })
   })
 
+  // ADR 0115 §2: the Details page's own route. Carries the folder
+  // on purpose (unlike the viewer's ?document=, which never needs one - the
+  // viewer is a dialog over whatever folder is already open) - without it,
+  // Back out of the Details page would land the listing at the root instead
+  // of the folder it was opened from.
+  it('parses /documents/<documentId> as the Details page, root folder', () => {
+    expect(parseAppLocation('/documents/doc-1')).toEqual({
+      panel: 'documents', documentEditId: 'doc-1', documentFolderId: null, documentId: null,
+    })
+  })
+
+  it('parses /documents/<documentId>?folder=<id> as the Details page, that folder', () => {
+    expect(parseAppLocation('/documents/doc-1?folder=f1')).toEqual({
+      panel: 'documents', documentEditId: 'doc-1', documentFolderId: 'f1', documentId: null,
+    })
+  })
+
+  it('decodes a percent-encoded Details page document id', () => {
+    expect(parseAppLocation('/documents/a%20b')).toEqual({
+      panel: 'documents', documentEditId: 'a b', documentFolderId: null, documentId: null,
+    })
+  })
+
+  // decodeSegment's own tolerance (see its doc comment): a malformed escape
+  // degrades to the ordinary browse shape rather than a half-parsed Details
+  // route, the same way every other caller of decodeSegment falls back to
+  // its own "nothing named" state instead of surfacing a parse error.
+  it('treats a malformed percent-escape in the Details page id as the ordinary browse shape', () => {
+    expect(parseAppLocation('/documents/%E0%A4%A')).toEqual({
+      panel: 'documents', documentFolderId: null, documentId: null,
+    })
+  })
+
   it('parses /mate as the Mate panel', () => {
     expect(parseAppLocation('/mate')).toEqual({ panel: 'assistant', conversationId: null })
   })
@@ -254,6 +287,24 @@ describe('formatAppLocation', () => {
       '/documents?folder=f1&document=d1',
     )
   })
+
+  it('formats the Details page as /documents/<documentId>', () => {
+    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1' }, ctx)).toBe('/documents/doc-1')
+  })
+
+  it('formats the Details page with a folder as /documents/<documentId>?folder=<id>', () => {
+    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1', documentFolderId: 'f1' }, ctx)).toBe(
+      '/documents/doc-1?folder=f1',
+    )
+  })
+
+  it('never serializes documentId alongside a Details page documentEditId', () => {
+    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1', documentId: 'd2' }, ctx)).toBe('/documents/doc-1')
+  })
+
+  it('encodes the Details page document id', () => {
+    expect(formatAppLocation({ panel: 'documents', documentEditId: 'a b' }, ctx)).toBe('/documents/a%20b')
+  })
 })
 
 describe('parse/format fixed point', () => {
@@ -263,6 +314,7 @@ describe('parse/format fixed point', () => {
     '/display', '/display/flybridge',
     '/wall-displays', '/wall-displays/flybridge',
     '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
+    '/documents/doc-1', '/documents/doc-1?folder=f1',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {

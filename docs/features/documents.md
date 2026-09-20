@@ -9,7 +9,8 @@ summary and a few suggested tags.
 
 The sidebar's **Documents** panel is where this happens day to day: browse
 folders, upload by button or drag-and-drop, search, and open, download,
-rename, move or reindex anything already in the library. A file can also be
+rename, move, reindex or edit the details of anything already in the
+library. A file can also be
 attached straight from Mate's composer - see
 [Documents](assistant.md#documents) on the Mate page - and a chip on a past
 message opens the same viewer this panel uses.
@@ -36,7 +37,8 @@ one-page scanned invoice cost $0.0023, the same document split across two
 pages cost $0.0046, and a photographed receipt cost $0.0012, all measured
 against a live OpenRouter account. Every document tracks what's actually
 been spent reading it, added up across however many times it's been
-reindexed, not just the last pass.
+reindexed, not just the last pass. That figure is on the document's own
+Details page, under Indexing - see below.
 
 **What leaves the boat:** with Mate off, nothing does. Local extraction
 never talks to the internet. With Mate on, an uploaded document's content
@@ -58,6 +60,12 @@ file manager's folders do. A document sits in exactly one folder, or none
 where it's filed; the file itself is untouched, so refiling something
 never means re-uploading it.
 
+**Move…** opens a folder picker you can browse the same way you browse the
+panel, and the destination doesn't have to exist yet: type a name, click
+**Create folder**, and the picker makes it inside whatever folder it's
+showing and drops straight into it, so **Move here** means the folder you
+just made. Filing the first receipt of a new year is one trip, not three.
+
 Every document carries:
 
 - A **title**, typed at upload or left blank and filled in automatically
@@ -74,6 +82,26 @@ Title, filename, folder, tags, summary and notes are all searchable
 alongside the document's own text, not as a separate lookup: a document
 titled "Impeller kit" turns up on the word "impeller" even before its
 contents have ever been read.
+
+### The Details page
+
+**Details…** on a document's row menu - or the **Details** button in the
+viewer - opens that document's own page, and it's where all three of those
+are edited after the fact. Fix a title the scan got wrong, write down where
+the paper original is filed, add the tag you'd actually search for. Tags
+you add show as your own; the ones Mate suggested sit beneath them under
+**Suggested by Mate**, each with a **Keep** that adopts it as yours.
+Nothing is written until you press **Save**, and **Discard** puts the page
+back the way you found it. **Rename** on the row menu is still there for
+when the title is all you want to change.
+
+The lower half of the page is the document itself, read-only: its status
+and, if it failed, why; the file's own name, type, size and page count;
+what read it and which model, if Mate did; when it was uploaded and last
+indexed; the summary; and the **Indexing cost**, what reading this one
+document has cost so far, added up across every reindex. A document read
+on board with Mate switched off reads $0.0000, because nothing about it
+ever left the boat.
 
 ## File types and limits
 
