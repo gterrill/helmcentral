@@ -370,32 +370,23 @@ describe('App sidebar navigation', () => {
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
   })
 
-  // ADR 0119: capture is a global action, reachable from the header on
-  // every screen (not just Documents) - the dashboard grid is what's on
-  // screen for every other test in this file, so this is exactly the
-  // "from any screen" case the ADR calls for.
-  it('opens the capture sheet from the header button, without leaving the dashboard', async () => {
+  // ADR 0121 reverses ADR 0119: capture is no longer a global action. The
+  // header button and the Alt+N shortcut are gone - a note is created only
+  // from Documents' own New → Note menu (documents-panel.test.tsx covers
+  // that path).
+  it('has no header capture-a-note button', () => {
     render(<App />)
 
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Capture a note' }))
-
-    // A longer timeout than findByRole's default 1s: this is a lazy-loaded
-    // chunk (note-capture-sheet.tsx, ADR 0119) resolving via dynamic
-    // import(), and observed flaky at the default under the full suite's
-    // own parallel CPU load (a pre-existing, unrelated lazy-chunk test in
-    // note-editor.test.tsx hits the identical timing issue in the same
-    // full-suite run) even though it settles well within 1s standalone.
-    expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
-    expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Capture a note' })).not.toBeInTheDocument()
   })
 
-  it('opens the capture sheet with Alt+N from anywhere in the shell', async () => {
+  it('opens nothing on Alt+N', () => {
     render(<App />)
 
     fireEvent.keyDown(window, { key: 'n', altKey: true, code: 'KeyN' })
 
-    expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Capture a note' })).not.toBeInTheDocument()
   })
 
   it('footers the sidebar with the version the backend reports', async () => {

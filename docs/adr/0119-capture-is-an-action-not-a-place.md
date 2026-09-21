@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-20). Ships alongside the revision recorded in
-[ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md)'s
-addendum, which folds the Notes and Manuals panels into Documents.
+Accepted (2026-09-20). The global header action and Alt+N are superseded by
+ADR 0121; the rest stands.
 
 ## Context
 

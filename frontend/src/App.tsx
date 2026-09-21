@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Mic,
   MicOff,
-  NotebookPen,
   Radar as RadarIcon,
   Route,
   Settings,
@@ -48,18 +47,16 @@ const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((m
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
 const SettingsPage = lazy(() => import('@/components/settings/settings-page').then((mod) => ({ default: mod.SettingsPage })))
-// MateSheet, HelpSheet and NoteCaptureSheet (unlike the panels above) fetch
-// nothing and run no effects until they've actually been opened - see the
-// `hasOpened` latches below, next to where each is rendered, for why that
-// makes them safe to lazy-load and mount only on first open rather than
-// always up front. NoteCaptureSheet (ADR 0119) is the global "capture a
-// note" sheet - opened from the header action/keyboard shortcut below AND
-// from Documents' own New → Note menu item, both sharing this one instance
-// so there is exactly one capture surface regardless of which trigger
-// opened it (revision "one panel, not three", 2026-09-20).
+// MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
+// no effects until they've actually been opened - see the `hasOpened`
+// latches below, next to where each is rendered, for why that makes them
+// safe to lazy-load and mount only on first open rather than always up
+// front. NoteCaptureSheet (ADR 0119) used to live here too, as a global
+// sheet the header action and Alt+N both opened; ADR 0121 moved it into
+// documents-panel.tsx, which now owns it entirely - a note is created only
+// from Documents' own New → Note menu.
 const MateSheet = lazy(() => import('@/components/mate-sheet').then((mod) => ({ default: mod.MateSheet })))
 const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ default: mod.HelpSheet })))
-const NoteCaptureSheet = lazy(() => import('@/components/documents/note-capture-sheet').then((mod) => ({ default: mod.NoteCaptureSheet })))
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,7 +174,6 @@ import { EngineProfileDialog } from '@/components/engine-profile-dialog'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import { useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
-import type { NoteType } from '@/hooks/use-notes'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -587,19 +583,6 @@ export function App() {
   // true, not one render later.
   const mateSheetHasOpenedRef = useRef(false)
   if (mateSheetOpen) mateSheetHasOpenedRef.current = true
-  // ADR 0119: capture is a global action - this is the one sheet both the
-  // header button/keyboard shortcut below and Documents' own New → Note
-  // menu item (documents-panel.tsx's onCaptureNote prop) open. Same
-  // lazy-mount-on-first-open latch as mateSheetHasOpenedRef above, and for
-  // the same reason: useNotes() (inside the sheet) fetches on mount, so
-  // there is nothing for it to do before the operator has ever opened it.
-  const [captureOpen, setCaptureOpen] = useState(false)
-  // Which kind the capture sheet opens on. undefined is Auto, which is what
-  // the global header action and Alt+N both pass - only Documents'
-  // New > Note submenu ever names a kind (ADR 0119).
-  const [captureType, setCaptureType] = useState<NoteType | undefined>(undefined)
-  const captureHasOpenedRef = useRef(false)
-  if (captureOpen) captureHasOpenedRef.current = true
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
   // thread was active there. Null means "whatever the panel already had",
@@ -807,32 +790,6 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [assistantVoiceConfig.voiceInput, isDisplay, mateVoicePushToTalk, mateVoiceCancel, mateVoiceListening])
-
-  // ADR 0119: Alt+N opens the capture sheet from anywhere in the shell -
-  // same Alt+<letter>, ignore-while-typing shape as Alt+M above, deliberately
-  // independent of assistantVoiceConfig/Mate: capture is a core feature, not
-  // an assistant add-on, so its shortcut is never gated on Mate being
-  // configured. Gated on canWrite like every other write affordance, and
-  // never active on the kiosk (isDisplay), which has no capture affordance
-  // at all.
-  useEffect(() => {
-    if (!canWrite || isDisplay) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      const isEditable = target !== null
-        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-
-      if (event.altKey && event.code === 'KeyN' && !isEditable) {
-        event.preventDefault()
-        setCaptureType(undefined)
-        setCaptureOpen(true)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [canWrite, isDisplay])
 
   // Gates the two URL-writing effects below on the shell actually being
   // shown (mirrors the render gate further down): while auth is still
@@ -2468,7 +2425,6 @@ export function App() {
             initialSectionId={documentsSectionId}
             onSectionChange={setDocumentsSectionId}
             onOpenHelp={openHelp}
-            onCaptureNote={(type) => { setCaptureType(type); setCaptureOpen(true) }}
             // ADR 0120: the toolbar's Mate failure line links straight to
             // Settings → Assistant, the same requestNavigate wiring
             // AssistantDrawer's own "Open Mate settings" button uses below.
@@ -2848,22 +2804,6 @@ export function App() {
             >
               <CircleHelp className="h-4 w-4" />
             </Button>
-            {/* ADR 0119: capture is a global action, not a place - reachable
-                from any screen via this header button and the Alt+N
-                shortcut above, both opening the same sheet Documents' own
-                New → Note menu item opens (documents-panel.tsx). Gated on
-                canWrite like every other write affordance in this header. */}
-            {canWrite && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Capture a note"
-                title="Capture a note (Alt+N)"
-                onClick={() => { setCaptureType(undefined); setCaptureOpen(true) }}
-              >
-                <NotebookPen className="h-4 w-4" />
-              </Button>
-            )}
             {/* ADR 0093 voice phase: opens the Mate sheet over whatever page is
                 behind it, without navigating away - the shell-wide "push to
                 talk" entry point the plan calls for, though this button is
@@ -3063,15 +3003,6 @@ export function App() {
               openMate(question)
             }}
           />
-        </Suspense>
-      )}
-
-      {/* ADR 0119: the one capture sheet, opened from the header button/
-          Alt+N above and from Documents' own New → Note menu item alike -
-          see captureHasOpenedRef's own comment for the lazy-mount reasoning. */}
-      {captureHasOpenedRef.current && (
-        <Suspense fallback={null}>
-          <NoteCaptureSheet open={captureOpen} onOpenChange={setCaptureOpen} initialType={captureType} />
         </Suspense>
       )}
 

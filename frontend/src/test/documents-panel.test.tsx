@@ -978,40 +978,42 @@ describe('DocumentsPanel', () => {
     })
   })
 
-  // Revision "one panel, not three" (2026-09-20): capture is a global
-  // action reachable two ways (ADR 0119) - the header/Alt+N path is
-  // app-sidebar-navigation.test.tsx's job (it owns the sheet); this only
-  // proves Documents' own New → Note menu item reaches the SAME callback
-  // prop App.tsx wires to it.
+  // ADR 0121: capture is no longer a global action - DocumentsPanel owns
+  // NoteCaptureSheet entirely now, with no onCaptureNote prop for App.tsx
+  // (or a test) to reach in from outside. New → Note is the only door in.
   describe('capture: New → Note', () => {
     // One New menu, Folder first, Note carrying its kinds in a submenu.
     // Auto leads that submenu and must pass NO kind, so the backend's own
     // classifier answers rather than the menu guessing on the operator's
-    // behalf (ADR 0119).
-    it('New → Note → Auto calls onCaptureNote with no kind', async () => {
-      const onCaptureNote = vi.fn()
-      render(<DocumentsPanel onCaptureNote={onCaptureNote} />)
+    // behalf (ADR 0116).
+    it('New → Note → Auto opens the capture sheet on Auto, with no onCaptureNote prop anywhere', async () => {
+      render(<DocumentsPanel />)
 
       fireEvent.click(screen.getByRole('button', { name: 'New' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Auto' }))
 
-      expect(onCaptureNote).toHaveBeenCalledWith()
+      // A longer timeout than findByRole's default 1s: this is a
+      // lazy-loaded chunk (note-capture-sheet.tsx) resolving via dynamic
+      // import(), the same flakiness app-sidebar-navigation.test.tsx's
+      // deleted equivalent test used to guard against.
+      expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Note type' })).toHaveTextContent('Auto')
     })
 
-    it('New → Note → a kind passes that kind', async () => {
-      const onCaptureNote = vi.fn()
-      render(<DocumentsPanel onCaptureNote={onCaptureNote} />)
+    it('New → Note → a kind opens the sheet already on that kind', async () => {
+      render(<DocumentsPanel />)
 
       fireEvent.click(screen.getByRole('button', { name: 'New' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Quirk' }))
 
-      expect(onCaptureNote).toHaveBeenCalledWith('quirk')
+      expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Note type' })).toHaveTextContent('Quirk')
     })
 
     it('offers every kind the classifier can produce, Auto first', async () => {
-      render(<DocumentsPanel onCaptureNote={vi.fn()} />)
+      render(<DocumentsPanel />)
 
       fireEvent.click(screen.getByRole('button', { name: 'New' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
@@ -1022,7 +1024,7 @@ describe('DocumentsPanel', () => {
     })
 
     it('has no second create control beside New', () => {
-      render(<DocumentsPanel onCaptureNote={vi.fn()} />)
+      render(<DocumentsPanel />)
 
       expect(screen.queryByRole('button', { name: 'Add Note' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Choose note type' })).not.toBeInTheDocument()

@@ -11,10 +11,8 @@ enough to see the shape.
 
 ## 1. Capture as you go
 
-**Capture a note** is in the header, on every screen, so there is nowhere
-you have to go first. Alt+N opens the same sheet from the keyboard. Write
-the note and press Ctrl+Enter, or Cmd+Enter on a Mac, or use the Capture
-button.
+Open **Documents** and choose **New → Note**. Write the note and press
+Ctrl+Enter, or Cmd+Enter on a Mac, or use the Capture button.
 
 Nothing else is required. No title, no folder, no formatting - the type
 field defaults to **Auto** and Helmcentral works it out from what you wrote.

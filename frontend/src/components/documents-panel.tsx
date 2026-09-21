@@ -20,7 +20,7 @@ import {
   Upload as UploadIcon,
   Sparkles,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import {
@@ -91,6 +91,15 @@ import { NoteTypeIconButton } from './documents/note-type-icon-button'
 import { UnfiledNotesView } from './documents/unfiled-notes-view'
 import { NoteEditor } from './note-editor'
 import { NoteMarkdown } from './note-markdown'
+
+// ADR 0121: this panel is now the ONLY place a note gets created - the
+// global header action and Alt+N shortcut ADR 0119 built are gone. Lazy
+// like every other sheet in the shell: NoteCaptureSheet fetches nothing and
+// runs no effects until opened (useNotes() inside it fetches on mount), so
+// there is nothing for it to do before the operator has ever picked New →
+// Note - see captureHasOpenedRef's own comment, next to where it's
+// rendered, for the mount-once-opened latch.
+const NoteCaptureSheet = lazy(() => import('./documents/note-capture-sheet').then((mod) => ({ default: mod.NoteCaptureSheet })))
 
 // ADR 0106 F1: the Documents panel. All data (folder browsing, search, tags,
 // every write) comes from useDocuments(folderId); uploads reuse
@@ -315,11 +324,6 @@ export interface DocumentsPanelProps {
    * ever reads it), same as app-location.ts's own documentSectionId. */
   initialSectionId?: string | null
   onSectionChange?: (id: string | null) => void
-  /** ADR 0119: opens the global capture sheet - the same one the header
-   * action/Alt+N shortcut open, App.tsx's onCaptureNote wired straight to
-   * its own setCaptureOpen(true). Optional so a test that never clicks
-   * New → Note doesn't need it, same pattern as onEditDocument above. */
-  onCaptureNote?: (type?: NoteType) => void
   /** Opens the in-app help at a given target - passed straight through the
    * "What to put in it" link in EmptyManualsState's replacement (the
    * revision drops the dedicated empty state, but a Manual-kind folder can
@@ -349,7 +353,6 @@ export function DocumentsPanel({
   onEditDocument,
   initialSectionId = null,
   onSectionChange,
-  onCaptureNote,
   onOpenHelp,
   onOpenAssistantSettings,
 }: DocumentsPanelProps) {
@@ -382,6 +385,22 @@ export function DocumentsPanel({
   // regardless of the list filter) - see the "the viewer" section below.
   const unfiled = useNotes({ unfiledOnly: true })
   const [view, setView] = useState<'browse' | 'unfiled'>('browse')
+
+  // ── capture sheet (ADR 0121) ────────────────────────────────────────────
+  // The New → Note menu below is the only way in now - no more global
+  // header button/Alt+N handing this panel a type through a callback prop.
+  // Same lazy-mount-on-first-open latch App.tsx used to keep for its sheets:
+  // this ref goes true the first time captureOpen does and never resets, so
+  // NoteCaptureSheet mounts once, on first use, and then stays mounted
+  // across later closes.
+  const [captureOpen, setCaptureOpen] = useState(false)
+  const [captureType, setCaptureType] = useState<NoteType | undefined>(undefined)
+  const captureHasOpenedRef = useRef(false)
+  if (captureOpen) captureHasOpenedRef.current = true
+  const openCapture = useCallback((type?: NoteType) => {
+    setCaptureType(type)
+    setCaptureOpen(true)
+  }, [])
 
   const navigate = useCallback((id: string | null) => {
     setFolderId(id)
@@ -872,11 +891,12 @@ export function DocumentsPanel({
               root) and Note carrying its kinds in a submenu.
 
               Auto leads that submenu, and picking it sends no `type` at
-              all so the Go classifier answers (ADR 0119). The submenu does
-              cost a hover before Auto, which is why the GLOBAL header
-              action and Alt+N still exist and still open capture on Auto
-              in one press - that is the path R1 is about. This menu is the
-              discoverable path, not the fast one. */}
+              all so the Go classifier answers (ADR 0116). ADR 0119 once
+              also gave capture a global header button and an Alt+N
+              shortcut reachable from any screen; ADR 0121 removed both -
+              a note is a document, and this is where every other document
+              this panel creates already starts, so this menu is now the
+              only path in, not just the discoverable one. */}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -895,7 +915,7 @@ export function DocumentsPanel({
                   <Pencil className="h-4 w-4" aria-hidden="true" /> Note
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => onCaptureNote?.()}>
+                  <DropdownMenuItem onClick={() => openCapture()}>
                     <Sparkles className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> Auto
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -909,7 +929,7 @@ export function DocumentsPanel({
                     // is 'note' either way - this is a label, not a type.
                     const label = type === 'note' ? 'Plain note' : meta.label
                     return (
-                      <DropdownMenuItem key={type} onClick={() => onCaptureNote?.(type)}>
+                      <DropdownMenuItem key={type} onClick={() => openCapture(type)}>
                         <Icon className={cn('h-4 w-4', meta.className)} aria-hidden="true" /> {label}
                       </DropdownMenuItem>
                     )
@@ -1446,6 +1466,28 @@ export function DocumentsPanel({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* ADR 0121: the one capture sheet, now reached only through New →
+          Note above. onCaptured opens the fresh note straight in the
+          viewer - setViewerId already fetches a document that isn't in
+          whatever's currently loaded (see its own effect's comment), which
+          covers a brand new unfiled note without this panel needing a
+          second lookup path. The sheet's own useNotes() instance is
+          separate from `unfiled` above (no shared cache between hook
+          instances - use-notes.ts's own doc comment), so a plain
+          setViewerId here would open the note without the Unfiled notes
+          count or list ever learning it exists; unfiled.refresh() closes
+          that gap now that both live in the same component. */}
+      {captureHasOpenedRef.current && (
+        <Suspense fallback={null}>
+          <NoteCaptureSheet
+            open={captureOpen}
+            onOpenChange={setCaptureOpen}
+            initialType={captureType}
+            onCaptured={(id) => { setViewerId(id); void unfiled.refresh() }}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

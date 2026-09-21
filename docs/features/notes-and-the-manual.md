@@ -13,11 +13,9 @@ captured and searchable immediately, filed alongside everything else in
 
 ## Capturing a note
 
-**Capture a note** sits in the header, reachable from any screen, so writing
-something down never means navigating away from whatever you were doing
-first. Alt+N opens the same sheet from the keyboard. Inside Documents, **New
-→ Note** opens the identical sheet, for anyone who goes looking for it there
-instead.
+Open **Documents** and choose **New → Note**. Pick a type from the submenu if
+you already know it, or **Auto** if you do not - the submenu is one extra
+hover, not a real delay.
 
 Write the note and press Capture, or Ctrl+Enter (Cmd+Enter on a Mac). That is
 the whole interaction: no title, no folder, nothing else required.
