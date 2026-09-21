@@ -705,3 +705,44 @@ func TestDocumentIndexer_SweepIfReadyReadinessErrorDoesNothing(t *testing.T) {
 		t.Fatalf("expected a readiness-check error to start no backfill")
 	}
 }
+
+// ── the failure line the Documents toolbar shows (ADR 0120) ─────────────
+
+// With the manual backfill gone, the toolbar's only Mate signal is
+// LastError, so an embedding failure has to land there whether or not a
+// backfill happens to be running. Once the boot backfill finishes, every
+// later embed pass is automatic; out of credit on one of those must not be
+// silent.
+func TestDocumentIndexer_AutomaticEmbedFailureIsReported(t *testing.T) {
+	store := newTestDocumentStore(t)
+	insertChunkedDocument(t, store, "sha-auto-fail", "consented.pdf", true, "some body text")
+	doer := &fakeOpenRouterDoer{errs: []error{fmt.Errorf("402 insufficient credits")}}
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), doer)
+
+	if _, err := idx.processEmbedBatch(context.Background()); err == nil {
+		t.Fatal("expected the failing embed pass to return an error")
+	}
+	if status := idx.BackfillStatus(); !strings.Contains(status.LastError, "insufficient credits") {
+		t.Fatalf("expected the automatic embed failure in LastError, got %+v", status)
+	}
+}
+
+// A failure is the current state only while something is still waiting to
+// be embedded. Once the queue is empty nothing is failing, so a red line
+// left over from an earlier batch would be a false alarm.
+func TestDocumentIndexer_EmptyQueueClearsAnEarlierFailure(t *testing.T) {
+	store := newTestDocumentStore(t)
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), &fakeOpenRouterDoer{})
+	if err := idx.StartBackfill(); err != nil {
+		t.Fatalf("StartBackfill: %v", err)
+	}
+	idx.recordEmbedError(fmt.Errorf("an earlier batch failed"))
+
+	if _, err := idx.processEmbedBatch(context.Background()); err != nil {
+		t.Fatalf("processEmbedBatch: %v", err)
+	}
+	status := idx.BackfillStatus()
+	if status.Running || status.LastError != "" {
+		t.Fatalf("expected an empty queue to finish the backfill with no error, got %+v", status)
+	}
+}

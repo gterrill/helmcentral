@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -207,5 +208,34 @@ func TestImportEnvSecretsHandler_NothingToImportReturns200WithEmptyArray(t *test
 	}
 	if len(resp.Imported) != 0 {
 		t.Fatalf("expected no imported keys, got %v", resp.Imported)
+	}
+}
+
+// ADR 0120: the OpenRouter key arrives through this handler, not
+// POST /api/settings, and the Settings page sends both at once. If only the
+// settings save swept, a sweep that read readiness before the key landed
+// would find Mate not ready and nothing would run it again until a reboot.
+func TestUpdateSecretsSettingsHandler_SuccessfulSaveTriggersTheReadySweep(t *testing.T) {
+	withTestSecretsStore(t)
+
+	swept := make(chan struct{}, 1)
+	prev := documentIndexerSweepIfReady
+	documentIndexerSweepIfReady = func() { swept <- struct{}{} }
+	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/secrets", strings.NewReader(`{"SIGNALK_USERNAME":"admin"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := updateSecretsSettingsHandler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-swept:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a secrets save to run the ready sweep")
 	}
 }

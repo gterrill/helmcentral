@@ -84,8 +84,12 @@ justified - the deliberate act already happened, at Settings → Assistant.
 new home for what the three deleted buttons used to do, minus the
 button. It runs once at boot (`main.go`, right after the indexer is wired
 up) and again every time `updateSettingsHandler` (`backend/signalk.go`)
-saves settings successfully - the moment Mate might have just become
-ready. It checks readiness itself and, gated independently:
+or `updateSecretsSettingsHandler` (`backend/secrets_settings_handlers.go`)
+saves successfully - the moment Mate might have just become ready. Both
+are needed: the OpenRouter key arrives through the secrets save, and the
+Settings page sends the two at once, so whichever lands last is the one
+that finds Mate ready. Every call runs in a goroutine so neither save waits
+on the document store's lock. It checks readiness itself and, gated independently:
 
 - If `documentEnrichReadinessProblem(readiness) == ""`, it calls the
   existing `EnrichBackfillNotes()` store method (`notes_store.go`, kept
@@ -131,8 +135,11 @@ language and offers a button straight to Settings → Assistant
 settings" button already is).
 
 `backfill.last_error` is what the embeddings status endpoint already
-exposed (`documentBackfillStatus.LastError`, unrelated to this ADR); no new
-field was added to surface an enrich-stage failure separately, since the
+exposed (`documentBackfillStatus.LastError`). It used to record failures
+only while a backfill was running; since this line is now the only Mate
+signal on the toolbar, it records every embed batch failure, automatic
+pass or backfill, and clears on the next successful batch or once nothing
+is left waiting to embed. No new field was added to surface an enrich-stage failure separately, since the
 status endpoint carries nothing to name one document from another for that
 stage. If a document's own enrichment fails, its `status`/`error` fields
 already say so on its own row and Details page - this line covers the

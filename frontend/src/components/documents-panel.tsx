@@ -1455,7 +1455,7 @@ export function DocumentsPanel({
 // enrichment), each with its own count, button and confirm dialog. A note
 // is classified the moment it's captured (there was never a real
 // classify backlog to show), and once Mate is ready the enrich/embed sweep
-// runs itself, at boot and on every settings save (SweepIfReady,
+// runs itself, at boot and on every settings or secrets save (SweepIfReady,
 // documents_embed.go) - repeating the same consent question on every visit
 // to Documents just read as nagging. The one state still worth a line here
 // is a FAILURE: status.backfill.last_error is the most recent embeddings

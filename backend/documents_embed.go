@@ -67,10 +67,12 @@ type documentBackfillStatus struct {
 	// a lifetime total across every backfill ever run.
 	ChunksEmbedded int       `json:"chunks_embedded"`
 	StartedAt      time.Time `json:"started_at"`
-	// LastError is the most recent batch failure during this backfill run,
-	// if any. It does not stop the backfill - Running stays true, and the
-	// next pass retries once Run's own backoff elapses - it is purely for
-	// the operator to see that something is currently going wrong.
+	// LastError is the most recent embed batch failure, whether or not a
+	// backfill is running: since ADR 0120 it is the only Mate signal the
+	// Documents toolbar shows, so an automatic pass failing (out of credit,
+	// say) must land here too. It does not stop a backfill - Running stays
+	// true, and the next pass retries once Run's own backoff elapses. A
+	// successful batch or an empty queue clears it.
 	LastError string `json:"last_error,omitempty"`
 }
 
@@ -122,7 +124,8 @@ func (idx *documentIndexer) BackfillStatus() documentBackfillStatus {
 // manual backfill clicks (the three per-feature confirm-and-send buttons
 // that ADR removed from the Documents toolbar): called once at boot
 // (main.go) and again every time settings are saved into a working
-// configuration (updateSettingsHandler, signalk.go), it checks whether
+// configuration (updateSettingsHandler, signalk.go) or a secret is saved
+// (updateSecretsSettingsHandler - the OpenRouter key arrives there), it checks whether
 // Mate is ready and, if so, clears the enrich=0 backlog without the
 // operator asking again. Turning Mate on IS the consent (ADR 0120); this
 // method is what "the system just does it" means in code.
@@ -213,21 +216,30 @@ func (idx *documentIndexer) stopBackfill(gen int, reason string) {
 	idx.embedMu.Unlock()
 }
 
-// recordBackfillError notes a batch failure in LastError without stopping
-// the backfill: Running stays true, and the next pass retries once Run's
-// own documentsIndexerErrorBackoff wait elapses.
-func (idx *documentIndexer) recordBackfillError(err error) {
+// recordEmbedError notes a batch failure in LastError, backfill or not,
+// without stopping a running backfill: Running stays true, and the next pass
+// retries once Run's own documentsIndexerErrorBackoff wait elapses.
+func (idx *documentIndexer) recordEmbedError(err error) {
 	idx.embedMu.Lock()
 	idx.backfillLastError = err.Error()
 	idx.embedMu.Unlock()
 }
 
-// recordBackfillProgress adds n to this run's ChunksEmbedded count and
-// clears any previous LastError - a batch that just succeeded means
-// whatever failed last time is no longer the backfill's current state.
-func (idx *documentIndexer) recordBackfillProgress(n int) {
+// clearEmbedError drops LastError once nothing is left waiting to embed.
+func (idx *documentIndexer) clearEmbedError() {
 	idx.embedMu.Lock()
-	idx.backfillChunksEmbedded += n
+	idx.backfillLastError = ""
+	idx.embedMu.Unlock()
+}
+
+// recordEmbedProgress clears any previous LastError - a batch that just
+// succeeded means whatever failed last time is no longer the current state -
+// and, during a backfill, adds n to this run's ChunksEmbedded count.
+func (idx *documentIndexer) recordEmbedProgress(n int, backfilling bool) {
+	idx.embedMu.Lock()
+	if backfilling {
+		idx.backfillChunksEmbedded += n
+	}
 	idx.backfillLastError = ""
 	idx.embedMu.Unlock()
 }
@@ -419,6 +431,9 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 	}
 	chunks = idx.dropSkippedChunks(chunks)
 	if len(chunks) == 0 {
+		// Nothing is waiting, so nothing is failing: an error left from an
+		// earlier batch would be a false alarm on the toolbar.
+		idx.clearEmbedError()
 		if backfilling {
 			// enrichedOnly=false came back empty: nothing left anywhere for
 			// this model. The backfill is done.
@@ -448,9 +463,7 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 	if err != nil {
 		log.Printf("documents: indexer: embed batch of %d chunk(s) failed: %v", len(chunks), err)
 		idx.recordEmbedBatchFailure(chunks)
-		if backfilling {
-			idx.recordBackfillError(err)
-		}
+		idx.recordEmbedError(err)
 		return false, fmt.Errorf("documents indexer: embed batch: %w", err)
 	}
 
@@ -466,18 +479,14 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 		// single chunk: normaliseEmbedding rejects a zero or non-finite
 		// vector, which one bad input can produce on its own.
 		idx.recordEmbedBatchFailure(chunks)
-		if backfilling {
-			idx.recordBackfillError(err)
-		}
+		idx.recordEmbedError(err)
 		return false, fmt.Errorf("documents indexer: set chunk embeddings: %w", err)
 	}
 
 	idx.recordEmbedBatchSuccess(chunks)
 	idx.splitEmbedCost(chunks, resp.Usage.Cost)
 
-	if backfilling {
-		idx.recordBackfillProgress(len(chunks))
-	}
+	idx.recordEmbedProgress(len(chunks), backfilling)
 	return true, nil
 }
 
