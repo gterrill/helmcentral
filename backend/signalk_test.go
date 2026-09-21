@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -517,9 +518,9 @@ func TestSettingsPayloadRoundTripsAssistantDocumentModel(t *testing.T) {
 func TestUpdateSettingsHandler_SuccessfulSaveTriggersTheReadySweep(t *testing.T) {
 	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
 
-	swept := 0
+	swept := make(chan struct{}, 1)
 	prev := documentIndexerSweepIfReady
-	documentIndexerSweepIfReady = func() { swept++ }
+	documentIndexerSweepIfReady = func() { swept <- struct{}{} }
 	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
 
 	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
@@ -528,9 +529,43 @@ func TestUpdateSettingsHandler_SuccessfulSaveTriggersTheReadySweep(t *testing.T)
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body %v)", code, body)
 	}
-	if swept != 1 {
-		t.Fatalf("expected the ready sweep to run exactly once on a successful save, got %d", swept)
+	select {
+	case <-swept:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the ready sweep to run after a successful save")
 	}
+}
+
+// The sweep waits on the document store's lock, which a long indexing write
+// can hold for a while. A settings save has nothing to do with that, so it
+// must return without waiting for the sweep to finish.
+func TestUpdateSettingsHandler_SaveDoesNotWaitForTheReadySweep(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	release := make(chan struct{})
+	done := make(chan struct{})
+	prev := documentIndexerSweepIfReady
+	documentIndexerSweepIfReady = func() { <-release; close(done) }
+	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
+
+	returned := make(chan int, 1)
+	go func() {
+		code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
+			p.Assistant.DocumentModel = "openai/gpt-4o-mini"
+		})
+		returned <- code
+	}()
+	select {
+	case code := <-returned:
+		if code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", code)
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("settings save blocked on the ready sweep")
+	}
+	close(release)
+	<-done
 }
 
 // A save validateSettingsChange refuses must not sweep - nothing was
@@ -540,9 +575,9 @@ func TestUpdateSettingsHandler_SuccessfulSaveTriggersTheReadySweep(t *testing.T)
 func TestUpdateSettingsHandler_RejectedSaveDoesNotTriggerTheReadySweep(t *testing.T) {
 	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
 
-	swept := 0
+	var swept int32
 	prev := documentIndexerSweepIfReady
-	documentIndexerSweepIfReady = func() { swept++ }
+	documentIndexerSweepIfReady = func() { atomic.AddInt32(&swept, 1) }
 	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
 
 	// current.Auth.Mode defaults to "none" (writeTestSettings' fixture has
@@ -555,8 +590,9 @@ func TestUpdateSettingsHandler_RejectedSaveDoesNotTriggerTheReadySweep(t *testin
 	if code != http.StatusBadGateway {
 		t.Fatalf("expected 502 for an unknown auth mode, got %d (body %v)", code, body)
 	}
-	if swept != 0 {
-		t.Fatalf("expected a rejected save to run no ready sweep, got %d", swept)
+	time.Sleep(50 * time.Millisecond) // a wrongly-started background sweep would have run by now
+	if atomic.LoadInt32(&swept) != 0 {
+		t.Fatalf("expected a rejected save to run no ready sweep, got %d", atomic.LoadInt32(&swept))
 	}
 }
 

@@ -326,11 +326,13 @@ func updateSettingsHandler(c echo.Context) error {
 	// pasted in, document/embedding models chosen) - sweep the enrich=0
 	// backlog now rather than waiting for the next boot. sweepDocumentsIfReady
 	// re-reads readiness itself and is a no-op whenever this save didn't
-	// change anything about it, so it costs nothing to call unconditionally
-	// on every settings save rather than diffing old vs. new readiness here.
-	// Best-effort: a sweep failure (logged inside sweepDocumentsIfReady) must
-	// not roll back or fail a settings save that already succeeded.
-	sweepDocumentsIfReady()
+	// change anything about it, so it is called on every settings save rather
+	// than diffing old vs. new readiness here. It runs in the background: it
+	// waits on the document store's lock, which a long indexing write can
+	// hold, and a settings save has no business waiting on that. A sweep
+	// failure is logged inside sweepDocumentsIfReady and never touches the
+	// save, which has already succeeded.
+	go sweepDocumentsIfReady()
 
 	return c.JSON(http.StatusOK, normalized)
 }

@@ -397,9 +397,10 @@ func main() {
 	// immediately - the boot-time pass that catches a library that was
 	// already sitting there, enrich=0, when Mate was configured on a
 	// previous run. updateSettingsHandler (signalk.go) runs it again every
-	// time settings are saved into a working configuration.
+	// time settings are saved into a working configuration. The boot pass
+	// runs in the background so the HTTP server doesn't wait on it.
 	documentIndexerSweepIfReady = docIndexer.SweepIfReady
-	documentIndexerSweepIfReady()
+	go documentIndexerSweepIfReady()
 
 	// The assistant's read_help tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
