@@ -34,13 +34,22 @@ func alarmReaderFromTree(snapshot *signalKSnapshot, context string, tree map[str
 		// shape, so a dotted path becomes the segments plus "value".
 		keys := append(append([]string{}, segments...), "value")
 
-		value := lookupNumber(tree, keys...)
-		if value == -1 {
-			// -1 is lookupNumber's miss sentinel and also a legitimate reading,
-			// so confirm presence before treating a miss as absence.
-			if _, ok := lookupAnyValue(tree, keys...); !ok {
-				return alarmSample{}
-			}
+		raw, ok := lookupAnyValue(tree, keys...)
+		if !ok {
+			return alarmSample{}
+		}
+
+		// A leaf can exist but hold null: the Victron alternator.0 service
+		// publishes that for voltage/current while the engine is off. Only a
+		// numeric leaf counts as present, so null never reads as -1.
+		var value float64
+		switch v := raw.(type) {
+		case float64:
+			value = v
+		case int:
+			value = float64(v)
+		default:
+			return alarmSample{}
 		}
 
 		return alarmSample{
@@ -52,7 +61,8 @@ func alarmReaderFromTree(snapshot *signalKSnapshot, context string, tree map[str
 }
 
 // lookupAnyValue walks the same key chain as lookupNumber but reports presence
-// rather than coercing, so a genuine -1 is distinguishable from a missing path.
+// rather than coercing, so a non-numeric leaf (null included) is
+// distinguishable from a missing path.
 func lookupAnyValue(payload map[string]any, keys ...string) (any, bool) {
 	var current any = payload
 	for _, key := range keys {

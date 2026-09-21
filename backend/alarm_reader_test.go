@@ -55,6 +55,20 @@ func TestSnapshotAlarmReaderTreatsNegativeOneAsARealValue(t *testing.T) {
 	}
 }
 
+// The Victron alternator.0 service publishes {"voltage":{"value":null}} while
+// the engine is off. lookupNumber's miss sentinel is also -1, so a naive
+// presence check that only confirms the key exists (rather than that its
+// value is numeric) reads a null leaf as a genuine -1 reading and a "below
+// 24 V" rule fires a false "Now -1" warning.
+func TestSnapshotAlarmReaderTreatsNullValueAsAbsent(t *testing.T) {
+	snapshot := snapshotWithSelfDelta("electrical.alternator.0.voltage", nil, alarmNow)
+
+	sample := snapshotAlarmReader(snapshot)("electrical.alternator.0.voltage")
+	if sample.Present {
+		t.Fatalf("a null leaf must read as absent, not -1")
+	}
+}
+
 func TestSnapshotAlarmReaderReportsAbsentWhenSelfContextUnknown(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	snapshot.applyDelta(signalKDelta{
