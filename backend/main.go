@@ -385,13 +385,21 @@ func main() {
 		},
 	)
 	documentIndexerWake = docIndexer.Wake
-	// documentIndexerStartBackfill/documentIndexerBackfillStatus
-	// (documents_handlers.go, E1c) connect POST
-	// /api/documents/embeddings/backfill and GET /api/documents/embeddings
-	// to this same indexer's backfill state - the same wiring as
-	// documentIndexerWake immediately above.
-	documentIndexerStartBackfill = docIndexer.StartBackfill
+	// documentIndexerBackfillStatus (documents_handlers.go, E1c) connects
+	// GET /api/documents/embeddings to this same indexer's backfill state -
+	// the same wiring as documentIndexerWake immediately above.
 	documentIndexerBackfillStatus = docIndexer.BackfillStatus
+	// documentIndexerSweepIfReady (ADR 0120) replaces what used to be POST
+	// /api/documents/embeddings/backfill and the two notes backfill
+	// endpoints: turning Mate on is the operator's consent, so the sweep
+	// runs itself rather than waiting on a button click. Wired here the
+	// same nil-until-assigned way as the lines above, then run once
+	// immediately - the boot-time pass that catches a library that was
+	// already sitting there, enrich=0, when Mate was configured on a
+	// previous run. updateSettingsHandler (signalk.go) runs it again every
+	// time settings are saved into a working configuration.
+	documentIndexerSweepIfReady = docIndexer.SweepIfReady
+	documentIndexerSweepIfReady()
 
 	// The assistant's read_help tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
@@ -796,10 +804,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// above on why Echo's router never needs that ordering.
 		{http.MethodPost, "/api/documents", tierWrite, uploadDocumentHandler},
 		{http.MethodPost, "/api/documents/move", tierWrite, moveDocumentsHandler},
-		// E1c: starts (or dry-runs) the operator's explicit embeddings
-		// backfill. Static segment ahead of "/:id", same reasoning as
-		// "move" above.
-		{http.MethodPost, "/api/documents/embeddings/backfill", tierWrite, documentsEmbeddingsBackfillHandler},
 		{http.MethodPatch, "/api/documents/:id", tierWrite, patchDocumentHandler},
 		{http.MethodDelete, "/api/documents/:id", tierWrite, deleteDocumentHandler},
 		{http.MethodPost, "/api/documents/:id/reindex", tierWrite, reindexDocumentHandler},
@@ -810,13 +814,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
 		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
 		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
-		// Backfills for the operator who enables Mate, or upgrades the
-		// classifier, after notes already exist (plan §9's "no-Mate path").
-		// Static segments, not "/:id" routes - no ordering issue with the
-		// PATCH above either way (Echo's router: static > param > any, see
-		// the read-tier comment above the document library's own routes).
-		{http.MethodPost, "/api/notes/classify/backfill", tierWrite, notesClassifyBackfillHandler},
-		{http.MethodPost, "/api/notes/enrich/backfill", tierWrite, notesEnrichBackfillHandler},
 
 		// Checklist runs writes (plan "Notes and the Boat's Manual" §3/§4,
 		// ADR 0118). DELETE clears abandoned_at only - see

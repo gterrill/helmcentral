@@ -222,6 +222,29 @@ func documentEnrichReadinessProblem(readiness assistantReadiness) string {
 	return ""
 }
 
+// documentEnrichFlag runs checkAssistantReadiness and folds the result
+// through documentEnrichReadinessProblem in the one motion every write path
+// that sets a document or note's enrich flag needs - originally written out
+// six lines at a time in uploadDocumentHandler, reindexDocumentHandler and
+// createNoteHandler (documents_handlers.go, notes_handlers.go) until ADR
+// 0120 made a note's create path need the exact same check a third time.
+// enrich is true exactly when problem is "". err is non-nil only for a
+// genuine readiness-check failure (a broken settings file, a secrets-store
+// read error) - every caller here fails the request over it rather than
+// defaulting enrich to false silently (AGENTS.md's fallback policy: don't
+// mask an upstream failure as an ordinary "not ready" state). logCtx names
+// the caller in that one log line, the same "package: verb" style each
+// call site already used inline.
+func documentEnrichFlag(logCtx string) (enrich bool, problem string, err error) {
+	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	if err != nil {
+		log.Printf("%s: check assistant readiness: %v", logCtx, err)
+		return false, "", err
+	}
+	problem = documentEnrichReadinessProblem(readiness)
+	return problem == "", problem, nil
+}
+
 // runEnrichStage sends doc's content to documentModel() and applies the
 // reply, or fails the document. It returns a non-nil error only for a
 // genuine infra failure (idx.readiness() itself erroring on a broken

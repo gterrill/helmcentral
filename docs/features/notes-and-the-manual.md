@@ -174,28 +174,19 @@ it opens fresh and unticked, ready to be run again.
 
 ## Catching up older notes
 
-Two things happen to a note automatically when it is captured: it is typed,
-and, if Mate is switched on and you have said yes to it, it is summarised and
-made searchable by meaning as well as by word. Neither is retroactive on its
-own, so a note captured before you turned the classifier on, or before you
-had Mate configured at all, can be left behind. Documents offers a way to
-catch both up in one pass, and only shows the offer when there is actually
-something to do.
+A note is typed the moment it is captured, by the same offline classifier
+that decides Contact from Procedure from Spec - no network, no Mate, no
+separate step, so there is never a backlog of untyped notes waiting on you.
 
-**Classifying older notes** re-runs the same offline classifier every fresh
-capture already gets, over every note that was never given a type by you
-specifically. It costs nothing and needs no Mate: it is the same plain text
-matching that decides Contact from Procedure from Spec on the way in, just
-run once over the backlog instead of once per note. A type you chose
-yourself is never touched.
-
-**Enriching older notes** is the one that costs something: it turns on
-summarising and semantic search for every note that has never had it,
-the same as ticking it on for one note at a time, just for all of them at
-once. Documents shows how many notes are waiting and an estimate of what it
-will send to OpenRouter before you confirm, the same estimate the document
-library's own semantic-search backfill gives. Clicking through is the
-consent; nothing is sent until you do.
+Summarising a note and making it searchable by meaning is Mate's job, and
+it happens on its own once Mate is switched on: capture a note while Mate
+is ready and it is queued for that the same instant. A note captured before
+you had Mate configured isn't left behind either. The moment Mate becomes
+ready - at startup, or the next time you save a settings change that
+leaves it working - it sweeps the whole library for anything still
+waiting, the same pass that catches up the rest of the document library's
+own search-by-meaning index. There is nothing to click and no backlog
+count to watch; turning Mate on is the only consent this asks for.
 
 ## What this is not
 

@@ -504,6 +504,62 @@ func TestSettingsPayloadRoundTripsAssistantDocumentModel(t *testing.T) {
 	}
 }
 
+// ── ADR 0120: a settings save sweeps the enrich=0 backlog ────────────────
+//
+// updateSettingsHandler is where the operator's save might be the very
+// moment Mate became ready (a key pasted in, a document model chosen), so
+// it calls sweepDocumentsIfReady itself rather than waiting for the next
+// boot. These tests swap documentIndexerSweepIfReady for a spy - the same
+// nil-until-wired package var main() assigns to the real indexer's
+// SweepIfReady method (documents_embed_test.go covers what that method
+// itself does; this only covers that the handler calls it).
+
+func TestUpdateSettingsHandler_SuccessfulSaveTriggersTheReadySweep(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	swept := 0
+	prev := documentIndexerSweepIfReady
+	documentIndexerSweepIfReady = func() { swept++ }
+	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.DocumentModel = "openai/gpt-4o-mini"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+	if swept != 1 {
+		t.Fatalf("expected the ready sweep to run exactly once on a successful save, got %d", swept)
+	}
+}
+
+// A save validateSettingsChange refuses must not sweep - nothing was
+// actually written, so there is nothing new for Mate to catch up on, and
+// running it anyway would be a pointless (if harmless) query on every
+// rejected save.
+func TestUpdateSettingsHandler_RejectedSaveDoesNotTriggerTheReadySweep(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	swept := 0
+	prev := documentIndexerSweepIfReady
+	documentIndexerSweepIfReady = func() { swept++ }
+	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
+
+	// current.Auth.Mode defaults to "none" (writeTestSettings' fixture has
+	// no auth: block); "sometimes" is not a valid mode, and validating it
+	// needs no network probe (TestValidateSettingsChange_RejectsUnknownAuthMode
+	// exercises the same check directly).
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Auth.Mode = "sometimes"
+	})
+	if code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for an unknown auth mode, got %d (body %v)", code, body)
+	}
+	if swept != 0 {
+		t.Fatalf("expected a rejected save to run no ready sweep, got %d", swept)
+	}
+}
+
 // TestNormalizeSettingsPayloadDefaultsDocumentModel pins a blank
 // document_model to defaultDocumentModel, the same "blank means default"
 // pattern defaultAssistantModel uses for the chat model.

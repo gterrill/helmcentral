@@ -48,14 +48,12 @@ func wakeDocumentIndexer() {
 	}
 }
 
-// documentIndexerStartBackfill and documentIndexerBackfillStatus wire POST
-// /api/documents/embeddings/backfill and GET /api/documents/embeddings
-// (E1c) to the running indexer's backfill methods, the same nil-until-wired
-// pattern as documentIndexerWake above: nil until main() assigns them once
-// the real documentIndexer exists, so a test that never built one still
-// gets sane, non-panicking handler behaviour (a backfill start is refused,
-// a status read comes back as "never run") rather than a nil-func panic.
-var documentIndexerStartBackfill func() error
+// documentIndexerBackfillStatus wires GET /api/documents/embeddings (E1c) to
+// the running indexer's backfill status, the same nil-until-wired pattern as
+// documentIndexerWake above: nil until main() assigns it once the real
+// documentIndexer exists, so a test that never built one still gets sane,
+// non-panicking handler behaviour (a status read comes back as "never run")
+// rather than a nil-func panic.
 var documentIndexerBackfillStatus func() documentBackfillStatus
 
 // currentDocumentBackfillStatus is documentIndexerBackfillStatus's nil-safe
@@ -65,6 +63,24 @@ func currentDocumentBackfillStatus() documentBackfillStatus {
 		return documentIndexerBackfillStatus()
 	}
 	return documentBackfillStatus{}
+}
+
+// documentIndexerSweepIfReady wires ADR 0120's automatic enrich/embed sweep
+// to the running indexer, the same nil-until-wired pattern as
+// documentIndexerWake above: nil until main() assigns it once the real
+// documentIndexer exists, so a settings save in a test that never built one
+// is a no-op rather than a nil-func panic.
+var documentIndexerSweepIfReady func()
+
+// sweepDocumentsIfReady is documentIndexerSweepIfReady's nil-safe caller -
+// run once at boot (main.go) and again by updateSettingsHandler
+// (signalk.go) every time settings are saved into a working configuration,
+// so turning Mate on sweeps the enrich=0 backlog without the operator
+// taking any further action (ADR 0120).
+func sweepDocumentsIfReady() {
+	if documentIndexerSweepIfReady != nil {
+		documentIndexerSweepIfReady()
+	}
 }
 
 // ── per-sha256 locking ───────────────────────────────────────────────────
@@ -252,8 +268,6 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusRequestEntityTooLarge, errNoteBodyTooLarge.Error()
 	case errors.Is(err, errNotANote):
 		return http.StatusConflict, errNotANote.Error()
-	case errors.Is(err, errNoteChangedUnderfoot):
-		return http.StatusConflict, errNoteChangedUnderfoot.Error()
 	// errNotAManual and errManualNotTopLevel back the manuals feature
 	// (manuals_store.go): both are the same kind of "a specific, expected
 	// condition, not a database failure" sentinel as errNotANote just
@@ -688,16 +702,11 @@ func uploadDocumentHandler(c echo.Context) error {
 	// this upload's bytes happen to match one already on disk (the final
 	// path is content-addressed by sha256, so it can collide with an
 	// existing document's own file).
-	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	enrich, _, err := documentEnrichFlag("documents: upload")
 	if err != nil {
 		removeTemp()
-		log.Printf("documents: upload: check assistant readiness: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	// documentEnrichReadinessProblem, not readiness.Problem directly: this
-	// consent decision also requires a document model, a document-only
-	// requirement that must never affect chat's own readiness.
-	enrichProblem := documentEnrichReadinessProblem(readiness)
 
 	// Everything from here to Insert runs under sha's own lock, shared with
 	// deleteDocumentHandler: a concurrent delete of the document this hash
@@ -734,7 +743,7 @@ func uploadDocumentHandler(c echo.Context) error {
 		Title:        title,
 		MIME:         detectDocumentMIME(head.buf, filename),
 		SizeBytes:    size,
-		Enrich:       enrichProblem == "",
+		Enrich:       enrich,
 		OperatorTags: parseDocumentTagsField(tagsRaw),
 	})
 	if errors.Is(err, errDocumentDuplicate) {
@@ -879,16 +888,10 @@ func reindexDocumentHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 
-	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	enrich, problem, err := documentEnrichFlag("documents: reindex")
 	if err != nil {
-		log.Printf("documents: reindex: check assistant readiness: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	// documentEnrichReadinessProblem, not readiness.Problem directly: this
-	// consent decision also requires a document model, a document-only
-	// requirement that must never affect chat's own readiness.
-	problem := documentEnrichReadinessProblem(readiness)
-	enrich := problem == ""
 
 	if err := globalDocumentStore.MarkReindex(id, enrich); err != nil {
 		return writeDocumentError(c, err)
@@ -971,60 +974,6 @@ func documentsEmbeddingsStatusHandler(c echo.Context) error {
 		Counts:     counts,
 		Backfill:   currentDocumentBackfillStatus(),
 	})
-}
-
-// documentEmbeddingsBackfillDryRunJSON is the ?dry_run=1 response shape:
-// the same library-wide counts the status endpoint reports, plus a token
-// estimate - nothing here starts any work.
-type documentEmbeddingsBackfillDryRunJSON struct {
-	Counts documentEmbeddingCounts `json:"counts"`
-	// TokensEstimate is CharsPending/4 - the usual rough
-	// characters-per-token ratio for English text. It is an estimate to
-	// give the operator a sense of scale before they click the button, not
-	// a quote: the price per token belongs to the model, not to this code,
-	// so no dollar figure is computed here.
-	TokensEstimate int `json:"tokens_estimate"`
-}
-
-// documentEmbeddingsBackfillJSON is the non-dry-run response shape, both on
-// success (200) and on an already-running conflict (409).
-type documentEmbeddingsBackfillJSON struct {
-	Backfill documentBackfillStatus `json:"backfill"`
-}
-
-// POST /api/documents/embeddings/backfill[?dry_run=1]
-func documentsEmbeddingsBackfillHandler(c echo.Context) error {
-	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
-	if err != nil {
-		log.Printf("documents: embeddings backfill: check assistant readiness: %v", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	if parseDocumentBool(c.QueryParam("dry_run")) {
-		counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel, readiness.EmbeddingDimensions)
-		if err != nil {
-			return writeDocumentError(c, err)
-		}
-		return c.JSON(http.StatusOK, documentEmbeddingsBackfillDryRunJSON{
-			Counts:         counts,
-			TokensEstimate: counts.CharsPending / 4,
-		})
-	}
-
-	if problem := documentEmbedReadinessProblem(readiness); problem != "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": problem})
-	}
-
-	if documentIndexerStartBackfill == nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "document indexer not available"})
-	}
-	if err := documentIndexerStartBackfill(); err != nil {
-		return c.JSON(http.StatusConflict, map[string]any{
-			"error":    err.Error(),
-			"backfill": currentDocumentBackfillStatus(),
-		})
-	}
-	return c.JSON(http.StatusOK, documentEmbeddingsBackfillJSON{Backfill: currentDocumentBackfillStatus()})
 }
 
 // ── document-folders ───────────────────────────────────────────────────────

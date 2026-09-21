@@ -48,9 +48,10 @@ func documentEmbedReadinessProblem(readiness assistantReadiness) string {
 }
 
 // errDocumentBackfillAlreadyRunning is StartBackfill's sentinel for "a
-// backfill is already in progress" - documentsEmbeddingsBackfillHandler
-// (documents_handlers.go) turns it into 409, rather than starting a second
-// concurrent pass over the same queue.
+// backfill is already in progress" - SweepIfReady (this file) checks for it
+// and logs rather than treating it as a failure, since the exact state it
+// wanted (a backfill running) already holds; it exists so a caller never
+// starts a second concurrent pass over the same queue.
 var errDocumentBackfillAlreadyRunning = errors.New("a backfill is already running")
 
 // documentBackfillStatus is BackfillStatus' return value, and the JSON
@@ -78,11 +79,14 @@ type documentBackfillStatus struct {
 // poll. Automatic embedding only ever touches enrich=1 documents (the same
 // upload-time consent that already sends their text to OpenRouter for
 // OCR/summarising, so embedding it discloses nothing new); every other
-// document waits for this call, which is itself the operator's consent for
-// THAT text to reach OpenRouter too - the same reasoning ADR 0106 already
-// applies to an explicit Reindex. Calling this while a backfill is already
-// running returns errDocumentBackfillAlreadyRunning rather than starting a
-// second concurrent pass over the same queue.
+// document waits for this call. Before ADR 0120 that consent was always an
+// operator's explicit click (POST /api/documents/embeddings/backfill); now
+// SweepIfReady (this file) is the ordinary caller, running it the moment
+// Mate is ready rather than waiting to be asked - the same reasoning ADR
+// 0106 already applies to an explicit Reindex, just triggered automatically
+// instead of by hand. Calling this while a backfill is already running
+// returns errDocumentBackfillAlreadyRunning rather than starting a second
+// concurrent pass over the same queue.
 func (idx *documentIndexer) StartBackfill() error {
 	idx.embedMu.Lock()
 	if idx.backfillRunning {
@@ -112,6 +116,59 @@ func (idx *documentIndexer) BackfillStatus() documentBackfillStatus {
 		StartedAt:      idx.backfillStartedAt,
 		LastError:      idx.backfillLastError,
 	}
+}
+
+// SweepIfReady is ADR 0120's automatic counterpart to the operator's old
+// manual backfill clicks (the three per-feature confirm-and-send buttons
+// that ADR removed from the Documents toolbar): called once at boot
+// (main.go) and again every time settings are saved into a working
+// configuration (updateSettingsHandler, signalk.go), it checks whether
+// Mate is ready and, if so, clears the enrich=0 backlog without the
+// operator asking again. Turning Mate on IS the consent (ADR 0120); this
+// method is what "the system just does it" means in code.
+//
+// The two halves are gated independently, mirroring documentEnrichReadinessProblem
+// and documentEmbedReadinessProblem's own split everywhere else in this
+// package: enrichment (EnrichBackfillNotes, which only needs a document
+// model) can run while embedding (StartBackfill, which also needs an
+// embedding model) stays off - e.g. an operator who has Mate summarising
+// notes but semantic search still switched off.
+//
+// A readiness-check error (a broken settings file, a secrets-store read
+// failure) is logged and this pass sweeps nothing - the same "log and
+// leave it to the next pass" treatment idx.Run's own readiness checks
+// already give this exact failure elsewhere in this file, rather than
+// crashing the boot or failing the settings save that triggered the call.
+// Nothing is written before the check fails, so there is nothing to roll
+// back; the next boot or the next settings save tries again.
+func (idx *documentIndexer) SweepIfReady() {
+	readiness, _, err := idx.readiness()
+	if err != nil {
+		log.Printf("documents: ready sweep: check assistant readiness: %v", err)
+		return
+	}
+
+	if documentEnrichReadinessProblem(readiness) == "" {
+		n, err := idx.store.EnrichBackfillNotes()
+		if err != nil {
+			log.Printf("documents: ready sweep: enrich backfill notes: %v", err)
+		} else if n > 0 {
+			log.Printf("documents: ready sweep: queued %d note(s) for enrichment", n)
+		}
+	}
+
+	if documentEmbedReadinessProblem(readiness) == "" {
+		if err := idx.StartBackfill(); err != nil && !errors.Is(err, errDocumentBackfillAlreadyRunning) {
+			log.Printf("documents: ready sweep: start embeddings backfill: %v", err)
+		}
+	}
+
+	// Wakes the extract/enrich stage for whatever EnrichBackfillNotes just
+	// queued even when the embed half above did nothing (documentEmbedReadinessProblem
+	// non-empty, so StartBackfill's own Wake never ran) - the same
+	// "flip the rows, then wake the pass that processes them" split
+	// wakeDocumentIndexer draws for every other write path in this package.
+	idx.Wake()
 }
 
 // currentBackfillGen reports the generation StartBackfill is currently on.

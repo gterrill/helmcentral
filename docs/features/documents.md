@@ -50,11 +50,11 @@ never talks to the internet. With Mate on, an uploaded document's content
 own text - goes to whichever model `assistant.document_model` names in
 Settings → Assistant, separate from the model that answers your questions
 and defaulting to a fast, inexpensive one. A document uploaded while Mate
-was switched off is never sent anywhere later on its own: turning Mate on
-afterwards doesn't reach back and enrich what's already in the library. Only
-a document uploaded (or reindexed) while Mate is on ever leaves the boat -
-or one you explicitly index for semantic search, which is the same bargain
-made deliberately rather than at upload time. See Searching, below.
+was switched off keeps whatever it read locally at upload time; turning
+Mate on afterwards doesn't reach back and OCR or summarise it - reindex it
+if you want that read properly now. Its already-read text does join search
+by meaning automatically, the moment Mate is ready, alongside everything
+else in the library. See Searching, below.
 
 ## Folders, tags, notes and title
 
@@ -132,15 +132,14 @@ even though the two share no useful word. Both searches run, and the results
 are merged: a document both agree on ranks above one only a single side
 found.
 
-This needs each document's text to have been turned into vectors first, which
-happens automatically in the background for anything uploaded while Mate is
-on. Anything already in the library from before waits for you. When there is
-something unindexed, the panel's toolbar says so and offers **Index for
-semantic search**, and the confirmation tells you how many chunks and roughly
-how many tokens are about to be sent to OpenRouter and billed. It runs in the
-background from there, and the same line shows progress. Stopping it is a
-restart; starting again picks up where it left off, so nothing is ever paid
-for twice.
+This needs each document's text to have been turned into vectors first.
+Turning Mate on, with an embedding model chosen, sweeps the whole library
+for you automatically in the background - at startup, and again each time
+you save a settings change that leaves Mate ready - so there's nothing to
+click and nothing left waiting on you. Anything uploaded or captured
+afterwards is embedded the same way as it's read in. Stopping partway
+through (a restart, a connection drop) picks back up where it left off on
+its own, so nothing is ever paid for twice.
 
 The cost is genuinely small. Embeddings bill around $0.02 per million tokens,
 which works out to fractions of a cent for a whole library, and a search's own
@@ -151,7 +150,9 @@ If the meaning half of a search can't run - no connection, OpenRouter down -
 the search still answers with its word results and says **Showing keyword
 results only** above them, with the reason. Nothing is silently missing. If
 you have no embedding model configured at all, semantic search is simply off
-and the panel says nothing about it.
+and the panel says nothing about it. If the background sweep itself hits a
+snag, the toolbar names it and links straight to Settings → Assistant so you
+can fix it there.
 
 The model is `assistant.embedding_model` in settings, alongside
 `assistant.document_model`. Blank turns semantic search off entirely and

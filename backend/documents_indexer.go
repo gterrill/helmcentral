@@ -82,12 +82,12 @@ type documentIndexer struct {
 
 	// embedMu guards the backfill fields below - the indexer's only mutex.
 	// It exists because StartBackfill can be called from an HTTP handler's
-	// own goroutine (documentsEmbeddingsBackfillHandler,
-	// documents_handlers.go) while Run's goroutine is concurrently reading
-	// and clearing these same fields inside processEmbedBatch
-	// (documents_embed.go); every other field on this struct is either
-	// read-only after construction or touched only from Run's single
-	// goroutine, so it has never needed one before now.
+	// own goroutine (updateSettingsHandler, signalk.go, via SweepIfReady -
+	// ADR 0120) while Run's goroutine is concurrently reading and clearing
+	// these same fields inside processEmbedBatch (documents_embed.go);
+	// every other field on this struct is either read-only after
+	// construction or touched only from Run's single goroutine, so it has
+	// never needed one before now.
 	embedMu sync.Mutex
 	// backfillRunning is true from StartBackfill until processEmbedBatch
 	// finds PendingEmbedChunks(model, _, enrichedOnly=false) empty - that

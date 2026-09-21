@@ -279,8 +279,6 @@ function makeDocumentsMock(overrides: Partial<DocumentsMock> = {}): DocumentsMoc
     search: vi.fn(),
     clearSearch: vi.fn(),
     embeddingsStatus: null,
-    dryRunEmbeddingsBackfill: vi.fn(),
-    startEmbeddingsBackfill: vi.fn(),
     createFolder: vi.fn(),
     renameFolder: vi.fn(),
     moveFolder: vi.fn(),

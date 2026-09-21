@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"unicode/utf8"
 )
 
 // This file is the note-scoped half of documentStore (documents_store.go):
@@ -24,11 +23,6 @@ var (
 	// note (ReplaceNoteBody, and notes_handlers.go's own id lookups) is
 	// given the id of a kind='file' document instead.
 	errNotANote = errors.New("document is not a note")
-	// errNoteChangedUnderfoot is the compare-and-swap miss in
-	// ReplaceNoteFrontmatter: the note's bytes moved between the caller
-	// snapshotting it and the caller trying to write. 409, because the
-	// request was fine and the world changed, not the request.
-	errNoteChangedUnderfoot = errors.New("note changed while it was being reclassified")
 
 	// errNoteBodyEmpty and errNoteBodyTooLarge are notes_handlers.go's own
 	// request-validation sentinels, defined here (with the rest of this
@@ -139,97 +133,6 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("replace note body: commit: %w", err)
-	}
-	return currentSHA, nil
-}
-
-// ReplaceNoteFrontmatter swaps a note's blob for one whose FRONTMATTER
-// changed but whose body did not - today, only the classify backfill's
-// `type:` rewrite (notes_handlers.go's reclassifyNote).
-//
-// Identical to ReplaceNoteBody in everything except the one thing that
-// matters here: it does NOT reset status/stage or bump reindex_seq, so the
-// indexer is never re-run. That is safe precisely because extractTextFile
-// strips the leading frontmatter fence before extracting
-// (documents_extract.go), so the text the indexer would read is
-// byte-identical either way - a re-extract would rebuild the same chunks
-// and buy the same embeddings again, at full OpenRouter cost, for a note
-// whose searchable content did not change by one character.
-//
-// It matters because the classify backfill is the free one. The plan gives
-// it no "this bills you" confirmation, unlike the enrich backfill beside
-// it, on the stated grounds that it costs nothing and needs no Mate.
-// Requeueing here would make that promise false, and silently.
-//
-// The meta chunk IS rebuilt, because note_type is part of it and that is
-// what makes the new type searchable - cheap, local, and no embedding call.
-func (s *documentStore) ReplaceNoteFrontmatter(id, expectedSHA, newSHA, noteType string, size int64) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var currentSHA, currentSource, kind string
-	err := s.db.QueryRow(`SELECT sha256, note_type_source, kind FROM documents WHERE id = ?`, id).Scan(&currentSHA, &currentSource, &kind)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", errDocumentNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("replace note frontmatter: read document: %w", err)
-	}
-	if kind != "note" {
-		return "", errNotANote
-	}
-	// Compare-and-swap. The classify backfill loops over a snapshot taken
-	// once, so by the time it reaches a given note the operator may have
-	// edited it - and rewriting from the stale render would both revert the
-	// row AND hand the caller the operator's fresh blob to delete as
-	// "superseded". Refuse instead; the edit path reclassifies on its own.
-	if currentSHA != expectedSHA {
-		return "", errNoteChangedUnderfoot
-	}
-	if currentSHA == newSHA {
-		return currentSHA, nil
-	}
-
-	existing, err := scanDocument(s.db.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE sha256 = ?`, newSHA))
-	if err == nil {
-		return "", fmt.Errorf("note frontmatter rewrite collides with existing document %s: %w", existing.ID, errDocumentDuplicate)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("replace note frontmatter: check collision: %w", err)
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", fmt.Errorf("replace note frontmatter: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	// note_type moves in the SAME transaction as the sha. Two separately
-	// locked calls would leave a window where the blob on disk already
-	// names the new type while the row still names the old one - exactly
-	// the disk/DB agreement this whole function exists to keep. An
-	// operator override stays sticky, the same precedence
-	// SetNoteTypeIfNotOperator enforces.
-	res, err := tx.Exec(
-		`UPDATE documents SET sha256 = ?, size_bytes = ?, updated_at = ?,
-		        note_type = CASE WHEN note_type_source = 'operator' THEN note_type ELSE ? END,
-		        note_type_source = CASE WHEN note_type_source = 'operator' THEN note_type_source ELSE 'auto' END
-		 WHERE id = ?`,
-		newSHA, size, s.now().Unix(), noteType, id,
-	)
-	if err != nil {
-		return "", fmt.Errorf("replace note frontmatter: %w", err)
-	}
-	if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
-		return "", err
-	}
-
-	if err := s.rebuildMetaChunkTx(tx, id); err != nil {
-		return "", err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("replace note frontmatter: commit: %w", err)
 	}
 	return currentSHA, nil
 }
@@ -411,85 +314,13 @@ func (s *documentStore) PinnedNotes() ([]document, error) {
 	return out, nil
 }
 
-// ── Backfills (plan §9's "no-Mate path": the operator who enables Mate, or
-// upgrades the classifier, later) ─────────────────────────────────────────
-
-// NoteClassifyBackfillCandidates returns every kind='note' document whose
-// note_type_source is the empty string (never classified - a note captured before the
-// classifier shipped) or 'auto' (classified, but never confirmed by an
-// operator override or upgraded by Mate) - never 'operator', which is
-// sticky against exactly this kind of automatic pass, the same precedence
-// SetNoteTypeIfNotOperator already enforces for a single note. Ordered
-// oldest-first (created_at, then id) purely so a backfill run's own log
-// output and any future progress reporting reads in a stable, predictable
-// order - nothing about classification itself depends on order.
-func (s *documentStore) NoteClassifyBackfillCandidates() ([]document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	rows, err := s.db.Query(`SELECT ` + documentColumns + ` FROM documents WHERE kind = 'note' AND note_type_source IN ('', 'auto') ORDER BY created_at, id`)
-	if err != nil {
-		return nil, fmt.Errorf("note classify backfill candidates: %w", err)
-	}
-	defer rows.Close()
-
-	var out []document
-	for rows.Next() {
-		doc, err := scanDocument(rows)
-		if err != nil {
-			return nil, fmt.Errorf("note classify backfill candidates: scan: %w", err)
-		}
-		out = append(out, doc)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("note classify backfill candidates: %w", err)
-	}
-	return out, nil
-}
-
-// notesEnrichCounts is NoteEnrichBackfillCounts' return value: how many
-// notes the enrich backfill would touch, and the chars/4 token-estimate
-// input notesEnrichBackfillHandler's dry run reports - the same shape
-// EmbeddingCounts' CharsPending gives documentsEmbeddingsBackfillHandler's
-// own dry run (documents_store.go), just without that call's extra
-// chunk-level fields, which have no equivalent here: this counts whole
-// notes, not chunks.
-type notesEnrichCounts struct {
-	NotesPending int
-	CharsPending int
-}
-
-// NoteEnrichBackfillCounts reports how many kind='note' documents currently
-// have enrich=0 (never sent for Mate enrichment) and the character count of
-// their already-extracted markdown (documents.markdown - populated at
-// create/edit time regardless of the enrich flag, since local extraction
-// always runs; see extractTextFile's doc comment, documents_extract.go).
-// Read-only: this starts no work, matching the ?dry_run=1 contract
-// documentsEmbeddingsBackfillHandler's own dry run keeps.
-func (s *documentStore) NoteEnrichBackfillCounts() (notesEnrichCounts, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	rows, err := s.db.Query(`SELECT markdown FROM documents WHERE kind = 'note' AND enrich = 0`)
-	if err != nil {
-		return notesEnrichCounts{}, fmt.Errorf("note enrich backfill counts: %w", err)
-	}
-	defer rows.Close()
-
-	var counts notesEnrichCounts
-	for rows.Next() {
-		var markdown string
-		if err := rows.Scan(&markdown); err != nil {
-			return notesEnrichCounts{}, fmt.Errorf("note enrich backfill counts: scan: %w", err)
-		}
-		counts.NotesPending++
-		counts.CharsPending += utf8.RuneCountInString(markdown)
-	}
-	if err := rows.Err(); err != nil {
-		return notesEnrichCounts{}, fmt.Errorf("note enrich backfill counts: %w", err)
-	}
-	return counts, nil
-}
+// ── The enrich sweep (ADR 0120: turning Mate on is the consent) ─────────
+//
+// Classification needs no sweep of its own: a note is classified at create
+// and at every body edit already (notes_handlers.go), so there is never a
+// backlog to catch up - ADR 0120 retired the classify-backfill endpoint
+// this file used to carry precisely because its "candidates" query only
+// ever found notes that were already classified.
 
 // EnrichBackfillNotes sets enrich=1 on every kind='note' document that
 // doesn't already carry it, in ONE UPDATE, and requeues each for
@@ -504,10 +335,12 @@ func (s *documentStore) NoteEnrichBackfillCounts() (notesEnrichCounts, error) {
 // kind/enrich rather than a single id) needs to run as one statement under
 // one lock acquisition, not one call - and one round trip - per note.
 //
-// Returns how many rows were touched, for the backfill endpoint's response.
-// Actually starting the indexer on them is the HTTP handler's job
-// (wakeDocumentIndexer), the same split documentsEmbeddingsBackfillHandler
-// draws between "flip the rows" and "wake the pass that processes them".
+// Returns how many rows were touched, for SweepIfReady's own log line
+// (documents_embed.go, ADR 0120). Actually starting the indexer on them is
+// SweepIfReady's job (idx.Wake()), the same split this method's callers
+// have always drawn between "flip the rows" and "wake the pass that
+// processes them" - only the caller changed, from an HTTP handler to the
+// automatic sweep.
 func (s *documentStore) EnrichBackfillNotes() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

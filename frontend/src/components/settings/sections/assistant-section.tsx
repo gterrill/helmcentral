@@ -450,7 +450,9 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
 
       <FieldDescription>
         Every question sends your position, the question itself, and forecast and tide excerpts to OpenRouter and whichever
-        model provider you choose. Every reply shows its cost.
+        model provider you choose. Mate also reads your documents and notes to answer questions, and once it&apos;s on it
+        summarises and indexes them for search on its own, no separate prompt per item. All of that text goes to OpenRouter
+        too, billed to your key. Every reply shows its cost.
       </FieldDescription>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -2469,6 +2469,13 @@ export function App() {
             onSectionChange={setDocumentsSectionId}
             onOpenHelp={openHelp}
             onCaptureNote={(type) => { setCaptureType(type); setCaptureOpen(true) }}
+            // ADR 0120: the toolbar's Mate failure line links straight to
+            // Settings → Assistant, the same requestNavigate wiring
+            // AssistantDrawer's own "Open Mate settings" button uses below.
+            onOpenAssistantSettings={() => requestNavigate('settings', () => {
+              setSettingsSection('assistant')
+              setActivePanel('settings')
+            })}
           />
         )
       }

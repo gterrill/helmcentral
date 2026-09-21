@@ -602,3 +602,106 @@ func TestDocumentIndexer_ASuccessClearsAChunksEarlierFailures(t *testing.T) {
 		t.Fatalf("expected the failure count to restart at 1, got %d", n)
 	}
 }
+
+// ── SweepIfReady (ADR 0120: turning Mate on is the consent) ─────────────
+
+func TestDocumentIndexer_SweepIfReadyEnrichesNotesAndStartsBackfillWhenReady(t *testing.T) {
+	store := withTestDocumentStore(t)
+	pending, err := store.InsertNote(document{SHA256: "note-sweep-pending", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	idx := newTestEmbedIndexer(store, documentsDirPath(), embedTestReadiness("test-embed-model", 4), &fakeOpenRouterDoer{})
+	idx.SweepIfReady()
+
+	got, err := store.Get(pending.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Enrich {
+		t.Fatalf("expected the sweep to set enrich=1 on the pending note")
+	}
+	if !idx.BackfillStatus().Running {
+		t.Fatalf("expected the sweep to start an embeddings backfill")
+	}
+}
+
+func TestDocumentIndexer_SweepIfReadyDoesNothingWhenMateNotReady(t *testing.T) {
+	store := withTestDocumentStore(t)
+	pending, err := store.InsertNote(document{SHA256: "note-sweep-not-ready", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	idx := newTestEmbedIndexer(store, documentsDirPath(), func() (assistantReadiness, string, error) {
+		return assistantReadiness{Enabled: false, Problem: "The assistant is switched off. Enable it in Settings → Assistant."}, "", nil
+	}, &fakeOpenRouterDoer{})
+	idx.SweepIfReady()
+
+	got, err := store.Get(pending.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Enrich {
+		t.Fatalf("expected the sweep to leave enrich=0 while Mate is not ready")
+	}
+	if idx.BackfillStatus().Running {
+		t.Fatalf("expected the sweep to start no backfill while Mate is not ready")
+	}
+}
+
+// The two halves of the sweep are independently gated - an operator can
+// have Mate summarising notes with semantic search still switched off - the
+// same split documentEnrichReadinessProblem/documentEmbedReadinessProblem
+// draw everywhere else in this package.
+func TestDocumentIndexer_SweepIfReadyEnrichesNotesButSkipsBackfillWithNoEmbeddingModel(t *testing.T) {
+	store := withTestDocumentStore(t)
+	pending, err := store.InsertNote(document{SHA256: "note-sweep-no-embed", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	idx := newTestEmbedIndexer(store, documentsDirPath(), embedTestReadiness("", 0), &fakeOpenRouterDoer{})
+	idx.SweepIfReady()
+
+	got, err := store.Get(pending.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Enrich {
+		t.Fatalf("expected the sweep to enrich notes independently of the (unconfigured) embedding model")
+	}
+	if idx.BackfillStatus().Running {
+		t.Fatalf("expected no embeddings backfill to start with no embedding model configured")
+	}
+}
+
+// A readiness-check error (a broken settings file, a secrets-store read
+// failure) sweeps nothing rather than crashing the caller - SweepIfReady
+// runs from main()'s boot path and from a settings-save HTTP handler, and
+// neither may fail because a background sweep could not read settings this
+// one time.
+func TestDocumentIndexer_SweepIfReadyReadinessErrorDoesNothing(t *testing.T) {
+	store := withTestDocumentStore(t)
+	pending, err := store.InsertNote(document{SHA256: "note-sweep-readiness-err", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	idx := newTestEmbedIndexer(store, documentsDirPath(), func() (assistantReadiness, string, error) {
+		return assistantReadiness{}, "", fmt.Errorf("read settings: permission denied")
+	}, &fakeOpenRouterDoer{})
+	idx.SweepIfReady()
+
+	got, err := store.Get(pending.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Enrich {
+		t.Fatalf("expected a readiness-check error to sweep nothing")
+	}
+	if idx.BackfillStatus().Running {
+		t.Fatalf("expected a readiness-check error to start no backfill")
+	}
+}

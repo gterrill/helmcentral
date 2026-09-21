@@ -81,8 +81,6 @@ function makeDocumentsMock(overrides: Partial<DocumentsMock> = {}): DocumentsMoc
     search: vi.fn(),
     clearSearch: vi.fn(),
     embeddingsStatus: null,
-    dryRunEmbeddingsBackfill: vi.fn(),
-    startEmbeddingsBackfill: vi.fn(),
     createFolder: vi.fn(),
     renameFolder: vi.fn(),
     moveFolder: vi.fn(),
@@ -925,94 +923,31 @@ describe('DocumentsPanel', () => {
     })
   })
 
-  // ADR 0106 E1c (F1e): the toolbar's semantic-search status line and its
-  // "Index for semantic search" backfill action.
-  describe('embeddings status and backfill', () => {
-    it('renders no status line at all when semantic search is off', () => {
+  // ADR 0120: "turning Mate on is the consent" retired the toolbar's three
+  // backlog banners (semantic search indexing, note classification, note
+  // enrichment) and the confirm dialogs that went with them. The automatic
+  // sweep (backend) does that work itself once Mate is ready; the only
+  // state left worth a line here is a failure.
+  describe('Mate failure line', () => {
+    it('renders nothing before the initial status load resolves', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ embeddingsStatus: null }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.queryByTestId('documents-mate-error')).not.toBeInTheDocument()
+    })
+
+    it('renders nothing when semantic search is off', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({ enabled: false, model: '', dimensions: 0, problem: 'No embedding model is configured. Set one in Settings → Assistant.' }),
       }))
 
       render(<DocumentsPanel />)
 
-      expect(screen.queryByTestId('documents-embeddings-status')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('documents-mate-error')).not.toBeInTheDocument()
     })
 
-    it('renders no status line before the initial status load resolves', () => {
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ embeddingsStatus: null }))
-
-      render(<DocumentsPanel />)
-
-      expect(screen.queryByTestId('documents-embeddings-status')).not.toBeInTheDocument()
-    })
-
-    it('shows the pending chunk count and the index action when chunks are pending', () => {
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
-        }),
-      }))
-
-      render(<DocumentsPanel />)
-
-      expect(screen.getByText(/12 chunks not yet searchable by meaning/i)).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /index for semantic search/i })).toBeEnabled()
-    })
-
-    it('the index action runs the dry run first and waits for confirmation before posting anything', async () => {
-      const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
-        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
-        tokens_estimate: 1200,
-      })
-      const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
-        }),
-        dryRunEmbeddingsBackfill,
-        startEmbeddingsBackfill,
-      }))
-
-      render(<DocumentsPanel />)
-
-      fireEvent.click(screen.getByRole('button', { name: /index for semantic search/i }))
-
-      expect(await screen.findByText(/12 pending chunk/i)).toBeInTheDocument()
-      expect(screen.getByText(/1200 tokens/i)).toBeInTheDocument()
-      expect(dryRunEmbeddingsBackfill).toHaveBeenCalledTimes(1)
-      expect(startEmbeddingsBackfill).not.toHaveBeenCalled()
-
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-      await waitFor(() => expect(screen.queryByText(/1200 tokens/i)).not.toBeInTheDocument())
-      expect(startEmbeddingsBackfill).not.toHaveBeenCalled()
-    })
-
-    it('confirming the index action posts the backfill', async () => {
-      const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
-        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
-        tokens_estimate: 1200,
-      })
-      const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
-        }),
-        dryRunEmbeddingsBackfill,
-        startEmbeddingsBackfill,
-      }))
-
-      render(<DocumentsPanel />)
-
-      fireEvent.click(screen.getByRole('button', { name: /index for semantic search/i }))
-      await screen.findByText(/1200 tokens/i)
-
-      fireEvent.click(screen.getByRole('button', { name: 'Index' }))
-
-      await waitFor(() => expect(startEmbeddingsBackfill).toHaveBeenCalledTimes(1))
-    })
-
-    it('a running backfill disables the action button and shows progress', () => {
+    it('renders nothing while the library is healthy, including mid-sweep', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
           counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chunks_pending_auto: 5, chars_pending: 2000 },
@@ -1022,11 +957,11 @@ describe('DocumentsPanel', () => {
 
       render(<DocumentsPanel />)
 
-      expect(screen.getByText(/7 embedded this run, 5 left/i)).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /index for semantic search/i })).toBeDisabled()
+      expect(screen.queryByTestId('documents-mate-error')).not.toBeInTheDocument()
     })
 
-    it("shows a running backfill's last_error as a quiet warning, since the backfill keeps retrying rather than stopping", () => {
+    it('names the error and links to Mate settings when the sweep hit one', () => {
+      const onOpenAssistantSettings = vi.fn()
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
           counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chunks_pending_auto: 5, chars_pending: 2000 },
@@ -1034,10 +969,12 @@ describe('DocumentsPanel', () => {
         }),
       }))
 
-      render(<DocumentsPanel />)
+      render(<DocumentsPanel onOpenAssistantSettings={onOpenAssistantSettings} />)
 
-      expect(screen.getByText('OpenRouter: 429 rate limited')).toBeInTheDocument()
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByText(/OpenRouter: 429 rate limited/)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: /open mate settings/i }))
+      expect(onOpenAssistantSettings).toHaveBeenCalledTimes(1)
     })
   })
 

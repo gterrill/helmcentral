@@ -122,15 +122,6 @@ export interface DocumentEmbeddingsStatus {
   backfill: DocumentBackfillStatus
 }
 
-// documentEmbeddingsBackfillDryRunJSON, backend/documents_handlers.go -
-// POST .../backfill?dry_run=1. Starts nothing; tokens_estimate is
-// chars_pending/4, a rough scale-setting figure for the confirmation
-// dialog, not a price quote.
-export interface DocumentEmbeddingsBackfillDryRun {
-  counts: DocumentEmbeddingCounts
-  tokens_estimate: number
-}
-
 export interface ReindexOutcome {
   document: DocumentRecord
   enrich: boolean
@@ -457,38 +448,6 @@ export function useDocuments(folderId: string | null) {
     await refresh()
   }, [refresh])
 
-  // Starts nothing - the dry run just reports what a real backfill would
-  // do, for the confirmation dialog (documents-panel.tsx) to show the
-  // operator before any text actually goes to OpenRouter. Goes through
-  // submitJSON like every other write here, so a readiness failure (a
-  // broken settings file, a secrets-store read error - the one way this
-  // particular call can fail; the handler itself starts no work either way)
-  // surfaces as the server's own message rather than a generic one.
-  const dryRunEmbeddingsBackfill = useCallback(async () => {
-    return submitJSON<DocumentEmbeddingsBackfillDryRun>(`${apiBaseUrl}/api/documents/embeddings/backfill?dry_run=1`, 'POST')
-  }, [])
-
-  // The real thing - POSTs with no ?dry_run, which is itself the operator's
-  // consent for whatever text is currently unembedded to reach OpenRouter
-  // (documents_embed.go's own comment on StartBackfill). Deliberately does
-  // NOT go through submitJSON: a 409 ("a backfill is already running") is
-  // not a failure the operator caused by clicking the button - it means the
-  // exact state they wanted (a backfill in progress) already holds, so its
-  // response is folded into embeddingsStatus the same as a plain 200 rather
-  // than thrown as an error. Any other non-2xx (400 semantic search off,
-  // 500) still throws the server's own message.
-  const startEmbeddingsBackfill = useCallback(async () => {
-    const response = await fetch(`${apiBaseUrl}/api/documents/embeddings/backfill`, { method: 'POST' })
-    const body = (await response.json().catch(() => ({}))) as { error?: string; backfill?: DocumentBackfillStatus }
-    if (!response.ok && response.status !== 409) {
-      throw new Error(body.error ?? `HTTP ${response.status}`)
-    }
-    if (body.backfill) {
-      const backfill = body.backfill
-      setEmbeddingsStatus((prev) => (prev ? { ...prev, backfill } : prev))
-    }
-  }, [])
-
   return {
     path,
     folders,
@@ -509,8 +468,6 @@ export function useDocuments(folderId: string | null) {
     clearSearch,
 
     embeddingsStatus,
-    dryRunEmbeddingsBackfill,
-    startEmbeddingsBackfill,
 
     createFolder,
     renameFolder,

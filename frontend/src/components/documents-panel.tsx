@@ -72,23 +72,13 @@ import { apiBaseUrl } from '@/config/api'
 import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import {
   useDocuments,
-  type DocumentEmbeddingsBackfillDryRun,
   type DocumentEmbeddingsStatus,
   type DocumentFolder,
   type DocumentRecord,
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
 import { useManuals } from '@/hooks/use-manuals'
-import {
-  useNotes,
-  type NoteType,
-  type NotesClassifyBackfillDryRun,
-  type NotesEnrichBackfillDryRun,
-  dryRunNotesClassifyBackfill,
-  runNotesClassifyBackfill,
-  dryRunNotesEnrichBackfill,
-  runNotesEnrichBackfill,
-} from '@/hooks/use-notes'
+import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
 import type { NoteLink } from '@/lib/note-links'
@@ -336,6 +326,13 @@ export interface DocumentsPanelProps {
    * still want to link to the how-to). Optional, same reasoning as the
    * deleted manuals-panel.tsx's own onOpenHelp. */
   onOpenHelp?: (target: HelpTarget) => void
+  /** ADR 0120: opens Settings → Assistant - the toolbar's failure line (the
+   * one surfaced state left once the backlog banners were removed) links
+   * here the same way AssistantDrawer's own "Open Mate settings" button
+   * does (App.tsx wires both through requestNavigate('settings', ...)).
+   * Optional, same reasoning as onOpenHelp above: a test that never
+   * triggers a failure doesn't need it. */
+  onOpenAssistantSettings?: () => void
 }
 
 // Revision "one panel, not three" (2026-09-20): docs/features/notes-and-the-manual.md
@@ -354,6 +351,7 @@ export function DocumentsPanel({
   onSectionChange,
   onCaptureNote,
   onOpenHelp,
+  onOpenAssistantSettings,
 }: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const documents = useDocuments(folderId)
@@ -603,83 +601,6 @@ export function DocumentsPanel({
     await runAction(async () => {
       await documents.reindexDocument(reindexTarget.id)
       setReindexTarget(null)
-    })
-  }
-
-  // ── embeddings backfill ("Index for semantic search") ──────────────
-  // ADR 0106 E1c's consent gate: clicking the row's button first runs the
-  // dry run (starts nothing, just reports what a real backfill would send)
-  // and holds its result here to drive the confirmation dialog below -
-  // Cancel (onOpenChange(false)) clears it with no POST ever made; only
-  // Confirm calls startEmbeddingsBackfill, which is the operator's actual
-  // consent for that text to reach OpenRouter.
-  const [backfillDryRun, setBackfillDryRun] = useState<DocumentEmbeddingsBackfillDryRun | null>(null)
-  const handleIndexClick = () => {
-    void runAction(async () => {
-      const dryRun = await documents.dryRunEmbeddingsBackfill()
-      setBackfillDryRun(dryRun)
-    })
-  }
-  const submitBackfill = async () => {
-    await runAction(async () => {
-      await documents.startEmbeddingsBackfill()
-      setBackfillDryRun(null)
-    })
-  }
-
-  // ── notes backfills (plan §9's "no-Mate path") ──────────────────────
-  // Both dry runs are fetched on mount and after every run, the same "is
-  // there anything to do" check EmbeddingsStatusRow gets for free from its
-  // own polled GET /api/documents/embeddings - there is no equivalent GET
-  // status endpoint for notes (a dry-run POST starts nothing either way,
-  // so calling it just to look is the same shape), so this component holds
-  // that state itself rather than useNotes owning it for every one of its
-  // several call sites.
-  const [classifyDryRun, setClassifyDryRun] = useState<NotesClassifyBackfillDryRun | null>(null)
-  const [enrichDryRun, setEnrichDryRun] = useState<NotesEnrichBackfillDryRun | null>(null)
-  const refreshNotesBackfillDryRuns = useCallback(async () => {
-    try {
-      setClassifyDryRun(await dryRunNotesClassifyBackfill())
-    } catch {
-      // Same "convenience overlay, not load-bearing" reasoning as
-      // useDocuments.ts's refreshEmbeddingsStatus - a failed dry-run read
-      // must not disturb the folder/search view it sits beside.
-      setClassifyDryRun(null)
-    }
-    try {
-      setEnrichDryRun(await dryRunNotesEnrichBackfill())
-    } catch {
-      setEnrichDryRun(null)
-    }
-  }, [])
-  useEffect(() => { void refreshNotesBackfillDryRuns() }, [refreshNotesBackfillDryRuns])
-
-  // Classify costs nothing (a pure local function, no OpenRouter, no Mate)
-  // so there's no consent to gate behind a confirmation dialog the way
-  // embeddings/enrich need - the click IS the whole action.
-  const submitClassifyBackfill = () => {
-    void runAction(async () => {
-      await runNotesClassifyBackfill()
-      await unfiled.refresh() // note_type may have changed for rows the inbox shows
-      await documents.refresh() // ...and for rows the current folder shows
-      await refreshNotesBackfillDryRuns()
-    })
-  }
-
-  // Enrich bills the operator's OpenRouter account, so it gets the same
-  // dry-run-then-confirm gate embeddings/backfill uses - the AlertDialog
-  // below, keyed on this same dry-run result being non-null.
-  const [enrichBackfillConfirm, setEnrichBackfillConfirm] = useState<NotesEnrichBackfillDryRun | null>(null)
-  const handleEnrichBackfillClick = () => {
-    void runAction(async () => {
-      setEnrichBackfillConfirm(await dryRunNotesEnrichBackfill())
-    })
-  }
-  const submitEnrichBackfill = async () => {
-    await runAction(async () => {
-      await runNotesEnrichBackfill()
-      setEnrichBackfillConfirm(null)
-      await refreshNotesBackfillDryRuns()
     })
   }
 
@@ -1054,13 +975,7 @@ export function DocumentsPanel({
         >
           Unfiled notes ({unfiled.notes.length})
         </Button>
-        <EmbeddingsStatusRow status={documents.embeddingsStatus} onIndexClick={handleIndexClick} />
-        <NotesBackfillStatusRow
-          classifyDryRun={classifyDryRun}
-          enrichDryRun={enrichDryRun}
-          onClassifyClick={submitClassifyBackfill}
-          onEnrichClick={handleEnrichBackfillClick}
-        />
+        <MateFailureRow status={documents.embeddingsStatus} onOpenAssistantSettings={onOpenAssistantSettings} />
       </div>
 
       {uploads.items.length > 0 && (
@@ -1416,44 +1331,6 @@ export function DocumentsPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Index for semantic search (embeddings backfill) confirmation ── */}
-      <AlertDialog open={backfillDryRun !== null} onOpenChange={(open) => { if (!open) setBackfillDryRun(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Index for semantic search?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This sends the text of {backfillDryRun?.counts.chunks_pending ?? 0}{' '}
-              {backfillDryRun?.counts.chunks_pending === 1 ? 'pending chunk' : 'pending chunks'} (about{' '}
-              {backfillDryRun?.tokens_estimate ?? 0} tokens) to OpenRouter, which bills for it.
-              Keyword search keeps working either way.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { void submitBackfill() }}>Index</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* ── Enrich notes for Mate (plan §9's enrich backfill) confirmation ── */}
-      <AlertDialog open={enrichBackfillConfirm !== null} onOpenChange={(open) => { if (!open) setEnrichBackfillConfirm(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Enrich notes for Mate?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This sends the text of {enrichBackfillConfirm?.count ?? 0}{' '}
-              {enrichBackfillConfirm?.count === 1 ? 'note' : 'notes'} (about{' '}
-              {enrichBackfillConfirm?.tokens_estimate ?? 0} tokens) to OpenRouter, which bills for it.
-              Capture, filing and keyword search keep working either way.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { void submitEnrichBackfill() }}>Enrich</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* ── Viewer ─────────────────────────────────────────────────── */}
       <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) setViewerId(null) }}>
         <SheetContent side="right" className="w-full sm:max-w-2xl">
@@ -1573,93 +1450,39 @@ export function DocumentsPanel({
   )
 }
 
-// ADR 0106 E1c's status row: library-wide, not folder-scoped, so it sits in
-// the toolbar rather than inside the folder/search view below it. Renders
-// nothing at all - not even an empty wrapper - while the status hasn't
-// loaded yet or semantic search is simply off (`enabled:false`, e.g. no
-// embedding model configured): an operator who never turned this on should
-// see no permanent nag about it. `active` (something still needs
-// embedding, or a backfill is already running) is what separates the quiet
-// "up to date" line from the count-plus-button state; the two states never
-// need a shared wrapper since a caller only ever sees one at a time.
-function EmbeddingsStatusRow({
+// ADR 0120: "turning Mate on is the consent" retired the toolbar's three
+// backlog banners (semantic search indexing, note classification, note
+// enrichment), each with its own count, button and confirm dialog. A note
+// is classified the moment it's captured (there was never a real
+// classify backlog to show), and once Mate is ready the enrich/embed sweep
+// runs itself, at boot and on every settings save (SweepIfReady,
+// documents_embed.go) - repeating the same consent question on every visit
+// to Documents just read as nagging. The one state still worth a line here
+// is a FAILURE: status.backfill.last_error is the most recent embeddings
+// batch that didn't go through (the pass keeps retrying on its own, so this
+// is a heads-up, not a stuck spinner), named in plain language with a
+// direct link to the setting most likely to fix it. Nothing renders at all
+// - not even an empty wrapper - while there's no error, or while semantic
+// search isn't configured (enabled:false): an operator who never turned
+// this on, or whose library is healthy, sees no permanent chrome about it
+// either way.
+function MateFailureRow({
   status,
-  onIndexClick,
+  onOpenAssistantSettings,
 }: {
   status: DocumentEmbeddingsStatus | null
-  onIndexClick: () => void
+  onOpenAssistantSettings?: () => void
 }) {
   if (!status || !status.enabled) return null
-  const { counts, backfill } = status
-  const active = backfill.running || counts.chunks_pending > 0
-
-  if (!active) {
-    return (
-      <span data-testid="documents-embeddings-status" className="ml-auto text-xs text-muted-foreground">
-        Semantic search up to date.
-      </span>
-    )
-  }
+  const error = status.backfill.last_error
+  if (!error) return null
 
   return (
-    <div data-testid="documents-embeddings-status" className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      {backfill.running && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />}
-      <span>
-        {backfill.running
-          ? `Indexing for semantic search… ${backfill.chunks_embedded} embedded this run, ${counts.chunks_pending} left`
-          : `${counts.chunks_pending} chunk${counts.chunks_pending === 1 ? '' : 's'} not yet searchable by meaning`}
-      </span>
-      <Button type="button" size="sm" variant="outline" disabled={backfill.running} onClick={onIndexClick}>
-        Index for semantic search
+    <div data-testid="documents-mate-error" className="ml-auto flex flex-wrap items-center gap-2 text-xs text-destructive">
+      <span>Mate couldn&apos;t finish indexing your documents for search: {error}</span>
+      <Button type="button" size="sm" variant="outline" onClick={onOpenAssistantSettings}>
+        Open Mate settings
       </Button>
-      {backfill.last_error && (
-        <span className="rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">
-          {backfill.last_error}
-        </span>
-      )}
-    </div>
-  )
-}
-
-// Plan §9's two backfills, surfaced the same way EmbeddingsStatusRow is:
-// invisible when there's nothing to do (both counts at 0, or the dry runs
-// haven't loaded yet), never a permanent nag once the library's caught up.
-// The two halves are independent - a boat can have unclassified notes with
-// nothing left to enrich, or the reverse - so each renders (or doesn't) on
-// its own count rather than sharing one active/inactive gate.
-function NotesBackfillStatusRow({
-  classifyDryRun,
-  enrichDryRun,
-  onClassifyClick,
-  onEnrichClick,
-}: {
-  classifyDryRun: NotesClassifyBackfillDryRun | null
-  enrichDryRun: NotesEnrichBackfillDryRun | null
-  onClassifyClick: () => void
-  onEnrichClick: () => void
-}) {
-  const classifyCount = classifyDryRun?.count ?? 0
-  const enrichCount = enrichDryRun?.count ?? 0
-  if (classifyCount === 0 && enrichCount === 0) return null
-
-  return (
-    <div data-testid="notes-backfill-status" className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      {classifyCount > 0 && (
-        <>
-          <span>{classifyCount} note{classifyCount === 1 ? '' : 's'} not yet classified</span>
-          <Button type="button" size="sm" variant="outline" onClick={onClassifyClick}>
-            Classify
-          </Button>
-        </>
-      )}
-      {enrichCount > 0 && (
-        <>
-          <span>{enrichCount} note{enrichCount === 1 ? '' : 's'} not yet enriched</span>
-          <Button type="button" size="sm" variant="outline" onClick={onEnrichClick}>
-            Enrich for Mate
-          </Button>
-        </>
-      )}
     </div>
   )
 }
