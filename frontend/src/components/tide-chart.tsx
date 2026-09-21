@@ -31,7 +31,8 @@ const CHART_LEFT = 36
 const CHART_RIGHT_MARGIN = 20
 const CHART_TOP = 16
 const CHART_BOTTOM = 125
-const CURVE_STEPS = 12
+// Samples across the 24h window, one every 5 minutes (see curvePoints).
+const CURVE_SAMPLE_COUNT = 24 * 12 + 1
 // Fallback viewBox width used only before the container's actual pixel width
 // has been measured (ResizeObserver hasn't fired yet, or in tests where it's
 // stubbed as a no-op) - chosen to match the chart's previous fixed size.
@@ -157,31 +158,47 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   // curvePoints stores real epoch-ms time and real display-unit height (not
   // pixel values) - recharts computes the data-to-pixel scaling itself now
   // (see tideChartMargin/XAxis/YAxis below), rather than being handed an
-  // identity pixel-space mapping. Memoized on the primitive values it
-  // actually reads (sortedExtremes, isImperial, chartStartMs/chartEndMs)
-  // rather than by calling the xFor/yFor/toDisplay closures below - those
-  // closures are recreated every render, so depending on them would defeat
-  // the memoization (it would "change" every render even when nothing it
-  // actually reads changed). The formulas are inlined here instead, matching
-  // xFor/yFor/toDisplay exactly.
+  // identity pixel-space mapping.
+  //
+  // Sampled evenly in time across [chartStartMs, chartEndMs], because
+  // useChartTooltip maps pointer X to an index with fraction * (count - 1).
+  // Stepping a fixed count per extreme-to-extreme segment broke that: tide
+  // segments differ in length, so the tooltip read a sample hours away from
+  // the cursor. A sample outside the first/last extreme has nothing to
+  // interpolate between and is skipped, not filled; the tooltip bounds below
+  // follow the curve's real first/last sample for that case.
+  //
+  // Memoized on the primitive values it actually reads (sortedExtremes,
+  // isImperial, chartStartMs/chartEndMs) rather than by calling the
+  // xFor/yFor/toDisplay closures below - those closures are recreated every
+  // render, so depending on them would defeat the memoization (it would
+  // "change" every render even when nothing it actually reads changed). The
+  // formulas are inlined here instead, matching xFor/yFor/toDisplay exactly.
   const curvePoints = useMemo(() => {
     const points: { t: number; h: number }[] = []
-    for (let i = 0; i < sortedExtremes.length - 1; i++) {
+    if (sortedExtremes.length < 2) return points
+
+    const stepMs = (chartEndMs - chartStartMs) / (CURVE_SAMPLE_COUNT - 1)
+    let i = 0
+    for (let s = 0; s < CURVE_SAMPLE_COUNT; s++) {
+      const t = chartStartMs + s * stepMs
+
+      // Both s and the extremes are in ascending time order, so a single
+      // forward-advancing pointer suffices - no need to rescan from the start
+      // for every sample.
+      while (i < sortedExtremes.length - 2 && new Date(sortedExtremes[i + 1].time).getTime() < t) i++
+
       const a = sortedExtremes[i]
       const b = sortedExtremes[i + 1]
       const tA = new Date(a.time).getTime()
       const tB = new Date(b.time).getTime()
-      if (tB < chartStartMs || tA > chartEndMs) continue
+      if (t < tA || t > tB) continue // before the first extreme or after the last - nothing brackets it
 
       const hA = isImperial ? metersToFeet(a.heightM) : a.heightM
       const hB = isImperial ? metersToFeet(b.heightM) : b.heightM
-
-      for (let s = 0; s <= CURVE_STEPS; s++) {
-        const progress = s / CURVE_STEPS
-        const t = tA + (tB - tA) * progress
-        const h = (hA + hB) / 2 + ((hA - hB) / 2) * Math.cos(Math.PI * progress)
-        points.push({ t, h })
-      }
+      const progress = tB === tA ? 0 : (t - tA) / (tB - tA)
+      const h = (hA + hB) / 2 + ((hA - hB) / 2) * Math.cos(Math.PI * progress)
+      points.push({ t, h })
     }
     return points
   }, [sortedExtremes, isImperial, chartStartMs, chartEndMs])
@@ -204,11 +221,16 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   // closure.
   const nowX = xFor(nowMs)
 
+  // The hook assumes sample 0 and count-1 sit at chartLeft/chartRight. That
+  // is CHART_LEFT/CHART_RIGHT only when the extremes span the whole day.
+  const tideCurveChartLeft = curvePoints.length > 0 ? xFor(curvePoints[0].t) : CHART_LEFT
+  const tideCurveChartRight = curvePoints.length > 0 ? xFor(curvePoints[curvePoints.length - 1].t) : CHART_RIGHT
+
   const tideTooltip = useChartTooltip(
     curvePoints.length,
     chart.station.stationId,
-    CHART_LEFT,
-    CHART_RIGHT,
+    tideCurveChartLeft,
+    tideCurveChartRight,
   )
 
   const tideTooltipEntry =

@@ -481,9 +481,11 @@ describe('TideChart', () => {
     expect(d).not.toBe('')
     expect(d).not.toMatch(/NaN/)
     const numbers = d.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? []
-    // 3 curve segments each producing up to CURVE_STEPS+1=13 points (the two
-    // boundary segments get partially clipped by the chartStartMs/chartEndMs
-    // guard) - well over 20 numbers confirms this is a real, non-empty path.
+    // curvePoints now samples CURVE_SAMPLE_COUNT (289) evenly-spaced points
+    // across the window rather than a fixed count per extreme-to-extreme
+    // segment, so this window (bracketed by extremes on both sides) produces
+    // a point for nearly every sample - well over 20 numbers confirms this is
+    // a real, non-empty path.
     expect(numbers.length).toBeGreaterThan(20)
   })
 
@@ -605,5 +607,86 @@ describe('TideChart keyboard access', () => {
 
     fireEvent.keyDown(overlay, { key: 'Escape' })
     expect(screen.queryByText(/^-?\d+\.\d+ m$/)).not.toBeInTheDocument()
+  })
+})
+
+// Regression test for a real bug found via browser-level verification: the
+// hover tooltip's value and marker didn't match the cursor position (e.g. the
+// cursor at ~2:40 PM showed the 1:47 PM value). Root cause was
+// useChartTooltip mapping pointer X to an index via `fraction * (count - 1)`,
+// which assumes curvePoints are evenly spaced in TIME across
+// [CHART_LEFT, CHART_RIGHT] - true for the hourly forecast charts, but not
+// for tide: the old curvePoints emitted CURVE_STEPS+1 points per
+// extreme-to-extreme segment, and segments have unequal durations (tide highs
+// and lows aren't evenly spaced), so index and time weren't interchangeable.
+//
+// This builds extremes with deliberately unequal segment durations (a 6h, a
+// 13h, and another 6h segment) and one extreme before the day window (the
+// buffer a real tide feed provides), moves the pointer to the exact pixel a
+// 10:00 AM cursor would sit at, and asserts the tooltip actually reads
+// "10:00 AM" (within one 5-minute sample step) - not whatever the old
+// uniform-index assumption would have landed on inside the 13h segment.
+describe('TideChart pointer tooltip accuracy', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 14, 12, 0, 0))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function parseClockTime(text: string): number {
+    const match = text.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/)
+    if (!match) throw new Error(`unexpected time text: "${text}"`)
+    let hour = Number(match[1]) % 12
+    if (match[3] === 'PM') hour += 12
+    return hour * 60 + Number(match[2])
+  }
+
+  it('shows the tooltip time matching the cursor position, not a uniform-index guess', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const extremes = [
+      // Before the window - the buffer a real tide feed provides.
+      { time: new Date(2026, 5, 13, 20, 0, 0).toISOString(), heightM: 1.0, high: false },
+      { time: new Date(2026, 5, 14, 2, 0, 0).toISOString(), heightM: 1.8, high: true }, // 6h segment before this
+      { time: new Date(2026, 5, 14, 15, 0, 0).toISOString(), heightM: 0.2, high: false }, // 13h segment before this - unequal
+      { time: new Date(2026, 5, 14, 21, 0, 0).toISOString(), heightM: 1.6, high: true }, // 6h segment before this
+    ]
+
+    const { container } = render(
+      <TideChart chart={buildChart({ extremes })} isImperial={false} windowStart={windowStart} windowEnd={windowEnd} />,
+    )
+
+    const overlay = screen.getByRole('img', { name: /Tide height at Test Harbor/i })
+    // jsdom lays nothing out, so give the overlay the width the component
+    // falls back to (DEFAULT_VIEWPORT_WIDTH) when it can't measure a real one.
+    ;(overlay as unknown as SVGSVGElement).getBoundingClientRect = () =>
+      ({ width: 1000, height: 175, left: 0, top: 0, right: 1000, bottom: 175, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+
+    // Reproduces the component's own xFor exactly (same formula, same
+    // inputs) - jsdom's ResizeObserver stub never fires, so viewportWidth
+    // falls back to DEFAULT_VIEWPORT_WIDTH (1000), matching the rect above.
+    const CHART_LEFT = 36
+    const CHART_RIGHT = 1000 - 20
+    const chartStartMs = windowStart.getTime()
+    const chartEndMs = windowEnd.getTime()
+    const xFor = (t: number) => CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
+
+    const targetTime = new Date(2026, 5, 14, 10, 0, 0)
+    const clientX = xFor(targetTime.getTime())
+
+    fireEvent.pointerMove(overlay, { clientX })
+
+    const bubble = container.querySelector('.pointer-events-none.absolute.top-1') as HTMLElement | null
+    expect(bubble).toBeTruthy()
+    const paragraphs = bubble!.querySelectorAll('p')
+    // time, primary (height), secondary (time-of-day) - in that order.
+    const secondaryText = paragraphs[2]?.textContent ?? ''
+
+    // Within one 5-minute sample step of the true cursor time (10:00 AM) -
+    // the old uniform-index mapping landed on 5:15 AM for this exact cursor
+    // position (index 16 of 39, inside the unequal 13h segment).
+    expect(Math.abs(parseClockTime(secondaryText) - parseClockTime('10:00 AM'))).toBeLessThanOrEqual(5)
   })
 })
