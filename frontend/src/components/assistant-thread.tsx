@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
+import { DictateButton, DictationError, DictationStatus, useDictation } from '@/components/dictation'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker'
 import { Message, MessageContent, MessageFooter } from '@/components/ui/message'
@@ -234,6 +235,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations.activeId])
 
+  // ADR 0122: dictation, not push-to-talk - appends to the composer, never
+  // sends by itself. The header's "Talk to Mate" mic (App.tsx) stays the
+  // only voice control that sends on its own. Declared ahead of handleSend
+  // below (rather than where it's used further down, near handleKeyDown)
+  // because handleSend now cancels it at send time.
+  const dictation = useDictation({ setValue: setContent })
+
   const handleSend = useCallback(async () => {
     const trimmed = content.trim()
     // ADR 0106 F2: a question may now be nothing but an attachment - the
@@ -271,6 +279,12 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       createdAt: new Date().toISOString(),
       attachments: attachmentChips.length > 0 ? attachmentChips : undefined,
     })
+    // Code review: sending used to leave an active dictation running - it
+    // kept listening after the composer was cleared below, so a word
+    // recognised after Send landed in the now-empty box as though it were
+    // the start of a fresh, unsent message. Cancelled here, before the
+    // clear, so nothing further can land in it.
+    dictation.cancel()
     setContent('')
 
     // Only included when something is actually staged - same
@@ -293,7 +307,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       conversations.appendLocal(reply)
       await conversations.refresh()
     }
-  }, [content, chat, conversations, canWrite, uploads])
+  }, [content, chat, conversations, canWrite, uploads, dictation])
 
   const handleStop = useCallback(() => {
     void chat.abort()
@@ -304,7 +318,9 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void handleSend()
+      return
     }
+    dictation.handleFieldKeyDown(event)
   }
 
   // ADR 0106 F2: the paperclip button never touches the DOM file input
@@ -559,6 +575,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
             >
               <Paperclip className="h-4 w-4" />
             </InputGroupButton>
+            {/* ADR 0122: dictation appends to the composer and never sends -
+                DictateButton renders nothing at all with no speech API, and
+                DictationStatus (the visible "Listening…"/interim line) only
+                renders while actually listening, so neither one changes
+                this addon's layout otherwise. */}
+            <DictateButton dictation={dictation} disabled={!canWrite} />
+            <DictationStatus dictation={dictation} />
             {/* Send is an icon button here, matching upstream's ArrowUpIcon
                 composer control - ml-auto is what actually pushes it to the
                 far edge, since the addon itself packs its children to the
@@ -583,6 +606,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
             {uploads.error}
           </p>
         )}
+        <DictationError dictation={dictation} />
         {!canWrite && <p className="text-[11px] text-muted-foreground">Read-only session</p>}
         {/* Send's disabled-attachment reason is a visible line, not just a
             hover title: the operator most likely to hit this is on the wall

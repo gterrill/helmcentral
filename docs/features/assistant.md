@@ -142,6 +142,12 @@ Voice is push-to-talk: tap the microphone in the header, or press `Alt+M`
 from anywhere in the app, and speak. The transcript lands in the composer as
 you talk and sends once you stop. Escape cancels a listening session.
 
+The composer has its own, separate microphone too, inside the text box next
+to Send. That one dictates: it adds whatever you say to the question you're
+typing and never sends by itself, for adding a follow-up thought by voice
+without cutting off what you'd already typed. Tap it again to stop dictating
+and read back what it heard before you press Send yourself.
+
 A voice question can also be answered aloud: turn on "Read replies aloud" in
 Settings → Mate → Voice and Mate speaks a short summary of its answer as soon
 as it arrives, in addition to the full written answer, never instead of it.
@@ -304,8 +310,10 @@ arrived: a model will happily spend every round it is allowed retrying a
 server that has stopped responding. If place search is the one failing, the
 configuration reference explains how to point OpenStreetMap at a mirror.
 
-If Mate can answer but voice specifically won't work, the microphone button
-says why rather than sitting there unresponsive: no speech recognition in
-this browser, or the app needs to be opened over https first. See [Talk to
-Mate](../how-to/talk-to-mate.md) for what each message means and how to fix
-it.
+If Mate can answer but voice specifically won't work, the header microphone
+says why rather than sitting there unresponsive - unless the browser has no
+speech recognition at all, in which case it isn't shown rather than shown
+disabled with no way to act on it. Press `Alt+M` anyway and Mate names the
+reason in a toast. The composer's own dictation mic follows the same rule.
+See [Talk to Mate](../how-to/talk-to-mate.md) for what each message means
+and how to fix it.

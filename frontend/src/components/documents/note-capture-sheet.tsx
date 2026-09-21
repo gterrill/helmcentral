@@ -1,14 +1,12 @@
-import { Mic } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { DictateButton, DictationError, DictationStatus, useDictation } from '@/components/dictation'
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Textarea } from '@/components/ui/textarea'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
-import { useSpeechInput } from '@/hooks/use-speech-input'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
-import { cn } from '@/lib/utils'
 
 // ADR 0119: capture is a global action, not a place. This sheet is the ONE
 // capture surface for the whole app - opened from App.tsx's header action
@@ -64,15 +62,10 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
   const [error, setError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
 
-  const speech = useSpeechInput({
-    // Appends rather than replaces: a skipper dictating with wet hands may
-    // still want to type a correction afterwards, and a second dictation
-    // should add to what's already there, not erase it.
-    onFinal: (final) => {
-      if (final === '') return
-      setText((prev) => (prev.trim() === '' ? final : `${prev} ${final}`))
-    },
-  })
+  // ADR 0122: dictation, appended to the textarea, never sent by itself -
+  // append semantics (a single space, skip an empty final) live in
+  // useDictation now, shared with the Mate composer's own mic.
+  const dictation = useDictation({ setValue: setText })
 
   const reset = useCallback(() => {
     setText('')
@@ -103,6 +96,13 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
       const created = type === TYPE_AUTO
         ? await notes.createNote({ body })
         : await notes.createNote({ body, type: type as NoteType })
+      // Code review: a successful Capture closes the sheet but leaves it
+      // mounted (this is the one instance, per ADR 0119/0121) - an active
+      // dictation left running would keep listening into hidden state and
+      // keep holding the voice arbiter's claim, blocking "Hey Mate"
+      // indefinitely. Cancelled before reset() so no late result from the
+      // just-cancelled session can land in between.
+      dictation.cancel()
       reset()
       onOpenChange(false)
       onCaptured?.(created.document.id)
@@ -114,37 +114,59 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
     } finally {
       setCapturing(false)
     }
-  }, [text, type, notes, reset, onOpenChange, onCaptured])
+  }, [text, type, notes, reset, onOpenChange, onCaptured, dictation])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       void submit()
+      return
     }
+    dictation.handleFieldKeyDown(event)
   }
 
   return (
-    <Sheet open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset() }}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next)
+        if (!next) {
+          // Code review: Escape, an overlay click and the sheet's own close
+          // button all funnel through here - the sheet closes but stays
+          // mounted, so a dictation left running would keep listening into
+          // state nobody can see and keep holding the voice arbiter's
+          // claim. Cancelled before reset() for the same reason submit()
+          // above does: no late result can land between the two.
+          dictation.cancel()
+          reset()
+        }
+      }}
+    >
       <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Capture a note</SheetTitle>
         </SheetHeader>
-        <Textarea
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Capture a note"
-          aria-label="Capture a note"
-          rows={6}
-          className="resize-none"
-        />
-        {speech.interim !== '' && (
-          <p className="text-[11px] text-muted-foreground">{speech.interim}</p>
-        )}
-        {speech.error && (
-          <p role="alert" className="text-[11px] text-destructive">{speech.error}</p>
-        )}
+        {/* ADR 0122: same InputGroup + block-end addon shape as the Mate
+            composer (assistant-thread.tsx) - the mic sits inside the field
+            itself, beside the visible "Listening…"/interim line, rather
+            than in a separate row below it the way this sheet used to put
+            it. */}
+        <InputGroup>
+          <InputGroupTextarea
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Capture a note"
+            aria-label="Capture a note"
+            rows={6}
+          />
+          <InputGroupAddon align="block-end">
+            <DictateButton dictation={dictation} />
+            <DictationStatus dictation={dictation} />
+          </InputGroupAddon>
+        </InputGroup>
+        <DictationError dictation={dictation} />
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Type</span>
           <Select value={type} onValueChange={(value) => { if (value) setType(value) }}>
@@ -164,30 +186,10 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
             {error}
           </p>
         )}
-        <div className="flex items-center justify-between gap-2">
-          {/* Same rules as the deleted notes-panel.tsx's capture box: hidden
-              entirely with no speech API, shown disabled with an explicit
-              reason when the API exists but the page isn't a secure
-              context. */}
-          {speech.unsupportedReason !== 'no-api' && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={speech.listening ? 'Stop dictation' : 'Dictate a note'}
-              aria-pressed={speech.listening}
-              disabled={speech.unsupportedReason === 'insecure-context'}
-              title={speech.unsupportedReason === 'insecure-context' ? 'Voice input needs the app opened over https' : undefined}
-              className={cn(speech.listening && 'text-primary')}
-              onClick={() => (speech.listening ? speech.stop() : speech.start())}
-            >
-              <Mic className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          )}
+        <div className="flex items-center justify-end gap-2">
           <Button
             type="button"
             size="lg"
-            className="ml-auto"
             disabled={capturing || text.trim() === ''}
             onClick={() => { void submit() }}
           >

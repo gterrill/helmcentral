@@ -302,12 +302,31 @@ describe('App-wide voice (ADR 0093)', () => {
     expect(screen.queryByRole('button', { name: 'Talk to Mate' })).not.toBeInTheDocument()
   })
 
-  it('disables the mic button and names the cause when there is no recognition API', () => {
+  // ADR 0122: no speech API at all hides the button entirely, matching the
+  // rule components/dictation.tsx's in-field mic already follows, rather
+  // than showing a disabled MicOff that names a cause nobody on a
+  // touchscreen would see anyway (a `title` tooltip needs a hover).
+  it('hides the mic button entirely when there is no recognition API', () => {
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Talk to Mate' })).not.toBeInTheDocument()
+  })
+
+  // An insecure origin is different from no API at all: the button stays
+  // visible, disabled, with MicOff and a title naming why - the operator
+  // can fix this one (open the https address) where "no recognition API"
+  // has no fix to offer.
+  it('shows the mic button disabled, with MicOff and a title, on an insecure origin', () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+
     render(<App />)
 
     const button = screen.getByRole('button', { name: 'Talk to Mate' })
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', 'This browser has no speech recognition.')
+    expect(button).toHaveAttribute('title', 'Voice input needs the app opened over https')
+
+    Object.defineProperty(window, 'isSecureContext', { value: undefined, configurable: true })
   })
 
   it('opens the Mate sheet with the transcript once the mic delivers a final result', async () => {
@@ -334,6 +353,22 @@ describe('App-wide voice (ADR 0093)', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
     expect(await screen.findByText('what about tomorrow')).toBeInTheDocument()
+  })
+
+  // ADR 0122: the same primary-filled treatment as the in-field
+  // DictateButton, so "this is recording" reads at a glance rather than
+  // depending on the ghost icon's low-contrast text-primary tint.
+  it('fills the mic button solid (primary) while listening, not just a tinted icon', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    const button = screen.getByRole('button', { name: 'Talk to Mate' })
+    expect(button.className).not.toMatch(/(?:^|\s)bg-primary(?:\s|$)/)
+
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'))
+
+    expect(button.className).toMatch(/(?:^|\s)bg-primary(?:\s|$)/)
   })
 
   it('Escape cancels push-to-talk while listening', async () => {

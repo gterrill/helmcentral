@@ -50,6 +50,19 @@ If "Listen for Hey Mate" is on, say "Hey Mate" followed by your question in
 one breath, or say "Hey Mate" alone and follow up within about eight
 seconds.
 
+## Dictating instead of asking
+
+The composer's own microphone, inside the text box beside Send, is a
+different button with a different job: it adds whatever you say to what
+you've already typed and never sends by itself. Tap it (it's labelled
+**Dictate**) to start, and it fills in solid while it's listening, with the
+words it's hearing shown right there in the box as you speak so you can tell
+it got you right before you send. Tap it again (now **Stop dictation**) when
+you're done talking, or press Escape to cancel the dictation without closing
+whatever you were doing - either way, nothing sends until you press Send
+yourself. The note capture sheet's own microphone (**Documents → New →
+Note**) works exactly the same way.
+
 ## Stop it reading aloud
 
 If a reply is being read aloud and you want it to stop now, a small square
@@ -59,8 +72,12 @@ Settings → Mate → Voice.
 
 ## Troubleshooting
 
-Mate reports voice problems by name rather than just going quiet. These are
-the exact messages you'll see, and what to do about each:
+Mate reports voice problems by name rather than just going quiet. On a
+browser with no speech recognition at all, neither microphone appears -
+there's nothing to tap, so pressing `Alt+M` anyway is how you'd see that
+message. Every other message below shows right where you'd expect it: on the
+header mic's own tooltip, or as a line under the composer or note box for
+its dictation mic.
 
 | Message | What it means | What to do |
 | --- | --- | --- |

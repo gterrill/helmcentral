@@ -210,6 +210,65 @@ describe('useSpeechInput recognition lifecycle', () => {
     expect(instances[0].aborted).toBe(true)
   })
 
+  it('stop() discards a phrase already in progress - a final result after stop() never reaches onFinal', () => {
+    const onFinal = vi.fn()
+    const { result } = renderHook(() => useSpeechInput({ onFinal }))
+    act(() => result.current.start())
+    act(() => instances[0].emitResult('how does the', false))
+
+    act(() => result.current.stop())
+
+    // A real recognizer can still fire a queued result after abort() - the
+    // hook detaches its handlers before aborting specifically so a race like
+    // that lands on nothing.
+    act(() => instances[0].emitResult('how does the passage look', true))
+    expect(onFinal).not.toHaveBeenCalled()
+    expect(result.current.listening).toBe(false)
+  })
+
+  // finish() (used by a mic tap that ends dictation, as opposed to
+  // Escape/cancel) calls the recognizer's own stop() rather than abort() -
+  // real speech APIs still deliver whatever phrase was already being
+  // recognised as a final result before firing `end`, so the last words
+  // spoken are not lost the way stop() above discards them.
+  it('finish() stops rather than aborts the underlying recognition', () => {
+    const { result } = renderHook(() => useSpeechInput({ onFinal: vi.fn() }))
+    act(() => result.current.start())
+
+    act(() => result.current.finish())
+
+    expect(instances[0].stopped).toBe(true)
+    expect(instances[0].aborted).toBe(false)
+    // Unlike stop(), listening does not clear immediately - only once the
+    // recognizer's own `end` event lands, same as an unprompted stop.
+    expect(result.current.listening).toBe(true)
+  })
+
+  it('finish() still lets a pending final result through before ending', () => {
+    const onFinal = vi.fn()
+    const { result } = renderHook(() => useSpeechInput({ onFinal }))
+    act(() => result.current.start())
+    act(() => instances[0].emitResult('how does the', false))
+    expect(result.current.interim).toBe('how does the')
+
+    act(() => result.current.finish())
+    // The browser delivers the final result for the phrase that was already
+    // in flight, then ends on its own - both after finish() was called.
+    act(() => instances[0].emitResult('how does the passage look', true))
+    expect(onFinal).toHaveBeenCalledWith('how does the passage look')
+    expect(result.current.listening).toBe(true)
+
+    act(() => instances[0].emitEnd())
+    expect(result.current.listening).toBe(false)
+  })
+
+  it('finish() on an already-idle hook is a no-op', () => {
+    const { result } = renderHook(() => useSpeechInput({ onFinal: vi.fn() }))
+
+    expect(() => act(() => result.current.finish())).not.toThrow()
+    expect(instances).toHaveLength(0)
+  })
+
   it('aborts the recognition on unmount', () => {
     const { result, unmount } = renderHook(() => useSpeechInput({ onFinal: vi.fn() }))
     act(() => result.current.start())

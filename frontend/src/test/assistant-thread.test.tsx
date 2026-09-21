@@ -735,6 +735,103 @@ describe('AssistantThread', () => {
       expect(group as HTMLElement).toContainElement(attachButton)
     })
 
+    // ADR 0122: dictation inside the composer - DictateButton appends to
+    // `content`, never sends, and lives in the same block-end addon as
+    // Paperclip/Send.
+    describe('dictation (ADR 0122)', () => {
+      interface FakeResultAlternative { transcript: string }
+      interface FakeResult extends Array<FakeResultAlternative> { isFinal: boolean }
+
+      class FakeSpeechRecognition {
+        lang = ''
+        continuous = false
+        interimResults = false
+        onresult: ((event: { resultIndex: number; results: ArrayLike<FakeResult> }) => void) | null = null
+        onerror: ((event: { error: string }) => void) | null = null
+        onend: (() => void) | null = null
+        started = false
+        aborted = false
+        stopped = false
+
+        constructor() {
+          fakeInstances.push(this)
+        }
+
+        start() { this.started = true }
+        stop() { this.stopped = true }
+        abort() { this.aborted = true }
+
+        emitResult(transcript: string, isFinal: boolean) {
+          const result: FakeResult = Object.assign([{ transcript }], { isFinal })
+          this.onresult?.({ resultIndex: 0, results: [result] })
+        }
+      }
+
+      let fakeInstances: FakeSpeechRecognition[] = []
+      const currentRecognition = () => fakeInstances[fakeInstances.length - 1]
+
+      beforeEach(() => {
+        fakeInstances = []
+        vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+      })
+
+      afterEach(() => {
+        vi.unstubAllGlobals()
+      })
+
+      it('shows a Dictate button in the same input-group panel as Send, that never sends by itself', () => {
+        const send = vi.fn()
+        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+        const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+        const group = textarea.closest('[data-slot="input-group"]')
+        const dictateButton = screen.getByRole('button', { name: 'Dictate' })
+        expect(group as HTMLElement).toContainElement(dictateButton)
+
+        fireEvent.click(dictateButton)
+        act(() => { currentRecognition().emitResult('what about the wind tomorrow', true) })
+
+        expect(send).not.toHaveBeenCalled()
+        expect(textarea).toHaveValue('what about the wind tomorrow')
+      })
+
+      it('is disabled when canWrite is false', () => {
+        render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} />)
+
+        expect(screen.getByRole('button', { name: 'Dictate' })).toBeDisabled()
+      })
+
+      it('is absent entirely when there is no speech API', () => {
+        vi.unstubAllGlobals()
+        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+        expect(screen.queryByRole('button', { name: /dictate/i })).not.toBeInTheDocument()
+      })
+
+      // Code review: sending (Enter or the Send button) used to leave an
+      // active dictation running - it kept listening after the composer was
+      // cleared, so a word recognised after Send landed in the now-empty
+      // box as if it were the start of a fresh, unsent message. Send has to
+      // cancel dictation itself, before it clears the composer.
+      it('cancels dictation at send time, so a result recognised after Send cannot land in the emptied composer', async () => {
+        const send = vi.fn().mockResolvedValue(null)
+        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+        const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
+        fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+        expect(currentRecognition().started).toBe(true)
+
+        fireEvent.keyDown(textarea, { key: 'Enter' })
+
+        await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?'))
+        expect(currentRecognition().aborted).toBe(true)
+
+        act(() => { currentRecognition().emitResult('leftover words', true) })
+        expect(textarea.value).toBe('')
+      })
+    })
+
     it('puts the staged-attachment chips inside the same input-group panel', () => {
       render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
 

@@ -2,13 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { SPEECH_INPUT_FATAL_ERRORS, useSpeechInput, type SpeechInputUnsupportedReason } from '@/hooks/use-speech-input'
 import { stripWakeWord } from '@/lib/spoken-summary'
+import { getVoiceClaimSnapshot, preemptVoice, subscribeVoiceClaim } from '@/lib/voice-arbiter'
 
 // ADR 0093 voice phase, "App-wide voice": mounted once in App.tsx (not per
 // panel) so push-to-talk - and, once enabled, "Hey Mate" - work from any
 // page, not just the Mate panel/sheet. Composes exactly one useSpeechInput
 // instance: only one SpeechRecognition session can usefully run at a time,
 // and push-to-talk taking over from a running wake-word session (then
-// handing back once it's done) needs them to share the same one.
+// handing back once it's done) needs them to share the same one. ADR 0122
+// extends that same rule to in-field dictation (components/dictation.tsx),
+// which runs an entirely separate useSpeechInput instance in a different
+// component tree - see lib/voice-arbiter.ts and the pause/resume effect
+// near the bottom of this hook for how the two stay out of each other's way.
 const ARM_WINDOW_MS = 8_000
 const WAKE_RESTART_DELAY_MS = 500
 
@@ -146,6 +151,12 @@ export function useMateVoice({
     clearArmTimer()
     setArmed(false)
     prime()
+    // ADR 0122: push-to-talk is a deliberate, explicit operator action - it
+    // wins over an in-progress dictation (components/dictation.tsx) rather
+    // than starting a second recognition alongside it. preemptVoice() tells
+    // whatever currently holds lib/voice-arbiter.ts's claim to abort and
+    // release before this starts its own; a no-op if nothing is claiming.
+    preemptVoice()
     modeRef.current = 'push-to-talk'
     startRecognition({ continuous: false })
   }, [canWrite, prime, startRecognition, clearArmTimer])
@@ -174,7 +185,7 @@ export function useMateVoice({
     // Freshly (re)enabled: an earlier fatal error no longer applies - this
     // is the operator trying again, e.g. after granting the permission.
     wakeStoppedRef.current = false
-    if (modeRef.current === 'idle' && !document.hidden) {
+    if (modeRef.current === 'idle' && !document.hidden && !getVoiceClaimSnapshot()) {
       modeRef.current = 'wake'
       startRecognition({ continuous: true })
     }
@@ -197,7 +208,7 @@ export function useMateVoice({
     restartTimerRef.current = setTimeout(() => {
       restartTimerRef.current = null
       if (!wakeDesiredRef.current || wakeStoppedRef.current) return
-      if (document.hidden) return
+      if (document.hidden || getVoiceClaimSnapshot()) return
       modeRef.current = 'wake'
       startRecognition({ continuous: true })
     }, WAKE_RESTART_DELAY_MS)
@@ -215,7 +226,7 @@ export function useMateVoice({
           modeRef.current = 'idle'
           stopRecognition()
         }
-      } else if (modeRef.current === 'idle' && !wakeStoppedRef.current) {
+      } else if (modeRef.current === 'idle' && !wakeStoppedRef.current && !getVoiceClaimSnapshot()) {
         modeRef.current = 'wake'
         startRecognition({ continuous: true })
       }
@@ -224,6 +235,37 @@ export function useMateVoice({
     return () => document.removeEventListener('visibilitychange', handleVisibility)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ADR 0122: in-field dictation claiming lib/voice-arbiter.ts pauses wake
+  // mode exactly the way the visibility effect above pauses it for a
+  // backgrounded tab, and resumes it the same way once the claim lifts -
+  // this hook's own push-to-talk already takes over from wake mode by a
+  // different path (starting a fresh recognition on the same
+  // useSpeechInput instance aborts the running one), so this only has to
+  // cover a claim originating *outside* this hook.
+  //
+  // Code review: this used to be a `useSyncExternalStore` read
+  // (`voiceClaimedElsewhere`) driving a plain `useEffect` keyed on it -
+  // which only runs on the render *after* the claim changed. A claimant
+  // that claims and then immediately starts its own recognizer in the same
+  // synchronous call (components/dictation.tsx's start()) needs this
+  // stopped *before* that happens, not on a later render. Subscribing
+  // directly instead - lib/voice-arbiter.ts's notify() calls every
+  // subscriber synchronously, in the same call stack as claimVoice() itself
+  // - closes that gap: this callback runs, and stops the recognizer, before
+  // claimVoice()'s caller gets control back.
+  useEffect(() => subscribeVoiceClaim(() => {
+    if (!wakeDesiredRef.current) return
+    if (getVoiceClaimSnapshot()) {
+      if (modeRef.current === 'wake') {
+        modeRef.current = 'idle'
+        stopRecognition()
+      }
+    } else if (modeRef.current === 'idle' && !wakeStoppedRef.current && !document.hidden) {
+      modeRef.current = 'wake'
+      startRecognition({ continuous: true })
+    }
+  }), [stopRecognition, startRecognition])
 
   return {
     supported: speech.supported,

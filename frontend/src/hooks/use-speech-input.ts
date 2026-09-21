@@ -92,18 +92,29 @@ export interface UseSpeechInputResult {
   error: string | null
   start: (options?: { continuous?: boolean }) => void
   stop: () => void
+  finish: () => void
 }
 
 /**
  * Wraps the browser's SpeechRecognition (webkitSpeechRecognition on Safari
  * and Chrome) for both push-to-talk (Phase 1, non-continuous) and the "Hey
  * Mate" wake-word listener (Phase 2, continuous) - see hooks/use-mate-voice.ts,
- * which composes exactly one instance of this hook for both.
+ * which composes exactly one instance of this hook for both. Also backs
+ * in-field dictation (components/dictation.tsx, ADR 0122), which composes
+ * its own separate instance.
  *
  * Fails fast rather than silently: an unsupported browser or an insecure
  * origin never pretends to listen - `supported`/`unsupportedReason` say why,
  * and `start()` on an unsupported hook sets `error` to a sentence naming the
  * cause instead of doing nothing.
+ *
+ * Two ways to end a session, and they are not interchangeable. `stop()`
+ * aborts and throws away whatever phrase is in progress - right for
+ * Escape/cancel, where the operator wants out, not a partial answer.
+ * `finish()` calls the recognizer's own stop(), which still lets a pending
+ * final result arrive before `listening` clears on the `end` event - right
+ * for an operator tapping the mic to say "I'm done talking," where the last
+ * few words matter.
  */
 export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechInputOptions): UseSpeechInputResult {
   const [listening, setListening] = useState(false)
@@ -198,7 +209,21 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     setInterim('')
   }, [])
 
+  // finish() ends the session the way an operator tapping the mic to stop
+  // dictating expects: the recognizer's own stop(), not abort(). A real
+  // recognizer still delivers whatever phrase was already being recognised
+  // as one last final result (through the same onresult handler above)
+  // before firing its `end` event - stop()'s abort() above throws that
+  // phrase away instead, which is right for Escape/cancel but would lose
+  // the last words of a dictation the operator just finished speaking.
+  // Handlers are left attached and `listening` is left alone here - both
+  // clear themselves the ordinary way, from the recognizer's own `end`
+  // event (see onend above), exactly as if it had stopped on its own.
+  const finish = useCallback(() => {
+    recognitionRef.current?.stop()
+  }, [])
+
   useEffect(() => () => { recognitionRef.current?.abort() }, [])
 
-  return { supported, unsupportedReason, listening, interim, error, start, stop }
+  return { supported, unsupportedReason, listening, interim, error, start, stop, finish }
 }

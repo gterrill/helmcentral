@@ -2814,28 +2814,44 @@ export function App() {
             {/* ADR 0093 voice phase, "App-wide voice": push-to-talk from the
                 header, on every panel and dashboard page - Settings → Mate →
                 "Voice input" gates it, and it's hidden for a read-only
-                session the same way write controls are elsewhere. */}
-            {assistantVoiceConfig.voiceInput && canWrite && (
+                session the same way write controls are elsewhere. ADR 0122:
+                with no speech API at all, the button is hidden entirely
+                (`unsupportedReason === 'no-api'`) rather than shown disabled
+                - matching the rule components/dictation.tsx's DictateButton
+                already follows for an in-field mic. An insecure origin still
+                shows it, disabled, with MicOff and a `title` naming why -
+                unlike a field's mic, this one's reason stays a tooltip: it
+                sits in the header rather than a touch-first form, and the
+                app's own https link is already covered in Talk to Mate. */}
+            {assistantVoiceConfig.voiceInput && canWrite && mateVoice.unsupportedReason !== 'no-api' && (
               <div className="flex items-center gap-2">
                 <Button
-                  variant="ghost"
+                  variant={mateVoiceListening ? 'default' : 'ghost'}
                   size="icon"
                   aria-label="Talk to Mate"
                   aria-pressed={mateVoiceListening}
                   disabled={!mateVoice.supported}
                   title={
                     !mateVoice.supported
-                      ? (mateVoice.unsupportedReason === 'insecure-context'
-                        ? 'Voice input needs the app opened over https'
-                        : 'This browser has no speech recognition.')
+                      ? 'Voice input needs the app opened over https'
                       : mateWakeActive ? 'Listening for Hey Mate' : undefined
                   }
-                  className={cn('relative', mateVoiceListening && 'text-primary')}
+                  className="relative"
                   onClick={mateVoicePushToTalk}
                 >
                   {mateVoice.supported ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
                   {mateWakeActive && (
-                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+                    // The dot needs to read against whichever background the
+                    // button itself is wearing right now - primary-on-primary
+                    // would vanish the moment the button fills solid while
+                    // actually listening.
+                    <span
+                      className={cn(
+                        'absolute right-1 top-1 h-1.5 w-1.5 rounded-full',
+                        mateVoiceListening ? 'bg-primary-foreground' : 'bg-primary',
+                      )}
+                      aria-hidden="true"
+                    />
                   )}
                 </Button>
                 {mateVoiceListening && (
