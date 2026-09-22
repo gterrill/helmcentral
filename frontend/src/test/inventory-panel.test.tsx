@@ -25,7 +25,13 @@ vi.mock('@/components/inventory/equipment-index', () => ({
 
 vi.mock('@/components/inventory/equipment-editor', () => ({
   EquipmentEditor: forwardRef(function MockEquipmentEditor(
-    props: { id: string | null; onDirtyChange?: (dirty: boolean) => void },
+    props: {
+      id: string | null
+      onDirtyChange?: (dirty: boolean) => void
+      onBack: () => void
+      onCreated: (id: string) => void
+      onDeleted: () => void
+    },
     ref,
   ) {
     useImperativeHandle(ref, () => ({ save: saveMock }), [])
@@ -33,6 +39,9 @@ vi.mock('@/components/inventory/equipment-editor', () => ({
       <div data-testid="equipment-editor">
         {props.id ?? 'new'}
         <button type="button" onClick={() => props.onDirtyChange?.(true)}>make-dirty</button>
+        <button type="button" onClick={props.onBack}>editor-back</button>
+        <button type="button" onClick={() => props.onCreated('eq-new')}>editor-created</button>
+        <button type="button" onClick={props.onDeleted}>editor-deleted</button>
       </div>
     )
   }),
@@ -51,9 +60,12 @@ function baseProps() {
     activeSectionId: 'equipment' as const,
     onSectionChange: vi.fn(),
     equipmentEditId: null,
-    onEquipmentEditIdChange: vi.fn(),
     creatingEquipment: false,
-    onCreatingEquipmentChange: vi.fn(),
+    onOpenEquipment: vi.fn(),
+    onNewEquipment: vi.fn(),
+    onCloseEditor: vi.fn(),
+    onEquipmentCreated: vi.fn(),
+    onEquipmentDeleted: vi.fn(),
   }
 }
 
@@ -63,18 +75,49 @@ describe('InventoryPanel', () => {
     expect(screen.getByTestId('equipment-index')).toBeInTheDocument()
   })
 
-  it('opening an item from the index reports it through onEquipmentEditIdChange', () => {
+  it('opening an item from the index reports it through onOpenEquipment', () => {
     const props = baseProps()
     render(<InventoryPanel {...props} />)
     fireEvent.click(screen.getByText('open-eq-1'))
-    expect(props.onEquipmentEditIdChange).toHaveBeenCalledWith('eq-1')
+    expect(props.onOpenEquipment).toHaveBeenCalledWith('eq-1')
   })
 
-  it('New item reports through onCreatingEquipmentChange', () => {
+  it('New item reports through onNewEquipment', () => {
     const props = baseProps()
     render(<InventoryPanel {...props} />)
     fireEvent.click(screen.getByText('new-item'))
-    expect(props.onCreatingEquipmentChange).toHaveBeenCalledWith(true)
+    expect(props.onNewEquipment).toHaveBeenCalled()
+  })
+
+  // Each way out of the editor is ONE callback, not two state changes made
+  // back to back. App.tsx guards a close by stashing the navigation until
+  // the operator answers the unsaved-changes dialog, and it can only stash
+  // one - a second guarded call overwrites the first, so Back used to stash
+  // "stop creating" over "close the editor" and Discard then ran a no-op
+  // while the dirty editor stayed on screen.
+  it('Back is a single onCloseEditor call, and touches nothing else', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} equipmentEditId="eq-1" />)
+    fireEvent.click(screen.getByText('editor-back'))
+    expect(props.onCloseEditor).toHaveBeenCalledTimes(1)
+    expect(props.onEquipmentCreated).not.toHaveBeenCalled()
+    expect(props.onEquipmentDeleted).not.toHaveBeenCalled()
+  })
+
+  it('a successful create is its own callback, never a close', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} creatingEquipment />)
+    fireEvent.click(screen.getByText('editor-created'))
+    expect(props.onEquipmentCreated).toHaveBeenCalledWith('eq-new')
+    expect(props.onCloseEditor).not.toHaveBeenCalled()
+  })
+
+  it('a successful delete is its own callback, never a close', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} equipmentEditId="eq-1" />)
+    fireEvent.click(screen.getByText('editor-deleted'))
+    expect(props.onEquipmentDeleted).toHaveBeenCalledTimes(1)
+    expect(props.onCloseEditor).not.toHaveBeenCalled()
   })
 
   it('renders the editor, not the index, when an equipmentEditId is set', () => {

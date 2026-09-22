@@ -304,3 +304,42 @@ export function isCanonicalAppPath(path: string, ctx: LocationContext): boolean 
   }
   return true
 }
+
+/**
+ * What the Equipment editor is showing right now, as App.tsx holds it.
+ * `creating` is the "New item" draft, which deliberately has no URL of its
+ * own (see InventoryPanelProps' own note), so it cannot be read back out of
+ * an AppLocation - which is exactly why this comparison needs it passed in.
+ */
+export interface InventoryEditorState {
+  section: InventorySectionId
+  equipmentEditId: string | null
+  creating: boolean
+}
+
+/**
+ * Would navigating to `target` take the Equipment editor off screen?
+ *
+ * The popstate handler asks this to decide whether a Back press needs the
+ * unsaved-changes guard. Comparing `equipmentEditId` alone is not enough, and
+ * got this wrong twice over: a "New item" draft has a null id, so Back out of
+ * one to another inventory section compared null to null, saw no change, and
+ * discarded the draft with no prompt at all. A saved record open in the
+ * editor had the same hole whenever the section changed without the id doing
+ * so.
+ *
+ * So the question is asked the other way round - is the editor showing, and
+ * does `target` still show that same editor? - which needs no special case
+ * for the draft and none for a section switch.
+ */
+export function inventoryEditorClosedBy(current: InventoryEditorState, target: AppLocation): boolean {
+  const showing = current.section === 'equipment'
+    && (current.equipmentEditId !== null || current.creating)
+  if (!showing) return false
+  if (target.panel !== 'inventory') return true
+  if ((target.inventorySection ?? 'equipment') !== 'equipment') return true
+  // A draft has no URL that can represent it, so any inventory location at
+  // all closes it. A saved record survives only a target naming that same id.
+  if (current.creating) return true
+  return (target.equipmentEditId ?? null) !== current.equipmentEditId
+}

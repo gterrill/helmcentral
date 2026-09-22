@@ -177,9 +177,24 @@ export class InventoryValidationError extends Error {
 // than imported - see that file's own comment on why a two-line helper is
 // cheaper to duplicate a third time than to thread a shared-module
 // dependency between features that otherwise don't know about each other -
-// with one addition: a structured `{errors}` body (the shape this API's
-// validation failures use, unlike documents' plain `{error}`) throws the
-// richer InventoryValidationError instead.
+// with one addition: a field validation failure throws the richer
+// InventoryValidationError so the editor can mark the offending input.
+//
+// Three body shapes reach here, and all three are the server's own words:
+//
+//   {"field":"install_date","message":"..."}  one rejected field
+//       (writeInventoryValidationError, inventory_handlers.go) - the common
+//       case, and the one an earlier cut of this function missed entirely by
+//       looking only for the array below, turning every validation failure
+//       into a bare "HTTP 400" and leaving the per-field error block dead.
+//   {"errors":[{field,message}, ...]}         several at once, if this API
+//       ever grows a bulk write; cheap to keep recognised.
+//   {"error":"zone is in use: ..."}           conflicts and not-founds,
+//       which belong to the record as a whole rather than to one input.
+//
+// A status code is the last resort, only for a body that parses as none of
+// them (AGENTS.md fallback policy: never a generic message standing in for
+// one the server actually sent).
 async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
   const response = await fetch(url, {
     method,
@@ -187,9 +202,17 @@ async function submitJSON<T>(url: string, method: string, body?: unknown): Promi
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string; errors?: InventoryFieldError[] }
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string
+      errors?: InventoryFieldError[]
+      field?: string
+      message?: string
+    }
     if (Array.isArray(payload.errors) && payload.errors.length > 0) {
       throw new InventoryValidationError(payload.errors)
+    }
+    if (typeof payload.field === 'string' && typeof payload.message === 'string') {
+      throw new InventoryValidationError([{ field: payload.field, message: payload.message }])
     }
     throw new Error(payload.error ?? `HTTP ${response.status}`)
   }

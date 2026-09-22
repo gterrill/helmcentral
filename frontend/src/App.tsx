@@ -92,7 +92,7 @@ import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-d
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
+import { nextWaypoint, etaToWaypoint, traversalOrder } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
@@ -209,6 +209,7 @@ import {
   parseAppLocation,
   formatAppLocation,
   isCanonicalAppPath,
+  inventoryEditorClosedBy,
   type AppLocation,
   type PanelId,
 } from '@/lib/app-location'
@@ -1016,13 +1017,20 @@ export function App() {
         && (parsed.documentEditId ?? null) !== documentsEditId
       // ADR 0123: the same "stays on the panel, so requestNavigate's own
       // targetPanel check can't see it" case a third time - a Back/Forward
-      // that changes (or clears) which equipment record is open. Covers
-      // switching InventoryNav sections too: parsed.equipmentEditId is only
-      // ever non-null for the Equipment section (app-location.ts's own
-      // parse), so leaving 'equipment' for 'profiles'/'locations' also
-      // reads as "equipmentEditId changed" here.
-      const leavingInventoryEditorWithinInventory = activePanel === 'inventory' && parsed.panel === 'inventory'
-        && (parsed.equipmentEditId ?? null) !== inventoryEquipmentEditId
+      // that takes the Equipment editor off screen. The comparison itself
+      // lives in app-location.ts (inventoryEditorClosedBy) because getting it
+      // right needs the "New item" draft, which has no URL, and a section
+      // switch, which leaves the record id untouched on both sides; see that
+      // function's own note on the two holes an id-only check left.
+      const leavingInventoryEditorWithinInventory = activePanel === 'inventory'
+        && inventoryEditorClosedBy(
+          {
+            section: inventorySection,
+            equipmentEditId: inventoryEquipmentEditId,
+            creating: inventoryCreatingEquipment,
+          },
+          parsed,
+        )
       const navigated = leavingDetailsWithinDocuments
         ? requestBackFromDocumentDetails(() => applyAppLocation(parsed))
         : leavingInventoryEditorWithinInventory
@@ -1310,6 +1318,24 @@ export function App() {
     const eta = etaToWaypoint(latitude, longitude, waypoint.waypoint, speedOverGroundKts, route.planning_speed_kts, new Date())
     return { label: waypoint.label, etaAt: eta.etaAt, basis: eta.basis }
   }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
+  // The Nearby map's route layer (this cycle's own addition): the same
+  // routeActivationStatus/routes/nextWaypoint pieces as clockNextWaypoint
+  // above, combined once here so the poi-map tile never has to know route
+  // activation exists - it only draws whatever waypoints and next-index it's
+  // handed. null whenever no route is active, its id isn't in `routes`, or
+  // the route has no waypoints. `waypoints` is traversalOrder's array, not
+  // necessarily route.waypoints' authored order, since nextIndex is an index
+  // into that traversal order (see next-waypoint.ts's own comment on why a
+  // reversed activation makes the two differ).
+  const activeRoute = useMemo(() => {
+    if (!routeActivationStatus || routeActivationStatus.state !== 'active' || routeActivationStatus.routeId === null) return null
+    const route = routes.find((r) => r.id === routeActivationStatus.routeId)
+    if (!route) return null
+    const waypoint = nextWaypoint(route, routeActivationStatus)
+    const traversal = traversalOrder(route, routeActivationStatus)
+    if (!waypoint || !traversal) return null
+    return { name: route.name, waypoints: traversal, nextIndex: waypoint.index }
+  }, [routeActivationStatus, routes])
   const depthTrend = useDepthTrend('3h', 60)
   // Item B: only the czone-switches widget reads this; poll it only while
   // the active page (or the wall's current page) actually has one placed.
@@ -1768,6 +1794,7 @@ export function App() {
           latitude={latitude}
           longitude={longitude}
           headingTrue={headingTrue}
+          activeRoute={activeRoute}
           gnssCriticalAlert={gnssCriticalAlert}
           positionLastUpdateAgeS={positionLastUpdateAgeS}
           nearbyVessels={nearbyVessels}
@@ -2551,19 +2578,39 @@ export function App() {
             activeSectionId={inventorySection}
             onSectionChange={(id) => { requestWithinInventory(() => setInventorySection(id)) }}
             equipmentEditId={inventoryEquipmentEditId}
-            onEquipmentEditIdChange={(id) => {
-              // Opening an item (from the index) or landing on the id a
-              // create just produced is never "leaving a dirty state" -
-              // only going back to the index (id -> null) can discard one,
-              // so only that direction is guarded, mirroring the Details
-              // page's own onBack just above.
-              if (id === null) requestWithinInventory(() => setInventoryEquipmentEditId(null))
-              else setInventoryEquipmentEditId(id)
-            }}
             creatingEquipment={inventoryCreatingEquipment}
-            onCreatingEquipmentChange={(creating) => {
-              if (!creating) requestWithinInventory(() => setInventoryCreatingEquipment(false))
-              else setInventoryCreatingEquipment(true)
+            // Opening an item or starting a new one enters the editor, so
+            // there is no draft to discard yet and nothing to guard.
+            onOpenEquipment={(id) => { setInventoryEquipmentEditId(id) }}
+            onNewEquipment={() => { setInventoryCreatingEquipment(true) }}
+            // Back is the only exit that can throw away typed work, so it is
+            // the only one guarded - and it is ONE guarded call that clears
+            // both pieces of state together. Two calls would not work:
+            // requestWithinInventory stashes a single pending navigation, so
+            // the second would overwrite the first and Discard would run a
+            // no-op with the dirty editor still open.
+            onCloseEditor={() => {
+              requestWithinInventory(() => {
+                setInventoryEquipmentEditId(null)
+                setInventoryCreatingEquipment(false)
+              })
+            }}
+            // A create or delete that already succeeded has nothing left to
+            // discard, and the editor is still reporting dirty at the moment
+            // it calls these (its draft is never re-baselined - it unmounts
+            // or reloads instead). Routing them through the guard therefore
+            // popped "unsaved changes" straight after a successful save, and
+            // on a delete offered a Save that would PUT to a record the
+            // server had just dropped.
+            onEquipmentCreated={(id) => {
+              setInventoryDirty(false)
+              setInventoryCreatingEquipment(false)
+              setInventoryEquipmentEditId(id)
+            }}
+            onEquipmentDeleted={() => {
+              setInventoryDirty(false)
+              setInventoryEquipmentEditId(null)
+              setInventoryCreatingEquipment(false)
             }}
             onDirtyChange={setInventoryDirty}
             onOpenHelp={openHelp}

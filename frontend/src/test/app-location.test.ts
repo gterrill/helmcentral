@@ -7,6 +7,7 @@ import {
   parseAppLocation,
   formatAppLocation,
   isCanonicalAppPath,
+  inventoryEditorClosedBy,
   type LocationContext,
 } from '@/lib/app-location'
 
@@ -458,5 +459,62 @@ describe('isCanonicalAppPath', () => {
 
   it('accepts an unknown page id when the page list has not loaded (knownPageIds: null)', () => {
     expect(isCanonicalAppPath('/dashboard/zzz', { ...baseCtx, knownPageIds: null })).toBe(true)
+  })
+})
+
+describe('inventoryEditorClosedBy', () => {
+  const at = (path: string) => parseAppLocation(path)
+
+  it('says no when the editor is not showing at all', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: null, creating: false },
+      at('/inventory/locations'),
+    )).toBe(false)
+  })
+
+  it('says no when the target is the same record', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/equipment/eq-1'),
+    )).toBe(false)
+  })
+
+  it('says yes when the target is a different record', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/equipment/eq-2'),
+    )).toBe(true)
+  })
+
+  it('says yes when the target is the index', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory'),
+    )).toBe(true)
+  })
+
+  // The hole this function was extracted to close: a section switch leaves the
+  // equipment id null on both sides, so comparing ids alone saw no change and
+  // let a dirty editor close unguarded.
+  it('says yes when only the section changed', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/profiles'),
+    )).toBe(true)
+  })
+
+  // And the same hole for a New item draft, which has no id to compare with.
+  it('says yes for an unsaved New item draft, whatever the inventory target', () => {
+    const draft = { section: 'equipment' as const, equipmentEditId: null, creating: true }
+    expect(inventoryEditorClosedBy(draft, at('/inventory'))).toBe(true)
+    expect(inventoryEditorClosedBy(draft, at('/inventory/profiles'))).toBe(true)
+    expect(inventoryEditorClosedBy(draft, at('/inventory/locations'))).toBe(true)
+  })
+
+  it('says yes when leaving the panel entirely', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/documents'),
+    )).toBe(true)
   })
 })

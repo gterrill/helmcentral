@@ -24,13 +24,35 @@ import { INVENTORY_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
 // changes the editor is no longer showing - see App.tsx's own clearing
 // effect, mirroring documentDetailsDirty's.
 
+// Each way into and out of the Equipment editor is its own callback, named
+// for what the operator did rather than for the state it happens to change.
+// The first cut of this component instead exposed two setters
+// (onEquipmentEditIdChange/onCreatingEquipmentChange) and called both, back
+// to back, for every exit - which broke the dirty guard. App.tsx guards a
+// close by stashing the navigation until the unsaved-changes dialog is
+// answered, and it can stash exactly one: the second call overwrote the
+// first, so Back on a dirty editor stashed "stop creating" over "close the
+// editor" and Discard then ran a no-op with the editor still on screen.
+//
+// Splitting them also puts the question that actually matters - is this exit
+// discarding the operator's work? - where it can be answered. Back is; a
+// completed create or delete is not, and routing those through the guard
+// popped the dialog after a save had already succeeded.
 interface InventoryPanelProps {
   activeSectionId: InventorySectionId
   onSectionChange: (id: InventorySectionId) => void
   equipmentEditId: string | null
-  onEquipmentEditIdChange: (id: string | null) => void
   creatingEquipment: boolean
-  onCreatingEquipmentChange: (creating: boolean) => void
+  /** Index row click. Opening an item never discards anything. */
+  onOpenEquipment: (id: string) => void
+  /** Index "New item". */
+  onNewEquipment: () => void
+  /** The editor's Back - the one exit that can discard an unsaved draft. */
+  onCloseEditor: () => void
+  /** A create that already succeeded; carries the id the server assigned. */
+  onEquipmentCreated: (id: string) => void
+  /** A delete that already succeeded. */
+  onEquipmentDeleted: () => void
   onDirtyChange?: (dirty: boolean) => void
   onOpenHelp?: (target: HelpTarget) => void
   canWrite?: boolean
@@ -45,9 +67,12 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     activeSectionId,
     onSectionChange,
     equipmentEditId,
-    onEquipmentEditIdChange,
     creatingEquipment,
-    onCreatingEquipmentChange,
+    onOpenEquipment,
+    onNewEquipment,
+    onCloseEditor,
+    onEquipmentCreated,
+    onEquipmentDeleted,
     onDirtyChange,
     onOpenHelp,
     canWrite = true,
@@ -73,9 +98,9 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
           <EquipmentEditor
             ref={editorRef}
             id={equipmentEditId}
-            onBack={() => { onEquipmentEditIdChange(null); onCreatingEquipmentChange(false) }}
-            onCreated={(id) => { onCreatingEquipmentChange(false); onEquipmentEditIdChange(id) }}
-            onDeleted={() => { onEquipmentEditIdChange(null); onCreatingEquipmentChange(false) }}
+            onBack={onCloseEditor}
+            onCreated={onEquipmentCreated}
+            onDeleted={onEquipmentDeleted}
             onDirtyChange={onDirtyChange}
             canWrite={canWrite}
           />
@@ -83,8 +108,8 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       }
       return (
         <EquipmentIndex
-          onOpenItem={(id) => onEquipmentEditIdChange(id)}
-          onNewItem={() => onCreatingEquipmentChange(true)}
+          onOpenItem={onOpenEquipment}
+          onNewItem={onNewEquipment}
           canWrite={canWrite}
         />
       )
