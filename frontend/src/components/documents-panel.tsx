@@ -494,6 +494,28 @@ export function DocumentsPanel({
 
   const searching = documents.searchResults !== null
 
+  // The chip row's options: documents.tags plus, if the active filter has
+  // fallen out of that list, the active filter itself. TagCounts
+  // (backend/documents_store.go) now leaves out a tag used as a suggested
+  // one on only a single document, so a filter selected while a tag still
+  // qualified can outlive its own chip - the next refreshTags() (the 3s
+  // poll, or a patch that drops the doc's other tag) simply stops
+  // returning it. Without this, the ToggleGroup's value points at a tag
+  // with no ToggleGroupItem, so nothing renders pressed and there is no
+  // control left to clear it. The count shown for that synthesized entry
+  // is how many of the currently listed documents carry it, not the
+  // library-wide distinct-document count TagCounts itself reports - the
+  // real figure isn't available once TagCounts has already dropped the
+  // tag, and this row only exists to stay visible and clearable, not to
+  // re-derive a number nothing asked for.
+  const tagFilterOptions = useMemo(() => {
+    const tags = documents.tags
+    const selected = documents.selectedTag
+    if (!selected || tags.some((t) => t.tag === selected)) return tags
+    const count = documents.documents.filter((d) => d.tags.some((t) => t.tag === selected)).length
+    return [...tags, { tag: selected, count }]
+  }, [documents.tags, documents.selectedTag, documents.documents])
+
   // A search result carries only folder_id (documentSearchResult,
   // backend/documents_search.go never adds a name or path to it), so a
   // human label for it is resolved here, once per distinct folder,
@@ -981,7 +1003,7 @@ export function DocumentsPanel({
           <Switch aria-label="All folders" checked={allFolders} onCheckedChange={setAllFolders} />
           <Label className="text-xs text-muted-foreground">All folders</Label>
         </div>
-        {documents.tags.length > 0 && (
+        {tagFilterOptions.length > 0 && (
           <ToggleGroup
             aria-label="Filter by tag"
             value={documents.selectedTag ? [documents.selectedTag] : []}
@@ -989,7 +1011,7 @@ export function DocumentsPanel({
             variant="outline"
             size="sm"
           >
-            {documents.tags.map((t) => (
+            {tagFilterOptions.map((t) => (
               <ToggleGroupItem key={t.tag} value={t.tag}>
                 {t.tag} ({t.count})
               </ToggleGroupItem>

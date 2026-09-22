@@ -138,9 +138,11 @@ type documentTag struct {
 	Source     string `json:"source"`
 }
 
-// documentTagCount is one row of TagCounts' output: a tag (operator- or
-// suggested-sourced, counted together) and how many distinct documents
-// carry it - the B3 API's GET /api/documents/tags chip list
+// documentTagCount is one row of TagCounts' output: a tag that qualifies
+// for the chip list (operator-sourced on at least one document, or carried
+// by at least two documents from any source - see TagCounts) and how many
+// distinct documents carry it, operator- and suggested-sourced counted
+// together - the B3 API's GET /api/documents/tags chip list
 // (documents_handlers.go).
 type documentTagCount struct {
 	Tag   string `json:"tag"`
@@ -788,15 +790,27 @@ func documentTagsOf(q sqlQueryer, docID string) (operator, suggested []string, e
 	return operator, suggested, rows.Err()
 }
 
-// TagCounts returns every distinct tag across all documents (operator- and
-// suggested-sourced alike), alphabetically, with how many distinct
-// documents carry it - the B3 API's GET /api/documents/tags chip list
-// (documents_handlers.go).
+// TagCounts returns the tags that earn a place in the B3 API's GET
+// /api/documents/tags chip list (documents_handlers.go), alphabetically,
+// with how many distinct documents carry each one (operator- and
+// suggested-sourced alike, counted together, as now). A tag qualifies if at
+// least one document carries it as an operator tag, or if at least two
+// distinct documents carry it from any source. Mate's enrichment
+// (SetSuggested) proposes several suggested tags per document, almost all
+// used once; those are excluded here so the chip row doesn't drown in
+// singletons, but a tag this excludes is untouched everywhere else - it
+// stays on its document, stays searchable, and stays filterable by ?tag=
+// (List/Search's own document_tags queries, not this one).
 func (s *documentStore) TagCounts() ([]documentTagCount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT tag, COUNT(DISTINCT document_id) FROM document_tags GROUP BY tag ORDER BY tag`)
+	rows, err := s.db.Query(`
+		SELECT tag, COUNT(DISTINCT document_id) FROM document_tags
+		GROUP BY tag
+		HAVING SUM(CASE WHEN source = 'operator' THEN 1 ELSE 0 END) > 0
+		    OR COUNT(DISTINCT document_id) >= 2
+		ORDER BY tag`)
 	if err != nil {
 		return nil, fmt.Errorf("tag counts: %w", err)
 	}

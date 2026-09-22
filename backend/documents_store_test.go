@@ -1655,6 +1655,95 @@ func TestDocumentStore_TagCountsCountsDistinctDocumentsPerTag(t *testing.T) {
 	}
 }
 
+// TestDocumentStore_TagCountsExcludesSingleUseSuggestedTags covers the chip
+// list rule: a tag appears only if at least one document carries it as an
+// operator tag, or at least two distinct documents carry it from any
+// source. A suggested tag used on exactly one document stays on that
+// document (searchable, filterable by ?tag=) but is left out of TagCounts,
+// which is what feeds the chip row.
+func TestDocumentStore_TagCountsExcludesSingleUseSuggestedTags(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	a := mustInsertDocument(t, store, "sha-tagrule-a", "a.pdf", nil)
+	b := mustInsertDocument(t, store, "sha-tagrule-b", "b.pdf", nil)
+	c := mustInsertDocument(t, store, "sha-tagrule-c", "c.pdf", nil)
+	d := mustInsertDocument(t, store, "sha-tagrule-d", "d.pdf", nil)
+
+	// "solo-suggested": Mate suggests it on a alone - excluded.
+	if err := store.SetSuggested(a.ID, "", "", []string{"solo-suggested"}); err != nil {
+		t.Fatalf("SetSuggested(a, solo-suggested): %v", err)
+	}
+	// "shared-suggested": Mate suggests it on both b and c - included, count 2.
+	if err := store.SetSuggested(b.ID, "", "", []string{"shared-suggested"}); err != nil {
+		t.Fatalf("SetSuggested(b, shared-suggested): %v", err)
+	}
+	if err := store.SetSuggested(c.ID, "", "", []string{"shared-suggested"}); err != nil {
+		t.Fatalf("SetSuggested(c, shared-suggested): %v", err)
+	}
+	// "solo-operator": operator types it on d alone - included, count 1.
+	if err := store.UpdateMeta(d.ID, nil, nil, []string{"solo-operator"}); err != nil {
+		t.Fatalf("UpdateMeta(d, solo-operator): %v", err)
+	}
+	// "mixed-source": suggested on a, operator on b - included, count 2.
+	if err := store.SetSuggested(a.ID, "", "", []string{"mixed-source"}); err != nil {
+		t.Fatalf("SetSuggested(a, mixed-source): %v", err)
+	}
+	if err := store.UpdateMeta(b.ID, nil, nil, []string{"mixed-source"}); err != nil {
+		t.Fatalf("UpdateMeta(b, mixed-source): %v", err)
+	}
+	// "reasserted-suggested": Mate suggests it on a, then suggests it again
+	// on a (e.g. a re-enrich pass) - still one document, still excluded. The
+	// (document_id, tag) primary key means this can't land as two rows, but
+	// the assertion pins the count-of-documents behavior either way.
+	if err := store.SetSuggested(a.ID, "", "", []string{"reasserted-suggested"}); err != nil {
+		t.Fatalf("SetSuggested(a, reasserted-suggested) first: %v", err)
+	}
+	if err := store.SetSuggested(a.ID, "", "", []string{"reasserted-suggested"}); err != nil {
+		t.Fatalf("SetSuggested(a, reasserted-suggested) second: %v", err)
+	}
+
+	counts, err := store.TagCounts()
+	if err != nil {
+		t.Fatalf("TagCounts: %v", err)
+	}
+	got := map[string]int{}
+	for _, tc := range counts {
+		got[tc.Tag] = tc.Count
+	}
+
+	if _, ok := got["solo-suggested"]; ok {
+		t.Fatalf("expected 'solo-suggested' to be excluded from the chip list, got %+v", counts)
+	}
+	if got["shared-suggested"] != 2 {
+		t.Fatalf("expected 'shared-suggested' with count 2, got %d (%+v)", got["shared-suggested"], counts)
+	}
+	if got["solo-operator"] != 1 {
+		t.Fatalf("expected 'solo-operator' with count 1, got %d (%+v)", got["solo-operator"], counts)
+	}
+	if got["mixed-source"] != 2 {
+		t.Fatalf("expected 'mixed-source' with count 2, got %d (%+v)", got["mixed-source"], counts)
+	}
+	if _, ok := got["reasserted-suggested"]; ok {
+		t.Fatalf("expected 'reasserted-suggested' (still one document) to be excluded, got %+v", counts)
+	}
+
+	// The excluded tag must still be present on the document itself and
+	// still filterable by ?tag= - only the chip list narrows.
+	gotDoc, err := store.Get(a.ID)
+	if err != nil {
+		t.Fatalf("Get(a): %v", err)
+	}
+	found := false
+	for _, tag := range gotDoc.SuggestedTags {
+		if tag == "solo-suggested" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'solo-suggested' to remain on document a's suggested tags, got %+v", gotDoc.SuggestedTags)
+	}
+}
+
 func strPtr(s string) *string { return &s }
 
 // ── embeddings ───────────────────────────────────────────────────────────
