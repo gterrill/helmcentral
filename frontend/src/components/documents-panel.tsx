@@ -1392,7 +1392,7 @@ export function DocumentsPanel({
 
       {/* ── Viewer ─────────────────────────────────────────────────── */}
       <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) setViewerId(null) }}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl">
+        <SheetContent side="right" className="flex h-full w-full flex-col gap-4 sm:max-w-2xl">
           <SheetHeader>
             <SheetTitle>{viewerDoc ? documentDisplayName(viewerDoc) : 'Loading…'}</SheetTitle>
             {viewerDoc && <SheetDescription>{mimeLabel(viewerDoc.mime)} · {formatBytes(viewerDoc.size_bytes)}</SheetDescription>}

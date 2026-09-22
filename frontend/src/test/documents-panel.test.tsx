@@ -627,6 +627,43 @@ describe('DocumentsPanel', () => {
       const pre = await screen.findByText('raw log output, unformatted')
       expect(pre.tagName).toBe('PRE')
     })
+
+    // The Sheet's own container has to lay out as a flex column, not just
+    // the scroll box inside it. SheetContent's base classes (sheetVariants,
+    // ui/sheet.tsx) are `fixed ... p-6` - a block box, not `flex` - so the
+    // viewer body's `min-h-0 flex-1 overflow-auto` div has no flex parent to
+    // size against: `flex-1`/`min-h-0` are inert outside a flex container,
+    // the div's height resolves to its content instead of the sheet's
+    // height, and a long note spills past the fixed-height sheet with no
+    // scrollbar anywhere. This checks the same unbroken flex/min-h-0 chain
+    // mate-sheet.test.tsx and help-sheet.tsx already require of their own
+    // SheetContent (`flex h-full ... flex-col`), which the documents viewer
+    // never had.
+    it('the viewer sheet is a flex column so its scroll body can actually bound its height', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the **seacock** first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      const dialog = await screen.findByRole('dialog')
+      expect(dialog.className).toEqual(expect.stringContaining('flex'))
+      expect(dialog.className).toEqual(expect.stringContaining('flex-col'))
+      expect(dialog.className).toEqual(expect.stringContaining('h-full'))
+
+      const scrollBox = dialog.querySelector('.overflow-auto')
+      expect(scrollBox).not.toBeNull()
+      expect(scrollBox!.className).toEqual(expect.stringContaining('min-h-0'))
+      expect(scrollBox!.className).toEqual(expect.stringContaining('flex-1'))
+      expect(scrollBox!.className).toEqual(expect.stringContaining('overflow-auto'))
+    })
   })
 
   it('delete asks for confirmation before calling deleteDocument', async () => {
