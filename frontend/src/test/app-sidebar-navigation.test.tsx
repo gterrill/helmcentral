@@ -433,6 +433,7 @@ describe('App sidebar navigation', () => {
       'Radar',
       'Routes',
       'Documents',
+      'Inventory',
       'Mate',
       'Wall displays',
       'Settings',

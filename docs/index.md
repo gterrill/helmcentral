@@ -31,7 +31,8 @@ meets your needs.
 - [Notes and the manual](features/notes-and-the-manual.md), somewhere to write
   down what you know about the boat in one action, and assemble it into an
   operations manual the crew and the next owner can follow.
-- [Inventory tracking](features/inventory-tracking.md), designed but not yet built.
+- [Inventory](features/inventory-tracking.md), the equipment registry: one record
+  per system aboard, its documents, where it lives, and the profile it follows.
 
 ## How-to guides
 

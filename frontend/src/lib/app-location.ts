@@ -1,4 +1,5 @@
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
+import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 
 // ADR 0074: path URLs, hand-rolled (no router library). This module is the
 // only place that knows how a URL string maps to app state — App.tsx's sync
@@ -7,7 +8,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
-export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'wall-displays'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface AppLocation {
@@ -71,6 +72,19 @@ export interface AppLocation {
    * failure mode is a 1920x360 strip showing the management UI, or the
    * editor rendering nothing because it hit the wall shell instead. */
   displayEditSlug?: string | null
+  /** ADR 0123: the Inventory panel's internal section (the InventoryNav
+   * shape, same contract as `section` above) - `/inventory`, `/inventory/profiles`,
+   * `/inventory/locations`. Defaults to 'equipment' the same way `section`
+   * defaults to 'general'. */
+  inventorySection?: InventorySectionId
+  /** ADR 0123: the Equipment editor's `/inventory/equipment/<id>` segment -
+   * only meaningful alongside inventorySection 'equipment' (or its default),
+   * same "meaningless on its own" rule documentSectionId already follows.
+   * null on the bare `/inventory` index; absent everywhere else. A brand
+   * new, not-yet-saved draft (the "New item" button) has no id and so no
+   * URL of its own - see App.tsx's inventoryCreatingEquipment, which is
+   * local UI state, never serialized here. */
+  equipmentEditId?: string | null
 }
 
 export interface LocationContext {
@@ -182,6 +196,24 @@ export function parseAppLocation(pathname: string): AppLocation {
     return { panel: 'wall-displays', displayEditSlug: second !== undefined ? decodeSegment(second) : null }
   }
 
+  // ADR 0123: the Inventory panel. `/inventory` (bare) is the canonical
+  // Equipment index - the same collapse-to-default `section` gives
+  // `/settings`. `/inventory/equipment/<id>` carries a third segment none of
+  // the other two sub-routes do, so (like /documents/<id> above) it's read
+  // explicitly here rather than falling through to the generic
+  // PANEL_ID_SET branch below.
+  if (first === 'inventory') {
+    if (second === 'profiles' || second === 'locations') {
+      return { panel: 'inventory', inventorySection: second }
+    }
+    if (second === 'equipment') {
+      const segments2 = segments[2]
+      const equipmentEditId = segments2 !== undefined ? decodeSegment(segments2) : null
+      return { panel: 'inventory', inventorySection: 'equipment', equipmentEditId: equipmentEditId || null }
+    }
+    return { panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null }
+  }
+
   if (PANEL_ID_SET.has(first)) {
     return { panel: first as PanelId }
   }
@@ -233,6 +265,15 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     if (loc.documentFolderId && loc.documentSectionId) params.set('section', loc.documentSectionId)
     const qs = params.toString()
     return qs ? `/documents?${qs}` : '/documents'
+  }
+
+  if (loc.panel === 'inventory') {
+    const section = loc.inventorySection ?? 'equipment'
+    if (section === 'equipment') {
+      if (loc.equipmentEditId) return `/inventory/equipment/${encodeURIComponent(loc.equipmentEditId)}`
+      return '/inventory'
+    }
+    return `/inventory/${section}`
   }
 
   if (loc.panel === 'display') {
