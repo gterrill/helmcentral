@@ -1,6 +1,7 @@
 # Documents
 
-The document library keeps files that matter to the boat: manuals,
+The document library keeps files that matter to the boat, and keeps them
+findable from the boat itself instead of an inbox ashore: manuals,
 receipts, invoices, service logs, passage notes, a photo of a part number
 or a data plate. Upload one and Helmcentral reads whatever text it can find
 in it and indexes that for search. If Mate is switched on, it goes further:
@@ -47,10 +48,12 @@ Details page, under Indexing - see below.
 **What leaves the boat:** with Mate off, nothing does. Local extraction
 never talks to the internet. With Mate on, an uploaded document's content
 - the scan itself for OCR, or up to 24,000 characters of a text-layer PDF's
-own text - goes to whichever model `assistant.document_model` names in
-Settings → Assistant, separate from the model that answers your questions
-and defaulting to a fast, inexpensive one. A document uploaded while Mate
-was switched off keeps whatever it read locally at upload time; turning
+own text - goes to a separate, faster reading model configured for the
+document library, apart from the model that answers your questions and
+defaulting to a fast, inexpensive one; see
+[Configuration](../reference/configuration.md) for where that's set. A
+document uploaded while Mate was switched off keeps whatever it read
+locally at upload time; turning
 Mate on afterwards doesn't reach back and OCR or summarise it - reindex it
 if you want that read properly now. Its already-read text does join search
 by meaning automatically, the moment Mate is ready, alongside everything
@@ -154,8 +157,8 @@ and the panel says nothing about it. If the background sweep itself hits a
 snag, the toolbar names it and links straight to Settings → Assistant so you
 can fix it there.
 
-The model is `assistant.embedding_model` in settings, alongside
-`assistant.document_model`. Blank turns semantic search off entirely and
+This runs on its own embedding model, set alongside the document-reading
+model above. Leaving it blank turns semantic search off entirely and
 leaves word search as the library's only retriever. See
 [Configuration](../reference/configuration.md).
 
@@ -186,6 +189,8 @@ how many pages, whether it's finished indexing yet, and - for the message
 you just sent - up to around 4,000 characters of what's actually in it.
 If the answer needs more than that, Mate reads further into the same
 document itself rather than needing the whole thing handed over up front.
+The attachment stays on the message afterwards, shown as a small chip that
+reopens this panel's own viewer for that file.
 
 Beyond a direct attachment, Mate can search the whole library on its own,
 the same way it looks up a forecast or a tide station. Ask something like
