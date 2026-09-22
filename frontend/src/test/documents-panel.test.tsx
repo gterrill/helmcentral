@@ -1432,4 +1432,47 @@ describe('DocumentsPanel', () => {
       expect(screen.queryByRole('button', { name: /Start checklist/ })).not.toBeInTheDocument()
     })
   })
+
+  // Backend chip-list narrowing (GET /api/documents/tags now excludes a
+  // suggested tag used on only one document) can leave an already-active
+  // filter out of documents.tags - e.g. an operator selected a tag while
+  // it had two documents, then removed it from one of them, or Mate
+  // re-enriched and the count dropped. selectedTag persists either way, so
+  // the active filter must stay visible and clearable even without a chip
+  // of its own in the freshly fetched list.
+  describe('tag filter chip row', () => {
+    it('renders a chip for every tag the hook reports', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        tags: [{ tag: 'engine', count: 3 }, { tag: 'receipts', count: 2 }],
+      }))
+
+      render(<DocumentsPanel />)
+
+      const group = screen.getByRole('group', { name: 'Filter by tag' })
+      expect(within(group).getByRole('button', { name: 'engine (3)' })).toBeInTheDocument()
+      expect(within(group).getByRole('button', { name: 'receipts (2)' })).toBeInTheDocument()
+    })
+
+    it('keeps the active filter visible and clearable when it drops out of the chip list', () => {
+      const setSelectedTag = vi.fn()
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        // 'solo-suggested' no longer qualifies for the chip list (now used
+        // on only one document, suggested source), but it is still the
+        // active filter.
+        tags: [{ tag: 'engine', count: 3 }],
+        selectedTag: 'solo-suggested',
+        setSelectedTag,
+        documents: [doc({ id: 'doc-1', title: 'Impeller kit' })],
+      }))
+
+      render(<DocumentsPanel />)
+
+      const group = screen.getByRole('group', { name: 'Filter by tag' })
+      const orphan = within(group).getByRole('button', { name: /solo-suggested/ })
+      expect(orphan).toHaveAttribute('aria-pressed', 'true')
+
+      fireEvent.click(orphan)
+      expect(setSelectedTag).toHaveBeenCalledWith(null)
+    })
+  })
 })

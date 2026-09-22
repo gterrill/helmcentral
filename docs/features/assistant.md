@@ -51,23 +51,10 @@ reading is unavailable it says so rather than guessing: an unknown wind
 reads as "unknown", not as a number that happens to be wrong.
 
 Beyond that, on request, it can look up wind, wave and tide forecasts for
-any named place, not just where you are now. It resolves a place name to a
-position first, searching your saved route waypoints and then whichever
-place-names plugin is configured (**Settings → Tiles → Place names**,
-OpenStreetMap by default) within about a hundred nautical miles of the
-boat, then fetches wind and waves through the same providers the forecast
-panel uses, and tides through the same tide provider and station catalog.
-If the name doesn't resolve, or a provider is down, or no tide provider is
-configured, it says which one failed. It never invents a forecast for a
-place it couldn't find, or a tide time from a provider that returned
-nothing.
-
-Place search uses the same plugin, and the same Overpass server setting
-when that plugin is OpenStreetMap, as the place name shown on the position
-tile - a separate choice from whichever plugin the Nearby tile uses, even
-though both default to the same one. The configuration reference explains
-how to point OpenStreetMap at a mirror if your boat's connection can't
-reach the default one.
+any named place, not just where you are now. If the name doesn't resolve,
+or a provider is down, or no tide provider is configured, it says which one
+failed. It never invents a forecast for a place it couldn't find, or a tide
+time from a provider that returned nothing.
 
 When it plans a passage leg, it works out the wind and sea angle against
 your planned course itself, rather than leaving a language model to
@@ -96,29 +83,20 @@ shows. Ask "what does the upper air chart on the forecast panel actually
 show" and it reads the help's own [Forecast](forecast.md) page and quotes
 it back.
 
+See [What Mate can look up](../reference/mate-tools.md) for exactly which
+provider each of these draws on, what counts as "nearby" for a place
+search, and what a failed or unconfigured lookup looks like.
+
 ## Documents
 
 Mate can read from the boat's own document library: manuals, receipts,
 invoices, service logs, passage notes, photos of a part or a data plate.
-There are two ways it draws on that.
-
-Attach a document to a question - the paperclip in the composer, or drop a
-file straight onto it - and Mate gets a short preamble ahead of your
-question describing it: filename, type, page count, whether it's finished
-indexing yet, plus up to around 4,000 characters of what's actually in it,
-so a question about the file is answered from its real content rather than
-a guess. If the answer needs more than that excerpt, Mate reads further
-into the same document itself. A message's attachments stay on it
-afterwards, shown as small chips that open the Documents panel's viewer for
-that file.
-
-Mate can also search the whole library on its own, the same way it looks
-up a forecast or a tide station, with no attachment needed. Ask something
-like "what's the part number for the raw water pump impeller", and if a
-receipt or a manual mentions it, Mate finds it and reads it without first
-being handed the file. That search is the same one the Documents panel's own
-search box runs, words and meaning together, so a question phrased nothing
-like the manual's own wording still lands on the right page.
+There are two ways it draws on that: attach a file directly to a question -
+the paperclip in the composer, or drop a file straight onto it - or let
+Mate search the whole library on its own, the same way it looks up a
+forecast or a tide station, with no attachment needed. See
+[Documents](documents.md#attaching-a-document-to-mate-and-mate-searching-on-its-own)
+for exactly how much of a document Mate reads and when.
 
 That one search covers everything in the library at once: uploaded manuals,
 your own captured notes, receipts, photos of a data plate. There's no
@@ -139,18 +117,13 @@ types and limits, and how folders and tags work.
 ## Talking to Mate
 
 Voice is push-to-talk: tap the microphone in the header, or press `Alt+M`
-from anywhere in the app, and speak. The transcript lands in the composer as
-you talk and sends once you stop. Escape cancels a listening session.
-
-The composer has its own, separate microphone too, inside the text box next
-to Send. That one dictates: it adds whatever you say to the question you're
-typing and never sends by itself, for adding a follow-up thought by voice
-without cutting off what you'd already typed. Tap it again to stop dictating
-and read back what it heard before you press Send yourself.
-
-A voice question can also be answered aloud: turn on "Read replies aloud" in
-Settings → Mate → Voice and Mate speaks a short summary of its answer as soon
-as it arrives, in addition to the full written answer, never instead of it.
+from anywhere in the app, and speak; the transcript lands in the composer as
+you talk and sends the moment you stop. The composer has its own, separate
+microphone too, and it does a different job: it dictates into whatever
+question you're already typing, rather than sending on its own, for adding a
+follow-up thought by voice without cutting off what you'd already typed. A
+voice question can also be answered aloud, on top of the full written
+answer, never instead of it.
 
 There's also "Listen for Hey Mate", an experimental always-on mode: say "Hey
 Mate" followed by your question, or say "Hey Mate" alone and Mate waits about
@@ -165,8 +138,9 @@ hidden.
 
 Voice needs the app opened over **https**, with microphone permission
 granted, in **Safari** or **Chrome** (Firefox has no speech recognition to
-use). See [Talk to Mate](../how-to/talk-to-mate.md) for exactly how to reach
-that address and what to do when the microphone button won't light up.
+use). See [Talk to Mate](../how-to/talk-to-mate.md) for how to turn each of
+these on, reach that address, and what to do when the microphone button
+won't light up.
 
 ## What leaves the boat
 
@@ -300,15 +274,11 @@ you, and the error names the model, because a page of markup where an
 answer should be is worse than being told plainly that this model can't do
 the job. Pick a different one in Settings → Mate.
 
-A lookup that keeps failing is abandoned rather than retried forever. If
-one of Mate's tools fails three times while answering a single question -
-usually a place search against an Overpass server that isn't reachable from
-the boat today - it stops being called for the rest of that answer, and
-Mate tells you the lookup was unavailable and answers with what it has. The
-alternative, which is what used to happen, was an answer that never
-arrived: a model will happily spend every round it is allowed retrying a
-server that has stopped responding. If place search is the one failing, the
-configuration reference explains how to point OpenStreetMap at a mirror.
+A lookup that keeps failing is abandoned rather than retried forever.
+Retrying forever is what used to happen: a model will happily spend every
+round it's allowed on a server that has stopped responding, so no answer
+ever arrives. See [What Mate can look up](../reference/mate-tools.md) for
+exactly when that kicks in and what Mate says when it does.
 
 If Mate can answer but voice specifically won't work, the header microphone
 says why rather than sitting there unresponsive - unless the browser has no
