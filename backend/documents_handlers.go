@@ -289,6 +289,44 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusConflict, errNoteHasNoChecklist.Error()
 	case errors.Is(err, errChecklistRunClosed):
 		return http.StatusConflict, errChecklistRunClosed.Error()
+	// Inventory (plan "Inventory: the equipment registry and locations",
+	// inventory_store.go): zones, bins and equipment share this same
+	// mapping function rather than a parallel inventoryErrorStatus - the
+	// task's own instruction to reuse this file's error-mapping style.
+	// errZoneInUse/errBinInUse ALSO reach here through the generic
+	// errors.Is default (as everything except the two delete handlers'
+	// own errors.As special case: they need the count for {in_use}), so
+	// this case still gives them a real message rather than falling to
+	// the 500 default below if some other caller ever surfaces one this
+	// way.
+	case errors.Is(err, errZoneNotFound):
+		return http.StatusNotFound, errZoneNotFound.Error()
+	case errors.Is(err, errZoneNameInvalid):
+		return http.StatusBadRequest, errZoneNameInvalid.Error()
+	case errors.Is(err, errZoneNameTaken):
+		return http.StatusConflict, errZoneNameTaken.Error()
+	case errors.Is(err, errZoneInUse):
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, errBinNotFound):
+		return http.StatusNotFound, errBinNotFound.Error()
+	case errors.Is(err, errBinCodeInvalid):
+		return http.StatusBadRequest, errBinCodeInvalid.Error()
+	case errors.Is(err, errBinCodeTaken):
+		return http.StatusConflict, errBinCodeTaken.Error()
+	case errors.Is(err, errBinInUse):
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, errEquipmentNotFound):
+		return http.StatusNotFound, errEquipmentNotFound.Error()
+	case errors.Is(err, errEquipmentNameRequired):
+		return http.StatusBadRequest, errEquipmentNameRequired.Error()
+	case errors.Is(err, errEquipmentInvalidCategory):
+		return http.StatusBadRequest, errEquipmentInvalidCategory.Error()
+	case errors.Is(err, errEquipmentInvalidSystem):
+		return http.StatusBadRequest, errEquipmentInvalidSystem.Error()
+	case errors.Is(err, errEquipmentInvalidStatus):
+		return http.StatusBadRequest, errEquipmentInvalidStatus.Error()
+	case errors.Is(err, errEquipmentLocationMismatch):
+		return http.StatusBadRequest, errEquipmentLocationMismatch.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}

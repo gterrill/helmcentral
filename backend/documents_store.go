@@ -498,6 +498,117 @@ var documentStoreSchema = []string{
 		checked_at INTEGER NOT NULL,
 		PRIMARY KEY (run_id, item_key, occurrence)
 	)`,
+
+	// Inventory (plan "Inventory: the equipment registry and locations"): the
+	// equipment registry's own tables, living in documents.sqlite rather than
+	// a file of their own - the one-store-one-file convention (ADR 0024 §3,
+	// followed again by ADR 0065) is per LIFECYCLE, not per feature, and
+	// equipment references documents on every read (equipment_documents
+	// below), so a foreign key plus a join is worth more here than file
+	// independence. All four tables are brand new - CREATE TABLE IF NOT
+	// EXISTS is already the correct idiom for a table that has never existed
+	// on any boat's documents.sqlite, unlike the notes/manuals columns above,
+	// which had to be ALTER TABLE'd onto an already-existing documents table
+	// (applyDocumentStoreMigrations' own doc comment explains why those two
+	// idioms can't be mixed within a single table).
+	//
+	// A zone is an area (salon, engine room, lazarette); a bin is a numbered,
+	// printable-coded container filed inside exactly one zone (ADR 0065 §4).
+	// inventory_bins.zone_id is NOT NULL - a bin with no zone isn't a
+	// location, it's a floating label - and ON DELETE RESTRICT so a zone
+	// still holding bins can't vanish out from under them; inventory_store.go's
+	// DeleteZone pre-checks with COUNT(*) before ever attempting the DELETE,
+	// rather than letting SQLite's own constraint violation (which carries no
+	// usable count) reach the operator as-is.
+	`CREATE TABLE IF NOT EXISTS inventory_zones (
+		id         TEXT PRIMARY KEY,
+		name       TEXT NOT NULL,
+		sort_index INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS inventory_zones_name ON inventory_zones (lower(name))`,
+
+	`CREATE TABLE IF NOT EXISTS inventory_bins (
+		id         TEXT PRIMARY KEY,
+		zone_id    TEXT NOT NULL REFERENCES inventory_zones(id) ON DELETE RESTRICT,
+		code       TEXT NOT NULL,
+		name       TEXT NOT NULL DEFAULT '',
+		sort_index INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`,
+	// A bin's printable code (e.g. "SAL-04") is unique boat-wide, not just
+	// within its own zone - it is what gets written on a label and read back
+	// without knowing which zone it belongs to, so two bins sharing a code
+	// anywhere aboard would make the label ambiguous.
+	`CREATE UNIQUE INDEX IF NOT EXISTS inventory_bins_code ON inventory_bins (lower(code))`,
+	`CREATE INDEX IF NOT EXISTS inventory_bins_zone_id ON inventory_bins (zone_id)`,
+
+	// equipment is the registry's own record: one row per system aboard,
+	// mechanical (hour-metered, hour_meter_path non-blank) or general.
+	// zone_id/bin_id are both nullable and both ON DELETE RESTRICT - a
+	// location is optional (an item can be "aboard, location unknown"), but
+	// once set, the zone or bin it names can't be deleted out from under it;
+	// again pre-checked with COUNT(*) in DeleteZone/DeleteBin rather than
+	// surfaced as a raw constraint error. bin_id does NOT imply zone_id at
+	// the schema level - SQLite can't express "bin_id set implies zone_id
+	// equals that bin's own zone_id" as a CHECK across two columns referencing
+	// two different tables - so that invariant is enforced in Go, by
+	// validateEquipmentLocation (inventory_store.go), on every write.
+	// aliases_json is a JSON array text column, read whole and matched in Go
+	// (ListEquipment's own doc comment) rather than normalised into a second
+	// table - this cycle has no need to query "which equipment has alias X"
+	// independently of already having the equipment row in hand.
+	`CREATE TABLE IF NOT EXISTS equipment (
+		id              TEXT PRIMARY KEY,
+		name            TEXT NOT NULL,
+		category        TEXT NOT NULL CHECK (category IN ('mechanical','general')),
+		system          TEXT NOT NULL DEFAULT 'other' CHECK (system IN ('propulsion','electrical','water','fuel','bilge','anchoring','safety','hvac','navigation','appliances','structure','other')),
+		manufacturer    TEXT NOT NULL DEFAULT '',
+		model           TEXT NOT NULL DEFAULT '',
+		serial          TEXT NOT NULL DEFAULT '',
+		quantity        INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
+		status          TEXT NOT NULL DEFAULT 'deployed' CHECK (status IN ('deployed','stored')),
+		zone_id         TEXT REFERENCES inventory_zones(id) ON DELETE RESTRICT,
+		bin_id          TEXT REFERENCES inventory_bins(id) ON DELETE RESTRICT,
+		location_detail TEXT NOT NULL DEFAULT '',
+		install_date    TEXT NOT NULL DEFAULT '',
+		hour_meter_path TEXT NOT NULL DEFAULT '',
+		profile_id      TEXT NOT NULL DEFAULT '',
+		aliases_json    TEXT NOT NULL DEFAULT '[]',
+		verified_aboard INTEGER NOT NULL DEFAULT 0 CHECK (verified_aboard IN (0,1)),
+		notes           TEXT NOT NULL DEFAULT '',
+		created_at      INTEGER NOT NULL,
+		updated_at      INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS equipment_system ON equipment (system)`,
+	`CREATE INDEX IF NOT EXISTS equipment_category ON equipment (category)`,
+	`CREATE INDEX IF NOT EXISTS equipment_zone_id ON equipment (zone_id)`,
+	`CREATE INDEX IF NOT EXISTS equipment_name ON equipment (lower(name))`,
+
+	// equipment_documents links an equipment record to the documents that
+	// describe it (a manual, an invoice, a photo - document_tags already say
+	// which), with no "role" column: plan's own decision is that a document's
+	// existing tags already carry that distinction, so a role here would be
+	// a second, competing way to say the same thing. source is
+	// 'operator'|'suggested', mirroring document_tags.source, for the later
+	// enrichment cycle this schema is deliberately sized to receive without
+	// churn - nothing writes 'suggested' yet (SetEquipmentDocuments always
+	// writes 'operator', plan's "links edited from the equipment side this
+	// cycle" decision). ON DELETE CASCADE on BOTH foreign keys, not RESTRICT:
+	// a link is metadata ABOUT the equipment-document relationship, not a
+	// thing either side of it must protect the other's existence for -
+	// deleting either the equipment record or the document itself should
+	// simply make the link vanish with it, never block the delete.
+	`CREATE TABLE IF NOT EXISTS equipment_documents (
+		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+		document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		source       TEXT NOT NULL CHECK (source IN ('operator','suggested')),
+		created_at   INTEGER NOT NULL,
+		PRIMARY KEY (equipment_id, document_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS equipment_documents_document_id ON equipment_documents (document_id)`,
 }
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's
