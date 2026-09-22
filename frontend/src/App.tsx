@@ -2432,6 +2432,10 @@ export function App() {
               setSettingsSection('assistant')
               setActivePanel('settings')
             })}
+            // Ask Mate about a selection (ask-mate-selection.tsx): same
+            // openMate the header's Sparkles button and SettingsPage's own
+            // onAskMate already call, always starting a fresh conversation.
+            onAskMate={openMate}
           />
         )
       }

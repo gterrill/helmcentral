@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
 
 import { DocumentsPanel } from '@/components/documents-panel'
+import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useDocuments } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
 import { useManuals } from '@/hooks/use-manuals'
@@ -25,6 +26,11 @@ import type { NoteRecord } from '@/hooks/use-notes'
 vi.mock('@/hooks/use-documents')
 vi.mock('@/hooks/use-document-uploads')
 vi.mock('@/hooks/use-notes')
+// Ask Mate about a selection (ask-mate-selection.tsx) gates on this same
+// status hook AssistantDrawer already uses - mocked the identical way the
+// other network-backed hooks above are, rather than letting a real fetch to
+// /api/assistant/status run (and fail) on every test in this file.
+vi.mock('@/hooks/use-assistant-status')
 vi.mock('@/hooks/use-manuals', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/use-manuals')>()
   return { ...actual, useManuals: vi.fn() }
@@ -59,6 +65,7 @@ const mockedUseDocuments = vi.mocked(useDocuments)
 const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
 const mockedUseManuals = vi.mocked(useManuals)
 const mockedUseNotes = vi.mocked(useNotes)
+const mockedUseAssistantStatus = vi.mocked(useAssistantStatus)
 
 type DocumentsMock = ReturnType<typeof useDocuments>
 type UploadsMock = ReturnType<typeof useDocumentUploads>
@@ -230,6 +237,16 @@ beforeEach(() => {
   mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
   mockedUseManuals.mockReturnValue(makeManualsMock())
   mockedUseNotes.mockReturnValue(makeNotesMock())
+  // Available by default (enabled/configured, no problem) - the panel's
+  // existing coverage isn't about Mate at all, so it shouldn't have to
+  // opt into "available" every time; ask-mate-selection.test.tsx and its
+  // own wiring cover the unavailable case.
+  mockedUseAssistantStatus.mockReturnValue({
+    status: { enabled: true, configured: true, model: 'test-model' },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  })
 })
 
 afterEach(() => {

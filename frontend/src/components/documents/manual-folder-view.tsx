@@ -20,6 +20,7 @@ import type { NoteLink } from '@/lib/note-links'
 import { noteTypeMeta } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
 
+import { AskMateSelection } from '../ask-mate-selection'
 import { ChecklistRunner } from './checklist-runner'
 import { NoteEditor } from '../note-editor'
 import { NoteMarkdown } from '../note-markdown'
@@ -62,9 +63,17 @@ export interface ManualFolderViewProps {
    * of document side by side, so there is no reason a manual's reading pane
    * should refuse to follow a link the ordinary viewer could open. */
   onNavigateDocument: (id: string) => void
+  /** Ask Mate about a text selection (plan: "select text in a manual
+   * section... a popover offers to ask Mate about it"). false (the
+   * default) hides the feature entirely - same reasoning as every other
+   * optional callback here, but load-bearing this time: a caller that
+   * hasn't checked Mate's own status yet must not offer a control that
+   * would just fail. */
+  mateAvailable?: boolean
+  onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
-export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemoted, onNavigateDocument }: ManualFolderViewProps) {
+export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemoted, onNavigateDocument, mateAvailable = false, onAskMate }: ManualFolderViewProps) {
   const manuals = useManuals(folderId)
   // Only for its patchNote/getNote mutators (both work on any note id
   // regardless of filing state) - the reading pane's GET and the editor's
@@ -211,6 +220,8 @@ export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemot
             onNavigate={handleNavigate}
             onSave={handleSaveSection}
             onBack={() => onSectionChange(null)}
+            mateAvailable={mateAvailable}
+            onAskMate={onAskMate}
           />
         </div>
       </div>
@@ -381,6 +392,8 @@ function ManualReadingPane({
   onNavigate,
   onSave,
   onBack,
+  mateAvailable,
+  onAskMate,
 }: {
   node: ManualTreeNode | null
   body: string | null
@@ -399,6 +412,8 @@ function ManualReadingPane({
   onNavigate: (link: NoteLink) => void
   onSave: (markdown: string) => Promise<void>
   onBack: () => void
+  mateAvailable: boolean
+  onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }) {
   // Reset whenever a DIFFERENT section is selected - an editing session
   // belongs to the section that was open when it started.
@@ -481,7 +496,11 @@ function ManualReadingPane({
           {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
-          {!loading && !error && body !== null && !editing && <NoteMarkdown content={body} onNavigate={onNavigate} />}
+          {!loading && !error && body !== null && !editing && (
+            <AskMateSelection noteId={node.id} noteTitle={node.name} mateAvailable={mateAvailable} onAskMate={onAskMate}>
+              <NoteMarkdown content={body} onNavigate={onNavigate} />
+            </AskMateSelection>
+          )}
           {!loading && !error && body !== null && editing && (
             <NoteEditor key={node.id} value={body} onSave={handleSave} />
           )}

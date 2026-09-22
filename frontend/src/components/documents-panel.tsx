@@ -77,6 +77,7 @@ import {
   type DocumentRecord,
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
+import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
@@ -85,6 +86,7 @@ import type { NoteLink } from '@/lib/note-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
 
+import { AskMateSelection } from './ask-mate-selection'
 import { ChecklistRunner } from './documents/checklist-runner'
 import { ManualFolderView } from './documents/manual-folder-view'
 import { NoteTypeIconButton } from './documents/note-type-icon-button'
@@ -337,6 +339,11 @@ export interface DocumentsPanelProps {
    * Optional, same reasoning as onOpenHelp above: a test that never
    * triggers a failure doesn't need it. */
   onOpenAssistantSettings?: () => void
+  /** Ask Mate about a text selection (ask-mate-selection.tsx): matches
+   * App.tsx's openMate signature exactly, the same way SettingsPage's own
+   * onAskMate does - see logs-section.tsx for the identical prop shape.
+   * Optional so a test that never selects text doesn't need it. */
+  onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
 // Revision "one panel, not three" (2026-09-20): docs/features/notes-and-the-manual.md
@@ -355,9 +362,17 @@ export function DocumentsPanel({
   onSectionChange,
   onOpenHelp,
   onOpenAssistantSettings,
+  onAskMate,
 }: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const documents = useDocuments(folderId)
+  // Ask Mate about a selection (ask-mate-selection.tsx) is hidden entirely
+  // unless Mate itself is actually usable right now - the same status
+  // AssistantDrawer's own "problem" card already gates its composer on
+  // (hooks/use-assistant-status.ts), reused here rather than re-derived so
+  // this popover can never appear while the panel would just fail to send.
+  const assistantStatus = useAssistantStatus()
+  const mateAvailable = assistantStatus.status !== null && !assistantStatus.status.problem
   // No attachment cap here (review finding, use-document-uploads.ts:173):
   // MAX_ATTACHMENTS is Mate's per-message limit, and this panel isn't
   // building a message. `sequential` avoids opening one XMLHttpRequest per
@@ -1084,6 +1099,8 @@ export function DocumentsPanel({
             onSectionChange={setSectionId}
             onDemoted={() => { void manualsList.refreshManuals() }}
             onNavigateDocument={setViewerId}
+            mateAvailable={mateAvailable}
+            onAskMate={onAskMate}
           />
         ) : (
           <Table>
@@ -1457,7 +1474,14 @@ export function DocumentsPanel({
             )}
             {!viewerLoading && viewerDoc?.mime === 'text/markdown' && !viewerChecklistRunning && !(viewerDoc.kind === 'note' && viewerEditing) && (
               <div className="p-4">
-                <NoteMarkdown content={viewerText ?? ''} onNavigate={handleNoteNavigate} />
+                <AskMateSelection
+                  noteId={viewerDoc.id}
+                  noteTitle={documentDisplayName(viewerDoc)}
+                  mateAvailable={mateAvailable}
+                  onAskMate={onAskMate}
+                >
+                  <NoteMarkdown content={viewerText ?? ''} onNavigate={handleNoteNavigate} />
+                </AskMateSelection>
               </div>
             )}
             {!viewerLoading && viewerDoc && viewerDoc.mime !== 'text/markdown' && !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf' && (
