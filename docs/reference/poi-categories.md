@@ -1,10 +1,10 @@
 # POI categories
 
-The Nearby feature (`GET /api/poi`) groups points of interest into eleven
-fixed categories. Every POI-provider plugin is expected to understand all
-eleven, though not every plugin can actually supply data for each - a
-category a plugin has no source for comes back in the response's
-`unsupported` list rather than silently empty.
+The Nearby tile groups points of interest into eleven fixed categories.
+Every points-of-interest provider is expected to understand all eleven,
+though not every one can actually supply data for each - a category a
+provider has no source for is reported as unsupported for that provider
+rather than just coming back empty.
 
 | Category | What it covers |
 | --- | --- |
@@ -22,12 +22,10 @@ category a plugin has no source for comes back in the response's
 
 ## The default provider: OpenStreetMap via Overpass
 
-`osm-overpass` (`docs/examples/poi-plugins/osm-overpass`) is the bundled,
-keyless default. It maps every category above onto an OpenStreetMap tag
-combination and fetches all of them in a single Overpass request. The exact
-tag table lives in that plugin's source (`osm-overpass.go`'s
-`poiCategories`), summarised here for an operator judging whether it will
-find anything useful on their cruising ground:
+`osm-overpass` is the bundled, keyless default. It maps every category
+above onto an OpenStreetMap tag combination and fetches all of them in a
+single request, summarised below for judging whether it will find anything
+useful on your cruising ground:
 
 | Category | Tags | Cap | Named only |
 | --- | --- | --- | --- |
@@ -46,8 +44,8 @@ find anything useful on their cruising ground:
 "Named only" means an unnamed feature never appears for that category - an
 unnamed reef or an unnamed stretch of coastal path is noise, not a point of
 interest an operator would navigate to. The cap is the most this plugin
-returns for that category from any one fetch; a cap being hit is reported in
-the response's `truncated` list.
+returns for that category from any one fetch; hitting it is reported as
+truncated for that category, rather than silently cutting the list short.
 
 ### Coverage caveats
 
@@ -80,17 +78,14 @@ but does not fill in a category with no OSM tagging in a given area at all.
 This plugin queries the public `overpass-api.de` by default. If your
 network refuses it, open its settings (**Settings → Tiles → Nearby →
 osm-overpass's gear icon**) and point **Overpass server** at a mirror
-instead - see [configuration.md](configuration.md#overpass) and the
-[plugin's own README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror)
-for the allowlist a mirror other than `overpass.openstreetmap.fr` also
-needs.
+instead - see [Configuration → Overpass](configuration.md#overpass).
 
 ## Google Places
 
-`google-places` (`docs/examples/poi-plugins/google-places`) trades free/
-keyless for Google's business and place database, at the cost of narrower
-category coverage: only `marina`, `historic`, `viewpoint` and `trail` map
-onto a real Google Places type. See that plugin's README for the exact type
+`google-places` trades free/keyless for Google's business and place
+database, at the cost of narrower category coverage: only `marina`,
+`historic`, `viewpoint` and `trail` map onto a real Google Places type. See
+the [developer documentation](../developers/plugins.md) for the exact type
 mapping and the cost/billing implications of switching to it.
 
 ## Why a fixed category list

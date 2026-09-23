@@ -743,6 +743,19 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/manuals", tierRead, listManualsHandler},
 		{http.MethodGet, "/api/manuals/:id/tree", tierRead, manualTreeHandler},
 
+		// Inventory (plan "Inventory: the equipment registry and locations"):
+		// the equipment registry's own API family, under /api/inventory/ -
+		// deliberately separate from /api/equipment-profiles just above,
+		// which stays exactly where it is (plan's own decision: profiles
+		// move in the UI only, in a later phase; the backend route never
+		// changes). "/api/inventory/equipment/:id" registered after the bare
+		// "/api/inventory/equipment" for readability only - see the
+		// read-tier comment above the document library's own routes on why
+		// Echo's router never needs that ordering.
+		{http.MethodGet, "/api/inventory/zones", tierRead, listZonesHandler},
+		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -831,6 +844,22 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/manuals", tierWrite, createManualHandler},
 		{http.MethodDelete, "/api/manuals/:id", tierWrite, clearManualHandler},
 		{http.MethodPost, "/api/manuals/:id/reorder", tierWrite, reorderManualHandler},
+
+		// Inventory writes (plan "Inventory: the equipment registry and
+		// locations"). DELETE on a zone/bin still in use answers 409 with
+		// {error, in_use} rather than the ordinary writeDocumentError
+		// mapping - see deleteZoneHandler/deleteBinHandler's own doc
+		// comments (inventory_handlers.go).
+		{http.MethodPost, "/api/inventory/zones", tierWrite, createZoneHandler},
+		{http.MethodPut, "/api/inventory/zones/:id", tierWrite, updateZoneHandler},
+		{http.MethodDelete, "/api/inventory/zones/:id", tierWrite, deleteZoneHandler},
+		{http.MethodPost, "/api/inventory/bins", tierWrite, createBinHandler},
+		{http.MethodPut, "/api/inventory/bins/:id", tierWrite, updateBinHandler},
+		{http.MethodDelete, "/api/inventory/bins/:id", tierWrite, deleteBinHandler},
+		{http.MethodPost, "/api/inventory/equipment", tierWrite, createEquipmentHandler},
+		{http.MethodPut, "/api/inventory/equipment/:id", tierWrite, updateEquipmentHandler},
+		{http.MethodDelete, "/api/inventory/equipment/:id", tierWrite, deleteEquipmentHandler},
+		{http.MethodPut, "/api/inventory/equipment/:id/documents", tierWrite, setEquipmentDocumentsHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},

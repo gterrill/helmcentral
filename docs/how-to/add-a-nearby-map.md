@@ -6,21 +6,30 @@ With write access, in layout mode:
 2. Choose **Add Tile**, then **Nearby map…**.
 3. Give it a title, or leave it blank for "Nearby".
 4. Set the range, 0.5 to 25 nautical miles. This is the radius searched
-   around the vessel, and roughly what the map zooms to fit.
+   around the vessel; the map itself zooms to keep the vessel and the
+   nearest matches in view, never tighter than this range.
 5. Choose a layout: **Map only** fills the tile with the map; **Map and
    list** adds the ranked list of the five nearest matches beside it, so it
    needs a wider tile to read comfortably.
-6. Tick the categories you want: anchorages, bays, islands, marinas, fuel,
+6. With **Map and list**, set **Summary cycle** to how many seconds each
+   described match stays on screen before the list moves to the next one -
+   3 to 120 seconds, 10 by default. Only matches with a description take a
+   turn; leave this alone if you'd rather not think about it.
+7. Tick the categories you want: anchorages, bays, islands, marinas, fuel,
    boat ramps, moorings, historic landmarks, lookouts, dive and snorkel
    spots, and walking trails. At least one is required.
-7. Toggle **Show AIS traffic** and **Show own trail** as you want them. Both
+8. Toggle **Show AIS traffic** and **Show own trail** as you want them. Both
    can be changed later.
-8. Choose **Save**.
+9. Choose **Save**.
 
 The tile starts polling immediately. The first few points may take a
 moment to appear the first time a given area is searched; after that the
 answer is cached for a few hours, so re-opening the same stretch of coast is
 fast.
+
+Activate a route and its line appears on the Nearby map automatically, the
+leg you're on drawn brighter and thicker than the rest - nothing to turn on,
+and nothing shows while no route is active.
 
 Add more than one Nearby map to a page, or to different pages, each with its
 own range and categories: a wide "Anchorages" map at 10 nm on the passage

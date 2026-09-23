@@ -35,6 +35,7 @@ const mapAndListRadio = () => screen.getByRole('radio', { name: /map and list/i 
 const categoryCheckbox = (label: string) => screen.getByRole('checkbox', { name: label })
 const aisSwitch = () => screen.getByRole('switch', { name: /ais/i })
 const trailSwitch = () => screen.getByRole('switch', { name: /trail/i })
+const summaryCycleField = () => screen.getByLabelText(/summary cycle/i)
 const saveButton = () => screen.getByRole('button', { name: /save/i })
 
 describe('PoiMapConfigDialog', () => {
@@ -157,5 +158,61 @@ describe('PoiMapConfigDialog', () => {
     renderDialog({ widget: draft })
 
     expect(saveButton()).toBeEnabled()
+  })
+
+  describe('summary cycle seconds (split layout only)', () => {
+    test('is shown for the split layout and hidden for map-only', () => {
+      renderDialog()
+      expect(summaryCycleField()).toBeInTheDocument()
+
+      fireEvent.click(mapOnlyRadio())
+      expect(screen.queryByLabelText(/summary cycle/i)).toBeNull()
+    })
+
+    test('saves a configured value', () => {
+      const { onSave } = renderDialog()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '20' } })
+      fireEvent.click(saveButton())
+
+      expect(onSave).toHaveBeenCalledWith(widget.id, expect.objectContaining({ summaryCycleSeconds: 20 }))
+    })
+
+    test('blocks saving a value outside 3 to 120 seconds', () => {
+      renderDialog()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '2' } })
+      expect(saveButton()).toBeDisabled()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '121' } })
+      expect(saveButton()).toBeDisabled()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '60' } })
+      expect(saveButton()).toBeEnabled()
+    })
+
+    test('accepts the bounds themselves', () => {
+      renderDialog()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '3' } })
+      expect(saveButton()).toBeEnabled()
+
+      fireEvent.change(summaryCycleField(), { target: { value: '120' } })
+      expect(saveButton()).toBeEnabled()
+    })
+
+    test('clearing the field back to blank leaves it unset (the 10s default applies)', () => {
+      const widgetWithCycle: DashboardLayoutItem = {
+        ...widget,
+        poiMap: { ...widget.poiMap!, summaryCycleSeconds: 20 },
+      }
+      const { onSave } = renderDialog({ widget: widgetWithCycle })
+      expect(summaryCycleField()).toHaveValue(20)
+
+      fireEvent.change(summaryCycleField(), { target: { value: '' } })
+      fireEvent.click(saveButton())
+
+      expect(onSave).toHaveBeenCalledWith(widgetWithCycle.id, expect.objectContaining({ summaryCycleSeconds: undefined }))
+    })
   })
 })

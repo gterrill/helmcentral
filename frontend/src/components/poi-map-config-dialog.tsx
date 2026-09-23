@@ -16,6 +16,9 @@ import {
   GAUGE_GROUP_TITLE_MAX_LENGTH,
   POI_MAP_RANGE_NM_MAX,
   POI_MAP_RANGE_NM_MIN,
+  POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT,
+  POI_MAP_SUMMARY_CYCLE_SECONDS_MAX,
+  POI_MAP_SUMMARY_CYCLE_SECONDS_MIN,
   isValidPoiMapConfig,
   type DashboardLayoutItem,
   type DashboardWidgetId,
@@ -132,6 +135,30 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
               </label>
             </div>
           </Field>
+
+          {config.layout === 'split' && (
+            <Field>
+              <FieldLabel htmlFor="poi-map-summary-cycle">Summary cycle (seconds)</FieldLabel>
+              <Input
+                id="poi-map-summary-cycle"
+                type="number"
+                min={POI_MAP_SUMMARY_CYCLE_SECONDS_MIN}
+                max={POI_MAP_SUMMARY_CYCLE_SECONDS_MAX}
+                step={1}
+                placeholder={String(POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT)}
+                value={config.summaryCycleSeconds ?? ''}
+                onChange={(e) => setConfig((prev) => ({
+                  ...prev,
+                  summaryCycleSeconds: e.target.value === '' ? undefined : Number(e.target.value),
+                }))}
+              />
+              <FieldDescription>
+                How long the ranked list shows one point's summary before cycling to the next
+                one that has a summary. {POI_MAP_SUMMARY_CYCLE_SECONDS_MIN} to{' '}
+                {POI_MAP_SUMMARY_CYCLE_SECONDS_MAX} seconds; {POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT} when left blank.
+              </FieldDescription>
+            </Field>
+          )}
 
           <Field>
             <FieldLabel>Categories</FieldLabel>

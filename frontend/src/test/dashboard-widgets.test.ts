@@ -12,6 +12,8 @@ import {
   EMBED_WIDGET_ID_PREFIX,
   POI_MAP_RANGE_NM_MAX,
   POI_MAP_RANGE_NM_MIN,
+  POI_MAP_SUMMARY_CYCLE_SECONDS_MAX,
+  POI_MAP_SUMMARY_CYCLE_SECONDS_MIN,
   POI_MAP_WIDGET_ID_PREFIX,
   WIDGET_CATEGORIES,
   duplicateWidget,
@@ -496,5 +498,21 @@ describe('isValidPoiMapConfig', () => {
   test('accepts the range bounds themselves', () => {
     expect(isValidPoiMapConfig({ ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MIN })).toBe(true)
     expect(isValidPoiMapConfig({ ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MAX })).toBe(true)
+  })
+
+  test('accepts an unset summaryCycleSeconds', () => {
+    expect(isValidPoiMapConfig(validPoiMapConfig())).toBe(true)
+  })
+
+  test('accepts the summary cycle bounds themselves', () => {
+    expect(isValidPoiMapConfig({ ...validPoiMapConfig(), summaryCycleSeconds: POI_MAP_SUMMARY_CYCLE_SECONDS_MIN })).toBe(true)
+    expect(isValidPoiMapConfig({ ...validPoiMapConfig(), summaryCycleSeconds: POI_MAP_SUMMARY_CYCLE_SECONDS_MAX })).toBe(true)
+  })
+
+  test.each([
+    ['summary cycle below minimum', { ...validPoiMapConfig(), summaryCycleSeconds: POI_MAP_SUMMARY_CYCLE_SECONDS_MIN - 1 }],
+    ['summary cycle above maximum', { ...validPoiMapConfig(), summaryCycleSeconds: POI_MAP_SUMMARY_CYCLE_SECONDS_MAX + 1 }],
+  ])('rejects %s', (_label, config) => {
+    expect(isValidPoiMapConfig(config)).toBe(false)
   })
 })

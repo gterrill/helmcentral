@@ -14,7 +14,7 @@ Three kinds of equipment are covered, set by the file's `kind` field:
 | `generator` | AC gensets | Must start with `phase.` or `total.` |
 
 Profiles live in `plugins/engine-profiles/`. Drop a file in and restart, or
-manage them from **Settings → Equipment**, which can upload, edit, download and
+manage them from **Inventory → Profiles**, which can upload, edit, download and
 delete without touching the filesystem. Either way they appear under **Add
 Tile → From equipment profile…**.
 
@@ -191,7 +191,7 @@ does.
 Every write is validated against the JSON schema and then against the same
 rules the loader applies, so the API cannot store a profile the dashboard would
 refuse. A rejected write comes back with the failing field paths, which is what
-**Settings → Equipment** shows you in its editor.
+**Inventory → Profiles** shows you in its editor.
 
 `GET /api/engine-profiles` and `PUT /api/engine-profiles/:id` still work,
 filtered to `kind: engine`.

@@ -25,11 +25,8 @@ Two more switches live in the same section, both off by default:
   it arrives, on top of the written answer, whenever you asked by voice.
 - **Listen for Hey Mate** keeps the microphone open the whole time the app is
   on screen, so you can start with "Hey Mate" instead of tapping anything.
-  It costs more battery than push-to-talk, and on Chrome the audio stream
-  goes to Google continuously rather than only when you actually ask
-  something, so it stays off until you decide that trade is worth it. It
-  also mishears ordinary cabin conversation as "Hey Mate" now and then; that
-  is expected, not a fault.
+  See [Mate](../features/assistant.md#talking-to-mate) for what that costs
+  in battery and privacy before you turn it on.
 
 ## 3. Allow the microphone
 
