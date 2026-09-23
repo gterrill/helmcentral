@@ -423,10 +423,22 @@ keeps its own range, categories, layout and toggles, so one page can show
 anchorages and dive spots while another shows fuel and boat ramps.
 
 Two layouts: map only, or map and list. The list ranks the five nearest
-matches by distance, each with its category icon, name, distance and bearing,
-and a one-line description where one exists. Those same five carry a numbered
-badge on the map so list and chart agree on which marker is which. Every
-matching feature in range still shows on the map, badge or no badge.
+matches by distance, each with its category icon, name, distance and bearing.
+Those same five carry a numbered badge on the map so list and chart agree on
+which marker is which. Every matching feature in range still shows on the
+map, badge or no badge.
+
+The map follows the vessel, holding north up, and keeps both the vessel and
+those five nearest matches in view rather than just centring on the vessel at
+a fixed zoom, so a match to one side doesn't sit off the edge of a narrower
+tile. It never zooms in tighter than the range you set, though, so a single
+very close match doesn't leave the map looking nearly blank.
+
+One row at a time shows its full description, where a match has one, cycling
+to the next described match every few seconds (how long is a tile setting).
+Matches with nothing to say are skipped rather than getting an empty turn.
+The currently described match's marker gets a light ring on the map, so you
+can match the row you're reading to its point on the chart at a glance.
 
 Categories: anchorages, bays and islands; marinas, fuel, boat ramps and
 moorings; historic landmarks; lookouts; dive and snorkel spots; and walking
@@ -439,10 +451,15 @@ Two switches control what else appears: nearby AIS traffic, on by default,
 and your own vessel's trail, off by default. Turn either off if the map feels
 busy at a low zoom.
 
-The map follows the vessel, holding north up. Should the position feed report
-a fix it does not trust, the map holds its last known position rather than
-jumping to an unreliable one, and shows a small amber GNSS badge until a good
-fix returns.
+Activate a route (see [Route planning](#route-planning) below) and its line
+appears on the Nearby map too, with the leg you're actually on drawn brighter
+and thicker than the rest of the route, and a small dot at each waypoint. No
+route active, nothing drawn - the Nearby map doesn't need a route to be
+useful, and doesn't clutter itself with one that isn't running.
+
+Should the position feed report a fix it does not trust, the map holds its
+last known view rather than jumping to an unreliable one, and shows a small
+amber GNSS badge until a good fix returns.
 
 A footer under the list names the current data provider and how old its
 answer is. When a fetch fails, the list keeps showing what it last knew, aged
