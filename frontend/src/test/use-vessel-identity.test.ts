@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-import { formatClock, formatDate } from '@/hooks/use-vessel-identity'
+import { formatClock, formatDate, formatWeekday, isSameLocalDate } from '@/hooks/use-vessel-identity'
 
 // use-vessel-identity.ts is a module-level shared store (item C): a single
 // 1s clock and a single subscription to the SSE `vessel-state` event, shared
@@ -104,6 +104,42 @@ describe('formatDate', () => {
 
     expect(result).toBe(formatDate(instant))
     expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ADR 0125: the clock tile's ETA line prefixes a 3-letter weekday when the
+// ETA isn't today in vessel-local time (HelmCast did this).
+describe('formatWeekday', () => {
+  it('names the weekday in the given vessel-local zone, independent of the browser zone', () => {
+    // 2026-09-12T20:31Z is Sep 12 (Saturday) at UTC, but already Sep 13
+    // (Sunday) at UTC+10.
+    const instant = new Date('2026-09-12T20:31:00Z')
+
+    expect(formatWeekday(instant, 'UTC')).toBe('Sat')
+    expect(formatWeekday(instant, 'Etc/GMT-10')).toBe('Sun')
+  })
+})
+
+describe('isSameLocalDate', () => {
+  it('is true for two instants on the same calendar date in the given zone', () => {
+    const a = new Date('2026-09-12T01:00:00Z')
+    const b = new Date('2026-09-12T23:00:00Z')
+    expect(isSameLocalDate(a, b, 'UTC')).toBe(true)
+  })
+
+  it('is false once the zone-local calendar date differs', () => {
+    const a = new Date('2026-09-12T23:00:00Z')
+    const b = new Date('2026-09-13T01:00:00Z')
+    expect(isSameLocalDate(a, b, 'UTC')).toBe(false)
+  })
+
+  it('crosses the vessel-local midnight boundary independently of the browser zone', () => {
+    // Same UTC instants as the "false" case above, but at UTC+10 both
+    // already fall on Sep 13 - the zone the comparison runs in changes the
+    // answer, exactly like formatDate's own boundary-crossing test above.
+    const a = new Date('2026-09-12T23:00:00Z')
+    const b = new Date('2026-09-13T01:00:00Z')
+    expect(isSameLocalDate(a, b, 'Etc/GMT-10')).toBe(true)
   })
 })
 

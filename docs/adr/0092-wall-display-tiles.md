@@ -1,7 +1,7 @@
 # ADR 0092: Wall-Display Tiles
 
 ## Status
-Accepted
+Accepted. Superseded in part by ADR 0125.
 
 ## Context
 

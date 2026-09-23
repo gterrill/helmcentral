@@ -234,7 +234,7 @@ func buildWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string, now time
 // docs/adr/0035-weather-local-day-boundaries.md.
 func weatherKitRequestURL(lat, lon float64, timezone string) string {
 	return fmt.Sprintf(
-		"https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=currentWeather,forecastDaily,forecastHourly&timezone=%s",
+		"https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=currentWeather,forecastDaily,forecastHourly,forecastNextHour&timezone=%s",
 		lat, lon, neturl.QueryEscape(timezone),
 	)
 }
@@ -317,10 +317,33 @@ type weatherHourOutput struct {
 	VisibilityM *float64 `json:"visibility_m"`
 }
 
+// weatherNextHourOutput mirrors one entry of
+// backend/wasm_weather_provider.go's wasmWeatherNextHourOutput. Unlike
+// weatherHourOutput's PrecipitationChancePct, this is NOT run through the
+// host's sentinelPrecipitationPct clamp on the host side - the raw
+// negative-is-absent value here reaches the wire and the frontend
+// unmodified (see backend/weather_providers.go's top doc comment).
+type weatherNextHourOutput struct {
+	Time                   string  `json:"time"`
+	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	PrecipitationMMPerH    float64 `json:"precipitation_mm_per_h"`
+}
+
 type fetchForecastOutput struct {
 	Current weatherCurrentOutput `json:"current"`
 	Days    []weatherDayOutput   `json:"days"`
 	Hourly  []weatherHourOutput  `json:"hourly"`
+	// NextHour is WeatherKit's forecastNextHour dataset, mapped minute by
+	// minute - nil/empty when WeatherKit omitted the dataset entirely, which
+	// it does outside its nowcast coverage area (a real, expected response
+	// shape, not an error - see parseWeatherKitResponse).
+	NextHour []weatherNextHourOutput `json:"next_hour"`
+	// NextHourSource is always "nowcast" when NextHour is non-empty:
+	// forecastNextHour is Apple's genuine short-range nowcast dataset, never
+	// interpolated from forecastHourly - there is no "hourly" case for this
+	// plugin. See backend/weather_providers.go's top doc comment's
+	// next_hour_source section.
+	NextHourSource string `json:"next_hour_source,omitempty"`
 }
 
 // --- WeatherKit's raw JSON response shapes ---
@@ -330,9 +353,10 @@ type fetchForecastOutput struct {
 // idiom.
 
 type weatherKitResponse struct {
-	CurrentWeather *weatherKitCurrentWeather `json:"currentWeather"`
-	ForecastDaily  *weatherKitForecastDaily  `json:"forecastDaily"`
-	ForecastHourly *weatherKitForecastHourly `json:"forecastHourly"`
+	CurrentWeather   *weatherKitCurrentWeather   `json:"currentWeather"`
+	ForecastDaily    *weatherKitForecastDaily    `json:"forecastDaily"`
+	ForecastHourly   *weatherKitForecastHourly   `json:"forecastHourly"`
+	ForecastNextHour *weatherKitForecastNextHour `json:"forecastNextHour"`
 }
 
 type weatherKitCurrentWeather struct {
@@ -394,6 +418,23 @@ type weatherKitHourForecast struct {
 	Visibility *float64 `json:"visibility"`
 }
 
+// weatherKitForecastNextHour/weatherKitNextHourMinute mirror WeatherKit's
+// forecastNextHour dataset (HelmCast's NextHourForecast in
+// internal/weather/client.go is the reference for this shape: minute-by-
+// minute startTime/precipitationChance/precipitationIntensity). WeatherKit
+// omits forecastNextHour entirely, rather than sending an empty minutes[],
+// when a position has no nowcast coverage - that is what
+// weatherKitResponse.ForecastNextHour being nil represents below.
+type weatherKitForecastNextHour struct {
+	Minutes []weatherKitNextHourMinute `json:"minutes"`
+}
+
+type weatherKitNextHourMinute struct {
+	StartTime              string   `json:"startTime"`
+	PrecipitationChance    *float64 `json:"precipitationChance"`
+	PrecipitationIntensity *float64 `json:"precipitationIntensity"`
+}
+
 // parseWeatherKitResponse parses a raw WeatherKit API response body and maps
 // it onto this plugin's fetch_forecast output contract. maxDays caps the
 // number of days[] entries returned (fetch_forecast's input "days" field);
@@ -439,6 +480,13 @@ func parseWeatherKitResponse(body []byte, maxDays int) (fetchForecastOutput, err
 
 	if resp.ForecastHourly != nil {
 		out.Hourly = mapForecastHours(resp.ForecastHourly.Hours)
+	}
+
+	if resp.ForecastNextHour != nil {
+		out.NextHour = mapForecastNextHour(resp.ForecastNextHour.Minutes)
+		if len(out.NextHour) > 0 {
+			out.NextHourSource = "nowcast"
+		}
 	}
 
 	return out, nil
@@ -601,4 +649,34 @@ func mapForecastHours(rawHours []weatherKitHourForecast) []weatherHourOutput {
 		})
 	}
 	return hourly
+}
+
+// mapForecastNextHour maps forecastNextHour.minutes[] onto weatherNextHourOutput,
+// reusing precipitationChancePct for the same fraction->percent conversion
+// and negative-is-absent sentinel current/days/hourly already use.
+// precipitationIntensity has no "absent" sentinel in this contract (0 mm/hr
+// is itself the legitimate "no rain this minute" reading, same as
+// PrecipitationMM's hourly convention above), so a missing value maps to 0.
+// Entries with an empty/missing startTime are skipped, not erred - next_hour
+// is optional nowcast data, same reasoning as mapForecastHours' handling of
+// forecastHourly.
+func mapForecastNextHour(rawMinutes []weatherKitNextHourMinute) []weatherNextHourOutput {
+	minutes := make([]weatherNextHourOutput, 0, len(rawMinutes))
+	for _, m := range rawMinutes {
+		if strings.TrimSpace(m.StartTime) == "" {
+			continue
+		}
+
+		var mmPerH float64
+		if m.PrecipitationIntensity != nil {
+			mmPerH = math.Max(0, *m.PrecipitationIntensity)
+		}
+
+		minutes = append(minutes, weatherNextHourOutput{
+			Time:                   m.StartTime,
+			PrecipitationChancePct: precipitationChancePct(m.PrecipitationChance),
+			PrecipitationMMPerH:    mmPerH,
+		})
+	}
+	return minutes
 }

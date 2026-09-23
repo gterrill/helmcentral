@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
+/** A chartplotter go-to destination with no Helmcentral route behind it (ADR 0125): SignalK's Course API `nextPoint`, reverse-geocoded server-side. `name` is `''` until the backend's cache resolves it - see GET /api/routes/active's own doc comment (backend/route_activation.go). */
+export interface RouteActivationDestination {
+  lat: number
+  lon: number
+  name: string
+}
+
 export type ActiveRouteStatus =
   | { state: 'unknown' }
-  | { state: 'inactive' }
+  | { state: 'inactive'; destination: RouteActivationDestination | null }
   | { state: 'active'; routeId: string | null; pointIndex: number; reverse: boolean }
 
 interface ActiveRouteResponse {
@@ -11,6 +18,7 @@ interface ActiveRouteResponse {
   route_name?: string
   point_index?: number
   reverse?: boolean
+  destination?: { lat: number; lon: number; name: string }
 }
 
 interface ErrorResponse {
@@ -34,7 +42,12 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
       }
       const data = (await res.json()) as ActiveRouteResponse
       if (!data.active) {
-        setStatus({ state: 'inactive' })
+        setStatus({
+          state: 'inactive',
+          destination: data.destination
+            ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
+            : null,
+        })
         return
       }
       setStatus({

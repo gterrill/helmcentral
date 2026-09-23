@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
-import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
+import { nextWaypoint, etaToWaypoint, etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
+import { haversineMeters } from '@/lib/geo'
 import type { Route, RouteWaypoint } from '@/hooks/use-routes'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
 
@@ -92,7 +93,7 @@ describe('nextWaypoint', () => {
   })
 
   it('returns null when the status is not active', () => {
-    expect(nextWaypoint(FORWARD_ROUTE, { state: 'inactive' })).toBeNull()
+    expect(nextWaypoint(FORWARD_ROUTE, { state: 'inactive', destination: null })).toBeNull()
     expect(nextWaypoint(FORWARD_ROUTE, { state: 'unknown' })).toBeNull()
   })
 
@@ -158,6 +159,99 @@ describe('etaToWaypoint', () => {
   it('gives an ETA equal to now when the distance is 0', () => {
     const samePoint = wp(0, 0)
     const result = etaToWaypoint(0, 0, samePoint, 5, 6, now)
+    expect(result.distanceM).toBe(0)
+    expect(result.etaAt).toEqual(now)
+  })
+})
+
+// ADR 0125: the clock tile's ETA is for the whole trip (the route's final
+// waypoint in traversal order), not just the next leg.
+describe('etaToRouteEnd', () => {
+  const now = new Date('2026-01-01T12:00:00Z')
+
+  it('sums the vessel-to-next-waypoint leg plus every remaining leg to the final waypoint, forward order', () => {
+    // pointIndex 1 (forward): current target is (2,2); the route continues
+    // (2,2) -> (3,3) -> (4,4). Vessel starts at the origin.
+    const result = etaToRouteEnd(0, 0, FORWARD_ROUTE, activeStatus(1, false), 10, now)
+    expect(result).not.toBeNull()
+
+    const expectedDistance =
+      haversineMeters(0, 0, 2, 2) + haversineMeters(2, 2, 3, 3) + haversineMeters(3, 3, 4, 4)
+    expect(result!.distanceM).toBeCloseTo(expectedDistance, 3)
+    // (4,4) has no name -> falls back to its 1-based traversal position.
+    expect(result!.label).toBe('WP 4')
+    expect(result!.basis).toBe('sog')
+    expect(result!.etaAt).not.toBeNull()
+  })
+
+  it('walks the reversed traversal order for its remaining legs and final waypoint, matching nextWaypoint', () => {
+    // reverse true, pointIndex 0: current target is (4,4); traversal order
+    // from there is (4,4) -> (3,3) -> (2,2) -> (1,1,"Start").
+    const result = etaToRouteEnd(0, 0, FORWARD_ROUTE, activeStatus(0, true), 10, now)
+    expect(result).not.toBeNull()
+
+    const expectedDistance =
+      haversineMeters(0, 0, 4, 4) + haversineMeters(4, 4, 3, 3) + haversineMeters(3, 3, 2, 2) + haversineMeters(2, 2, 1, 1)
+    expect(result!.distanceM).toBeCloseTo(expectedDistance, 3)
+    expect(result!.label).toBe('Start')
+  })
+
+  it('has no remaining legs when the current target is already the final waypoint', () => {
+    // pointIndex 3 (forward) targets (4,4), which is also the last waypoint.
+    const result = etaToRouteEnd(0, 0, FORWARD_ROUTE, activeStatus(3, false), 10, now)
+    expect(result).not.toBeNull()
+    expect(result!.distanceM).toBeCloseTo(haversineMeters(0, 0, 4, 4), 3)
+    expect(result!.label).toBe('WP 4')
+  })
+
+  it('falls back to the route planning speed when SOG is at or below the threshold', () => {
+    const result = etaToRouteEnd(0, 0, FORWARD_ROUTE, activeStatus(1, false), 0.5, now)
+    expect(result).not.toBeNull()
+    expect(result!.basis).toBe('plan')
+    expect(result!.etaAt).not.toBeNull()
+  })
+
+  it('gives a null ETA when neither SOG nor a usable planning speed exists', () => {
+    const becalmedRoute = route(FORWARD_ROUTE.waypoints, { planning_speed_kts: 0 })
+    const result = etaToRouteEnd(0, 0, becalmedRoute, activeStatus(1, false), null, now)
+    expect(result).not.toBeNull()
+    expect(result!.basis).toBe('plan')
+    expect(result!.etaAt).toBeNull()
+  })
+
+  it('returns null when nextWaypoint itself would (status not active)', () => {
+    expect(etaToRouteEnd(0, 0, FORWARD_ROUTE, { state: 'inactive', destination: null }, 10, now)).toBeNull()
+  })
+
+  it('returns null when the route has no waypoints', () => {
+    expect(etaToRouteEnd(0, 0, route([]), activeStatus(0, false), 10, now)).toBeNull()
+  })
+})
+
+// ADR 0125: a bare chartplotter go-to (SignalK's Course API nextPoint, no
+// Helmcentral route behind it) has no planning speed to fall back to.
+describe('etaToDestination', () => {
+  const now = new Date('2026-01-01T12:00:00Z')
+  const destination = { lat: 0, lon: 1 } // ~111.2km east of the origin at the equator
+
+  it('gives an ETA from SOG when SOG is above the threshold', () => {
+    const result = etaToDestination(0, 0, destination, 5, now)
+    expect(result.distanceM).toBeGreaterThan(111000)
+    expect(result.etaAt).not.toBeNull()
+  })
+
+  it('gives no ETA when SOG is at or below the threshold - there is no planning speed to fall back to', () => {
+    const result = etaToDestination(0, 0, destination, 0.5, now)
+    expect(result.etaAt).toBeNull()
+  })
+
+  it('gives no ETA when SOG is null', () => {
+    const result = etaToDestination(0, 0, destination, null, now)
+    expect(result.etaAt).toBeNull()
+  })
+
+  it('gives an ETA equal to now when the distance is 0', () => {
+    const result = etaToDestination(0, 0, { lat: 0, lon: 0 }, 5, now)
     expect(result.distanceM).toBe(0)
     expect(result.etaAt).toEqual(now)
   })

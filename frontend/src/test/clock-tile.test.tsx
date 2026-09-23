@@ -46,7 +46,7 @@ const defaultProps: ClockTileProps = {
   sunsetTime: null,
   moonPhase: null,
   placeName: null,
-  nextWaypoint: null,
+  tripEta: null,
 }
 
 /**
@@ -119,7 +119,7 @@ describe('ClockTile', () => {
   test('shows an ETA line with the waypoint label and time when a route is active', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
     renderClockTile({
-      nextWaypoint: { label: 'WP 3', etaAt, basis: 'sog' },
+      tripEta: { label: 'WP 3', etaAt, basis: 'sog' },
     })
 
     const eta = screen.getByTestId('clock-eta')
@@ -131,7 +131,7 @@ describe('ClockTile', () => {
 
   test('marks a planning-speed ETA with a plan suffix', () => {
     renderClockTile({
-      nextWaypoint: { label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
+      tripEta: { label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
     })
 
     expect(screen.getByTestId('clock-eta')).toHaveTextContent(/plan/i)
@@ -139,7 +139,7 @@ describe('ClockTile', () => {
 
   test('shows the waypoint label with a dash for the time when no honest ETA exists', () => {
     renderClockTile({
-      nextWaypoint: { label: 'WP 1', etaAt: null, basis: 'plan' },
+      tripEta: { label: 'WP 1', etaAt: null, basis: 'plan' },
     })
 
     expect(screen.getByText(/WP 1/)).toBeInTheDocument()
@@ -149,6 +149,43 @@ describe('ClockTile', () => {
   test('shows a structural dash for the ETA line when no route is active', () => {
     renderClockTile()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('—')
+  })
+
+  // ADR 0125: a chartplotter go-to has no route behind it, so the backend may
+  // not have a name for it yet (or ever) - the ETA line shows just the time
+  // rather than inventing a label.
+  test('shows the ETA time with no label when the destination has none', () => {
+    const etaAt = new Date('2026-06-14T15:05:00Z')
+    renderClockTile({ tripEta: { label: null, etaAt, basis: 'sog' } })
+
+    const eta = screen.getByTestId('clock-eta')
+    expect(eta).toHaveTextContent('ETA')
+    expect(eta).toHaveTextContent(hhmmFor(etaAt))
+    expect(eta).not.toHaveTextContent('WP')
+  })
+
+  // ADR 0125: HelmCast prefixed a cross-day ETA with the weekday; carried
+  // forward here now the ETA can span a multi-day passage.
+  test('prefixes the ETA with a 3-letter weekday when it falls on a different vessel-local day than today', () => {
+    // Vessel-local (UTC) "now" is Jun 14; the ETA below is two days later.
+    renderClockTile(
+      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-16T09:40:00Z'), basis: 'plan' } },
+      { datetime: NOW.toISOString(), timezone: 'UTC' },
+    )
+
+    expect(screen.getByTestId('clock-eta')).toHaveTextContent(/\bTue\b/)
+  })
+
+  test('carries no weekday prefix when the ETA falls on the same vessel-local day as today', () => {
+    renderClockTile(
+      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' } },
+      { datetime: NOW.toISOString(), timezone: 'UTC' },
+    )
+
+    const eta = screen.getByTestId('clock-eta')
+    for (const weekday of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
+      expect(eta).not.toHaveTextContent(new RegExp(`\\b${weekday}\\b`))
+    }
   })
 
   test('renders the date in compact three-letter form so a long weekday holds one line', () => {
@@ -188,11 +225,27 @@ describe('ClockTile', () => {
       sunsetTime: '7:41PM',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
-      nextWaypoint: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z'), basis: 'plan' },
+      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z'), basis: 'plan' },
     })
 
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('Mooloolaba Marina')
+  })
+
+  // The place chip and the ETA line share one box (clock-tile.tsx's own doc
+  // comment) rather than the ETA sitting in a separate margined paragraph
+  // below it - that merge is what buys back the vertical room the tile
+  // needs to hold both lines at h6/h7. Assert the structure directly rather
+  // than only its visual effect, which jsdom cannot measure.
+  test('renders the ETA line inside the same block as the place name, not as a separate element below it', () => {
+    renderClockTile({
+      placeName: 'Airlie Beach',
+      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
+    })
+
+    const place = screen.getByText('Airlie Beach')
+    const eta = screen.getByTestId('clock-eta')
+    expect(eta.parentElement).toBe(place.parentElement)
   })
 
   // ── vessel-local timezone label (live finding: the wall display's Ubuntu

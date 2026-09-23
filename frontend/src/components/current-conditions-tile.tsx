@@ -3,10 +3,11 @@ import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
 import { BulletGauge } from '@/components/ui/bullet-gauge'
 import type { WeatherToday } from '@/hooks/use-weather-today'
-import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
+import type { WeatherForecastDay, WeatherNextHour } from '@/hooks/use-weather-forecast'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { DistanceUnits } from '@/config/app-config'
-import { next24hWindBand, todayTempBand, nextRain } from '@/lib/forecast-bands'
+import { next24hWindBand, todayTempBand } from '@/lib/forecast-bands'
+import { computeNowcastStatus, nowcastIntensityLabel, type NowcastBar } from '@/lib/nowcast'
 import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
@@ -18,7 +19,138 @@ export interface CurrentConditionsTileProps {
   maxGustKts: Record<GustWindow, number | null>
   weather: WeatherToday
   forecast: WeatherForecastDay[]
+  /** null/omitted means the configured provider supplied no next-hour nowcast for this position (ADR 0126) - the tile falls back to the hourly/daily rain line. */
+  nextHour?: WeatherNextHour | null
   distanceUnits: DistanceUnits
+}
+
+/** Fraction (0-1) of the strip's plot height a bar is drawn at. Height comes
+ * from intensity (mm/h) only, never fabricated from chance alone - a
+ * chance-only point (no intensity data) still gets a faint fixed-height
+ * wash so the strip isn't silently blank, mirroring HelmCast's
+ * precipitation-chart.js (bars represent intensity; a chance-only reading
+ * is conveyed through the status line and a low-opacity fill, not a
+ * invented bar height). */
+function nowcastBarHeightFraction(bar: NowcastBar, maxMmPerH: number): number {
+  if (maxMmPerH > 0 && bar.mmPerH > 0) {
+    return Math.max(bar.mmPerH / maxMmPerH, 0.12)
+  }
+  if (bar.chancePct !== null && bar.chancePct > 0) {
+    return 0.15
+  }
+  return 0
+}
+
+/** Fill opacity by intensity band (light/moderate/heavy) - a chance-only
+ * bar (0 mm/h but a positive chance) gets a faint wash rather than one of
+ * the three real intensity tones. */
+function nowcastBarFillOpacity(bar: NowcastBar): number {
+  if (bar.mmPerH <= 0) return 0.25
+  const intensity = nowcastIntensityLabel(bar.mmPerH)
+  if (intensity === 'heavy') return 0.9
+  if (intensity === 'moderate') return 0.65
+  return 0.45
+}
+
+const NOWCAST_STRIP_WIDTH = 300
+const NOWCAST_STRIP_PLOT_HEIGHT = 24
+const NOWCAST_STRIP_LABEL_ROW_HEIGHT = 10
+const NOWCAST_STRIP_TICKS = [0, 20, 40, 60]
+
+/**
+ * The tile's bottom-half nowcast strip: one bar per next_hour point
+ * (1-minute bars for WeatherKit, 15-minute bars for Open-Meteo - see
+ * ADR 0126), 0/20/40/60-minute ticks, hand-rolled SVG per ADR 0012. Only
+ * rendered when computeNowcastStatus says there is real rain signal in the
+ * window (design point 7) - callers never draw this for a dry/absent
+ * nowcast, which would read as a false "definitely no rain" instead of
+ * "nothing to show here".
+ */
+function NowcastStrip({ bars, isHourlySourced }: { bars: NowcastBar[]; isHourlySourced: boolean }) {
+  const maxMmPerH = Math.max(0, ...bars.map((b) => b.mmPerH))
+  const totalHeight = NOWCAST_STRIP_PLOT_HEIGHT + NOWCAST_STRIP_LABEL_ROW_HEIGHT
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${NOWCAST_STRIP_WIDTH} ${totalHeight}`}
+        preserveAspectRatio="none"
+        className="h-9 w-full"
+        data-testid="nowcast-strip"
+        role="img"
+        aria-label={isHourlySourced ? 'Rain expected in the next hour, from the hourly forecast' : 'Rain expected in the next hour'}
+      >
+      {NOWCAST_STRIP_TICKS.map((minute) => {
+        const x = (minute / 60) * NOWCAST_STRIP_WIDTH
+        return (
+          <line
+            key={minute}
+            x1={x}
+            y1={0}
+            x2={x}
+            y2={NOWCAST_STRIP_PLOT_HEIGHT}
+            stroke="hsl(var(--border))"
+            strokeWidth={1}
+            strokeDasharray="2,2"
+          />
+        )
+      })}
+      {bars.map((bar, i) => {
+        const heightFrac = nowcastBarHeightFraction(bar, maxMmPerH)
+        if (heightFrac <= 0) return null
+        const x = (bar.offsetMinutes / 60) * NOWCAST_STRIP_WIDTH
+        const width = (bar.widthMinutes / 60) * NOWCAST_STRIP_WIDTH
+        const height = heightFrac * NOWCAST_STRIP_PLOT_HEIGHT
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={NOWCAST_STRIP_PLOT_HEIGHT - height}
+            width={Math.max(0, width - 0.5)}
+            height={height}
+            fill={`hsl(var(--chart-precip) / ${nowcastBarFillOpacity(bar)})`}
+          />
+        )
+      })}
+      <line
+        x1={0}
+        y1={NOWCAST_STRIP_PLOT_HEIGHT}
+        x2={NOWCAST_STRIP_WIDTH}
+        y2={NOWCAST_STRIP_PLOT_HEIGHT}
+        stroke="hsl(var(--border))"
+        strokeWidth={1}
+      />
+      {NOWCAST_STRIP_TICKS.map((minute) => {
+        const x = (minute / 60) * NOWCAST_STRIP_WIDTH
+        const anchor = minute === 0 ? 'start' : minute === 60 ? 'end' : 'middle'
+        return (
+          <text
+            key={minute}
+            x={x}
+            y={totalHeight - 1}
+            textAnchor={anchor}
+            fontSize="10"
+            fill="hsl(var(--muted-foreground))"
+          >
+            {minute === 0 ? 'Now' : `${minute}m`}
+          </text>
+        )
+      })}
+      </svg>
+      {/* Overlaid, not stacked in flow: the caption must not grow the
+          tile's height past its h7/minH budget on the 1920x360 wall (ADR
+          0126 addendum) - absolute positioning over the strip's own box
+          costs zero extra vertical space. */}
+      {isHourlySourced && (
+        <span
+          className="pointer-events-none absolute right-0 top-0 text-[10px] text-muted-foreground"
+          data-testid="nowcast-hourly-caption"
+        >
+          Hourly forecast
+        </span>
+      )}
+    </div>
+  )
 }
 
 const METRES_TO_FEET = 3.28084
@@ -44,6 +176,7 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   maxGustKts,
   weather,
   forecast,
+  nextHour,
   distanceUnits,
 }: CurrentConditionsTileProps) {
   const isImperial = distanceUnits === 'imperial'
@@ -51,10 +184,16 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   const depthDisplay = depth !== null ? (isImperial ? depth * METRES_TO_FEET : depth).toFixed(1) : '—'
   const depthUnit = isImperial ? 'ft' : 'm'
 
-  const nowHour = new Date().getHours()
+  const now = new Date()
+  const nowHour = now.getHours()
   const windBand = next24hWindBand(forecast, nowHour)
   const tempBandF = todayTempBand(forecast[0])
-  const rain = nextRain(forecast, nowHour)
+  const nowcast = computeNowcastStatus({
+    now,
+    nextHour: nextHour ? { stepMinutes: nextHour.stepMinutes, points: nextHour.points, source: nextHour.source } : null,
+    forecastDays: forecast,
+    nowHour,
+  })
 
   const obsGust1h = maxGustKts['1h']
   const windMax = niceMax(windBand?.max, windBand?.gustMax, obsGust1h, windSpeedApparentKts)
@@ -69,15 +208,6 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   const tempBand = tempBandF ? { low: displayTemp(tempBandF.low), high: displayTemp(tempBandF.high) } : null
   const tempMin = tempBand ? Math.floor(tempBand.low) - 5 : 0
   const tempMax = tempBand ? Math.ceil(tempBand.high) + 5 : 40
-
-  const rainLine =
-    rain === null
-      ? '—'
-      : rain === 'none'
-        ? 'No rain expected next 24 h'
-        : rain.isNow
-          ? `Rain likely now (${Math.round(rain.chancePct)}%)`
-          : `Rain likely from ${rain.label} (${Math.round(rain.chancePct)}%)`
 
   return (
     <Tile title="Current Conditions" stale={depthStale} staleLabel={formatDataAge(depthLastUpdateAgeS)}>
@@ -124,7 +254,10 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
         </div>
       </div>
 
-      <p className="mt-3 truncate text-[11px] text-muted-foreground">{rainLine}</p>
+      <div className="mt-3 min-w-0">
+        {nowcast.showChart && <NowcastStrip bars={nowcast.bars} isHourlySourced={nowcast.isHourlySourced} />}
+        <p className={`truncate text-[11px] text-muted-foreground ${nowcast.showChart ? 'mt-1' : ''}`}>{nowcast.line}</p>
+      </div>
     </Tile>
   )
 })

@@ -151,6 +151,113 @@ describe('useWeatherForecast', () => {
     expect(result.current.forecast[0].dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(result.current.provider).toBeNull()
   })
+
+  it('maps the next_hour nowcast envelope into typed points', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 },
+            { time: '2026-06-14T14:15:00Z', chance_pct: -1, mm_per_h: 1.6 },
+          ],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).not.toBeNull()
+    expect(result.current.nextHour!.stepMinutes).toBe(15)
+    expect(result.current.nextHour!.source).toBe('nowcast')
+    expect(result.current.nextHour!.points).toHaveLength(2)
+    expect(result.current.nextHour!.points[0].time.toISOString()).toBe('2026-06-14T14:00:00.000Z')
+    expect(result.current.nextHour!.points[0].chancePct).toBe(20)
+    // The backend's -1 sentinel ("not supplied") must map to null, the same
+    // absence convention every other precipitation-chance field in this
+    // hook already uses - never a fabricated 0%.
+    expect(result.current.nextHour!.points[1].chancePct).toBeNull()
+    expect(result.current.nextHour!.points[1].mmPerH).toBe(1.6)
+  })
+
+  // ADR 0126 addendum: Open-Meteo's minutely_15 is interpolated from the
+  // hourly model outside its two native-resolution regions - next_hour.source
+  // carries which case applies so the tile can caption it honestly.
+  it('maps next_hour.source "hourly" through unchanged', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'hourly',
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour!.source).toBe('hourly')
+  })
+
+  // A missing/unrecognized source is treated as "hourly", the honest/
+  // uncertain default - never silently trusted as a genuine nowcast.
+  it('maps a missing next_hour.source to "hourly", not "nowcast"', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour!.source).toBe('hourly')
+  })
+
+  it('maps a missing next_hour field to null, not an empty nowcast', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+  })
   // The backend sends -1 when the provider reported no precipitation data at
   // all, which is different from a genuine 0% chance. Collapsing the two is
   // what showed a confident "0% precip" during actual drizzle, so the hook

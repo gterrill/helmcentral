@@ -69,5 +69,14 @@
         "daylight": true
       }
     ]
+  },
+  "forecastNextHour": {
+    "minutes": [
+      { "startTime": "2026-07-19T10:00:00Z", "precipitationChance": 0.1, "precipitationIntensity": 0.0 },
+      { "startTime": "2026-07-19T10:01:00Z", "precipitationChance": 0.1, "precipitationIntensity": 0.0 },
+      { "startTime": "2026-07-19T10:02:00Z", "precipitationChance": 0.35, "precipitationIntensity": 0.5 },
+      { "startTime": "2026-07-19T10:03:00Z", "precipitationChance": 0.6, "precipitationIntensity": 1.8 },
+      { "startTime": "2026-07-19T10:04:00Z", "precipitationChance": 0.55, "precipitationIntensity": 1.2 }
+    ]
   }
 }

@@ -26,8 +26,7 @@ import { PositionTile } from '@/components/position-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
 import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
-import { ForecastDaysTile } from '@/components/forecast-days-tile'
-import { SeaStateTile } from '@/components/sea-state-tile'
+import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
@@ -88,7 +87,7 @@ import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-d
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
+import { etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
@@ -1103,6 +1102,7 @@ export function App() {
   const {
     forecast,
     hourlyToday: forecastHourlyToday,
+    nextHour: forecastNextHour,
     summary: forecastSummary,
     loading: forecastLoading,
     error: forecastError,
@@ -1192,18 +1192,37 @@ export function App() {
   // A reverse geocode of a slowly changing position, cached server-side per
   // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
   const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
-  // The clock wall-display tile's next-waypoint line (ADR 0092): the same
-  // pieces any other consumer of routeActivationStatus already has in scope,
-  // just combined once here rather than inside the tile itself, which has no
-  // reason to know about routes or route activation at all.
-  const clockNextWaypoint = useMemo(() => {
-    if (!routeActivationStatus || routeActivationStatus.state !== 'active' || routeActivationStatus.routeId === null) return null
-    const route = routes.find((r) => r.id === routeActivationStatus.routeId)
-    if (!route) return null
-    const waypoint = nextWaypoint(route, routeActivationStatus)
-    if (!waypoint || latitude === null || longitude === null) return null
-    const eta = etaToWaypoint(latitude, longitude, waypoint.waypoint, speedOverGroundKts, route.planning_speed_kts, new Date())
-    return { label: waypoint.label, etaAt: eta.etaAt, basis: eta.basis }
+  // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125): the
+  // same pieces any other consumer of routeActivationStatus already has in
+  // scope, just combined once here rather than inside the tile itself,
+  // which has no reason to know about routes or route activation at all.
+  // The ETA is for the TRIP, not just the next leg: a Helmcentral-activated
+  // route reports to its FINAL waypoint (etaToRouteEnd), and with no route
+  // active but SignalK still carrying a chartplotter go-to destination
+  // (GET /api/routes/active's `destination`, backend/route_activation.go),
+  // the tile reports to that instead (etaToDestination) rather than
+  // showing nothing just because the trip wasn't planned inside
+  // Helmcentral.
+  const clockTripEta = useMemo(() => {
+    if (!routeActivationStatus || latitude === null || longitude === null) return null
+    const now = new Date()
+
+    if (routeActivationStatus.state === 'active' && routeActivationStatus.routeId !== null) {
+      const route = routes.find((r) => r.id === routeActivationStatus.routeId)
+      if (!route) return null
+      const eta = etaToRouteEnd(latitude, longitude, route, routeActivationStatus, speedOverGroundKts, now)
+      if (!eta) return null
+      return { label: eta.label, etaAt: eta.etaAt, basis: eta.basis }
+    }
+
+    if (routeActivationStatus.state === 'inactive' && routeActivationStatus.destination) {
+      const destination = routeActivationStatus.destination
+      const eta = etaToDestination(latitude, longitude, destination, speedOverGroundKts, now)
+      const label = destination.name.trim() !== '' ? destination.name : null
+      return { label, etaAt: eta.etaAt, basis: 'sog' as const }
+    }
+
+    return null
   }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
   const depthTrend = useDepthTrend('3h', 60)
   // Item B: only the czone-switches widget reads this; poll it only while
@@ -1739,7 +1758,7 @@ export function App() {
             sunsetTime={forecast[0]?.sunsetTime ?? null}
             moonPhase={forecast[0]?.moonPhase ?? null}
             placeName={placeName}
-            nextWaypoint={clockNextWaypoint}
+            tripEta={clockTripEta}
           />
         )
       case 'current-conditions':
@@ -1751,14 +1770,13 @@ export function App() {
             maxGustKts={maxGustKts}
             weather={weather}
             forecast={forecast}
+            nextHour={forecastNextHour}
             distanceUnits={uiConfig.distanceUnits}
           />
         )
-      case 'forecast-days':
-        return <ForecastDaysTile days={forecast} units={uiConfig.distanceUnits} />
-      case 'sea-state':
+      case 'forecast-conditions':
         return (
-          <SeaStateTile
+          <ForecastConditionsTile
             forecast={forecast}
             waveForecastDays={waveForecastDays}
             waveLoading={waveForecastLoading}

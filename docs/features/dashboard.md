@@ -34,18 +34,40 @@ simply cannot tell you what they are doing.
 
 ## Instrument tiles
 
-Twenty-one built-in tiles: Vessel, Apparent Wind, Depth & Tide, Position,
+Twenty built-in tiles: Vessel, Apparent Wind, Depth & Tide, Position,
 Today & Now, Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets,
 Battery & Power, Solar, Alternator, Generator, Switches, Hot Water,
-Autopilot, Clock, Current Conditions, Forecast and Sea State.
+Autopilot, Clock, Current Conditions and Forecast Conditions.
 
-The last four suit the wall display: a clock with sunrise, sunset, moon phase
-and a route's ETA to its next waypoint; depth, apparent wind and outside
-temperature each read against today's forecast range; five days of condition,
-high and low; and a five-day wind-and-wave chart. Nothing stops you putting
-them on a phone or tablet page too, but they were sized for the flybridge
-strip's fold first, which is the narrowest wall this boat has. See [Set up a wall
-display](../how-to/set-up-a-wall-display.md).
+The last three suit the wall display: a clock with sunrise, sunset, moon
+phase, where the boat is and when it gets where it's going; depth, apparent wind and outside
+temperature each read against today's forecast range, with a look at rain in
+the next hour underneath; and five days of
+condition, high and low above a wind-and-wave chart for the same five days.
+Nothing stops you putting them on a phone or tablet page too, but they were
+sized for the flybridge strip's fold first, which is the narrowest wall this
+boat has. See [Set up a wall display](../how-to/set-up-a-wall-display.md).
+
+Current Conditions' rain strip shows the next sixty minutes as a row of
+bars, tallest where the rain is heaviest, with a line saying how heavy the
+rain will be and whether it starts now, in so many minutes, or later in the
+day. A small chance with no rain actually forecast reads as a chance, not as
+rain on the way. How fine that timing
+gets depends on your weather provider: Apple WeatherKit tracks rain minute
+by minute where it has coverage; Open-Meteo, the free default, models it in
+coarser fifteen-minute steps. If your provider has nothing to say about the
+next hour at your position, the tile drops the strip and falls back to
+whatever it knows from the hourly and daily outlook, rather than guessing.
+
+The clock's arrival time follows whatever you are steering to. With a route
+running in Helmcentral it is the arrival at the route's last waypoint, at
+your speed over the ground, or at the route's planning speed when you are
+barely moving (marked "plan"). With only a destination set on the
+chartplotter it is the arrival at that point, named after the nearest place
+once one is found, and blank while you are stopped. With a TimeZero route,
+the boat's instruments only pass on the waypoint you are heading for, so the
+time shown is the arrival at that waypoint, not the end of the passage. An
+arrival that falls on another day carries the day, as in "Thu 09:40".
 
 Three more tile types you configure yourself:
 

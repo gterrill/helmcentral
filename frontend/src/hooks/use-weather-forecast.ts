@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { NowcastPoint } from '@/lib/nowcast';
+
 export interface WeatherHourlyWindPoint {
   label: string;
   hourOfDay: number;
@@ -149,6 +151,19 @@ interface WeatherForecastDayApi {
   hourly_cloud?: WeatherHourlyCloudApi[];
 }
 
+interface WeatherNextHourPointApi {
+  time?: string;
+  chance_pct?: number;
+  mm_per_h?: number;
+}
+
+interface WeatherNextHourApi {
+  start?: string;
+  step_minutes?: number;
+  source?: string;
+  points?: WeatherNextHourPointApi[];
+}
+
 interface WeatherForecastEnvelopeApi {
   provider?: string;
   days?: WeatherForecastDayApi[];
@@ -163,10 +178,66 @@ interface WeatherForecastEnvelopeApi {
     kind?: string;
     is_daylight?: boolean;
   }>;
+  next_hour?: WeatherNextHourApi;
   summary?: string;
   cached?: boolean;
   updated_at?: string;
   ttl_seconds?: number;
+}
+
+/** The nowcast lib/nowcast.ts consumes - see that file and backend/weather_providers.go's top doc comment for the next_hour contract. */
+export interface WeatherNextHour {
+  stepMinutes: number;
+  points: NowcastPoint[];
+  /**
+   * "nowcast" (genuine short-range data) or "hourly" (interpolated from the
+   * hourly model, e.g. Open-Meteo's minutely_15 outside its native-
+   * resolution regions - ADR 0126 addendum). Any wire value other than
+   * these two exact strings maps to "hourly", the honest/uncertain default
+   * this contract's own fallback-policy bias favours over silently trusting
+   * an unrecognized value as a genuine nowcast.
+   */
+  source: 'nowcast' | 'hourly';
+}
+
+/** Maps the wire next_hour.source to the strict union WeatherNextHour.source carries - see that field's doc comment for why an unrecognized value defaults to "hourly", not "nowcast". */
+function mapNextHourSource(raw: string | undefined): 'nowcast' | 'hourly' {
+  return raw === 'nowcast' ? 'nowcast' : 'hourly';
+}
+
+/**
+ * Maps the wire next_hour envelope to typed NowcastPoint[], parsing RFC3339
+ * times and mapping the backend's -1 "not supplied" sentinel to null (the
+ * same absence convention sentinelValueOrNull already uses for every other
+ * precipitation-chance field in this hook). A point with an unparseable
+ * time is dropped rather than surfaced as an invalid Date - a plugin bug at
+ * the backend boundary is fail-fast there (parseRequiredTime,
+ * wasm_weather_provider.go); by the time JSON reaches the browser a bad
+ * timestamp is not worth crashing the tile over.
+ */
+function mapNextHour(raw: WeatherNextHourApi | undefined): WeatherNextHour | null {
+  if (!raw || !Array.isArray(raw.points) || raw.points.length === 0) {
+    return null;
+  }
+
+  const points: NowcastPoint[] = [];
+  for (const p of raw.points) {
+    if (typeof p.time !== 'string') continue;
+    const time = new Date(p.time);
+    if (Number.isNaN(time.getTime())) continue;
+    points.push({
+      time,
+      chancePct: sentinelValueOrNull(p.chance_pct),
+      mmPerH: typeof p.mm_per_h === 'number' ? p.mm_per_h : 0,
+    });
+  }
+  if (points.length === 0) return null;
+
+  return {
+    stepMinutes: typeof raw.step_minutes === 'number' ? raw.step_minutes : 0,
+    points,
+    source: mapNextHourSource(raw.source),
+  };
 }
 
 export function useWeatherForecast(refreshIntervalSeconds = 3600) {
@@ -174,6 +245,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hourlyToday, setHourlyToday] = useState<WeatherHourlyEntry[]>([]);
+  const [nextHour, setNextHour] = useState<WeatherNextHour | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [provider, setProvider] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
@@ -282,6 +354,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 isDaylight: Boolean(entry.is_daylight),
               }))
             : []);
+          setNextHour(mapNextHour(payload.next_hour));
           setSummary(typeof payload.summary === 'string' ? payload.summary : null);
           setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
           setIsCached(Boolean(payload.cached));
@@ -289,6 +362,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
           setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
         } else {
           setHourlyToday([]);
+          setNextHour(null);
           setSummary(null);
           setProvider(null);
           setIsCached(false);
@@ -310,5 +384,5 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
     return () => clearInterval(interval);
   }, [fetchForecast, refreshIntervalSeconds]);
 
-  return { forecast, hourlyToday, summary, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
+  return { forecast, hourlyToday, nextHour, summary, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
 }

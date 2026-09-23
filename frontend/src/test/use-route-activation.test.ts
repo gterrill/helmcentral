@@ -35,7 +35,25 @@ describe('useRouteActivation', () => {
 
     await act(async () => { await Promise.resolve() })
 
-    expect(result.current.status).toEqual({ state: 'inactive' })
+    expect(result.current.status).toEqual({ state: 'inactive', destination: null })
+  })
+
+  // ADR 0125: a chartplotter go-to with no Helmcentral route behind it still
+  // carries a destination the clock tile can build a trip ETA from.
+  it('carries the destination through when inactive but the backend reports one', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: false, destination: { lat: -18.6675, lon: 146.4846, name: 'Hook Island' } }),
+    }))
+
+    const { result } = renderHook(() => useRouteActivation())
+
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.status).toEqual({
+      state: 'inactive',
+      destination: { lat: -18.6675, lon: 146.4846, name: 'Hook Island' },
+    })
   })
 
   it('sets status to unknown — not inactive — when the poll fails', async () => {
@@ -80,7 +98,7 @@ describe('useRouteActivation', () => {
 
     const { result } = renderHook(() => useRouteActivation())
     await act(async () => { await Promise.resolve() })
-    expect(result.current.status).toEqual({ state: 'inactive' })
+    expect(result.current.status).toEqual({ state: 'inactive', destination: null })
 
     let activateResult: boolean | undefined
     await act(async () => {
@@ -128,7 +146,7 @@ describe('useRouteActivation', () => {
 
     expect(deactivateResult).toBe(true)
     expect(fetchMock).toHaveBeenCalledWith('/api/routes/deactivate', expect.objectContaining({ method: 'POST' }))
-    expect(result.current.status).toEqual({ state: 'inactive' })
+    expect(result.current.status).toEqual({ state: 'inactive', destination: null })
   })
 
   it('clears a previous activateError at the start of a new attempt', async () => {

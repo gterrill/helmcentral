@@ -42,7 +42,7 @@ function renderDrawer(overrides: Partial<Parameters<typeof RoutePlannerDrawer>[0
       deleteRoute={vi.fn()}
       dashboardRouteId={null}
       onSetDashboardRouteId={vi.fn()}
-      activationStatus={{ state: 'inactive' }}
+      activationStatus={{ state: 'inactive', destination: null }}
       activating={false}
       deactivating={false}
       activateError={null}

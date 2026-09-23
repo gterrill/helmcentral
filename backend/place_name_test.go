@@ -713,3 +713,105 @@ func TestUpdateTickPlaceName_StaleResolveDoesNotPublishAfterMovingCell(t *testin
 		t.Fatalf("a resolve for the previous cell published %q after the vessel had already moved to another cell", got)
 	}
 }
+
+// ── resolveDestinationPlaceName (ADR 0125): GET /api/routes/active's
+// destination name must never block, and must dedupe concurrent lookups
+// for the same cell on its own guard, independent of the vessel tick's ──
+
+// resetDestinationPlaceNameResolveState clears the destination resolver's
+// single-flight guard so a resolve left in flight by an earlier test cannot
+// bleed into this one.
+func resetDestinationPlaceNameResolveState(t *testing.T) {
+	t.Helper()
+	destinationPlaceNameResolve.mu.Lock()
+	destinationPlaceNameResolve.active = false
+	destinationPlaceNameResolve.mu.Unlock()
+}
+
+// resolveDestinationPlaceNameOrFail calls resolveDestinationPlaceName and
+// fails the test if it does not return promptly - GET /api/routes/active is
+// polled every 15s and must never stall on a provider round trip.
+func resolveDestinationPlaceNameOrFail(t *testing.T, lat, lon float64) string {
+	t.Helper()
+	var name string
+	returned := make(chan struct{})
+	go func() {
+		name = resolveDestinationPlaceName(lat, lon)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		return name
+	case <-time.After(2 * time.Second):
+		t.Fatal("resolveDestinationPlaceName blocked on the place-names provider round trip")
+		return ""
+	}
+}
+
+func waitForDestinationPlaceNameResolveIdle(t *testing.T) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		destinationPlaceNameResolve.mu.Lock()
+		defer destinationPlaceNameResolve.mu.Unlock()
+		return !destinationPlaceNameResolve.active
+	})
+}
+
+func TestResolveDestinationPlaceName_ServesCacheHitImmediately(t *testing.T) {
+	resetPlaceNameCache(t)
+	placeNameCache.put(placeNameCacheKey(goldsmithLat, goldsmithLon), "Goldsmith Island")
+
+	if got := resolveDestinationPlaceName(goldsmithLat, goldsmithLon); got != "Goldsmith Island" {
+		t.Fatalf("expected the cached name, got %q", got)
+	}
+}
+
+func TestResolveDestinationPlaceName_DoesNotBlockOnACacheMiss(t *testing.T) {
+	resetPlaceNameCache(t)
+	resetDestinationPlaceNameResolveState(t)
+
+	provider, release := gatedPlaceNameProvider(t, map[int]placeNameResult{
+		400: {Name: "Hook Island", Kind: "island"},
+	})
+	withFakePlaceNameProviderResolver(t, provider)
+
+	got := resolveDestinationPlaceNameOrFail(t, goldsmithLat, goldsmithLon)
+	if got != "" {
+		t.Fatalf("expected an empty name on a cache miss while the resolve is in flight, got %q", got)
+	}
+
+	release()
+	waitForCondition(t, 2*time.Second, func() bool {
+		name, ok := placeNameCache.get(placeNameCacheKey(goldsmithLat, goldsmithLon))
+		return ok && name == "Hook Island"
+	})
+	waitForDestinationPlaceNameResolveIdle(t)
+}
+
+func TestResolveDestinationPlaceName_DedupesConcurrentLookupsForTheSameCell(t *testing.T) {
+	resetPlaceNameCache(t)
+	resetDestinationPlaceNameResolveState(t)
+
+	provider, release := gatedPlaceNameProvider(t, map[int]placeNameResult{
+		400: {Name: "Hook Island", Kind: "island"},
+	})
+	withFakePlaceNameProviderResolver(t, provider)
+
+	resolveDestinationPlaceNameOrFail(t, goldsmithLat, goldsmithLon)
+	waitForCondition(t, 2*time.Second, func() bool { return provider.callCount() == 1 })
+
+	for range 5 {
+		resolveDestinationPlaceNameOrFail(t, goldsmithLat, goldsmithLon)
+	}
+
+	if got := provider.callCount(); got != 1 {
+		t.Fatalf("expected the single-flight guard to hold at one in-flight resolution, got %d upstream calls; GET /api/routes/active polls every 15s and a slower provider must not stack goroutines", got)
+	}
+
+	release()
+	waitForCondition(t, 2*time.Second, func() bool {
+		name, ok := placeNameCache.get(placeNameCacheKey(goldsmithLat, goldsmithLon))
+		return ok && name == "Hook Island"
+	})
+	waitForDestinationPlaceNameResolveIdle(t)
+}

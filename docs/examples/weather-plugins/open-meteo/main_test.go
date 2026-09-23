@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -397,6 +399,22 @@ func TestOpenMeteoRequestURL_ClampsDaysToSupportedRange(t *testing.T) {
 	}
 }
 
+// minutely_15 is Open-Meteo's nowcast dataset - see next_hour's mapping
+// below. forecast_minutely_15=8 bounds the response to 2 hours of 15-minute
+// points (Open-Meteo's undocumented default is 288 points/3 days, confirmed
+// via a live probe - far more than a next-hour nowcast needs), leaving
+// enough cushion past 60 minutes that the host/frontend's "next 60 minutes
+// from now" window is always covered even right at a 15-minute boundary.
+func TestOpenMeteoRequestURL_RequestsMinutely15Precipitation(t *testing.T) {
+	url := openMeteoRequestURL(wasmFetchForecastInput{Lat: -18.65, Lon: 146.48, Days: 7, Timezone: "Etc/GMT-10"})
+	if !strings.Contains(url, "minutely_15=precipitation,precipitation_probability") {
+		t.Errorf("expected minutely_15 precipitation variables in the URL, got: %s", url)
+	}
+	if !strings.Contains(url, "forecast_minutely_15=8") {
+		t.Errorf("expected forecast_minutely_15=8 to bound the nowcast window, got: %s", url)
+	}
+}
+
 // Confirmed via a live capture (docs/examples/weather-plugins/open-meteo/testdata/open_meteo_response_16day_sydney.json)
 // that Open-Meteo requires these to be explicitly requested; they are not
 // included in the plugin's pre-existing hourly parameter list.
@@ -601,5 +619,280 @@ func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.
 	}
 	if out.Hourly[2].HumidityPct == nil || *out.Hourly[2].HumidityPct != 72.0 {
 		t.Fatalf("expected humidity (full-length array) to still populate hourly[2], got %v", out.Hourly[2].HumidityPct)
+	}
+}
+
+// --- minutely_15 (nowcast) ---
+
+func minimalCurrentForNextHourTests() *struct {
+	Time                     string  `json:"time"`
+	Temperature2m            float64 `json:"temperature_2m"`
+	WeatherCode              int     `json:"weather_code"`
+	WindSpeed10m             float64 `json:"wind_speed_10m"`
+	WindGusts10m             float64 `json:"wind_gusts_10m"`
+	WindDirection10m         int     `json:"wind_direction_10m"`
+	IsDay                    int     `json:"is_day"`
+	PrecipitationProbability int     `json:"precipitation_probability"`
+} {
+	return &struct {
+		Time                     string  `json:"time"`
+		Temperature2m            float64 `json:"temperature_2m"`
+		WeatherCode              int     `json:"weather_code"`
+		WindSpeed10m             float64 `json:"wind_speed_10m"`
+		WindGusts10m             float64 `json:"wind_gusts_10m"`
+		WindDirection10m         int     `json:"wind_direction_10m"`
+		IsDay                    int     `json:"is_day"`
+		PrecipitationProbability int     `json:"precipitation_probability"`
+	}{Time: "2026-07-19T18:30"}
+}
+
+// TestParseOpenMeteoForecast_MapsMinutely15IntoNextHour pins the happy path:
+// each minutely_15 point's local time is converted to RFC3339 UTC (same
+// parseOpenMeteoLocalTime as every other timestamp in this plugin) and then
+// shifted BACK by one 15-minute step (Open-Meteo documents precipitation as
+// a "preceding 15 minutes sum" - see open-meteo.go's doc comment on this
+// mapping), precipitation_probability (a 0-100 percentage on the wire,
+// though not independently documented at this resolution - see README.md)
+// passes straight through, and precipitation (mm per 15 minutes) is
+// converted to mm/h by multiplying by 4.
+func TestParseOpenMeteoForecast_MapsMinutely15IntoNextHour(t *testing.T) {
+	resp := &openMeteoResponse{
+		UTCOffsetSeconds: 36000, // Sydney: UTC+10:00
+		Current:          minimalCurrentForNextHourTests(),
+		Minutely15: &struct {
+			Time                     []string  `json:"time"`
+			Precipitation            []float64 `json:"precipitation"`
+			PrecipitationProbability []int     `json:"precipitation_probability"`
+		}{
+			Time:                     []string{"2026-07-19T18:15", "2026-07-19T18:30", "2026-07-19T18:45"},
+			Precipitation:            []float64{0.0, 0.4, 0.6},
+			PrecipitationProbability: []int{18, 36, 51},
+		},
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.NextHour) != 3 {
+		t.Fatalf("expected 3 next_hour points, got %d", len(out.NextHour))
+	}
+	// 2026-07-19T18:15 Sydney (+10:00) = 2026-07-19T08:15 UTC, shifted back
+	// 15 minutes (preceding-window fix) = 2026-07-19T08:00 UTC.
+	if out.NextHour[0].Time != "2026-07-19T08:00:00Z" {
+		t.Errorf("expected next_hour[0].time=2026-07-19T08:00:00Z, got %q", out.NextHour[0].Time)
+	}
+	if out.NextHour[0].PrecipitationChancePct != 18 {
+		t.Errorf("expected next_hour[0].precipitation_chance_pct=18, got %v", out.NextHour[0].PrecipitationChancePct)
+	}
+	if out.NextHour[0].PrecipitationMMPerH != 0 {
+		t.Errorf("expected next_hour[0].precipitation_mm_per_h=0, got %v", out.NextHour[0].PrecipitationMMPerH)
+	}
+	// 0.4mm/15min * 4 = 1.6mm/h
+	if out.NextHour[1].PrecipitationMMPerH != 1.6 {
+		t.Errorf("expected next_hour[1].precipitation_mm_per_h=1.6, got %v", out.NextHour[1].PrecipitationMMPerH)
+	}
+	if out.NextHour[1].PrecipitationChancePct != 36 {
+		t.Errorf("expected next_hour[1].precipitation_chance_pct=36, got %v", out.NextHour[1].PrecipitationChancePct)
+	}
+	// 0.6mm/15min * 4 = 2.4mm/h
+	if out.NextHour[2].PrecipitationMMPerH != 2.4 {
+		t.Errorf("expected next_hour[2].precipitation_mm_per_h=2.4, got %v", out.NextHour[2].PrecipitationMMPerH)
+	}
+	// resp.Latitude/Longitude are the zero value (0,0) in this synthetic
+	// fixture - well outside both native-resolution boxes, so this must
+	// read "hourly", not "nowcast".
+	if out.NextHourSource != "hourly" {
+		t.Errorf("expected next_hour_source=hourly for a (0,0) position, got %q", out.NextHourSource)
+	}
+}
+
+// TestParseOpenMeteoForecast_NoMinutely15YieldsEmptyNextHour covers a
+// request/response with no minutely_15 block at all (e.g. an older cached
+// response, or a position where the underlying model has no 15-minute
+// resolution) - AGENTS.md's fallback policy: no nowcast data means an
+// empty next_hour, never a fabricated dry window.
+func TestParseOpenMeteoForecast_NoMinutely15YieldsEmptyNextHour(t *testing.T) {
+	resp := &openMeteoResponse{
+		Current: minimalCurrentForNextHourTests(),
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.NextHour) != 0 {
+		t.Fatalf("expected no next_hour points when minutely_15 is absent, got %d", len(out.NextHour))
+	}
+}
+
+// TestParseOpenMeteoForecast_RealFixture_MackayDry replays a live capture
+// (lat -18.65, lon 146.48 - the position this plugin's task brief asked to
+// confirm minutely_15 against) taken 2026-09-23: dry at the time, so this
+// pins the "coverage exists but reads dry" shape - 8 points (the
+// forecast_minutely_15=8 window), all zero mm/h, and a genuine
+// precipitation_probability around 80-84%.
+func TestParseOpenMeteoForecast_RealFixture_MackayDry(t *testing.T) {
+	body, err := os.ReadFile("testdata/open_meteo_response_minutely15_mackay.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+	var resp openMeteoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.NextHour) != 8 {
+		t.Fatalf("expected 8 next_hour points from the live fixture, got %d", len(out.NextHour))
+	}
+	for i, p := range out.NextHour {
+		if p.PrecipitationMMPerH != 0 {
+			t.Errorf("next_hour[%d]: expected 0 mm/h in this dry capture, got %v", i, p.PrecipitationMMPerH)
+		}
+		if p.PrecipitationChancePct < 70 || p.PrecipitationChancePct > 90 {
+			t.Errorf("next_hour[%d]: expected a real chance_pct in the 70-90 range from this capture, got %v", i, p.PrecipitationChancePct)
+		}
+	}
+	// Mackay (lat -18.65, lon 146.48) is outside both native-resolution
+	// regions (NOAA HRRR / DWD ICON-D2 + AROME) - this fixture's own
+	// minutely_15.precipitation_probability values (stepping 84, 83, 83...
+	// between the surrounding hourly readings) are exactly what motivated
+	// this field in the first place (see README.md).
+	if out.NextHourSource != "hourly" {
+		t.Errorf("expected next_hour_source=hourly for the Mackay fixture, got %q", out.NextHourSource)
+	}
+}
+
+// TestParseOpenMeteoForecast_RealFixtureRepositioned_NorthAmericaIsNowcast
+// and its Central Europe sibling below reuse the real Mackay fixture's
+// minutely_15 payload (a genuine, unedited API response shape) but override
+// just its echoed latitude/longitude - next_hour_source classification is
+// purely geometric (nextHourSourceForPosition), so this validates the
+// region gate itself without needing a live capture from either region.
+func TestParseOpenMeteoForecast_RealFixtureRepositioned_NorthAmericaIsNowcast(t *testing.T) {
+	body, err := os.ReadFile("testdata/open_meteo_response_minutely15_mackay.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+	var resp openMeteoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+	// Denver, CO - well inside the documented NOAA HRRR CONUS grid.
+	resp.Latitude = 39.7392
+	resp.Longitude = -104.9903
+
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if out.NextHourSource != "nowcast" {
+		t.Errorf("expected next_hour_source=nowcast for a Denver, CO position, got %q", out.NextHourSource)
+	}
+}
+
+func TestParseOpenMeteoForecast_RealFixtureRepositioned_CentralEuropeIsNowcast(t *testing.T) {
+	body, err := os.ReadFile("testdata/open_meteo_response_minutely15_mackay.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+	var resp openMeteoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+	// Frankfurt, Germany - well inside the documented DWD ICON-D2 grid.
+	resp.Latitude = 50.1109
+	resp.Longitude = 8.6821
+
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if out.NextHourSource != "nowcast" {
+		t.Errorf("expected next_hour_source=nowcast for a Frankfurt, Germany position, got %q", out.NextHourSource)
+	}
+}
+
+// TestNextHourSourceForPosition_OutsideBothBoxesIsHourly and its two
+// "just inside the edge" siblings below pin the boundary behaviour of the
+// classification function directly, independent of any fixture.
+func TestNextHourSourceForPosition_OutsideBothBoxesIsHourly(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lat, lon float64
+	}{
+		{"Mackay, Australia", -18.65, 146.48},
+		{"Singapore", 1.3708, 103.8024},
+		{"mid-Atlantic", 30.0, -40.0},
+		{"Null Island", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextHourSourceForPosition(tc.lat, tc.lon); got != "hourly" {
+				t.Errorf("expected hourly for %s, got %q", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestNextHourSourceForPosition_InsideEitherBoxIsNowcast(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lat, lon float64
+	}{
+		{"Chicago, IL (North America box)", 41.8781, -87.6298},
+		{"Munich, Germany (Central Europe box)", 48.1351, 11.5820},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextHourSourceForPosition(tc.lat, tc.lon); got != "nowcast" {
+				t.Errorf("expected nowcast for %s, got %q", tc.name, got)
+			}
+		})
+	}
+}
+
+// TestParseOpenMeteoForecast_RealFixture_SingaporeRain replays a live
+// capture (Singapore, actively raining, 2026-09-23) demonstrating a genuine
+// non-zero mm/h nowcast end to end from the real API response through this
+// plugin's mapping.
+func TestParseOpenMeteoForecast_RealFixture_SingaporeRain(t *testing.T) {
+	body, err := os.ReadFile("testdata/open_meteo_response_minutely15_singapore_rain.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+	var resp openMeteoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.NextHour) != 8 {
+		t.Fatalf("expected 8 next_hour points from the live fixture, got %d", len(out.NextHour))
+	}
+	// Fixture's first minutely_15 precipitation reading is 0.4mm/15min.
+	if out.NextHour[0].PrecipitationMMPerH != 1.6 {
+		t.Errorf("expected next_hour[0].precipitation_mm_per_h=1.6 (0.4mm/15min*4), got %v", out.NextHour[0].PrecipitationMMPerH)
+	}
+	if out.NextHour[0].PrecipitationChancePct != 18 {
+		t.Errorf("expected next_hour[0].precipitation_chance_pct=18, got %v", out.NextHour[0].PrecipitationChancePct)
+	}
+	// Fixture's chance ramps up across the window - pin the last point too.
+	last := out.NextHour[len(out.NextHour)-1]
+	if last.PrecipitationChancePct != 66 {
+		t.Errorf("expected the fixture's last next_hour chance_pct=66, got %v", last.PrecipitationChancePct)
+	}
+	if last.PrecipitationMMPerH != 2.4 {
+		t.Errorf("expected the fixture's last next_hour mm_per_h=2.4 (0.6mm/15min*4), got %v", last.PrecipitationMMPerH)
+	}
+	// Singapore (lat 1.37, lon 103.80) is outside both native-resolution
+	// regions.
+	if out.NextHourSource != "hourly" {
+		t.Errorf("expected next_hour_source=hourly for the Singapore fixture, got %q", out.NextHourSource)
 	}
 }

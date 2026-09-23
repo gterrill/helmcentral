@@ -150,6 +150,167 @@ func TestMapWasmFetchForecastOutput_GenuineZeroVisibilitySurvives(t *testing.T) 
 	}
 }
 
+// TestMapWasmFetchForecastOutput_NextHourAbsentStaysNil covers a provider
+// with no nowcast coverage at all (e.g. WeatherKit outside its
+// forecastNextHour region, or a plugin that predates next_hour entirely,
+// like weathervalid.wasm above): the JSON key is simply missing, and the
+// mapped bundle must carry a nil/empty NextHour, never a fabricated dry
+// window - see the fallback policy in AGENTS.md and the "no next_hour" case
+// in weather_providers.go's top doc comment.
+func TestMapWasmFetchForecastOutput_NextHourAbsentStaysNil(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bundle.NextHour) != 0 {
+		t.Fatalf("expected an absent next_hour to map to an empty slice, got %+v", bundle.NextHour)
+	}
+}
+
+// TestMapWasmFetchForecastOutput_ParsesNextHourPoints pins the happy path:
+// each point's time is parsed, and chance/mm-per-h pass through unchanged
+// and in the order the plugin sent them - the host does not sort, since the
+// contract requires the plugin to already emit them in time order.
+func TestMapWasmFetchForecastOutput_ParsesNextHourPoints(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		NextHour: []wasmWeatherNextHourOutput{
+			{Time: "2026-06-14T00:00:00Z", PrecipitationChancePct: 10, PrecipitationMMPerH: 0},
+			{Time: "2026-06-14T00:01:00Z", PrecipitationChancePct: 40, PrecipitationMMPerH: 1.2},
+		},
+		NextHourSource: "nowcast",
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bundle.NextHour) != 2 {
+		t.Fatalf("expected 2 next_hour points, got %d", len(bundle.NextHour))
+	}
+	if bundle.NextHourSource != "nowcast" {
+		t.Fatalf("expected next_hour_source to pass through, got %q", bundle.NextHourSource)
+	}
+	if bundle.NextHour[0].Time.IsZero() || bundle.NextHour[1].Time.IsZero() {
+		t.Fatalf("expected both next_hour times to be parsed, got %+v", bundle.NextHour)
+	}
+	if !bundle.NextHour[1].Time.After(bundle.NextHour[0].Time) {
+		t.Fatalf("expected next_hour points to stay in the order the plugin sent them")
+	}
+	if bundle.NextHour[0].PrecipitationChancePct != 10 || bundle.NextHour[1].PrecipitationChancePct != 40 {
+		t.Fatalf("expected chance_pct to pass through unchanged, got %+v", bundle.NextHour)
+	}
+	if bundle.NextHour[1].PrecipitationMMPerH != 1.2 {
+		t.Fatalf("expected mm_per_h to pass through unchanged, got %v", bundle.NextHour[1].PrecipitationMMPerH)
+	}
+}
+
+// TestMapWasmFetchForecastOutput_NextHourNegativeChancePassesThrough covers
+// the "provider has intensity but no probability at this resolution" case
+// (e.g. Open-Meteo's minutely_15, which has no minutely precipitation_probability
+// variable): a negative chance_pct is the same "not supplied" convention
+// current/days/hourly already use, and it must reach the bundle unchanged,
+// not get clamped to 0 (which would read as "definitely won't rain").
+func TestMapWasmFetchForecastOutput_NextHourNegativeChancePassesThrough(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		NextHour: []wasmWeatherNextHourOutput{
+			{Time: "2026-06-14T00:00:00Z", PrecipitationChancePct: -1, PrecipitationMMPerH: 0.6},
+		},
+		NextHourSource: "hourly",
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bundle.NextHour[0].PrecipitationChancePct != -1 {
+		t.Fatalf("expected the not-supplied sentinel to pass through unchanged, got %v", bundle.NextHour[0].PrecipitationChancePct)
+	}
+	if bundle.NextHour[0].PrecipitationMMPerH != 0.6 {
+		t.Fatalf("expected mm_per_h to still be mapped when chance is unsupplied, got %v", bundle.NextHour[0].PrecipitationMMPerH)
+	}
+}
+
+// TestMapWasmFetchForecastOutput_NextHourRequiresTimePerPoint is the
+// fail-fast case: a plugin bug that emits a next_hour point with no time is
+// a hard error, same as every other required-time field in this contract -
+// never silently dropped or zeroed (AGENTS.md fallback policy).
+func TestMapWasmFetchForecastOutput_NextHourRequiresTimePerPoint(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current:  wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:     []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		NextHour: []wasmWeatherNextHourOutput{{PrecipitationChancePct: 10}},
+	}
+
+	if _, err := mapWasmFetchForecastOutput(out); err == nil {
+		t.Fatalf("expected an error for a next_hour point missing time, got nil")
+	}
+}
+
+// TestMapWasmFetchForecastOutput_NextHourRequiresSource is the fail-fast
+// case for next_hour_source itself: next_hour is present but the plugin
+// sent no next_hour_source at all (a plugin built before this field
+// existed, or a bug that dropped it) - this must be a hard error, not a
+// silent "assume nowcast" default, since a provider whose nowcast is
+// actually interpolated hourly data masquerading as real short-range data
+// is exactly the failure this field exists to prevent (AGENTS.md fallback
+// policy).
+func TestMapWasmFetchForecastOutput_NextHourRequiresSource(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current:  wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:     []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		NextHour: []wasmWeatherNextHourOutput{{Time: "2026-06-14T00:00:00Z", PrecipitationChancePct: 10}},
+		// NextHourSource deliberately left empty.
+	}
+
+	if _, err := mapWasmFetchForecastOutput(out); err == nil {
+		t.Fatalf("expected an error for next_hour present with no next_hour_source, got nil")
+	}
+}
+
+// TestMapWasmFetchForecastOutput_NextHourRejectsUnknownSource covers a typo
+// or a plugin sending some other value ("interpolated", "unknown", ...) -
+// only the two contract-defined values are accepted.
+func TestMapWasmFetchForecastOutput_NextHourRejectsUnknownSource(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current:        wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:           []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		NextHour:       []wasmWeatherNextHourOutput{{Time: "2026-06-14T00:00:00Z", PrecipitationChancePct: 10}},
+		NextHourSource: "interpolated",
+	}
+
+	if _, err := mapWasmFetchForecastOutput(out); err == nil {
+		t.Fatalf("expected an error for an unrecognized next_hour_source, got nil")
+	}
+}
+
+// TestMapWasmFetchForecastOutput_NextHourSourceIgnoredWhenNextHourEmpty
+// covers the inverse: no next_hour points at all means next_hour_source is
+// simply not looked at, whatever value (or none) the plugin sent.
+func TestMapWasmFetchForecastOutput_NextHourSourceIgnoredWhenNextHourEmpty(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		// NextHour absent, NextHourSource absent too.
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bundle.NextHourSource != "" {
+		t.Fatalf("expected NextHourSource to stay empty when next_hour is empty, got %q", bundle.NextHourSource)
+	}
+}
+
 // The timezone drives the provider's daily rollup boundaries, so two
 // requests for the same position in different zones are genuinely different
 // bundles and must not share a cache slot - otherwise a vessel crossing a

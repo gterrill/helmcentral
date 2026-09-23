@@ -132,9 +132,82 @@ go test ./...
 
 ## Open-Meteo endpoints this plugin uses
 
-- Forecast (hourly + daily): `GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset&wind_speed_unit=ms&timezone=auto&forecast_days=<days>`
+- Forecast (current + hourly + daily + 15-minute nowcast): `GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day,relative_humidity_2m,visibility&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=8&wind_speed_unit=ms&timezone=<caller-timezone>&forecast_days=<days>`
 
 See the comment block at the top of `main.go` and `open-meteo.go`'s
 `parseOpenMeteoLocalTime` documentation for exact response shape details and
 how they map onto Helmcentral's plugin contract (including the
 UTC-offset conversion for Open-Meteo's naive local-time timestamps).
+
+### `next_hour` (15-minute nowcast)
+
+Open-Meteo's `minutely_15` dataset is a coarser nowcast than WeatherKit's
+minute-by-minute `forecastNextHour`: four points per hour instead of sixty.
+This plugin requests only `precipitation` and `precipitation_probability`
+from it, bounded to `forecast_minutely_15=8` (2 hours/8 points - Open-Meteo's
+undocumented default is 288 points/3 days, confirmed live, far more than a
+next-hour nowcast needs), and maps each point onto the guest contract's
+`next_hour` field:
+
+- `time` is `minutely_15.time[i]` shifted back by one 15-minute step. Open-
+  Meteo documents `precipitation` as a **"Preceding 15 minutes sum"** - the
+  value at timestamp T covers `[T-15min, T)`, not `[T, T+15min)` - while this
+  plugin's contract says a point's `time` marks the START of forward
+  coverage. Shifting the timestamp back by 15 minutes is what reconciles the
+  two; leaving it as Open-Meteo sends it makes rain that has already been
+  falling for 10 minutes read as "expected in 5 minutes" instead.
+  `precipitation_probability` has no separately documented convention at
+  `minutely_15` resolution (see below), so the same shift is applied to it
+  too via the shared per-point `time` - the only consistent treatment
+  available.
+- `precipitation` arrives as mm accumulated over the preceding 15-minute
+  slot; multiplied by 4 to get this contract's `precipitation_mm_per_h`.
+- `precipitation_chance_pct` comes from `precipitation_probability`
+  directly, unconverted (already a 0-100 percentage, per
+  `minutely_15_units` in every live response captured below) - not the
+  "not supplied" `-1` sentinel this contract allows for this field (a
+  request for this endpoint always returns a numeric value here).
+
+**Whether `minutely_15` is real 15-minute data, or interpolated from the
+hourly model, depends on where the vessel is - this plugin does not assume
+either way.** Open-Meteo's forecast API docs (https://open-meteo.com/en/docs,
+confirmed 2026-09-23) state: *"This data is based on NOAA HRRR model for
+North America and DWD ICON-D2 and Météo-France AROME model for Central
+Europe. If 15-minutely data is requested for other regions data is
+interpolated from 1-hourly to 15-minutely."* `precipitation_probability` is
+not listed in the 15-Minutely Weather Variables table at all, in any
+region - only the hourly resolution documents one, as *"Preceding hour
+probability"*.
+
+Confirmed live against `api.open-meteo.com` on 2026-09-23 at Mackay (lat
+-18.65, lon 146.48 - outside both native-resolution regions):
+`minutely_15.precipitation_probability` stepped smoothly between the
+surrounding hourly readings (hourly 84, 82, 80 -> minutely_15 84, 83, 83,
+82, 82, 81...) - exactly the shape linear interpolation produces, not
+independent per-15-minute observations - and `minutely_15.precipitation`
+read `0.0` at a point where the hourly figure was `0.1`. Both confirm this
+window's data was backfilled from the hourly model at this position, as
+Open-Meteo's own docs say it would be. Requesting an invalid `minutely_15`
+variable name (`totally_fake_variable`) does still get a `400`
+`"Invalid value"` response, confirming `precipitation`/
+`precipitation_probability` are accepted, real API fields, not silently
+ignored - just not necessarily *independently modelled* data outside the
+two native-resolution regions.
+
+`nextHourSourceForPosition` (`open-meteo.go`) reports which case applies for
+a given position - `"nowcast"` inside conservative bounding boxes for the
+NOAA HRRR (North America) and DWD ICON-D2/Météo-France AROME (Central
+Europe) grids, `"hourly"` everywhere else - and the plugin sends it as this
+response's `next_hour_source` field (backend/weather_providers.go's
+`next_hour_source` contract) so the host/frontend can caption an
+interpolated strip honestly instead of presenting it as a true short-range
+nowcast.
+
+`testdata/open_meteo_response_minutely15_mackay.json` (lat -18.65, lon
+146.48, dry at capture time, chance readings in the 80-84% range) and
+`testdata/open_meteo_response_minutely15_singapore_rain.json` (lat 1.3521,
+lon 103.8198, actively raining, precipitation ramping 0.4 -> 0.6mm/15min and
+chance ramping 18% -> 66% across the captured window) are both real,
+unedited API responses, not synthesized fixtures - and both positions are
+outside the two native-resolution regions, so both map to
+`next_hour_source: "hourly"`.

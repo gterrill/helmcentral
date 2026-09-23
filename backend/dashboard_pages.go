@@ -18,33 +18,40 @@ import (
 )
 
 var validDashboardWidgetIDs = map[string]bool{
-	"vessel":             true,
-	"wind":               true,
-	"depth-tide":         true,
-	"position":           true,
-	"today-now":          true,
-	"anchor-watch":       true,
-	"tanks":              true,
-	"route":              true,
-	"nearby-vessels":     true,
-	"radar-targets":      true,
-	"battery-power":      true,
-	"solar":              true,
-	"alternator":         true,
-	"generator":          true,
-	"czone-switches":     true,
-	"hot-water":          true,
-	"autopilot":          true,
-	"clock":              true,
-	"current-conditions": true,
-	"forecast-days":      true,
-	"sea-state":          true,
+	"vessel":              true,
+	"wind":                true,
+	"depth-tide":          true,
+	"position":            true,
+	"today-now":           true,
+	"anchor-watch":        true,
+	"tanks":               true,
+	"route":               true,
+	"nearby-vessels":      true,
+	"radar-targets":       true,
+	"battery-power":       true,
+	"solar":               true,
+	"alternator":          true,
+	"generator":           true,
+	"czone-switches":      true,
+	"hot-water":           true,
+	"autopilot":           true,
+	"clock":               true,
+	"current-conditions":  true,
+	"forecast-conditions": true,
 }
 
 // Widget ids that existed in a previous release and have been retired. Saved
 // pages are stripped of them on load and rewritten, so a stale id can never
 // fail validateDashboardWidgets on the next PATCH. See ADR 0047.
-var retiredDashboardWidgetIDs = map[string]bool{"rode-scope": true}
+//
+// forecast-days and sea-state (ADR 0125) were merged into one
+// forecast-conditions tile; the boat's own "Wall: Conditions" page still
+// held both ids and 400'd on every PATCH until they landed here.
+var retiredDashboardWidgetIDs = map[string]bool{
+	"rode-scope":    true,
+	"forecast-days": true,
+	"sea-state":     true,
+}
 
 const dashboardLayoutMaxCoord = 1000
 
