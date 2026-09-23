@@ -78,16 +78,30 @@ export function StocktakeSection() {
     if (text === '') return
     setScanError(null)
 
-    // "Accepts a keyboard-wedge or pasted URL or bin code" - a scan that
-    // doesn't parse as an absolute URL is treated as a bare bin code
-    // instead, resolved through the SAME parseAppLocation path a real
-    // /inventory/bins/<code> URL would take, so there is exactly one place
-    // that decides what a scan means.
+    // "Accepts a keyboard-wedge or pasted URL or bin code" - `new URL(text)`
+    // only succeeds for an ABSOLUTE url (a scheme included), which a scan
+    // typed into a boat's own tailnet address bar without "https://" is not
+    // (e.g. "boat.tailnet.ts.net/inventory/bins/LAZ-02"). Treating THAT
+    // whole string as a bare bin code (the naive fallback this replaced)
+    // resolved to the wrong bin - or, worse, silently to none at all. So a
+    // scheme-less scan is read three ways, in order: an /inventory/ path
+    // pulled out of wherever it starts in the string; failing that, a bare
+    // bin code ONLY if there's no slash in it at all (a real bin code never
+    // has one); anything else is reported as unrecognised rather than
+    // guessed at.
     let pathname: string
     try {
       pathname = new URL(text).pathname
     } catch {
-      pathname = `/inventory/bins/${text}`
+      const inventoryIndex = text.indexOf('/inventory/')
+      if (inventoryIndex !== -1) {
+        pathname = text.slice(inventoryIndex)
+      } else if (!text.includes('/')) {
+        pathname = `/inventory/bins/${text}`
+      } else {
+        pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+        return
+      }
     }
     const parsed = parseAppLocation(pathname)
 

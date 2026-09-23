@@ -159,6 +159,28 @@ describe('StocktakeSection', () => {
     expect(putCalls.find((c) => c.id === 'eq-2')).toBeUndefined()
   })
 
+  it('resolves a scan with no https:// scheme via its /inventory/ path', async () => {
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    // A tailnet host pasted or scanned without its scheme - `new URL(...)`
+    // throws on this, and the bug being fixed here used to fall back to
+    // treating the WHOLE string (host and all) as a bin code.
+    await scan('boat.tailnet.ts.net/inventory/bins/LAZ-02')
+
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
+  })
+
+  it('reports a schemeless scan with a slash but no /inventory/ path as not an inventory tag', async () => {
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('some/other/path')
+
+    await screen.findByText('Not an inventory tag: some/other/path')
+  })
+
   it('reports an unrecognised scan without writing anything', async () => {
     render(<StocktakeSection />)
     await waitFor(() => expect(zones.length).toBeGreaterThan(0))
