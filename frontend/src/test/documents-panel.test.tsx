@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
+import { forwardRef, useImperativeHandle } from 'react'
 
 import { DocumentsPanel } from '@/components/documents-panel'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
@@ -47,6 +48,27 @@ vi.mock('@/components/note-editor', () => ({
       <button type="button" onClick={() => { void onSave(`${value} edited`) }}>Save</button>
     </div>
   ),
+  // ADR 0124: note-capture-sheet.tsx now embeds the body-only editor
+  // directly (a ref exposing getMarkdown/insertDictation/focus). This
+  // file's own "capture: New → Note" tests only need the sheet to OPEN on
+  // the right heading and type - never to type or dictate into the body -
+  // so the fake implements just enough of the handle contract for
+  // note-capture-sheet.tsx not to throw calling it (submit()'s own
+  // .trim() included), without pulling in the real Plate editor. Its own
+  // round-trip/insertion coverage lives in note-editor.test.tsx and
+  // note-editor-dictation.test.ts.
+  NoteEditorBody: forwardRef<
+    { getMarkdown: () => string; insertDictation: () => void; focus: () => void },
+    { value: string }
+  >(function NoteEditorBody({ value }, ref) {
+    useImperativeHandle(ref, () => ({
+      getMarkdown: () => value,
+      insertDictation: () => {},
+      focus: () => {},
+    }), [value])
+    return <p>editor body: {value}</p>
+  }),
+  prefetchNoteEditor: () => {},
 }))
 // checklist-runner.tsx has its own full coverage against a mocked
 // use-checklist-run (checklist-runner.test.tsx) - this file only needs to

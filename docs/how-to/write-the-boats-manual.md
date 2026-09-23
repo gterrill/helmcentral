@@ -11,16 +11,20 @@ enough to see the shape.
 
 ## 1. Capture as you go
 
-Open **Documents** and choose **New → Note**. Write the note and press
-Ctrl+Enter, or Cmd+Enter on a Mac, or use the Capture button.
+Open **Documents** and choose **New → Note**. The note opens straight into
+the full editor - headings, lists, tables and links are all there in the
+toolbar from the first word, not something added on a later pass. Write the
+note and press Ctrl+Enter, or Cmd+Enter on a Mac, or use the Capture button.
 
-Nothing else is required. No title, no folder, no formatting - the type
-field defaults to **Auto** and Helmcentral works it out from what you wrote.
-If you are standing in the engine room with one hand free, use the
-microphone button inside the box and dictate it.
+Nothing else is required. No title, no folder - the type field defaults to
+**Auto** and Helmcentral works it out from what you wrote. If you are
+standing in the engine room with one hand free, use the microphone button
+and dictate it; it types wherever the cursor is sitting, so you can dictate
+a line, tap back in to fix a word, and carry on.
 
 Write it as you would say it to someone. "Fuel return is the inboard valve,
-the one with the scratched handle" is a finished note.
+the one with the scratched handle" is a finished note - most of them are
+plain sentences like this one, and the toolbar can sit there unused.
 
 ## 2. Start a manual
 
