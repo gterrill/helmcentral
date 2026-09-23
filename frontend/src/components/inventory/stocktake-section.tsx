@@ -48,7 +48,19 @@ type ScanEvent =
 // operator hasn't scanned a bin yet this pass.
 const NO_CURRENT_BIN_SENTINEL = '__stocktake_no_current_bin__'
 
-export function StocktakeSection() {
+interface StocktakeSectionProps {
+  /** The bin photo grid's own Open (BinPage's own onOpenEquipment) - wired
+   * from InventoryPanel/App the same way BinPage's is, so tapping a photo's
+   * Open here reaches the equipment editor instead of doing nothing. */
+  onOpenEquipment?: (id: string) => void
+  /** Same write gate EquipmentIndex/LocationsSection/ProfilesSection already
+   * take. A read-only session still gets to run a stocktake - a scan still
+   * reports what it found - but nothing is written, and Move (the one press
+   * that writes) is hidden rather than shown and then rejected. */
+  canWrite?: boolean
+}
+
+export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
   const { zones } = useInventoryZones()
   const [currentBin, setCurrentBin] = useState<CurrentBin | null>(null)
   const [events, setEvents] = useState<ScanEvent[]>([])
@@ -136,7 +148,7 @@ export function StocktakeSection() {
       if (currentBin === null || item.bin_id === currentBin.bin.id) {
         setConfirmedIds((prev) => new Set(prev).add(item.id))
         pushEvent({ id: crypto.randomUUID(), kind: 'confirmed', item })
-        if (!item.verified_aboard) {
+        if (canWrite && !item.verified_aboard) {
           try {
             // Fetched fresh immediately before the write (review finding:
             // reusing the copy fetched above, moments earlier in this same
@@ -237,6 +249,9 @@ export function StocktakeSection() {
             className="min-w-0 flex-1"
           />
         </div>
+        {!canWrite && (
+          <p className="text-[11px] text-muted-foreground">This session is read-only - scans are checked but nothing is written.</p>
+        )}
         {scanError && (
           <p role="alert" className="text-sm text-destructive">{scanError}</p>
         )}
@@ -269,16 +284,18 @@ export function StocktakeSection() {
                   <span className="min-w-0 flex-1 truncate">
                     {event.item.name} - {event.recordedBinCode ? `Recorded in ${event.recordedBinCode}` : 'Not filed'}
                   </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    disabled={movingId === event.item.id}
-                    onClick={() => { void handleMove(event.id, event.item, event.targetBin) }}
-                  >
-                    {movingId === event.item.id ? 'Moving...' : `Move to ${event.targetBin.bin.code}`}
-                  </Button>
+                  {canWrite && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={movingId === event.item.id}
+                      onClick={() => { void handleMove(event.id, event.item, event.targetBin) }}
+                    >
+                      {movingId === event.item.id ? 'Moving...' : `Move to ${event.targetBin.bin.code}`}
+                    </Button>
+                  )}
                 </>
               )}
               {event.kind === 'unrecognised' && (
@@ -289,7 +306,7 @@ export function StocktakeSection() {
         </div>
       )}
 
-      {currentBin && <BinPhotoGrid items={binItems} onOpenEquipment={() => {}} />}
+      {currentBin && <BinPhotoGrid items={binItems} onOpenEquipment={onOpenEquipment} />}
 
       {currentBin && notSeen.length > 0 && (
         <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-3">

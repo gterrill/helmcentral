@@ -252,4 +252,41 @@ describe('StocktakeSection', () => {
     await screen.findByText('Not an inventory tag: not a url or a known bin code')
     expect(putCalls).toHaveLength(0)
   })
+
+  it('wires the bin photo grid\'s Open button to onOpenEquipment', async () => {
+    const item = makeItem({ id: 'eq-1', bin_id: 'b1', photo_ids: [] })
+    equipmentById['eq-1'] = item
+    binItemsByBinId['b1'] = [item]
+    const onOpenEquipment = vi.fn()
+    render(<StocktakeSection onOpenEquipment={onOpenEquipment} />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await waitFor(() => expect(screen.getAllByText('Spare impeller').length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    expect(onOpenEquipment).toHaveBeenCalledWith('eq-1')
+  })
+
+  it('is read-only when canWrite is false: confirms without writing and hides Move', async () => {
+    const item = makeItem({ id: 'eq-1', bin_id: 'b1', verified_aboard: false })
+    const other = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2' })
+    equipmentById['eq-1'] = item
+    equipmentById['eq-2'] = other
+    render(<StocktakeSection canWrite={false} />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    expect(screen.getByText(/read-only/i)).toBeInTheDocument()
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    await scan('https://boat.example/inventory/equipment/eq-1')
+    await screen.findByText('Confirmed')
+    expect(putCalls.find((c) => c.id === 'eq-1')).toBeUndefined()
+
+    await scan('https://boat.example/inventory/equipment/eq-2')
+    await screen.findByText(/Recorded in SAL-04/)
+    expect(screen.queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument()
+  })
 })

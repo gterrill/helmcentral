@@ -73,7 +73,11 @@ vi.mock('@/components/inventory/bin-page', () => ({
 }))
 
 vi.mock('@/components/inventory/stocktake-section', () => ({
-  StocktakeSection: () => <div data-testid="stocktake-section" />,
+  StocktakeSection: (props: { onOpenEquipment?: (id: string) => void; canWrite?: boolean }) => (
+    <div data-testid="stocktake-section" data-can-write={String(props.canWrite)}>
+      <button type="button" onClick={() => props.onOpenEquipment?.('eq-1')}>stocktake-open-eq-1</button>
+    </div>
+  ),
 }))
 
 function baseProps() {
@@ -191,6 +195,17 @@ describe('InventoryPanel', () => {
   it('renders StocktakeSection for the stocktake section', () => {
     render(<InventoryPanel {...baseProps()} activeSectionId="stocktake" />)
     expect(screen.getByTestId('stocktake-section')).toBeInTheDocument()
+  })
+
+  // ADR 0127 review: StocktakeSection's own photo grid Open button and
+  // read-only gate were dead until wired from here, the same way BinPage's
+  // already are.
+  it('wires onOpenEquipment and canWrite through to StocktakeSection', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} activeSectionId="stocktake" canWrite={false} />)
+    expect(screen.getByTestId('stocktake-section')).toHaveAttribute('data-can-write', 'false')
+    fireEvent.click(screen.getByText('stocktake-open-eq-1'))
+    expect(props.onOpenEquipment).toHaveBeenCalledWith('eq-1')
   })
 
   it('clicking a nav section reports it through onSectionChange', () => {

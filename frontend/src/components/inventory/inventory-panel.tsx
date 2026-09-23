@@ -157,7 +157,9 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       }
       return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
     }
-    if (activeSectionId === 'stocktake') return <StocktakeSection />
+    if (activeSectionId === 'stocktake') {
+      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
+    }
     return null
   })()
 
