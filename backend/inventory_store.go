@@ -211,13 +211,25 @@ type equipmentItem struct {
 	ZoneName  string `json:"zone_name"`
 	BinCode   string `json:"bin_code"`
 	LinkCount int    `json:"link_count"`
+
+	// PhotoIDs (ADR 0124) is the item's OWN linked documents tagged 'photo',
+	// ordered by sort_index then document_id, cover first - never nil (see
+	// equipmentByID/ListEquipment, the same "always the keys" reasoning as
+	// ZoneName/BinCode above). It is NOT every equipment_documents link
+	// (EquipmentDocuments returns that); it is the photo-tagged subset,
+	// which is what the bin page's photo strip and the editor's photo row
+	// both read.
+	PhotoIDs []string `json:"photo_ids"`
 }
 
 // equipmentDocument is one row of EquipmentDocuments' output: an
 // equipment_documents link joined against documents for the fields a
 // document-picker list actually wants to show (title, filename, kind,
 // note_type) - never the document's full body/markdown, which nothing about
-// an equipment record's Documents tab needs.
+// an equipment record's Documents tab needs. SortIndex (ADR 0124) is
+// carried through unconditionally - EquipmentDocuments returns every link,
+// photo or not, and the photo strip is what actually orders by it; this
+// struct just stops hiding the column from a caller that wants it.
 type equipmentDocument struct {
 	DocumentID string `json:"document_id"`
 	Title      string `json:"title"`
@@ -225,18 +237,23 @@ type equipmentDocument struct {
 	Kind       string `json:"kind"`
 	NoteType   string `json:"note_type"`
 	Source     string `json:"source"`
+	SortIndex  int    `json:"sort_index"`
 }
 
 // equipmentFilter is ListEquipment's input: every field blank means no
 // filter at all (every equipment record, matching queryDocuments' own
 // nil-means-unfiltered convention). See ListEquipment's own doc comment for
 // why Query matches name/manufacturer/model AND aliases entirely in Go
-// rather than splitting the two into a SQL LIKE plus a Go-side pass.
+// rather than splitting the two into a SQL LIKE plus a Go-side pass. BinID
+// (ADR 0124) is the bin page's own filter - `?bin=` on GET
+// /api/inventory/equipment - and mirrors ZoneID exactly: an exact match
+// against a foreign-key column, no substring matching involved.
 type equipmentFilter struct {
 	Category string
 	System   string
 	Status   string
 	ZoneID   string
+	BinID    string
 	Query    string
 }
 
@@ -801,8 +818,56 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	return it, nil
 }
 
-// equipmentByID reads a single equipment row, zone name and bin code
-// joined in. The unlocked helper GetEquipment's own locking method, and
+// photoIDsForEquipmentIDs returns each of ids' own photo-tagged document
+// ids, cover first - ADR 0124: "an item's photos are its linked documents
+// tagged photo, ordered by sort_index [then document_id]". One aggregate
+// query over every id at once (equipmentColumns' own doc comment gives the
+// identical reasoning for the zone/bin join above it: a handful of items
+// aboard one boat, never worth N+1 queries to avoid), shared by
+// equipmentByID (one id) and ListEquipment (the whole filtered result) so
+// the two can never compute this differently. Callers get back only the
+// ids that actually matched - an id with no photos simply has no entry in
+// the map, and every call site treats a missing key the same as an empty
+// slice.
+func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := q.Query(`
+		SELECT ed.equipment_id, ed.document_id
+		FROM equipment_documents ed
+		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		WHERE ed.equipment_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY ed.equipment_id, ed.sort_index, ed.document_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("photo ids for equipment: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var equipmentID, documentID string
+		if err := rows.Scan(&equipmentID, &documentID); err != nil {
+			return nil, fmt.Errorf("photo ids for equipment: scan: %w", err)
+		}
+		out[equipmentID] = append(out[equipmentID], documentID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("photo ids for equipment: %w", err)
+	}
+	return out, nil
+}
+
+// equipmentByID reads a single equipment row, zone name, bin code and photo
+// ids joined in. The unlocked helper GetEquipment's own locking method, and
 // CreateEquipment/UpdateEquipment from inside their own transaction, all
 // call this rather than duplicating the query.
 func equipmentByID(q sqlQueryer, id string) (equipmentItem, error) {
@@ -813,6 +878,15 @@ func equipmentByID(q sqlQueryer, id string) (equipmentItem, error) {
 	}
 	if err != nil {
 		return equipmentItem{}, fmt.Errorf("get equipment: %w", err)
+	}
+
+	photoMap, err := photoIDsForEquipmentIDs(q, []string{id})
+	if err != nil {
+		return equipmentItem{}, err
+	}
+	it.PhotoIDs = photoMap[id]
+	if it.PhotoIDs == nil {
+		it.PhotoIDs = []string{}
 	}
 	return it, nil
 }
@@ -1078,6 +1152,10 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		query += ` AND e.zone_id = ?`
 		args = append(args, filter.ZoneID)
 	}
+	if filter.BinID != "" {
+		query += ` AND e.bin_id = ?`
+		args = append(args, filter.BinID)
+	}
 	query += ` ORDER BY e.system, lower(e.name)`
 
 	rows, err := s.db.Query(query, args...)
@@ -1096,6 +1174,25 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list equipment: %w", err)
+	}
+
+	// One aggregate photoIDsForEquipmentIDs call over the whole filtered
+	// result, not one per item (that function's own doc comment) - the bin
+	// page and the equipment index both need photo_ids on every row they
+	// show.
+	ids := make([]string, len(out))
+	for i, it := range out {
+		ids[i] = it.ID
+	}
+	photoMap, err := photoIDsForEquipmentIDs(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].PhotoIDs = photoMap[out[i].ID]
+		if out[i].PhotoIDs == nil {
+			out[i].PhotoIDs = []string{}
+		}
 	}
 
 	q := strings.ToLower(strings.TrimSpace(filter.Query))
@@ -1138,7 +1235,7 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	}
 
 	rows, err := s.db.Query(`
-		SELECT ed.document_id, d.title, d.filename, d.kind, d.note_type, ed.source
+		SELECT ed.document_id, d.title, d.filename, d.kind, d.note_type, ed.source, ed.sort_index
 		FROM equipment_documents ed
 		JOIN documents d ON d.id = ed.document_id
 		WHERE ed.equipment_id = ?
@@ -1151,7 +1248,7 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	out := []equipmentDocument{}
 	for rows.Next() {
 		var ed equipmentDocument
-		if err := rows.Scan(&ed.DocumentID, &ed.Title, &ed.Filename, &ed.Kind, &ed.NoteType, &ed.Source); err != nil {
+		if err := rows.Scan(&ed.DocumentID, &ed.Title, &ed.Filename, &ed.Kind, &ed.NoteType, &ed.Source, &ed.SortIndex); err != nil {
 			return nil, fmt.Errorf("equipment documents: scan: %w", err)
 		}
 		out = append(out, ed)
@@ -1162,14 +1259,19 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	return out, nil
 }
 
-// SetEquipmentDocuments replaces id's ENTIRE set of linked documents in one
-// transaction - "replace wholesale" (plan's own phrase): every existing
-// equipment_documents row for id is deleted and docIDs are inserted fresh,
-// all under source='operator' (this cycle only edits links from the
-// equipment side - plan's own "Links edited from the equipment side this
-// cycle" decision - so every link this method ever writes is an explicit
-// operator action; source='suggested' has no writer yet, reserved for the
-// enrichment cycle this schema is sized to receive without churn).
+// SetEquipmentDocuments replaces id's NON-PHOTO linked documents in one
+// transaction - "replace wholesale" (plan's own phrase) narrowed by ADR
+// 0124: photo-tagged links are managed only through the photo routes
+// (AddEquipmentPhoto/SetEquipmentPhotoOrder/RemoveEquipmentPhoto below), so
+// this method leaves them exactly as they are rather than deleting and
+// reinserting every link the way it did before photos existed. Every
+// existing NON-photo equipment_documents row for id is deleted and docIDs
+// are inserted fresh, all under source='operator' (this cycle only edits
+// links from the equipment side - plan's own "Links edited from the
+// equipment side this cycle" decision - so every link this method ever
+// writes is an explicit operator action; source='suggested' has no writer
+// yet, reserved for the enrichment cycle this schema is sized to receive
+// without churn).
 //
 // A docID that doesn't name a real documents row fails the
 // equipment_documents.document_id foreign key and rolls back the WHOLE
@@ -1183,14 +1285,15 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 // constraint failure surfaces as-is rather than this method inventing its
 // own, possibly-differently-worded, version of "unknown document id".
 //
-// docIDs IS deduped here, first-occurrence order kept: it names "the whole
-// set" the record should end up linked to, not a sequence of individual
-// link operations, so the same id appearing twice means the same thing as
-// it appearing once. Left undeduped, a repeated id would collide with
-// equipment_documents' own (equipment_id, document_id) primary key and turn
-// an ordinary caller mistake into a raw SQLite constraint error - not a
-// real "unknown document id" data problem the fail-fast policy above is
-// about surfacing as-is.
+// docIDs IS deduped here (against itself AND against the kept photo set),
+// first-occurrence order kept: it names "the whole non-photo set" the
+// record should end up linked to, not a sequence of individual link
+// operations, so the same id appearing twice means the same thing as it
+// appearing once. Left undeduped, a repeated id - or one that happens to
+// already be a kept photo link - would collide with equipment_documents'
+// own (equipment_id, document_id) primary key and turn an ordinary caller
+// mistake (or the document-link-picker offering something it should have
+// excluded) into a raw SQLite constraint error rather than a silent no-op.
 func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1209,19 +1312,41 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 		return errEquipmentNotFound
 	}
 
-	if _, err := tx.Exec(`DELETE FROM equipment_documents WHERE equipment_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`
+		DELETE FROM equipment_documents
+		WHERE equipment_id = ?
+		AND document_id NOT IN (SELECT document_id FROM document_tags WHERE tag = 'photo')`,
+		id,
+	); err != nil {
 		return fmt.Errorf("set equipment documents: clear: %w", err)
 	}
 
+	// Seeded with whatever the DELETE above just left standing (the item's
+	// photo links) so a docID that happens to already be one of them is a
+	// silent no-op below rather than a primary-key collision - see this
+	// method's own doc comment.
+	seen := map[string]bool{}
+	kept, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("set equipment documents: read kept links: %w", err)
+	}
+	for kept.Next() {
+		var docID string
+		if err := kept.Scan(&docID); err != nil {
+			kept.Close()
+			return fmt.Errorf("set equipment documents: scan kept link: %w", err)
+		}
+		seen[docID] = true
+	}
+	if err := kept.Err(); err != nil {
+		kept.Close()
+		return fmt.Errorf("set equipment documents: read kept links: %w", err)
+	}
+	kept.Close()
+
 	now := s.now().Unix()
-	seen := make(map[string]bool, len(docIDs))
 	for _, docID := range docIDs {
 		if seen[docID] {
-			// Deduped, not rejected: docIDs is "the whole set", not an
-			// ordered list of individual link operations, so the same id
-			// twice means the same thing as it once - not a second write
-			// that should collide with equipment_documents' own
-			// (equipment_id, document_id) primary key.
 			continue
 		}
 		seen[docID] = true
@@ -1234,4 +1359,224 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 	}
 
 	return tx.Commit()
+}
+
+// ── equipment photos ─────────────────────────────────────────────────────
+// ADR 0124: a photo is an ordinary uploaded document, tagged 'photo' and
+// linked through equipment_documents - these three methods are the ONLY
+// writers of a photo-tagged link (SetEquipmentDocuments above deliberately
+// leaves them alone).
+
+// errEquipmentPhotoSetMismatch is returned by SetEquipmentPhotoOrder when
+// order doesn't name EXACTLY the item's current photo id set - ADR 0124:
+// "must name exactly the item's current photo set, or it returns 400",
+// deliberately not a partial-reorder/subset-allowed API the way
+// SetEquipmentDocuments' whole-set replace is for ordinary links, so a
+// stale client's PUT can never silently add or drop a photo.
+var errEquipmentPhotoSetMismatch = errors.New("photo set does not match the item's current photos")
+
+// errEquipmentPhotoNotFound is returned by RemoveEquipmentPhoto when
+// documentID is not currently one of equipmentID's own photo-tagged links -
+// a stale UI, an id belonging to a different item's photo, or an ordinary
+// (non-photo) linked document. Distinct from errEquipmentNotFound, which
+// means the equipment record itself doesn't exist.
+var errEquipmentPhotoNotFound = errors.New("photo not found on this item")
+
+// sameIDSet reports whether a and b hold the same ids, in any order -
+// SetEquipmentPhotoOrder's own "exactly the current set" check.
+func sameIDSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, v := range a {
+		counts[v]++
+	}
+	for _, v := range b {
+		counts[v]--
+	}
+	for _, c := range counts {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// EnsurePhotoTag adds the 'photo' operator tag to documentID if it doesn't
+// already carry it. idempotent (insertOperatorTagsTx's own ON CONFLICT
+// DO UPDATE). Needed only for the rare case where a freshly uploaded
+// photo's bytes match a document already in the library byte-for-byte
+// (Insert's own sha256 dedupe finds the existing row instead of creating a
+// new one) - without this, that existing row would keep whatever tags it
+// already had and never show up in the item's photo strip, even though the
+// operator just told the photo route to add it as one.
+func (s *documentStore) EnsurePhotoTag(documentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ensure photo tag: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := insertOperatorTagsTx(tx, documentID, []string{"photo"}); err != nil {
+		return fmt.Errorf("ensure photo tag: %w", err)
+	}
+	return tx.Commit()
+}
+
+// AddEquipmentPhoto links documentID to equipmentID as a photo, at the end
+// of the item's current photo order - max(sort_index)+1 among its OWN
+// photo-tagged links (ADR 0124: "the first one is the cover"), so a freshly
+// uploaded photo always lands after every photo already on the strip. A
+// no-op if the link already exists (equipment_documents' PRIMARY KEY is
+// (equipment_id, document_id) - re-adding an existing pair, e.g. identical
+// photo bytes uploaded twice for the same item, leaves its position exactly
+// where it already was rather than erroring).
+func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("add equipment photo: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+	if err != nil {
+		return fmt.Errorf("add equipment photo: check equipment: %w", err)
+	}
+	if !ok {
+		return errEquipmentNotFound
+	}
+
+	already, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`, equipmentID, documentID)
+	if err != nil {
+		return fmt.Errorf("add equipment photo: check existing link: %w", err)
+	}
+	if already {
+		return tx.Commit()
+	}
+
+	var maxSort sql.NullInt64
+	if err := tx.QueryRow(`
+		SELECT MAX(ed.sort_index) FROM equipment_documents ed
+		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		WHERE ed.equipment_id = ?`, equipmentID).Scan(&maxSort); err != nil {
+		return fmt.Errorf("add equipment photo: max sort: %w", err)
+	}
+	next := 0
+	if maxSort.Valid {
+		next = int(maxSort.Int64) + 1
+	}
+
+	now := s.now().Unix()
+	if _, err := tx.Exec(
+		`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
+		equipmentID, documentID, next, now,
+	); err != nil {
+		return fmt.Errorf("add equipment photo: link: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// SetEquipmentPhotoOrder rewrites sort_index on equipmentID's existing
+// photo links to match order exactly - ADR 0124: "Make cover" is this same
+// call with the chosen id moved to the front. order must name EXACTLY the
+// item's current photo id set (errEquipmentPhotoSetMismatch otherwise - see
+// its own doc comment for why a partial reorder isn't accepted the way
+// SetEquipmentDocuments' whole-set replace is for ordinary links).
+func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("set equipment photo order: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+	if err != nil {
+		return fmt.Errorf("set equipment photo order: check equipment: %w", err)
+	}
+	if !ok {
+		return errEquipmentNotFound
+	}
+
+	photoMap, err := photoIDsForEquipmentIDs(tx, []string{equipmentID})
+	if err != nil {
+		return err
+	}
+	if !sameIDSet(photoMap[equipmentID], order) {
+		return errEquipmentPhotoSetMismatch
+	}
+
+	for i, docID := range order {
+		if _, err := tx.Exec(
+			`UPDATE equipment_documents SET sort_index = ? WHERE equipment_id = ? AND document_id = ?`,
+			i, equipmentID, docID,
+		); err != nil {
+			return fmt.Errorf("set equipment photo order: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// RemoveEquipmentPhoto detaches documentID from equipmentID's photo strip
+// AND deletes the underlying document row - ADR 0124: "a photo has no life
+// outside its item." Returns the document's own sha256 (like Delete) so the
+// handler can remove its on-disk file the same way deleteDocumentHandler
+// does. errEquipmentPhotoNotFound if documentID isn't currently one of
+// equipmentID's own photo links.
+func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", fmt.Errorf("remove equipment photo: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+	if err != nil {
+		return "", fmt.Errorf("remove equipment photo: check equipment: %w", err)
+	}
+	if !ok {
+		return "", errEquipmentNotFound
+	}
+
+	isPhoto, err := rowExists(tx, `
+		SELECT 1 FROM equipment_documents ed
+		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		WHERE ed.equipment_id = ? AND ed.document_id = ?`, equipmentID, documentID)
+	if err != nil {
+		return "", fmt.Errorf("remove equipment photo: check link: %w", err)
+	}
+	if !isPhoto {
+		return "", errEquipmentPhotoNotFound
+	}
+
+	var sha string
+	if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, documentID).Scan(&sha); err != nil {
+		return "", fmt.Errorf("remove equipment photo: read sha: %w", err)
+	}
+
+	// Deleting the document cascades the equipment_documents link (ON
+	// DELETE CASCADE on document_id, documents_store.go's schema) - no
+	// separate DELETE of the link is needed.
+	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, documentID); err != nil {
+		return "", fmt.Errorf("remove equipment photo: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("remove equipment photo: commit: %w", err)
+	}
+	return sha, nil
 }

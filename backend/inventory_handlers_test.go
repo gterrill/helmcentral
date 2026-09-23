@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 // This file exercises inventory_handlers.go (plan "Inventory: the equipment
@@ -807,10 +813,455 @@ func TestListEquipmentHandler_EveryFieldIsUnconditional(t *testing.T) {
 		"quantity", "status", "zone_id", "bin_id", "location_detail",
 		"install_date", "hour_meter_path", "profile_id", "aliases",
 		"verified_aboard", "notes", "created_at", "updated_at",
-		"zone_name", "bin_code", "link_count",
+		"zone_name", "bin_code", "link_count", "photo_ids",
 	} {
 		if _, ok := payload.Items[0][key]; !ok {
 			t.Errorf("field %q missing from an item with nothing filled in", key)
 		}
+	}
+}
+
+// ── GET /api/inventory/equipment?bin= ────────────────────────────────────
+
+func TestListEquipmentHandler_FiltersByBin(t *testing.T) {
+	withTestDocumentStore(t)
+
+	zone, err := globalDocumentStore.CreateZone("Lazarette")
+	if err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	binA, err := globalDocumentStore.CreateBin(zone.ID, "LAZ-01", "")
+	if err != nil {
+		t.Fatalf("CreateBin(a): %v", err)
+	}
+	binB, err := globalDocumentStore.CreateBin(zone.ID, "LAZ-02", "")
+	if err != nil {
+		t.Fatalf("CreateBin(b): %v", err)
+	}
+	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Tape", Category: "general", BinID: &binA.ID}); err != nil {
+		t.Fatalf("CreateEquipment(a): %v", err)
+	}
+	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Caulk", Category: "general", BinID: &binB.ID}); err != nil {
+		t.Fatalf("CreateEquipment(b): %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/equipment?bin="+binA.ID, "", "")
+	if err := listEquipmentHandler(c); err != nil {
+		t.Fatalf("listEquipmentHandler returned error: %v", err)
+	}
+	var resp struct {
+		Items []equipmentItem `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].Name != "Tape" {
+		t.Fatalf("expected only the item filed in bin A, got %+v", resp.Items)
+	}
+}
+
+// ── equipment photos (ADR 0124) ─────────────────────────────────────────
+// Written before the handlers themselves (AGENTS.md's test-first policy),
+// the same convention every other section of this file follows.
+
+// validJPEGBytes/validPNGBytes are just enough of each format's own magic
+// number for http.DetectContentType (detectDocumentMIME's own sniffer) to
+// recognise them - detectDocumentMIME never looks past the first 512 bytes
+// either way (headCapture's own doc comment, documents_handlers.go), so
+// neither fixture needs to be a real, decodable image.
+var validJPEGBytes = append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, []byte("fake jpeg bytes for sniffing")...)
+var validPNGBytes = append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, []byte("fake png bytes for sniffing")...)
+
+// newInventoryPhotoUploadContext builds a POST /api/inventory/equipment/:id/
+// photos multipart request - newDocumentUploadContext's own builder
+// (documents_handlers_test.go), extended with the :id path param the photo
+// routes key on and a caller-chosen target so the same helper covers both
+// the photo upload endpoint's tests below.
+func newInventoryPhotoUploadContext(t *testing.T, id string, fields []documentUploadField) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for _, f := range fields {
+		var w io.Writer
+		var err error
+		if f.filename != "" {
+			w, err = writer.CreateFormFile(f.name, f.filename)
+		} else {
+			w, err = writer.CreateFormField(f.name)
+		}
+		if err != nil {
+			t.Fatalf("create part %q: %v", f.name, err)
+		}
+		if _, err := w.Write(f.content); err != nil {
+			t.Fatalf("write part %q: %v", f.name, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/inventory/equipment/"+id+"/photos", body)
+	req.Header.Set(echo.HeaderContentType, writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+	return c, rec
+}
+
+// newInventoryEquipmentIDContext is newDocumentEchoContext's own shape with
+// a SECOND path param - the photo delete route's own :id/:documentId -
+// which newDocumentEchoContext (a single "id" param) can't express.
+func newInventoryEquipmentIDContext(method, target, body, id, documentID string) (echo.Context, *httptest.ResponseRecorder) {
+	e := echo.New()
+	var req *http.Request
+	if body != "" {
+		req = httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	} else {
+		req = httptest.NewRequest(method, target, nil)
+	}
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id", "documentId")
+	c.SetParamValues(id, documentID)
+	return c, rec
+}
+
+func TestUploadEquipmentPhotoHandler_TwoUploadsComeBackInUploadOrder(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	c1, rec1 := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c1); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler (first): %v", err)
+	}
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	c2, rec2 := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "b.png", content: validPNGBytes}})
+	if err := uploadEquipmentPhotoHandler(c2); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler (second): %v", err)
+	}
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var resp struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Item.PhotoIDs) != 2 {
+		t.Fatalf("expected two photos, got %+v", resp.Item.PhotoIDs)
+	}
+}
+
+func TestUploadEquipmentPhotoHandler_UnknownItemStoresNoDocument(t *testing.T) {
+	store := withTestDocumentStore(t)
+
+	before, err := store.ListEquipment(equipmentFilter{})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, "does-not-exist", []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries := documentsDirEntries(t)
+	if len(entries) != 0 {
+		t.Fatalf("expected no file written for an upload to an unknown item, found %v", entries)
+	}
+	after, err := store.ListEquipment(equipmentFilter{})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected no document row created, before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestUploadEquipmentPhotoHandler_NonImageReturns400(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "notes.txt", content: []byte("hello world")}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	entries := documentsDirEntries(t)
+	if len(entries) != 0 {
+		t.Fatalf("expected no file left behind for a rejected upload, found %v", entries)
+	}
+}
+
+func TestUploadEquipmentPhotoHandler_HEICReturnsEnrichStageMessage(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.heic", content: []byte("not a real heic but the extension is what matters")}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "convert to JPEG") {
+		t.Fatalf("expected the enrich stage's own HEIC message, got %s", rec.Body.String())
+	}
+}
+
+// ── PUT /api/inventory/equipment/:id/photos ──────────────────────────────
+
+func TestSetEquipmentPhotoOrderHandler_ReorderMovesSecondToFrontChangesCover(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA, err := globalDocumentStore.Insert(document{SHA256: "sha-reorder-a", Filename: "a.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(a): %v", err)
+	}
+	photoB, err := globalDocumentStore.Insert(document{SHA256: "sha-reorder-b", Filename: "b.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(b): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+
+	body := `{"document_ids":["` + photoB.ID + `","` + photoA.ID + `"]}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/photos", body, item.ID)
+	if err := setEquipmentPhotoOrderHandler(c); err != nil {
+		t.Fatalf("setEquipmentPhotoOrderHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Item.PhotoIDs) != 2 || resp.Item.PhotoIDs[0] != photoB.ID {
+		t.Fatalf("expected b to become the cover, got %+v", resp.Item.PhotoIDs)
+	}
+}
+
+func TestSetEquipmentPhotoOrderHandler_MismatchedSetReturns400(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA, err := globalDocumentStore.Insert(document{SHA256: "sha-mismatch-h-a", Filename: "a.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(a): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+
+	// Missing id: an empty order against one existing photo.
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/photos", `{"document_ids":[]}`, item.ID)
+	if err := setEquipmentPhotoOrderHandler(c); err != nil {
+		t.Fatalf("setEquipmentPhotoOrderHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a missing id, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Extra id: a photo id the item does not own.
+	body := `{"document_ids":["` + photoA.ID + `","does-not-exist"]}`
+	c2, rec2 := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/photos", body, item.ID)
+	if err := setEquipmentPhotoOrderHandler(c2); err != nil {
+		t.Fatalf("setEquipmentPhotoOrderHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an extra id, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// ── DELETE /api/inventory/equipment/:id/photos/:documentId ──────────────
+
+func TestDeleteEquipmentPhotoHandler_RemovesFileAndLink(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	c1, rec1 := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c1); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler: %v", err)
+	}
+	var uploaded struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &uploaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	photoID := uploaded.Item.PhotoIDs[0]
+
+	c, rec := newInventoryEquipmentIDContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID+"/photos/"+photoID, "", item.ID, photoID)
+	if err := deleteEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	entries := documentsDirEntries(t)
+	if len(entries) != 0 {
+		t.Fatalf("expected the photo's file removed from disk, found %v", entries)
+	}
+}
+
+// TestDeleteEquipmentHandler_CascadesPhotoLinks is a required Verification
+// case: "Deleting the item cascades its photo links."
+func TestDeleteEquipmentHandler_CascadesPhotoLinks(t *testing.T) {
+	store := withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-cascade-photo", Filename: "a.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM equipment_documents WHERE equipment_id = ?`, item.ID).Scan(&count); err != nil {
+		t.Fatalf("count equipment_documents: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected the photo link to cascade away with the item, found %d still there", count)
+	}
+}
+
+// ── PUT /api/inventory/equipment/:id/documents leaves photos alone ───────
+
+func TestSetEquipmentDocumentsHandler_LeavesPhotoLinksAndOrderUntouched(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA, err := globalDocumentStore.Insert(document{SHA256: "sha-h-preserve-a", Filename: "a.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(a): %v", err)
+	}
+	photoB, err := globalDocumentStore.Insert(document{SHA256: "sha-h-preserve-b", Filename: "b.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(b): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+	manual, err := globalDocumentStore.Insert(document{SHA256: "sha-h-preserve-manual", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert(manual): %v", err)
+	}
+
+	body := `{"document_ids":["` + manual.ID + `"]}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", body, item.ID)
+	if err := setEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	item2, err := globalDocumentStore.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(item2.PhotoIDs) != 2 || item2.PhotoIDs[0] != photoA.ID || item2.PhotoIDs[1] != photoB.ID {
+		t.Fatalf("expected both photo links and their order untouched, got %+v", item2.PhotoIDs)
+	}
+}
+
+// ── removing the 'photo' tag ─────────────────────────────────────────────
+
+func TestGetEquipmentHandler_RemovingPhotoTagDropsFromPhotoIDsButKeepsLink(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-h-untag", Filename: "a.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	if err := globalDocumentStore.UpdateMeta(photo.ID, nil, nil, []string{"consumable"}); err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := getEquipmentHandler(c); err != nil {
+		t.Fatalf("getEquipmentHandler returned error: %v", err)
+	}
+	var resp struct {
+		Item      equipmentItem       `json:"item"`
+		Documents []equipmentDocument `json:"documents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Item.PhotoIDs) != 0 {
+		t.Fatalf("expected the untagged photo to leave photo_ids, got %+v", resp.Item.PhotoIDs)
+	}
+	if len(resp.Documents) != 1 || resp.Documents[0].DocumentID != photo.ID {
+		t.Fatalf("expected the link itself to survive as an ordinary linked document, got %+v", resp.Documents)
 	}
 }

@@ -1,9 +1,15 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -318,15 +324,18 @@ func deleteBinHandler(c echo.Context) error {
 // ── equipment ────────────────────────────────────────────────────────────
 
 // listEquipmentHandler is GET /api/inventory/equipment?category=&system=
-// &status=&zone=&q=: every equipment record matching the given filters,
-// each with link_count/zone_name/bin_code already joined in
-// (ListEquipment's own doc comment, inventory_store.go).
+// &status=&zone=&bin=&q=: every equipment record matching the given
+// filters, each with link_count/zone_name/bin_code/photo_ids already joined
+// in (ListEquipment's own doc comment, inventory_store.go). bin (ADR 0124)
+// is the bin page's own filter - `useEquipment({ bin: bin.id })` on the
+// frontend.
 func listEquipmentHandler(c echo.Context) error {
 	filter := equipmentFilter{
 		Category: c.QueryParam("category"),
 		System:   c.QueryParam("system"),
 		Status:   c.QueryParam("status"),
 		ZoneID:   c.QueryParam("zone"),
+		BinID:    c.QueryParam("bin"),
 		Query:    c.QueryParam("q"),
 	}
 	items, err := globalDocumentStore.ListEquipment(filter)
@@ -468,4 +477,269 @@ func setEquipmentDocumentsHandler(c echo.Context) error {
 		documents = []equipmentDocument{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"documents": documents})
+}
+
+// ── equipment photos ─────────────────────────────────────────────────────
+// ADR 0124: a photo is an ordinary uploaded document, tagged 'photo' and
+// linked through equipment_documents (inventory_store.go's own "equipment
+// photos" section). respondWithUpdatedEquipment is shared by all three
+// handlers below - every one of them answers with the item as it stands
+// right after the write, so the frontend never has to reload separately to
+// see its own change reflected.
+
+// respondWithUpdatedEquipment re-reads id and answers c with {item} at
+// status - the common tail of every photo write below (and, unlike a write
+// that merely echoes back the request body, this is a real re-read, so
+// photo_ids always reflects exactly what the write just did).
+func respondWithUpdatedEquipment(c echo.Context, id string, status int) error {
+	item, err := globalDocumentStore.GetEquipment(id)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(status, map[string]any{"item": item})
+}
+
+// uploadEquipmentPhotoHandler is POST /api/inventory/equipment/:id/photos
+// (multipart, one "file" part): stores the file through the same path
+// uploadDocumentHandler uses (documents_handlers.go) - same
+// documentMaxUploadBytes cap, same content-sniffed MIME detection, same
+// sha256 dedupe - tags it 'photo', and links it at the end of the item's
+// photo order. Existence is checked FIRST, before the multipart body is
+// ever read, so an upload to an unknown id never writes a file at all
+// (ADR 0124's own test list: "An upload to an unknown id stores no
+// document").
+func uploadEquipmentPhotoHandler(c echo.Context) error {
+	id := c.Param("id")
+	if _, err := globalDocumentStore.GetEquipment(id); err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	req := c.Request()
+	req.Body = http.MaxBytesReader(c.Response(), req.Body, documentMaxUploadBytes)
+
+	reader, err := req.MultipartReader()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data"})
+	}
+
+	dir := documentsDirPath()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
+	}
+
+	var (
+		tmpPath  string
+		filename string
+		size     int64
+		haveFile bool
+	)
+	removeTemp := func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}
+
+	hasher := sha256.New()
+	head := &headCapture{}
+
+	for {
+		part, partErr := reader.NextPart()
+		if partErr == io.EOF {
+			break
+		}
+		if partErr != nil {
+			removeTemp()
+			return documentUploadReadError(c, partErr)
+		}
+		if part.FormName() != "file" {
+			part.Close()
+			continue
+		}
+		if tmpPath != "" {
+			part.Close()
+			removeTemp()
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "only one file per upload"})
+		}
+		filename = part.FileName()
+		tmpFile, createErr := os.CreateTemp(dir, "upload-*.tmp")
+		if createErr != nil {
+			part.Close()
+			removeTemp()
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
+		}
+		tmpPath = tmpFile.Name()
+		mw := io.MultiWriter(tmpFile, hasher, head)
+		n, copyErr := io.Copy(mw, part)
+		closeErr := tmpFile.Close()
+		part.Close()
+		if copyErr != nil {
+			removeTemp()
+			return documentUploadReadError(c, copyErr)
+		}
+		if closeErr != nil {
+			removeTemp()
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save upload"})
+		}
+		size = n
+		haveFile = n > 0
+	}
+
+	if !haveFile {
+		removeTemp()
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "file is required"})
+	}
+
+	// ADR 0124: "Accept JPEG or PNG only. Reject HEIC with the enrich
+	// stage's existing message." - the same wording runEnrichStage uses for
+	// the identical problem (documents_enrich.go), so an operator sees ONE
+	// explanation for "why can't Helmcentral use this" wherever they meet
+	// it.
+	mimeType := detectDocumentMIME(head.buf, filename)
+	switch mimeType {
+	case "image/jpeg", "image/png":
+		// accepted
+	case "image/heic":
+		removeTemp()
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "image/heic is not supported for reading; convert to JPEG"})
+	default:
+		removeTemp()
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "only JPEG or PNG photos are accepted"})
+	}
+
+	// Readiness is checked before the bytes ever move to their final,
+	// content-addressed path - uploadDocumentHandler's own reasoning
+	// (documents_handlers.go): a failure here removes only this attempt's
+	// own temp file, never an existing document's.
+	enrich, _, err := documentEnrichFlag("inventory: upload photo")
+	if err != nil {
+		removeTemp()
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	sha := hex.EncodeToString(hasher.Sum(nil))
+
+	unlockSHA := lockDocumentSHA(sha)
+	defer unlockSHA()
+
+	if existing, ok, err := globalDocumentStore.GetBySHA(sha); err != nil {
+		removeTemp()
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	} else if ok {
+		// Identical bytes already in the library (Insert's own sha256
+		// dedupe, uploadDocumentHandler's own comment) - the file on disk
+		// belongs to that existing row, so only this attempt's own temp
+		// file is removed. EnsurePhotoTag covers the case where that row
+		// wasn't already tagged 'photo' (e.g. it was linked as an ordinary
+		// document elsewhere first).
+		removeTemp()
+		if err := globalDocumentStore.EnsurePhotoTag(existing.ID); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		if err := globalDocumentStore.AddEquipmentPhoto(id, existing.ID); err != nil {
+			return writeDocumentError(c, err)
+		}
+		return respondWithUpdatedEquipment(c, id, http.StatusOK)
+	}
+
+	finalPath := filepath.Join(dir, sha)
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		removeTemp()
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to store upload"})
+	}
+	tmpPath = "" // renamed into place; removeTemp must not touch it anymore
+
+	inserted, err := globalDocumentStore.Insert(document{
+		SHA256:       sha,
+		Filename:     filename,
+		MIME:         mimeType,
+		SizeBytes:    size,
+		Enrich:       enrich,
+		OperatorTags: []string{"photo"},
+	})
+	if errors.Is(err, errDocumentDuplicate) {
+		// Insert's own sha256 race: another request created the row between
+		// our GetBySHA check and this Insert call. Same shape as the
+		// "already existed" branch above - the file belongs to that row,
+		// not to this attempt.
+		if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
+			return writeDocumentError(c, err)
+		}
+		return respondWithUpdatedEquipment(c, id, http.StatusOK)
+	}
+	if err != nil {
+		// Safe to remove: still holding sha's lock, and GetBySHA just
+		// confirmed no row owned this hash, so finalPath can only be this
+		// attempt's own file.
+		os.Remove(finalPath)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
+		// The document now exists but isn't linked - surfaced as-is
+		// (AGENTS.md fail-fast policy) rather than silently leaving an
+		// orphaned, unlinked photo document with no cleanup.
+		return writeDocumentError(c, err)
+	}
+
+	wakeDocumentIndexer()
+	return respondWithUpdatedEquipment(c, id, http.StatusCreated)
+}
+
+type setEquipmentPhotoOrderRequest struct {
+	DocumentIDs []string `json:"document_ids"`
+}
+
+// setEquipmentPhotoOrderHandler is PUT /api/inventory/equipment/:id/photos:
+// {document_ids: [...]}, rewriting sort_index to match the given order
+// exactly - ADR 0124: "Make cover" is this same call with the chosen id
+// moved to the front. document_ids must name EXACTLY the item's current
+// photo set (errEquipmentPhotoSetMismatch -> 400, mapped through
+// writeDocumentError/documentErrorStatus) - see SetEquipmentPhotoOrder's
+// own doc comment (inventory_store.go) for why a partial reorder isn't
+// accepted the way SetEquipmentDocuments' whole-set replace is for
+// ordinary links.
+func setEquipmentPhotoOrderHandler(c echo.Context) error {
+	limitNoteRequestBody(c)
+	id := c.Param("id")
+
+	var req setEquipmentPhotoOrderRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	}
+
+	if err := globalDocumentStore.SetEquipmentPhotoOrder(id, req.DocumentIDs); err != nil {
+		return writeDocumentError(c, err)
+	}
+	return respondWithUpdatedEquipment(c, id, http.StatusOK)
+}
+
+// deleteEquipmentPhotoHandler is DELETE
+// /api/inventory/equipment/:id/photos/:documentId: detaches the photo AND
+// deletes its document (ADR 0124: "a photo has no life outside its item"),
+// the same sha-lock-then-remove-file sequence deleteDocumentHandler uses
+// (documents_handlers.go), so an upload racing the exact same content can
+// never interleave into a row with no file or a file no row points at.
+func deleteEquipmentPhotoHandler(c echo.Context) error {
+	id := c.Param("id")
+	documentID := c.Param("documentId")
+
+	doc, err := globalDocumentStore.Get(documentID)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	unlockSHA := lockDocumentSHA(doc.SHA256)
+	defer unlockSHA()
+
+	sha, err := globalDocumentStore.RemoveEquipmentPhoto(id, documentID)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	path := filepath.Join(documentsDirPath(), sha)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("inventory: delete photo: failed to remove file %s: %v", path, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove document file"})
+	}
+	return respondWithUpdatedEquipment(c, id, http.StatusOK)
 }
