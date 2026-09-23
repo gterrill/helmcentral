@@ -27,8 +27,7 @@ import { PositionTile } from '@/components/position-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
 import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
-import { ForecastDaysTile } from '@/components/forecast-days-tile'
-import { SeaStateTile } from '@/components/sea-state-tile'
+import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
@@ -96,7 +95,7 @@ import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-d
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, etaToWaypoint, traversalOrder } from '@/lib/next-waypoint'
+import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
@@ -1253,6 +1252,7 @@ export function App() {
   const {
     forecast,
     hourlyToday: forecastHourlyToday,
+    nextHour: forecastNextHour,
     summary: forecastSummary,
     loading: forecastLoading,
     error: forecastError,
@@ -1342,21 +1342,21 @@ export function App() {
   // A reverse geocode of a slowly changing position, cached server-side per
   // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
   const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
-  // The clock wall-display tile's next-waypoint line (ADR 0092): the same
-  // pieces any other consumer of routeActivationStatus already has in scope,
-  // just combined once here rather than inside the tile itself, which has no
-  // reason to know about routes or route activation at all.
-  const clockNextWaypoint = useMemo(() => {
-    if (!routeActivationStatus || routeActivationStatus.state !== 'active' || routeActivationStatus.routeId === null) return null
-    const route = routes.find((r) => r.id === routeActivationStatus.routeId)
-    if (!route) return null
-    const waypoint = nextWaypoint(route, routeActivationStatus)
-    if (!waypoint || latitude === null || longitude === null) return null
-    const eta = etaToWaypoint(latitude, longitude, waypoint.waypoint, speedOverGroundKts, route.planning_speed_kts, new Date())
-    return { label: waypoint.label, etaAt: eta.etaAt, basis: eta.basis }
-  }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
+  // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125):
+  // computeClockTripEta (lib/next-waypoint.ts) picks between a
+  // Helmcentral-activated route's FINAL waypoint (etaToRouteEnd) and a bare
+  // Course API destination (etaToDestination, GET /api/routes/active's
+  // `destination`, backend/route_activation.go) - the latter covers both an
+  // inactive chartplotter go-to AND a route activated somewhere other than
+  // Helmcentral, so the tile still reports something rather than showing
+  // nothing just because the trip wasn't planned inside Helmcentral. See
+  // that function's own doc comment for the full decision.
+  const clockTripEta = useMemo(
+    () => computeClockTripEta(routeActivationStatus, routes, latitude, longitude, speedOverGroundKts, new Date()),
+    [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts],
+  )
   // The Nearby map's route layer (this cycle's own addition): the same
-  // routeActivationStatus/routes/nextWaypoint pieces as clockNextWaypoint
+  // routeActivationStatus/routes/nextWaypoint pieces as clockTripEta
   // above, combined once here so the poi-map tile never has to know route
   // activation exists - it only draws whatever waypoints and next-index it's
   // handed. null whenever no route is active, its id isn't in `routes`, or
@@ -1908,7 +1908,7 @@ export function App() {
             sunsetTime={forecast[0]?.sunsetTime ?? null}
             moonPhase={forecast[0]?.moonPhase ?? null}
             placeName={placeName}
-            nextWaypoint={clockNextWaypoint}
+            tripEta={clockTripEta}
           />
         )
       case 'current-conditions':
@@ -1920,14 +1920,13 @@ export function App() {
             maxGustKts={maxGustKts}
             weather={weather}
             forecast={forecast}
+            nextHour={forecastNextHour}
             distanceUnits={uiConfig.distanceUnits}
           />
         )
-      case 'forecast-days':
-        return <ForecastDaysTile days={forecast} units={uiConfig.distanceUnits} />
-      case 'sea-state':
+      case 'forecast-conditions':
         return (
-          <SeaStateTile
+          <ForecastConditionsTile
             forecast={forecast}
             waveForecastDays={waveForecastDays}
             waveLoading={waveForecastLoading}

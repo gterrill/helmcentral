@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { NowcastPoint } from '@/lib/nowcast';
+
 export interface WeatherHourlyWindPoint {
   label: string;
   hourOfDay: number;
@@ -149,6 +151,19 @@ interface WeatherForecastDayApi {
   hourly_cloud?: WeatherHourlyCloudApi[];
 }
 
+interface WeatherNextHourPointApi {
+  time?: string;
+  chance_pct?: number;
+  mm_per_h?: number;
+}
+
+interface WeatherNextHourApi {
+  start?: string;
+  step_minutes?: number;
+  source?: string;
+  points?: WeatherNextHourPointApi[];
+}
+
 interface WeatherForecastEnvelopeApi {
   provider?: string;
   days?: WeatherForecastDayApi[];
@@ -163,10 +178,87 @@ interface WeatherForecastEnvelopeApi {
     kind?: string;
     is_daylight?: boolean;
   }>;
+  next_hour?: WeatherNextHourApi;
   summary?: string;
   cached?: boolean;
   updated_at?: string;
   ttl_seconds?: number;
+}
+
+/** The nowcast lib/nowcast.ts consumes - see that file and backend/weather_providers.go's top doc comment for the next_hour contract. */
+export interface WeatherNextHour {
+  stepMinutes: number;
+  points: NowcastPoint[];
+  /**
+   * "nowcast" (genuine short-range data) or "hourly" (interpolated from the
+   * hourly model, e.g. Open-Meteo's minutely_15 outside its native-
+   * resolution regions - ADR 0126 addendum). The backend already validates
+   * this (mapWasmFetchForecastOutput hard-errors on anything else, so
+   * next_hour is never sent with a missing/unrecognized source) - a wire
+   * value other than these two exact strings reaching here means something
+   * broke that contract, not a shape to quietly repair, so mapNextHour
+   * below discards the whole next_hour rather than guessing "hourly".
+   */
+  source: 'nowcast' | 'hourly';
+}
+
+/**
+ * Maps the wire next_hour envelope to typed NowcastPoint[]. The backend
+ * already validates this contract end-to-end (weather_providers.go:
+ * next_hour_source is a hard error if missing/unrecognized whenever points
+ * are present, and buildWeatherNextHourResponse never emits an unusable
+ * step - it omits next_hour entirely instead), so a malformed payload
+ * reaching here means something upstream broke the contract, not a shape
+ * the frontend should quietly repair. Any structural problem - a bad or
+ * missing timestamp, a missing mm_per_h, a non-positive/missing
+ * step_minutes, or an unrecognized source - discards the *whole* next_hour
+ * (never a partially-patched one) and console.errors what was wrong, so a
+ * broken nowcast shows as "no nowcast" (the existing, well-tested
+ * hourly/daily fallback) rather than a silently-repaired strip, and the
+ * break is diagnosable instead of silent (AGENTS.md fallback policy).
+ */
+function mapNextHour(raw: WeatherNextHourApi | undefined): WeatherNextHour | null {
+  if (!raw) return null;
+  if (!Array.isArray(raw.points) || raw.points.length === 0) {
+    return null;
+  }
+
+  if (typeof raw.step_minutes !== 'number' || raw.step_minutes <= 0) {
+    console.error('next_hour: malformed step_minutes, dropping the nowcast', raw.step_minutes);
+    return null;
+  }
+  if (raw.source !== 'nowcast' && raw.source !== 'hourly') {
+    console.error('next_hour: missing/unrecognized source, dropping the nowcast', raw.source);
+    return null;
+  }
+
+  const points: NowcastPoint[] = [];
+  for (const p of raw.points) {
+    if (typeof p.time !== 'string') {
+      console.error('next_hour: point missing a time, dropping the nowcast', p);
+      return null;
+    }
+    const time = new Date(p.time);
+    if (Number.isNaN(time.getTime())) {
+      console.error('next_hour: point has an unparseable time, dropping the nowcast', p.time);
+      return null;
+    }
+    if (typeof p.mm_per_h !== 'number') {
+      console.error('next_hour: point missing mm_per_h, dropping the nowcast', p);
+      return null;
+    }
+    points.push({
+      time,
+      chancePct: sentinelValueOrNull(p.chance_pct),
+      mmPerH: p.mm_per_h,
+    });
+  }
+
+  return {
+    stepMinutes: raw.step_minutes,
+    points,
+    source: raw.source,
+  };
 }
 
 export function useWeatherForecast(refreshIntervalSeconds = 3600) {
@@ -174,6 +266,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hourlyToday, setHourlyToday] = useState<WeatherHourlyEntry[]>([]);
+  const [nextHour, setNextHour] = useState<WeatherNextHour | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [provider, setProvider] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
@@ -282,6 +375,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 isDaylight: Boolean(entry.is_daylight),
               }))
             : []);
+          setNextHour(mapNextHour(payload.next_hour));
           setSummary(typeof payload.summary === 'string' ? payload.summary : null);
           setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
           setIsCached(Boolean(payload.cached));
@@ -289,6 +383,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
           setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
         } else {
           setHourlyToday([]);
+          setNextHour(null);
           setSummary(null);
           setProvider(null);
           setIsCached(false);
@@ -310,5 +405,5 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
     return () => clearInterval(interval);
   }, [fetchForecast, refreshIntervalSeconds]);
 
-  return { forecast, hourlyToday, summary, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
+  return { forecast, hourlyToday, nextHour, summary, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
 }

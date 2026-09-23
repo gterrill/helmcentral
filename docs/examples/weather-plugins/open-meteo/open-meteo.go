@@ -67,6 +67,45 @@ type openMeteoResponse struct {
 		RelativeHumidity2m []*float64 `json:"relative_humidity_2m"`
 		Visibility         []*float64 `json:"visibility"`
 	} `json:"hourly"`
+	// Minutely15 is Open-Meteo's 15-minute-resolution nowcast dataset,
+	// mapped onto this plugin's next_hour output below. Requesting
+	// `minutely_15=precipitation,precipitation_probability` never gets a 400
+	// (an invalid variable name does) - but that does NOT mean both
+	// variables are genuine 15-minute data everywhere. Per Open-Meteo's own
+	// forecast API docs (https://open-meteo.com/en/docs, confirmed
+	// 2026-09-23): "This data is based on NOAA HRRR model for North America
+	// and DWD ICON-D2 and Météo-France AROME model for Central Europe. If
+	// 15-minutely data is requested for other regions data is interpolated
+	// from 1-hourly to 15-minutely." precipitation_probability additionally
+	// is not listed in the 15-Minutely Weather Variables table AT ALL, in
+	// any region - only the hourly resolution documents a
+	// precipitation_probability ("Preceding hour probability"). Verified
+	// live at Mackay (lat -18.65, lon 146.48, outside both native-resolution
+	// regions, 2026-09-23): minutely_15.precipitation_probability stepped
+	// smoothly between the surrounding hourly values (84, 82, 80 -> 84, 83,
+	// 83, 82, 82, 81...), exactly the shape linear interpolation produces,
+	// and minutely_15.precipitation read 0.0 at a point where the hourly
+	// figure was 0.1 - both confirming this window's data was backfilled
+	// from the hourly model, not independently observed/modelled at 15-
+	// minute resolution. nextHourSourceForPosition below reports which case
+	// applies for a given position ("nowcast" inside the two native-
+	// resolution regions, "hourly" everywhere else) so the host/frontend can
+	// caption it honestly instead of presenting interpolated data as a true
+	// short-range nowcast (AGENTS.md fallback policy).
+	// Precipitation/PrecipitationProbability are POINTER-ELEMENT slices,
+	// deliberately - matching Hourly.RelativeHumidity2m/Visibility above,
+	// and for the same reason: a plain []float64/[]int silently decodes a
+	// real JSON null to 0.0/0, which is exactly wrong here. A null
+	// precipitation_probability means "no probability at this resolution"
+	// (the plugin's own existing -1 sentinel convention for that field
+	// below); a null precipitation means "no reading for this point at
+	// all", which is NOT the same as "0 mm/h falling" - see
+	// parseOpenMeteoForecast's mapping below for how each is handled.
+	Minutely15 *struct {
+		Time                     []string   `json:"time"`
+		Precipitation            []*float64 `json:"precipitation"`
+		PrecipitationProbability []*int     `json:"precipitation_probability"`
+	} `json:"minutely_15"`
 }
 
 // --- Helmcentral plugin contract shapes (backend/wasm_weather_provider.go) ---
@@ -112,6 +151,7 @@ func openMeteoRequestURL(input wasmFetchForecastInput) string {
 			"&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability"+
 			"&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day,relative_humidity_2m,visibility"+
 			"&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset"+
+			"&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=8"+
 			"&wind_speed_unit=ms&timezone=%s&forecast_days=%d",
 		input.Lat, input.Lon, neturl.QueryEscape(strings.TrimSpace(input.Timezone)), days,
 	)
@@ -171,10 +211,76 @@ type wasmWeatherHourOutput struct {
 	VisibilityM *float64 `json:"visibility_m"`
 }
 
+// wasmWeatherNextHourOutput mirrors backend/wasm_weather_provider.go's
+// wasmWeatherNextHourOutput - see that file's doc comment and
+// backend/weather_providers.go's top doc comment for the full next_hour
+// contract. PrecipitationChancePct keeps the same negative-is-absent
+// convention as this contract's other precipitation_chance_pct fields:
+// usually a plain 0-100 value straight from Open-Meteo's
+// precipitation_probability, but -1 whenever that entry is a real JSON null
+// (see openMeteoResponse.Minutely15's doc comment on the pointer-element
+// slices this is parsed from) - whether a real (non-sentinel) value is
+// genuine 15-minute data or interpolated from the hourly model is exactly
+// what NextHourSource (below) reports, not something PrecipitationChancePct
+// itself needs a second signal for.
+type wasmWeatherNextHourOutput struct {
+	Time                   string  `json:"time"`
+	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	PrecipitationMMPerH    float64 `json:"precipitation_mm_per_h"`
+}
+
 type wasmFetchForecastOutput struct {
-	Current wasmWeatherCurrentOutput `json:"current"`
-	Days    []wasmWeatherDayOutput   `json:"days"`
-	Hourly  []wasmWeatherHourOutput  `json:"hourly"`
+	Current  wasmWeatherCurrentOutput    `json:"current"`
+	Days     []wasmWeatherDayOutput      `json:"days"`
+	Hourly   []wasmWeatherHourOutput     `json:"hourly"`
+	NextHour []wasmWeatherNextHourOutput `json:"next_hour"`
+	// NextHourSource is "nowcast" or "hourly" whenever NextHour is
+	// non-empty, set by nextHourSourceForPosition below from the response's
+	// own echoed latitude/longitude. See backend/weather_providers.go's top
+	// doc comment's next_hour_source section.
+	NextHourSource string `json:"next_hour_source,omitempty"`
+}
+
+// --- next_hour_source region classification ---
+//
+// Conservative bounding boxes for the two regions Open-Meteo documents as
+// having native 15-minute-resolution minutely_15 data (see
+// openMeteoResponse.Minutely15's doc comment for the exact quoted source).
+// Both boxes are drawn slightly INSIDE each model's own published grid
+// extent - a position near a model's edge is exactly where "nowcast" would
+// be the least defensible claim, and the fallback policy's bias is toward
+// the honest "hourly" label over the flattering one.
+type geoBox struct{ MinLat, MaxLat, MinLon, MaxLon float64 }
+
+func (b geoBox) contains(lat, lon float64) bool {
+	return lat >= b.MinLat && lat <= b.MaxLat && lon >= b.MinLon && lon <= b.MaxLon
+}
+
+var (
+	// North America / NOAA HRRR: documented CONUS grid roughly 21.1-52.6N,
+	// 134.1-59.1W (registry.opendata.aws/noaa-hrrr-pds; gribstream.com/models/hrrr).
+	northAmericaMinutely15Box = geoBox{MinLat: 22.0, MaxLat: 52.0, MinLon: -133.0, MaxLon: -60.0}
+	// Central Europe / DWD ICON-D2 (+ Météo-France AROME): ICON-D2's
+	// documented public regular-grid product spans 43.18-58.08N,
+	// 3.94W-20.34E (dwd.de). AROME's own French domain is not separately
+	// boxed here - Open-Meteo's docs name both models together as one
+	// "Central Europe" coverage claim, and ICON-D2's grid is the one this
+	// plugin has a precise documented extent for; erring toward "hourly" at
+	// AROME's western fringe (which ICON-D2 doesn't reach) is the
+	// conservative direction, not a gap.
+	centralEuropeMinutely15Box = geoBox{MinLat: 43.5, MaxLat: 58.0, MinLon: -3.5, MaxLon: 20.0}
+)
+
+// nextHourSourceForPosition reports whether a position falls inside
+// Open-Meteo's native 15-minute-resolution minutely_15 coverage ("nowcast")
+// or is interpolated from the hourly model ("hourly") - see the two box
+// definitions above and openMeteoResponse.Minutely15's doc comment for the
+// documented source and the live Mackay verification.
+func nextHourSourceForPosition(lat, lon float64) string {
+	if northAmericaMinutely15Box.contains(lat, lon) || centralEuropeMinutely15Box.contains(lat, lon) {
+		return "nowcast"
+	}
+	return "hourly"
 }
 
 // wmoCodeToCondition maps WMO weather codes to Helmcentral's canonical
@@ -360,6 +466,78 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 				VisibilityM:            visibilityM,
 			}
 			out.Hourly = append(out.Hourly, hour)
+		}
+	}
+
+	// Parse minutely_15 nowcast data. Nil/empty means this response has no
+	// nowcast coverage (an older cached response, or a position whose
+	// underlying model lacks 15-minute resolution) - out.NextHour simply
+	// stays nil/empty, never backfilled from hourly data (AGENTS.md
+	// fallback policy: "no nowcast" must be shown honestly).
+	if resp.Minutely15 != nil && len(resp.Minutely15.Time) > 0 {
+		out.NextHour = make([]wasmWeatherNextHourOutput, 0, len(resp.Minutely15.Time))
+		for i := 0; i < len(resp.Minutely15.Time); i++ {
+			rawPointTime, err := parseOpenMeteoLocalTime(resp.Minutely15.Time[i], "2006-01-02T15:04", resp.UTCOffsetSeconds)
+			if err != nil {
+				return out, fmt.Errorf("failed to parse minutely_15.time[%d]: %w", i, err)
+			}
+			// Open-Meteo documents minutely_15.precipitation as a "Preceding
+			// 15 minutes sum" (https://open-meteo.com/en/docs, 15-Minutely
+			// Weather Variables table, confirmed 2026-09-23): the value at
+			// timestamp T covers [T-15min, T), not [T, T+15min). This
+			// plugin's contract says the opposite - a next_hour point's
+			// "time" marks the START of forward coverage (see
+			// backend/weather_providers.go's next_hour doc comment) - so
+			// Open-Meteo's own timestamp is one step LATE for this contract
+			// and must be shifted back by one 15-minute step. Without this,
+			// rain that has been falling since 12:00 (and is reported at
+			// the T=12:15 point) reads as "expected in 10 minutes" at
+			// 12:05 instead of "already falling".
+			//
+			// Open-Meteo does not separately document a convention for
+			// minutely_15's precipitation_probability - it is not listed in
+			// the 15-Minutely Weather Variables table at all (only the
+			// hourly resolution's own precipitation_probability is
+			// documented, as "Preceding hour probability"). Since this
+			// contract carries one Time per point covering both fields,
+			// shifting the point's Time is the only consistent treatment
+			// available, and matches the "preceding window" convention
+			// Open-Meteo uses everywhere else it documents one.
+			pointTime := rawPointTime.Add(-15 * time.Minute)
+
+			// A null precipitation reading means Open-Meteo has no data for
+			// this point at all - not a genuine 0 mm/h. This plugin's
+			// next_hour contract has no per-point "no data" flag for
+			// PrecipitationMMPerH (unlike PrecipitationChancePct's own
+			// negative-sentinel convention), so the only honest way to carry
+			// "no data" through is to omit the point entirely - the
+			// host/frontend already treat a gap between next_hour points as
+			// "nothing known there", never as "confirmed dry" (see
+			// lib/nowcast.ts's buildNowcastBars, which only ever draws bars
+			// for the points it's actually given).
+			if i >= len(resp.Minutely15.Precipitation) || resp.Minutely15.Precipitation[i] == nil {
+				continue
+			}
+			// mm per 15 minutes -> mm/h: 4 quarter-hours per hour.
+			mmPerH := *resp.Minutely15.Precipitation[i] * 4
+
+			chancePct := -1.0
+			if i < len(resp.Minutely15.PrecipitationProbability) && resp.Minutely15.PrecipitationProbability[i] != nil {
+				chancePct = float64(*resp.Minutely15.PrecipitationProbability[i])
+			}
+
+			out.NextHour = append(out.NextHour, wasmWeatherNextHourOutput{
+				Time:                   pointTime.UTC().Format(time.RFC3339),
+				PrecipitationChancePct: chancePct,
+				PrecipitationMMPerH:    mmPerH,
+			})
+		}
+		// Only claim a source when at least one point survived the null
+		// check above - a next_hour_source with zero actual points is
+		// meaningless (the host doesn't look at it when next_hour is empty
+		// either way, but there's no reason to set a stale/misleading value).
+		if len(out.NextHour) > 0 {
+			out.NextHourSource = nextHourSourceForPosition(resp.Latitude, resp.Longitude)
 		}
 	}
 

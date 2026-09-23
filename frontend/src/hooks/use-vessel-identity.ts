@@ -68,6 +68,17 @@ export function formatDate(date: Date, options?: { compact?: boolean; timeZone?:
   ).format(date)
 }
 
+/** 3-letter weekday in the given zone ("Thu"), for clock-tile.tsx's ETA line: HelmCast prefixed a cross-day ETA with the weekday rather than leaving it looking like today. */
+export function formatWeekday(date: Date, timeZone?: string): string {
+  return dateTimeFormat({ weekday: 'short' }, timeZone).format(date)
+}
+
+/** Whether `a` and `b` fall on the same calendar date in the given zone - the test clock-tile.tsx runs to decide whether an ETA needs formatWeekday's prefix. */
+export function isSameLocalDate(a: Date, b: Date, timeZone?: string): boolean {
+  const key = dateTimeFormat({ year: 'numeric', month: '2-digit', day: '2-digit' }, timeZone)
+  return key.format(a) === key.format(b)
+}
+
 // ---- shared store (ADR: same module-singleton shape as use-app-config.ts
 // and use-telemetry-stream.ts) ----------------------------------------------
 //

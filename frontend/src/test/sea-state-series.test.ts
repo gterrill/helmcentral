@@ -203,4 +203,40 @@ describe('buildSeaStateSeries', () => {
     expect(series).toHaveLength(48)
     expect(series[47].dayKey).toBe('d1')
   })
+
+  // The merged forecast-conditions tile (ADR 0125) shows tomorrow through
+  // five days out, matching forecast-days-tile.tsx's own card row - so the
+  // chart needs to start at forecastDays index 1, not 0.
+  describe('startDay', () => {
+    it('skips the leading days and starts the series at forecastDays[startDay]', () => {
+      const forecastDays = Array.from({ length: 6 }, (_, d) => fullDayWind(`d${d}`))
+      const waveDays = Array.from({ length: 6 }, (_, d) => fullDayWave(`d${d}`))
+
+      const series = buildSeaStateSeries(forecastDays, waveDays, 5, 1)
+      expect(series).toHaveLength(120)
+      expect(series[0].dayKey).toBe('d1')
+      expect(series[0].index).toBe(0)
+      expect(series[119].dayKey).toBe('d5')
+    })
+
+    it('defaults to 0, matching the pre-existing behaviour when omitted', () => {
+      const forecastDays = Array.from({ length: 5 }, (_, d) => fullDayWind(`d${d}`))
+      const waveDays = Array.from({ length: 5 }, (_, d) => fullDayWave(`d${d}`))
+
+      const series = buildSeaStateSeries(forecastDays, waveDays, 5)
+      expect(series[0].dayKey).toBe('d0')
+    })
+
+    it('stops at the real days available when forecastDays has fewer than startDay + dayCount entries', () => {
+      // Only 3 days exist (d0..d2); starting at index 1 with dayCount 5
+      // asks for d1..d5, but only d1 and d2 are real.
+      const forecastDays = [fullDayWind('d0'), fullDayWind('d1'), fullDayWind('d2')]
+      const waveDays = [fullDayWave('d0'), fullDayWave('d1'), fullDayWave('d2')]
+
+      const series = buildSeaStateSeries(forecastDays, waveDays, 5, 1)
+      expect(series).toHaveLength(48)
+      expect(series[0].dayKey).toBe('d1')
+      expect(series[47].dayKey).toBe('d2')
+    })
+  })
 })

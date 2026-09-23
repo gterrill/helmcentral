@@ -201,12 +201,19 @@ tendency table, mostly enabled. See [Alarms](alarms.md).
 
 The forecast panel is the full picture; the dashboard carries condensed
 versions of the same data as ordinary tiles. **Current Conditions** shows
-apparent wind and outside temperature against today's forecast range.
-**Forecast** lists five days ahead with condition, high and low. **Sea
-State** draws the same wind, gust and wave-height series this page does,
-steepness-coloured the same way, across five days at once. **Clock** shows
-sunrise, sunset and moon phase alongside the time. None of the four
-replace this page: none show the warning signs, the largest-wave figure or
+apparent wind and outside temperature against today's forecast range, plus
+whether rain is likely in the next hour, when it starts and how heavy -
+minute by minute with Apple WeatherKit, in coarser fifteen-minute steps with
+Open-Meteo over North America and central Europe. Elsewhere, Open-Meteo's
+near-term strip is built from the hourly outlook rather than a true
+short-range reading, and is labelled "hourly forecast" so it reads as what
+it is rather than a promise of minute-by-minute accuracy it can't back up.
+Dropped in favour of the plain hourly outlook wherever neither provider has
+any near-term coverage at all. **Forecast Conditions** lists the next
+five days with condition, high and low, and under them draws the same wind,
+gust and wave-height series this page does, steepness-coloured the same way,
+each day lined up under its own card. **Clock** shows sunrise, sunset and
+moon phase alongside the time. None of the three replace this page: none show the warning signs, the largest-wave figure or
 the upper-air outlook. They exist for a glance that doesn't want the
 detail, particularly on a [wall
 display](../how-to/set-up-a-wall-display.md), which has no room for this

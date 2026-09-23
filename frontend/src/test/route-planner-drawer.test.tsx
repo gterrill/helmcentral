@@ -42,7 +42,7 @@ function renderDrawer(overrides: Partial<Parameters<typeof RoutePlannerDrawer>[0
       deleteRoute={vi.fn()}
       dashboardRouteId={null}
       onSetDashboardRouteId={vi.fn()}
-      activationStatus={{ state: 'inactive' }}
+      activationStatus={{ state: 'inactive', destination: null }}
       activating={false}
       deactivating={false}
       activateError={null}
@@ -61,7 +61,7 @@ describe('RoutePlannerDrawer activation controls', () => {
   })
 
   it('shows Deactivate and an ACTIVE badge on the active route only', () => {
-    renderDrawer({ activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false } })
+    renderDrawer({ activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false, destination: null } })
 
     expect(screen.getByRole('button', { name: 'Deactivate Route A' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Activate Route B' })).toBeInTheDocument()
@@ -80,7 +80,7 @@ describe('RoutePlannerDrawer activation controls', () => {
   it('calls onDeactivate when Deactivate is clicked', async () => {
     const onDeactivate = vi.fn().mockResolvedValue(true)
     renderDrawer({
-      activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false },
+      activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false, destination: null },
       onDeactivate,
     })
 
@@ -108,7 +108,7 @@ describe('RoutePlannerDrawer activation controls', () => {
   })
 
   it('shows a header note when an unrecognized route is active', () => {
-    const status: ActiveRouteStatus = { state: 'active', routeId: null, pointIndex: 0, reverse: false }
+    const status: ActiveRouteStatus = { state: 'active', routeId: null, pointIndex: 0, reverse: false, destination: null }
     renderDrawer({ activationStatus: status })
     expect(screen.getByText(/isn't one of your saved routes/)).toBeInTheDocument()
     expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument()
@@ -118,7 +118,7 @@ describe('RoutePlannerDrawer activation controls', () => {
     const onSetDashboardRouteId = vi.fn()
     renderDrawer({
       onSetDashboardRouteId,
-      activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false },
+      activationStatus: { state: 'active', routeId: 'a', pointIndex: 0, reverse: false, destination: null },
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Route A on dashboard' }))

@@ -134,10 +134,29 @@ type wasmWeatherHourOutput struct {
 	VisibilityM *float64 `json:"visibility_m"`
 }
 
+// wasmWeatherNextHourOutput mirrors one entry of the guest's optional
+// fetch_forecast "next_hour" field - see weather_providers.go's top doc
+// comment for the full contract. PrecipitationChancePct keeps the
+// negative-is-absent convention every other precipitation_chance_pct field
+// in this contract uses; the host does not clamp/normalize it the way
+// sentinelPrecipitationPct does for current/days/hourly, since a negative
+// value here means "this provider's nowcast has no probability at this
+// resolution" and must survive to the wire, not collapse to a false 0%.
+type wasmWeatherNextHourOutput struct {
+	Time                   string  `json:"time"`
+	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	PrecipitationMMPerH    float64 `json:"precipitation_mm_per_h"`
+}
+
 type wasmFetchForecastOutput struct {
-	Current wasmWeatherCurrentOutput `json:"current"`
-	Days    []wasmWeatherDayOutput   `json:"days"`
-	Hourly  []wasmWeatherHourOutput  `json:"hourly"`
+	Current  wasmWeatherCurrentOutput    `json:"current"`
+	Days     []wasmWeatherDayOutput      `json:"days"`
+	Hourly   []wasmWeatherHourOutput     `json:"hourly"`
+	NextHour []wasmWeatherNextHourOutput `json:"next_hour"`
+	// NextHourSource is "nowcast" or "hourly" - required whenever NextHour is
+	// non-empty (mapWasmFetchForecastOutput fails fast on anything else) -
+	// see weather_providers.go's top doc comment's next_hour_source section.
+	NextHourSource string `json:"next_hour_source"`
 }
 
 // parseRequiredTime parses an RFC3339 timestamp that the guest contract
@@ -237,6 +256,35 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 			HumidityPct:            sentinelHumidityPct(h.HumidityPct),
 			VisibilityNm:           sentinelVisibilityNm(h.VisibilityM),
 		})
+	}
+
+	bundle.NextHour = make([]weatherNextHourPoint, 0, len(out.NextHour))
+	for i, n := range out.NextHour {
+		pointTime, err := parseRequiredTime(fmt.Sprintf("next_hour[%d].time", i), n.Time)
+		if err != nil {
+			return weatherForecastBundle{}, err
+		}
+		bundle.NextHour = append(bundle.NextHour, weatherNextHourPoint{
+			Time:                   pointTime,
+			PrecipitationChancePct: n.PrecipitationChancePct,
+			PrecipitationMMPerH:    n.PrecipitationMMPerH,
+		})
+	}
+
+	// next_hour_source is required whenever next_hour is non-empty - an
+	// unknown or missing value here is a plugin bug, not something to
+	// silently default (AGENTS.md fallback policy; see
+	// weather_providers.go's top doc comment's next_hour_source section).
+	if len(bundle.NextHour) > 0 {
+		switch out.NextHourSource {
+		case "nowcast", "hourly":
+			bundle.NextHourSource = out.NextHourSource
+		default:
+			return weatherForecastBundle{}, fmt.Errorf(
+				"next_hour present but next_hour_source is missing/unknown: %q (must be \"nowcast\" or \"hourly\")",
+				out.NextHourSource,
+			)
+		}
 	}
 
 	return bundle, nil

@@ -29,18 +29,26 @@ function sentinelOrNull(value: number | undefined): number | null {
  * feed must read as null fields, never as a shortened series or a
  * fabricated calm reading.
  *
- * When `forecastDays` itself has fewer than `dayCount` entries, the series
- * stops at however many real days exist rather than padding the remainder
- * with fabricated all-null days: a day that hasn't arrived from the
- * forecast yet is a different thing from a day whose feed went dead, and
- * only the latter gets the null-fields treatment above.
+ * When `forecastDays` itself has fewer than `startDay + dayCount` entries,
+ * the series stops at however many real days exist rather than padding the
+ * remainder with fabricated all-null days: a day that hasn't arrived from
+ * the forecast yet is a different thing from a day whose feed went dead,
+ * and only the latter gets the null-fields treatment above.
+ *
+ * `startDay` skips the leading days of `forecastDays` before counting
+ * `dayCount` from there - the merged forecast-conditions tile (ADR 0125)
+ * shows tomorrow through five days out, matching its card row, so it calls
+ * this with `startDay: 1` rather than slicing the result itself (which
+ * would leave the returned `index`/`dayKey` pairing still keyed to
+ * `forecastDays[0]`, the day the tile never shows).
  */
 export function buildSeaStateSeries(
   forecastDays: WeatherForecastDay[],
   waveDays: WaveForecastDay[],
   dayCount = 5,
+  startDay = 0,
 ): SeaStatePoint[] {
-  const days = forecastDays.slice(0, dayCount)
+  const days = forecastDays.slice(startDay, startDay + dayCount)
   const points: SeaStatePoint[] = []
 
   days.forEach((day, dayIndex) => {

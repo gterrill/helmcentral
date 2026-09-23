@@ -421,6 +421,117 @@ func TestMapForecastHours_MissingHumidityAndVisibilityYieldNil(t *testing.T) {
 	}
 }
 
+// --- forecastNextHour (nowcast) ---
+
+// TestParseWeatherKitResponse_MapsNextHourMinutes pins the happy path: the
+// sample fixture's forecastNextHour.minutes[] maps onto next_hour in the
+// same order, chance converted from a 0-1 fraction to a percentage (reusing
+// precipitationChancePct, same as current/days/hourly), and intensity
+// passed through in mm/hr unconverted.
+func TestParseWeatherKitResponse_MapsNextHourMinutes(t *testing.T) {
+	body, err := os.ReadFile("testdata/weatherkit_response_sample.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+
+	out, err := parseWeatherKitResponse(body, 0)
+	if err != nil {
+		t.Fatalf("parseWeatherKitResponse returned error: %v", err)
+	}
+
+	if len(out.NextHour) != 5 {
+		t.Fatalf("expected 5 next_hour minutes, got %d", len(out.NextHour))
+	}
+	if out.NextHour[0].Time != "2026-07-19T10:00:00Z" {
+		t.Errorf("expected next_hour[0].time=2026-07-19T10:00:00Z, got %q", out.NextHour[0].Time)
+	}
+	// 0.1 fraction -> 10 pct
+	if out.NextHour[0].PrecipitationChancePct != 10 {
+		t.Errorf("expected next_hour[0].precipitation_chance_pct=10, got %v", out.NextHour[0].PrecipitationChancePct)
+	}
+	if out.NextHour[0].PrecipitationMMPerH != 0 {
+		t.Errorf("expected next_hour[0].precipitation_mm_per_h=0, got %v", out.NextHour[0].PrecipitationMMPerH)
+	}
+	// third minute ramps up: 0.35 -> 35pct, 0.5mm/hr
+	if out.NextHour[2].PrecipitationChancePct != 35 {
+		t.Errorf("expected next_hour[2].precipitation_chance_pct=35, got %v", out.NextHour[2].PrecipitationChancePct)
+	}
+	if out.NextHour[2].PrecipitationMMPerH != 0.5 {
+		t.Errorf("expected next_hour[2].precipitation_mm_per_h=0.5, got %v", out.NextHour[2].PrecipitationMMPerH)
+	}
+	if out.NextHour[3].Time != "2026-07-19T10:03:00Z" {
+		t.Errorf("expected next_hour[3].time=2026-07-19T10:03:00Z, got %q", out.NextHour[3].Time)
+	}
+	// forecastNextHour is always WeatherKit's genuine short-range nowcast,
+	// never interpolated from forecastHourly - see backend/weather_providers.go's
+	// next_hour_source contract section.
+	if out.NextHourSource != "nowcast" {
+		t.Errorf("expected next_hour_source=nowcast, got %q", out.NextHourSource)
+	}
+}
+
+// TestParseWeatherKitResponse_NoNextHourCoverageYieldsEmptyNextHour covers
+// WeatherKit's real behaviour outside forecastNextHour's coverage area: the
+// key is omitted from the response entirely (confirmed by
+// weatherkit_response_dry_nearterm.json, a live capture with no
+// forecastNextHour block). That must map to an empty/nil next_hour, never
+// an error and never a fabricated dry window - see AGENTS.md's fallback
+// policy ("a provider that doesn't supply next-hour data means 'no
+// nowcast'").
+func TestParseWeatherKitResponse_NoNextHourCoverageYieldsEmptyNextHour(t *testing.T) {
+	body, err := os.ReadFile("testdata/weatherkit_response_dry_nearterm.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+
+	out, err := parseWeatherKitResponse(body, 0)
+	if err != nil {
+		t.Fatalf("parseWeatherKitResponse returned error: %v", err)
+	}
+	if len(out.NextHour) != 0 {
+		t.Fatalf("expected no next_hour minutes for a response with no forecastNextHour block, got %d", len(out.NextHour))
+	}
+	if out.NextHourSource != "" {
+		t.Fatalf("expected next_hour_source to stay empty when there is no next_hour coverage, got %q", out.NextHourSource)
+	}
+}
+
+// TestMapForecastNextHour_MissingPrecipitationChanceBecomesSentinel mirrors
+// the hourly/daily/current absent-chance tests: a minute with no
+// precipitationChance must map to the -1 sentinel, never a fabricated 0%.
+func TestMapForecastNextHour_MissingPrecipitationChanceBecomesSentinel(t *testing.T) {
+	minutes := mapForecastNextHour([]weatherKitNextHourMinute{
+		{StartTime: "2026-07-19T10:00:00Z"}, // no precipitationChance/precipitationIntensity
+	})
+	if len(minutes) != 1 {
+		t.Fatalf("expected 1 minute, got %d", len(minutes))
+	}
+	if minutes[0].PrecipitationChancePct != -1 {
+		t.Errorf("expected a missing next-hour precipitationChance to map to -1, got %v", minutes[0].PrecipitationChancePct)
+	}
+	if minutes[0].PrecipitationMMPerH != 0 {
+		t.Errorf("expected a missing next-hour precipitationIntensity to map to 0, got %v", minutes[0].PrecipitationMMPerH)
+	}
+}
+
+// TestMapForecastNextHour_SkipsMinutesMissingStartTime mirrors
+// mapForecastHours' handling of a missing forecastStart - next_hour is
+// optional nowcast data, so a malformed minute is dropped, not a hard
+// parseWeatherKitResponse error.
+func TestMapForecastNextHour_SkipsMinutesMissingStartTime(t *testing.T) {
+	chance := 0.2
+	minutes := mapForecastNextHour([]weatherKitNextHourMinute{
+		{PrecipitationChance: &chance}, // no startTime
+		{StartTime: "2026-07-19T10:01:00Z", PrecipitationChance: &chance},
+	})
+	if len(minutes) != 1 {
+		t.Fatalf("expected the entry with no startTime to be skipped, got %d entries", len(minutes))
+	}
+	if minutes[0].Time != "2026-07-19T10:01:00Z" {
+		t.Errorf("expected the surviving minute's time to be 2026-07-19T10:01:00Z, got %q", minutes[0].Time)
+	}
+}
+
 func TestParseWeatherKitResponse_CapsDaysAtInputDaysWhenPositive(t *testing.T) {
 	body, err := os.ReadFile("testdata/weatherkit_response_sample.json")
 	if err != nil {
@@ -472,8 +583,8 @@ func TestWeatherKitRequestURL_UsesCallerTimezoneAndMergedDataSets(t *testing.T) 
 	if strings.Contains(url, "timezone=UTC") {
 		t.Errorf("expected the hardcoded timezone=UTC to be gone, got: %s", url)
 	}
-	if !strings.Contains(url, "dataSets=currentWeather,forecastDaily,forecastHourly") {
-		t.Errorf("expected request URL to request all three datasets in one call, got: %s", url)
+	if !strings.Contains(url, "dataSets=currentWeather,forecastDaily,forecastHourly,forecastNextHour") {
+		t.Errorf("expected request URL to request all four datasets in one call, got: %s", url)
 	}
 	if !strings.Contains(url, "37.8199") || !strings.Contains(url, "-122.4783") {
 		t.Errorf("expected request URL to contain the lat/lon, got: %s", url)

@@ -417,6 +417,62 @@ func updateTickPlaceName(lat, lon float64) string {
 	return ""
 }
 
+// ── Destination place name (ADR 0125: GET /api/routes/active) ─────────────
+
+// destinationPlaceNameResolve is a single-flight guard for background
+// resolution of the chartplotter destination's place name, mirroring
+// placeNameResolve above but kept on its own flag rather than sharing it:
+// GET /api/routes/active is polled independently of the main 5s vessel
+// tick, and sharing one in-flight guard between the two would let a slow
+// destination lookup silently starve the tick's own resolution of its turn
+// (or the reverse). Both still share the same underlying placeNameCache and
+// backoff state - only the "one resolve in flight at a time" guard differs.
+var destinationPlaceNameResolve = struct {
+	mu     sync.Mutex
+	active bool
+}{}
+
+func startDestinationPlaceNameResolve(resolve func()) bool {
+	destinationPlaceNameResolve.mu.Lock()
+	if destinationPlaceNameResolve.active {
+		destinationPlaceNameResolve.mu.Unlock()
+		return false
+	}
+	destinationPlaceNameResolve.active = true
+	destinationPlaceNameResolve.mu.Unlock()
+
+	go func() {
+		defer func() {
+			destinationPlaceNameResolve.mu.Lock()
+			destinationPlaceNameResolve.active = false
+			destinationPlaceNameResolve.mu.Unlock()
+		}()
+		resolve()
+	}()
+	return true
+}
+
+// resolveDestinationPlaceName serves the destination name for GET
+// /api/routes/active: cache-first, and never blocking on a live provider
+// call - that endpoint is polled every 15s and must answer immediately. A
+// cache miss starts a single background resolve for that cell (deduped by
+// destinationPlaceNameResolve, so a lookup slower than the poll interval
+// doesn't stack a goroutine per poll) and returns "" for this call; the next
+// poll picks up the cached name once it lands. A provider failure is
+// logged and backed off inside resolveAndCachePlaceName - nothing here
+// masks it, it just isn't this call's to report.
+func resolveDestinationPlaceName(lat, lon float64) string {
+	key := placeNameCacheKey(lat, lon)
+	if name, ok := placeNameCache.get(key); ok {
+		return name
+	}
+
+	startDestinationPlaceNameResolve(func() {
+		resolveAndCachePlaceName(placeNameProviderResolve, lat, lon)
+	})
+	return ""
+}
+
 // ── HTTP handler ────────────────────────────────────────────────────────
 
 // placeName is the GET /api/place-name handler. It is a pure cache read:

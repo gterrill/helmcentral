@@ -64,22 +64,23 @@ describe('the fuel rail', () => {
 })
 
 /**
- * The four wall-display tiles (ADR 0092). Each minH is small enough to fit
- * inside the narrow strip's seven-row, 344px fold budget on its own - a tile sized
- * past that could never appear on the wall at all, only ever on the ordinary
- * dashboard, which would defeat the point of building it for the wall.
+ * The three wall-display tiles (ADR 0092, ADR 0125 - forecast-days and
+ * sea-state merged into forecast-conditions). Each minH is small enough to
+ * fit inside the narrow strip's seven-row, 344px fold budget on its own - a
+ * tile sized past that could never appear on the wall at all, only ever on
+ * the ordinary dashboard, which would defeat the point of building it for
+ * the wall.
  */
 describe('the wall-display tiles', () => {
   test.each([
     ['clock', { minW: 2, minH: 6 }],
     ['current-conditions', { minW: 3, minH: 6 }],
-    ['forecast-days', { minW: 3, minH: 4 }],
-    ['sea-state', { minW: 4, minH: 5 }],
+    ['forecast-conditions', { minW: 4, minH: 6 }],
   ] as const)('%s has the constraint the wall-display layout was authored against', (id, expected) => {
     expect(WIDGET_CONSTRAINTS[id]).toEqual(expected)
   })
 
-  test.each(['clock', 'current-conditions', 'forecast-days', 'sea-state'] as const)(
+  test.each(['clock', 'current-conditions', 'forecast-conditions'] as const)(
     '%s fits inside the narrow-strip fold on its own',
     (id) => {
       const minH = WIDGET_CONSTRAINTS[id]!.minH!

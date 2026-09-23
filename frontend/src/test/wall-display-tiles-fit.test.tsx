@@ -3,17 +3,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
-import { ForecastDaysTile } from '@/components/forecast-days-tile'
-import { SeaStateTile } from '@/components/sea-state-tile'
+import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
 import { WIDGET_CONSTRAINTS, gridPixelHeight } from '@/components/dashboard-bento-grid'
 import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 import type { WeatherToday } from '@/hooks/use-weather-today'
 
 /**
- * ADR 0092 verification step: none of the four wall-display tiles may need
- * more vertical room than the grid row budget they were registered with
- * (dashboard-bento-grid.tsx's WIDGET_CONSTRAINTS), since a tile that
+ * ADR 0092/0125 verification step: none of the three wall-display tiles may
+ * need more vertical room than the grid row budget they were registered
+ * with (dashboard-bento-grid.tsx's WIDGET_CONSTRAINTS), since a tile that
  * overflows its own minH can never actually fit inside the kiosk's 344px
  * fold - the whole reason these tiles exist.
  *
@@ -148,7 +147,7 @@ describe('wall-display tiles fit their registered grid constraint', () => {
         sunsetTime="7:41PM"
         moonPhase="waxingGibbous"
         placeName="Airlie Beach, Queensland"
-        nextWaypoint={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z'), basis: 'plan' }}
+        tripEta={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z'), basis: 'plan' }}
       />,
       columnsToPx(minW!),
       gridPixelHeight(minH!),
@@ -172,16 +171,11 @@ describe('wall-display tiles fit their registered grid constraint', () => {
     )
   })
 
-  test('forecast-days-tile', () => {
-    const { minW, minH } = WIDGET_CONSTRAINTS['forecast-days']!
+  test('forecast-conditions-tile', () => {
+    const { minW, minH } = WIDGET_CONSTRAINTS['forecast-conditions']!
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((n) => weatherDay({ dayName: n }))
-    renderAtGridBox(<ForecastDaysTile days={days} units="imperial" />, columnsToPx(minW!), gridPixelHeight(minH!))
-  })
-
-  test('sea-state-tile', () => {
-    const { minW, minH } = WIDGET_CONSTRAINTS['sea-state']!
     renderAtGridBox(
-      <SeaStateTile forecast={[weatherDay()]} waveForecastDays={[waveDay()]} waveLoading={false} waveError={null} units="metric" />,
+      <ForecastConditionsTile forecast={days} waveForecastDays={[waveDay()]} waveLoading={false} waveError={null} units="imperial" />,
       columnsToPx(minW!),
       gridPixelHeight(minH!),
     )

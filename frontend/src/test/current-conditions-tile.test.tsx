@@ -145,7 +145,10 @@ describe('CurrentConditionsTile', () => {
     expect(screen.getByLabelText(/obs: 19/i)).toBeInTheDocument()
   })
 
-  test('shows a rain line when the forecast crosses the threshold', () => {
+  // Bottom-half nowcast (ADR 0126): with no `nextHour` prop at all, the tile
+  // falls straight to the hourly/daily fallback cascade (lib/nowcast.ts) and
+  // never draws the strip - see nowcast.test.ts for the cascade's own rules.
+  test('falls back to the hourly rain line when no nowcast is supplied', () => {
     render(
       <CurrentConditionsTile
         depth={5}
@@ -164,59 +167,11 @@ describe('CurrentConditionsTile', () => {
       />,
     )
 
-    expect(screen.getByText(/rain likely from 3PM/i)).toBeInTheDocument()
-    expect(screen.getByText(/60%/)).toBeInTheDocument()
+    expect(screen.getByText(/rain likely from 3pm \(60%\)/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('nowcast-strip')).not.toBeInTheDocument()
   })
 
-  test('shows "Rain likely now" when the first over-threshold bucket is the current hour', () => {
-    // The tile derives nowHour from new Date().getHours() (local time), which
-    // shifts with the machine's timezone even though the fake system time
-    // above is fixed in UTC - so the precip bucket under test has to line up
-    // with whatever hour that resolves to here, not a hardcoded one.
-    const nowHour = new Date().getHours()
-
-    render(
-      <CurrentConditionsTile
-        depth={5}
-        depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
-        weather={weather()}
-        forecast={[
-          day({
-            hourlyPrecip: [
-              { label: 'now', hourOfDay: nowHour, precipChancePct: 50, precipIntensityMm: 1 },
-            ],
-          }),
-        ]}
-        distanceUnits="metric"
-      />,
-    )
-
-    expect(screen.getByText(/rain likely now/i)).toBeInTheDocument()
-    expect(screen.getByText(/50%/)).toBeInTheDocument()
-    expect(screen.queryByText(/rain likely from/i)).not.toBeInTheDocument()
-  })
-
-  test('shows "no rain expected" when the forecast has data but stays under threshold', () => {
-    render(
-      <CurrentConditionsTile
-        depth={5}
-        depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
-        weather={weather()}
-        forecast={[
-          day({ hourlyPrecip: [{ label: '3PM', hourOfDay: 15, precipChancePct: 5, precipIntensityMm: 0 }] }),
-        ]}
-        distanceUnits="metric"
-      />,
-    )
-
-    expect(screen.getByText(/no rain expected/i)).toBeInTheDocument()
-  })
-
-  test('shows a dash for the rain line when the forecast has no precip data at all, never a fabricated no-rain', () => {
+  test('shows a dash when there is no nowcast and no hourly/daily precip data at all, never a fabricated no-rain', () => {
     render(
       <CurrentConditionsTile
         depth={5}
@@ -229,7 +184,151 @@ describe('CurrentConditionsTile', () => {
       />,
     )
 
-    expect(screen.queryByText(/no rain expected/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/rain likely/i)).not.toBeInTheDocument()
+    expect(screen.getByText('—', { selector: 'p' })).toBeInTheDocument()
+    expect(screen.queryByTestId('nowcast-strip')).not.toBeInTheDocument()
+  })
+
+  test('draws the nowcast strip and says "Rain expected now" when the current minute already has signal', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day()]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: now, chancePct: 60, mmPerH: 2.1 },
+            { time: new Date(now.getTime() + 15 * 60000), chancePct: 70, mmPerH: 3 },
+          ],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('nowcast-strip')).toBeInTheDocument()
+    expect(screen.getByText(/rain expected now/i)).toBeInTheDocument()
+    // A genuine nowcast never gets the "hourly forecast" caption.
+    expect(screen.queryByTestId('nowcast-hourly-caption')).not.toBeInTheDocument()
+    expect(screen.queryByText(/hourly forecast/i)).not.toBeInTheDocument()
+  })
+
+  // The strip's plot SVG uses preserveAspectRatio="none" so its bars fill
+  // the tile's full width - correct for rects/lines, but an SVG <text>
+  // sharing that non-uniformly-scaled viewBox would get its glyphs squashed
+  // horizontally. The tick labels must render as plain (undistorted) text
+  // outside the SVG, not as an SVG <text> element.
+  test('renders the nowcast strip tick labels as plain text outside the stretched SVG, not distorted inside it', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day()]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'nowcast',
+          points: [{ time: now, chancePct: 60, mmPerH: 2.1 }],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    const strip = screen.getByTestId('nowcast-strip')
+    expect(strip.querySelector('text')).toBeNull()
+    expect(screen.getByText('Now')).toBeInTheDocument()
+    expect(screen.getByText('20m')).toBeInTheDocument()
+    expect(screen.getByText('40m')).toBeInTheDocument()
+    expect(screen.getByText('60m')).toBeInTheDocument()
+  })
+
+  test('says "Rain expected in N minutes" when the nowcast\'s first signal is a later bucket', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day()]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: now, chancePct: 0, mmPerH: 0 },
+            { time: new Date(now.getTime() + 30 * 60000), chancePct: 55, mmPerH: 1.8 },
+          ],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('nowcast-strip')).toBeInTheDocument()
+    expect(screen.getByText(/rain expected in 30 minutes/i)).toBeInTheDocument()
+  })
+
+  // ADR 0126 addendum: Open-Meteo's minutely_15 is interpolated from the
+  // hourly model outside its two native-resolution regions - the tile must
+  // still draw the strip (operator's decision: keep drawing it) but caption
+  // it honestly, both on the strip itself and in the status line.
+  test('source "hourly": still draws the strip, but captions the line and the strip itself', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day()]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'hourly',
+          points: [
+            { time: now, chancePct: 0, mmPerH: 0 },
+            { time: new Date(now.getTime() + 30 * 60000), chancePct: 55, mmPerH: 1.8 },
+          ],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('nowcast-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('nowcast-hourly-caption')).toBeInTheDocument()
+    expect(screen.getByText(/light rain expected in 30 minutes \(hourly forecast\)/i)).toBeInTheDocument()
+  })
+
+  test('does not draw the strip when the nowcast is entirely dry, falling back to the hourly/daily line instead', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day({ hourlyPrecip: [] })]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: now, chancePct: 0, mmPerH: 0 },
+            { time: new Date(now.getTime() + 15 * 60000), chancePct: 0, mmPerH: 0 },
+          ],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('nowcast-strip')).not.toBeInTheDocument()
+    expect(screen.getByText('—', { selector: 'p' })).toBeInTheDocument()
   })
 })

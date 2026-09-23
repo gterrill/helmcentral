@@ -1134,6 +1134,101 @@ func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
 	}
 }
 
+// ADR 0125 merged forecast-days and sea-state into one forecast-conditions
+// tile and removed both old ids from validDashboardWidgetIDs, but - unlike
+// rode-scope - did not add them to retiredDashboardWidgetIDs. The boat's own
+// "Wall: Conditions" page still held both ids, so validateDashboardWidgets
+// rejected the whole PATCH for that page (same failure mode
+// TestDashboardPages_RetiredWidgetIDStrippedOnLoad covers for rode-scope),
+// until they landed here too.
+func TestDashboardPages_ForecastDaysAndSeaStateStrippedOnLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	pageID := uuid.NewString()
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{
+				ID:   pageID,
+				Name: "Wall: Conditions",
+				Widgets: []dashboardLayoutItem{
+					{ID: "clock", X: 0, Y: 0, W: 4, H: 7},
+					{ID: "forecast-days", X: 4, Y: 0, W: 6, H: 4},
+					{ID: "sea-state", X: 4, Y: 4, W: 6, H: 5},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal saved pages: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write pages file: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	page, ok := dashboardPagesState[pageID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected page to load")
+	}
+	if len(page.Widgets) != 1 {
+		t.Fatalf("expected forecast-days/sea-state stripped leaving 1 widget, got %d: %+v", len(page.Widgets), page.Widgets)
+	}
+	for _, w := range page.Widgets {
+		if w.ID == "forecast-days" || w.ID == "sea-state" {
+			t.Fatalf("expected %q to be stripped from loaded widgets", w.ID)
+		}
+	}
+
+	// The stripped state must be persisted back to disk, not just held in
+	// memory, so a restart doesn't resurrect the retired ids.
+	onDiskBytes, err := os.ReadFile(pagesPath)
+	if err != nil {
+		t.Fatalf("failed to read pages file after load: %v", err)
+	}
+	var onDisk dashboardPagesFile
+	if err := json.Unmarshal(onDiskBytes, &onDisk); err != nil {
+		t.Fatalf("failed to parse pages file after load: %v", err)
+	}
+	if len(onDisk.Pages) != 1 || len(onDisk.Pages[0].Widgets) != 1 {
+		t.Fatalf("expected persisted file to have forecast-days/sea-state stripped, got %+v", onDisk.Pages)
+	}
+
+	// A subsequent PATCH must now succeed - this is the actual bug being
+	// fixed: validateDashboardWidgets previously rejected the whole PATCH
+	// because the saved page still contained the two unknown ids.
+	e := echo.New()
+	newWidgets := []dashboardLayoutItem{
+		{ID: "clock", X: 0, Y: 0, W: 4, H: 7},
+		{ID: "forecast-conditions", X: 4, Y: 0, W: 6, H: 7},
+	}
+	body, err := json.Marshal(map[string]any{"widgets": newWidgets})
+	if err != nil {
+		t.Fatalf("failed to marshal patch body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/dashboard-pages/"+pageID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(pageID)
+
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patch handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected PATCH to succeed with status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // ── the kiosk -> display load-time conversion (multiple-wall-displays plan §1) ─
 //
 // A v1 file's "kiosk"/"kiosk_seconds"/"kiosk_when" keys are absorbed into
@@ -1631,10 +1726,11 @@ func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
 // radar-targets has been a real frontend widget (frontend/src/lib/dashboard-widgets.ts,
 // rendered by App.tsx's renderWidget and constrained in dashboard-bento-grid.tsx)
 // since before this test existed, but was never added to this map - a latent
-// 400 on save for any page that placed it. The four wall-display tiles are new
-// in the same change that fixes that gap.
+// 400 on save for any page that placed it. The three wall-display tiles are new
+// in the same change that fixes that gap. (ADR 0125 merged the original four
+// into three: forecast-days and sea-state became one forecast-conditions tile.)
 func TestValidateDashboardWidgets_AcceptsWallDisplayAndRadarTargetsBuiltins(t *testing.T) {
-	for _, id := range []string{"radar-targets", "clock", "current-conditions", "forecast-days", "sea-state"} {
+	for _, id := range []string{"radar-targets", "clock", "current-conditions", "forecast-conditions"} {
 		widgets := []dashboardLayoutItem{{ID: id, X: 0, Y: 0, W: 4, H: 6}}
 		if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 			t.Errorf("expected builtin id %q to be accepted, got %q", id, msg)

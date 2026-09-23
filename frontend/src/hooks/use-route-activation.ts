@@ -1,9 +1,31 @@
 import { useCallback, useEffect, useState } from 'react'
 
+/** A chartplotter go-to destination with no Helmcentral route behind it (ADR 0125): SignalK's Course API `nextPoint`, reverse-geocoded server-side. `name` is `''` until the backend's cache resolves it - see GET /api/routes/active's own doc comment (backend/route_activation.go). */
+export interface RouteActivationDestination {
+  lat: number
+  lon: number
+  name: string
+}
+
 export type ActiveRouteStatus =
   | { state: 'unknown' }
-  | { state: 'inactive' }
-  | { state: 'active'; routeId: string | null; pointIndex: number; reverse: boolean }
+  | { state: 'inactive'; destination: RouteActivationDestination | null }
+  | {
+      state: 'active'
+      routeId: string | null
+      pointIndex: number
+      reverse: boolean
+      /**
+       * The Course API's nextPoint (ADR 0125), same as the inactive state's
+       * own `destination` - present whenever GET /api/routes/active sent
+       * one, which it does whenever the Course API carries a nextPoint,
+       * REGARDLESS of whether routeId matched a Helmcentral route. A route
+       * activated outside Helmcentral (routeId null here) has no leg-by-leg
+       * ETA to compute, but the chartplotter's own destination is still
+       * available - see App.tsx's clockTripEta.
+       */
+      destination: RouteActivationDestination | null
+    }
 
 interface ActiveRouteResponse {
   active: boolean
@@ -11,6 +33,7 @@ interface ActiveRouteResponse {
   route_name?: string
   point_index?: number
   reverse?: boolean
+  destination?: { lat: number; lon: number; name: string }
 }
 
 interface ErrorResponse {
@@ -34,7 +57,12 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
       }
       const data = (await res.json()) as ActiveRouteResponse
       if (!data.active) {
-        setStatus({ state: 'inactive' })
+        setStatus({
+          state: 'inactive',
+          destination: data.destination
+            ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
+            : null,
+        })
         return
       }
       setStatus({
@@ -42,6 +70,9 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
         routeId: data.route_id ?? null,
         pointIndex: typeof data.point_index === 'number' ? data.point_index : 0,
         reverse: data.reverse === true,
+        destination: data.destination
+          ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
+          : null,
       })
     } catch {
       // Don't assume inactive on a failed poll — the route may still be

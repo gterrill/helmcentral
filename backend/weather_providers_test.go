@@ -362,6 +362,97 @@ func TestWeatherForecast_ReturnsOKWithDayKeyAndNoWaveFields(t *testing.T) {
 	_ = loc
 }
 
+// TestWeatherForecast_IncludesNextHourWhenProviderSuppliesIt is the
+// end-to-end guard that a provider's NextHour points actually reach
+// GET /api/weather-forecast's top-level next_hour field, not just the
+// bundle mapping and response builder in isolation.
+func TestWeatherForecast_IncludesNextHourWhenProviderSuppliesIt(t *testing.T) {
+	withCleanWeatherProviderRegistry(t)
+
+	loc := vesselLocalLocation(153.0)
+	nowLocal := time.Now().In(loc)
+	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+
+	bundle := weatherForecastBundle{
+		Days: []weatherDayPoint{
+			{Start: todayLocalMidnight, Condition: "clear", TempMaxC: 24, TempMinC: 15},
+		},
+		NextHour: []weatherNextHourPoint{
+			{Time: time.Now().UTC(), PrecipitationChancePct: 20, PrecipitationMMPerH: 0},
+			{Time: time.Now().UTC().Add(15 * time.Minute), PrecipitationChancePct: 60, PrecipitationMMPerH: 2.4},
+		},
+		NextHourSource: "hourly",
+		CachedAt:       time.Now().UTC(),
+	}
+	registerWeatherProvider(&stubWeatherProvider{id: "open-meteo", name: "Open-Meteo", ttl: 900, bundle: bundle})
+
+	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
+	defer server.Close()
+	settingsPath := writeWeatherSettings(t, "open-meteo", server.URL)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/weather-forecast", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := weatherForecast(c); err != nil {
+		t.Fatalf("weatherForecast returned error: %v", err)
+	}
+
+	var payload weatherForecastResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload.NextHour == nil {
+		t.Fatalf("expected next_hour to be present, got nil (body: %s)", rec.Body.String())
+	}
+	if len(payload.NextHour.Points) != 2 {
+		t.Fatalf("expected 2 next_hour points, got %d", len(payload.NextHour.Points))
+	}
+	if payload.NextHour.StepMinutes != 15 {
+		t.Fatalf("expected step_minutes 15, got %d", payload.NextHour.StepMinutes)
+	}
+	if payload.NextHour.Source != "hourly" {
+		t.Fatalf("expected next_hour.source to reach the wire, got %q", payload.NextHour.Source)
+	}
+}
+
+// TestWeatherForecast_OmitsNextHourWhenProviderSuppliesNone covers the
+// "no nowcast coverage" case end-to-end: the JSON response must not carry a
+// next_hour key at all, so the frontend can tell "no nowcast here" apart
+// from "nowcast checked, all dry" without inventing either state itself.
+func TestWeatherForecast_OmitsNextHourWhenProviderSuppliesNone(t *testing.T) {
+	withCleanWeatherProviderRegistry(t)
+
+	loc := vesselLocalLocation(153.0)
+	nowLocal := time.Now().In(loc)
+	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+
+	bundle := weatherForecastBundle{
+		Days:     []weatherDayPoint{{Start: todayLocalMidnight, Condition: "clear", TempMaxC: 24, TempMinC: 15}},
+		CachedAt: time.Now().UTC(),
+	}
+	registerWeatherProvider(&stubWeatherProvider{id: "weatherkit", name: "WeatherKit", ttl: 900, bundle: bundle})
+
+	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
+	defer server.Close()
+	settingsPath := writeWeatherSettings(t, "weatherkit", server.URL)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/weather-forecast", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := weatherForecast(c); err != nil {
+		t.Fatalf("weatherForecast returned error: %v", err)
+	}
+	if bodyContains(rec.Body.String(), `"next_hour"`) {
+		t.Fatalf("expected no next_hour key when the provider supplied none, got: %s", rec.Body.String())
+	}
+}
+
 func bodyContains(body, substr string) bool {
 	return len(body) > 0 && (func() bool {
 		for i := 0; i+len(substr) <= len(body); i++ {
@@ -668,6 +759,216 @@ func TestMapWeatherHourlyPrecipitationResponse_PropagatesAbsentAsSentinel(t *tes
 	}
 	if got[2].PrecipitationChancePct != 65 {
 		t.Errorf("expected a real hourly chance to pass through, got %v", got[2].PrecipitationChancePct)
+	}
+}
+
+// --- next_hour (nowcast) ---
+
+// TestBuildWeatherNextHourResponse_NilWhenNoPoints covers both "the provider
+// never sent next_hour" and "the provider sent an empty array": either way
+// the wire response must omit next_hour entirely (nil, so
+// `omitempty` drops the key), never an empty-but-present points array that
+// the frontend could mistake for "checked, found nothing to report" instead
+// of "no nowcast coverage here at all".
+func TestBuildWeatherNextHourResponse_NilWhenNoPoints(t *testing.T) {
+	if got := buildWeatherNextHourResponse(nil, ""); got != nil {
+		t.Fatalf("expected nil for a nil points slice, got %+v", got)
+	}
+	if got := buildWeatherNextHourResponse([]weatherNextHourPoint{}, ""); got != nil {
+		t.Fatalf("expected nil for an empty points slice, got %+v", got)
+	}
+}
+
+// TestBuildWeatherNextHourResponse_InfersStepMinutesFromConsecutiveTimes is
+// the "host infers the step from consecutive times" half of the contract
+// (weather_providers.go's top doc comment): the plugin never sends a step
+// field, so the host has to derive it from the gap between the first two
+// points. WeatherKit's minute-by-minute data and Open-Meteo's 15-minute
+// data must both come out right from the same function.
+func TestBuildWeatherNextHourResponse_InfersStepMinutesFromConsecutiveTimes(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name     string
+		stepMins int
+		count    int
+		want     int
+	}{
+		{"one-minute cadence (WeatherKit)", 1, 3, 1},
+		{"fifteen-minute cadence (Open-Meteo minutely_15)", 15, 4, 15},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			points := make([]weatherNextHourPoint, 0, tc.count)
+			for i := 0; i < tc.count; i++ {
+				points = append(points, weatherNextHourPoint{
+					Time:                   base.Add(time.Duration(i*tc.stepMins) * time.Minute),
+					PrecipitationChancePct: 10,
+				})
+			}
+
+			got := buildWeatherNextHourResponse(points, "nowcast")
+			if got == nil {
+				t.Fatalf("expected a non-nil response")
+			}
+			if got.StepMinutes != tc.want {
+				t.Errorf("expected step_minutes %d, got %d", tc.want, got.StepMinutes)
+			}
+			if got.Start != base.Format(time.RFC3339) {
+				t.Errorf("expected start %q, got %q", base.Format(time.RFC3339), got.Start)
+			}
+			if len(got.Points) != tc.count {
+				t.Errorf("expected %d points, got %d", tc.count, len(got.Points))
+			}
+		})
+	}
+}
+
+// TestBuildWeatherNextHourResponse_SinglePointOmitsNextHour covers the
+// degenerate one-point case: there is no second point to diff against, so
+// no step is inferrable at all - the response must be nil (never a
+// step_minutes 0 that would silently zero-width the frontend's only bar),
+// matching the "omit next_hour rather than guess" fallback-policy rule
+// TestInferNextHourStepMinutes_NoPositiveGapReturnsFalse pins directly.
+func TestBuildWeatherNextHourResponse_SinglePointOmitsNextHour(t *testing.T) {
+	got := buildWeatherNextHourResponse([]weatherNextHourPoint{
+		{Time: time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC), PrecipitationChancePct: 10},
+	}, "nowcast")
+	if got != nil {
+		t.Fatalf("expected nil (no inferrable step) for a single point, got %+v", got)
+	}
+}
+
+// --- inferNextHourStepMinutes ---
+
+func TestInferNextHourStepMinutes_TableTest(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	at := func(minutesFromBase int) time.Time { return base.Add(time.Duration(minutesFromBase) * time.Minute) }
+
+	for _, tc := range []struct {
+		name      string
+		offsets   []int // minutes from base, one per point, in the given order
+		wantStep  int
+		wantFound bool
+	}{
+		{"empty", nil, 0, false},
+		{"single point: no second point to diff against", []int{0}, 0, false},
+		{"two points, normal 15-minute cadence", []int{0, 15}, 15, true},
+		{"two points, one-minute cadence (WeatherKit)", []int{0, 1, 2}, 1, true},
+		{
+			"duplicate FIRST timestamp must not zero out the real step from later points",
+			[]int{0, 0, 15, 30}, 15, true,
+		},
+		{
+			"a duplicate timestamp anywhere in the middle is skipped, not just the first pair",
+			[]int{0, 15, 15, 30}, 15, true,
+		},
+		{"every timestamp identical: no positive gap anywhere", []int{5, 5, 5, 5}, 0, false},
+		{"timestamps going backward: no positive gap anywhere", []int{30, 15, 0}, 0, false},
+		{
+			"the smallest positive gap wins even when a larger gap comes first",
+			[]int{0, 30, 45}, 15, true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			points := make([]weatherNextHourPoint, 0, len(tc.offsets))
+			for _, off := range tc.offsets {
+				points = append(points, weatherNextHourPoint{Time: at(off)})
+			}
+
+			gotStep, gotFound := inferNextHourStepMinutes(points)
+			if gotFound != tc.wantFound {
+				t.Fatalf("expected found=%v, got %v (step=%d)", tc.wantFound, gotFound, gotStep)
+			}
+			if gotFound && gotStep != tc.wantStep {
+				t.Errorf("expected step %d, got %d", tc.wantStep, gotStep)
+			}
+		})
+	}
+}
+
+// TestBuildWeatherNextHourResponse_DuplicateFirstTimestampStillInfersRealStep
+// is the end-to-end regression for the bug this fix targets: a duplicate (or
+// non-increasing) FIRST pair of timestamps used to force step_minutes to 0
+// for the WHOLE response, which - since the frontend applies one shared step
+// to every bar (lib/nowcast.ts's buildNowcastBars) - silently dropped every
+// bar in the strip, not just the first. The real 15-minute cadence carried
+// by the later points must still be found and applied to all four points.
+func TestBuildWeatherNextHourResponse_DuplicateFirstTimestampStillInfersRealStep(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	points := []weatherNextHourPoint{
+		{Time: base, PrecipitationChancePct: 10},
+		{Time: base, PrecipitationChancePct: 12}, // duplicate of point 0's timestamp
+		{Time: base.Add(15 * time.Minute), PrecipitationChancePct: 20},
+		{Time: base.Add(30 * time.Minute), PrecipitationChancePct: 30},
+	}
+
+	got := buildWeatherNextHourResponse(points, "nowcast")
+	if got == nil {
+		t.Fatalf("expected a non-nil response")
+	}
+	if got.StepMinutes != 15 {
+		t.Errorf("expected the real 15-minute cadence to be recovered despite the duplicate first timestamp, got step_minutes=%d", got.StepMinutes)
+	}
+	if len(got.Points) != 4 {
+		t.Errorf("expected all 4 points to pass through, got %d", len(got.Points))
+	}
+}
+
+// TestBuildWeatherNextHourResponse_NoPositiveGapOmitsNextHour covers every
+// point sharing (or going backward from) its neighbour's timestamp - no
+// positive gap exists anywhere, so the response must be nil rather than a
+// step_minutes 0 that would silently zero-width every bar.
+func TestBuildWeatherNextHourResponse_NoPositiveGapOmitsNextHour(t *testing.T) {
+	same := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	got := buildWeatherNextHourResponse([]weatherNextHourPoint{
+		{Time: same, PrecipitationChancePct: 10},
+		{Time: same, PrecipitationChancePct: 12},
+		{Time: same, PrecipitationChancePct: 14},
+	}, "nowcast")
+	if got != nil {
+		t.Fatalf("expected nil when no positive gap can be inferred, got %+v", got)
+	}
+}
+
+// TestBuildWeatherNextHourResponse_CarriesSourceThrough pins the field this
+// function was extended for: the bundle's NextHourSource ("nowcast" or
+// "hourly") reaches the wire response's Source field unchanged, so the
+// frontend can caption an interpolated-from-hourly strip honestly.
+func TestBuildWeatherNextHourResponse_CarriesSourceThrough(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	points := []weatherNextHourPoint{
+		{Time: base, PrecipitationChancePct: 10},
+		{Time: base.Add(15 * time.Minute), PrecipitationChancePct: 12},
+	}
+
+	if got := buildWeatherNextHourResponse(points, "nowcast"); got.Source != "nowcast" {
+		t.Errorf("expected source %q, got %q", "nowcast", got.Source)
+	}
+	if got := buildWeatherNextHourResponse(points, "hourly"); got.Source != "hourly" {
+		t.Errorf("expected source %q, got %q", "hourly", got.Source)
+	}
+}
+
+// TestBuildWeatherNextHourResponse_PassesThroughChanceAndMM pins the
+// per-point field mapping, including the negative "not supplied" sentinel
+// for chance_pct passing straight through unmodified (unlike
+// sentinelPrecipitationPct elsewhere in this file, next_hour's chance_pct
+// reuses the plugin's own raw negative-is-absent convention rather than a
+// separate normalization step - see weather_providers.go's top doc comment).
+func TestBuildWeatherNextHourResponse_PassesThroughChanceAndMM(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	got := buildWeatherNextHourResponse([]weatherNextHourPoint{
+		{Time: base, PrecipitationChancePct: -1, PrecipitationMMPerH: 0.6},
+		{Time: base.Add(15 * time.Minute), PrecipitationChancePct: 40, PrecipitationMMPerH: 2.1},
+	}, "nowcast")
+	if got.Points[0].ChancePct != -1 {
+		t.Errorf("expected the not-supplied sentinel to pass through, got %v", got.Points[0].ChancePct)
+	}
+	if got.Points[0].MMPerH != 0.6 {
+		t.Errorf("expected mm_per_h to pass through, got %v", got.Points[0].MMPerH)
+	}
+	if got.Points[1].ChancePct != 40 {
+		t.Errorf("expected a real chance to pass through, got %v", got.Points[1].ChancePct)
 	}
 }
 

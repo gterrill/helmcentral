@@ -36,8 +36,65 @@
 //	  "hourly": [{time, temperature_c, condition, wind_speed_ms, wind_gust_ms,
 //	              wind_direction_deg, precipitation_chance_pct,
 //	              precipitation_mm, uv_index, is_daylight,
-//	              humidity_pct, visibility_m}]
+//	              humidity_pct, visibility_m}],
+//	  "next_hour": [{time, precipitation_chance_pct, precipitation_mm_per_h}],
+//	  "next_hour_source": "nowcast" | "hourly"
 //	}
+//
+// "next_hour" is an OPTIONAL minute-by-minute (or whatever finer-than-hourly
+// resolution the provider has) nowcast, in time order, covering roughly the
+// next hour from whenever the provider fetched it. Absent or empty means
+// this provider has no nowcast coverage here - a WeatherKit request outside
+// its forecastNextHour region, or a provider (like Open-Meteo without its
+// minutely_15 block requested) that never has one - and that must be
+// surfaced as "no nowcast", never backfilled from hourly/daily data inside
+// the plugin itself (fallback policy: a provider that doesn't supply
+// next-hour data means "no nowcast", shown honestly by the host/frontend,
+// never faked from something else without saying so). precipitation_chance_pct
+// follows the same negative-is-absent convention as the other
+// precipitation_chance_pct fields in this contract (a provider whose
+// nowcast has intensity but no probability at this resolution, e.g.
+// Open-Meteo's minutely_15, sends a negative chance rather than inventing
+// one). The host does not require or infer any particular cadence: it
+// infers the step (e.g. 1 minute for WeatherKit, 15 minutes for Open-Meteo)
+// from the smallest positive gap between any two consecutive points, and
+// omits next_hour entirely (logging why) when no positive gap can be found
+// at all - a single point, or every point sharing (or going backward from)
+// its predecessor's timestamp. See buildWeatherNextHourResponse below.
+//
+// Each next_hour point's "time" marks the START of the interval it
+// describes: a point covers [time, time+step) counting FORWARD from its own
+// timestamp, matching how the host and frontend (lib/nowcast.ts's
+// buildNowcastBars) both read it. This is not every upstream API's own
+// convention - Open-Meteo documents minutely_15.precipitation as a
+// "preceding 15 minutes sum" (the value at timestamp T covers
+// [T-step, T), backward from T) - so a plugin whose source data is a
+// trailing/preceding-window statistic must shift its emitted "time" back by
+// one step before it reaches this contract, not pass the upstream timestamp
+// through unchanged. See docs/examples/weather-plugins/open-meteo/open-meteo.go's
+// minutely_15 mapping for a worked example.
+//
+// "next_hour_source" is REQUIRED whenever "next_hour" is non-empty (an
+// unknown or missing value is a hard error - mapWasmFetchForecastOutput in
+// wasm_weather_provider.go - never a silent default), and is one of:
+//
+//   - "nowcast": genuine short-range/high-resolution data - WeatherKit's
+//     forecastNextHour, or Open-Meteo's minutely_15 in the regions it
+//     documents as natively modelled at 15-minute resolution rather than
+//     interpolated.
+//   - "hourly": the provider only has an hourly-resolution model here, and
+//     next_hour's finer timestamps are interpolated from it - e.g.
+//     Open-Meteo's minutely_15 outside its native-resolution regions, which
+//     reads as smoothly-stepping values between the surrounding hourly
+//     readings rather than independent short-range data, confirmed live at
+//     multiple positions (see that plugin's own doc comment).
+//
+// A provider with no next_hour coverage at all omits next_hour_source too
+// (or sends anything - the host does not look at it when next_hour is
+// empty). See buildWeatherNextHourResponse's Source field, which carries
+// this straight through to GET /api/weather-forecast's next_hour.source so
+// the frontend can caption a "hourly" strip honestly rather than presenting
+// it as a true nowcast (AGENTS.md fallback policy).
 //
 // humidity_pct/visibility_m are hourly-only - there is no daily aggregate in
 // this contract, deliberately: the host derives the day figure itself
@@ -144,17 +201,42 @@ type weatherHourPoint struct {
 	VisibilityNm           float64
 }
 
+// weatherNextHourPoint is a single time-stamped nowcast sample, SI units, as
+// returned by one entry of a plugin's fetch_forecast "next_hour" field. A
+// nil/empty NextHour on weatherForecastBundle means the provider has no
+// nowcast coverage for this position, not "checked, found nothing to
+// report" - see this file's top doc comment.
+type weatherNextHourPoint struct {
+	Time time.Time
+	// PrecipitationChancePct follows the same negative-is-absent convention
+	// as weatherCurrentPoint/weatherDayPoint/weatherHourPoint's own field of
+	// the same name - see sentinelPrecipitationPct's doc comment. Unlike
+	// those fields, the host does NOT run it through sentinelPrecipitationPct
+	// here: that function clamps into [0,100] and would turn a negative
+	// "not supplied" reading into a false 0%. next_hour keeps the plugin's
+	// raw value so buildWeatherNextHourResponse can pass the sentinel
+	// straight through to the wire.
+	PrecipitationChancePct float64
+	PrecipitationMMPerH    float64
+}
+
 // weatherForecastBundle is one provider round-trip's worth of data - the
 // return value of weatherProvider.FetchForecast and of a WASM plugin's
 // fetch_forecast, mapped to typed Go values. Cached/CachedAt describe the
 // adapter's own cache bookkeeping (see wasmWeatherProvider.FetchForecast),
-// independent of any timestamp inside Current/Days/Hourly.
+// independent of any timestamp inside Current/Days/Hourly/NextHour.
 type weatherForecastBundle struct {
 	Current  weatherCurrentPoint
 	Days     []weatherDayPoint
 	Hourly   []weatherHourPoint
-	Cached   bool
-	CachedAt time.Time
+	NextHour []weatherNextHourPoint
+	// NextHourSource is "nowcast" or "hourly" whenever NextHour is non-empty
+	// (validated in mapWasmFetchForecastOutput) - see this file's top doc
+	// comment's next_hour_source section. Meaningless/unset when NextHour is
+	// empty.
+	NextHourSource string
+	Cached         bool
+	CachedAt       time.Time
 }
 
 // weatherProvider is the interface implemented by each pluggable weather
@@ -729,14 +811,117 @@ type weatherForecastDayResponse struct {
 	HourlyCloud          []weatherHourlyCloudResponse         `json:"hourly_cloud"`
 }
 
+// weatherNextHourPointResponse mirrors weatherNextHourPoint for JSON output.
+// ChancePct keeps the plugin's raw negative-is-absent value unchanged (see
+// weatherNextHourPoint's doc comment) rather than running it through
+// sentinelPrecipitationPct.
+type weatherNextHourPointResponse struct {
+	Time      string  `json:"time"`
+	ChancePct float64 `json:"chance_pct"`
+	MMPerH    float64 `json:"mm_per_h"`
+}
+
+// weatherNextHourResponse is the wire shape of GET /api/weather-forecast's
+// top-level "next_hour" nowcast field - nil (and therefore omitted by
+// weatherForecastResponse's `omitempty`) when the provider supplied none.
+// Start is the first point's own timestamp, not the time the bundle was
+// fetched/cached: a nowcast goes stale far faster than the hourly/daily
+// data around it (a cached bundle can be many minutes old), so the frontend
+// must slide its display window against each point's own Time compared to
+// the viewer's current clock, never against when the response left the
+// server - see lib/nowcast.ts.
+type weatherNextHourResponse struct {
+	Start       string `json:"start"`
+	StepMinutes int    `json:"step_minutes"`
+	// Source is "nowcast" or "hourly" - see this file's top doc comment's
+	// next_hour_source section. Always populated when Points is non-empty
+	// (buildWeatherNextHourResponse only returns non-nil in that case, and
+	// mapWasmFetchForecastOutput already validated the bundle's
+	// NextHourSource by the time it gets here).
+	Source string                         `json:"source"`
+	Points []weatherNextHourPointResponse `json:"points"`
+}
+
+// inferNextHourStepMinutes derives the nowcast's per-point interval width
+// from the smallest positive gap between any two chronologically-adjacent
+// points (points arrive in time order - see this file's top doc comment).
+// Using only the gap between the first two points broke down whenever the
+// provider's very first two timestamps happened to be equal (or
+// out-of-order): a non-positive first gap produced step 0, which - since
+// buildNowcastBars (lib/nowcast.ts) applies one shared step to every point -
+// silently zero-widthed and dropped every bar in the strip, not just the
+// first. Taking the smallest positive gap across the whole slice recovers
+// the provider's real cadence even when one pair is anomalous. Returns
+// (0, false) when no positive gap exists anywhere - a single point, or every
+// timestamp identical/non-increasing - so the caller can refuse to guess
+// rather than emit an unusable step (AGENTS.md fallback policy: surfaced,
+// not silent).
+func inferNextHourStepMinutes(points []weatherNextHourPoint) (int, bool) {
+	best := 0
+	found := false
+	for i := 1; i < len(points); i++ {
+		gap := int(points[i].Time.Sub(points[i-1].Time).Round(time.Minute) / time.Minute)
+		if gap <= 0 {
+			continue
+		}
+		if !found || gap < best {
+			best = gap
+			found = true
+		}
+	}
+	return best, found
+}
+
+// buildWeatherNextHourResponse maps a bundle's NextHour points (and their
+// shared NextHourSource) onto the wire shape, inferring StepMinutes via
+// inferNextHourStepMinutes (the guest contract deliberately carries no
+// explicit step field - see this file's top doc comment). Returns nil for a
+// nil or empty points slice, so a provider with no nowcast coverage produces
+// no "next_hour" key at all, distinguishable from "nowcast checked, all dry"
+// (a non-nil response whose points all read 0% chance) - and also returns
+// nil, after logging why, when the points present carry no inferrable
+// step: better to show "no nowcast" than a strip whose every bar silently
+// vanishes on the frontend.
+func buildWeatherNextHourResponse(points []weatherNextHourPoint, source string) *weatherNextHourResponse {
+	if len(points) == 0 {
+		return nil
+	}
+
+	stepMinutes, ok := inferNextHourStepMinutes(points)
+	if !ok {
+		log.Printf("weather next_hour: could not infer a positive step from %d point(s) (all gaps <= 0); omitting next_hour rather than guessing", len(points))
+		return nil
+	}
+
+	mapped := make([]weatherNextHourPointResponse, 0, len(points))
+	for _, p := range points {
+		mapped = append(mapped, weatherNextHourPointResponse{
+			Time:      p.Time.UTC().Format(time.RFC3339),
+			ChancePct: p.PrecipitationChancePct,
+			MMPerH:    p.PrecipitationMMPerH,
+		})
+	}
+
+	return &weatherNextHourResponse{
+		Start:       points[0].Time.UTC().Format(time.RFC3339),
+		StepMinutes: stepMinutes,
+		Source:      source,
+		Points:      mapped,
+	}
+}
+
 type weatherForecastResponse struct {
 	Days        []weatherForecastDayResponse `json:"days"`
 	HourlyToday []weatherHourlyEntryResponse `json:"hourly_today"`
-	Summary     string                       `json:"summary"`
-	Provider    string                       `json:"provider"`
-	Cached      bool                         `json:"cached"`
-	UpdatedAt   string                       `json:"updated_at"`
-	TTLSeconds  int64                        `json:"ttl_seconds"`
+	// NextHour is the nowcast (see buildWeatherNextHourResponse) - nil, and
+	// therefore omitted, when the configured provider has no next-hour
+	// coverage for this position.
+	NextHour   *weatherNextHourResponse `json:"next_hour,omitempty"`
+	Summary    string                   `json:"summary"`
+	Provider   string                   `json:"provider"`
+	Cached     bool                     `json:"cached"`
+	UpdatedAt  string                   `json:"updated_at"`
+	TTLSeconds int64                    `json:"ttl_seconds"`
 }
 
 func mapWeatherHourlyWindResponse(entries []weatherHourlyWindData) []weatherHourlyWindResponse {
@@ -988,6 +1173,7 @@ func weatherForecast(c echo.Context) error {
 	response := weatherForecastResponse{
 		Days:        dayResponses,
 		HourlyToday: mapWeatherHourlyEntryResponse(hourlyToday),
+		NextHour:    buildWeatherNextHourResponse(bundle.NextHour, bundle.NextHourSource),
 		Summary:     summary,
 		Provider:    configuredProvider,
 		Cached:      bundle.Cached,

@@ -151,6 +151,215 @@ describe('useWeatherForecast', () => {
     expect(result.current.forecast[0].dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(result.current.provider).toBeNull()
   })
+
+  it('maps the next_hour nowcast envelope into typed points', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 },
+            { time: '2026-06-14T14:15:00Z', chance_pct: -1, mm_per_h: 1.6 },
+          ],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).not.toBeNull()
+    expect(result.current.nextHour!.stepMinutes).toBe(15)
+    expect(result.current.nextHour!.source).toBe('nowcast')
+    expect(result.current.nextHour!.points).toHaveLength(2)
+    expect(result.current.nextHour!.points[0].time.toISOString()).toBe('2026-06-14T14:00:00.000Z')
+    expect(result.current.nextHour!.points[0].chancePct).toBe(20)
+    // The backend's -1 sentinel ("not supplied") must map to null, the same
+    // absence convention every other precipitation-chance field in this
+    // hook already uses - never a fabricated 0%.
+    expect(result.current.nextHour!.points[1].chancePct).toBeNull()
+    expect(result.current.nextHour!.points[1].mmPerH).toBe(1.6)
+  })
+
+  // ADR 0126 addendum: Open-Meteo's minutely_15 is interpolated from the
+  // hourly model outside its two native-resolution regions - next_hour.source
+  // carries which case applies so the tile can caption it honestly.
+  it('maps next_hour.source "hourly" through unchanged', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'hourly',
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour!.source).toBe('hourly')
+  })
+
+  // The backend hard-errors on a missing/unrecognized next_hour_source
+  // whenever next_hour has points (mapWasmFetchForecastOutput,
+  // backend/wasm_weather_provider.go), so one reaching the frontend at all
+  // means the contract broke upstream - the hook must not quietly repair it
+  // by guessing "hourly"; it drops the whole nowcast and logs why, falling
+  // back to the well-tested hourly/daily cascade instead.
+  it('drops a next_hour with a missing/unrecognized source rather than defaulting it, and logs why', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+    expect(consoleErrorSpy).toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
+  })
+
+  // The backend never emits an unusable step (buildWeatherNextHourResponse
+  // omits next_hour entirely rather than sending step_minutes 0/missing) -
+  // a non-positive or missing step reaching the frontend is malformed, not
+  // "unknown cadence, assume 0", since a 0 step silently zero-widths every
+  // bar in the strip (lib/nowcast.ts's buildNowcastBars).
+  it('drops a next_hour with a non-positive/missing step_minutes rather than coercing it to 0, and logs why', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 0,
+          source: 'nowcast',
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+    expect(consoleErrorSpy).toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
+  })
+
+  // mm_per_h is a plain number on the wire (not sentinel-coded the way
+  // chance_pct is) - a point missing it entirely is malformed, not "assume
+  // 0 mm/h" (which would misrepresent a data gap as a confirmed-dry point).
+  it('drops a next_hour whose point is missing mm_per_h rather than coercing it to 0, and logs why', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'nowcast',
+          points: [{ time: '2026-06-14T14:00:00Z', chance_pct: 20 }],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+    expect(consoleErrorSpy).toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
+  })
+
+  // An unparseable point time is a plugin/host bug reaching the wire, not
+  // something the frontend should skip and carry on with a gap - the whole
+  // nowcast is dropped and the break logged.
+  it('drops a next_hour whose point has an unparseable time rather than skipping just that point, and logs why', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+        next_hour: {
+          start: '2026-06-14T14:00:00Z',
+          step_minutes: 15,
+          source: 'nowcast',
+          points: [
+            { time: '2026-06-14T14:00:00Z', chance_pct: 20, mm_per_h: 0 },
+            { time: 'not-a-real-timestamp', chance_pct: 40, mm_per_h: 1 },
+          ],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+    expect(consoleErrorSpy).toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('maps a missing next_hour field to null, not an empty nowcast', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [{ day_key: '2026-06-14', date: 'Jun 14', day_name: 'Sunday', condition: 'Clear' }],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.nextHour).toBeNull()
+  })
   // The backend sends -1 when the provider reported no precipitation data at
   // all, which is different from a genuine 0% chance. Collapsing the two is
   // what showed a confident "0% precip" during actual drizzle, so the hook

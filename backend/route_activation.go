@@ -221,11 +221,20 @@ type signalkCourseStatus struct {
 	ActiveRouteHref string
 	PointIndex      int
 	Reverse         bool
+	// NextPoint* (ADR 0125): the Course API's `nextPoint`, present whenever
+	// the chartplotter has a destination set - whether or not it came from a
+	// Helmcentral-activated route. A plain chartplotter go-to (no
+	// activeRoute at all) still populates this, which is what lets the
+	// clock tile show a trip ETA for that case too.
+	HasNextPoint  bool
+	NextPointLat  float64
+	NextPointLon  float64
+	NextPointType string
 }
 
-// fetchSignalKCourseStatus GETs the Course API and extracts activeRoute info.
-// An absent/null activeRoute is a normal "nothing active" result (zero value),
-// not an error.
+// fetchSignalKCourseStatus GETs the Course API and extracts activeRoute and
+// nextPoint info. An absent/null activeRoute is a normal "nothing active"
+// result (zero value), not an error - same now for nextPoint.
 func fetchSignalKCourseStatus(signalkURL string) (signalkCourseStatus, error) {
 	url := strings.TrimRight(signalkURL, "/") + signalkCoursePath
 
@@ -251,20 +260,32 @@ func fetchSignalKCourseStatus(signalkURL string) (signalkCourseStatus, error) {
 			PointIndex int    `json:"pointIndex"`
 			Reverse    bool   `json:"reverse"`
 		} `json:"activeRoute"`
+		NextPoint *struct {
+			Position *struct {
+				Latitude  float64 `json:"latitude"`
+				Longitude float64 `json:"longitude"`
+			} `json:"position"`
+			Type string `json:"type"`
+		} `json:"nextPoint"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return signalkCourseStatus{}, err
 	}
 
-	if payload.ActiveRoute == nil || payload.ActiveRoute.Href == "" {
-		return signalkCourseStatus{}, nil
+	var status signalkCourseStatus
+	if payload.ActiveRoute != nil && payload.ActiveRoute.Href != "" {
+		status.ActiveRouteHref = payload.ActiveRoute.Href
+		status.PointIndex = payload.ActiveRoute.PointIndex
+		status.Reverse = payload.ActiveRoute.Reverse
+	}
+	if payload.NextPoint != nil && payload.NextPoint.Position != nil {
+		status.HasNextPoint = true
+		status.NextPointLat = payload.NextPoint.Position.Latitude
+		status.NextPointLon = payload.NextPoint.Position.Longitude
+		status.NextPointType = payload.NextPoint.Type
 	}
 
-	return signalkCourseStatus{
-		ActiveRouteHref: payload.ActiveRoute.Href,
-		PointIndex:      payload.ActiveRoute.PointIndex,
-		Reverse:         payload.ActiveRoute.Reverse,
-	}, nil
+	return status, nil
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -322,26 +343,44 @@ func getActiveRouteHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch active route from signalk: %v", err)})
 	}
 
+	var result map[string]any
 	if status.ActiveRouteHref == "" {
-		return c.JSON(http.StatusOK, map[string]any{"active": false})
-	}
-
-	routeID := routeIDFromSignalKHref(status.ActiveRouteHref)
-
-	routesMu.RLock()
-	route, ok := routesState[routeID]
-	routesMu.RUnlock()
-
-	result := map[string]any{
-		"active":      true,
-		"point_index": status.PointIndex,
-		"reverse":     status.Reverse,
-	}
-	if ok {
-		result["route_id"] = route.ID
-		result["route_name"] = route.Name
+		result = map[string]any{"active": false}
 	} else {
-		result["route_id"] = nil
+		routeID := routeIDFromSignalKHref(status.ActiveRouteHref)
+
+		routesMu.RLock()
+		route, ok := routesState[routeID]
+		routesMu.RUnlock()
+
+		result = map[string]any{
+			"active":      true,
+			"point_index": status.PointIndex,
+			"reverse":     status.Reverse,
+		}
+		if ok {
+			result["route_id"] = route.ID
+			result["route_name"] = route.Name
+		} else {
+			result["route_id"] = nil
+		}
+	}
+
+	// destination (ADR 0125): the Course API's nextPoint, whenever present -
+	// a chartplotter go-to with no Helmcentral route behind it, OR a route
+	// activated somewhere other than Helmcentral (activeRoute.href set, but
+	// not one of ours, so route_id above came back nil), still deserves a
+	// trip ETA on the clock tile. Added in both branches above, not just the
+	// "nothing active" one - only added when the Course API actually
+	// carries a nextPoint, so a response with no destination at all gets no
+	// key, not a null one, letting the frontend tell "nothing to report"
+	// apart from "reported, but empty" without a third state.
+	if status.HasNextPoint {
+		result["destination"] = map[string]any{
+			"lat":  status.NextPointLat,
+			"lon":  status.NextPointLon,
+			"name": resolveDestinationPlaceName(status.NextPointLat, status.NextPointLon),
+		}
 	}
 
 	return c.JSON(http.StatusOK, result)

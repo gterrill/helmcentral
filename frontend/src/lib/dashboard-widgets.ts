@@ -20,8 +20,7 @@ export const DASHBOARD_WIDGET_IDS = [
   'autopilot',
   'clock',
   'current-conditions',
-  'forecast-days',
-  'sea-state',
+  'forecast-conditions',
 ] as const
 
 /** A widget baked into the app, with a fixed id and at most one instance per page. */
@@ -81,8 +80,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'autopilot': 'Autopilot',
   'clock': 'Clock',
   'current-conditions': 'Current Conditions',
-  'forecast-days': 'Forecast',
-  'sea-state': 'Sea State',
+  'forecast-conditions': 'Forecast Conditions',
 }
 
 export type WidgetCategory =
@@ -132,8 +130,7 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
   'autopilot': 'navigation',
   'wind': 'weather',
   'current-conditions': 'weather',
-  'forecast-days': 'weather',
-  'sea-state': 'weather',
+  'forecast-conditions': 'weather',
   'anchor-watch': 'situational',
   'nearby-vessels': 'situational',
   'radar-targets': 'situational',
@@ -165,11 +162,18 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
  * page agreeing about what each widget needs, instead of drifting apart the
  * first time someone tunes one number without the other.
  *
- * clock/current-conditions/forecast-days/sea-state instead default to their
- * own WIDGET_CONSTRAINTS minimum (dashboard-bento-grid.tsx): that minimum was
- * already set to the wall-display's actual per-widget content need at the
- * kiosk's 7-row fold, not a density-scale floor, so there is no taller
- * "normal desktop" number to prefer over it.
+ * clock/current-conditions instead default to their own WIDGET_CONSTRAINTS
+ * minimum (dashboard-bento-grid.tsx): that minimum was already set to the
+ * wall-display's actual per-widget content need at the kiosk's 7-row fold,
+ * not a density-scale floor, so there is no taller "normal desktop" number
+ * to prefer over it.
+ *
+ * forecast-conditions (ADR 0125) is the one exception in this group: its own
+ * WIDGET_CONSTRAINTS floor (minW 4, minH 6) is the wall's tightest-column
+ * fit for a merged card-row-plus-chart tile, but that floor is cramped
+ * anywhere with more room to give it, so its default here (6x7) is taller
+ * and wider than its own minimum rather than equal to it, same as every
+ * other non-wall widget in this table.
  *
  * radar-targets and autopilot have no backend precedent (both shipped after
  * that layout was written) — sized here from their own tile content
@@ -205,13 +209,19 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   // readout, mode strip and three button grids (adjust, dodge, tack/gybe)
   // plus the hold-to-confirm engage bar — check against a live pilot.
   'autopilot': { w: 4, h: 9 },
-  // These four are sized for the kiosk's 7-row fold (WIDGET_CONSTRAINTS'
-  // own comment, dashboard-bento-grid.tsx) — that minimum already is the
-  // content-fit number, so the default is the minimum, not something taller.
+  // clock/current-conditions are sized for the kiosk's 7-row fold
+  // (WIDGET_CONSTRAINTS' own comment, dashboard-bento-grid.tsx) — that
+  // minimum already is the content-fit number, so the default is the
+  // minimum, not something taller.
   'clock': { w: 2, h: 6 },
   'current-conditions': { w: 3, h: 6 },
-  'forecast-days': { w: 3, h: 4 },
-  'sea-state': { w: 4, h: 5 },
+  // forecast-conditions (ADR 0125) merges the old forecast-days card row
+  // and sea-state chart into one tile - w:6 h:7 is what the actual wall
+  // page places it at (clock x0 w3 h7, current-conditions x3 w3 h7,
+  // forecast-conditions x6 w6 h7 on the 1920x360 Flybridge display), taller
+  // and wider than its own WIDGET_CONSTRAINTS floor (4x6) since that floor
+  // is the tightest fit, not the comfortable one.
+  'forecast-conditions': { w: 6, h: 7 },
 }
 
 export interface EmbedWidgetConfig {

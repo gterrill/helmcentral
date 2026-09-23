@@ -390,6 +390,246 @@ func TestGetActiveRouteHandler_ActiveHrefNotLocallyKnown(t *testing.T) {
 	}
 }
 
+// ── nextPoint parsing (ADR 0125: the trip ETA for a bare chartplotter
+// go-to destination, not just a Helmcentral-activated route) ───────────────
+
+func TestFetchSignalKCourseStatus_ParsesNextPointWhenNoActiveRoute(t *testing.T) {
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	// The real payload shape observed live: activeRoute null, nextPoint set
+	// from a chartplotter go-to.
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":null,"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	status, err := fetchSignalKCourseStatus(srv.URL)
+	if err != nil {
+		t.Fatalf("fetchSignalKCourseStatus returned error: %v", err)
+	}
+	if status.ActiveRouteHref != "" {
+		t.Fatalf("expected no active route href, got %q", status.ActiveRouteHref)
+	}
+	if !status.HasNextPoint {
+		t.Fatal("expected HasNextPoint true for a chartplotter go-to destination")
+	}
+	if status.NextPointLat != -18.6675 || status.NextPointLon != 146.48466666666667 {
+		t.Fatalf("expected next point position to round-trip, got lat=%v lon=%v", status.NextPointLat, status.NextPointLon)
+	}
+	if status.NextPointType != "Location" {
+		t.Fatalf("expected next point type %q, got %q", "Location", status.NextPointType)
+	}
+}
+
+func TestFetchSignalKCourseStatus_NoCourseAtAll(t *testing.T) {
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK, `{"activeRoute":null,"nextPoint":null}`)
+
+	status, err := fetchSignalKCourseStatus(srv.URL)
+	if err != nil {
+		t.Fatalf("fetchSignalKCourseStatus returned error: %v", err)
+	}
+	if status.ActiveRouteHref != "" {
+		t.Fatalf("expected no active route href, got %q", status.ActiveRouteHref)
+	}
+	if status.HasNextPoint {
+		t.Fatal("expected HasNextPoint false when nextPoint is null")
+	}
+}
+
+func TestFetchSignalKCourseStatus_ActiveRouteResponseUnaffectedByNextPointParsing(t *testing.T) {
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	// An active-route payload with no nextPoint key at all (the shape the
+	// existing active-route tests already use) must round-trip exactly as
+	// before - adding nextPoint parsing must not disturb it.
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"/resources/routes/abc","pointIndex":2,"reverse":true}}`)
+
+	status, err := fetchSignalKCourseStatus(srv.URL)
+	if err != nil {
+		t.Fatalf("fetchSignalKCourseStatus returned error: %v", err)
+	}
+	if status.ActiveRouteHref != "/resources/routes/abc" || status.PointIndex != 2 || !status.Reverse {
+		t.Fatalf("expected active route fields to round-trip unchanged, got %+v", status)
+	}
+	if status.HasNextPoint {
+		t.Fatal("expected HasNextPoint false when the payload carries no nextPoint")
+	}
+}
+
+// TestGetActiveRouteHandler_ActiveHrefNotLocallyKnownWithNextPointReturnsDestination
+// is the regression for the bug this fix targets: a route activated OUTSIDE
+// Helmcentral (activeRoute.href doesn't match anything in routesState, so
+// route_id comes back nil) used to get no destination at all, even though
+// the Course API's nextPoint was right there - destination was only ever
+// added on the "nothing active" branch. The clock tile's trip ETA needs the
+// destination in this case exactly as much as the inactive one.
+func TestGetActiveRouteHandler_ActiveHrefNotLocallyKnownWithNextPointReturnsDestination(t *testing.T) {
+	setupRouteActivationTest(t)
+	resetPlaceNameCache(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"/resources/routes/some-foreign-id","pointIndex":0,"reverse":false},`+
+			`"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload["active"] != true {
+		t.Fatalf("expected active=true, got %v", payload["active"])
+	}
+	if payload["route_id"] != nil {
+		t.Fatalf("expected route_id nil for a foreign href, got %v", payload["route_id"])
+	}
+	dest, ok := payload["destination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a destination object even though the active route isn't a local one, got %+v", payload)
+	}
+	if dest["lat"] != -18.6675 || dest["lon"] != 146.48466666666667 {
+		t.Fatalf("expected destination position to round-trip, got %+v", dest)
+	}
+}
+
+// ── GET /api/routes/active: destination (ADR 0125) ─────────────────────────
+
+func TestGetActiveRouteHandler_NoActiveRouteWithNextPointReturnsDestination(t *testing.T) {
+	setupRouteActivationTest(t)
+	resetPlaceNameCache(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":null,"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload["active"] != false {
+		t.Fatalf("expected active=false, got %v", payload["active"])
+	}
+	dest, ok := payload["destination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a destination object, got %+v", payload)
+	}
+	if dest["lat"] != -18.6675 || dest["lon"] != 146.48466666666667 {
+		t.Fatalf("expected destination position to round-trip, got %+v", dest)
+	}
+	if _, hasName := dest["name"]; !hasName {
+		t.Fatalf("expected a name key (empty string on a cache miss) to be present, got %+v", dest)
+	}
+}
+
+func TestGetActiveRouteHandler_NoActiveRouteNoNextPointOmitsDestination(t *testing.T) {
+	setupRouteActivationTest(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK, `{}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if _, hasDest := payload["destination"]; hasDest {
+		t.Fatalf("expected no destination key when there is no next point, got %+v", payload)
+	}
+}
+
+func TestGetActiveRouteHandler_DestinationServesCachedNameWithoutBlocking(t *testing.T) {
+	setupRouteActivationTest(t)
+	resetPlaceNameCache(t)
+
+	placeNameCache.put(placeNameCacheKey(-18.6675, 146.48466666666667), "Hook Island")
+
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":null,"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	dest, ok := payload["destination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a destination object, got %+v", payload)
+	}
+	if dest["name"] != "Hook Island" {
+		t.Fatalf("expected the cached name to be served, got %+v", dest)
+	}
+}
+
+func TestGetActiveRouteHandler_ActiveRouteResponseUnaffectedByDestinationField(t *testing.T) {
+	setupRouteActivationTest(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	route := createTestRoute(t, "Known Route", sampleWaypoints(), 8)
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"`+signalkRouteHref(route.ID)+`","pointIndex":1,"reverse":false}}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if _, hasDest := payload["destination"]; hasDest {
+		t.Fatalf("expected no destination key on an active-route response, got %+v", payload)
+	}
+}
+
 func TestGetActiveRouteHandler_SignalKUnreachable(t *testing.T) {
 	setupRouteActivationTest(t)
 

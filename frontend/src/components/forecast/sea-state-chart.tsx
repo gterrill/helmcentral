@@ -5,15 +5,39 @@ import { WindBarb, WaveDirectionArrow } from '@/components/forecast/direction-gl
 import type { SeaStatePoint } from '@/lib/sea-state-series'
 import type { WaveSteepnessBand } from '@/hooks/use-wave-forecast'
 import { metersToFeet } from '@/lib/units'
+import {
+  HOURS_PER_DAY,
+  SEA_STATE_CHART_MARGIN,
+  SEA_STATE_DAY_COUNT,
+  SEA_STATE_GLYPH_SCALE,
+  SEA_STATE_PLOT_INSET,
+  plotWidthFor,
+  xForIndex,
+} from '@/lib/sea-state-geometry'
 
 export interface SeaStateChartProps {
   series: SeaStatePoint[]
   width: number
   height: number
   waveUnit: 'm' | 'ft'
+  /**
+   * Total day columns the chart divides its width into, regardless of how
+   * many real days `series` actually covers (ADR 0125) - a series shorter
+   * than `dayCount * 24` points (a forecast with fewer real days than the
+   * tile shows card slots for) still gets `dayCount` equal-width columns,
+   * the trailing ones simply empty, rather than stretching what data exists
+   * across the full plot. Defaults to SEA_STATE_DAY_COUNT (5), today's only
+   * caller (forecast-conditions-tile.tsx).
+   */
+  dayCount?: number
 }
 
-const HOURS_PER_DAY = 24
+// HOURS_PER_DAY, SEA_STATE_DAY_COUNT, SEA_STATE_GLYPH_SCALE,
+// SEA_STATE_CHART_MARGIN, SEA_STATE_PLOT_INSET and plotWidthFor/xForIndex/
+// xForDayBoundary all moved to lib/sea-state-geometry.ts - they are pure
+// pixel arithmetic with no recharts dependency, and forecast-conditions-
+// tile.tsx (and this chart's own tests) need them without pulling recharts
+// into the entry bundle. See that module's doc comment.
 // Glyphs closer together than this read as a solid smear rather than
 // individual barbs/arrows once the tile narrows below its widest columns.
 const MIN_GLYPH_SPACING_PX = 22
@@ -58,21 +82,19 @@ function weekdayLabel(dayKey: string): string {
  * same margin object passed to <ComposedChart> keeps the two in agreement
  * without depending on Recharts' internal APIs across versions.
  */
-export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChartProps) {
+export function SeaStateChart({ series, width, height, waveUnit, dayCount = SEA_STATE_DAY_COUNT }: SeaStateChartProps) {
   const windGradientId = useId()
   const waveGradientId = useId()
   const waveSteepnessGradientId = useId()
 
-  // top raised from 24 so the barb row (barbY, half of margin.top) sits
-  // clear of the top y-axis tick text now that the tick carries the unit
-  // ("50 kn") rather than a separate corner label; bottom raised to match so
-  // the wave-arrow row keeps its own clearance from the day-name ticks below.
-  const margin = { top: 40, right: 40, bottom: 34, left: 40 }
-  const plotLeft = margin.left
-  const plotRight = width - margin.right
-  const plotWidth = Math.max(1, plotRight - plotLeft)
-  const lastIndex = Math.max(1, series.length - 1)
-  const xForIndex = (i: number) => plotLeft + (i / lastIndex) * plotWidth
+  const margin = SEA_STATE_CHART_MARGIN
+  // The actual plotted x-range's pixel bounds - see SEA_STATE_PLOT_INSET's
+  // own comment for why this isn't simply margin.left/margin.right.
+  const plotLeft = SEA_STATE_PLOT_INSET.left
+  const plotRight = width - SEA_STATE_PLOT_INSET.right
+  const plotWidth = plotWidthFor(width)
+  // Fixed at dayCount columns, not series.length: see SeaStateChartProps.dayCount.
+  const totalPoints = dayCount * HOURS_PER_DAY
   const barbY = margin.top / 2
   const arrowY = height - margin.bottom / 2 - 4
 
@@ -80,13 +102,12 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
   // data supports), widened just enough that adjacent glyphs stay at least
   // MIN_GLYPH_SPACING_PX apart once the tile is narrower than its widest
   // grid span.
-  const glyphStepHours = 3 * Math.ceil((MIN_GLYPH_SPACING_PX * lastIndex) / plotWidth / 3)
+  const glyphStepHours = 3 * Math.ceil((MIN_GLYPH_SPACING_PX * totalPoints) / plotWidth / 3)
 
-  const dayCount = Math.max(1, Math.round(series.length / HOURS_PER_DAY))
-  const middayTicks = Array.from({ length: dayCount }, (_, d) => d * HOURS_PER_DAY + HOURS_PER_DAY / 2)
+  const middayTicks = Array.from({ length: dayCount }, (_, d) => d * HOURS_PER_DAY + HOURS_PER_DAY / 2 - 0.5)
   const dayBoundaries = Array.from({ length: dayCount - 1 }, (_, d) => (d + 1) * HOURS_PER_DAY - 0.5)
   const tickLabelByIndex = new Map(
-    Array.from({ length: dayCount }, (_, d) => [d * HOURS_PER_DAY + HOURS_PER_DAY / 2, weekdayLabel(series[d * HOURS_PER_DAY]?.dayKey ?? '')]),
+    Array.from({ length: dayCount }, (_, d) => [d * HOURS_PER_DAY + HOURS_PER_DAY / 2 - 0.5, weekdayLabel(series[d * HOURS_PER_DAY]?.dayKey ?? '')]),
   )
 
   const chartData = useMemo(
@@ -114,15 +135,19 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
       .filter((p): p is { i: number; band: WaveSteepnessBand } => p.band !== null)
     return banded.flatMap(({ i, band }, idx) => {
       const colour = WAVE_STEEPNESS_STROKE[band as string] ?? WAVE_STEEPNESS_STROKE.rolling
-      const start = Math.min(1, Math.max(0, i / lastIndex))
+      // Same (index + 0.5) / totalPoints mapping as xForIndex above, since
+      // this gradient is painted in the identical plotLeft..plotRight pixel
+      // span (userSpaceOnUse) the Line/Area series and the Customized glyph
+      // layer are drawn in.
+      const start = Math.min(1, Math.max(0, (i + 0.5) / totalPoints))
       const next = banded[idx + 1]
-      const end = next === undefined ? 1 : Math.min(1, Math.max(0, next.i / lastIndex))
+      const end = next === undefined ? 1 : Math.min(1, Math.max(0, (next.i + 0.5) / totalPoints))
       return [
         { key: `${idx}-a`, offset: start, colour },
         { key: `${idx}-b`, offset: end, colour },
       ]
     })
-  }, [series, lastIndex])
+  }, [series, totalPoints])
 
   const glyphIndices: number[] = []
   for (let i = 0; i < series.length; i += glyphStepHours) glyphIndices.push(i)
@@ -132,7 +157,7 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
       <XAxis
         dataKey="index"
         type="number"
-        domain={[0, lastIndex]}
+        domain={[-0.5, totalPoints - 0.5]}
         ticks={middayTicks}
         tickFormatter={(value: number) => tickLabelByIndex.get(value) ?? ''}
         axisLine={false}
@@ -237,11 +262,11 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
           <>
             {glyphIndices.map((i) => {
               const point = series[i]
-              const x = xForIndex(i)
+              const x = xForIndex(i, width, dayCount)
               return (
                 <g key={i}>
-                  <WindBarb cx={x} cy={barbY} speedKts={point.windKts ?? -1} directionDeg={point.windDirDeg ?? -1} />
-                  <WaveDirectionArrow cx={x} cy={arrowY} directionDeg={point.waveDirDeg ?? -1} />
+                  <WindBarb cx={x} cy={barbY} speedKts={point.windKts ?? -1} directionDeg={point.windDirDeg ?? -1} scale={SEA_STATE_GLYPH_SCALE} />
+                  <WaveDirectionArrow cx={x} cy={arrowY} directionDeg={point.waveDirDeg ?? -1} scale={SEA_STATE_GLYPH_SCALE} />
                 </g>
               )
             })}

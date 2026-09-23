@@ -194,13 +194,25 @@ go test ./...
 
 ## WeatherKit endpoint this plugin uses
 
-- Forecast (current + daily + hourly in one call): `GET https://weatherkit.apple.com/api/v1/weather/en/<lat>/<lon>?dataSets=currentWeather,forecastDaily,forecastHourly&timezone=UTC`, with header `Authorization: Bearer <ES256 JWT>`.
+- Forecast (current + daily + hourly + next-hour nowcast in one call): `GET https://weatherkit.apple.com/api/v1/weather/en/<lat>/<lon>?dataSets=currentWeather,forecastDaily,forecastHourly,forecastNextHour&timezone=UTC`, with header `Authorization: Bearer <ES256 JWT>`.
+
+  `forecastNextHour` is WeatherKit's minute-by-minute nowcast (`minutes[]`,
+  each a `startTime`/`precipitationChance`/`precipitationIntensity` triple),
+  mapped onto the guest contract's `next_hour` field
+  (`precipitation_chance_pct` from the 0-1 fraction, same conversion and
+  negative-is-absent sentinel as every other `precipitation_chance_pct` in
+  this contract; `precipitation_mm_per_h` passed through in WeatherKit's
+  native mm/hr unconverted). WeatherKit omits the whole `forecastNextHour`
+  key, rather than sending an empty `minutes[]`, at positions outside its
+  nowcast coverage area - `parseWeatherKitResponse` treats that as "no
+  next_hour data", never an error and never a value backfilled from
+  `forecastHourly`.
 
   This differs from the original native integration in two ways, both
   documented in detail at the top of `weatherkit.go`: it merges what used
-  to be two separate requests into one (this plugin's single
-  `fetch_forecast` call needs current + daily + hourly data together), and
-  it uses `timezone=UTC` instead of the original's hardcoded
+  to be separate requests into one (this plugin's single
+  `fetch_forecast` call needs current + daily + hourly + next-hour data
+  together), and it uses `timezone=UTC` instead of the original's hardcoded
   `timezone=America/Los_Angeles` (WeatherKit's RFC3339 timestamps already
    carry their own UTC offset regardless of that query parameter; the old
    hardcoded value was a bug).
