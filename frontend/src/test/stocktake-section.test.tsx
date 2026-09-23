@@ -137,6 +137,68 @@ describe('StocktakeSection', () => {
     })
   })
 
+  it('Move targets the bin that was current when the item was scanned, not whatever is current when pressed', async () => {
+    zones = [
+      {
+        id: 'z1', name: 'Lazarette', sort_index: 0,
+        bins: [
+          { id: 'b1', zone_id: 'z1', code: 'LAZ-02', name: '', sort_index: 0 },
+          { id: 'b3', zone_id: 'z1', code: 'FWD-01', name: '', sort_index: 1 },
+        ],
+      },
+    ]
+    const item = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2' })
+    equipmentById['eq-2'] = item
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    await scan('https://boat.example/inventory/equipment/eq-2')
+    await screen.findByText(/Recorded in SAL-04/)
+    expect(screen.getByRole('button', { name: 'Move to LAZ-02' })).toBeInTheDocument()
+
+    // Scanning a DIFFERENT bin afterward must not retarget an already
+    // reported card - its own Move button still reads (and writes) LAZ-02.
+    await scan('https://boat.example/inventory/bins/FWD-01')
+    await screen.findByRole('heading', { name: 'FWD-01' })
+
+    expect(screen.getByRole('button', { name: 'Move to LAZ-02' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Move to LAZ-02' }))
+
+    await waitFor(() => {
+      const call = putCalls.find((c) => c.id === 'eq-2')
+      expect(call).toBeDefined()
+      expect(call?.body.bin_id).toBe('b1')
+      expect(call?.body.zone_id).toBe('z1')
+    })
+  })
+
+  it('Move fetches the item fresh immediately before writing, keeping a name changed server-side since the scan', async () => {
+    const item = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2', name: 'Old name' })
+    equipmentById['eq-2'] = item
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    await scan('https://boat.example/inventory/equipment/eq-2')
+    await screen.findByText(/Recorded in SAL-04/)
+
+    // The record changes server-side AFTER the scan, before Move is pressed.
+    equipmentById['eq-2'] = { ...equipmentById['eq-2'], name: 'New name' }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move to LAZ-02' }))
+
+    await waitFor(() => {
+      const call = putCalls.find((c) => c.id === 'eq-2')
+      expect(call).toBeDefined()
+      expect(call?.body.name).toBe('New name')
+    })
+  })
+
   it('lists an unseen item under "Not seen this pass" and writes nothing for it', async () => {
     const seen = makeItem({ id: 'eq-1', name: 'Spare impeller', bin_id: 'b1' })
     const unseen = makeItem({ id: 'eq-2', name: 'Fuel filter', bin_id: 'b1' })
