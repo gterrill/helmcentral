@@ -115,13 +115,24 @@ function toEditableProfile(profile: EngineProfile) {
   }
 }
 
+interface ProfilesSectionProps {
+  /** Code review: this section moved from admin-only Settings into
+   * Inventory (any signed-in operator can open that panel) without its own
+   * write gate, so a read-only session saw New/Upload/Edit/Delete controls
+   * that would 403 - the same canWrite EquipmentIndex/LocationsSection
+   * already take, gating the same shape of control. Download stays
+   * ungated: GET /api/equipment-profiles/:id/download is tierRead on the
+   * backend, same as the profile list itself. */
+  canWrite?: boolean
+}
+
 // ADR 0123: moved from components/settings/sections/equipment-section.tsx -
 // profiles are reference data (gauges, alarm bands, service intervals) about
 // a make and model, not a setting, and now live beside the gear that uses
 // them rather than in Settings. Renamed EquipmentSection -> ProfilesSection
 // on the move; nothing about how it talks to /api/equipment-profiles
 // changed (that API stays where it is, ADR 0123 decisions).
-export function ProfilesSection() {
+export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   const { profiles, loading, error: loadError, reload } = useEquipmentProfiles(true)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [isEditing, setIsEditing] = useState(false)
@@ -403,24 +414,26 @@ export function ProfilesSection() {
             </p>
           )}
 
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>
-              <Plus className="h-4 w-4" />
-              New profile
-            </Button>
-            <Button type="button" variant="outline" className="gap-2" onClick={handleUploadClick} disabled={uploading || saving || deleting}>
-              <Upload className="h-4 w-4" />
-              {uploading ? 'Uploading...' : 'Upload'}
-            </Button>
-            <input
-              ref={uploadInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="sr-only"
-              aria-label="Upload equipment profile file"
-              onChange={(event) => { void handleUploadChange(event) }}
-            />
-          </div>
+          {canWrite && (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>
+                <Plus className="h-4 w-4" />
+                New profile
+              </Button>
+              <Button type="button" variant="outline" className="gap-2" onClick={handleUploadClick} disabled={uploading || saving || deleting}>
+                <Upload className="h-4 w-4" />
+                {uploading ? 'Uploading...' : 'Upload'}
+              </Button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="sr-only"
+                aria-label="Upload equipment profile file"
+                onChange={(event) => { void handleUploadChange(event) }}
+              />
+            </div>
+          )}
 
           {profiles.length > 0 && (
             <Field>
@@ -441,7 +454,7 @@ export function ProfilesSection() {
 
           {isEditing && (
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => { void handleSave() }} disabled={saving}>
+              <Button type="button" onClick={() => { void handleSave() }} disabled={saving || !canWrite}>
                 {saving ? 'Saving...' : 'Save changes'}
               </Button>
               <Button type="button" variant="outline" onClick={handleCancel} disabled={saving || deleting}>Cancel</Button>
@@ -482,7 +495,7 @@ export function ProfilesSection() {
                   size="sm"
                   className="gap-2"
                   onClick={handleEdit}
-                  disabled={isEditing || loading || profiles.length === 0 || deleting}
+                  disabled={isEditing || loading || profiles.length === 0 || deleting || !canWrite}
                 >
                   <PencilLine className="h-4 w-4" />
                   Edit
@@ -506,7 +519,7 @@ export function ProfilesSection() {
                   className="gap-2 text-destructive"
                   aria-label="Delete equipment profile"
                   onClick={handleDeleteClick}
-                  disabled={isCreating || deleting || loading || profiles.length === 0}
+                  disabled={isCreating || deleting || loading || profiles.length === 0 || !canWrite}
                 >
                   <Trash2 className="h-4 w-4" />
                   {deleting ? 'Deleting...' : 'Delete'}

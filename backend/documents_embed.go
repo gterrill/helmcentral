@@ -72,7 +72,9 @@ type documentBackfillStatus struct {
 	// Documents toolbar shows, so an automatic pass failing (out of credit,
 	// say) must land here too. It does not stop a backfill - Running stays
 	// true, and the next pass retries once Run's own backoff elapses. A
-	// successful batch or an empty queue clears it.
+	// successful batch or a genuinely empty queue clears it - one that is
+	// empty only because every chunk left in it was set aside as permanently
+	// failing does not.
 	LastError string `json:"last_error,omitempty"`
 }
 
@@ -429,11 +431,30 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 	if err != nil {
 		return false, fmt.Errorf("documents indexer: pending embed chunks: %w", err)
 	}
+	pendingCount := len(chunks)
 	chunks = idx.dropSkippedChunks(chunks)
 	if len(chunks) == 0 {
 		// Nothing is waiting, so nothing is failing: an error left from an
-		// earlier batch would be a false alarm on the toolbar.
-		idx.clearEmbedError()
+		// earlier batch would be a false alarm on the toolbar. But that is
+		// only true when the queue is genuinely empty - when it is empty
+		// SOLELY because every pending chunk THIS PASS FOUND was just
+		// dropped by dropSkippedChunks, the document behind at least one of
+		// them still has no vector, so LastError must stay put rather than
+		// being cleared out from under a failure that is still the current
+		// state.
+		//
+		// Code review: this used to check idx.skippedEmbedCount() == 0
+		// instead of pendingCount - the skip set lives for the whole
+		// process and never shrinks on its own, so that check stayed true
+		// forever once anything was ever skipped, even once the skipped
+		// chunk's document was deleted or a backfill moved on to only
+		// scanning enriched documents. Checking what THIS pass's own query
+		// returned, before dropSkippedChunks ran, tracks the current state
+		// instead: PendingEmbedChunks stops returning a chunk the moment
+		// its document (or the chunk itself) is gone, deleted or not.
+		if pendingCount == 0 {
+			idx.clearEmbedError()
+		}
 		if backfilling {
 			// enrichedOnly=false came back empty: nothing left anywhere for
 			// this model. The backfill is done.

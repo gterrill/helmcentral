@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
 
@@ -54,6 +54,23 @@ let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
 const fetchMock = vi.fn()
 
+// Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
+// drop blanks, dedupe case-insensitively (folding only the comparison key,
+// keeping first-seen casing) - see that function's own comment.
+function normalizeAliasesLikeServer(aliases: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const alias of aliases) {
+    const trimmed = alias.trim()
+    if (trimmed === '') continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(trimmed)
+  }
+  return out
+}
+
 function stubFetch() {
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     const u = String(url)
@@ -81,7 +98,21 @@ function stubFetch() {
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
       const body = JSON.parse(String(init?.body))
-      currentItem = { ...currentItem, ...body }
+      // Same normalisation the real handler applies (backend/inventory_
+      // handlers.go / inventory_store.go) before it ever echoes the item
+      // back - trimmed strings, deduped aliases. A fixture that skipped
+      // this would go green against a shape the real server never sends.
+      currentItem = {
+        ...currentItem,
+        ...body,
+        name: String(body.name).trim(),
+        manufacturer: String(body.manufacturer).trim(),
+        model: String(body.model).trim(),
+        serial: String(body.serial).trim(),
+        location_detail: String(body.location_detail).trim(),
+        install_date: String(body.install_date).trim(),
+        aliases: normalizeAliasesLikeServer(body.aliases ?? []),
+      }
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'DELETE') {
@@ -204,6 +235,74 @@ describe('EquipmentEditor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove alias genset' }))
     expect(screen.queryByText('genset')).not.toBeInTheDocument()
+  })
+
+  it('re-seeds the draft from the saved item after a successful save, so server-side trimming does not leave it dirty forever', async () => {
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    onDirtyChange.mockClear()
+
+    // The server trims this to "Onan" and echoes that back - the draft has
+    // to pick up the trimmed value, not keep comparing against what was typed.
+    fireEvent.change(screen.getByLabelText('Manufacturer'), { target: { value: '  Onan  ' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    expect(screen.getByLabelText('Manufacturer')).toHaveValue('Onan')
+  })
+
+  it('keeps a newer edit typed while a save is in flight instead of the server echo overwriting it, and dirty stays true', async () => {
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Onan Generator' } })
+    onDirtyChange.mockClear()
+
+    // The PUT this Save sends is held open, so the operator's next edit
+    // lands while it's still in flight - the same race as a slow network.
+    let resolvePut!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
+        return new Promise((resolve) => { resolvePut = resolve })
+      }
+      throw new Error(`unexpected fetch in this test: ${method} ${u}`)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    // A further, still-unsaved edit, typed before the PUT above resolves.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Onan Generator 2' } })
+
+    await act(async () => {
+      resolvePut({ ok: true, json: async () => ({ item: { ...currentItem, name: 'Onan Generator' } }) })
+      await Promise.resolve()
+    })
+
+    // The newer edit survives - it was never sent, so the server's echo of
+    // the OLDER draft must not stomp it - and the editor keeps reporting it
+    // dirty rather than silently losing the warning along with the edit.
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Onan Generator 2'))
+    expect(onDirtyChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('addAlias dedupes case-insensitively, matching the server\'s normalizeAliases', async () => {
+    currentItem = makeItem({ aliases: ['Genset'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    expect(screen.getByText('Genset')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Add alias'), { target: { value: 'genset' } })
+    fireEvent.keyDown(screen.getByLabelText('Add alias'), { key: 'Enter' })
+
+    // Only the one chip - a case-only variant of an existing alias is not
+    // a second alias, the same rule the server's own normalizeAliases applies.
+    expect(screen.getAllByText(/^genset$/i)).toHaveLength(1)
   })
 
   it('reports dirty as soon as a field changes and clears it after a successful save', async () => {

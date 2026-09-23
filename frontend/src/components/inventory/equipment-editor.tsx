@@ -255,7 +255,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
 
   const addAlias = () => {
     const name = aliasInput.trim()
-    if (name === '' || draft.aliases.includes(name)) { setAliasInput(''); return }
+    // Case-insensitive, matching the server's own normalizeAliases
+    // (backend/inventory_store.go) - otherwise "Genset" and "genset" would
+    // sit in the draft as two aliases only for the save to collapse them to
+    // one, leaving the draft one alias ahead of what actually got stored.
+    if (name === '' || draft.aliases.some((a) => a.toLowerCase() === name.toLowerCase())) {
+      setAliasInput('')
+      return
+    }
     setDraft((prev) => ({ ...prev, aliases: [...prev.aliases, name] }))
     setAliasInput('')
   }
@@ -291,7 +298,30 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         onCreated(created.id)
         return
       }
-      await update(draft)
+      const sentDraft = draft
+      const updated = await update(draft)
+      // Re-seed the draft from the server's own normalised record (trimmed
+      // strings, case-insensitively deduped aliases - backend/inventory_
+      // handlers.go and inventory_store.go's normalizeAliases). The effect
+      // above only re-seeds on a DIFFERENT id, so without this a save that
+      // only changed what the server trims off (e.g. "  Onan  " -> "Onan")
+      // would leave `dirty` stuck true forever - the draft still says
+      // "  Onan  ", the record now says "Onan", and nothing ever compares
+      // them again.
+      //
+      // Code review: this used to call setDraft unconditionally, which
+      // overwrote whatever the operator typed WHILE this PUT was in flight
+      // - a functional setDraft here still snapshots `draft` as of when
+      // Save was pressed (in `sentDraft`, captured above), so a newer draft
+      // the operator has since typed is left alone. It only re-seeds when
+      // the current draft is still exactly what was sent: sameDraft, not
+      // `===`, because setDraft's own callback receives the very state that
+      // would otherwise be replaced, and that's the one comparison that
+      // means "nothing changed since Save was pressed." Left alone, the
+      // newer draft still differs from the also-just-updated baseline (this
+      // save's own record), so `dirty` correctly stays true instead of
+      // dropping with no warning that the newer edit was never sent.
+      setDraft((current) => (sameDraft(current, sentDraft) ? draftFromItem(updated) : current))
       // Trap: only sent when the link SET actually changed - comparing ids
       // as sets, not array order, so re-saving an untouched Documents list
       // never issues a no-op PUT.

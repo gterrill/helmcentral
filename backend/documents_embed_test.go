@@ -746,3 +746,133 @@ func TestDocumentIndexer_EmptyQueueClearsAnEarlierFailure(t *testing.T) {
 		t.Fatalf("expected an empty queue to finish the backfill with no error, got %+v", status)
 	}
 }
+
+// TestDocumentIndexer_SkippedChunkKeepsLastErrorRatherThanClearingIt covers
+// the other side of TestDocumentIndexer_EmptyQueueClearsAnEarlierFailure: a
+// batch can come back empty not because nothing is waiting, but because the
+// only pending chunk (besides its own meta chunk, which embeds cleanly) was
+// just set aside by recordEmbedBatchFailure after documentsEmbedChunkAttempts
+// failures. That is not "nothing failing" - the document was never embedded
+// - so LastError (and the toolbar's failure row it drives) must survive the
+// pass, not be cleared as a false alarm.
+func TestDocumentIndexer_SkippedChunkKeepsLastErrorRatherThanClearingIt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := insertChunkedDocument(t, store, "sha-skip-keeps-error", "poison-only.pdf", true, "a chunk the upstream never accepts")
+
+	poisonChunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(poisonChunks) != 1 {
+		t.Fatalf("ChunksFrom: %v", err)
+	}
+	poisonText := poisonChunks[0].Text
+
+	// Rejects any batch containing the poison chunk's text; embeds anything
+	// else (its own meta chunk included) - the same doer shape
+	// TestDocumentIndexer_APermanentlyFailingChunkIsSkippedRatherThanBlockingTheQueue
+	// uses, for the same reason: a real upstream refusing one specific
+	// input behaves this way.
+	doer := openRouterDoerFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var parsed openRouterEmbeddingsRequest
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, err
+		}
+		for _, in := range parsed.Input {
+			if in == poisonText {
+				return openRouterFakeResponse(400, `{"error":{"message":"input rejected","code":400}}`), nil
+			}
+		}
+		return fakeEmbeddingsResponse(t, 4, len(parsed.Input), 0), nil
+	})
+
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), doer)
+
+	// Run passes until the poison chunk is set aside - the same 40-pass
+	// ceiling that test uses, well past however many narrowing takes.
+	for i := 0; i < 40 && idx.skippedEmbedCount() == 0; i++ {
+		idx.processEmbedBatch(context.Background())
+	}
+	if idx.skippedEmbedCount() != 1 {
+		t.Fatalf("expected the poison chunk to be set aside")
+	}
+	if status := idx.BackfillStatus(); status.LastError == "" {
+		t.Fatalf("expected LastError to be set once the chunk failed")
+	}
+
+	// The next pass finds nothing to send - the only pending chunk left is
+	// the one just set aside - but the document behind it still has no
+	// vector for its body text.
+	if _, err := idx.processEmbedBatch(context.Background()); err != nil {
+		t.Fatalf("processEmbedBatch: %v", err)
+	}
+	if status := idx.BackfillStatus(); status.LastError == "" {
+		t.Fatalf("expected LastError to survive a pass that is empty only because its one chunk was skipped")
+	}
+}
+
+// TestDocumentIndexer_SkippedChunkDocumentDeletedClearsLastError covers the
+// skip set's other blind spot: it lives for the whole process and never
+// shrinks on its own, so basing "clear LastError" on skippedEmbedCount()
+// alone (rather than on what THIS pass's own query actually found) leaves
+// LastError stuck forever once a document behind a skipped chunk is gone -
+// there is nothing left anywhere for that chunk to keep failing on, but the
+// skip map still remembers its id. Deleting the document is one legitimate
+// way the queue becomes genuinely empty; PendingEmbedChunks itself won't
+// return the poison chunk anymore, so this pass must see the queue as
+// empty and clear the error, the same as if nothing had ever been skipped.
+func TestDocumentIndexer_SkippedChunkDocumentDeletedClearsLastError(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := insertChunkedDocument(t, store, "sha-skip-deleted-clears-error", "poison-only.pdf", true, "a chunk the upstream never accepts")
+
+	poisonChunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(poisonChunks) != 1 {
+		t.Fatalf("ChunksFrom: %v", err)
+	}
+	poisonText := poisonChunks[0].Text
+
+	doer := openRouterDoerFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var parsed openRouterEmbeddingsRequest
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, err
+		}
+		for _, in := range parsed.Input {
+			if in == poisonText {
+				return openRouterFakeResponse(400, `{"error":{"message":"input rejected","code":400}}`), nil
+			}
+		}
+		return fakeEmbeddingsResponse(t, 4, len(parsed.Input), 0), nil
+	})
+
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), doer)
+
+	for i := 0; i < 40 && idx.skippedEmbedCount() == 0; i++ {
+		idx.processEmbedBatch(context.Background())
+	}
+	if idx.skippedEmbedCount() != 1 {
+		t.Fatalf("expected the poison chunk to be set aside")
+	}
+	if status := idx.BackfillStatus(); status.LastError == "" {
+		t.Fatalf("expected LastError to be set once the chunk failed")
+	}
+
+	// The operator deletes the document behind the skipped chunk - its
+	// chunk row (and any embedding) cascades away with it (documents_
+	// store.go's Delete), so PendingEmbedChunks no longer has any row to
+	// return for it at all, skipped or not.
+	if _, err := store.Delete(doc.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := idx.processEmbedBatch(context.Background()); err != nil {
+		t.Fatalf("processEmbedBatch: %v", err)
+	}
+	if status := idx.BackfillStatus(); status.LastError != "" {
+		t.Fatalf("expected LastError to clear once the skipped chunk's document was deleted, got %q", status.LastError)
+	}
+}

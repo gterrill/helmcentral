@@ -82,11 +82,19 @@ func trimStringPtr(p *string) *string {
 // name required; category/system/status validated against their own valid*
 // set (system/status default first, same as CreateEquipment/UpdateEquipment
 // themselves do, so a request that omits them never trips this check only
-// to have the store apply a DIFFERENT default); profile_id, when given,
-// must be a currently loaded engineProfiles() id (a profile is a file on
-// disk, not a foreign key the schema can enforce, so this is the only place
-// that ever checks it); install_date blank or YYYY-MM-DD; hour_meter_path
-// trimmed with no embedded whitespace. It does NOT re-validate the zone_id/
+// to have the store apply a DIFFERENT default); profile_id, when given AND
+// different from existingProfileID, must be a currently loaded
+// engineProfiles() id (a profile is a file on disk, not a foreign key the
+// schema can enforce, so this is the only place that ever checks it).
+// existingProfileID is the stored record's own profile_id on an update ("" on
+// a create, where nothing is stored yet): a profile can be deleted out from
+// under a record that already links to it, and re-checking profile_id
+// against the live profile list on every PUT would then 400 every future
+// edit of that record for a field the request never touched. Leaving
+// profile_id exactly as it already was is therefore always accepted without
+// a fresh lookup; only a NEW or CHANGED value is re-validated. install_date
+// blank or YYYY-MM-DD; hour_meter_path trimmed with no embedded whitespace.
+// It does NOT re-validate the zone_id/
 // bin_id pairing - that needs a database lookup (does this bin's own zone
 // match?) that only the store can cheaply make inside the same transaction
 // as the write (validateEquipmentLocation, inventory_store.go); this
@@ -101,7 +109,7 @@ func trimStringPtr(p *string) *string {
 // UpdateEquipment apply the identical function again on write, which is a
 // harmless no-op on an already-normalised list, so there is exactly one
 // place that decides what "normalised" means.
-func validateEquipmentInput(req equipmentRequest) (equipmentItem, *inventoryValidationError) {
+func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equipmentItem, *inventoryValidationError) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return equipmentItem{}, &inventoryValidationError{Field: "name", Message: "name is required"}
@@ -128,7 +136,7 @@ func validateEquipmentInput(req equipmentRequest) (equipmentItem, *inventoryVali
 	}
 
 	profileID := strings.TrimSpace(req.ProfileID)
-	if profileID != "" {
+	if profileID != "" && profileID != existingProfileID {
 		profiles, _ := engineProfiles()
 		found := false
 		for _, p := range profiles {
@@ -342,7 +350,7 @@ func createEquipmentHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
-	item, verr := validateEquipmentInput(req)
+	item, verr := validateEquipmentInput(req, "")
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
@@ -376,8 +384,10 @@ func getEquipmentHandler(c echo.Context) error {
 }
 
 // updateEquipmentHandler is PUT /api/inventory/equipment/:id: the same
-// validateEquipmentInput pass as create, then UpdateEquipment's whole-record
-// replace.
+// validateEquipmentInput pass as create - except profile_id, where it also
+// loads the stored record first so a value the request left unchanged is
+// never re-checked against engineProfiles() (validateEquipmentInput's own
+// doc comment explains why) - then UpdateEquipment's whole-record replace.
 func updateEquipmentHandler(c echo.Context) error {
 	limitNoteRequestBody(c)
 	var req equipmentRequest
@@ -385,7 +395,12 @@ func updateEquipmentHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
-	item, verr := validateEquipmentInput(req)
+	existing, err := globalDocumentStore.GetEquipment(c.Param("id"))
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	item, verr := validateEquipmentInput(req, existing.ProfileID)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}

@@ -607,6 +607,67 @@ func TestUpdateEquipmentHandler_ReplacesFields(t *testing.T) {
 	}
 }
 
+// TestUpdateEquipmentHandler_UnchangedProfileIDSurvivesProfileDeletion pins
+// the fix for validateEquipmentInput re-checking profile_id against
+// engineProfiles() on every PUT: a record linked to a profile that is later
+// deleted must still be editable as long as the edit does not touch
+// profile_id - only a NEW or CHANGED profile_id needs to name a currently
+// loaded profile.
+func TestUpdateEquipmentHandler_UnchangedProfileIDSurvivesProfileDeletion(t *testing.T) {
+	withTestDocumentStore(t)
+
+	// engineProfiles() carries none in this test process - the same state
+	// as after the profile file backing "now-deleted-profile" was removed.
+	// CreateEquipment goes straight to the store, bypassing
+	// validateEquipmentInput's own profile_id check, the same way a record
+	// already linked to a profile before it was ever deleted would have
+	// gotten there.
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical", ProfileID: "now-deleted-profile"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	body := `{"name":"Generator","category":"mechanical","profile_id":"now-deleted-profile"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID, body, item.ID)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatalf("updateEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for an update that leaves its already-linked profile_id unchanged, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUpdateEquipmentHandler_ChangedProfileIDStillValidated is the other
+// half of the fix above: an update that introduces a DIFFERENT profile_id
+// must still be validated against engineProfiles(), not waved through just
+// because the record already had some profile_id set.
+func TestUpdateEquipmentHandler_ChangedProfileIDStillValidated(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical", ProfileID: "already-linked-profile"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	body := `{"name":"Generator","category":"mechanical","profile_id":"a-different-unknown-profile"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID, body, item.ID)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatalf("updateEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a changed profile_id that names no loaded profile, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Field string `json:"field"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Field != "profile_id" {
+		t.Fatalf("expected field=profile_id, got %+v", resp)
+	}
+}
+
 // ── DELETE /api/inventory/equipment/:id ──────────────────────────────────
 
 func TestDeleteEquipmentHandler_RemovesAndReturns204(t *testing.T) {

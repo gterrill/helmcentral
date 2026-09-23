@@ -31,9 +31,10 @@ crawling into the compartment to read the data plate:
 - **Status.** *Deployed* for gear in use, *stored* for a spare sitting in
   the lazarette. A spare impeller is a real record; marking it stored is
   what will keep it out of maintenance reminders when those arrive.
-- **Hour meter.** For mechanical gear, the SignalK path its runtime is
-  published on, picked from the paths your boat actually publishes. This is
-  what future service schedules will count against.
+- **Hour meter.** For mechanical gear, the engine-hours reading from the
+  vessel telemetry that this item's runtime comes from, picked from the live
+  instrument data your boat actually publishes. This is what future service
+  schedules will count against.
 - **Aliases.** What the crew actually calls it. "Genset" finds the
   generator.
 - **Install date, notes, and whether you have verified it aboard.** The

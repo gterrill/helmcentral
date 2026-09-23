@@ -41,6 +41,12 @@ beforeEach(() => {
         : z))
       return Promise.resolve({ ok: true, json: async () => ({ bin: { id: 'b2', zone_id: body.zone_id, code: body.code, name: body.name, sort_index: 1 } }) })
     }
+    if (u.match(/\/api\/inventory\/bins\/b1$/) && method === 'PUT') {
+      const body = JSON.parse(String(init?.body)) as { code?: string; name?: string }
+      zones = zones.map((z) => ({ ...z, bins: z.bins.map((b) => (b.id === 'b1' ? { ...b, ...body } : b)) }))
+      const updated = zones.flatMap((z) => z.bins).find((b) => b.id === 'b1')
+      return Promise.resolve({ ok: true, json: async () => ({ bin: updated }) })
+    }
     if (u.match(/\/api\/inventory\/bins\/b1$/) && method === 'DELETE') {
       return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'bin is in use by 1 item' }) })
     }
@@ -105,6 +111,82 @@ describe('LocationsSection', () => {
       expect.objectContaining({ method: 'POST' }),
     ))
     await screen.findByDisplayValue('ER-02')
+  })
+
+  it('commits each field\'s own latest value on blur, not the other field\'s stale value from the last render (quick code-then-name edit)', async () => {
+    render(<LocationsSection />)
+    await screen.findByDisplayValue('Engine room (stbd)')
+
+    const codeInput = screen.getByLabelText('Bin code')
+    const nameInput = screen.getByLabelText('Bin name')
+
+    // Edit code, blur (fires the code PUT), then edit name and blur again -
+    // all before a re-render can land, the same "quickly editing code then
+    // name" sequence the bug report describes.
+    fireEvent.change(codeInput, { target: { value: 'ER-02' } })
+    fireEvent.blur(codeInput)
+    fireEvent.change(nameInput, { target: { value: 'Spares' } })
+    fireEvent.blur(nameInput)
+
+    await waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith('/api/inventory/bins/b1') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(putCalls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    const putCalls = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/bins/b1') && (init as RequestInit | undefined)?.method === 'PUT')
+    const lastBody = JSON.parse(String((putCalls[putCalls.length - 1][1] as RequestInit).body)) as { code: string; name: string }
+    // The name blur must send the code the operator just typed, not revert
+    // it to whatever the code field held before this edit started.
+    expect(lastBody.code).toBe('ER-02')
+    expect(lastBody.name).toBe('Spares')
+  })
+
+  it('keeps the name field\'s typed value and focus through a code-save refetch, then sends both on its own blur', async () => {
+    render(<LocationsSection />)
+    await screen.findByDisplayValue('Engine room (stbd)')
+
+    const codeInput = screen.getByLabelText('Bin code')
+    let nameInput = screen.getByLabelText('Bin name')
+
+    // Edit code and blur it - this fires the code PUT and the refetch that
+    // follows it. Before either resolves, the operator has already tabbed
+    // into name and started typing.
+    fireEvent.change(codeInput, { target: { value: 'ER-02' } })
+    fireEvent.blur(codeInput)
+    nameInput.focus()
+    fireEvent.change(nameInput, { target: { value: 'Spa' } })
+
+    // Let the code PUT and its refetch land - zones now carries the new
+    // code under the same bin id, name untouched by that save.
+    await waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith('/api/inventory/bins/b1') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(putCalls).toHaveLength(1)
+    })
+    await waitFor(() => expect(screen.getByLabelText('Bin code')).toHaveValue('ER-02'))
+
+    // The refetch must not have remounted the row: the name field keeps
+    // whatever was typed into it, and keeps focus.
+    nameInput = screen.getByLabelText('Bin name')
+    expect(nameInput).toHaveValue('Spa')
+    expect(nameInput).toHaveFocus()
+
+    fireEvent.blur(nameInput)
+
+    await waitFor(() => {
+      const putCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith('/api/inventory/bins/b1') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(putCalls).toHaveLength(2)
+    })
+    const putCalls = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/bins/b1') && (init as RequestInit | undefined)?.method === 'PUT')
+    const lastBody = JSON.parse(String((putCalls[1][1] as RequestInit).body)) as { code: string; name: string }
+    // The name blur sends the new code plus the new name - not a stale
+    // pre-edit code reverted by a remount.
+    expect(lastBody.code).toBe('ER-02')
+    expect(lastBody.name).toBe('Spa')
   })
 
   it('shows the server\'s 409 message when deleting a zone in use is refused', async () => {

@@ -515,4 +515,11 @@ describe('isValidPoiMapConfig', () => {
   ])('rejects %s', (_label, config) => {
     expect(isValidPoiMapConfig(config)).toBe(false)
   })
+
+  // The backend field is a Go int (backend/dashboard_pages.go's
+  // PoiMapWidgetConfig.SummaryCycleSeconds) - a fractional value in range
+  // passes this range check and then fails the actual page save.
+  test('rejects a non-integer summaryCycleSeconds within range', () => {
+    expect(isValidPoiMapConfig({ ...validPoiMapConfig(), summaryCycleSeconds: 4.5 })).toBe(false)
+  })
 })

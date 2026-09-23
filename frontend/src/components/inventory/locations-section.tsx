@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { useInventoryZones } from '@/hooks/use-inventory'
+import { useInventoryZones, type InventoryBin } from '@/hooks/use-inventory'
 
 // ADR 0065 §4 / ADR 0123: zones and bins, plain CRUD, no floor plans this
 // cycle. Rename is inline-on-blur rather than a separate edit mode (an
@@ -21,6 +21,81 @@ import { useInventoryZones } from '@/hooks/use-inventory'
 
 interface LocationsSectionProps {
   canWrite?: boolean
+}
+
+interface BinRowProps {
+  bin: InventoryBin
+  canWrite: boolean
+  onRename: (id: string, code: string, name: string, original: { code: string; name: string }) => void
+  onDelete: (id: string) => void
+}
+
+/**
+ * Code review: code and name used to be two separate <Input>s in the parent
+ * map, each committing on blur with `bin.code`/`bin.name` filled in for the
+ * OTHER field - those are LocationsSection's own props as of its last
+ * render, not what the operator has typed since. Editing code, tabbing to
+ * name, typing there and blurring fired the name commit with the CODE
+ * field's pre-edit prop value, reverting the code change that was still
+ * in flight (the rename PUT hadn't resolved and re-rendered LocationsSection
+ * yet). Pulling both fields into their own row component with co-located
+ * state fixes it structurally: `code`/`name` here are state, not props, so
+ * one field's onBlur always reads the other field's latest typed value from
+ * this same render, never a stale one from further up the tree.
+ *
+ * Code review: this row used to remount on ANY server-confirmed rename
+ * (keyed on `${bin.id}-${bin.code}-${bin.name}`), to keep a saved field in
+ * sync with the refetch that follows its own PUT. That's too broad: a code
+ * blur's refetch changes the key, and the whole row - including the NAME
+ * field the operator has since tabbed into and is still typing - gets torn
+ * down and rebuilt from props, losing focus and the typed text. Keyed on
+ * bin.id alone below, the row never remounts on a rename. Each field
+ * instead re-syncs from its OWN prop in its own effect, so a
+ * server-confirmed code change re-syncs code without touching name (and
+ * vice versa) - the field the operator isn't touching catches up to the
+ * server, the field they are stays exactly as typed.
+ */
+function BinRow({ bin, canWrite, onRename, onDelete }: BinRowProps) {
+  const [code, setCode] = useState(bin.code)
+  const [name, setName] = useState(bin.name)
+
+  useEffect(() => { setCode(bin.code) }, [bin.code])
+  useEffect(() => { setName(bin.name) }, [bin.name])
+
+  const commit = () => onRename(bin.id, code, name, { code: bin.code, name: bin.name })
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        value={code}
+        aria-label="Bin code"
+        className="h-9 w-28 font-mono"
+        disabled={!canWrite}
+        onChange={(e) => setCode(e.target.value)}
+        onBlur={commit}
+      />
+      <Input
+        value={name}
+        aria-label="Bin name"
+        placeholder="Name (optional)"
+        className="h-9 flex-1"
+        disabled={!canWrite}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={commit}
+      />
+      {canWrite && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Delete bin ${bin.code}`}
+          onClick={() => onDelete(bin.id)}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      )}
+    </div>
+  )
 }
 
 export function LocationsSection({ canWrite = true }: LocationsSectionProps) {
@@ -148,36 +223,13 @@ export function LocationsSection({ canWrite = true }: LocationsSectionProps) {
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {zone.bins.map((bin) => (
-              <div key={bin.id} className="flex items-center gap-2">
-                <Input
-                  key={`${bin.id}-code-${bin.code}`}
-                  defaultValue={bin.code}
-                  aria-label="Bin code"
-                  className="h-9 w-28 font-mono"
-                  disabled={!canWrite}
-                  onBlur={(e) => { void handleRenameBin(bin.id, e.target.value, bin.name, { code: bin.code, name: bin.name }) }}
-                />
-                <Input
-                  key={`${bin.id}-name-${bin.name}`}
-                  defaultValue={bin.name}
-                  aria-label="Bin name"
-                  placeholder="Name (optional)"
-                  className="h-9 flex-1"
-                  disabled={!canWrite}
-                  onBlur={(e) => { void handleRenameBin(bin.id, bin.code, e.target.value, { code: bin.code, name: bin.name }) }}
-                />
-                {canWrite && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Delete bin ${bin.code}`}
-                    onClick={() => { void handleDeleteBin(bin.id) }}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                )}
-              </div>
+              <BinRow
+                key={bin.id}
+                bin={bin}
+                canWrite={canWrite}
+                onRename={(id, code, name, original) => { void handleRenameBin(id, code, name, original) }}
+                onDelete={(id) => { void handleDeleteBin(id) }}
+              />
             ))}
 
             {canWrite && (
