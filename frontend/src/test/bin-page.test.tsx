@@ -151,6 +151,18 @@ describe('BinPage', () => {
     expect(onOpenEquipment).toHaveBeenCalledWith('eq-2')
   })
 
+  it("builds the Tag row's path with formatAppLocation, encoded like the app's own URLs", async () => {
+    zones = [
+      {
+        id: 'z1', name: 'Lazarette', sort_index: 0,
+        bins: [{ id: 'b1', zone_id: 'z1', code: 'LAZ 02', name: '', sort_index: 0 }],
+      },
+    ]
+    render(<BinPage code="LAZ 02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    await screen.findByText('LAZ 02')
+    expect(screen.getByTestId('tag-row')).toHaveTextContent('/inventory/bins/LAZ%2002')
+  })
+
   it('pre-sets the bin and zone when Full item is pressed', async () => {
     const onNewEquipment = vi.fn()
     render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={onNewEquipment} />)

@@ -9,6 +9,7 @@ import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipment, useInventoryZones, type EquipmentItem, type InventoryZone } from '@/hooks/use-inventory'
+import { formatAppLocation } from '@/lib/app-location'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
 // case-insensitively against the zone/bin tree (useInventoryZones) - there
@@ -346,7 +347,12 @@ function BinContents({
 
       {!loading && <BinPhotoGrid items={items} onOpenEquipment={onOpenEquipment} />}
 
-      <TagRow path={`/inventory/bins/${bin.code}`} />
+      {/* formatAppLocation (not raw interpolation) so the code is
+          percent-encoded the same way the app's own /inventory/bins/<code>
+          URLs are - a bin code with a space or another reserved character
+          would otherwise produce a path the app itself wouldn't parse back
+          the same way. */}
+      <TagRow path={formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: bin.code }, { firstPageId: null })} />
     </div>
   )
 }

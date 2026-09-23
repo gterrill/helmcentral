@@ -24,6 +24,7 @@ import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import { formatAppLocation } from '@/lib/app-location'
 import {
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
@@ -627,7 +628,10 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         )}
       </FieldSet>
 
-      {id !== null && <TagRow path={`/inventory/equipment/${id}`} />}
+      {/* formatAppLocation (not raw interpolation) - same reasoning as
+          bin-page.tsx's own Tag row, so this path is encoded exactly the
+          way the app's own /inventory/equipment/<id> URLs are. */}
+      {id !== null && <TagRow path={formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })} />}
 
       <FieldSet className="rounded-md border border-border bg-card p-4">
         <FieldLegend variant="label">{id === null ? 'New item' : 'Specifications & IDs'}</FieldLegend>
