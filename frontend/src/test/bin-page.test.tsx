@@ -131,6 +131,26 @@ describe('BinPage', () => {
     await screen.findByText('No photo')
   })
 
+  it('renders the created bin through the normal path with real callbacks (not dead buttons)', async () => {
+    items = [makeItem({ id: 'eq-2', zone_id: 'z1', bin_id: 'b2' })]
+    const onOpenEquipment = vi.fn()
+    const onNewEquipment = vi.fn()
+    render(<BinPage code="NOPE" onClose={vi.fn()} onOpenEquipment={onOpenEquipment} onNewEquipment={onNewEquipment} />)
+    await screen.findByText('No bin')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bin NOPE' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await screen.findByText('NOPE')
+    await waitFor(() => expect(screen.getAllByText('Gaffer tape').length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
+    expect(onNewEquipment).toHaveBeenCalledWith({ zoneId: 'z1', binId: 'b2' })
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+    expect(onOpenEquipment).toHaveBeenCalledWith('eq-2')
+  })
+
   it('pre-sets the bin and zone when Full item is pressed', async () => {
     const onNewEquipment = vi.fn()
     render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={onNewEquipment} />)

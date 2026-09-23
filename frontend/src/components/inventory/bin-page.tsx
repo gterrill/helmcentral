@@ -27,7 +27,14 @@ interface BinPageProps {
 }
 
 export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true }: BinPageProps) {
-  const { zones, loading: zonesLoading } = useInventoryZones()
+  // ONE useInventoryZones() instance for the whole page (there is no shared
+  // store between separate calls - the hook's own header comment), so that
+  // when BinNotFound's Create bin below calls createBin/createZone, THIS
+  // component's own `zones` state is what updates. That is what lets a
+  // freshly created bin fall straight through `match` into the ordinary
+  // BinContents render below, with its real onOpenEquipment/onNewEquipment
+  // callbacks, rather than a second, dummy-callback render path.
+  const { zones, loading: zonesLoading, createZone, createBin } = useInventoryZones()
 
   const match = useMemo(() => {
     const lower = code.toLowerCase()
@@ -59,34 +66,42 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
     return <div className="p-4 text-sm text-muted-foreground">Loading...</div>
   }
 
-  return <BinNotFound code={code} zones={zones} onClose={onClose} canWrite={canWrite} />
+  return (
+    <BinNotFound
+      code={code}
+      zones={zones}
+      createZone={createZone}
+      createBin={createBin}
+      onClose={onClose}
+      canWrite={canWrite}
+    />
+  )
 }
 
 // ── not found / create ───────────────────────────────────────────────────
 
 function BinNotFound({
-  code, zones, onClose, canWrite,
+  code, zones, createZone, createBin, onClose, canWrite,
 }: {
   code: string
   zones: InventoryZone[]
+  createZone: (name: string) => Promise<InventoryZone>
+  createBin: (zoneId: string, code: string, name: string) => Promise<{ id: string; zone_id: string; code: string; name: string; sort_index: number }>
   onClose: () => void
   canWrite: boolean
 }) {
-  const { createZone, createBin } = useInventoryZones()
   const [creating, setCreating] = useState(false)
   const [selectedZoneId, setSelectedZoneId] = useState<string>(zones[0]?.id ?? '')
   const [newZoneName, setNewZoneName] = useState('')
   const [binName, setBinName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [createdBin, setCreatedBin] = useState<{ zone: InventoryZone; bin: { id: string; zone_id: string; code: string; name: string; sort_index: number } } | null>(null)
 
   const handleCreate = async () => {
     setSaving(true)
     setError(null)
     try {
       let zoneId = selectedZoneId
-      let zone: InventoryZone | undefined = zones.find((z) => z.id === zoneId)
       if (zones.length === 0) {
         const trimmedZoneName = newZoneName.trim()
         if (trimmedZoneName === '') {
@@ -96,18 +111,19 @@ function BinNotFound({
         }
         const created = await createZone(trimmedZoneName)
         zoneId = created.id
-        zone = created
       }
-      if (!zoneId || !zone) {
+      if (!zoneId) {
         setError('Pick a zone')
         setSaving(false)
         return
       }
       // The code is kept exactly as typed in the URL, apart from case
       // (ADR 0127 §2) - never re-derived from what the operator types into
-      // this form, which is only the zone/name.
-      const bin = await createBin(zoneId, code, binName.trim())
-      setCreatedBin({ zone, bin })
+      // this form, which is only the zone/name. createBin's own refresh()
+      // (use-inventory.ts) updates BinPage's `zones` state above, so its
+      // `match` picks the new bin up and swaps this view for BinContents -
+      // no local "just created" state needed here.
+      await createBin(zoneId, code, binName.trim())
     } catch (err) {
       // AGENTS.md fallback policy: the server's own conflict message
       // (e.g. a code already in use case-insensitively), never an
@@ -116,23 +132,6 @@ function BinNotFound({
     } finally {
       setSaving(false)
     }
-  }
-
-  // The same URL resolves the newly created bin the instant it exists -
-  // ADR 0127 §2: "The same URL then resolves and shows the empty bin,
-  // ready for quick add." No separate "created" screen; once creation
-  // lands, hand straight off to the ordinary BinContents view.
-  if (createdBin) {
-    return (
-      <BinContents
-        zone={createdBin.zone}
-        bin={createdBin.bin}
-        onClose={onClose}
-        onOpenEquipment={() => {}}
-        onNewEquipment={() => {}}
-        canWrite={true}
-      />
-    )
   }
 
   return (
