@@ -383,19 +383,34 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // into the single onFilesPicked/onMakeCover/onRemove PhotoStripEditor
   // actually receives further down, which branches on `id` itself.
 
+  // Downscaling every picked file runs concurrently (Promise.all) - each
+  // file's own canvas work is independent of the others, so there's no
+  // reason a slow one should hold up the rest. The results are still
+  // applied in the ORIGINAL file order afterward (not completion order),
+  // so a multi-pick's local photo list comes out in the order the operator
+  // picked them regardless of which one's canvas work happened to finish
+  // first.
   const addLocalPhotos = async (files: File[]) => {
-    for (const file of files) {
+    const results = await Promise.all(files.map(async (file) => {
       try {
-        const downscaled = await downscaleImage(file)
-        const previewUrl = URL.createObjectURL(downscaled)
-        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: downscaled, filename: photoFilename(file.name), previewUrl }])
+        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
       } catch (err) {
         // AGENTS.md fallback policy: the real reason a photo couldn't be
         // prepared (a canvas failure, an unreadable file), never silently
         // dropped.
-        setSaveError(err instanceof Error ? err.message : String(err))
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+    let lastError: string | null = null
+    for (const result of results) {
+      if (result.ok) {
+        const previewUrl = URL.createObjectURL(result.downscaled)
+        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
+      } else {
+        lastError = result.error
       }
     }
+    if (lastError) setSaveError(lastError)
   }
 
   const makeCoverLocal = (photoId: string) => {
@@ -432,20 +447,29 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // useEquipmentItem's own GET for a freshly created id can land before
   // these uploads finish and nothing else would ever catch the item up.
   const uploadPhotosToSavedItem = async (targetId: string, files: File[]) => {
-    const failures: FailedPhotoUpload[] = []
-    for (const file of files) {
-      let downscaled: Blob
+    // Downscaling runs concurrently for every file (Promise.all) - the
+    // network uploads that follow stay strictly sequential and in the
+    // ORIGINAL file order (not completion order), because the server
+    // assigns sort_index as each one arrives.
+    const downscaled = await Promise.all(files.map(async (file) => {
       try {
-        downscaled = await downscaleImage(file)
+        return { ok: true as const, file, blob: await downscaleImage(file) }
       } catch (err) {
-        failures.push({ blob: file, filename: photoFilename(file.name), error: err instanceof Error ? err.message : String(err) })
+        return { ok: false as const, file, error: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+
+    const failures: FailedPhotoUpload[] = []
+    for (const result of downscaled) {
+      if (!result.ok) {
+        failures.push({ blob: result.file, filename: photoFilename(result.file.name), error: result.error })
         continue
       }
       try {
-        const updated = await uploadEquipmentPhoto(targetId, downscaled, photoFilename(file.name))
+        const updated = await uploadEquipmentPhoto(targetId, result.blob, photoFilename(result.file.name))
         setItem(updated)
       } catch (err) {
-        failures.push({ blob: downscaled, filename: photoFilename(file.name), error: err instanceof Error ? err.message : String(err) })
+        failures.push({ blob: result.blob, filename: photoFilename(result.file.name), error: err instanceof Error ? err.message : String(err) })
       }
     }
     if (failures.length > 0) {

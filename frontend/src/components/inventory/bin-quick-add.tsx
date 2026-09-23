@@ -52,16 +52,28 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
   const [savedItemId, setSavedItemId] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
 
+  // Downscaling every picked file runs concurrently (Promise.all) - see
+  // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
+  // Results are still applied in the ORIGINAL file order, not completion
+  // order.
   const addFiles = async (files: File[]) => {
-    for (const file of files) {
+    const results = await Promise.all(files.map(async (file) => {
       try {
-        const downscaled = await downscaleImage(file)
-        const previewUrl = URL.createObjectURL(downscaled)
-        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: downscaled, filename: photoFilename(file.name), previewUrl }])
+        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
       } catch (err) {
-        setSaveError(err instanceof Error ? err.message : String(err))
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+    let lastError: string | null = null
+    for (const result of results) {
+      if (result.ok) {
+        const previewUrl = URL.createObjectURL(result.downscaled)
+        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
+      } else {
+        lastError = result.error
       }
     }
+    if (lastError) setSaveError(lastError)
   }
 
   const makeCover = (photoId: string) => {
