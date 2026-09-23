@@ -1,7 +1,11 @@
 # Forecast
 
-The forecast panel carries ten days of weather, wind, wave and tide for
-wherever the boat currently is. Position comes from SignalK, so it follows you
+The forecast panel turns ten days of weather, wind, wave and tide into a
+heavy-weather read for wherever the boat currently is, so you can see a
+building system or a dangerous sea state while there is still time to reef
+early, delay a passage or pick a different anchorage.
+
+Position comes from the boat's own GPS feed, so the forecast follows you
 without manual position updates.
 
 Weather, waves and tides each come from their own provider plugin. If one is
@@ -170,13 +174,14 @@ material and barely covers it directly.
 
 ### Getting it
 
-Upper air needs its own provider plugin in `plugins/upper-air/`, separate from
-your weather provider. Apple WeatherKit provides surface forecasts but no
-pressure-level data. Separate providers let you use WeatherKit for weather
-and Open-Meteo for upper air.
+Upper air needs its own provider, separate from and selected independently of
+your weather provider, since a weather source doesn't necessarily cover
+pressure-level data too. Apple WeatherKit, for example, provides surface
+forecasts but no pressure-level data, which is why WeatherKit for weather and
+Open-Meteo for upper air is a supported pairing rather than a contradiction.
 
-With no plugin installed, the forecast page simply has no upper-air section.
-Nothing else changes.
+With no upper-air provider selected, the forecast page simply has no
+upper-air section. Nothing else changes.
 
 ## Alarm rules that use this
 

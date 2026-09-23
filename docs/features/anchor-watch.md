@@ -1,17 +1,19 @@
 # Anchor watch
 
-Trail sampling and drag detection both run on the server, for your own vessel
-and for nearby AIS targets.
+Anchor watch catches a dragging anchor before it grounds the boat or fouls a
+neighbour, including at 0300 with nobody on deck: trail sampling and drag
+detection both run on the server, for your own vessel and for nearby AIS
+targets, and keep running with every browser on the boat closed.
 
-Drag detection continues when the browser is closed. A drag is an ordinary
-alarm: it is logged, can be acknowledged, and uses the transports you have
-configured. Acknowledgement is server-side, so silencing an alarm on your phone
-also silences it in a browser left open in the saloon.
+A drag is an ordinary alarm: it is logged, can be acknowledged, and uses the
+transports you have configured. Acknowledgement happens on the server, so
+silencing an alarm on your phone also silences it in a browser left open in
+the saloon.
 
 A lost GNSS fix never raises a drag. Position freezes at its last trusted value
-during an outage rather than wandering, and the stream watchdog reports the
-outage separately, as its own alarm. A drag alert and a lost GPS fix require
-different responses.
+during an outage rather than wandering, and the watchdog for a lost instrument
+connection reports the outage separately, as its own alarm. A drag alert and a
+lost GPS fix require different responses.
 
 ## AIS targets on the map
 
@@ -24,23 +26,26 @@ map and turn red on their own closing figures, independently of AIS, so a
 boat your radar and your AIS both see can show two red markers at once with
 two different numbers.
 
-## Drop, Raise, and SignalK
+## Drop, Raise, and the instrument network
 
-**Drop** saves the watch and publishes its anchor coordinates to SignalK's
-`navigation.anchor.position`. These are the stored coordinates, including the
-bow offset when applied. Repositioning the anchor marker republishes the
+**Drop** saves the watch and publishes its anchor coordinates onto the boat's
+instrument network. These are the stored coordinates, including the bow
+offset when applied. Repositioning the anchor marker republishes the
 corrected coordinates; changing radius or rode settings does not.
 
-**Raise** publishes an explicit `null` at that path, then removes the local
-watch, trail and session pins. This releases SignalK Auto-state's anchored
-state. Both operations check SignalK's model before reporting success and use
-the saved SignalK service credentials, independently of alarm transport settings.
+**Raise** publishes an explicit "no anchor" state, then removes the local
+watch, trail and session pins. This clears the boat's anchored navigation
+state, so an autopilot or another instrument that only behaves differently at
+anchor sees the vessel as under way again. Both operations confirm the change
+before reporting success and use the saved instrument-network credentials,
+independently of alarm transport settings.
 
 If synchronization fails, an error is shown. A failed Drop/reposition leaves
 the saved local watch active for safety; repeat Drop/reposition to synchronize.
-A failed Raise publication retains the local watch; retry Raise. If SignalK
-accepted Raise but removing the local watch failed, the error says so and Raise
-can be retried. Restarting Helmcentral does not republish or clear anchor state.
+A failed Raise publication retains the local watch; retry Raise. If the
+instrument network accepted Raise but removing the local watch failed, the
+error says so and Raise can be retried. Restarting Helmcentral does not
+republish or clear anchor state.
 
 ## Automatic raise
 
@@ -69,10 +74,10 @@ Every screen shows a toast when it happens: *"Anchor watch raised
 automatically: engines running, under way outside the zone."* The server log
 records the rpm, distance, radius and speed it acted on.
 
-If the raise fails, for example because SignalK doesn't confirm it, the
-server logs it and won't try again until the conditions break and re-form.
-The watch is still up and the boat is outside the circle, so the drag alarm
-sounds. Raise by hand.
+If the raise fails, for example because the instrument network doesn't
+confirm it, the server logs it and won't try again until the conditions
+break and re-form. The watch is still up and the boat is outside the circle,
+so the drag alarm sounds. Raise by hand.
 
 ## The rode planner
 
@@ -89,3 +94,6 @@ than accumulating across seasons.
 The map keeps the view you panned to for as long as you stay in the anchorage,
 including across updates. Anchoring somewhere else recentres every device on
 the new anchor.
+
+See [Set an anchor watch](../how-to/set-an-anchor-watch.md) for dropping,
+resizing, repositioning and raising the watch.

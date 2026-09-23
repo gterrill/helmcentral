@@ -15,7 +15,7 @@ A native install (via `install.sh`) uses:
 | `/var/lib/helmcentral/settings.yaml` | Operator settings, rewritten by the Settings UI on save. |
 | `/var/lib/helmcentral/data/` | SQLite stores, routes, dashboard pages, uploaded charts. |
 | `/var/lib/helmcentral/cache/` | Anchor-watch state and plugin forecast caches. |
-| `/var/lib/helmcentral/plugins/` | WASM providers, by category (`tides/`, `weather/`, `waves/`, `forecast-warnings/`). |
+| `/var/lib/helmcentral/plugins/` | Provider plugins, by category (`tides/`, `weather/`, `waves/`, `forecast-warnings/`). |
 | `/etc/systemd/system/helmcentral.service` | The service unit. |
 
 Under Docker the same tree lives in the `./backend-data` bind mount, with
@@ -57,7 +57,10 @@ block, or your shell.
 | `DAWN_LINEAR_FALLBACK` | `true` | When overnight state-of-charge history is unavailable (InfluxDB not configured, unreachable, or too few usable nights), extrapolate the live rate to sunrise and label the result as such. Set `false` to show a dash with the reason instead. |
 | `INFLUX_SHORE_MEASUREMENT` | `electrical.chargers.0.acin.1.current` | The charger's AC input current. A night with a reading above 0.5 A is excluded from the overnight model as shore-powered. |
 | `INFLUX_GENERATOR_MEASUREMENT` | `electrical.generator.0.stateNumber` | The generator's state. A night with a reading above zero is excluded from the overnight model as a generator night. |
-| `HELMCENTRAL_PPROF` | *(unset)* | Set to `1` to register Go's `net/http/pprof` handlers under `/debug/pprof/`, for pulling a CPU, heap or goroutine profile from a running instance. Off by default: `auth.mode` is often `none` on a boat LAN, and profiling endpoints are not something to expose to anyone who can reach the port. Helmcentral logs a warning at startup when this is on. |
+
+A profiling switch for diagnosing a running instance's performance exists too;
+see [Configuration internals](../developers/configuration.md) if you have been
+asked to use it.
 
 ### Authentication
 
@@ -88,35 +91,33 @@ section, set from the Settings UI.
 
 ### Overpass
 
-The Overpass server is the `osm-overpass` POI plugin's own setting, not an
-app-level one. The gear icon on osm-overpass's card, under either **Settings →
-Tiles → Nearby** or **Settings → Tiles → Place names**, opens the same
-**Overpass server** field, declared by that plugin's own
-`osm-overpass.config_fields.json` sidecar. There is no environment-variable
-override and no `settings.yaml` entry. A save (`POST
-/api/plugins/poi/osm-overpass/config`) takes effect on the plugin's next call
-with no restart. Blank (the default) uses the public
-`https://overpass-api.de/api/interpreter`. The save rejects anything that is not
-an absolute URL, and the plugin itself refuses anything but `https://` on
-every call.
+The Overpass server is the `osm-overpass` points-of-interest plugin's own
+setting, not an app-level one. The gear icon on osm-overpass's card, under
+either **Settings → Tiles → Nearby** or **Settings → Tiles → Place names**,
+opens the same **Overpass server** field. There is no environment-variable
+override and no `settings.yaml` entry. Saving it takes effect on the
+plugin's next call with no restart needed. Blank (the default) uses the
+public `https://overpass-api.de/api/interpreter`. The save rejects anything
+that is not an absolute URL, and the plugin itself refuses anything but
+`https://` on every call.
 
 This one setting feeds every use this plugin is put to: Nearby, place-name
-resolution (the position tile, the anchor pin), and Mate's `find_places`
-tool all call into the plugin itself now, rather than any of them keeping
-their own copy of the Overpass endpoint (see
-[ADR 0100](../adr/0100-plugins-declare-their-own-settings.md) and
-[ADR 0101](../adr/0101-place-names-come-from-a-plugin.md)). Point it at
-a mirror such as `https://overpass.openstreetmap.fr/api/interpreter` when
-your network refuses `overpass-api.de`. See
+resolution (the position tile, the anchor pin), and Mate's place-name
+questions all call into the plugin itself, rather than each keeping its own
+copy of the Overpass address. Point it at a mirror such as
+`https://overpass.openstreetmap.fr/api/interpreter` when your network
+refuses `overpass-api.de`. See
 [poi-categories.md](poi-categories.md#the-default-provider-openstreetmap-via-overpass)
-and the [osm-overpass plugin's README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror)
-for the allowlist a mirror other than those two also needs.
+for what this plugin covers. A mirror other than those two also needs adding
+to the plugin's own allowlist file; see
+[Provider plugins](plugins.md#plugin-declared-settings) and the developer
+documentation for how.
 
 ### State paths
 
 Each of these overrides one file or directory and takes precedence over
-`HELMCENTRAL_STATE_DIR`. Defaults are relative, resolved against the state dir
-when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
+`HELMCENTRAL_STATE_DIR`. Defaults are relative, resolved against the state
+dir when one is set.
 
 | Variable | Default |
 | --- | --- |
@@ -144,16 +145,17 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 SignalK credentials, `INFLUXDB_TOKEN`, the `WEATHERKIT_*` keys,
 `OPENROUTER_API_KEY` and the `VAPID_*` web push keys are **not** environment
 variables in normal use. They reside in an AES-256-GCM encrypted SQLite store
-and are managed from the Secrets panel in the Settings UI. Keeping them out
-of the process environment is deliberate: every WASM plugin's `${VAR}`
+and each is entered in the Settings section it belongs to (SignalK,
+InfluxDB, Mate, Alarms) or in a weather provider's settings. Keeping them out
+of the process environment is deliberate: every plugin's own `${VAR}`
 configuration expansion reads from the environment, so a value placed there
 is accessible to any plugin.
 
 Changing the SignalK address (or port) clears the stored SignalK username
 and password; changing the InfluxDB URL clears `INFLUXDB_TOKEN`. Both are
 bound to the destination they were entered for, and a save that repoints
-the destination does not carry the credential over to the new one - you
-will need to re-enter it on the Secrets panel. Editing anything else on the
+the destination does not carry the credential over to the new one, so
+re-enter it in the same section. Editing anything else on the
 Settings page, including the rest of the InfluxDB block (org, bucket), never
 touches either credential.
 
@@ -182,14 +184,10 @@ configuration:
 `allowed_models`, `excluded_models`, and `cost_tier` only affect routing when
 `model` is `openrouter/auto` (or `openrouter/auto-beta`).
 
-`ASSISTANT_DB_PATH` holds conversations, not the in-app help Mate reads
-from when a question is about Helmcentral itself. That help is staged into
-`backend/help` from `docs/features`, `docs/how-to` and `docs/reference`,
-the same way the built frontend is staged into `backend/dist`: `make
-help-stage` does it for a local `go build`/`go run`, and both a container
-build and a release build stage it themselves as part of their own build
-steps. A binary built without that step still runs; Mate just says the
-help isn't embedded rather than answering from an empty one.
+`ASSISTANT_DB_PATH` holds conversations, not the in-app help Mate reads from
+when a question is about Helmcentral itself: that help ships built into
+every official release and does not depend on your conversation history or
+this database.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
 from the UI. The VAPID keypair is self-issued, generated automatically on first
@@ -202,30 +200,11 @@ the count, rather than allowing pushes to fail silently. Back up
 
 ## Plugins
 
-Tide, weather, wave and forecast-warning data all come from WASM plugins
-rather than being built into the core binary, so providers can be added or
-swapped without recompilation. See [plugins.md](plugins.md) for plugin
-contracts and build instructions. The release bundle ships:
-
-| Category | Plugins |
-| --- | --- |
-| `tides/` | `bom` (Australia), `noaa` (US) |
-| `weather/` | `open-meteo` (worldwide, no key), `weatherkit` (Apple, needs keys) |
-| `waves/` | `open-meteo-marine` |
-| `forecast-warnings/` | `bom` (Australia), `nws` (US) |
-
-Select the active plugin per category in Settings. Each plugin carries an
-`allowed_hosts.json` file next to its `.wasm` binary; the runtime rejects any
-outbound host not listed there, so keep the sidecar files alongside the
-binaries.
-
-To install or update the bundle manually:
-
-```sh
-curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins.tar.gz \
-  | sudo tar -xz -C /var/lib/helmcentral/plugins
-sudo systemctl restart helmcentral
-```
+Tide, weather, wave, points-of-interest, forecast-warning and upper-air data
+all come from provider plugins rather than being built into Helmcentral
+itself, so a provider can be added or swapped without an upgrade. See
+[Provider plugins](plugins.md) for what ships, how to install one, and the
+settings a plugin can expose.
 
 ## Startup behaviour
 
