@@ -6,10 +6,12 @@ import { describe, it, expect } from 'vitest'
 
 import { PANEL_IDS } from '@/lib/app-location'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
+import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 import {
   CREATE_PAGE_HELP_TARGET,
   DASHBOARD_HELP_TARGET,
   HELP_INDEX,
+  INVENTORY_HELP_TARGETS,
   PANEL_HELP_TARGETS,
   SETTINGS_HELP_TARGETS,
   helpBodyWithoutTitle,
@@ -46,6 +48,20 @@ describe('helpTargetFor', () => {
   it('gives the display panel-table entry the help index, unreachable but total', () => {
     expect(PANEL_HELP_TARGETS.display).toEqual(HELP_INDEX)
   })
+
+  // ADR 0123: the Inventory panel, same section-table branching as settings.
+  it('sends inventory to the section table, defaulting to Equipment when no section is set', () => {
+    expect(helpTargetFor({ panel: 'inventory' })).toEqual(INVENTORY_HELP_TARGETS.equipment)
+    for (const section of INVENTORY_SECTIONS) {
+      expect(helpTargetFor({ panel: 'inventory', inventorySection: section.id })).toEqual(
+        INVENTORY_HELP_TARGETS[section.id],
+      )
+    }
+  })
+
+  it('gives the inventory panel-table entry the same target as the Equipment section, for totality', () => {
+    expect(PANEL_HELP_TARGETS.inventory).toEqual(INVENTORY_HELP_TARGETS.equipment)
+  })
 })
 
 // The lookup table is verified against the docs' actual headings so a docs
@@ -65,6 +81,7 @@ function allHelpTargets(): HelpTargetLike[] {
   const targets: HelpTargetLike[] = [DASHBOARD_HELP_TARGET, HELP_INDEX, CREATE_PAGE_HELP_TARGET]
   for (const id of PANEL_IDS) targets.push(PANEL_HELP_TARGETS[id])
   for (const section of SETTINGS_SECTIONS) targets.push(SETTINGS_HELP_TARGETS[section.id])
+  for (const section of INVENTORY_SECTIONS) targets.push(INVENTORY_HELP_TARGETS[section.id])
   return targets
 }
 

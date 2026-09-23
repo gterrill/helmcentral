@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import {
   Plate,
   PlateContent,
@@ -45,6 +45,7 @@ import {
   deserializeNoteMarkdown,
   serializeNoteMarkdown,
 } from '@/lib/note-editor-config'
+import { insertDictatedText } from '@/lib/note-editor-dictation'
 import { resolveNoteHref } from '@/lib/note-links'
 import { cn } from '@/lib/utils'
 
@@ -269,9 +270,84 @@ const NOTE_EDITOR_COMPONENTS = {
   [KEYS.codeLine]: CodeLineElement,
 }
 
-// ── the editor itself ────────────────────────────────────────────────────
+// ── the editor body ──────────────────────────────────────────────────────
+// ADR 0124: split out of what used to be the whole of NoteEditorImpl, so
+// note-capture-sheet.tsx can embed the ADR 0117 editor - toolbar, WYSIWYG
+// surface, Markdown source escape hatch, the lot - without its Save button
+// and dirty line. Capture keeps exactly one commit action (its own Capture
+// button); a second, disconnected Save inside the body would be a second
+// unsaved buffer over the same note, which is the ambiguity a helm screen
+// cannot afford. NoteEditorImpl below is now this plus a footer.
 
-export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEditorProps) {
+export interface NoteEditorBodyProps {
+  /** The note's current Markdown body - see NoteEditorProps.value's own
+   * doc comment (note-editor.tsx) for why this is read once, at
+   * construction, and not reacted to afterwards. */
+  value: string
+  /** Puts the caret in the body the moment it mounts - the capture sheet
+   * wants this (ADR 0124: "the operator presses New Note... and gets the
+   * editor, with the caret in the body"); a note reopened for editing does
+   * not, since the operator hasn't asked to type yet. */
+  autoFocus?: boolean
+  /** Fires on an operator edit only - WYSIWYG or source mode - never on
+   * mount, never from Plate's own mount-time normalisation. Same mountedRef
+   * gate NoteEditorImpl's markDirty used to carry directly; it now lives
+   * here so every caller (the footer below, and the capture sheet) gets it
+   * for free rather than re-deriving it.
+   *
+   * No payload (unlike onMarkdownChange below) - this is the sink for a
+   * caller that only needs to know an edit happened (NoteEditorImpl's own
+   * markDirty), so nothing here has to pay for serialising the Slate
+   * document just to hand over a string that gets thrown away. */
+  onChange?: () => void
+  /** Same edit gate as onChange, but carries the fresh Markdown body - for a
+   * caller that actually needs it (the capture sheet's handleBodyChange,
+   * tracking whether there's anything to Capture).
+   *
+   * Code review: this used to be onChange's own payload, computed
+   * (serializeNoteMarkdown over the whole Slate document) on every keystroke
+   * regardless of whether anything read it - wasted work for
+   * NoteEditorImpl's markDirty, which ignores its argument entirely. Kept as
+   * a second, optional prop instead of a return value or a ref read: a
+   * caller that needs it gets the same "fresh, not stale" guarantee the
+   * single onChange used to give (see the note this replaced, still true
+   * below at the Plate/source call sites) - `getMarkdown()` off the
+   * imperative handle is a closure over state as of the LAST completed
+   * render, and reading it from inside the event handler that is itself
+   * about to cause the next render reads the value from before that
+   * keystroke. */
+  onMarkdownChange?: (markdown: string) => void
+  /** Forwarded to both the WYSIWYG surface and the source textarea - the
+   * capture sheet uses this for Cmd/Ctrl+Enter-to-submit and for
+   * useDictation's own Escape-to-cancel handler (dictation.tsx). */
+  onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
+  /** WYSIWYG placeholder text. Defaults to the editor's own "Write the
+   * note…", unchanged from before this split. */
+  placeholder?: string
+}
+
+export interface NoteEditorHandle {
+  /** The current body as Markdown - sourceText verbatim in source mode
+   * (plan §7's escape hatch is authoritative over its own buffer), else
+   * through the same serializeNoteMarkdown the footer's own Save uses, so
+   * a caller that reads this at Capture time gets byte-for-byte what the
+   * editor would have written on Save. */
+  getMarkdown(): string
+  /** Inserts dictated text at the caret (ADR 0124's mic-in-the-editor
+   * decision) - lib/note-editor-dictation.ts's insertDictatedText in
+   * WYSIWYG mode, the same append semantics useDictation's `setValue` sink
+   * already gives a plain field in source mode (the textarea has no Slate
+   * selection to insert at). */
+  insertDictation(text: string): void
+  /** Focuses whichever surface is currently showing - the WYSIWYG editor,
+   * or the source textarea while toggled. */
+  focus(): void
+}
+
+export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(function NoteEditorBody(
+  { value, autoFocus, onChange, onMarkdownChange, onKeyDown, placeholder },
+  ref,
+) {
   const editor = usePlateEditor({
     plugins: [...NOTE_EDITOR_PLUGINS],
     components: NOTE_EDITOR_COMPONENTS,
@@ -285,51 +361,48 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
     value: (ed) => deserializeNoteMarkdown(ed, value),
   })
 
-  const [dirty, setDirty] = useState(false)
   const [sourceMode, setSourceMode] = useState(false)
   const [sourceText, setSourceText] = useState(value)
+  const sourceTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // This task's #5 / plan §7: "Opening a note must never write. Dirty state
   // comes from user edits only, never from a serialisation diff." Plate can
   // fire onValueChange once during its own mount-time normalisation (node
   // ids assigned, list structure normalised) - that is Plate tidying up,
-  // not an operator edit, so it must not flip the dirty flag. Child
+  // not an operator edit, so it must not reach `onChange`. Child
   // components (<Plate>/<PlateContent> below) commit their mount effects
   // before this component's own effect runs, so any such call arrives
   // while mountedRef is still false and is correctly ignored; anything the
-  // operator does afterwards runs long after this effect has flipped it.
+  // operator (or a dictated result, ADR 0124) does afterwards runs long
+  // after this effect has flipped it.
   const mountedRef = useRef(false)
   useEffect(() => {
     mountedRef.current = true
   }, [])
 
-  const markDirty = useCallback(() => {
+  // Takes a thunk, not the markdown itself: the Plate call site below has to
+  // serialise the whole Slate document to produce it, and that cost is only
+  // worth paying when onMarkdownChange is actually wired up - a caller that
+  // only wants onChange (markDirty, which ignores its argument) must not
+  // pay for a serialisation nobody reads. handleSourceChange/insertDictation
+  // already have their string for free (the textarea's own value), so
+  // wrapping it in `() => next` there costs nothing either way.
+  const notifyChange = useCallback((getMarkdown: () => string) => {
     if (!mountedRef.current) return
-    setDirty(true)
-  }, [])
+    onChange?.()
+    if (onMarkdownChange) onMarkdownChange(getMarkdown())
+  }, [onChange, onMarkdownChange])
 
   // Computed once, from the value this component was constructed with, not
   // from anything the operator has since done - "announced once" (plan §7):
   // a note authored elsewhere (imported .md, hand-edited off a backup) will
   // be reformatted the first time this editor saves it. Comparing here,
   // against the FRESHLY PARSED value, costs no save and no reindex - only
-  // an actual Save button press would ever change the stored bytes.
+  // an actual Save (or Capture) would ever change the stored bytes. An
+  // empty new note (capture's own starting value) serialises to '' both
+  // ways, so this stays false there rather than greeting an untouched note
+  // with a notice about content it doesn't have.
   const [showNormalizedNotice] = useState(() => serializeNoteMarkdown(editor, editor.children) !== value)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  const handleSave = useCallback(async () => {
-    const markdown = sourceMode ? sourceText : serializeNoteMarkdown(editor, editor.children)
-    try {
-      await onSave(markdown)
-      setDirty(false)
-      setSaveError(null)
-    } catch (err) {
-      // AGENTS.md fallback policy: surface the caller's own message rather
-      // than a generic failure, and leave `dirty` alone - a failed save
-      // must not look, to the operator, like a successful one.
-      setSaveError(err instanceof Error ? err.message : String(err))
-    }
-  }, [editor, onSave, sourceMode, sourceText])
 
   const toggleSourceMode = useCallback(() => {
     if (sourceMode) {
@@ -345,12 +418,47 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
   }, [editor, sourceMode, sourceText])
 
   const handleSourceChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setSourceText(event.target.value)
-    markDirty()
+    const next = event.target.value
+    setSourceText(next)
+    notifyChange(() => next)
   }
 
+  useImperativeHandle(ref, () => ({
+    getMarkdown: () => (sourceMode ? sourceText : serializeNoteMarkdown(editor, editor.children)),
+    insertDictation: (text: string) => {
+      if (sourceMode) {
+        // Same append semantics as useDictation's own `setValue` sink
+        // (dictation.tsx) - the textarea has no Slate selection to insert
+        // at, so this mirrors what a plain field already does rather than
+        // inventing a second rule. Computed against `sourceText` directly
+        // (not a functional setState update) so the same string can also
+        // go to notifyChange - this closure is already rebuilt whenever
+        // `sourceText` changes (it's in this useImperativeHandle's own
+        // deps below), so it's never stale.
+        const trimmed = text.trim()
+        if (trimmed === '') return
+        const next = sourceText.trim() === '' ? trimmed : `${sourceText} ${trimmed}`
+        setSourceText(next)
+        notifyChange(() => next)
+        return
+      }
+      // insertDictatedText mutates `editor` directly (a Slate transform),
+      // which Plate's own onValueChange below already reports through to
+      // notifyChange - the same path a toolbar click already takes, so
+      // nothing further needs to be wired here.
+      insertDictatedText(editor, text)
+    },
+    focus: () => {
+      if (sourceMode) {
+        sourceTextareaRef.current?.focus()
+      } else {
+        editor.tf.focus()
+      }
+    },
+  }), [editor, sourceMode, sourceText, notifyChange])
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {showNormalizedNotice && (
         <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           This note was written outside Helmcentral. Saving will tidy its Markdown into this editor's own style -
@@ -363,21 +471,63 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
       <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border p-3">
         {sourceMode ? (
           <Textarea
+            ref={sourceTextareaRef}
             aria-label="Note markdown source"
             value={sourceText}
             onChange={handleSourceChange}
+            onKeyDown={onKeyDown}
+            autoFocus={autoFocus}
             className="h-full min-h-60 resize-none font-mono text-xs"
           />
         ) : (
-          <Plate editor={editor} onValueChange={markDirty}>
+          <Plate editor={editor} onValueChange={({ value }) => notifyChange(() => serializeNoteMarkdown(editor, value))}>
             <PlateContent
               aria-label="Note body"
-              placeholder="Write the note…"
+              placeholder={placeholder ?? 'Write the note…'}
+              onKeyDown={onKeyDown}
+              autoFocus={autoFocus}
               className="min-h-60 text-sm leading-relaxed text-foreground outline-none"
             />
           </Plate>
         )}
       </div>
+    </div>
+  )
+})
+
+// ── the editor itself ────────────────────────────────────────────────────
+// The footer (Save button, dirty line, save error) composed on top of
+// NoteEditorBody - the shape every caller besides note-capture-sheet.tsx
+// still gets (the viewer's Edit toggle, manual-folder-view.tsx). Behaviour
+// unchanged from before the ADR 0124 split: nothing here reacts to `value`
+// changing identity after mount (switching notes remounts this component,
+// keyed by the caller), and dirty still only ever comes from NoteEditorBody
+// reporting an actual operator edit through onChange.
+
+export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEditorProps) {
+  const bodyRef = useRef<NoteEditorHandle>(null)
+  const [dirty, setDirty] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const markDirty = useCallback(() => setDirty(true), [])
+
+  const handleSave = useCallback(async () => {
+    const markdown = bodyRef.current?.getMarkdown() ?? ''
+    try {
+      await onSave(markdown)
+      setDirty(false)
+      setSaveError(null)
+    } catch (err) {
+      // AGENTS.md fallback policy: surface the caller's own message rather
+      // than a generic failure, and leave `dirty` alone - a failed save
+      // must not look, to the operator, like a successful one.
+      setSaveError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onSave])
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <NoteEditorBody ref={bodyRef} value={value} onChange={markDirty} />
 
       {saveError && (
         <p role="alert" className="text-xs text-destructive">{saveError}</p>

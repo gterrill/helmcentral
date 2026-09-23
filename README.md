@@ -287,8 +287,9 @@ networks rather than a global model. Pick `ui.tide_provider` in
 Settings to match your region. Until you do, `/api/tide-today` returns an error
 naming the missing configuration.
 
-Contracts, the sandbox model, and how to build a plugin:
-[docs/reference/plugins.md](docs/reference/plugins.md).
+Installing and configuring plugins:
+[docs/reference/plugins.md](docs/reference/plugins.md). Contracts, the sandbox
+model and how to build one: [docs/developers/plugins.md](docs/developers/plugins.md).
 
 ## Documentation
 
@@ -339,7 +340,7 @@ gives the second one its own checkout alongside this directory, with
 can run the dev stack, since the ports are fixed.
 
 Docker workflows, the isolated E2E stack and release builds:
-[docs/how-to/development.md](docs/how-to/development.md).
+[docs/developers/development.md](docs/developers/development.md).
 
 ## Architecture
 

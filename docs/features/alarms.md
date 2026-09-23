@@ -1,14 +1,21 @@
 # Alarms
 
-A rule can name any path the SignalK server publishes. Helmcentral subscribes
-to the delta stream rather than a hardcoded list of paths, so adding a rule
-for a newly published path needs no code change or release.
+Alarms watch the boat's own instrument readings around the clock, so a
+rising engine temperature, a failing bilge pump or a falling barometer gets
+your attention whether or not anyone is on watch to notice it.
 
-Helmcentral uses SignalK's own notification vocabulary, with the severities
-`normal`, `alert`, `warn`, `alarm` and `emergency` kept verbatim. Alarms raised
-elsewhere on the bus, by a Victron GX, an N2K device or another plugin, appear
-with those severities unchanged. Helmcentral's rule hits are written back to
-`notifications.*`, where a buzzer plugin or an MFD can react to them.
+A rule can be built on any live reading published anywhere on the boat's
+instrument network, including gear from other manufacturers already wired
+into it. Helmcentral watches for newly published readings rather than
+working from a fixed list, so a rule for something new needs no Helmcentral
+release to support it first.
+
+Every alarm carries one of five severities: normal, alert, warn, alarm and
+emergency. An alarm raised elsewhere on the instrument network, by a battery
+monitor, an engine gateway or another instrument, arrives here with the
+severity it already had. A hit on one of your own rules is broadcast back
+onto that same network in the same terms, so a separate alarm buzzer or a
+chartplotter already wired to it can react too.
 
 ## Three decisions worth spelling out
 
@@ -21,22 +28,20 @@ The deadband is also why acknowledging does not clear an alarm. Acknowledge
 says you have seen it; it stops the sound and the visual alert, and the alarm
 stays on the board until the value has recovered. Every alarm card shows its
 clearing condition in your selected units: "Falling 1.1 mb/hr. Clears once the
-fall eases to 0.7 mb/hr." An
-alarm raised by something else on the bus, which has no rule behind it, says
-so and clears when its source clears it.
+fall eases to 0.7 mb/hr." An alarm raised by something else on the network,
+which has no rule behind it, says so and clears when its source clears it.
 
-An alarm raised elsewhere on the bus can also go stale the other way: the
-source clears it, or forgets it, without Helmcentral noticing, since the
-stream only reports what changes. Helmcentral re-reads the server's
-notifications every 30 seconds to catch that, so an alarm the server has
+An alarm raised elsewhere on the network can also go stale the other way: the
+source clears it, or forgets it, without Helmcentral noticing, since Helmcentral
+only hears about what changes. Helmcentral re-checks every alarm it did not
+raise itself every 30 seconds to catch that, so an alarm the source has
 forgotten leaves the list within half a minute. Acknowledging or silencing
-one inside that window can answer with the server's own "Alarm not found"
-message rather than success, and the card then disappears on its own rather
-than staying stuck.
+one inside that window can answer with "Alarm not found" rather than success,
+and the card then disappears on its own rather than staying stuck.
 
-**Missing paths do not satisfy thresholds.** This prevents a freshly booted
-boat from firing every rule at once while the bus comes up. The
-same rule applies in reverse: a live alarm does not clear when its path goes
+**Missing readings do not satisfy thresholds.** This prevents a freshly booted
+boat from firing every rule at once while the instrument network comes up. The
+same rule applies in reverse: a live alarm does not clear when its reading goes
 stale, so a sensor outage cannot clear an active alarm.
 
 **Failed deliveries are queued for retry.** Retries use backoff from 30 seconds
@@ -46,13 +51,13 @@ heartbeats could incorrectly indicate that the system is still running.
 
 ## Built in
 
-Anchor drag and the stream watchdog are built in and use the same logging,
-acknowledgement and delivery as your own rules.
+Anchor drag and the watchdog for a lost instrument connection are built in and
+use the same logging, acknowledgement and delivery as your own rules.
 
-The watchdog raises an alarm if the SignalK connection fails, since frozen
-readings can otherwise look like stable conditions. A periodic heartbeat sent
-off the boat also allows an external monitor to detect when the whole system
-stops responding.
+The watchdog raises an alarm if the connection to the boat's instrument
+network fails, since frozen readings can otherwise look like stable
+conditions. A periodic heartbeat sent off the boat also allows an external
+monitor to detect when the whole system stops responding.
 
 ## Getting told
 
@@ -63,11 +68,13 @@ Five transports, none of which needs a paid subscription:
 | **ntfy** | Self-hostable, or the free public server. No account needed. |
 | **SMTP** | Your own mail server or provider. |
 | **Webhook** | Anything that accepts an HTTP POST. |
-| **SignalK `notifications.*`** | Needs no internet at all. |
-| **Web push** | Alarms on your phone's lock screen with no app to install. Needs Helmcentral served over https. |
+| **Publish to SignalK** | Broadcasts onto the boat's own instrument network, so a buzzer or an MFD already wired to it can react. Needs no internet at all. |
+| **Web push** | Alarms on your phone's lock screen with no app to install. Needs Helmcentral served over https; see [Web push over Tailscale](../reference/configuration.md#web-push-over-tailscale). |
 
-`POST /api/alarm-transports/test` probes every enabled transport so you can
-check delivery before relying on it.
+A **Send Test** button probes every enabled transport at once, so you can
+check delivery before relying on it. See [Set up alarm
+notifications](../how-to/set-up-alarm-notifications.md) for entering the
+details each transport needs.
 
 Changing the ntfy server or the SMTP host clears the token or password
 stored for that transport. This is deliberate: a credential is bound to the
@@ -76,42 +83,42 @@ carry it across. Paste the token or password back in after changing either
 address; the transport stays quiet until you do. Changing the SMTP username
 clears the password too, since AUTH PLAIN sends the two together.
 
-Helmcentral reads `notifications.*` to pick up alarms from other producers,
-so it has to recognise its
-own output coming back. It does that by path: anything under `helmcentral.` is
-its own, and so is the path of any enabled rule. These are not shown as
-duplicate external alarms. A notification under its own namespace that no
+Helmcentral picks up alarms from other producers on the instrument network, so
+it has to recognise its own output coming back. It does that by name: anything
+under `helmcentral.` is its own, and so is any of your enabled rules. These are
+not shown as duplicate external alarms. An alarm under its own name that no
 rule here is holding, left behind by a restart or by another Helmcentral
-install pointed at the same SignalK, is cleared from the bus automatically.
-For that reason a development copy of Helmcentral should keep the SignalK
-transport switched off if it talks to the boat's server.
+install pointed at the same instrument network, is cleared automatically. For
+that reason a development copy of Helmcentral should leave **Publish to
+SignalK** switched off if it shares an instrument network with the boat's own
+install.
 
-A SignalK server restarting is the sharpest way a bus alarm goes stale: its
-notifications live in memory and none of them survive a restart, so
-everything it was holding for another producer is simply gone the moment it
-comes back, whatever the underlying condition is actually doing. The stream
-carries no signal that this happened, since nothing on the path in question
-changed from its point of view. The 30-second re-read described above is
-what catches it, rather than leaving that alarm on your board until the same
-path happens to change again.
+A restart of the boat's instrument network hub is the sharpest way an
+externally-raised alarm goes stale: whatever it was holding for another
+producer is simply gone the moment it comes back, whatever the underlying
+condition is actually doing, and nothing about the reconnection says this
+happened, since nothing being watched actually changed from its point of
+view. The 30-second re-check described above is what catches it, rather than
+leaving that alarm on your board until the same reading happens to change
+again.
 
 ## AIS collision alarms
 
-Collision warnings for AIS targets come from the AIS Target Prioritizer plugin
-on the SignalK server, not from a Helmcentral rule. The plugin works out CPA
-and TCPA for every target from the AIS data already on the bus and raises a
-notification per target when one crosses the thresholds of the profile in
-force. It keeps four profiles, anchored, harbor, coastal and offshore, each
-with its own warning and alarm tiers. Helmcentral selects the profile from the
-vessel's navigation state (anchored, moored, under way) and never edits the
-numbers in it.
+Collision warnings for AIS targets come from a separate AIS Target
+Prioritizer plugin on the boat's own instrument-network server, not from a
+Helmcentral rule. It works out CPA and TCPA for every target from the AIS
+data already on the network and raises a warning per target when one crosses
+the thresholds of the profile in force. It keeps four profiles, anchored,
+harbor, coastal and offshore, each with its own warning and alarm tiers.
+Helmcentral selects the profile from the vessel's navigation state (anchored,
+moored, under way) and never edits the numbers in it.
 
 Those numbers are yours, and the shipped harbor profile needs attention before
 a marina. It warns on any target closer than half a mile with a reported speed
 over half a knot. Alongside a pontoon every neighbour is inside half a mile,
 and GPS jitter puts a tied-up boat over half a knot every few minutes, so the
 warning fires on boats doing nothing. Each collision alarm card carries a link
-to the plugin's own page, which is where the thresholds live. Raising the
+to the plugin's own settings, which is where the thresholds live. Raising the
 warning tier's speed floor to a couple of knots quietens a marina without
 losing a boat actually moving down the fairway.
 
@@ -139,11 +146,11 @@ caution about which way not to turn.
 
 ## The rules list
 
-Rules are grouped by what they watch, using the first part of the SignalK path:
-`electrical`, `environment`, `propulsion`, `tanks`, `radar` and so on, in
-alphabetical order. No manual categorisation is needed. A rule whose alarm is live is marked as
-firing. Each rule shows its threshold and the point it clears at in your units,
-and deleting one asks first.
+Rules are grouped by what they watch: electrical, environment, propulsion,
+tanks, radar and so on, sorted alphabetically and worked out automatically
+from what each rule reads, with no manual categorising needed. A rule whose
+alarm is live is marked as firing. Each one shows its threshold and the point
+it clears at, in your own units, and deleting one asks first.
 
 ## Gauge bands are alarm rules
 
@@ -154,56 +161,25 @@ separate screen or convert it to different units.
 
 Rules derived this way appear in the alarms list alongside hand-written ones,
 marked as coming from a gauge, and are edited on the gauge rather than in the
-list.
+list. See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for
+the steps either way.
 
 ## Values Helmcentral works out for itself
 
-A rule can name any path SignalK publishes. Rates and relationships between
-readings may need to be computed from instrument data before rules can use them.
+A rule is not limited to a single instrument reading. Some useful numbers,
+a rate of change, a relationship between two readings, a total across every
+tank, don't exist as a single reading and have to be worked out from the
+history Helmcentral already keeps.
 
-Helmcentral computes these and publishes them under `helmcentral.`, where they
-behave like any other path. They appear in the path picker with their units,
-they bind to gauges and rules the same way, and they report nothing rather than
-zero when there is not enough history to answer.
+Helmcentral computes a set of these values itself and makes them available
+the same way as any instrument reading: they show up alongside everything
+else when you're choosing what a rule or a gauge should watch, they carry
+their own units, and they report nothing rather than a misleading zero when
+there isn't yet enough history to answer. See [Alarm rules
+reference](../reference/alarm-rules.md#derived-values) for the full list,
+what each one needs before it starts reporting, and when it goes quiet again.
 
-| Path | Units | What it is |
-| --- | --- | --- |
-| `helmcentral.environment.pressureRate` | Pa/s | The barometer's rate of change over the last three hours. 100 Pa/hr is 1 mb/hr. |
-| `helmcentral.environment.pressureChange3h` | Pa | The plain three-hour tendency, the figure marine forecasts quote. |
-| `helmcentral.environment.squashZoneIndex` | none | 1 when the wind has climbed 10 knots in three hours while the barometer stayed within 1 mb and the direction held. Bind it with "above 0.5". |
-| `helmcentral.environment.pressureChange12h` | Pa | The twelve-hour barometric tendency. |
-| `helmcentral.environment.pressureChange24h` | Pa | The twenty-four-hour barometric tendency, the figure the weather-bomb rule below reads. |
-| `helmcentral.environment.stormIndex` | none | 1 when the barometer has fallen 4 mb or more in three hours and sits under 1009 mb, 0 otherwise. Bind it with "above 0.5". |
-| `helmcentral.environment.severeThunderstormIndex` | none | 1 when the barometer has fallen 4 mb or more in three hours, 8 mb or more in twelve hours, and sits under 1005 mb. Bind it with "above 0.5". |
-| `helmcentral.propulsion.fuelEconomy` | m/m³ | The whole boat's distance per unit fuel, rather than one engine's. |
-| `helmcentral.fuel.volume` | m3 | Fuel aboard, summed across every tank that reports both a level and a capacity. Empty when no tank reports both. |
-| `helmcentral.fuel.timeToEmpty` | s | Fuel aboard divided by the current total burn. Empty while stopped, with the engines off, or with no fuel volume to divide. |
-| `helmcentral.fuel.rangeAtCurrentBurn` | m | Fuel aboard times the boat's current distance per unit fuel. Empty under the same conditions as fuel economy or fuel volume, whichever is absent. |
-| `helmcentral.environment.forecastWindWarningLevel` | none | The official wind warning in force for the vessel's zone, ranked: 0 none, 1 strong wind or small craft, 2 gale, 3 storm. Absent until the first fetch lands, and again after thirty minutes without one. |
-| `helmcentral.environment.forecastSurfWarning` | none | 1 when a hazardous surf warning is in force for the zone, 0 otherwise. Absent under the same conditions as the wind level. |
-
-These need the boat to be publishing `environment.outside.pressure` and, for
-the squash-zone index, true wind speed and direction. If these inputs are
-missing, the value stays absent and does not satisfy a rule.
-
-The three-hour barometer paths, the rate, the three-hour tendency and the
-storm signature, need thirty minutes of history before they report anything.
-The twelve-hour tendency needs eleven and a half hours, and the
-twenty-four-hour tendency and the weather bomb rule need twenty-three and a
-half hours. The severe-thunderstorm signature needs whatever the twelve-hour
-tendency needs, since it reads both windows at once. All of them clear when
-Helmcentral restarts, since the history they are built from is kept in
-memory rather than on disk.
-
-The fuel-economy and fuel paths go absent for a second reason as well: if any
-reading they are built from (a fuel tank's level or capacity, an engine's fuel
-rate, or speed over ground) has stopped updating for more than two minutes,
-the derived path reports nothing rather than a number computed from a source
-that is no longer telling the truth. A rule bound to one of these paths never
-fires on stale arithmetic; it simply sees no value, the same as if the path
-had never been published at all.
-
-### Why a squash zone gets its own path
+### Why a squash zone needs a signal of its own
 
 A squash zone is a high and a low close enough together to accelerate the wind
 between them. Pressure and wind direction can both hold steady while the wind
@@ -217,12 +193,8 @@ Zealand and Australia as getting more than its share. See
 ## The heavy-weather rule set
 
 Helmcentral ships two rules using thresholds from that book, created once on
-first run:
-
-| Rule | Fires when | Severity |
-| --- | --- | --- |
-| Squash zone | The signature above holds | warn |
-| Tropical barometer anomaly | Three-hour tendency past -1.5 mb | alert |
+first run. See [Alarm rules reference](../reference/alarm-rules.md#heavy-weather-rule-set)
+for the two rules and their thresholds.
 
 **They arrive switched off.** These are one crew's thresholds, published in 1999,
 and they have not been calibrated against your boat or your cruising ground.
@@ -254,17 +226,9 @@ and gales page), turns the same three-hour tendency into a ladder: a 6 mb
 move either way means strong wind, a 10 mb move either way means gale, and
 two further rules read the tendency against the barometer's own height
 rather than its movement alone. Helmcentral ships seven rules from this
-ladder, created once on first run:
-
-| Rule | Fires when | Severity |
-| --- | --- | --- |
-| Barometer up 6 mb in three hours | Three-hour tendency past +6 mb | warn |
-| Barometer down 6 mb in three hours | Three-hour tendency past -6 mb | warn |
-| Barometer up 10 mb in three hours | Three-hour tendency past +10 mb | alarm |
-| Barometer down 10 mb in three hours | Three-hour tendency past -10 mb | alarm |
-| Storm signature | Barometer down 4 mb in three hours with pressure under 1009 mb | alert |
-| Severe thunderstorm signature | Barometer down 4 mb in three hours and 8 mb in twelve hours with pressure under 1005 mb | alarm |
-| Weather bomb | Twenty-four-hour tendency past -24 mb | emergency |
+ladder, created once on first run. See [Alarm rules
+reference](../reference/alarm-rules.md#the-law-of-storms-rule-set) for the
+full ladder.
 
 **Six of these seven arrive switched on.** Unlike the two rules above, this
 is a single ladder rather than three rules restating one falling barometer,
@@ -286,15 +250,10 @@ stay gone.
 
 The forecast-warnings plugin (see [Forecast](forecast.md)) already knows which
 official marine warnings are in force for the vessel's own zone. Helmcentral
-polls it every ten minutes in the background, ranks the result onto the two
-paths above, and ships four rules bound to them, created once on first run:
-
-| Rule | Fires when | Severity |
-| --- | --- | --- |
-| Forecast wind warning | Any wind warning is in force | warn |
-| Forecast gale or storm warning | The warning is a gale or worse | alarm |
-| Forecast surf warning | A hazardous surf warning is in force | alert |
-| Forecast warnings unavailable | No successful fetch for thirty minutes | alert |
+polls it every ten minutes in the background, ranks the result, and ships
+four rules bound to it, created once on first run. See [Alarm rules
+reference](../reference/alarm-rules.md#forecast-warning-rule-set) for the four
+rules.
 
 **These arrive switched on.** Unlike the heavy-weather set there is nothing to
 calibrate: the source is the met service's own call for your zone, not a
@@ -305,9 +264,9 @@ button now, right beside View, so silencing the sound never needs a trip to
 the Active Alarms tile.
 
 "Unavailable" means what it says. It raises when there is no forecast-warnings
-plugin installed, when the boat has had no position fix, or when the provider
+provider installed, when the boat has had no position fix, or when the provider
 has been down for half an hour. It exists so a dead provider looks like a dead
-provider rather than a quiet sea. If your boat has no plugin and you do not
+provider rather than a quiet sea. If your boat has no provider and you do not
 want the standing alert, disable that rule like any other.
 
 The alarm card says which warning is in force, with a link straight to the

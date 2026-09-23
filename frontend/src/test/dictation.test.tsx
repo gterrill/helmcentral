@@ -264,4 +264,136 @@ describe('dictation lifecycle', () => {
     expect(current().aborted).toBe(true)
     expect(getVoiceClaimSnapshot()).toBe(false)
   })
+
+  // Code review: claimVoice() is only ref-counted - a second field starting
+  // bumps the count without telling the FIRST field's own recognizer to stop,
+  // so two live SpeechRecognition sessions ran at once. Starting dictation
+  // in one field has to stop whichever other field is already dictating, the
+  // same way push-to-talk already stops dictation above - via preemptVoice(),
+  // which every mounted dictation field already reacts to.
+  it('starting dictation in one field stops whichever other field is already dictating', () => {
+    render(<div><TestField /><TestField /></div>)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dictate' })[0])
+    expect(instances).toHaveLength(1)
+    const first = current()
+    expect(getVoiceClaimSnapshot()).toBe(true)
+
+    // Only the second field's mic button still reads "Dictate" - the
+    // first's now reads "Stop dictation".
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dictate' })[0])
+
+    expect(instances).toHaveLength(2)
+    const second = current()
+    expect(first.aborted).toBe(true)
+    expect(second.started).toBe(true)
+    // Exactly one field holds the claim once the dust settles, not a
+    // ref count stacked to two.
+    expect(getVoiceClaimSnapshot()).toBe(true)
+    expect(screen.queryAllByRole('button', { name: 'Stop dictation' })).toHaveLength(1)
+  })
+
+  // Code review: start() preempting every other mounted field (above) is
+  // too broad - a field the operator has just tapped Stop on, whose final
+  // result is still in flight (finish() already told the recognizer to
+  // stop(), but the browser hasn't delivered the tail result or fired
+  // `end` yet - listening is still true for that window), is not
+  // "actively listening" in the sense the two-recognizer bug cares about:
+  // it isn't capturing any more audio. Aborting it there throws away the
+  // phrase the operator just finished speaking.
+  it('a field that has already tapped Stop (final result still pending) is not aborted by another field starting', () => {
+    render(<div><TestField /><TestField /></div>)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dictate' })[0])
+    const fieldA = current()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop dictation' })[0])
+    expect(fieldA.stopped).toBe(true)
+    expect(fieldA.aborted).toBe(false)
+
+    // Field B starts while A's final result is still pending - only one
+    // button reads "Dictate" now, A's own having stayed "Stop dictation"
+    // (finish() doesn't flip `listening`, see use-speech-input.ts).
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    const fieldB = current()
+    expect(fieldB.started).toBe(true)
+
+    expect(fieldA.aborted).toBe(false)
+
+    // A's pending final still lands in A's own field, not B's.
+    act(() => { fieldA.emitResult('fuel return is the inboard valve', true) })
+    act(() => { fieldA.emitEnd() })
+
+    expect(screen.getAllByRole('textbox', { name: 'Field' })[0]).toHaveValue('fuel return is the inboard valve')
+    expect(screen.getAllByRole('textbox', { name: 'Field' })[1]).toHaveValue('')
+  })
+})
+
+// ADR 0124: the note editor's mic uses `insert` instead of `setValue` -
+// see this file's own UseDictationOptions union and lib/note-editor-
+// dictation.ts's insertDictatedText for what the editor itself does with
+// each call. This field only has to prove the CONTRACT useDictation gives
+// that sink: it receives every final, and only a final, already trimmed
+// and never empty - not whether a real Slate editor places the text
+// correctly (that's insertDictatedText's own headless test suite, note-
+// editor-dictation.test.ts).
+function TestFieldWithInsert() {
+  const [received, setReceived] = useState<string[]>([])
+  const dictation = useDictation({ insert: (text) => setReceived((prev) => [...prev, text]) })
+  return (
+    <div>
+      <ul aria-label="Received">
+        {received.map((text, i) => <li key={i}>{text}</li>)}
+      </ul>
+      <DictateButton dictation={dictation} />
+      <DictationStatus dictation={dictation} />
+    </div>
+  )
+}
+
+describe('useDictation insert sink (ADR 0124)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    stubSecureContext(true)
+  })
+
+  it('receives a final result, already trimmed', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('  fuel return is the inboard valve  ', true) })
+
+    expect(screen.getByRole('list', { name: 'Received' })).toHaveTextContent('fuel return is the inboard valve')
+  })
+
+  it('never receives an interim result', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('fuel return is the', false) })
+
+    expect(screen.queryByRole('list', { name: 'Received' })?.textContent).toBe('')
+  })
+
+  it('skips an empty (or whitespace-only) final rather than calling insert with nothing useful', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('   ', true) })
+
+    expect(screen.queryByRole('list', { name: 'Received' })?.textContent).toBe('')
+  })
+
+  it('receives each final separately, in order, rather than being joined into one string', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('fuel return is the inboard valve', true) })
+    act(() => { current().emitResult('the one with the scratched handle', true) })
+
+    const items = screen.getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'fuel return is the inboard valve',
+      'the one with the scratched handle',
+    ])
+  })
 })

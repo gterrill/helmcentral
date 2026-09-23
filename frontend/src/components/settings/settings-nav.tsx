@@ -1,6 +1,10 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
+// ADR 0123: 'equipment' (equipment profiles) moved out of this list into
+// the Inventory panel's own InventoryNav (inventory-nav.tsx) - profiles are
+// reference data about gear, not a setting, and now live beside the
+// equipment records that use them rather than here.
 export type SettingsSectionId =
   | 'general'
   | 'signalk'
@@ -11,7 +15,6 @@ export type SettingsSectionId =
   | 'mayara'
   | 'alarms'
   | 'assistant'
-  | 'equipment'
   | 'security'
   | 'logs'
 
@@ -24,7 +27,6 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'mayara', label: 'Mayara' },
   { id: 'alarms', label: 'Alarms' },
   { id: 'assistant', label: 'Mate' },
-  { id: 'equipment', label: 'Equipment' },
   { id: 'tiles', label: 'Tiles' },
   { id: 'security', label: 'Security' },
   { id: 'logs', label: 'Logs' },

@@ -1,5 +1,6 @@
 import type { AppLocation, PanelId } from '@/lib/app-location'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
+import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 import { normalizePath, slugifyHeading } from '@/lib/markdown-links'
 
 // slugifyHeading and normalizePath now live in markdown-links.ts (note-links.ts
@@ -29,12 +30,12 @@ export const HELP_INDEX: HelpTarget = { page: 'index' }
  * app-location.ts without adding a row here is a compile error rather than a
  * silent fallback to the index.
  *
- * `settings` and `display` are never actually read through this table -
- * helpTargetFor branches settings off to SETTINGS_HELP_TARGETS before
- * consulting this one, and the wall display route (ADR 0110) mounts no
- * Help affordance at all (App.tsx's kiosk-route early return precedes the
- * header, sidebar and every sheet). Both rows exist purely so the Record
- * stays total.
+ * `settings`, `inventory` and `display` are never actually read through this
+ * table - helpTargetFor branches settings and inventory off to their own
+ * per-section tables before consulting this one, and the wall display route
+ * (ADR 0110) mounts no Help affordance at all (App.tsx's kiosk-route early
+ * return precedes the header, sidebar and every sheet). All three rows exist
+ * purely so the Record stays total.
  */
 export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   forecast: { page: 'features/forecast' },
@@ -50,7 +51,10 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   // links rather than a second PANEL_HELP_TARGETS row - there is no longer
   // a second panel for a second row to point at.
   documents: { page: 'features/documents' },
-  // Reachable, unlike the two below: the management surface (ADR 0112)
+  // Unreachable (see above) - set to the Equipment section's own target,
+  // for totality (mirrors settings' own row just below).
+  inventory: { page: 'features/inventory-tracking', heading: 'Equipment' },
+  // Reachable, unlike the others: the management surface (ADR 0112)
   // mounts the ordinary header, so its Help affordance resolves here.
   'wall-displays': { page: 'features/dashboard', heading: 'Wall displays' },
   // Unreachable (see above) - set to General's target for totality.
@@ -72,10 +76,21 @@ export const SETTINGS_HELP_TARGETS: Record<SettingsSectionId, HelpTarget> = {
   mayara: { page: 'features/dashboard', heading: 'Radar targets' },
   alarms: { page: 'features/alarms', heading: 'Getting told' },
   assistant: { page: 'how-to/set-up-the-assistant', heading: '2. Configure it in Helmcentral' },
-  equipment: { page: 'features/inventory-tracking', heading: 'Settings' },
   tiles: { page: 'reference/plugins' },
   security: { page: 'reference/configuration', heading: 'Security' },
   logs: HELP_INDEX,
+}
+
+/** Every Inventory section's help target, keyed by InventorySectionId - ADR
+ * 0123 moved equipment profiles out of SETTINGS_HELP_TARGETS.equipment into
+ * this table's own 'profiles' row, alongside the new 'equipment' and
+ * 'locations' rows, all three pointed at their own heading on the single
+ * inventory-tracking feature page. Same exhaustive-Record reasoning as the
+ * two tables above. */
+export const INVENTORY_HELP_TARGETS: Record<InventorySectionId, HelpTarget> = {
+  equipment: { page: 'features/inventory-tracking', heading: 'Equipment' },
+  profiles: { page: 'features/inventory-tracking', heading: 'Profiles' },
+  locations: { page: 'features/inventory-tracking', heading: 'Locations' },
 }
 
 /** Where the dashboard grid itself (panel === null) opens in the help. */
@@ -93,6 +108,7 @@ export const CREATE_PAGE_HELP_TARGET: HelpTarget = { page: 'how-to/create-a-dash
 export function helpTargetFor(location: AppLocation): HelpTarget {
   if (location.panel === null) return DASHBOARD_HELP_TARGET
   if (location.panel === 'settings') return SETTINGS_HELP_TARGETS[location.section ?? 'general']
+  if (location.panel === 'inventory') return INVENTORY_HELP_TARGETS[location.inventorySection ?? 'equipment']
   return PANEL_HELP_TARGETS[location.panel]
 }
 

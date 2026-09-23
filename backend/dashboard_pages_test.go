@@ -2116,6 +2116,47 @@ func TestValidatePoiMapWidget_RejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestValidatePoiMapWidget_AcceptsSummaryCycleSecondsUnsetOrInBounds(t *testing.T) {
+	unset := validPoiMapConfig()
+
+	atMin := validPoiMapConfig()
+	atMin.SummaryCycleSeconds = poiMapSummaryCycleSecondsMin
+
+	atMax := validPoiMapConfig()
+	atMax.SummaryCycleSeconds = poiMapSummaryCycleSecondsMax
+
+	for _, config := range []*dashboardPoiMapConfig{unset, atMin, atMax} {
+		widget := poiMapWidget("poi-map:m1x8abcd", config)
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
+			t.Fatalf("expected config %+v to be accepted, got %q", config, msg)
+		}
+	}
+}
+
+func TestValidatePoiMapWidget_RejectsBadSummaryCycleSeconds(t *testing.T) {
+	tooSmall := validPoiMapConfig()
+	tooSmall.SummaryCycleSeconds = poiMapSummaryCycleSecondsMin - 1
+
+	tooBig := validPoiMapConfig()
+	tooBig.SummaryCycleSeconds = poiMapSummaryCycleSecondsMax + 1
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"summary cycle below minimum", poiMapWidget("poi-map:m1x8abcd", tooSmall)},
+		{"summary cycle above maximum", poiMapWidget("poi-map:m1x8abcd", tooBig)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
+				t.Fatalf("expected %s to be rejected", tc.name)
+			}
+		})
+	}
+}
+
 // Reject rather than silently drop, matching the embed and gauge-group precedent.
 func TestValidateDashboardWidgetsRejectsMismatchedPoiMapConfig(t *testing.T) {
 	poiMap := validPoiMapConfig()

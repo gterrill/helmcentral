@@ -27,12 +27,32 @@ export interface NextWaypointResult {
  * point_index/reverse straight through with zero transformation. So this
  * traversal-order mapping has to happen here, on the frontend, once.
  */
-export function nextWaypoint(route: Route, status: ActiveRouteStatus): NextWaypointResult | null {
+
+/**
+ * The route's waypoints in the order `status.pointIndex` counts through -
+ * reversed when `status.reverse` is set, authored order otherwise. Exported
+ * (rather than kept private to nextWaypoint below) so a consumer that needs
+ * the whole ordered route - not just the single next waypoint - gets it from
+ * the one place this reversal is handled, instead of re-deriving it.
+ *
+ * Returns null under the same conditions nextWaypoint does: not active, a
+ * routeId that doesn't match this route, or a route with no waypoints.
+ */
+export function traversalOrder(route: Route, status: ActiveRouteStatus): RouteWaypoint[] | null {
   if (status.state !== 'active') return null
   if (status.routeId !== route.id) return null
   if (route.waypoints.length === 0) return null
+  return status.reverse ? [...route.waypoints].reverse() : route.waypoints
+}
 
-  const traversal = status.reverse ? [...route.waypoints].reverse() : route.waypoints
+export function nextWaypoint(route: Route, status: ActiveRouteStatus): NextWaypointResult | null {
+  const traversal = traversalOrder(route, status)
+  // The second check is redundant with traversalOrder's own (traversal is
+  // only ever non-null when status.state === 'active'), but TypeScript can't
+  // see that through the function boundary, so it's what narrows `status`
+  // enough to read pointIndex below.
+  if (!traversal || status.state !== 'active') return null
+
   const index = Math.min(Math.max(status.pointIndex, 0), traversal.length - 1)
   const waypoint = traversal[index]
   const label = waypoint.name && waypoint.name.trim() !== '' ? waypoint.name : `WP ${index + 1}`

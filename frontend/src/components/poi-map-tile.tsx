@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 
-import type { PoiMapTileProps } from '@/components/poi-map-tile-impl'
+import type { PoiMapActiveRoute, PoiMapActiveRouteWaypoint, PoiMapTileProps } from '@/components/poi-map-tile-impl'
 
 // Same kiosk bundle-split reasoning as assistant-markdown.tsx /
 // help-markdown.tsx: this widget imports maplibre-gl and react-map-gl at
@@ -11,7 +11,7 @@ import type { PoiMapTileProps } from '@/components/poi-map-tile-impl'
 // once a page that actually renders this tile does.
 const PoiMapTileImpl = lazy(() => import('./poi-map-tile-impl'))
 
-export type { PoiMapTileProps }
+export type { PoiMapTileProps, PoiMapActiveRoute, PoiMapActiveRouteWaypoint }
 
 export function PoiMapTile(props: PoiMapTileProps) {
   return (

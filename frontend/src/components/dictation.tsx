@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 
 import { InputGroupButton } from '@/components/ui/input-group'
 import { useSpeechInput, type SpeechInputUnsupportedReason } from '@/hooks/use-speech-input'
-import { claimVoice, subscribeVoicePreempt } from '@/lib/voice-arbiter'
+import { claimVoice, preemptVoice, subscribeVoicePreempt } from '@/lib/voice-arbiter'
 
 // ADR 0122: dictation, as opposed to the header's push-to-talk mic
 // (App.tsx, "Talk to Mate" - the only voice control that sends by itself).
@@ -14,16 +14,33 @@ import { claimVoice, subscribeVoicePreempt } from '@/lib/voice-arbiter'
 // (components/documents/note-capture-sheet.tsx) share, so the two fields
 // don't drift into two different mic behaviours for no reason.
 
-export interface UseDictationOptions {
-  /** Same shape as a React state setter's functional-update form - append
-   * semantics (a single space between what was already there and the new
-   * phrase, skip a final that's empty after trimming) live here so both
-   * call sites don't each reimplement the three lines note-capture-sheet.tsx
-   * used to carry directly. Pass the field's own setState function. */
-  setValue: (updater: (prev: string) => string) => void
-  /** BCP 47 language tag, forwarded to useSpeechInput. Defaults to en-AU. */
-  lang?: string
-}
+// ADR 0124: a second insertion sink alongside `setValue`, for the note
+// editor's mic - the editor has no plain string to append to, only an
+// `editor.tf.insertText` call at a Slate selection (lib/note-editor-
+// dictation.ts's insertDictatedText). Both sinks get the same trimmed,
+// non-empty final text; only what happens to it differs, so this stays a
+// union on the one options object rather than a second hook the composer
+// and capture sheet would have to choose between - "it does not grow a
+// second recognizer" (ADR 0124).
+export type UseDictationOptions = { lang?: string } & (
+  | {
+      /** Same shape as a React state setter's functional-update form -
+       * append semantics (a single space between what was already there
+       * and the new phrase, skip a final that's empty after trimming) live
+       * in handleFinal below so both call sites don't each reimplement the
+       * three lines note-capture-sheet.tsx used to carry directly before
+       * ADR 0124. Pass the field's own setState function. */
+      setValue: (updater: (prev: string) => string) => void
+      insert?: never
+    }
+  | {
+      /** Receives only the trimmed, non-empty final - handleFinal below
+       * applies the same skip-empty rule `setValue` gets before calling
+       * this, so a caller never has to re-derive it. */
+      insert: (text: string) => void
+      setValue?: never
+    }
+)
 
 export interface UseDictationResult {
   supported: boolean
@@ -48,16 +65,27 @@ export interface UseDictationResult {
    * stopPropagation is load-bearing: both call sites sit inside a Sheet or
    * a component that itself treats Escape as "close/cancel", and a mid
    * dictation Escape must mean "stop dictating," not "close the sheet out
-   * from under me." */
-  handleFieldKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+   * from under me."
+   *
+   * `HTMLElement`, not `HTMLTextAreaElement` (ADR 0124): the note editor's
+   * WYSIWYG surface is a contentEditable div, not a textarea, and this has
+   * to sit on both. Any more specific keyboard event (a real textarea's
+   * included) is still assignable here - only the reverse would be unsafe. */
+  handleFieldKeyDown: (event: KeyboardEvent<HTMLElement>) => void
 }
 
-export function useDictation({ setValue, lang }: UseDictationOptions): UseDictationResult {
+export function useDictation(options: UseDictationOptions): UseDictationResult {
+  const { lang, setValue, insert } = options
+
   const handleFinal = useCallback((text: string) => {
     const trimmed = text.trim()
     if (trimmed === '') return
-    setValue((prev) => (prev.trim() === '' ? trimmed : `${prev} ${trimmed}`))
-  }, [setValue])
+    if (insert) {
+      insert(trimmed)
+      return
+    }
+    setValue?.((prev) => (prev.trim() === '' ? trimmed : `${prev} ${trimmed}`))
+  }, [insert, setValue])
 
   const speech = useSpeechInput({ onFinal: handleFinal, lang })
   const { listening } = speech
@@ -82,8 +110,17 @@ export function useDictation({ setValue, lang }: UseDictationOptions): UseDictat
   // end/error), all of which report through `listening` regardless of which
   // one it was.
   const releaseRef = useRef<(() => void) | null>(null)
+  // True from finish() (below) until the session actually ends - the
+  // recognizer's own stop() was already called, so no more audio is being
+  // captured, but `listening` stays true for a window while the browser
+  // delivers whatever final result was already in flight (see
+  // use-speech-input.ts's finish()). The preempt subscriber further down
+  // reads this to tell "tapped Stop, tail result pending" apart from
+  // "still actively listening."
+  const finishingRef = useRef(false)
   useEffect(() => {
     if (!listening) {
+      finishingRef.current = false
       releaseRef.current?.()
       releaseRef.current = null
     }
@@ -105,14 +142,30 @@ export function useDictation({ setValue, lang }: UseDictationOptions): UseDictat
     // renders nothing with no API, and disables itself on an insecure
     // origin) but start() is exported, not private to that button.
     if (!speech.supported) return
+    // Code review: claimVoice() is only ref-counted - it tells wake mode to
+    // pause on the first claim, but a SECOND dictation field claiming while
+    // the first is still listening never told that first field to stop, so
+    // two SpeechRecognition sessions ran at once. preemptVoice() (ADR 0122,
+    // previously only called by push-to-talk) fixes that the same way it
+    // already fixes dictation-vs-push-to-talk: every mounted dictation field
+    // (this one included) reacts to it by calling speech.stop() below, which
+    // is a no-op for a field that isn't listening yet - so this only ever
+    // stops an OTHER field that was already dictating, never itself.
+    preemptVoice()
     // Idempotent: a second start() while already claiming (e.g. a stray
     // double-tap before the first click's effects have settled) must not
     // claim twice - claimVoice() is ref-counted, and a second, unmatched
     // claim here would need a second release to ever lift it.
     if (releaseRef.current === null) releaseRef.current = claimVoice()
+    finishingRef.current = false
     speech.start({ continuous: true })
   }, [speech])
-  const finish = useCallback(() => { speech.finish() }, [speech])
+  const finish = useCallback(() => {
+    // Marked BEFORE speech.finish() so a preempt landing in the window
+    // between this call and the recognizer's `end` event (below) sees it.
+    finishingRef.current = true
+    speech.finish()
+  }, [speech])
   const cancel = useCallback(() => { speech.stop() }, [speech])
 
   // ADR 0122: push-to-talk (hooks/use-mate-voice.ts) is an explicit,
@@ -121,9 +174,24 @@ export function useDictation({ setValue, lang }: UseDictationOptions): UseDictat
   // waiting for it to finish. speech.stop() is already a no-op when nothing
   // is running, so every mounted dictation field can react the same way
   // without checking whether it's the one actually holding the claim.
-  useEffect(() => subscribeVoicePreempt(() => { speech.stop() }), [speech])
+  //
+  // Code review: this used to call speech.stop() unconditionally, which
+  // also fired on a field the operator had just tapped Stop on - finish()
+  // (above) had already told the recognizer to stop() capturing, but its
+  // last phrase was still in flight (finishingRef, set by finish()). A
+  // preempt from a second field starting reached that first field's
+  // subscriber here and aborted it, discarding the phrase the operator had
+  // just finished speaking. Skipping the abort while finishingRef is true
+  // fixes that: nothing is being captured in that window, so there is no
+  // second live microphone session for the two-recognizer bug this guard
+  // exists for - a field that IS still actively listening (finishingRef
+  // false) is unaffected and still gets stopped exactly as before.
+  useEffect(() => subscribeVoicePreempt(() => {
+    if (finishingRef.current) return
+    speech.stop()
+  }), [speech])
 
-  const handleFieldKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleFieldKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape' && speech.listening) {
       event.preventDefault()
       event.stopPropagation()

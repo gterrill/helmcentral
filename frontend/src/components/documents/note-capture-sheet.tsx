@@ -2,18 +2,25 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 
 import { Button } from '@/components/ui/button'
 import { DictateButton, DictationError, DictationStatus, useDictation } from '@/components/dictation'
-import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group'
+import { NoteEditorBody, type NoteEditorHandle } from '@/components/note-editor'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 
-// ADR 0119: capture is a global action, not a place. This sheet is the ONE
-// capture surface for the whole app - opened from App.tsx's header action
-// and keyboard shortcut (available from any screen) and from Documents'
-// own New → Note menu item (documents-panel.tsx), both handing the exact
-// same open/onOpenChange pair down from App.tsx so there is only ever one
-// mounted instance regardless of which trigger opened it.
+// ADR 0121: the one capture sheet, reached only through Documents' New →
+// Note menu (documents-panel.tsx) - no separate global header action or
+// Alt+N shortcut exists any more; every note starts here.
+//
+// ADR 0124: the body is the full ADR 0117 editor (NoteEditorBody, note-
+// editor.tsx), not a plain textarea - headings, tables, links and a task
+// list are available from the first word, with the plain-Markdown escape
+// hatch (the editor's own "Markdown source" toggle) still one click away
+// for whoever wants it. There is no second, plain-field path any more:
+// AGENTS.md's fallback policy rules out two authoring surfaces that could
+// each silently be the one the operator gets, and that was this ADR's own
+// reason for removing the textarea rather than keeping it beside the
+// editor as a fallback.
 //
 // Carries the type select notes-panel.tsx's inbox row never had (that
 // panel only ever offered a type OVERRIDE after the fact, via the row's
@@ -47,30 +54,89 @@ export interface NoteCaptureSheetProps {
    * keeps this sheet out of the URL, and the sheet closes over whatever
    * screen was already open), but a caller that wants to open it can. */
   onCaptured?: (noteId: string) => void
-  /** The kind the sheet opens on. Documents' Add Note split button passes
-   * one when the operator used the caret to pick a kind up front; the
-   * global header action and the split button's own body pass nothing, so
-   * the one-click path never meets a capture-time decision (ADR 0119).
-   * The select stays live either way - this only chooses where it starts. */
+  /** The kind the sheet opens on. Documents' New → Note submenu passes one
+   * when the operator picked a kind directly rather than Auto; the global
+   * header action and Alt+N ADR 0121 removed used to pass nothing, and the
+   * submenu's own Auto item still does today. The select stays live either
+   * way - this only chooses where it starts. */
   initialType?: NoteType
 }
 
 export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }: NoteCaptureSheetProps) {
   const notes = useNotes()
-  const [text, setText] = useState('')
+  const editorRef = useRef<NoteEditorHandle | null>(null)
+  // Code review: NoteEditorBody is a React.lazy body (note-editor.tsx) - its
+  // own "Loading editor…" Suspense fallback can be on screen for a real tick
+  // while the editor-vendor chunk fetches, and DictateButton below used to
+  // have no idea that window existed at all. `editorReady` tracks the
+  // imperative handle's own attach/detach (setEditorHandle below), rather
+  // than something inferred from editorKey or a timer, so it is exactly
+  // "does editorRef.current point at something right now" - true whenever a
+  // call through editorRef is safe, false the instant it wouldn't be.
+  const [editorReady, setEditorReady] = useState(false)
+  const setEditorHandle = useCallback((handle: NoteEditorHandle | null) => {
+    editorRef.current = handle
+    setEditorReady(handle !== null)
+  }, [])
   const [type, setType] = useState<string>(initialType ?? TYPE_AUTO)
+  const [empty, setEmpty] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
+  // Bumped on every open and after a successful Capture - remounts
+  // NoteEditorBody with a fresh, empty value (ADR 0124), the same job
+  // setText('') used to do for the plain textarea this replaced. A fresh
+  // key rather than an imperative "clear" call because Plate owns its own
+  // undo history and node ids per mount; remounting is the one way to
+  // guarantee none of a just-captured note's editing history leaks into
+  // the next one.
+  const [editorKey, setEditorKey] = useState(0)
 
-  // ADR 0122: dictation, appended to the textarea, never sent by itself -
-  // append semantics (a single space, skip an empty final) live in
-  // useDictation now, shared with the Mate composer's own mic.
-  const dictation = useDictation({ setValue: setText })
+  // Tracks Capture's disabled state - NoteEditorBody owns the actual
+  // buffer (WYSIWYG or source mode), so "is there anything to capture" has
+  // to come from what it reports rather than a string this component holds
+  // itself.
+  //
+  // Code review: this used to read editorRef.current?.getMarkdown() instead
+  // of taking the string directly - the imperative handle's getMarkdown is
+  // a closure over the body's own state as of its LAST completed render,
+  // and this was being called from inside the very onChange that fires
+  // before that render happens (setSourceText, in source mode). One
+  // keystroke landed in the buffer while Capture kept reporting empty.
+  // NoteEditorBody's onMarkdownChange (note-editor-impl.tsx) now hands over
+  // the fresh Markdown itself, so there is nothing left to read stale - it
+  // is the one caller that actually needs the string (unlike NoteEditorImpl's
+  // own markDirty, which is why that's a separate prop from plain onChange).
+  const handleBodyChange = useCallback((markdown: string) => {
+    setEmpty(markdown.trim() === '')
+  }, [])
+
+  const insertDictation = useCallback((text: string) => {
+    // Code review: DictateButton's own `disabled={!editorReady}` (below) is
+    // meant to make this branch unreachable through the mic itself, but a
+    // final can still be in flight from the Web Speech API's own event
+    // queue (finish() deliberately leaves the recognizer's handlers attached
+    // for exactly this - see use-speech-input.ts's own comment on finish()
+    // vs stop()). AGENTS.md's fallback policy: a dictated phrase that can't
+    // be delivered has to say so, not vanish - `?.` on editorRef used to let
+    // it do exactly that.
+    if (!editorRef.current) {
+      setError("The editor wasn't ready, so that dictation wasn't added. Try again.")
+      return
+    }
+    editorRef.current.insertDictation(text)
+  }, [])
+
+  // ADR 0122: the mic, appended at the editor's caret rather than sent by
+  // itself. ADR 0124 moves its sink from the plain field's `setValue` to
+  // the editor's own insertion point - see dictation.tsx's own doc comment
+  // on the two-branch UseDictationOptions union this made of it.
+  const dictation = useDictation({ insert: insertDictation })
 
   const reset = useCallback(() => {
-    setText('')
     setType(initialType ?? TYPE_AUTO)
     setError(null)
+    setEmpty(true)
+    setEditorKey((key) => key + 1)
   }, [initialType])
 
   // Re-seed when the sheet is re-opened on a different kind. The caret can
@@ -82,14 +148,15 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
     const wasOpen = previousOpenRef.current
     previousOpenRef.current = open
     if (open && !wasOpen) {
-      setText('')
       setType(initialType ?? TYPE_AUTO)
       setError(null)
+      setEmpty(true)
+      setEditorKey((key) => key + 1)
     }
   }, [open, initialType])
 
   const submit = useCallback(async () => {
-    const body = text.trim()
+    const body = (editorRef.current?.getMarkdown() ?? '').trim()
     if (body === '') return
     setCapturing(true)
     try {
@@ -108,15 +175,15 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
       onCaptured?.(created.document.id)
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message surfaces
-      // verbatim, and the text stays in the box so nothing dictated or
+      // verbatim, and the body stays in the editor so nothing dictated or
       // typed is lost.
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setCapturing(false)
     }
-  }, [text, type, notes, reset, onOpenChange, onCaptured, dictation])
+  }, [type, notes, reset, onOpenChange, onCaptured, dictation])
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       void submit()
@@ -142,30 +209,33 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
         }
       }}
     >
-      <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
+      {/* sm:max-w-2xl, wider than the sheet used to be (ADR 0124): the
+          embedded editor carries a toolbar now, which the old plain
+          textarea's sm:max-w-lg never had to leave room for. */}
+      <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle>Capture a note</SheetTitle>
         </SheetHeader>
-        {/* ADR 0122: same InputGroup + block-end addon shape as the Mate
-            composer (assistant-thread.tsx) - the mic sits inside the field
-            itself, beside the visible "Listening…"/interim line, rather
-            than in a separate row below it the way this sheet used to put
-            it. */}
-        <InputGroup>
-          <InputGroupTextarea
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Capture a note"
-            aria-label="Capture a note"
-            rows={6}
-          />
-          <InputGroupAddon align="block-end">
-            <DictateButton dictation={dictation} />
-            <DictationStatus dictation={dictation} />
-          </InputGroupAddon>
-        </InputGroup>
+        {/* ADR 0124: the full editor, not a plain field - see this file's
+            own header comment. No Save button or dirty line (NoteEditorBody
+            carries neither): Capture below stays the one commit action over
+            this buffer. flex-1/min-h-0 come from NoteEditorBody's own root,
+            so it grows to fill the space between the header and the rows
+            below and scrolls internally rather than pushing Capture off
+            the bottom of the sheet on a long note. */}
+        <NoteEditorBody
+          key={editorKey}
+          ref={setEditorHandle}
+          value=""
+          autoFocus
+          placeholder="Write the note…"
+          onMarkdownChange={handleBodyChange}
+          onKeyDown={handleKeyDown}
+        />
+        <div className="flex items-center gap-2">
+          <DictateButton dictation={dictation} disabled={!editorReady} />
+          <DictationStatus dictation={dictation} />
+        </div>
         <DictationError dictation={dictation} />
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Type</span>
@@ -190,7 +260,7 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
           <Button
             type="button"
             size="lg"
-            disabled={capturing || text.trim() === ''}
+            disabled={capturing || empty}
             onClick={() => { void submit() }}
           >
             Capture

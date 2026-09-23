@@ -12,7 +12,6 @@ import { AlarmsSection } from '@/components/settings/sections/alarms-section'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
 import { AssistantSection } from '@/components/settings/sections/assistant-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
-import { EquipmentSection } from '@/components/settings/sections/equipment-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
@@ -211,8 +210,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <AlarmsSection />
       case 'assistant':
         return <AssistantSection draft={draft} onChange={handleDraftChange} />
-      case 'equipment':
-        return <EquipmentSection />
       case 'security':
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':

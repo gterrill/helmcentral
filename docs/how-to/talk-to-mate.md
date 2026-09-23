@@ -25,11 +25,8 @@ Two more switches live in the same section, both off by default:
   it arrives, on top of the written answer, whenever you asked by voice.
 - **Listen for Hey Mate** keeps the microphone open the whole time the app is
   on screen, so you can start with "Hey Mate" instead of tapping anything.
-  It costs more battery than push-to-talk, and on Chrome the audio stream
-  goes to Google continuously rather than only when you actually ask
-  something, so it stays off until you decide that trade is worth it. It
-  also mishears ordinary cabin conversation as "Hey Mate" now and then; that
-  is expected, not a fault.
+  See [Mate](../features/assistant.md#talking-to-mate) for what that costs
+  in battery and privacy before you turn it on.
 
 ## 3. Allow the microphone
 
@@ -61,7 +58,9 @@ it got you right before you send. Tap it again (now **Stop dictation**) when
 you're done talking, or press Escape to cancel the dictation without closing
 whatever you were doing - either way, nothing sends until you press Send
 yourself. The note capture sheet's own microphone (**Documents → New →
-Note**) works exactly the same way.
+Note**) shares the same never-sends-by-itself rule, but types wherever the
+cursor is in the note rather than only at the end - see [Notes and the
+manual](../features/notes-and-the-manual.md).
 
 ## Stop it reading aloud
 

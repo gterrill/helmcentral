@@ -6,10 +6,14 @@ call. Capture puts it somewhere in one action, so that the thing you worked
 out about the shower drain pump is still there in two years when it matters,
 and is readable by whoever is aboard when you are not.
 
-A note is just text. There is no title to fill in, no folder to choose and no
-format to get right before you can save it. Type it, or dictate it, and it is
-captured and searchable immediately, filed alongside everything else in
-**Documents**.
+A note opens straight into the same editor used for headings, lists, tables
+and links elsewhere in Helmcentral - not a plain box you tidy up later. There
+is still no title to fill in, no folder to choose and nothing to get right
+before you can save it: type a plain sentence and it captures exactly as
+before, or reach for the toolbar the moment something needs real structure -
+a numbered start-up sequence, a table of settings, a link to another note.
+Type it, or dictate it, and it is captured and searchable immediately, filed
+alongside everything else in **Documents**.
 
 ## Capturing a note
 
@@ -17,15 +21,19 @@ Open **Documents** and choose **New → Note**. Pick a type from the submenu if
 you already know it, or **Auto** if you do not - the submenu is one extra
 hover, not a real delay.
 
-Write the note and press Capture, or Ctrl+Enter (Cmd+Enter on a Mac). That is
-the whole interaction: no title, no folder, nothing else required.
+Write the note - plain prose is enough for most of them - and press Capture,
+or Ctrl+Enter (Cmd+Enter on a Mac). Nothing about pressing Capture changes
+whether you used the toolbar or not: no title, no folder, nothing else
+required either way.
 
 The microphone button dictates instead of typing, which is the easier option
-with wet hands or while the boat is moving. Speech recognition is the
-browser's own, so it needs no OpenRouter account, but most browsers send the
-audio to a speech service to do the work, which means it needs an internet
-connection. If the connection is down the button says so rather than
-appearing to do nothing. On a browser with no speech support at all the
+with wet hands or while the boat is moving. It types wherever the cursor is
+sitting, not just at the end, so you can dictate a line, tap back into the
+middle of it to fix a word, and carry on from there. Speech recognition is
+the browser's own, so it needs no OpenRouter account, but most browsers send
+the audio to a speech service to do the work, which means it needs an
+internet connection. If the connection is down the button says so rather
+than appearing to do nothing. On a browser with no speech support at all the
 button is simply absent.
 
 ## What kind of note it is

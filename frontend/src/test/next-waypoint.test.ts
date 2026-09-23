@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { nextWaypoint, etaToWaypoint, etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
+import { nextWaypoint, etaToWaypoint, traversalOrder, etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
 import { haversineMeters } from '@/lib/geo'
 import type { Route, RouteWaypoint } from '@/hooks/use-routes'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
@@ -105,6 +105,36 @@ describe('nextWaypoint', () => {
   it('returns null when the route has no waypoints', () => {
     const result = nextWaypoint(route([]), activeStatus(0, false))
     expect(result).toBeNull()
+  })
+})
+
+describe('traversalOrder', () => {
+  it('returns the authored order when reverse is false', () => {
+    expect(traversalOrder(FORWARD_ROUTE, activeStatus(0, false))).toEqual(FORWARD_ROUTE.waypoints)
+  })
+
+  it('returns the reversed order when reverse is true', () => {
+    expect(traversalOrder(FORWARD_ROUTE, activeStatus(0, true))).toEqual([...FORWARD_ROUTE.waypoints].reverse())
+  })
+
+  it('is the array nextWaypoint indexes into: nextWaypoint.index matches traversalOrder[index]', () => {
+    const status = activeStatus(2, true)
+    const traversal = traversalOrder(FORWARD_ROUTE, status)
+    const next = nextWaypoint(FORWARD_ROUTE, status)
+    expect(traversal![next!.index]).toEqual(next!.waypoint)
+  })
+
+  it('returns null when the status is not active', () => {
+    expect(traversalOrder(FORWARD_ROUTE, { state: 'inactive', destination: null })).toBeNull()
+    expect(traversalOrder(FORWARD_ROUTE, { state: 'unknown' })).toBeNull()
+  })
+
+  it('returns null when the active routeId does not match this route', () => {
+    expect(traversalOrder(FORWARD_ROUTE, activeStatus(0, false, 'some-other-route'))).toBeNull()
+  })
+
+  it('returns null when the route has no waypoints', () => {
+    expect(traversalOrder(route([]), activeStatus(0, false))).toBeNull()
   })
 })
 

@@ -386,11 +386,24 @@ export interface PoiMapWidgetConfig {
   layout: 'map' | 'split'
   showAis?: boolean
   showTrail?: boolean
+  /**
+   * How many seconds the split layout's ranked list shows one POI's summary
+   * before cycling to the next one that has one. "map" layout has no ranked
+   * list to cycle, so this is ignored there. Undefined means
+   * POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT.
+   */
+  summaryCycleSeconds?: number
 }
 
 /** Mirrors poiRadiusNmMin/Max in backend/poi_providers.go — the same bounds GET /api/poi enforces. */
 export const POI_MAP_RANGE_NM_MIN = 0.5
 export const POI_MAP_RANGE_NM_MAX = 25
+
+/** Mirrors poiMapSummaryCycleSecondsMin/Max in backend/dashboard_pages.go. */
+export const POI_MAP_SUMMARY_CYCLE_SECONDS_MIN = 3
+export const POI_MAP_SUMMARY_CYCLE_SECONDS_MAX = 120
+/** Cycle interval a poi-map widget uses when it doesn't set summaryCycleSeconds. */
+export const POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT = 10
 
 export const CLUSTER_MAX_CORNERS = 4
 export const CLUSTER_MAX_CORNER_ROWS = 4
@@ -481,10 +494,13 @@ export function isValidEmbedUrl(url: string): boolean {
 /**
  * Mirrors validatePoiMapWidget in backend/dashboard_pages.go: title length via
  * the gauge-group cap, range within GET /api/poi's own bounds, categories a
- * non-empty subset of the known catalog, layout in the closed set. Duplicated
- * rather than shared for the same reason isValidEmbedUrl is: the config
- * dialog needs synchronous feedback while the server must not trust the
- * client.
+ * non-empty subset of the known catalog, layout in the closed set, and
+ * summaryCycleSeconds (when set) an integer within
+ * POI_MAP_SUMMARY_CYCLE_SECONDS_MIN/MAX - the backend field is a Go int, so a
+ * fractional value has to be rejected here too, not just out of range.
+ * Duplicated rather than shared for the same reason isValidEmbedUrl is: the
+ * config dialog needs synchronous feedback while the server must not trust
+ * the client.
  */
 export function isValidPoiMapConfig(config: PoiMapWidgetConfig): boolean {
   if (config.title.length > GAUGE_GROUP_TITLE_MAX_LENGTH) return false
@@ -492,6 +508,12 @@ export function isValidPoiMapConfig(config: PoiMapWidgetConfig): boolean {
   if (config.categories.length === 0) return false
   if (!config.categories.every((id) => POI_CATEGORY_IDS.includes(id))) return false
   if (config.layout !== 'map' && config.layout !== 'split') return false
+  if (
+    config.summaryCycleSeconds !== undefined
+    && (!Number.isInteger(config.summaryCycleSeconds)
+      || config.summaryCycleSeconds < POI_MAP_SUMMARY_CYCLE_SECONDS_MIN
+      || config.summaryCycleSeconds > POI_MAP_SUMMARY_CYCLE_SECONDS_MAX)
+  ) return false
   return true
 }
 
