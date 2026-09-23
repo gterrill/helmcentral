@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { readErrorMessage } from '@/lib/api-error'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
 // its zones/bins. Same idiom as use-documents.ts/use-manuals.ts throughout:
@@ -233,11 +234,16 @@ async function submitJSON<T>(url: string, method: string, body?: unknown): Promi
 /**
  * The Equipment index's filtered listing - `?category=&system=&status=&zone=&q=`.
  * `filter` is caller-owned (EquipmentIndex's own toolbar state), the same
- * contract useDocuments(folderId) gives folderId.
+ * contract useDocuments(folderId) gives folderId. `null` fetches nothing at
+ * all (items stay `[]`, loading false) - the same "meaningless without a
+ * scope" shape useEquipmentItem(null) gives a brand new draft - for a
+ * caller like StocktakeSection that only has something to filter BY once
+ * the operator has scanned a bin, rather than that caller having to invent
+ * a filter value that can never match a real record.
  */
-export function useEquipment(filter: EquipmentFilter) {
+export function useEquipment(filter: EquipmentFilter | null) {
   const [items, setItems] = useState<EquipmentItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(filter !== null)
   const [error, setError] = useState<string | null>(null)
 
   // Ordering guard (same idiom as use-documents.ts's refreshSeqRef): a
@@ -250,9 +256,18 @@ export function useEquipment(filter: EquipmentFilter) {
   // (EquipmentIndex builds it inline from several useState values) - keying
   // the effect on its serialized contents, not its identity, is what keeps
   // the request from refiring every render for no filter change at all.
-  const filterKey = JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
+  const filterKey = filter === null
+    ? null
+    : JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
 
   const refresh = useCallback(async () => {
+    if (filter === null) {
+      seqRef.current += 1
+      setItems([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     const seq = (seqRef.current += 1)
     setLoading(true)
     try {
@@ -265,10 +280,7 @@ export function useEquipment(filter: EquipmentFilter) {
       if (filter.q) params.set('q', filter.q)
       const qs = params.toString()
       const res = await fetch(`${apiBaseUrl}/api/inventory/equipment${qs ? `?${qs}` : ''}`)
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
+      if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = (await res.json()) as { items?: EquipmentItem[] }
       if (seq !== seqRef.current) return
       setItems(data.items ?? [])
@@ -399,10 +411,7 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
  * scanning a different item's tag on every pass, one after another. */
 export async function fetchEquipment(id: string): Promise<EquipmentItem> {
   const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error ?? `HTTP ${res.status}`)
-  }
+  if (!res.ok) throw new Error(await readErrorMessage(res))
   const data = (await res.json()) as { item: EquipmentItem }
   return data.item
 }
@@ -460,10 +469,7 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
     method: 'POST',
     body: form,
   })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
+  if (!response.ok) throw new Error(await readErrorMessage(response))
   const data = (await response.json()) as { item: EquipmentItem }
   return data.item
 }
@@ -489,6 +495,21 @@ export async function deleteEquipmentPhoto(equipmentId: string, documentId: stri
     'DELETE',
   )
   return data.item
+}
+
+/** Case-insensitive bin-code lookup against a zone tree - a bin code is
+ * "short and human-chosen" (ADR 0127 §2), so this is never a server round
+ * trip, just a scan over the already-fetched zone list. Shared by the bin
+ * page (resolving `/inventory/bins/<code>`, bin-page.tsx) and Stocktake
+ * (resolving a scanned bin code, stocktake-section.tsx), which each
+ * duplicated this exact loop before. */
+export function findBinByCode(zones: InventoryZone[], code: string): { zone: InventoryZone; bin: InventoryBin } | null {
+  const lower = code.toLowerCase()
+  for (const zone of zones) {
+    const bin = zone.bins.find((b) => b.code.toLowerCase() === lower)
+    if (bin) return { zone, bin }
+  }
+  return null
 }
 
 /** Zones (with their nested bins) plus every zone/bin write - shared by

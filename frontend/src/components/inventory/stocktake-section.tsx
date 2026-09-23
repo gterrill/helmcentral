@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,6 +7,7 @@ import { parseAppLocation } from '@/lib/app-location'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
   fetchEquipment,
+  findBinByCode,
   toEquipmentInput,
   updateEquipment,
   useEquipment,
@@ -42,12 +43,6 @@ type ScanEvent =
   | { id: string; kind: 'elsewhere'; item: EquipmentItem; recordedBinCode: string | null; targetBin: CurrentBin }
   | { id: string; kind: 'unrecognised'; text: string }
 
-// A bin id that can never match a real one, so useEquipment (below, a Hook
-// that must be called unconditionally on every render) fetches nothing at
-// all rather than "no bin filter -> every item aboard" whenever the
-// operator hasn't scanned a bin yet this pass.
-const NO_CURRENT_BIN_SENTINEL = '__stocktake_no_current_bin__'
-
 interface StocktakeSectionProps {
   /** The bin photo grid's own Open (BinPage's own onOpenEquipment) - wired
    * from InventoryPanel/App the same way BinPage's is, so tapping a photo's
@@ -64,23 +59,29 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
   const { zones } = useInventoryZones()
   const [currentBin, setCurrentBin] = useState<CurrentBin | null>(null)
   const [events, setEvents] = useState<ScanEvent[]>([])
-  const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set())
   const [movingId, setMovingId] = useState<string | null>(null)
   const [scanFieldValue, setScanFieldValue] = useState('')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  const { items: binItems } = useEquipment({ bin: currentBin?.bin.id ?? NO_CURRENT_BIN_SENTINEL })
+  // null (rather than a bin id chosen to never match a real one) fetches
+  // nothing at all until the operator has actually scanned a bin this pass -
+  // useEquipment(null)'s own contract.
+  const { items: binItems } = useEquipment(currentBin ? { bin: currentBin.bin.id } : null)
 
-  const resolveBinCode = (code: string): CurrentBin | null => {
-    const lower = code.toLowerCase()
-    for (const zone of zones) {
-      const bin = zone.bins.find((b) => b.code.toLowerCase() === lower)
-      if (bin) return { zone, bin }
-    }
-    return null
-  }
+  // Derived from events rather than a second piece of state kept in step
+  // with it by hand - every 'confirmed' event's own item.id IS the set of
+  // ids confirmed so far, so there is exactly one thing to keep correct
+  // (pushEvent/setEvents below) instead of two.
+  const confirmedIds = useMemo(
+    () => new Set(
+      events
+        .filter((e): e is Extract<ScanEvent, { kind: 'confirmed' }> => e.kind === 'confirmed')
+        .map((e) => e.item.id),
+    ),
+    [events],
+  )
 
   // Takes a fully-formed ScanEvent (id included) rather than an Omit<...,
   // 'id'> - Omit collapses a discriminated union to the INTERSECTION of its
@@ -123,7 +124,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     const parsed = parseAppLocation(pathname)
 
     if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
-      const match = resolveBinCode(parsed.binCode)
+      const match = findBinByCode(zones, parsed.binCode)
       if (!match) {
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
         return
@@ -146,7 +147,6 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
       // place" - the same branch as "recorded in the current bin", just
       // with nothing to compare the bin against.
       if (currentBin === null || item.bin_id === currentBin.bin.id) {
-        setConfirmedIds((prev) => new Set(prev).add(item.id))
         pushEvent({ id: crypto.randomUUID(), kind: 'confirmed', item })
         if (canWrite && !item.verified_aboard) {
           try {
@@ -189,7 +189,6 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
       // copy.
       const fresh = await fetchEquipment(item.id)
       const updated = await updateEquipment(item.id, { ...toEquipmentInput(fresh), bin_id: targetBin.bin.id, zone_id: targetBin.zone.id })
-      setConfirmedIds((prev) => new Set(prev).add(item.id))
       setEvents((prev) => prev.map((e) => (e.id === eventId ? { id: e.id, kind: 'confirmed', item: updated } : e)))
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err))

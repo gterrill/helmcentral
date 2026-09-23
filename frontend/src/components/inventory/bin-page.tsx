@@ -8,7 +8,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
-import { useEquipment, useInventoryZones, type EquipmentItem, type InventoryZone } from '@/hooks/use-inventory'
+import { findBinByCode, useEquipment, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
 import { formatAppLocation } from '@/lib/app-location'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
@@ -37,14 +37,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   // callbacks, rather than a second, dummy-callback render path.
   const { zones, loading: zonesLoading, createZone, createBin } = useInventoryZones()
 
-  const match = useMemo(() => {
-    const lower = code.toLowerCase()
-    for (const zone of zones) {
-      const bin = zone.bins.find((b) => b.code.toLowerCase() === lower)
-      if (bin) return { zone, bin }
-    }
-    return null
-  }, [zones, code])
+  const match = useMemo(() => findBinByCode(zones, code), [zones, code])
 
   if (match) {
     return (
@@ -87,7 +80,7 @@ function BinNotFound({
   code: string
   zones: InventoryZone[]
   createZone: (name: string) => Promise<InventoryZone>
-  createBin: (zoneId: string, code: string, name: string) => Promise<{ id: string; zone_id: string; code: string; name: string; sort_index: number }>
+  createBin: (zoneId: string, code: string, name: string) => Promise<InventoryBin>
   onClose: () => void
   canWrite: boolean
 }) {
@@ -285,7 +278,7 @@ function BinContents({
   zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite,
 }: {
   zone: InventoryZone
-  bin: { id: string; zone_id: string; code: string; name: string; sort_index: number }
+  bin: InventoryBin
   onClose: () => void
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
