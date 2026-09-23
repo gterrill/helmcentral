@@ -52,7 +52,24 @@ vi.mock('@/components/inventory/profiles-section', () => ({
 }))
 
 vi.mock('@/components/inventory/locations-section', () => ({
-  LocationsSection: () => <div data-testid="locations-section" />,
+  LocationsSection: (props: { onOpenBin?: (code: string) => void }) => (
+    <div data-testid="locations-section">
+      <button type="button" onClick={() => props.onOpenBin?.('LAZ-02')}>open-bin-LAZ-02</button>
+    </div>
+  ),
+}))
+
+// ADR 0127: BinPage is its own already-tested component (bin-page.test.tsx)
+// - mocked here the same way every other InventoryPanel child is, so this
+// file only exercises InventoryPanel's own job of choosing which one to
+// render and wiring its callback props through.
+vi.mock('@/components/inventory/bin-page', () => ({
+  BinPage: (props: { code: string; onClose: () => void }) => (
+    <div data-testid="bin-page">
+      {props.code}
+      <button type="button" onClick={props.onClose}>bin-page-back</button>
+    </div>
+  ),
 }))
 
 function baseProps() {
@@ -66,6 +83,10 @@ function baseProps() {
     onCloseEditor: vi.fn(),
     onEquipmentCreated: vi.fn(),
     onEquipmentDeleted: vi.fn(),
+    binCode: null,
+    onOpenBin: vi.fn(),
+    onCloseBin: vi.fn(),
+    newEquipmentPreset: null,
   }
 }
 
@@ -139,6 +160,28 @@ describe('InventoryPanel', () => {
   it('renders LocationsSection for the locations section', () => {
     render(<InventoryPanel {...baseProps()} activeSectionId="locations" />)
     expect(screen.getByTestId('locations-section')).toBeInTheDocument()
+  })
+
+  // ADR 0127: the bin page is the SAME section as Locations, split by
+  // binCode the same way Equipment is split by equipmentEditId.
+  it('renders BinPage instead of LocationsSection when binCode is set', () => {
+    render(<InventoryPanel {...baseProps()} activeSectionId="locations" binCode="LAZ-02" />)
+    expect(screen.getByTestId('bin-page')).toHaveTextContent('LAZ-02')
+    expect(screen.queryByTestId('locations-section')).not.toBeInTheDocument()
+  })
+
+  it('reports a Locations-section bin click through onOpenBin', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} activeSectionId="locations" />)
+    fireEvent.click(screen.getByText('open-bin-LAZ-02'))
+    expect(props.onOpenBin).toHaveBeenCalledWith('LAZ-02')
+  })
+
+  it('reports the bin page\'s Back through onCloseBin', () => {
+    const props = baseProps()
+    render(<InventoryPanel {...props} activeSectionId="locations" binCode="LAZ-02" />)
+    fireEvent.click(screen.getByText('bin-page-back'))
+    expect(props.onCloseBin).toHaveBeenCalled()
   })
 
   it('clicking a nav section reports it through onSectionChange', () => {

@@ -726,6 +726,17 @@ export function App() {
   const [inventorySection, setInventorySection] = useState<InventorySectionId>(initialLocation.inventorySection ?? 'equipment')
   const [inventoryEquipmentEditId, setInventoryEquipmentEditId] = useState<string | null>(initialLocation.equipmentEditId ?? null)
   const [inventoryCreatingEquipment, setInventoryCreatingEquipment] = useState(false)
+  // ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`,
+  // what a tag tap or a Locations-section click opens. null is "not on a
+  // bin page" (the ordinary Locations index), the same convention
+  // wallDisplaysSlug/documentsEditId use for their own "nothing open" state.
+  const [inventoryBinCode, setInventoryBinCode] = useState<string | null>(initialLocation.binCode ?? null)
+  // ADR 0127: the bin/zone the bin page's "Full item" button last asked
+  // for - local UI state, like inventoryCreatingEquipment above, never
+  // serialised to the URL (a "New item" draft has none of its own either
+  // way). Read once by EquipmentEditor when a brand new draft mounts
+  // (InventoryPanel's own newEquipmentPreset prop).
+  const [inventoryNewEquipmentPreset, setInventoryNewEquipmentPreset] = useState<{ zoneId?: string; binId?: string } | null>(null)
 
   // inventoryDirty (declared up with settingsDirty) is only meaningful while
   // the Equipment editor is actually mounted and reporting it via
@@ -949,6 +960,7 @@ export function App() {
       // never a mid-draft "New item" - see inventoryCreatingEquipment's own
       // doc comment above.
       setInventoryCreatingEquipment(false)
+      setInventoryBinCode(loc.binCode ?? null)
     }
   }, [pages, pagesLoading, setActivePageId])
 
@@ -993,6 +1005,7 @@ export function App() {
       // the Equipment index until the operator actually saves.
       inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
       equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
+      binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
     }, ctx)
     // documents is the one panel whose canonical URL can carry a query
     // string (?folder=/?document=/?section=) - pathname alone is never
@@ -1011,7 +1024,7 @@ export function App() {
   }, [
     shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId,
     documentsFolderId, documentsEditId, documentsSectionId, wallDisplaysSlug,
-    inventorySection, inventoryEquipmentEditId, pages, pagesLoading, canAdmin,
+    inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
   ])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
@@ -1090,6 +1103,7 @@ export function App() {
           documentEditId: activePanel === 'documents' ? documentsEditId : null,
           inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
           equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
+          binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
         }, ctx))
       }
     }
@@ -1098,7 +1112,7 @@ export function App() {
   }, [
     shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, requestWithinInventory, applyAppLocation,
     activePanel, activePageId, settingsSection, matePanelConversationId, wallDisplaysSlug,
-    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, pages, pagesLoading, canAdmin,
+    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
   ])
 
   // If admin access ends (or was never established) while Settings happens
@@ -2618,7 +2632,10 @@ export function App() {
             // Opening an item or starting a new one enters the editor, so
             // there is no draft to discard yet and nothing to guard.
             onOpenEquipment={(id) => { setInventoryEquipmentEditId(id) }}
-            onNewEquipment={() => { setInventoryCreatingEquipment(true) }}
+            onNewEquipment={(preset) => {
+              setInventoryNewEquipmentPreset(preset ?? null)
+              setInventoryCreatingEquipment(true)
+            }}
             // Back is the only exit that can throw away typed work, so it is
             // the only one guarded - and it is ONE guarded call that clears
             // both pieces of state together. Two calls would not work:
@@ -2651,6 +2668,23 @@ export function App() {
             onDirtyChange={setInventoryDirty}
             onOpenHelp={openHelp}
             canWrite={canWrite}
+            binCode={inventoryBinCode}
+            // Opening a bin, like opening an equipment item, never discards
+            // anything by itself - but it CAN leave a dirty Equipment
+            // editor on screen if the operator navigates to a bin from
+            // there (a Locations-section click, or a deep link), so it
+            // still goes through the same guard onSectionChange uses.
+            onOpenBin={(code) => {
+              requestWithinInventory(() => {
+                setInventorySection('locations')
+                setInventoryBinCode(code)
+              })
+            }}
+            // The bin page's own Back never discards anything - there is
+            // no draft on that page (its quick-add form is deliberately
+            // ambient, ADR 0127) - so this is a plain setter.
+            onCloseBin={() => { setInventoryBinCode(null) }}
+            newEquipmentPreset={inventoryNewEquipmentPreset}
           />
         )
       case 'settings':

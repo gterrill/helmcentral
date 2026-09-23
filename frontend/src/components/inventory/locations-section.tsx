@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ArrowUpRight, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -21,6 +21,11 @@ import { useInventoryZones, type InventoryBin } from '@/hooks/use-inventory'
 
 interface LocationsSectionProps {
   canWrite?: boolean
+  /** ADR 0127: "reaching it without a tag" - each bin's code opens its bin
+   * page (bin-page.tsx). Optional and defaulted to a no-op so every
+   * existing caller/test that doesn't care about the bin page still works
+   * unchanged. */
+  onOpenBin?: (code: string) => void
 }
 
 interface BinRowProps {
@@ -28,6 +33,7 @@ interface BinRowProps {
   canWrite: boolean
   onRename: (id: string, code: string, name: string, original: { code: string; name: string }) => void
   onDelete: (id: string) => void
+  onOpen: (code: string) => void
 }
 
 /**
@@ -55,50 +61,83 @@ interface BinRowProps {
  * vice versa) - the field the operator isn't touching catches up to the
  * server, the field they are stays exactly as typed.
  */
-function BinRow({ bin, canWrite, onRename, onDelete }: BinRowProps) {
+function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProps) {
   const [code, setCode] = useState(bin.code)
   const [name, setName] = useState(bin.name)
+  // ADR 0127: "Renaming a code orphans that bin's tags, and the rename UI
+  // says so." Non-blocking (a plain muted line under the row, not a
+  // confirm dialog that would slow down an ordinary rename) - the operator
+  // typed the new code deliberately, this is information, not a gate.
+  // Cleared on the NEXT commit (whatever it says) rather than lingering
+  // forever, and never shown for a first render / a server-driven resync
+  // (the effects above), only for a code that actually changed under the
+  // operator's own edit.
+  const [renameWarning, setRenameWarning] = useState<string | null>(null)
 
   useEffect(() => { setCode(bin.code) }, [bin.code])
   useEffect(() => { setName(bin.name) }, [bin.name])
 
-  const commit = () => onRename(bin.id, code, name, { code: bin.code, name: bin.name })
+  const commit = () => {
+    const trimmedCode = code.trim()
+    if (trimmedCode !== '' && trimmedCode !== bin.code) {
+      setRenameWarning(`Tags written for ${bin.code} no longer open this bin.`)
+    } else {
+      setRenameWarning(null)
+    }
+    onRename(bin.id, code, name, { code: bin.code, name: bin.name })
+  }
 
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        value={code}
-        aria-label="Bin code"
-        className="h-9 w-28 font-mono"
-        disabled={!canWrite}
-        onChange={(e) => setCode(e.target.value)}
-        onBlur={commit}
-      />
-      <Input
-        value={name}
-        aria-label="Bin name"
-        placeholder="Name (optional)"
-        className="h-9 flex-1"
-        disabled={!canWrite}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={commit}
-      />
-      {canWrite && (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          aria-label={`Delete bin ${bin.code}`}
-          onClick={() => onDelete(bin.id)}
+          size="sm"
+          aria-label={`Open bin ${bin.code}`}
+          className="h-9 shrink-0 justify-start gap-1 px-2 font-mono text-primary"
+          onClick={() => onOpen(bin.code)}
         >
-          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+          {bin.code}
         </Button>
+        <Input
+          value={code}
+          aria-label="Bin code"
+          className="h-9 w-28 font-mono"
+          disabled={!canWrite}
+          onChange={(e) => setCode(e.target.value)}
+          onBlur={commit}
+        />
+        <Input
+          value={name}
+          aria-label="Bin name"
+          placeholder="Name (optional)"
+          className="h-9 flex-1"
+          disabled={!canWrite}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commit}
+        />
+        {canWrite && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Delete bin ${bin.code}`}
+            onClick={() => onDelete(bin.id)}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
+      </div>
+      {renameWarning && (
+        <p className="pl-2 text-[11px] text-muted-foreground">{renameWarning}</p>
       )}
     </div>
   )
 }
 
-export function LocationsSection({ canWrite = true }: LocationsSectionProps) {
+export function LocationsSection({ canWrite = true, onOpenBin = () => {} }: LocationsSectionProps) {
   const { zones, loading, error, createZone, renameZone, deleteZone, createBin, renameBin, deleteBin } = useInventoryZones()
 
   const [newZoneName, setNewZoneName] = useState('')
@@ -229,6 +268,7 @@ export function LocationsSection({ canWrite = true }: LocationsSectionProps) {
                 canWrite={canWrite}
                 onRename={(id, code, name, original) => { void handleRenameBin(id, code, name, original) }}
                 onDelete={(id) => { void handleDeleteBin(id) }}
+                onOpen={onOpenBin}
               />
             ))}
 

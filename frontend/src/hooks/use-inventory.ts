@@ -60,6 +60,9 @@ export interface EquipmentDocument {
   kind: string
   note_type: string
   source: string
+  /** ADR 0127: orders a link within its OWN item's photo strip - meaningless
+   * for a non-photo link, where the server leaves it at 0. */
+  sort_index: number
 }
 
 /** inventoryBin, backend/inventory_store.go - a numbered container within
@@ -111,6 +114,11 @@ export interface EquipmentItem {
   link_count: number
   created_at: string
   updated_at: string
+  /** ADR 0127: the item's OWN linked documents tagged 'photo', cover first -
+   * never every linked document (that's link_count/the Documents tab), just
+   * the photo-tagged subset the bin page's photo strip and the editor's
+   * photo row both read. */
+  photo_ids: string[]
 }
 
 /** The body EquipmentEditor sends on create (POST) and save (PUT) - every
@@ -142,6 +150,8 @@ export interface EquipmentFilter {
   system?: EquipmentSystem | ''
   status?: EquipmentStatus | ''
   zone?: string
+  /** ADR 0127: the bin page's own filter - `useEquipment({ bin: bin.id })`. */
+  bin?: string
   q?: string
 }
 
@@ -240,7 +250,7 @@ export function useEquipment(filter: EquipmentFilter) {
   // (EquipmentIndex builds it inline from several useState values) - keying
   // the effect on its serialized contents, not its identity, is what keeps
   // the request from refiring every render for no filter change at all.
-  const filterKey = JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.q ?? ''])
+  const filterKey = JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
 
   const refresh = useCallback(async () => {
     const seq = (seqRef.current += 1)
@@ -251,6 +261,7 @@ export function useEquipment(filter: EquipmentFilter) {
       if (filter.system) params.set('system', filter.system)
       if (filter.status) params.set('status', filter.status)
       if (filter.zone) params.set('zone', filter.zone)
+      if (filter.bin) params.set('bin', filter.bin)
       if (filter.q) params.set('q', filter.q)
       const qs = params.toString()
       const res = await fetch(`${apiBaseUrl}/api/inventory/equipment${qs ? `?${qs}` : ''}`)
@@ -370,6 +381,56 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
   return data.item
 }
 
+// ── equipment photos (ADR 0127) ─────────────────────────────────────────
+// Three plain functions, not a hook - the same "standalone, not tied to a
+// useEquipmentItem instance" reasoning createEquipment's own doc comment
+// gives: the photo row works identically for a saved item (each action
+// calls its route immediately) and, before Save, for a brand new draft
+// held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
+// neither of which has a persistent hook instance to hang these off.
+
+/** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
+ * 'photo' and linked at the end of the item's photo order server-side.
+ * Throws the server's own message on a rejected upload (AGENTS.md fallback
+ * policy: HEIC/non-image get a specific reason, never a generic one). */
+export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
+  const form = new FormData()
+  form.append('file', file, filename)
+  const response = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(payload.error ?? `HTTP ${response.status}`)
+  }
+  const data = (await response.json()) as { item: EquipmentItem }
+  return data.item
+}
+
+/** PUT /api/inventory/equipment/:id/photos - {document_ids} must name
+ * EXACTLY the item's current photo set; "Make cover" is this same call
+ * with the chosen id moved to the front. */
+export async function setEquipmentPhotoOrder(equipmentId: string, documentIds: string[]): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`,
+    'PUT',
+    { document_ids: documentIds },
+  )
+  return data.item
+}
+
+/** DELETE /api/inventory/equipment/:id/photos/:documentId - removes the
+ * photo from the item AND deletes its document (ADR 0127: "a photo has no
+ * life outside its item"). */
+export async function deleteEquipmentPhoto(equipmentId: string, documentId: string): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}`,
+    'DELETE',
+  )
+  return data.item
+}
+
 /** Zones (with their nested bins) plus every zone/bin write - shared by
  * EquipmentEditor's zone/bin selects and LocationsSection's own CRUD, so it
  * is its own hook rather than folded into either useEquipment or
@@ -410,9 +471,17 @@ export function useInventoryZones() {
   // (deleteZone/deleteBin) is a plain `{error}` naming what's still filed in
   // it (ADR 0123 decisions) - submitJSON's ordinary Error path already
   // surfaces that message verbatim, so no special handling is needed here.
+  // Returns the created record (ADR 0127: the bin page's own "Create bin"
+  // flow needs the new zone's id to then create a bin under it, and the
+  // caller-side `zones` state isn't updated synchronously by refresh()'s own
+  // setZones - a caller reading it right after this resolves would see
+  // whatever this render still holds, not the new zone). Every existing
+  // caller (locations-section.tsx) already discards the return value, so
+  // this is additive.
   const createZone = useCallback(async (name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/zones`, 'POST', { name })
+    const data = await submitJSON<{ zone: InventoryZone }>(`${apiBaseUrl}/api/inventory/zones`, 'POST', { name })
     await refresh()
+    return data.zone
   }, [refresh])
 
   const renameZone = useCallback(async (id: string, name: string) => {
@@ -425,9 +494,12 @@ export function useInventoryZones() {
     await refresh()
   }, [refresh])
 
+  // Returns the created record - same reasoning as createZone's own comment
+  // just above.
   const createBin = useCallback(async (zoneId: string, code: string, name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/bins`, 'POST', { zone_id: zoneId, code, name })
+    const data = await submitJSON<{ bin: InventoryBin }>(`${apiBaseUrl}/api/inventory/bins`, 'POST', { zone_id: zoneId, code, name })
     await refresh()
+    return data.bin
   }, [refresh])
 
   const renameBin = useCallback(async (id: string, patch: { code?: string; name?: string }) => {

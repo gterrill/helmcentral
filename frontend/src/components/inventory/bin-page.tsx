@@ -1,0 +1,344 @@
+import { useMemo, useRef, useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { Field, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
+import { TagRow } from '@/components/inventory/tag-row'
+import { apiBaseUrl } from '@/config/api'
+import { useEquipment, useInventoryZones, type EquipmentItem, type InventoryZone } from '@/hooks/use-inventory'
+
+// ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
+// case-insensitively against the zone/bin tree (useInventoryZones) - there
+// is no server-side "get bin by code" route, because the whole tree is
+// already small enough aboard one boat that the frontend already fetches
+// it whole for the Locations section and the equipment editor's own
+// zone/bin selects.
+
+interface BinPageProps {
+  code: string
+  onClose: () => void
+  onOpenEquipment: (id: string) => void
+  /** Full item (below) - pre-sets a brand new draft's location. */
+  onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
+  canWrite?: boolean
+}
+
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true }: BinPageProps) {
+  const { zones, loading: zonesLoading } = useInventoryZones()
+
+  const match = useMemo(() => {
+    const lower = code.toLowerCase()
+    for (const zone of zones) {
+      const bin = zone.bins.find((b) => b.code.toLowerCase() === lower)
+      if (bin) return { zone, bin }
+    }
+    return null
+  }, [zones, code])
+
+  if (match) {
+    return (
+      <BinContents
+        zone={match.zone}
+        bin={match.bin}
+        onClose={onClose}
+        onOpenEquipment={onOpenEquipment}
+        onNewEquipment={onNewEquipment}
+        canWrite={canWrite}
+      />
+    )
+  }
+
+  // Loading and "genuinely not found" both render nothing-matched-yet -
+  // ADR 0127 §2: "An unknown code renders 'No bin LAZ-02' and never
+  // redirects", so a still-loading zone list must not flash that state
+  // before the fetch has even landed.
+  if (zonesLoading) {
+    return <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+  }
+
+  return <BinNotFound code={code} zones={zones} onClose={onClose} canWrite={canWrite} />
+}
+
+// ── not found / create ───────────────────────────────────────────────────
+
+function BinNotFound({
+  code, zones, onClose, canWrite,
+}: {
+  code: string
+  zones: InventoryZone[]
+  onClose: () => void
+  canWrite: boolean
+}) {
+  const { createZone, createBin } = useInventoryZones()
+  const [creating, setCreating] = useState(false)
+  const [selectedZoneId, setSelectedZoneId] = useState<string>(zones[0]?.id ?? '')
+  const [newZoneName, setNewZoneName] = useState('')
+  const [binName, setBinName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [createdBin, setCreatedBin] = useState<{ zone: InventoryZone; bin: { id: string; zone_id: string; code: string; name: string; sort_index: number } } | null>(null)
+
+  const handleCreate = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      let zoneId = selectedZoneId
+      let zone: InventoryZone | undefined = zones.find((z) => z.id === zoneId)
+      if (zones.length === 0) {
+        const trimmedZoneName = newZoneName.trim()
+        if (trimmedZoneName === '') {
+          setError('Zone name is required')
+          setSaving(false)
+          return
+        }
+        const created = await createZone(trimmedZoneName)
+        zoneId = created.id
+        zone = created
+      }
+      if (!zoneId || !zone) {
+        setError('Pick a zone')
+        setSaving(false)
+        return
+      }
+      // The code is kept exactly as typed in the URL, apart from case
+      // (ADR 0127 §2) - never re-derived from what the operator types into
+      // this form, which is only the zone/name.
+      const bin = await createBin(zoneId, code, binName.trim())
+      setCreatedBin({ zone, bin })
+    } catch (err) {
+      // AGENTS.md fallback policy: the server's own conflict message
+      // (e.g. a code already in use case-insensitively), never an
+      // invented one.
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // The same URL resolves the newly created bin the instant it exists -
+  // ADR 0127 §2: "The same URL then resolves and shows the empty bin,
+  // ready for quick add." No separate "created" screen; once creation
+  // lands, hand straight off to the ordinary BinContents view.
+  if (createdBin) {
+    return (
+      <BinContents
+        zone={createdBin.zone}
+        bin={createdBin.bin}
+        onClose={onClose}
+        onOpenEquipment={() => {}}
+        onNewEquipment={() => {}}
+        canWrite={true}
+      />
+    )
+  }
+
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col gap-4">
+      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Locations
+      </Button>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <p className="text-sm">
+          No bin <span className="font-mono">{code}</span>
+        </p>
+
+        {canWrite && !creating && (
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setCreating(true)}>
+            Create bin {code}
+          </Button>
+        )}
+
+        {canWrite && creating && (
+          <div className="mt-3 flex flex-col gap-3">
+            {zones.length === 0 ? (
+              <Field>
+                <FieldLabel htmlFor="bin-new-zone-name">New zone</FieldLabel>
+                <Input id="bin-new-zone-name" value={newZoneName} onChange={(e) => setNewZoneName(e.target.value)} placeholder="Lazarette" />
+              </Field>
+            ) : (
+              <Field>
+                <FieldLabel htmlFor="bin-create-zone">Zone</FieldLabel>
+                <Select value={selectedZoneId} onValueChange={(v) => { if (v) setSelectedZoneId(v) }}>
+                  <SelectTrigger id="bin-create-zone" aria-label="Zone">
+                    <SelectValue>{(v: string) => zones.find((z) => z.id === v)?.name ?? v}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                  </SelectPopup>
+                </Select>
+              </Field>
+            )}
+            <Field>
+              <FieldLabel htmlFor="bin-create-name">Bin name (optional)</FieldLabel>
+              <Input id="bin-create-name" value={binName} onChange={(e) => setBinName(e.target.value)} placeholder="Adhesives" />
+            </Field>
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            <div className="flex items-center gap-2">
+              <Button type="button" onClick={() => { void handleCreate() }} disabled={saving}>
+                {saving ? 'Creating...' : 'Create'}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setCreating(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── contents ─────────────────────────────────────────────────────────────
+
+function photoBlockId(itemId: string): string {
+  return `bin-photo-${itemId}`
+}
+
+function PhotoBlock({ item, onOpenEquipment }: { item: EquipmentItem; onOpenEquipment: (id: string) => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const photoCount = item.photo_ids.length
+
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el || el.clientWidth === 0) return
+    const idx = Math.round(el.scrollLeft / el.clientWidth)
+    setActiveIndex(Math.min(Math.max(idx, 0), Math.max(photoCount - 1, 0)))
+  }
+
+  return (
+    <div id={photoBlockId(item.id)} className="flex min-w-0 flex-col gap-1">
+      {photoCount === 0 ? (
+        <div className="flex h-40 items-center justify-center rounded-md border border-border bg-muted">
+          <p className="text-sm text-muted-foreground">No photo</p>
+        </div>
+      ) : (
+        <div className="relative">
+          {/* CSS scroll-snap, no carousel library (ADR 0127) - swiping
+              sideways moves through THIS item's own photos; the bin's
+              contents list above still scrolls independently. */}
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="flex h-56 snap-x snap-mandatory overflow-x-auto rounded-md border border-border bg-muted"
+          >
+            {item.photo_ids.map((photoId) => (
+              <img
+                key={photoId}
+                src={`${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`}
+                alt=""
+                loading="lazy"
+                className="h-full w-full shrink-0 snap-center object-contain"
+              />
+            ))}
+          </div>
+          {photoCount > 1 && (
+            <>
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/90 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                {activeIndex + 1} / {photoCount}
+              </span>
+              <div className="absolute bottom-1.5 left-1.5 flex gap-1">
+                {item.photo_ids.map((photoId, i) => (
+                  <span
+                    key={photoId}
+                    className={i === activeIndex ? 'h-1.5 w-1.5 rounded-full bg-primary' : 'h-1.5 w-1.5 rounded-full bg-muted-foreground/40'}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      <div className="flex min-w-0 items-center justify-between gap-2 px-0.5">
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-primary"
+          onClick={() => onOpenEquipment(item.id)}
+        >
+          {item.name}
+        </button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => onOpenEquipment(item.id)}>Open</Button>
+      </div>
+    </div>
+  )
+}
+
+function BinContents({
+  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite,
+}: {
+  zone: InventoryZone
+  bin: { id: string; zone_id: string; code: string; name: string; sort_index: number }
+  onClose: () => void
+  onOpenEquipment: (id: string) => void
+  onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
+  canWrite: boolean
+}) {
+  const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
+
+  const scrollToPhoto = (itemId: string) => {
+    document.getElementById(photoBlockId(itemId))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Locations
+      </Button>
+
+      <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-4">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{zone.name}</p>
+        <div className="flex items-baseline gap-2">
+          <h2 className="font-mono text-lg font-semibold">{bin.code}</h2>
+          {bin.name && <span className="text-sm text-muted-foreground">{bin.name}</span>}
+        </div>
+        <p className="text-[11px] text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
+      </div>
+
+      {error && (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      {canWrite && (
+        <BinQuickAdd zoneId={zone.id} binId={bin.id} onCreated={() => { void refresh() }} canWrite={canWrite} />
+      )}
+
+      {canWrite && (
+        <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => onNewEquipment({ zoneId: zone.id, binId: bin.id })}>
+          Full item
+        </Button>
+      )}
+
+      {!loading && items.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+              onClick={() => scrollToPhoto(item.id)}
+            >
+              <span className="min-w-0 flex-1 truncate">{item.name}</span>
+              {item.quantity > 1 && <span className="shrink-0 text-[11px] text-muted-foreground">×{item.quantity}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!loading && items.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item) => (
+            <PhotoBlock key={item.id} item={item} onOpenEquipment={onOpenEquipment} />
+          ))}
+        </div>
+      )}
+
+      <TagRow path={`/inventory/bins/${bin.code}`} />
+    </div>
+  )
+}

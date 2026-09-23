@@ -249,6 +249,23 @@ describe('parseAppLocation', () => {
   it('parses /inventory/locations as the Locations section', () => {
     expect(parseAppLocation('/inventory/locations')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
   })
+
+  // ADR 0127: the bin page.
+  it('parses /inventory/bins/<code> as the Locations section with a binCode', () => {
+    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02',
+    })
+  })
+
+  it('decodes a percent-encoded bin code', () => {
+    expect(parseAppLocation('/inventory/bins/LAZ%2002')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ 02',
+    })
+  })
+
+  it('collapses a bare /inventory/bins (no code) to the ordinary Locations shape', () => {
+    expect(parseAppLocation('/inventory/bins')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
+  })
 })
 
 describe('formatAppLocation', () => {
@@ -393,6 +410,23 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: 'inventory', inventorySection: 'profiles' }, ctx)).toBe('/inventory/profiles')
     expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations' }, ctx)).toBe('/inventory/locations')
   })
+
+  // ADR 0127: the bin page.
+  it('formats a binCode as /inventory/bins/<code>', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02' }, ctx)).toBe(
+      '/inventory/bins/LAZ-02',
+    )
+  })
+
+  it('encodes the bin code', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ 02' }, ctx)).toBe(
+      '/inventory/bins/LAZ%2002',
+    )
+  })
+
+  it('drops a binCode on the Equipment section - it is meaningless on its own', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', binCode: 'LAZ-02' }, ctx)).toBe('/inventory')
+  })
 })
 
 describe('parse/format fixed point', () => {
@@ -405,6 +439,7 @@ describe('parse/format fixed point', () => {
     '/documents?folder=f1&section=s1',
     '/documents/doc-1', '/documents/doc-1?folder=f1',
     '/inventory', '/inventory/equipment/eq-1', '/inventory/profiles', '/inventory/locations',
+    '/inventory/bins/LAZ-02',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -451,6 +486,11 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/inventory', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/inventory/equipment/eq-1', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/inventory/profiles', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/inventory/bins/LAZ-02', baseCtx)).toBe(true)
+  })
+
+  it('is false for a bare /inventory/bins with no code', () => {
+    expect(isCanonicalAppPath('/inventory/bins', baseCtx)).toBe(false)
   })
 
   it('is false for the legacy /assistant alias because canonical is /mate', () => {
@@ -515,6 +555,17 @@ describe('inventoryEditorClosedBy', () => {
     expect(inventoryEditorClosedBy(
       { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
       at('/documents'),
+    )).toBe(true)
+  })
+
+  // ADR 0127: a bin page target is inventorySection 'locations', so it is
+  // already covered by the same "any non-equipment section closes it" check
+  // as a plain /inventory/locations - no special case needed, and this
+  // pins that a target carrying a binCode doesn't slip through.
+  it('says yes when the target is a bin page', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/bins/LAZ-02'),
     )).toBe(true)
   })
 })
