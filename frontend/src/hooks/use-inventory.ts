@@ -381,6 +381,54 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
   return data.item
 }
 
+/** GET /api/inventory/equipment/:id - a standalone, one-off fetch (not
+ * useEquipmentItem's own persistent hook instance) for a caller that reads
+ * an ARBITRARY id it doesn't already hold state for - stocktake-section.tsx
+ * scanning a different item's tag on every pass, one after another. */
+export async function fetchEquipment(id: string): Promise<EquipmentItem> {
+  const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(payload.error ?? `HTTP ${res.status}`)
+  }
+  const data = (await res.json()) as { item: EquipmentItem }
+  return data.item
+}
+
+/** Strips an equipmentItem down to its own editable EquipmentInput shape -
+ * draftFromItem's own reasoning (equipment-editor.tsx), pulled out here so
+ * a caller with no editor draft of its own (stocktake-section.tsx's
+ * verified_aboard/bin_id writes) can still send a PUT's required
+ * whole-record body built from a record it only just fetched. */
+export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
+  return {
+    name: item.name,
+    category: item.category,
+    system: item.system,
+    manufacturer: item.manufacturer,
+    model: item.model,
+    serial: item.serial,
+    quantity: item.quantity,
+    status: item.status,
+    zone_id: item.zone_id,
+    bin_id: item.bin_id,
+    location_detail: item.location_detail,
+    install_date: item.install_date,
+    hour_meter_path: item.hour_meter_path,
+    profile_id: item.profile_id,
+    aliases: item.aliases,
+    verified_aboard: item.verified_aboard,
+    notes: item.notes,
+  }
+}
+
+/** PUT /api/inventory/equipment/:id - standalone, for the same "no
+ * persistent hook instance" reason fetchEquipment exists. */
+export async function updateEquipment(id: string, input: EquipmentInput): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
+  return data.item
+}
+
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────
 // Three plain functions, not a hook - the same "standalone, not tied to a
 // useEquipmentItem instance" reasoning createEquipment's own doc comment

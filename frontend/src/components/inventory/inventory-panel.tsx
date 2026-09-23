@@ -8,6 +8,7 @@ import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationsSection } from '@/components/inventory/locations-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
+import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import { INVENTORY_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
 
 // ADR 0123: InventoryNav plus whichever section is active - the Settings
@@ -156,6 +157,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       }
       return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
     }
+    if (activeSectionId === 'stocktake') return <StocktakeSection />
     return null
   })()
 

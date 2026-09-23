@@ -228,7 +228,7 @@ export function parseAppLocation(pathname: string): AppLocation {
       }
       return { panel: 'inventory', inventorySection: 'locations' }
     }
-    if (second === 'profiles' || second === 'locations') {
+    if (second === 'profiles' || second === 'locations' || second === 'stocktake') {
       return { panel: 'inventory', inventorySection: second }
     }
     if (second === 'equipment') {

@@ -266,6 +266,21 @@ function PhotoBlock({ item, onOpenEquipment }: { item: EquipmentItem; onOpenEqui
   )
 }
 
+/** The photo stack grid - exported so Stocktake (stocktake-section.tsx)
+ * can show the same photo grid under the current bin it's confirming
+ * against ("the bin's photo grid, reused from A4", the plan's own words)
+ * rather than a second implementation of it. */
+export function BinPhotoGrid({ items, onOpenEquipment }: { items: EquipmentItem[]; onOpenEquipment: (id: string) => void }) {
+  if (items.length === 0) return null
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => (
+        <PhotoBlock key={item.id} item={item} onOpenEquipment={onOpenEquipment} />
+      ))}
+    </div>
+  )
+}
+
 function BinContents({
   zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite,
 }: {
@@ -330,13 +345,7 @@ function BinContents({
         </div>
       )}
 
-      {!loading && items.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((item) => (
-            <PhotoBlock key={item.id} item={item} onOpenEquipment={onOpenEquipment} />
-          ))}
-        </div>
-      )}
+      {!loading && <BinPhotoGrid items={items} onOpenEquipment={onOpenEquipment} />}
 
       <TagRow path={`/inventory/bins/${bin.code}`} />
     </div>

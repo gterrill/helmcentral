@@ -72,6 +72,10 @@ vi.mock('@/components/inventory/bin-page', () => ({
   ),
 }))
 
+vi.mock('@/components/inventory/stocktake-section', () => ({
+  StocktakeSection: () => <div data-testid="stocktake-section" />,
+}))
+
 function baseProps() {
   return {
     activeSectionId: 'equipment' as const,
@@ -182,6 +186,11 @@ describe('InventoryPanel', () => {
     render(<InventoryPanel {...props} activeSectionId="locations" binCode="LAZ-02" />)
     fireEvent.click(screen.getByText('bin-page-back'))
     expect(props.onCloseBin).toHaveBeenCalled()
+  })
+
+  it('renders StocktakeSection for the stocktake section', () => {
+    render(<InventoryPanel {...baseProps()} activeSectionId="stocktake" />)
+    expect(screen.getByTestId('stocktake-section')).toBeInTheDocument()
   })
 
   it('clicking a nav section reports it through onSectionChange', () => {

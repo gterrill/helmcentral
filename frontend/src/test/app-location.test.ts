@@ -266,6 +266,10 @@ describe('parseAppLocation', () => {
   it('collapses a bare /inventory/bins (no code) to the ordinary Locations shape', () => {
     expect(parseAppLocation('/inventory/bins')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
   })
+
+  it('parses /inventory/stocktake as the Stocktake section', () => {
+    expect(parseAppLocation('/inventory/stocktake')).toEqual({ panel: 'inventory', inventorySection: 'stocktake' })
+  })
 })
 
 describe('formatAppLocation', () => {
@@ -427,6 +431,10 @@ describe('formatAppLocation', () => {
   it('drops a binCode on the Equipment section - it is meaningless on its own', () => {
     expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', binCode: 'LAZ-02' }, ctx)).toBe('/inventory')
   })
+
+  it('formats the Stocktake section as /inventory/stocktake', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'stocktake' }, ctx)).toBe('/inventory/stocktake')
+  })
 })
 
 describe('parse/format fixed point', () => {
@@ -439,7 +447,7 @@ describe('parse/format fixed point', () => {
     '/documents?folder=f1&section=s1',
     '/documents/doc-1', '/documents/doc-1?folder=f1',
     '/inventory', '/inventory/equipment/eq-1', '/inventory/profiles', '/inventory/locations',
-    '/inventory/bins/LAZ-02',
+    '/inventory/bins/LAZ-02', '/inventory/stocktake',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -487,6 +495,7 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/inventory/equipment/eq-1', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/inventory/profiles', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/inventory/bins/LAZ-02', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/inventory/stocktake', baseCtx)).toBe(true)
   })
 
   it('is false for a bare /inventory/bins with no code', () => {
