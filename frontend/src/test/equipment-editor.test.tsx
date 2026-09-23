@@ -465,6 +465,111 @@ describe('EquipmentEditor', () => {
     })
   })
 
+  // ADR 0127 review finding: every photo write already gets the updated
+  // item back from the server (the same shape update() applies via
+  // setItem) - Make cover/Remove should use THAT rather than firing a
+  // second, redundant GET afterward.
+  it('applies the server response directly on Make cover/Remove, without a follow-up GET', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getAllByText('Make cover')[1])
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/photos') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+    })
+    fetchMock.mockClear()
+
+    fireEvent.click(screen.getAllByText('Remove')[0])
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([, init]) =>
+        (init as RequestInit | undefined)?.method === 'DELETE')
+      expect(call).toBeDefined()
+    })
+
+    // No bare GET /api/inventory/equipment/eq-1 after either write - the
+    // returned {item} is applied directly instead of triggering a refetch.
+    const getEq1 = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+    expect(getEq1).toHaveLength(0)
+  })
+
+  // ADR 0127 review finding: uploadPhotosToSavedItem `break`s on the first
+  // failure, so the remaining files never even get tried and are never
+  // offered for Retry - unlike the new-draft path, which tries every file
+  // and queues each failure. Also proves bug #5's fix for THIS call site:
+  // the strip reflects the two successful uploads rather than staying
+  // stuck on a stale refresh().
+  it('tries every file when adding several photos to a saved item, queuing only the failure for Retry', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('b.jpg')
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    const fileC = new File(['c'], 'c.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB, fileC] } })
+
+    // All three tried, in order - b.jpg failing must not stop c.jpg.
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'c.jpg']))
+    await screen.findByText("1 of 3 photos didn't upload: upload failed: b.jpg")
+    // a.jpg and c.jpg made it onto the item - the strip isn't stuck empty.
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'c.jpg', 'b.jpg']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(3))
+  })
+
+  // ADR 0127 review finding: the photo row was empty after creating an item
+  // with photos - useEquipmentItem's own GET for the newly created id (the
+  // id-change effect) can land BEFORE the photo uploads that follow it in
+  // performSave finish, and nothing ever applied the uploads' own returned
+  // item afterward. Deliberately holds that GET open (rather than trusting
+  // the mock's natural timing, which doesn't reliably reproduce the race
+  // either way) so this proves the strip comes from the uploads' own
+  // responses, not from that GET landing to already show the finished
+  // state.
+  it('shows both uploaded photos even while the id-change GET is still in flight', async () => {
+    const onCreated = vi.fn()
+    let resolveGetNew!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const withoutRace = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/equipment/eq-new') && method === 'GET') {
+        return new Promise((resolve) => { resolveGetNew = resolve })
+      }
+      return withoutRace(url, init)
+    })
+
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+
+    // The id-change GET is STILL pending here - the strip must already show
+    // both photos from the uploads' own returned item, not from that GET.
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    resolveGetNew({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
+  })
+
   // Mirrors how InventoryPanel/App.tsx actually wire onCreated - id starts
   // null and flips to the server-assigned id once Save's create succeeds,
   // WITHOUT unmounting EquipmentEditor (same component instance, only the

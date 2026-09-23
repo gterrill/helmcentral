@@ -367,7 +367,19 @@ export function useEquipmentItem(id: string | null) {
     await refresh()
   }, [id, refresh])
 
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments }
+  // Exposed (rather than making every photo write below call refresh()) so
+  // a caller holding an EquipmentItem the server just handed back directly
+  // - uploadEquipmentPhoto/setEquipmentPhotoOrder/deleteEquipmentPhoto below
+  // all return the updated item the same way update() does - can apply it
+  // straight to this hook's own state instead of firing a second, redundant
+  // GET. ADR 0127 review: equipment-editor.tsx's create-with-photos flow
+  // used to do neither (no refresh, no setItem) after each upload, so the
+  // photo strip stayed empty until something else happened to re-fetch -
+  // which for a brand new draft was only the ONE GET useEquipmentItem's own
+  // effect fires the instant `id` turns from null into the created id, a
+  // request that typically lands before the photo uploads that follow it
+  // even start.
+  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any

@@ -200,7 +200,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   { id, onBack, onCreated, onDeleted, onDirtyChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, refresh, update, remove, setLinkedDocuments } = useEquipmentItem(id)
+  const { item, documents, loading, error, update, remove, setLinkedDocuments, setItem } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
@@ -417,24 +417,48 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     })
   }
 
+  // ADR 0127 review: this used to `break` on the first failed file, so the
+  // remaining picks were never even tried and never offered for Retry -
+  // fixed to match the new-draft path (performSave below): every file gets
+  // its own attempt regardless of an earlier one failing. A downscale
+  // failure (no Blob to retry) still queues for Retry using the ORIGINAL
+  // file - Retry re-sends it as-is rather than losing the pick entirely.
+  //
+  // Applies each successful upload's own returned item via setItem as it
+  // lands (not a refresh() afterward) - same review finding as makeCover/
+  // remove/retry below: a write already gets the updated record back, so a
+  // second GET is redundant, and - for the create-then-upload transition in
+  // particular (performSave's id===null branch) - actively wrong, since
+  // useEquipmentItem's own GET for a freshly created id can land before
+  // these uploads finish and nothing else would ever catch the item up.
   const uploadPhotosToSavedItem = async (targetId: string, files: File[]) => {
+    const failures: FailedPhotoUpload[] = []
     for (const file of files) {
+      let downscaled: Blob
       try {
-        const downscaled = await downscaleImage(file)
-        await uploadEquipmentPhoto(targetId, downscaled, photoFilename(file.name))
+        downscaled = await downscaleImage(file)
       } catch (err) {
-        setSaveError(err instanceof Error ? err.message : String(err))
-        break
+        failures.push({ blob: file, filename: photoFilename(file.name), error: err instanceof Error ? err.message : String(err) })
+        continue
+      }
+      try {
+        const updated = await uploadEquipmentPhoto(targetId, downscaled, photoFilename(file.name))
+        setItem(updated)
+      } catch (err) {
+        failures.push({ blob: downscaled, filename: photoFilename(file.name), error: err instanceof Error ? err.message : String(err) })
       }
     }
-    await refresh()
+    if (failures.length > 0) {
+      setFailedPhotoUploads(failures)
+      setPhotoNotice(`${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+    }
   }
 
   const makeCoverSaved = async (photoId: string) => {
     if (id === null || !item) return
     try {
-      await setEquipmentPhotoOrder(id, [photoId, ...item.photo_ids.filter((p) => p !== photoId)])
-      await refresh()
+      const updated = await setEquipmentPhotoOrder(id, [photoId, ...item.photo_ids.filter((p) => p !== photoId)])
+      setItem(updated)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     }
@@ -443,8 +467,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const removeSavedPhoto = async (photoId: string) => {
     if (id === null) return
     try {
-      await deleteEquipmentPhoto(id, photoId)
-      await refresh()
+      const updated = await deleteEquipmentPhoto(id, photoId)
+      setItem(updated)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     }
@@ -459,7 +483,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     const stillFailing: FailedPhotoUpload[] = []
     for (const photo of failedPhotoUploads) {
       try {
-        await uploadEquipmentPhoto(id, photo.blob, photo.filename)
+        const updated = await uploadEquipmentPhoto(id, photo.blob, photo.filename)
+        setItem(updated)
       } catch (err) {
         stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
       }
@@ -469,7 +494,6 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       ? null
       : `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
     setRetryingPhotos(false)
-    await refresh()
   }
 
   const photoStripPhotos: PhotoStripPhoto[] = id === null
@@ -505,7 +529,16 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           const failures: FailedPhotoUpload[] = []
           for (const photo of toUpload) {
             try {
-              await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
+              // Review finding: applied via setItem the moment each upload
+              // lands, not a refresh() (or nothing at all, which is what
+              // this did before) afterward - useEquipmentItem's own GET for
+              // `created.id` (fired the instant onCreated above flips the
+              // `id` prop) routinely lands before this loop finishes, and
+              // without this the photo row stayed empty: nothing was ever
+              // going to re-fetch it again once that GET's stale response
+              // was in.
+              const updated = await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
+              setItem(updated)
               URL.revokeObjectURL(photo.previewUrl)
             } catch (err) {
               URL.revokeObjectURL(photo.previewUrl)
@@ -553,7 +586,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, update, setLinkedDocuments, onCreated])
+  }, [id, draft, docEntries, baselineDocIds, localPhotos, update, setLinkedDocuments, setItem, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
