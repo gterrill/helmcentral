@@ -601,7 +601,7 @@ var documentStoreSchema = []string{
 	// thing either side of it must protect the other's existence for -
 	// deleting either the equipment record or the document itself should
 	// simply make the link vanish with it, never block the delete.
-	// sort_index (ADR 0124) orders a link within ITS OWN equipment's photo
+	// sort_index (ADR 0127) orders a link within ITS OWN equipment's photo
 	// strip - meaningless for a non-photo link (left at its default 0), read
 	// only through the photo-tag join in photoIDsForEquipmentIDs
 	// (inventory_store.go). Added to the CREATE TABLE here for a database
@@ -657,7 +657,7 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		`ALTER TABLE documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE document_folders ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE document_folders ADD COLUMN role TEXT NOT NULL DEFAULT '' CHECK (role IN ('','manual'))`,
-		// ADR 0124: equipment_documents predates this column (ADR 0123 shipped
+		// ADR 0127: equipment_documents predates this column (ADR 0123 shipped
 		// the table first) - single operator, no installed base, so a plain
 		// guarded ADD COLUMN is the whole of the migration story (AGENTS.md).
 		`ALTER TABLE equipment_documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,

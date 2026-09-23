@@ -860,7 +860,7 @@ func TestListEquipmentHandler_FiltersByBin(t *testing.T) {
 	}
 }
 
-// ── equipment photos (ADR 0124) ─────────────────────────────────────────
+// ── equipment photos (ADR 0127) ─────────────────────────────────────────
 // Written before the handlers themselves (AGENTS.md's test-first policy),
 // the same convention every other section of this file follows.
 

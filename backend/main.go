@@ -860,7 +860,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPut, "/api/inventory/equipment/:id", tierWrite, updateEquipmentHandler},
 		{http.MethodDelete, "/api/inventory/equipment/:id", tierWrite, deleteEquipmentHandler},
 		{http.MethodPut, "/api/inventory/equipment/:id/documents", tierWrite, setEquipmentDocumentsHandler},
-		// Photo routes (ADR 0124): a write-tier file intake, same size limit
+		// Photo routes (ADR 0127): a write-tier file intake, same size limit
 		// and MIME sniffing as POST /api/documents just above - see
 		// uploadEquipmentPhotoHandler's own doc comment (inventory_handlers.go).
 		{http.MethodPost, "/api/inventory/equipment/:id/photos", tierWrite, uploadEquipmentPhotoHandler},

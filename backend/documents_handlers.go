@@ -327,7 +327,7 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusBadRequest, errEquipmentInvalidStatus.Error()
 	case errors.Is(err, errEquipmentLocationMismatch):
 		return http.StatusBadRequest, errEquipmentLocationMismatch.Error()
-	// ADR 0124's photo routes (inventory_store.go's own "equipment photos"
+	// ADR 0127's photo routes (inventory_store.go's own "equipment photos"
 	// section) share this same mapping function rather than a parallel one,
 	// the same reasoning the comment above already gives for every other
 	// inventory sentinel.

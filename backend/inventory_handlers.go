@@ -326,7 +326,7 @@ func deleteBinHandler(c echo.Context) error {
 // listEquipmentHandler is GET /api/inventory/equipment?category=&system=
 // &status=&zone=&bin=&q=: every equipment record matching the given
 // filters, each with link_count/zone_name/bin_code/photo_ids already joined
-// in (ListEquipment's own doc comment, inventory_store.go). bin (ADR 0124)
+// in (ListEquipment's own doc comment, inventory_store.go). bin (ADR 0127)
 // is the bin page's own filter - `useEquipment({ bin: bin.id })` on the
 // frontend.
 func listEquipmentHandler(c echo.Context) error {
@@ -480,7 +480,7 @@ func setEquipmentDocumentsHandler(c echo.Context) error {
 }
 
 // ── equipment photos ─────────────────────────────────────────────────────
-// ADR 0124: a photo is an ordinary uploaded document, tagged 'photo' and
+// ADR 0127: a photo is an ordinary uploaded document, tagged 'photo' and
 // linked through equipment_documents (inventory_store.go's own "equipment
 // photos" section). respondWithUpdatedEquipment is shared by all three
 // handlers below - every one of them answers with the item as it stands
@@ -506,7 +506,7 @@ func respondWithUpdatedEquipment(c echo.Context, id string, status int) error {
 // sha256 dedupe - tags it 'photo', and links it at the end of the item's
 // photo order. Existence is checked FIRST, before the multipart body is
 // ever read, so an upload to an unknown id never writes a file at all
-// (ADR 0124's own test list: "An upload to an unknown id stores no
+// (ADR 0127's own test list: "An upload to an unknown id stores no
 // document").
 func uploadEquipmentPhotoHandler(c echo.Context) error {
 	id := c.Param("id")
@@ -589,18 +589,18 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "file is required"})
 	}
 
-	// ADR 0124: "Accept JPEG or PNG only. Reject HEIC with the enrich
-	// stage's existing message." - the same wording runEnrichStage uses for
-	// the identical problem (documents_enrich.go), so an operator sees ONE
-	// explanation for "why can't Helmcentral use this" wherever they meet
-	// it.
+	// ADR 0127: "Accept JPEG or PNG only. Reject HEIC with the enrich
+	// stage's existing message." - documentHEICRejectionMessage
+	// (documents_enrich.go) is that same shared wording, so an operator
+	// sees ONE explanation for "why can't Helmcentral use this" wherever
+	// they meet it.
 	mimeType := detectDocumentMIME(head.buf, filename)
 	switch mimeType {
 	case "image/jpeg", "image/png":
 		// accepted
 	case "image/heic":
 		removeTemp()
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "image/heic is not supported for reading; convert to JPEG"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": documentHEICRejectionMessage})
 	default:
 		removeTemp()
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "only JPEG or PNG photos are accepted"})
@@ -660,7 +660,14 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		// Insert's own sha256 race: another request created the row between
 		// our GetBySHA check and this Insert call. Same shape as the
 		// "already existed" branch above - the file belongs to that row,
-		// not to this attempt.
+		// not to this attempt - and the SAME EnsurePhotoTag call is needed
+		// for the same reason: the row that won the race might not have
+		// been tagged 'photo' (e.g. an ordinary document upload racing this
+		// one for identical bytes), and without it this upload would link
+		// successfully but never actually show up in photo_ids.
+		if err := globalDocumentStore.EnsurePhotoTag(inserted.ID); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
 			return writeDocumentError(c, err)
 		}
@@ -691,7 +698,7 @@ type setEquipmentPhotoOrderRequest struct {
 
 // setEquipmentPhotoOrderHandler is PUT /api/inventory/equipment/:id/photos:
 // {document_ids: [...]}, rewriting sort_index to match the given order
-// exactly - ADR 0124: "Make cover" is this same call with the chosen id
+// exactly - ADR 0127: "Make cover" is this same call with the chosen id
 // moved to the front. document_ids must name EXACTLY the item's current
 // photo set (errEquipmentPhotoSetMismatch -> 400, mapped through
 // writeDocumentError/documentErrorStatus) - see SetEquipmentPhotoOrder's
@@ -718,7 +725,7 @@ func setEquipmentPhotoOrderHandler(c echo.Context) error {
 // ONLY when no other item still links the same document (uploads are
 // deduplicated by sha256, so byte-identical photos on two items share one
 // document row - RemoveEquipmentPhoto's own doc comment), deletes the
-// document and its file too (ADR 0124: "a photo has no life outside its
+// document and its file too (ADR 0127: "a photo has no life outside its
 // item"). The sha-lock-then-remove-file sequence otherwise matches
 // deleteDocumentHandler (documents_handlers.go), so an upload racing the
 // exact same content can never interleave into a row with no file or a file

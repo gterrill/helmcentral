@@ -212,7 +212,7 @@ type equipmentItem struct {
 	BinCode   string `json:"bin_code"`
 	LinkCount int    `json:"link_count"`
 
-	// PhotoIDs (ADR 0124) is the item's OWN linked documents tagged 'photo',
+	// PhotoIDs (ADR 0127) is the item's OWN linked documents tagged 'photo',
 	// ordered by sort_index then document_id, cover first - never nil (see
 	// equipmentByID/ListEquipment, the same "always the keys" reasoning as
 	// ZoneName/BinCode above). It is NOT every equipment_documents link
@@ -226,7 +226,7 @@ type equipmentItem struct {
 // equipment_documents link joined against documents for the fields a
 // document-picker list actually wants to show (title, filename, kind,
 // note_type) - never the document's full body/markdown, which nothing about
-// an equipment record's Documents tab needs. SortIndex (ADR 0124) is
+// an equipment record's Documents tab needs. SortIndex (ADR 0127) is
 // carried through unconditionally - EquipmentDocuments returns every link,
 // photo or not, and the photo strip is what actually orders by it; this
 // struct just stops hiding the column from a caller that wants it.
@@ -245,7 +245,7 @@ type equipmentDocument struct {
 // nil-means-unfiltered convention). See ListEquipment's own doc comment for
 // why Query matches name/manufacturer/model AND aliases entirely in Go
 // rather than splitting the two into a SQL LIKE plus a Go-side pass. BinID
-// (ADR 0124) is the bin page's own filter - `?bin=` on GET
+// (ADR 0127) is the bin page's own filter - `?bin=` on GET
 // /api/inventory/equipment - and mirrors ZoneID exactly: an exact match
 // against a foreign-key column, no substring matching involved.
 type equipmentFilter struct {
@@ -819,7 +819,7 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 }
 
 // photoIDsForEquipmentIDs returns each of ids' own photo-tagged document
-// ids, cover first - ADR 0124: "an item's photos are its linked documents
+// ids, cover first - ADR 0127: "an item's photos are its linked documents
 // tagged photo, ordered by sort_index [then document_id]". One aggregate
 // query over every id at once (equipmentColumns' own doc comment gives the
 // identical reasoning for the zone/bin join above it: a handful of items
@@ -1362,13 +1362,13 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 }
 
 // ── equipment photos ─────────────────────────────────────────────────────
-// ADR 0124: a photo is an ordinary uploaded document, tagged 'photo' and
+// ADR 0127: a photo is an ordinary uploaded document, tagged 'photo' and
 // linked through equipment_documents - these three methods are the ONLY
 // writers of a photo-tagged link (SetEquipmentDocuments above deliberately
 // leaves them alone).
 
 // errEquipmentPhotoSetMismatch is returned by SetEquipmentPhotoOrder when
-// order doesn't name EXACTLY the item's current photo id set - ADR 0124:
+// order doesn't name EXACTLY the item's current photo id set - ADR 0127:
 // "must name exactly the item's current photo set, or it returns 400",
 // deliberately not a partial-reorder/subset-allowed API the way
 // SetEquipmentDocuments' whole-set replace is for ordinary links, so a
@@ -1429,7 +1429,7 @@ func (s *documentStore) EnsurePhotoTag(documentID string) error {
 
 // AddEquipmentPhoto links documentID to equipmentID as a photo, at the end
 // of the item's current photo order - max(sort_index)+1 among its OWN
-// photo-tagged links (ADR 0124: "the first one is the cover"), so a freshly
+// photo-tagged links (ADR 0127: "the first one is the cover"), so a freshly
 // uploaded photo always lands after every photo already on the strip. A
 // no-op if the link already exists (equipment_documents' PRIMARY KEY is
 // (equipment_id, document_id) - re-adding an existing pair, e.g. identical
@@ -1485,7 +1485,7 @@ func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error 
 }
 
 // SetEquipmentPhotoOrder rewrites sort_index on equipmentID's existing
-// photo links to match order exactly - ADR 0124: "Make cover" is this same
+// photo links to match order exactly - ADR 0127: "Make cover" is this same
 // call with the chosen id moved to the front. order must name EXACTLY the
 // item's current photo id set (errEquipmentPhotoSetMismatch otherwise - see
 // its own doc comment for why a partial reorder isn't accepted the way
@@ -1534,7 +1534,7 @@ func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []strin
 // it unconditionally, the way this method first shipped, cascaded the photo
 // off every OTHER item that happened to share the exact same bytes and
 // deleted their file too. So this only ever removes equipmentID's own link.
-// The document row itself (and, per ADR 0124, "a photo has no life outside
+// The document row itself (and, per ADR 0127, "a photo has no life outside
 // its item") is deleted only when no equipment_documents row references it
 // anywhere any more - documentDeleted reports which happened, so the caller
 // (deleteEquipmentPhotoHandler) knows whether it's safe to remove the file

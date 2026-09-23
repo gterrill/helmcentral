@@ -784,7 +784,7 @@ func TestDocumentStore_CreateEquipmentDedupesAliasesCaseInsensitively(t *testing
 	}
 }
 
-// ── equipment photos (ADR 0124) ─────────────────────────────────────────
+// ── equipment photos (ADR 0127) ─────────────────────────────────────────
 // Written before the store methods themselves (AGENTS.md's test-first
 // policy), the same convention every other section of this file follows.
 
@@ -909,6 +909,18 @@ func TestDocumentStore_SetEquipmentPhotoOrderRejectsMismatchedSet(t *testing.T) 
 	}
 }
 
+// TestDocumentStore_SetEquipmentPhotoOrderRejectsUnknownEquipmentID pins an
+// ADR 0127 review finding: an unknown equipment id must be rejected
+// explicitly (errEquipmentNotFound), not fall through to the photo-set
+// comparison below it (which would see an empty current set and, for an
+// empty `order`, wrongly report success instead of "no such item").
+func TestDocumentStore_SetEquipmentPhotoOrderRejectsUnknownEquipmentID(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.SetEquipmentPhotoOrder("does-not-exist", []string{}); !errors.Is(err, errEquipmentNotFound) {
+		t.Fatalf("expected errEquipmentNotFound, got %v", err)
+	}
+}
+
 func TestDocumentStore_RemoveEquipmentPhotoDeletesLinkAndDocument(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
@@ -1016,7 +1028,7 @@ func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testi
 }
 
 // TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder pins
-// ADR 0124's central compatibility rule: the pre-existing whole-set-replace
+// ADR 0127's central compatibility rule: the pre-existing whole-set-replace
 // PUT .../documents must not be able to wipe or reshuffle the photo strip a
 // completely separate part of the UI manages.
 func TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder(t *testing.T) {
