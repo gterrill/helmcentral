@@ -22,7 +22,35 @@ describe('useRouteActivation', () => {
 
     await act(async () => { await Promise.resolve() })
 
-    expect(result.current.status).toEqual({ state: 'active', routeId: 'r1', pointIndex: 2, reverse: false })
+    expect(result.current.status).toEqual({ state: 'active', routeId: 'r1', pointIndex: 2, reverse: false, destination: null })
+  })
+
+  // ADR 0125: a route activated OUTSIDE Helmcentral (routeId doesn't match a
+  // known route) still carries the Course API's nextPoint as a destination -
+  // the backend now sends it in the active branch too, not just inactive.
+  it('carries the destination through when active but the route is not one of ours', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active: true,
+        route_id: null,
+        point_index: 0,
+        reverse: false,
+        destination: { lat: -18.6675, lon: 146.4846, name: 'Hook Island' },
+      }),
+    }))
+
+    const { result } = renderHook(() => useRouteActivation())
+
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.status).toEqual({
+      state: 'active',
+      routeId: null,
+      pointIndex: 0,
+      reverse: false,
+      destination: { lat: -18.6675, lon: 146.4846, name: 'Hook Island' },
+    })
   })
 
   it('reflects inactive state', async () => {
@@ -107,7 +135,7 @@ describe('useRouteActivation', () => {
 
     expect(activateResult).toBe(true)
     expect(fetchMock).toHaveBeenCalledWith('/api/routes/r1/activate', expect.objectContaining({ method: 'POST' }))
-    expect(result.current.status).toEqual({ state: 'active', routeId: 'r1', pointIndex: 0, reverse: false })
+    expect(result.current.status).toEqual({ state: 'active', routeId: 'r1', pointIndex: 0, reverse: false, destination: null })
     expect(result.current.activating).toBe(false)
   })
 

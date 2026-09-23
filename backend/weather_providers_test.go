@@ -823,18 +823,110 @@ func TestBuildWeatherNextHourResponse_InfersStepMinutesFromConsecutiveTimes(t *t
 	}
 }
 
-// TestBuildWeatherNextHourResponse_SinglePointHasNoInferrableStep covers the
+// TestBuildWeatherNextHourResponse_SinglePointOmitsNextHour covers the
 // degenerate one-point case: there is no second point to diff against, so
-// step_minutes is 0 rather than a guessed value.
-func TestBuildWeatherNextHourResponse_SinglePointHasNoInferrableStep(t *testing.T) {
+// no step is inferrable at all - the response must be nil (never a
+// step_minutes 0 that would silently zero-width the frontend's only bar),
+// matching the "omit next_hour rather than guess" fallback-policy rule
+// TestInferNextHourStepMinutes_NoPositiveGapReturnsFalse pins directly.
+func TestBuildWeatherNextHourResponse_SinglePointOmitsNextHour(t *testing.T) {
 	got := buildWeatherNextHourResponse([]weatherNextHourPoint{
 		{Time: time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC), PrecipitationChancePct: 10},
 	}, "nowcast")
+	if got != nil {
+		t.Fatalf("expected nil (no inferrable step) for a single point, got %+v", got)
+	}
+}
+
+// --- inferNextHourStepMinutes ---
+
+func TestInferNextHourStepMinutes_TableTest(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	at := func(minutesFromBase int) time.Time { return base.Add(time.Duration(minutesFromBase) * time.Minute) }
+
+	for _, tc := range []struct {
+		name      string
+		offsets   []int // minutes from base, one per point, in the given order
+		wantStep  int
+		wantFound bool
+	}{
+		{"empty", nil, 0, false},
+		{"single point: no second point to diff against", []int{0}, 0, false},
+		{"two points, normal 15-minute cadence", []int{0, 15}, 15, true},
+		{"two points, one-minute cadence (WeatherKit)", []int{0, 1, 2}, 1, true},
+		{
+			"duplicate FIRST timestamp must not zero out the real step from later points",
+			[]int{0, 0, 15, 30}, 15, true,
+		},
+		{
+			"a duplicate timestamp anywhere in the middle is skipped, not just the first pair",
+			[]int{0, 15, 15, 30}, 15, true,
+		},
+		{"every timestamp identical: no positive gap anywhere", []int{5, 5, 5, 5}, 0, false},
+		{"timestamps going backward: no positive gap anywhere", []int{30, 15, 0}, 0, false},
+		{
+			"the smallest positive gap wins even when a larger gap comes first",
+			[]int{0, 30, 45}, 15, true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			points := make([]weatherNextHourPoint, 0, len(tc.offsets))
+			for _, off := range tc.offsets {
+				points = append(points, weatherNextHourPoint{Time: at(off)})
+			}
+
+			gotStep, gotFound := inferNextHourStepMinutes(points)
+			if gotFound != tc.wantFound {
+				t.Fatalf("expected found=%v, got %v (step=%d)", tc.wantFound, gotFound, gotStep)
+			}
+			if gotFound && gotStep != tc.wantStep {
+				t.Errorf("expected step %d, got %d", tc.wantStep, gotStep)
+			}
+		})
+	}
+}
+
+// TestBuildWeatherNextHourResponse_DuplicateFirstTimestampStillInfersRealStep
+// is the end-to-end regression for the bug this fix targets: a duplicate (or
+// non-increasing) FIRST pair of timestamps used to force step_minutes to 0
+// for the WHOLE response, which - since the frontend applies one shared step
+// to every bar (lib/nowcast.ts's buildNowcastBars) - silently dropped every
+// bar in the strip, not just the first. The real 15-minute cadence carried
+// by the later points must still be found and applied to all four points.
+func TestBuildWeatherNextHourResponse_DuplicateFirstTimestampStillInfersRealStep(t *testing.T) {
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	points := []weatherNextHourPoint{
+		{Time: base, PrecipitationChancePct: 10},
+		{Time: base, PrecipitationChancePct: 12}, // duplicate of point 0's timestamp
+		{Time: base.Add(15 * time.Minute), PrecipitationChancePct: 20},
+		{Time: base.Add(30 * time.Minute), PrecipitationChancePct: 30},
+	}
+
+	got := buildWeatherNextHourResponse(points, "nowcast")
 	if got == nil {
 		t.Fatalf("expected a non-nil response")
 	}
-	if got.StepMinutes != 0 {
-		t.Errorf("expected step_minutes 0 for a single point, got %d", got.StepMinutes)
+	if got.StepMinutes != 15 {
+		t.Errorf("expected the real 15-minute cadence to be recovered despite the duplicate first timestamp, got step_minutes=%d", got.StepMinutes)
+	}
+	if len(got.Points) != 4 {
+		t.Errorf("expected all 4 points to pass through, got %d", len(got.Points))
+	}
+}
+
+// TestBuildWeatherNextHourResponse_NoPositiveGapOmitsNextHour covers every
+// point sharing (or going backward from) its neighbour's timestamp - no
+// positive gap exists anywhere, so the response must be nil rather than a
+// step_minutes 0 that would silently zero-width every bar.
+func TestBuildWeatherNextHourResponse_NoPositiveGapOmitsNextHour(t *testing.T) {
+	same := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	got := buildWeatherNextHourResponse([]weatherNextHourPoint{
+		{Time: same, PrecipitationChancePct: 10},
+		{Time: same, PrecipitationChancePct: 12},
+		{Time: same, PrecipitationChancePct: 14},
+	}, "nowcast")
+	if got != nil {
+		t.Fatalf("expected nil when no positive gap can be inferred, got %+v", got)
 	}
 }
 
@@ -843,7 +935,11 @@ func TestBuildWeatherNextHourResponse_SinglePointHasNoInferrableStep(t *testing.
 // "hourly") reaches the wire response's Source field unchanged, so the
 // frontend can caption an interpolated-from-hourly strip honestly.
 func TestBuildWeatherNextHourResponse_CarriesSourceThrough(t *testing.T) {
-	points := []weatherNextHourPoint{{Time: time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC), PrecipitationChancePct: 10}}
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	points := []weatherNextHourPoint{
+		{Time: base, PrecipitationChancePct: 10},
+		{Time: base.Add(15 * time.Minute), PrecipitationChancePct: 12},
+	}
 
 	if got := buildWeatherNextHourResponse(points, "nowcast"); got.Source != "nowcast" {
 		t.Errorf("expected source %q, got %q", "nowcast", got.Source)

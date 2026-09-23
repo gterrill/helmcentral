@@ -78,7 +78,11 @@ export const ClockTile = memo(function ClockTile({
     // rather than leaving it looking like it lands today - carried forward
     // here now the trip ETA can span more than one day.
     const dayPrefix = isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
-    const time = `${dayPrefix}${hhmm(formatClock(tripEta.etaAt, timeZone).timePart)}`
+    // Include the meridiem the same way the hero clock does (its own
+    // `clock.meridiem` span) - a bare "09:40" can't be told from 9:40 PM,
+    // and this line has no other AM/PM context of its own to lean on.
+    const etaClock = formatClock(tripEta.etaAt, timeZone)
+    const time = `${dayPrefix}${hhmm(etaClock.timePart)}${etaClock.meridiem ? ` ${etaClock.meridiem}` : ''}`
     const labelPart = tripEta.label ? `${tripEta.label} ` : ''
     const planSuffix = tripEta.basis === 'plan' ? ' (plan)' : ''
     return `ETA ${labelPart}${time}${planSuffix}`

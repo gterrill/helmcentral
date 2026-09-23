@@ -6,6 +6,7 @@ import type { SeaStatePoint } from '@/lib/sea-state-series'
 import type { WaveSteepnessBand } from '@/hooks/use-wave-forecast'
 import { metersToFeet } from '@/lib/units'
 import {
+  HOURS_PER_DAY,
   SEA_STATE_CHART_MARGIN,
   SEA_STATE_DAY_COUNT,
   SEA_STATE_GLYPH_SCALE,
@@ -37,7 +38,6 @@ export interface SeaStateChartProps {
 // pixel arithmetic with no recharts dependency, and forecast-conditions-
 // tile.tsx (and this chart's own tests) need them without pulling recharts
 // into the entry bundle. See that module's doc comment.
-const HOURS_PER_DAY = 24
 // Glyphs closer together than this read as a solid smear rather than
 // individual barbs/arrows once the tile narrows below its widest columns.
 const MIN_GLYPH_SPACING_PX = 22

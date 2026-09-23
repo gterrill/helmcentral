@@ -656,17 +656,19 @@ func minimalCurrentForNextHourTests() *struct {
 // passes straight through, and precipitation (mm per 15 minutes) is
 // converted to mm/h by multiplying by 4.
 func TestParseOpenMeteoForecast_MapsMinutely15IntoNextHour(t *testing.T) {
+	precip := []float64{0.0, 0.4, 0.6}
+	prob := []int{18, 36, 51}
 	resp := &openMeteoResponse{
 		UTCOffsetSeconds: 36000, // Sydney: UTC+10:00
 		Current:          minimalCurrentForNextHourTests(),
 		Minutely15: &struct {
-			Time                     []string  `json:"time"`
-			Precipitation            []float64 `json:"precipitation"`
-			PrecipitationProbability []int     `json:"precipitation_probability"`
+			Time                     []string   `json:"time"`
+			Precipitation            []*float64 `json:"precipitation"`
+			PrecipitationProbability []*int     `json:"precipitation_probability"`
 		}{
 			Time:                     []string{"2026-07-19T18:15", "2026-07-19T18:30", "2026-07-19T18:45"},
-			Precipitation:            []float64{0.0, 0.4, 0.6},
-			PrecipitationProbability: []int{18, 36, 51},
+			Precipitation:            []*float64{&precip[0], &precip[1], &precip[2]},
+			PrecipitationProbability: []*int{&prob[0], &prob[1], &prob[2]},
 		},
 	}
 
@@ -704,6 +706,105 @@ func TestParseOpenMeteoForecast_MapsMinutely15IntoNextHour(t *testing.T) {
 	// read "hourly", not "nowcast".
 	if out.NextHourSource != "hourly" {
 		t.Errorf("expected next_hour_source=hourly for a (0,0) position, got %q", out.NextHourSource)
+	}
+}
+
+// TestParseOpenMeteoForecast_NullMinutelyPrecipitationOmitsThatPoint pins
+// the bug this fix targets: Minutely15.Precipitation/PrecipitationProbability
+// used to be plain []float64/[]int, so a real JSON null in either array
+// silently decoded to 0.0/0 - a null precipitation reading (no data at that
+// point) is not the same thing as a confirmed 0 mm/h (dry), and reporting it
+// that way is exactly the false "definitely dry" claim AGENTS.md's fallback
+// policy exists to prevent. A null precipitation now omits that point from
+// next_hour entirely (there is no per-point "no data" flag for mm/h to carry
+// it honestly any other way - see the field's own doc comment); a null
+// precipitation_probability keeps the point but falls back to the existing
+// -1 "not supplied" sentinel, exactly as an out-of-range index already did.
+func TestParseOpenMeteoForecast_NullMinutelyPrecipitationOmitsThatPoint(t *testing.T) {
+	zero := 0.0
+	pointFour := 0.4
+	eighteen := 18
+	fiftyOne := 51
+	resp := &openMeteoResponse{
+		UTCOffsetSeconds: 36000, // Sydney: UTC+10:00
+		Current:          minimalCurrentForNextHourTests(),
+		Minutely15: &struct {
+			Time                     []string   `json:"time"`
+			Precipitation            []*float64 `json:"precipitation"`
+			PrecipitationProbability []*int     `json:"precipitation_probability"`
+		}{
+			Time: []string{"2026-07-19T18:15", "2026-07-19T18:30", "2026-07-19T18:45"},
+			// Point 1's precipitation is a real JSON null (no reading at all) -
+			// must be omitted, not read as 0 mm/h.
+			Precipitation: []*float64{&zero, nil, &pointFour},
+			// Point 2's probability is a real JSON null (no probability at
+			// this resolution) - the point survives (its precipitation is
+			// non-null), but its chance falls back to the -1 sentinel.
+			PrecipitationProbability: []*int{&eighteen, &fiftyOne, nil},
+		},
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.NextHour) != 2 {
+		t.Fatalf("expected 2 next_hour points (the null-precipitation point omitted), got %d: %+v", len(out.NextHour), out.NextHour)
+	}
+	if out.NextHour[0].PrecipitationChancePct != 18 {
+		t.Errorf("expected next_hour[0].precipitation_chance_pct=18, got %v", out.NextHour[0].PrecipitationChancePct)
+	}
+	if out.NextHour[0].PrecipitationMMPerH != 0 {
+		t.Errorf("expected next_hour[0].precipitation_mm_per_h=0, got %v", out.NextHour[0].PrecipitationMMPerH)
+	}
+	// The surviving second point is the original index 2 (0.4mm/15min * 4 =
+	// 1.6mm/h), with its null probability mapped to the -1 sentinel.
+	if out.NextHour[1].PrecipitationMMPerH != 1.6 {
+		t.Errorf("expected next_hour[1].precipitation_mm_per_h=1.6, got %v", out.NextHour[1].PrecipitationMMPerH)
+	}
+	if out.NextHour[1].PrecipitationChancePct != -1 {
+		t.Errorf("expected next_hour[1].precipitation_chance_pct=-1 (not-supplied sentinel) for a null probability, got %v", out.NextHour[1].PrecipitationChancePct)
+	}
+}
+
+// TestParseOpenMeteoForecast_RealFixtureWithNulls replays the real Mackay
+// capture (see TestParseOpenMeteoForecast_RealFixture_MackayDry) with two
+// values deliberately nulled out - Open-Meteo's own hourly humidity/
+// visibility fields are already documented (this package's 16-day Sydney
+// fixture) to go null mid-array on live responses, and neither
+// minutely_15 field carries a documented guarantee against the same -
+// exercising the null path against a genuine capture's shape rather than a
+// hand-built one.
+func TestParseOpenMeteoForecast_RealFixtureWithNulls(t *testing.T) {
+	body, err := os.ReadFile("testdata/open_meteo_response_minutely15_mackay_with_nulls.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+	var resp openMeteoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	// The unmodified fixture has 8 points; this one nulls out one
+	// precipitation reading, which must be omitted, leaving 7.
+	if len(out.NextHour) != 7 {
+		t.Fatalf("expected 7 next_hour points (one omitted for a null precipitation reading), got %d", len(out.NextHour))
+	}
+	sawSentinel := false
+	for _, p := range out.NextHour {
+		if p.PrecipitationChancePct == -1 {
+			sawSentinel = true
+		}
+	}
+	if !sawSentinel {
+		t.Error("expected exactly one surviving point to carry the -1 not-supplied sentinel for its nulled probability")
+	}
+	if out.NextHourSource != "hourly" {
+		t.Errorf("expected next_hour_source=hourly for the Mackay fixture, got %q", out.NextHourSource)
 	}
 }
 

@@ -192,51 +192,72 @@ export interface WeatherNextHour {
   /**
    * "nowcast" (genuine short-range data) or "hourly" (interpolated from the
    * hourly model, e.g. Open-Meteo's minutely_15 outside its native-
-   * resolution regions - ADR 0126 addendum). Any wire value other than
-   * these two exact strings maps to "hourly", the honest/uncertain default
-   * this contract's own fallback-policy bias favours over silently trusting
-   * an unrecognized value as a genuine nowcast.
+   * resolution regions - ADR 0126 addendum). The backend already validates
+   * this (mapWasmFetchForecastOutput hard-errors on anything else, so
+   * next_hour is never sent with a missing/unrecognized source) - a wire
+   * value other than these two exact strings reaching here means something
+   * broke that contract, not a shape to quietly repair, so mapNextHour
+   * below discards the whole next_hour rather than guessing "hourly".
    */
   source: 'nowcast' | 'hourly';
 }
 
-/** Maps the wire next_hour.source to the strict union WeatherNextHour.source carries - see that field's doc comment for why an unrecognized value defaults to "hourly", not "nowcast". */
-function mapNextHourSource(raw: string | undefined): 'nowcast' | 'hourly' {
-  return raw === 'nowcast' ? 'nowcast' : 'hourly';
-}
-
 /**
- * Maps the wire next_hour envelope to typed NowcastPoint[], parsing RFC3339
- * times and mapping the backend's -1 "not supplied" sentinel to null (the
- * same absence convention sentinelValueOrNull already uses for every other
- * precipitation-chance field in this hook). A point with an unparseable
- * time is dropped rather than surfaced as an invalid Date - a plugin bug at
- * the backend boundary is fail-fast there (parseRequiredTime,
- * wasm_weather_provider.go); by the time JSON reaches the browser a bad
- * timestamp is not worth crashing the tile over.
+ * Maps the wire next_hour envelope to typed NowcastPoint[]. The backend
+ * already validates this contract end-to-end (weather_providers.go:
+ * next_hour_source is a hard error if missing/unrecognized whenever points
+ * are present, and buildWeatherNextHourResponse never emits an unusable
+ * step - it omits next_hour entirely instead), so a malformed payload
+ * reaching here means something upstream broke the contract, not a shape
+ * the frontend should quietly repair. Any structural problem - a bad or
+ * missing timestamp, a missing mm_per_h, a non-positive/missing
+ * step_minutes, or an unrecognized source - discards the *whole* next_hour
+ * (never a partially-patched one) and console.errors what was wrong, so a
+ * broken nowcast shows as "no nowcast" (the existing, well-tested
+ * hourly/daily fallback) rather than a silently-repaired strip, and the
+ * break is diagnosable instead of silent (AGENTS.md fallback policy).
  */
 function mapNextHour(raw: WeatherNextHourApi | undefined): WeatherNextHour | null {
-  if (!raw || !Array.isArray(raw.points) || raw.points.length === 0) {
+  if (!raw) return null;
+  if (!Array.isArray(raw.points) || raw.points.length === 0) {
+    return null;
+  }
+
+  if (typeof raw.step_minutes !== 'number' || raw.step_minutes <= 0) {
+    console.error('next_hour: malformed step_minutes, dropping the nowcast', raw.step_minutes);
+    return null;
+  }
+  if (raw.source !== 'nowcast' && raw.source !== 'hourly') {
+    console.error('next_hour: missing/unrecognized source, dropping the nowcast', raw.source);
     return null;
   }
 
   const points: NowcastPoint[] = [];
   for (const p of raw.points) {
-    if (typeof p.time !== 'string') continue;
+    if (typeof p.time !== 'string') {
+      console.error('next_hour: point missing a time, dropping the nowcast', p);
+      return null;
+    }
     const time = new Date(p.time);
-    if (Number.isNaN(time.getTime())) continue;
+    if (Number.isNaN(time.getTime())) {
+      console.error('next_hour: point has an unparseable time, dropping the nowcast', p.time);
+      return null;
+    }
+    if (typeof p.mm_per_h !== 'number') {
+      console.error('next_hour: point missing mm_per_h, dropping the nowcast', p);
+      return null;
+    }
     points.push({
       time,
       chancePct: sentinelValueOrNull(p.chance_pct),
-      mmPerH: typeof p.mm_per_h === 'number' ? p.mm_per_h : 0,
+      mmPerH: p.mm_per_h,
     });
   }
-  if (points.length === 0) return null;
 
   return {
-    stepMinutes: typeof raw.step_minutes === 'number' ? raw.step_minutes : 0,
+    stepMinutes: raw.step_minutes,
     points,
-    source: mapNextHourSource(raw.source),
+    source: raw.source,
   };
 }
 

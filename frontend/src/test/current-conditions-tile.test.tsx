@@ -167,7 +167,7 @@ describe('CurrentConditionsTile', () => {
       />,
     )
 
-    expect(screen.getByText(/rain expected after 3PM/i)).toBeInTheDocument()
+    expect(screen.getByText(/rain likely from 3pm \(60%\)/i)).toBeInTheDocument()
     expect(screen.queryByTestId('nowcast-strip')).not.toBeInTheDocument()
   })
 
@@ -215,6 +215,38 @@ describe('CurrentConditionsTile', () => {
     // A genuine nowcast never gets the "hourly forecast" caption.
     expect(screen.queryByTestId('nowcast-hourly-caption')).not.toBeInTheDocument()
     expect(screen.queryByText(/hourly forecast/i)).not.toBeInTheDocument()
+  })
+
+  // The strip's plot SVG uses preserveAspectRatio="none" so its bars fill
+  // the tile's full width - correct for rects/lines, but an SVG <text>
+  // sharing that non-uniformly-scaled viewBox would get its glyphs squashed
+  // horizontally. The tick labels must render as plain (undistorted) text
+  // outside the SVG, not as an SVG <text> element.
+  test('renders the nowcast strip tick labels as plain text outside the stretched SVG, not distorted inside it', () => {
+    const now = new Date()
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[day()]}
+        nextHour={{
+          stepMinutes: 15,
+          source: 'nowcast',
+          points: [{ time: now, chancePct: 60, mmPerH: 2.1 }],
+        }}
+        distanceUnits="metric"
+      />,
+    )
+
+    const strip = screen.getByTestId('nowcast-strip')
+    expect(strip.querySelector('text')).toBeNull()
+    expect(screen.getByText('Now')).toBeInTheDocument()
+    expect(screen.getByText('20m')).toBeInTheDocument()
+    expect(screen.getByText('40m')).toBeInTheDocument()
+    expect(screen.getByText('60m')).toBeInTheDocument()
   })
 
   test('says "Rain expected in N minutes" when the nowcast\'s first signal is a later bucket', () => {

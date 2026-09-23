@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { nextWaypoint, etaToWaypoint, traversalOrder, etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
+import { nextWaypoint, etaToWaypoint, traversalOrder, etaToRouteEnd, etaToDestination, computeClockTripEta } from '@/lib/next-waypoint'
 import { haversineMeters } from '@/lib/geo'
 import type { Route, RouteWaypoint } from '@/hooks/use-routes'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
@@ -29,7 +29,7 @@ const FORWARD_ROUTE = route([
 ])
 
 function activeStatus(pointIndex: number, reverse: boolean, routeId: string | null = 'route-1'): ActiveRouteStatus {
-  return { state: 'active', routeId, pointIndex, reverse }
+  return { state: 'active', routeId, pointIndex, reverse, destination: null }
 }
 
 describe('nextWaypoint', () => {
@@ -284,5 +284,90 @@ describe('etaToDestination', () => {
     const result = etaToDestination(0, 0, { lat: 0, lon: 0 }, 5, now)
     expect(result.distanceM).toBe(0)
     expect(result.etaAt).toEqual(now)
+  })
+})
+
+// ADR 0125: the clock tile's trip-ETA decision, pulled out of App.tsx so it
+// is unit-testable without rendering the whole app.
+describe('computeClockTripEta', () => {
+  const now = new Date('2026-01-01T12:00:00Z')
+  const routes = [FORWARD_ROUTE]
+
+  it('returns null with no position fix', () => {
+    expect(computeClockTripEta(activeStatus(1, false), routes, null, 0, 10, now)).toBeNull()
+    expect(computeClockTripEta(activeStatus(1, false), routes, 0, null, 10, now)).toBeNull()
+  })
+
+  it('returns null when there is no status at all', () => {
+    expect(computeClockTripEta(null, routes, 0, 0, 10, now)).toBeNull()
+  })
+
+  it('returns null for status "unknown"', () => {
+    expect(computeClockTripEta({ state: 'unknown' }, routes, 0, 0, 10, now)).toBeNull()
+  })
+
+  it('reports the FINAL waypoint via etaToRouteEnd for a known active route', () => {
+    const result = computeClockTripEta(activeStatus(1, false), routes, 0, 0, 10, now)
+    expect(result).not.toBeNull()
+    expect(result!.label).toBe('WP 4') // FORWARD_ROUTE's last waypoint has no name
+    expect(result!.etaAt).not.toBeNull()
+    expect(result!.basis).toBe('sog')
+  })
+
+  it('returns null when the active routeId does not match any route in `routes`', () => {
+    const status = activeStatus(0, false, 'some-other-route')
+    expect(computeClockTripEta(status, routes, 0, 0, 10, now)).toBeNull()
+  })
+
+  it('reports a bare chartplotter destination via etaToDestination when inactive', () => {
+    const status = { state: 'inactive' as const, destination: { lat: 0, lon: 1, name: 'Hook Island' } }
+    const result = computeClockTripEta(status, routes, 0, 0, 5, now)
+    expect(result).not.toBeNull()
+    expect(result!.label).toBe('Hook Island')
+    expect(result!.basis).toBe('sog')
+    expect(result!.etaAt).not.toBeNull()
+  })
+
+  it('returns null when inactive with no destination', () => {
+    const status = { state: 'inactive' as const, destination: null }
+    expect(computeClockTripEta(status, routes, 0, 0, 5, now)).toBeNull()
+  })
+
+  // The regression this cycle's fix targets: a route activated OUTSIDE
+  // Helmcentral (routeId null) still has the Course API's destination to
+  // report an ETA against, read exactly like the inactive case.
+  it('reports the destination via etaToDestination when active but the route is not one of ours', () => {
+    const status = {
+      state: 'active' as const,
+      routeId: null,
+      pointIndex: 0,
+      reverse: false,
+      destination: { lat: 0, lon: 1, name: 'Hook Island' },
+    }
+    const result = computeClockTripEta(status, routes, 0, 0, 5, now)
+    expect(result).not.toBeNull()
+    expect(result!.label).toBe('Hook Island')
+    expect(result!.basis).toBe('sog')
+    expect(result!.etaAt).not.toBeNull()
+  })
+
+  it('returns null when active with an unrecognized route and no destination either', () => {
+    const status = { state: 'active' as const, routeId: null, pointIndex: 0, reverse: false, destination: null }
+    expect(computeClockTripEta(status, routes, 0, 0, 5, now)).toBeNull()
+  })
+
+  // A known, active Helmcentral route always takes the leg-by-leg ETA, even
+  // if the response somehow also carried a destination alongside it.
+  it('prefers the known-route ETA over a destination when both are present', () => {
+    const status = {
+      state: 'active' as const,
+      routeId: 'route-1',
+      pointIndex: 1,
+      reverse: false,
+      destination: { lat: 9, lon: 9, name: 'Somewhere Else' },
+    }
+    const result = computeClockTripEta(status, routes, 0, 0, 10, now)
+    expect(result).not.toBeNull()
+    expect(result!.label).toBe('WP 4')
   })
 })

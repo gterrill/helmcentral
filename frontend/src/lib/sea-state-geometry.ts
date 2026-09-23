@@ -18,7 +18,7 @@
  * itself).
  */
 
-const HOURS_PER_DAY = 24
+export const HOURS_PER_DAY = 24
 export const SEA_STATE_DAY_COUNT = 5
 
 // The barbs and wave arrows draw at this fraction of the forecast drawer's

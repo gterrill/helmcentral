@@ -129,6 +129,19 @@ describe('ClockTile', () => {
     expect(eta).not.toHaveTextContent(/plan/i)
   })
 
+  // A bare "09:40" can't be told from 9:40 PM - the ETA line must carry the
+  // same AM/PM meridiem the hero clock shows beside its own hh:mm.
+  test('includes the AM/PM meridiem in the ETA line, not just hh:mm', () => {
+    const etaAt = new Date('2026-06-14T18:05:00Z')
+    renderClockTile({
+      tripEta: { label: 'WP 3', etaAt, basis: 'sog' },
+    })
+
+    const eta = screen.getByTestId('clock-eta')
+    expect(eta).toHaveTextContent(hhmmFor(etaAt))
+    expect(eta).toHaveTextContent(formatClock(etaAt).meridiem)
+  })
+
   test('marks a planning-speed ETA with a plan suffix', () => {
     renderClockTile({
       tripEta: { label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },

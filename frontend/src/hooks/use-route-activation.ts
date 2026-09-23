@@ -10,7 +10,22 @@ export interface RouteActivationDestination {
 export type ActiveRouteStatus =
   | { state: 'unknown' }
   | { state: 'inactive'; destination: RouteActivationDestination | null }
-  | { state: 'active'; routeId: string | null; pointIndex: number; reverse: boolean }
+  | {
+      state: 'active'
+      routeId: string | null
+      pointIndex: number
+      reverse: boolean
+      /**
+       * The Course API's nextPoint (ADR 0125), same as the inactive state's
+       * own `destination` - present whenever GET /api/routes/active sent
+       * one, which it does whenever the Course API carries a nextPoint,
+       * REGARDLESS of whether routeId matched a Helmcentral route. A route
+       * activated outside Helmcentral (routeId null here) has no leg-by-leg
+       * ETA to compute, but the chartplotter's own destination is still
+       * available - see App.tsx's clockTripEta.
+       */
+      destination: RouteActivationDestination | null
+    }
 
 interface ActiveRouteResponse {
   active: boolean
@@ -55,6 +70,9 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
         routeId: data.route_id ?? null,
         pointIndex: typeof data.point_index === 'number' ? data.point_index : 0,
         reverse: data.reverse === true,
+        destination: data.destination
+          ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
+          : null,
       })
     } catch {
       // Don't assume inactive on a failed poll — the route may still be

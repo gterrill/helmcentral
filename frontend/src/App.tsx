@@ -95,7 +95,7 @@ import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-d
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, traversalOrder, etaToRouteEnd, etaToDestination } from '@/lib/next-waypoint'
+import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
@@ -1342,38 +1342,19 @@ export function App() {
   // A reverse geocode of a slowly changing position, cached server-side per
   // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
   const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
-  // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125): the
-  // same pieces any other consumer of routeActivationStatus already has in
-  // scope, just combined once here rather than inside the tile itself,
-  // which has no reason to know about routes or route activation at all.
-  // The ETA is for the TRIP, not just the next leg: a Helmcentral-activated
-  // route reports to its FINAL waypoint (etaToRouteEnd), and with no route
-  // active but SignalK still carrying a chartplotter go-to destination
-  // (GET /api/routes/active's `destination`, backend/route_activation.go),
-  // the tile reports to that instead (etaToDestination) rather than
-  // showing nothing just because the trip wasn't planned inside
-  // Helmcentral.
-  const clockTripEta = useMemo(() => {
-    if (!routeActivationStatus || latitude === null || longitude === null) return null
-    const now = new Date()
-
-    if (routeActivationStatus.state === 'active' && routeActivationStatus.routeId !== null) {
-      const route = routes.find((r) => r.id === routeActivationStatus.routeId)
-      if (!route) return null
-      const eta = etaToRouteEnd(latitude, longitude, route, routeActivationStatus, speedOverGroundKts, now)
-      if (!eta) return null
-      return { label: eta.label, etaAt: eta.etaAt, basis: eta.basis }
-    }
-
-    if (routeActivationStatus.state === 'inactive' && routeActivationStatus.destination) {
-      const destination = routeActivationStatus.destination
-      const eta = etaToDestination(latitude, longitude, destination, speedOverGroundKts, now)
-      const label = destination.name.trim() !== '' ? destination.name : null
-      return { label, etaAt: eta.etaAt, basis: 'sog' as const }
-    }
-
-    return null
-  }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
+  // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125):
+  // computeClockTripEta (lib/next-waypoint.ts) picks between a
+  // Helmcentral-activated route's FINAL waypoint (etaToRouteEnd) and a bare
+  // Course API destination (etaToDestination, GET /api/routes/active's
+  // `destination`, backend/route_activation.go) - the latter covers both an
+  // inactive chartplotter go-to AND a route activated somewhere other than
+  // Helmcentral, so the tile still reports something rather than showing
+  // nothing just because the trip wasn't planned inside Helmcentral. See
+  // that function's own doc comment for the full decision.
+  const clockTripEta = useMemo(
+    () => computeClockTripEta(routeActivationStatus, routes, latitude, longitude, speedOverGroundKts, new Date()),
+    [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts],
+  )
   // The Nearby map's route layer (this cycle's own addition): the same
   // routeActivationStatus/routes/nextWaypoint pieces as clockTripEta
   // above, combined once here so the poi-map tile never has to know route

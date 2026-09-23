@@ -44,10 +44,17 @@ keeps the same negative-is-absent convention every other
 intensity but no probability at this resolution sends a negative chance
 rather than inventing one. The host does not require or normalize the
 cadence: `buildWeatherNextHourResponse` (`backend/weather_providers.go`)
-infers `step_minutes` from the gap between the first two points, so
-WeatherKit's 1-minute and Open-Meteo's 15-minute data both reach the wire
-correctly labelled, and a single point (no second point to diff against)
-carries `step_minutes: 0`.
+infers `step_minutes` from the smallest positive gap between any two
+consecutive points (`inferNextHourStepMinutes`), so WeatherKit's 1-minute
+and Open-Meteo's 15-minute data both reach the wire correctly labelled. A
+single point, or a run of points with no positive gap anywhere (every
+timestamp identical or non-increasing), has no inferrable step at all -
+`next_hour` is omitted entirely in that case (logged, not silent) rather
+than emitted with `step_minutes: 0`, which the frontend's
+`buildNowcastBars` applies to every point alike and would silently
+zero-width (and therefore drop) every bar in the strip, not just the one
+with the bad gap. See §8 below for why the original "gap between the first
+two points only" version of this broke on exactly that case.
 
 ### 2. WeatherKit: `forecastNextHour`, mapped minute by minute
 
@@ -127,15 +134,16 @@ start is the first bucket with forecast rainfall (`mmPerH > 0`), not the
 first with a positive chance, and the line names the hour's peak intensity
 ("Moderate rain expected in 20 minutes"); a window with chance but no
 rainfall says "N% chance of rain in the next hour" instead of claiming rain
-is on the way. Otherwise, otherwise the hourly
-fallback, reusing `nextRain` (`lib/forecast-bands.ts`, threshold 1 rather
-than its 40%-default "likely" gate, so it fires on any positive chance the
-same way HelmCast's hourly fallback did) instead of a second hourly rain
-finder; otherwise a daily fallback; otherwise "No rain expected in the next
-6 days"; otherwise a structural dash when nothing in the cascade has real
-data. `hasNowcastRain` treats a positive chance as signal on its own, and a
-null (not-supplied) chance alongside positive intensity as signal too - null
-chance alone is neither evidence of rain nor of dry.
+is on the way. Otherwise, the hourly
+fallback, reusing `nextRain` (`lib/forecast-bands.ts`) at its own 40%-default
+"likely" threshold - see §8 below for why an earlier version of this used
+threshold 1 (firing on any positive chance) instead, and why that was
+wrong - instead of a second hourly rain finder; otherwise a daily fallback;
+otherwise "No rain expected in the next 6 days"; otherwise a structural
+dash when nothing in the cascade has real data. `hasNowcastRain` treats a
+positive chance as signal on its own, and a null (not-supplied) chance
+alongside positive intensity as signal too - null chance alone is neither
+evidence of rain nor of dry.
 
 One deliberate deviation from HelmCast here: HelmCast's daily fallback
 reports an amount in mm (`daily.precipitation_amount`), because WeatherKit's
@@ -245,6 +253,80 @@ its echoed lat/lon overridden into each native-resolution region
 (`nextHourSourceForPosition` is purely geometric, so this validates the
 region gate without needing a live capture from either region).
 
+### 8. Addendum (2026-09-23, pre-merge review): threshold, staleness, robustness and validation fixes
+
+A round of review before this cycle merged turned up five more problems,
+all still against the fallback-policy theme this ADR already leans on:
+
+- **The hourly fallback fired on any positive chance, not a "likely" one.**
+  §5's `fallbackRainLine` called `nextRain(forecastDays, nowHour, 1)` -
+  threshold 1, not `nextRain`'s own 40%-default "likely" gate - so a
+  genuine 2% hourly chance read as "Light rain expected after 4PM," a false
+  positive the fallback policy exists to prevent (a 2% chance is not rain
+  "expected" by any reasonable reading of that word). **Fix:** the hourly
+  tier calls `nextRain` with its default threshold. The line's wording
+  changed to match: instead of inventing a light/moderate/heavy label from
+  a bare percentage (there is no mm/h figure at this tier to band), it
+  restores the older wording with the number in it - "Rain likely from 2PM
+  (45%)" / "Rain likely now (55%)" - so the operator sees exactly how
+  confident the forecast actually is rather than a categorical label that
+  overstates it.
+- **A dry real nowcast could still let the hourly fallback claim rain "now"
+  off the very hour the nowcast had just ruled out.** When `next_hour` covers
+  the current hour and reads dry, falling through to the hourly cascade
+  with the unchanged `nowHour` let it re-ask the coarser per-hour forecast
+  about that same hour - which, at a high enough chance, could report "Rain
+  likely now," directly contradicting the finer-grained nowcast the tile had
+  just drawn no strip for. **Fix:** `computeNowcastStatus` starts the hourly
+  search at `nowHour + 1` whenever the nowcast left real (non-stale) bars
+  behind, even a dry one - an absent or fully-stale nowcast still searches
+  from the true current hour, since it told us nothing about right now.
+- **The step-inference bug described in §1 above:** a duplicate or
+  non-increasing first pair of `next_hour` timestamps forced
+  `step_minutes` to 0 for the *entire* response, silently dropping every
+  bar in the strip (not just the anomalous one), because the frontend
+  applies one shared step to every point. Fixed by inferring from the
+  smallest positive gap across the whole slice, and omitting `next_hour`
+  (with a log line) rather than guessing when no positive gap exists
+  anywhere - see §1's updated text.
+- **The frontend quietly repaired a malformed `next_hour` instead of
+  rejecting it.** `mapNextHour` (`use-weather-forecast.ts`) used to skip
+  individual bad points, coerce a missing `mm_per_h`/`step_minutes` to `0`,
+  and default an unrecognized `source` to `"hourly"` - all silent repairs of
+  a payload the backend already guarantees is well-formed whenever it sends
+  one at all (`next_hour_source` is a hard backend error if
+  missing/unrecognized, and §1's fix means `step_minutes` is never emitted
+  as an unusable value). A malformed `next_hour` reaching the frontend at
+  all means the contract broke somewhere upstream, not a shape to patch
+  over. **Fix:** any structural problem - a bad/missing timestamp, a missing
+  `mm_per_h`, a non-positive/missing `step_minutes`, an unrecognized
+  `source` - discards the *whole* `next_hour` (never a partially-repaired
+  one) and `console.error`s what was wrong, falling back to the existing
+  hourly/daily cascade exactly as an absent nowcast already does, but now
+  diagnosable instead of silent.
+- **Open-Meteo's `minutely_15.precipitation`/`precipitation_probability`
+  could silently turn a real JSON `null` into a confirmed `0`.** Both
+  fields were plain `[]float64`/`[]int` in the Open-Meteo reference plugin,
+  the same latent bug class `Hourly.RelativeHumidity2m`/`Visibility`
+  already had to be fixed for (this ADR's own §1 doc comment even warns
+  against "a third instance of it"). A null `precipitation_probability` now
+  falls back to this contract's `-1` "not supplied" sentinel, same as an
+  out-of-range index already did; a null `precipitation` has no equivalent
+  sentinel for `precipitation_mm_per_h` to carry, so that point is omitted
+  from `next_hour` entirely rather than reported as a confirmed-dry `0.0`
+  mm/h - the gap reads as "nothing known there," which is what
+  `buildNowcastBars` already does with any gap between points, never as
+  "confirmed dry."
+
+Covered by new tests at every layer: a Go table test for the step-inference
+function directly plus an end-to-end duplicate-timestamp regression test
+(`backend/weather_providers_test.go`), new `lib/nowcast.ts` cases for the
+restored threshold and the dry-nowcast-defers-the-covered-hour behaviour,
+new `use-weather-forecast.ts` cases asserting each malformed shape drops to
+`null` and logs, and a new Open-Meteo fixture
+(`testdata/open_meteo_response_minutely15_mackay_with_nulls.json`, the real
+Mackay capture with two values nulled out) alongside a hand-built null case.
+
 ## Consequences
 
 - Both reference weather plugins now report a next-hour nowcast where their
@@ -272,6 +354,26 @@ region gate without needing a live capture from either region).
   (the plugin), not patched in the frontend, so the contract's "time is the
   start of forward coverage" rule holds for every current and future
   provider without a per-provider special case downstream.
+- (§8) The hourly fallback tier can no longer claim rain is "expected" off a
+  chance too low to call likely, and can no longer contradict a dry nowcast
+  by re-reporting "now" from the same hour the nowcast already spoke for
+  more precisely.
+- (§8) A `next_hour` whose per-point step can't be inferred (a single point,
+  or a run with no positive gap anywhere) is omitted and logged rather than
+  emitted with a step that would silently drop every bar - this was never
+  actually reachable from either reference plugin before §8, since both
+  always emit consecutive, strictly-increasing timestamps, but the host no
+  longer trusts a third-party plugin to keep that invariant either.
+- (§8) The frontend now refuses to repair a malformed `next_hour` rather
+  than quietly defaulting or dropping individual bad fields - a contract
+  violation upstream shows up as a console error and a "no nowcast"
+  fallback, not a silently-patched strip that could still be wrong in a way
+  nobody notices.
+- (§8) Open-Meteo's null-precipitation/probability handling matches the
+  pattern already established for `Hourly.RelativeHumidity2m`/`Visibility` -
+  every pointer-element slice in this plugin now treats a real JSON `null`
+  the same way, rather than three of four such fields getting it right and
+  a fourth silently coercing to zero.
 
 ## Related
 

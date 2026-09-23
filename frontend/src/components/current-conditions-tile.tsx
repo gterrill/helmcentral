@@ -54,7 +54,6 @@ function nowcastBarFillOpacity(bar: NowcastBar): number {
 
 const NOWCAST_STRIP_WIDTH = 300
 const NOWCAST_STRIP_PLOT_HEIGHT = 24
-const NOWCAST_STRIP_LABEL_ROW_HEIGHT = 10
 const NOWCAST_STRIP_TICKS = [0, 20, 40, 60]
 
 /**
@@ -65,17 +64,26 @@ const NOWCAST_STRIP_TICKS = [0, 20, 40, 60]
  * window (design point 7) - callers never draw this for a dry/absent
  * nowcast, which would read as a false "definitely no rain" instead of
  * "nothing to show here".
+ *
+ * The plot's own SVG uses `preserveAspectRatio="none"` so its bars/gridlines
+ * stretch to fill whatever width the tile is given rather than
+ * letterboxing - correct for rects and lines, but an SVG `<text>` inside
+ * that same non-uniformly-scaled viewport gets its glyphs squashed
+ * horizontally whenever the rendered aspect ratio doesn't match the
+ * viewBox's. The 0/20/40/60-minute tick labels are therefore drawn as plain
+ * HTML below the plot instead, positioned by percentage (the ticks are
+ * always evenly spaced, so a percentage-based left offset lands exactly
+ * under each gridline at any tile width) rather than inside the SVG.
  */
 function NowcastStrip({ bars, isHourlySourced }: { bars: NowcastBar[]; isHourlySourced: boolean }) {
   const maxMmPerH = Math.max(0, ...bars.map((b) => b.mmPerH))
-  const totalHeight = NOWCAST_STRIP_PLOT_HEIGHT + NOWCAST_STRIP_LABEL_ROW_HEIGHT
 
   return (
     <div className="relative">
       <svg
-        viewBox={`0 0 ${NOWCAST_STRIP_WIDTH} ${totalHeight}`}
+        viewBox={`0 0 ${NOWCAST_STRIP_WIDTH} ${NOWCAST_STRIP_PLOT_HEIGHT}`}
         preserveAspectRatio="none"
-        className="h-9 w-full"
+        className="h-6 w-full"
         data-testid="nowcast-strip"
         role="img"
         aria-label={isHourlySourced ? 'Rain expected in the next hour, from the hourly forecast' : 'Rain expected in the next hour'}
@@ -120,23 +128,26 @@ function NowcastStrip({ bars, isHourlySourced }: { bars: NowcastBar[]; isHourlyS
         stroke="hsl(var(--border))"
         strokeWidth={1}
       />
-      {NOWCAST_STRIP_TICKS.map((minute) => {
-        const x = (minute / 60) * NOWCAST_STRIP_WIDTH
-        const anchor = minute === 0 ? 'start' : minute === 60 ? 'end' : 'middle'
-        return (
-          <text
-            key={minute}
-            x={x}
-            y={totalHeight - 1}
-            textAnchor={anchor}
-            fontSize="10"
-            fill="hsl(var(--muted-foreground))"
-          >
-            {minute === 0 ? 'Now' : `${minute}m`}
-          </text>
-        )
-      })}
       </svg>
+      <div className="relative mt-0.5 h-[10px] text-[10px] text-muted-foreground" aria-hidden="true">
+        {NOWCAST_STRIP_TICKS.map((minute) => {
+          const leftPct = (minute / 60) * 100
+          // Mirrors the SVG text's old textAnchor behaviour (start/middle/end)
+          // via translateX, so each label still lines up under its own
+          // gridline at any tile width without the SVG's own non-uniform
+          // scale ever touching a glyph.
+          const translate = minute === 0 ? '0%' : minute === 60 ? '-100%' : '-50%'
+          return (
+            <span
+              key={minute}
+              className="absolute top-0 whitespace-nowrap"
+              style={{ left: `${leftPct}%`, transform: `translateX(${translate})` }}
+            >
+              {minute === 0 ? 'Now' : `${minute}m`}
+            </span>
+          )
+        })}
+      </div>
       {/* Overlaid, not stacked in flow: the caption must not grow the
           tile's height past its h7/minH budget on the 1920x360 wall (ADR
           0126 addendum) - absolute positioning over the strip's own box
@@ -190,7 +201,10 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   const tempBandF = todayTempBand(forecast[0])
   const nowcast = computeNowcastStatus({
     now,
-    nextHour: nextHour ? { stepMinutes: nextHour.stepMinutes, points: nextHour.points, source: nextHour.source } : null,
+    // WeatherNextHour (use-weather-forecast.ts) already has exactly the
+    // shape computeNowcastStatus's nextHour param wants - no need to repack
+    // it field by field.
+    nextHour: nextHour ?? null,
     forecastDays: forecast,
     nowHour,
   })

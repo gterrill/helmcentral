@@ -248,8 +248,89 @@ describe('computeNowcastStatus', () => {
       nowHour,
     })
     expect(result.showChart).toBe(false)
-    expect(result.line).toMatch(/rain expected/i)
-    expect(result.line).toMatch(/4PM/)
+    expect(result.line).toBe('Rain likely from 4PM (80%)')
+  })
+
+  // The hourly fallback restores nextRain's own 40% "likely" threshold
+  // (not a bare positive-chance one) - a 2% chance is not "rain expected",
+  // and claiming otherwise is the false positive the fallback policy exists
+  // to prevent.
+  it('a real but unlikely hourly chance (below the 40% threshold) never reads as rain coming', () => {
+    const result = computeNowcastStatus({
+      now: NOW,
+      nextHour: null,
+      forecastDays: [
+        day({
+          hourlyPrecip: [precipPoint(nowHour + 1, 2, '3PM')],
+          precipitation: null,
+        }),
+      ],
+      nowHour,
+    })
+    expect(result.line).not.toMatch(/rain/i)
+  })
+
+  it('reports the chance alongside the label when the hourly tier finds a likely hour, matching the old tile\'s wording', () => {
+    const result = computeNowcastStatus({
+      now: NOW,
+      nextHour: null,
+      forecastDays: [day({ hourlyPrecip: [precipPoint(nowHour + 1, 45, '3PM')] })],
+      nowHour,
+    })
+    expect(result.line).toBe('Rain likely from 3PM (45%)')
+  })
+
+  it('reports "now" when the hourly tier\'s own likely match is the current hour, with no real nowcast to defer to', () => {
+    const result = computeNowcastStatus({
+      now: NOW,
+      nextHour: null,
+      forecastDays: [day({ hourlyPrecip: [precipPoint(nowHour, 55, 'Now')] })],
+      nowHour,
+    })
+    expect(result.line).toBe('Rain likely now (55%)')
+  })
+
+  // A dry-but-real nowcast (bars drawn, just carrying no signal) already
+  // spoke for the current hour more precisely than the hourly forecast's
+  // own blunt per-hour bucket can - the hourly fallback must not then
+  // contradict it by reporting "now" off that same hour's coarser chance.
+  it('a dry real nowcast defers the hourly fallback past the hour it already covered, never reporting "now" off that hour', () => {
+    const result = computeNowcastStatus({
+      now: NOW,
+      nextHour: { stepMinutes: 15, points: [point(0, 0, 0), point(15, 0, 0), point(30, 0, 0), point(45, 0, 0)] },
+      forecastDays: [
+        day({
+          hourlyPrecip: [
+            precipPoint(nowHour, 45, 'Now'), // would have matched "now" before this fix
+            precipPoint(nowHour + 1, 50, '3PM'),
+          ],
+        }),
+      ],
+      nowHour,
+    })
+    expect(result.showChart).toBe(false)
+    expect(result.line).toBe('Rain likely from 3PM (50%)')
+  })
+
+  // Same scenario, but with no hour past the one the nowcast covered
+  // clearing the threshold either - the hourly tier must report nothing
+  // usable (falling further down the cascade) rather than reaching back
+  // into the hour the nowcast already spoke for.
+  it('a dry real nowcast never falls back onto its own covered hour even when nothing later qualifies', () => {
+    const result = computeNowcastStatus({
+      now: NOW,
+      nextHour: { stepMinutes: 15, points: [point(0, 0, 0), point(15, 0, 0), point(30, 0, 0), point(45, 0, 0)] },
+      forecastDays: [
+        day({
+          hourlyPrecip: [precipPoint(nowHour, 90, 'Now')],
+          precipitation: 0,
+        }),
+      ],
+      nowHour,
+    })
+    expect(result.showChart).toBe(false)
+    expect(result.line).not.toMatch(/90%/)
+    expect(result.line).not.toMatch(/now/i)
   })
 
   it('falls all the way back to a dash when there is no nowcast and no hourly/daily data at all', () => {

@@ -6,6 +6,24 @@ import { SEA_STATE_PLOT_INSET, xForDayBoundary } from '@/lib/sea-state-geometry'
 import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 
+// Item D (this cycle's own fix): App re-renders on every gauge-values tick,
+// so buildSeaStateSeries must not rebuild the whole 5-day hourly series
+// (and hand the chart a new array, forcing a re-diff) on every one of those
+// ticks - only when forecast/waveForecastDays themselves actually change.
+// Spying on the real implementation (not replacing it) pins that the
+// component's own useMemo, not the mock, is what's doing the bailing out.
+const buildSeaStateSeriesSpy = vi.fn()
+vi.mock('@/lib/sea-state-series', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/sea-state-series')>()
+  return {
+    ...actual,
+    buildSeaStateSeries: (...args: Parameters<typeof actual.buildSeaStateSeries>) => {
+      buildSeaStateSeriesSpy(...args)
+      return actual.buildSeaStateSeries(...args)
+    },
+  }
+})
+
 /**
  * Captures the observed target and callback instead of firing on its own
  * (jsdom's global ResizeObserver stub - src/test/setup.ts - never fires),
@@ -290,5 +308,45 @@ describe('ForecastConditionsTile', () => {
     // width falls back to the tile's FALLBACK_WIDTH (800) in jsdom, since
     // ResizeObserver never fires there (src/test/setup.ts's stub).
     expect(firstLineX).toBeCloseTo(xForDayBoundary(1, 800), 0)
+  })
+
+  // ── memoization (item D): App re-renders on every gauge-values tick ────
+
+  test('is exported wrapped in memo', () => {
+    expect((ForecastConditionsTile as unknown as { $$typeof: symbol }).$$typeof).toBe(Symbol.for('react.memo'))
+  })
+
+  test('does not rebuild the sea-state series when forecast/waveForecastDays are unchanged, even if another prop changes', () => {
+    const forecast = SEVEN_DAYS
+    const waveForecastDays = forecast.map((d) => waveDay(d.dayKey))
+    buildSeaStateSeriesSpy.mockClear()
+
+    const { rerender } = render(
+      <ForecastConditionsTile {...defaultProps} forecast={forecast} waveForecastDays={waveForecastDays} units="imperial" />,
+    )
+    expect(buildSeaStateSeriesSpy).toHaveBeenCalledTimes(1)
+
+    // units flips (a re-render this tile must still do - the card temps
+    // depend on it), but forecast/waveForecastDays are the SAME references.
+    rerender(
+      <ForecastConditionsTile {...defaultProps} forecast={forecast} waveForecastDays={waveForecastDays} units="metric" />,
+    )
+    expect(buildSeaStateSeriesSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('does rebuild the sea-state series when forecast changes', () => {
+    const forecast = SEVEN_DAYS
+    const waveForecastDays = forecast.map((d) => waveDay(d.dayKey))
+    buildSeaStateSeriesSpy.mockClear()
+
+    const { rerender } = render(
+      <ForecastConditionsTile {...defaultProps} forecast={forecast} waveForecastDays={waveForecastDays} />,
+    )
+    expect(buildSeaStateSeriesSpy).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <ForecastConditionsTile {...defaultProps} forecast={[...forecast]} waveForecastDays={waveForecastDays} />,
+    )
+    expect(buildSeaStateSeriesSpy).toHaveBeenCalledTimes(2)
   })
 })

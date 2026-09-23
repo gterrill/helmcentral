@@ -101,13 +101,6 @@ export function nowcastIntensityLabel(mmPerH: number): NowcastIntensity {
   return 'heavy'
 }
 
-/** Chance-only intensity bands, for the hourly fallback tier where no mm/h figure exists - mirrors HelmCast's getRainIntensityLabelFromSignals fallback branch. */
-function hourlyChanceIntensityLabel(chancePct: number): NowcastIntensity {
-  if (chancePct < 30) return 'light'
-  if (chancePct < 70) return 'moderate'
-  return 'heavy'
-}
-
 function capitalize(s: string): string {
   return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s
 }
@@ -144,15 +137,27 @@ function checkDailyRain(forecastDays: WeatherForecastDay[]): { kind: 'found' | '
  * nothing to say (absent or fully dry/stale) - HelmCast's
  * getNextRainExpectationFromHourly / getNextDailyRainExpectation /
  * hasNoDailyRainWithinDays(6), reusing `nextRain` (forecast-bands.ts) for
- * the hourly tier rather than a second hourly rain-finder. threshold 1
- * (not nextRain's 40% default) matches HelmCast's fallback firing on any
- * positive chance, not a "likely" threshold.
+ * the hourly tier rather than a second hourly rain-finder. Uses nextRain's
+ * own 40% "likely" default, not a bare positive-chance threshold - a 2%
+ * hourly chance is not rain "expected", and claiming it was is exactly the
+ * false positive AGENTS.md's fallback policy exists to prevent. The old
+ * tile's own wording ("Rain likely from 2PM (45%)") is restored rather than
+ * an invented intensity label, since the hourly tier has no mm/h figure to
+ * band into light/moderate/heavy - only a chance.
+ *
+ * `searchFromHour` lets the caller skip the hour(s) a real (non-stale)
+ * nowcast already spoke for - see computeNowcastStatus below - while
+ * `nowHour` (the TRUE current hour) still governs whether the result reads
+ * as "now": nextRain's own `isNow` is only trusted when the search actually
+ * started at the true current hour, so a match found by searching ahead
+ * from a later hour is never mislabelled as happening "now".
  */
-function fallbackRainLine(forecastDays: WeatherForecastDay[], nowHour: number): string {
-  const hourly = nextRain(forecastDays, nowHour, 1)
+function fallbackRainLine(forecastDays: WeatherForecastDay[], nowHour: number, searchFromHour: number = nowHour): string {
+  const hourly = nextRain(forecastDays, searchFromHour)
   if (hourly && hourly !== 'none') {
-    const intensity = capitalize(hourlyChanceIntensityLabel(hourly.chancePct))
-    return hourly.isNow ? `${intensity} rain expected now` : `${intensity} rain expected after ${hourly.label}`
+    const chancePct = Math.round(hourly.chancePct)
+    const isNow = searchFromHour === nowHour && hourly.isNow
+    return isNow ? `Rain likely now (${chancePct}%)` : `Rain likely from ${hourly.label} (${chancePct}%)`
   }
 
   const daily = checkDailyRain(forecastDays)
@@ -180,8 +185,9 @@ export interface NowcastStatus {
    * nowcast (backend/weather_providers.go's next_hour_source contract,
    * e.g. Open-Meteo's minutely_15 outside its native-resolution regions).
    * Always false when showChart is false - the hourly/daily fallback tiers
-   * are already labelled by their own phrasing ("expected after 4PM") and
-   * don't need a second "(hourly forecast)" caption on top of that.
+   * are already labelled by their own phrasing ("Rain likely from 4PM
+   * (45%)") and don't need a second "(hourly forecast)" caption on top of
+   * that.
    */
   isHourlySourced: boolean
 }
@@ -234,5 +240,17 @@ export function computeNowcastStatus(params: {
     return { bars, showChart, isHourlySourced, line: `${intensity} rain expected ${when}${captionSuffix}` }
   }
 
-  return { bars, showChart, isHourlySourced: false, line: fallbackRainLine(forecastDays, nowHour) }
+  // A real (non-stale) nowcast already speaks for the hour it covers, even
+  // when it's dry - `bars.length > 0` means at least one of its points
+  // survived buildNowcastBars' staleness filter, i.e. genuinely covers some
+  // part of the window starting from "now" (see that function's own doc
+  // comment). Asking the coarser hourly forecast about that SAME hour can
+  // contradict the nowcast it was just overridden by (a nowcast dry through
+  // the rest of this hour, next to an hourly line claiming rain "now" off
+  // that hour's blunt chance-of-precipitation bucket) - so the fallback
+  // search starts at the following hour instead. An absent or fully-stale
+  // nowcast (bars.length === 0) has told us nothing about the current hour,
+  // so the search still starts there.
+  const searchFromHour = bars.length > 0 ? nowHour + 1 : nowHour
+  return { bars, showChart, isHourlySourced: false, line: fallbackRainLine(forecastDays, nowHour, searchFromHour) }
 }

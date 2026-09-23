@@ -164,9 +164,23 @@ next-hour nowcast needs), and maps each point onto the guest contract's
   slot; multiplied by 4 to get this contract's `precipitation_mm_per_h`.
 - `precipitation_chance_pct` comes from `precipitation_probability`
   directly, unconverted (already a 0-100 percentage, per
-  `minutely_15_units` in every live response captured below) - not the
-  "not supplied" `-1` sentinel this contract allows for this field (a
-  request for this endpoint always returns a numeric value here).
+  `minutely_15_units` in every live response captured below).
+- Both `Precipitation` and `PrecipitationProbability` decode into
+  **pointer-element** slices (`[]*float64`/`[]*int`), the same reason
+  `Hourly.RelativeHumidity2m`/`Visibility` do: a plain `[]float64`/`[]int`
+  would silently turn a real JSON `null` into `0.0`/`0`, and neither field
+  carries a documented guarantee against one. A `null`
+  `precipitation_probability` falls back to this contract's "not supplied"
+  `-1` sentinel, the same as an out-of-range index already did. A `null`
+  `precipitation` is a different case: it means Open-Meteo has no reading
+  for that point at all, which is not the same thing as a confirmed
+  `0.0` (dry) - and this contract has no per-point "no data" flag for
+  `precipitation_mm_per_h` the way it does for the chance field. The plugin
+  therefore **omits that point from `next_hour` entirely** rather than
+  emitting a fabricated dry reading; the host/frontend already treat a gap
+  between `next_hour` points as "nothing known there," never as "confirmed
+  dry" (`lib/nowcast.ts`'s `buildNowcastBars` only ever draws bars for the
+  points it's actually given).
 
 **Whether `minutely_15` is real 15-minute data, or interpolated from the
 hourly model, depends on where the vessel is - this plugin does not assume
@@ -211,3 +225,10 @@ chance ramping 18% -> 66% across the captured window) are both real,
 unedited API responses, not synthesized fixtures - and both positions are
 outside the two native-resolution regions, so both map to
 `next_hour_source: "hourly"`.
+
+`testdata/open_meteo_response_minutely15_mackay_with_nulls.json` is the
+Mackay capture above with two values deliberately nulled out (one
+`precipitation` entry, one `precipitation_probability` entry, at different
+points) - exercising the pointer-slice null handling described above against
+a genuine capture's shape rather than a hand-built one, since neither
+fixture above happened to carry a real null at capture time.

@@ -460,6 +460,53 @@ func TestFetchSignalKCourseStatus_ActiveRouteResponseUnaffectedByNextPointParsin
 	}
 }
 
+// TestGetActiveRouteHandler_ActiveHrefNotLocallyKnownWithNextPointReturnsDestination
+// is the regression for the bug this fix targets: a route activated OUTSIDE
+// Helmcentral (activeRoute.href doesn't match anything in routesState, so
+// route_id comes back nil) used to get no destination at all, even though
+// the Course API's nextPoint was right there - destination was only ever
+// added on the "nothing active" branch. The clock tile's trip ETA needs the
+// destination in this case exactly as much as the inactive one.
+func TestGetActiveRouteHandler_ActiveHrefNotLocallyKnownWithNextPointReturnsDestination(t *testing.T) {
+	setupRouteActivationTest(t)
+	resetPlaceNameCache(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"/resources/routes/some-foreign-id","pointIndex":0,"reverse":false},`+
+			`"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/active", nil)
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := getActiveRouteHandler(c); err != nil {
+		t.Fatalf("getActiveRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload["active"] != true {
+		t.Fatalf("expected active=true, got %v", payload["active"])
+	}
+	if payload["route_id"] != nil {
+		t.Fatalf("expected route_id nil for a foreign href, got %v", payload["route_id"])
+	}
+	dest, ok := payload["destination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a destination object even though the active route isn't a local one, got %+v", payload)
+	}
+	if dest["lat"] != -18.6675 || dest["lon"] != 146.48466666666667 {
+		t.Fatalf("expected destination position to round-trip, got %+v", dest)
+	}
+}
+
 // ── GET /api/routes/active: destination (ADR 0125) ─────────────────────────
 
 func TestGetActiveRouteHandler_NoActiveRouteWithNextPointReturnsDestination(t *testing.T) {

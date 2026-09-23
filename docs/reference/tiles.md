@@ -51,7 +51,7 @@ chartplotter it is the arrival at that point, named after the nearest place
 once one is found, and blank while you are stopped. With a TimeZero route,
 the boat's instruments only pass on the waypoint you are heading for, so the
 time shown is the arrival at that waypoint, not the end of the passage. An
-arrival that falls on another day carries the day, as in "Thu 09:40".
+arrival that falls on another day carries the day, as in "Thu 09:40 AM".
 
 ## Tiles you configure yourself
 

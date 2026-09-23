@@ -92,10 +92,19 @@ type openMeteoResponse struct {
 	// resolution regions, "hourly" everywhere else) so the host/frontend can
 	// caption it honestly instead of presenting interpolated data as a true
 	// short-range nowcast (AGENTS.md fallback policy).
+	// Precipitation/PrecipitationProbability are POINTER-ELEMENT slices,
+	// deliberately - matching Hourly.RelativeHumidity2m/Visibility above,
+	// and for the same reason: a plain []float64/[]int silently decodes a
+	// real JSON null to 0.0/0, which is exactly wrong here. A null
+	// precipitation_probability means "no probability at this resolution"
+	// (the plugin's own existing -1 sentinel convention for that field
+	// below); a null precipitation means "no reading for this point at
+	// all", which is NOT the same as "0 mm/h falling" - see
+	// parseOpenMeteoForecast's mapping below for how each is handled.
 	Minutely15 *struct {
-		Time                     []string  `json:"time"`
-		Precipitation            []float64 `json:"precipitation"`
-		PrecipitationProbability []int     `json:"precipitation_probability"`
+		Time                     []string   `json:"time"`
+		Precipitation            []*float64 `json:"precipitation"`
+		PrecipitationProbability []*int     `json:"precipitation_probability"`
 	} `json:"minutely_15"`
 }
 
@@ -206,13 +215,14 @@ type wasmWeatherHourOutput struct {
 // wasmWeatherNextHourOutput - see that file's doc comment and
 // backend/weather_providers.go's top doc comment for the full next_hour
 // contract. PrecipitationChancePct keeps the same negative-is-absent
-// convention as this contract's other precipitation_chance_pct fields, but
-// this plugin never actually emits a negative here: Open-Meteo's
-// minutely_15 request always returns a numeric precipitation_probability
-// value (see openMeteoResponse.Minutely15's doc comment) - whether that
-// value is genuine 15-minute data or interpolated from the hourly model is
-// exactly what NextHourSource (below) reports, not something
-// PrecipitationChancePct itself needs a sentinel for.
+// convention as this contract's other precipitation_chance_pct fields:
+// usually a plain 0-100 value straight from Open-Meteo's
+// precipitation_probability, but -1 whenever that entry is a real JSON null
+// (see openMeteoResponse.Minutely15's doc comment on the pointer-element
+// slices this is parsed from) - whether a real (non-sentinel) value is
+// genuine 15-minute data or interpolated from the hourly model is exactly
+// what NextHourSource (below) reports, not something PrecipitationChancePct
+// itself needs a second signal for.
 type wasmWeatherNextHourOutput struct {
 	Time                   string  `json:"time"`
 	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
@@ -495,15 +505,25 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 			// Open-Meteo uses everywhere else it documents one.
 			pointTime := rawPointTime.Add(-15 * time.Minute)
 
-			var mmPerH float64
-			if i < len(resp.Minutely15.Precipitation) {
-				// mm per 15 minutes -> mm/h: 4 quarter-hours per hour.
-				mmPerH = resp.Minutely15.Precipitation[i] * 4
+			// A null precipitation reading means Open-Meteo has no data for
+			// this point at all - not a genuine 0 mm/h. This plugin's
+			// next_hour contract has no per-point "no data" flag for
+			// PrecipitationMMPerH (unlike PrecipitationChancePct's own
+			// negative-sentinel convention), so the only honest way to carry
+			// "no data" through is to omit the point entirely - the
+			// host/frontend already treat a gap between next_hour points as
+			// "nothing known there", never as "confirmed dry" (see
+			// lib/nowcast.ts's buildNowcastBars, which only ever draws bars
+			// for the points it's actually given).
+			if i >= len(resp.Minutely15.Precipitation) || resp.Minutely15.Precipitation[i] == nil {
+				continue
 			}
+			// mm per 15 minutes -> mm/h: 4 quarter-hours per hour.
+			mmPerH := *resp.Minutely15.Precipitation[i] * 4
 
 			chancePct := -1.0
-			if i < len(resp.Minutely15.PrecipitationProbability) {
-				chancePct = float64(resp.Minutely15.PrecipitationProbability[i])
+			if i < len(resp.Minutely15.PrecipitationProbability) && resp.Minutely15.PrecipitationProbability[i] != nil {
+				chancePct = float64(*resp.Minutely15.PrecipitationProbability[i])
 			}
 
 			out.NextHour = append(out.NextHour, wasmWeatherNextHourOutput{
@@ -512,7 +532,13 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 				PrecipitationMMPerH:    mmPerH,
 			})
 		}
-		out.NextHourSource = nextHourSourceForPosition(resp.Latitude, resp.Longitude)
+		// Only claim a source when at least one point survived the null
+		// check above - a next_hour_source with zero actual points is
+		// meaningless (the host doesn't look at it when next_hour is empty
+		// either way, but there's no reason to set a stale/misleading value).
+		if len(out.NextHour) > 0 {
+			out.NextHourSource = nextHourSourceForPosition(resp.Latitude, resp.Longitude)
+		}
 	}
 
 	return out, nil

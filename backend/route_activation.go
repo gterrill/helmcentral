@@ -343,40 +343,44 @@ func getActiveRouteHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch active route from signalk: %v", err)})
 	}
 
+	var result map[string]any
 	if status.ActiveRouteHref == "" {
-		result := map[string]any{"active": false}
-		// destination (ADR 0125): a chartplotter go-to with no Helmcentral
-		// route behind it still deserves a trip ETA on the clock tile. Only
-		// added when the Course API actually carries a nextPoint - a route
-		// activated from elsewhere with no destination at all gets no key,
-		// not a null one, so the frontend can tell "nothing to report" apart
-		// from "reported, but empty" without a third state.
-		if status.HasNextPoint {
-			result["destination"] = map[string]any{
-				"lat":  status.NextPointLat,
-				"lon":  status.NextPointLon,
-				"name": resolveDestinationPlaceName(status.NextPointLat, status.NextPointLon),
-			}
-		}
-		return c.JSON(http.StatusOK, result)
-	}
-
-	routeID := routeIDFromSignalKHref(status.ActiveRouteHref)
-
-	routesMu.RLock()
-	route, ok := routesState[routeID]
-	routesMu.RUnlock()
-
-	result := map[string]any{
-		"active":      true,
-		"point_index": status.PointIndex,
-		"reverse":     status.Reverse,
-	}
-	if ok {
-		result["route_id"] = route.ID
-		result["route_name"] = route.Name
+		result = map[string]any{"active": false}
 	} else {
-		result["route_id"] = nil
+		routeID := routeIDFromSignalKHref(status.ActiveRouteHref)
+
+		routesMu.RLock()
+		route, ok := routesState[routeID]
+		routesMu.RUnlock()
+
+		result = map[string]any{
+			"active":      true,
+			"point_index": status.PointIndex,
+			"reverse":     status.Reverse,
+		}
+		if ok {
+			result["route_id"] = route.ID
+			result["route_name"] = route.Name
+		} else {
+			result["route_id"] = nil
+		}
+	}
+
+	// destination (ADR 0125): the Course API's nextPoint, whenever present -
+	// a chartplotter go-to with no Helmcentral route behind it, OR a route
+	// activated somewhere other than Helmcentral (activeRoute.href set, but
+	// not one of ours, so route_id above came back nil), still deserves a
+	// trip ETA on the clock tile. Added in both branches above, not just the
+	// "nothing active" one - only added when the Course API actually
+	// carries a nextPoint, so a response with no destination at all gets no
+	// key, not a null one, letting the frontend tell "nothing to report"
+	// apart from "reported, but empty" without a third state.
+	if status.HasNextPoint {
+		result["destination"] = map[string]any{
+			"lat":  status.NextPointLat,
+			"lon":  status.NextPointLon,
+			"name": resolveDestinationPlaceName(status.NextPointLat, status.NextPointLon),
+		}
 	}
 
 	return c.JSON(http.StatusOK, result)

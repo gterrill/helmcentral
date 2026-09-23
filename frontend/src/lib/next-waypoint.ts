@@ -144,7 +144,16 @@ export function etaToRouteEnd(
   const next = nextWaypoint(route, status)
   if (!next) return null
 
-  const traversal = status.reverse ? [...route.waypoints].reverse() : route.waypoints
+  // traversalOrder is where the reverse-flag handling lives (see this
+  // module's top comment) - reusing it here rather than re-reversing
+  // route.waypoints keeps that logic in exactly one place. The null check
+  // is redundant with nextWaypoint's own (traversalOrder can only return
+  // null here under conditions nextWaypoint already ruled out by not
+  // returning null itself), but TypeScript can't see that through the
+  // function boundary - same reasoning nextWaypoint's own body already
+  // documents for its identical check.
+  const traversal = traversalOrder(route, status)
+  if (!traversal) return null
   const finalIndex = traversal.length - 1
   const finalWaypoint = traversal[finalIndex]
   const label = finalWaypoint.name && finalWaypoint.name.trim() !== '' ? finalWaypoint.name : `WP ${finalIndex + 1}`
@@ -194,4 +203,61 @@ export function etaToDestination(
   }
 
   return { distanceM, etaAt: new Date(now.getTime() + seconds * 1000) }
+}
+
+/** Structurally identical to clock-tile.tsx's ClockTileTripEta - duck-typed rather than imported so this lib module has no dependency on a components/ file. */
+export interface ClockTripEta {
+  label: string | null
+  etaAt: Date | null
+  basis: 'sog' | 'plan'
+}
+
+/**
+ * The clock tile's trip ETA (ADR 0092, ADR 0125): the whole trip's arrival,
+ * picked from whichever of routeActivationStatus/routes actually has
+ * something to report. Pulled out of App.tsx as its own pure function so
+ * this decision - which of etaToRouteEnd/etaToDestination applies, and to
+ * which of routeActivationStatus's branches - is unit-testable without
+ * rendering the whole app.
+ *
+ * A Helmcentral-activated route (state 'active', a routeId matching one of
+ * `routes`) reports to its FINAL waypoint via etaToRouteEnd. Every other
+ * case that still carries a `destination` - state 'inactive' (a bare
+ * chartplotter go-to), or state 'active' with a routeId SignalK reports but
+ * Helmcentral doesn't recognize (a route activated from elsewhere) - reports
+ * to that destination via etaToDestination instead, identically: neither
+ * has a Helmcentral route to compute a leg-by-leg ETA from. Returns null
+ * when there is genuinely nothing to report (no position fix, no active
+ * status, an active known routeId whose route has gone missing, or no
+ * destination at all).
+ */
+export function computeClockTripEta(
+  status: ActiveRouteStatus | null,
+  routes: Route[],
+  vesselLat: number | null,
+  vesselLon: number | null,
+  sogKts: number | null,
+  now: Date,
+): ClockTripEta | null {
+  if (!status || vesselLat === null || vesselLon === null) return null
+
+  if (status.state === 'active' && status.routeId !== null) {
+    const route = routes.find((r) => r.id === status.routeId)
+    if (!route) return null
+    const eta = etaToRouteEnd(vesselLat, vesselLon, route, status, sogKts, now)
+    if (!eta) return null
+    return { label: eta.label, etaAt: eta.etaAt, basis: eta.basis }
+  }
+
+  // The block above already returned for every active-with-a-known-routeId
+  // outcome, so reaching here with state === 'active' means routeId was
+  // null.
+  if ((status.state === 'inactive' || status.state === 'active') && status.destination) {
+    const destination = status.destination
+    const eta = etaToDestination(vesselLat, vesselLon, destination, sogKts, now)
+    const label = destination.name.trim() !== '' ? destination.name : null
+    return { label, etaAt: eta.etaAt, basis: 'sog' as const }
+  }
+
+  return null
 }

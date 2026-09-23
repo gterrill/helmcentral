@@ -131,16 +131,27 @@ just the ones someone happened to test at.
 `backend/route_activation.go`'s `fetchSignalKCourseStatus` now also parses
 the Course API's `nextPoint.position`/`nextPoint.type`, independent of
 whether `activeRoute` is set. `GET /api/routes/active` gains a
-`destination: {lat, lon, name}` key when there is no active route but the
-plotter still has a `nextPoint` set (omitted entirely, not `null`, when
-there is no next point at all). `name` comes from the same cached
-place-name machinery the vessel's own position uses
+`destination: {lat, lon, name}` key whenever the plotter has a `nextPoint`
+set, regardless of which of the two response shapes it's added to (omitted
+entirely, not `null`, when there is no next point at all). `name` comes
+from the same cached place-name machinery the vessel's own position uses
 (`backend/place_name.go`'s `resolvePlaceName`/`placeNameCache`/backoff) via
 a new `resolveDestinationPlaceName`: cache-first, and a cache miss starts
 exactly one background resolve (its own single-flight guard, deliberately
 separate from the vessel tick's, so a slow destination lookup can never
 starve the tick's own resolution of its turn or vice versa) rather than
 blocking the 15s poll on a live provider round trip.
+
+**Addendum (2026-09-23, pre-merge review):** the first version of this
+landed `destination` on the "no active route" response only. A route
+activated from somewhere other than Helmcentral - SignalK reports an
+`activeRoute.href`, but it doesn't match anything in `routesState`, so
+`route_id` comes back `null` - still has a real `nextPoint` behind it, and
+got no ETA at all: exactly the same "trip wasn't planned inside
+Helmcentral" case as a bare chartplotter go-to, just with the *other* of
+the two response branches. Fixed by adding `destination` after both
+branches build their own `result` map, keyed only on `HasNextPoint`, not on
+which branch ran.
 
 `lib/next-waypoint.ts` gained `etaToRouteEnd` (ETA to a Helmcentral route's
 FINAL waypoint in traversal order - the vessel's distance to the current
@@ -149,11 +160,15 @@ basis rule as the existing `etaToWaypoint`) and `etaToDestination` (ETA to
 a bare chartplotter destination, SOG only - there is no route behind it and
 therefore no planning speed to fall back to, so a becalmed boat gets no
 honest ETA here even though the same boat would still get one, on plan
-speed, toward an actual route). `useRouteActivation`'s `inactive` status
-variant carries the destination through (`destination: {lat, lon, name} |
-null`) so `App.tsx` can build whichever of the two the current situation
-calls for - route active, chartplotter destination only, or neither - and
-hand the clock tile one label/etaAt/basis triple either way. A destination
+speed, toward an actual route). `useRouteActivation`'s `active` status
+variant now carries `destination` through too (matching `inactive`'s own
+`destination: {lat, lon, name} | null`), so `App.tsx`'s
+`computeClockTripEta` (`lib/next-waypoint.ts` - pulled out of `App.tsx`
+itself so the decision is unit-testable without rendering the whole app)
+can pick whichever of the two ETA functions the current situation calls
+for: a known Helmcentral route always takes `etaToRouteEnd`; everything
+else that still carries a `destination` - inactive, or active with an
+unrecognized route - takes `etaToDestination` identically. A destination
 with no resolved name yet shows the ETA with no label ("ETA 11:13") rather
 than inventing one.
 
@@ -215,7 +230,10 @@ cycle.
   invisible to a test suite that only checked glyph counts.
 - The clock tile reports an ETA for a chartplotter go-to now, not only for
   a route activated inside Helmcentral - closing a real regression against
-  what HelmCast's wall page used to show.
+  what HelmCast's wall page used to show. That now includes a route
+  activated on the plotter itself but never inside Helmcentral, not just a
+  plain go-to with no route feature involved at all (pre-merge addendum
+  above).
 - The destination place name adds one more consumer of the shared
   place-name cache/backoff machinery, on its own single-flight guard so it
   cannot compete with the vessel tick's own resolution for the same

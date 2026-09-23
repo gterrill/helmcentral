@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { ChartUnavailableMessage } from '@/components/chart-tooltip'
@@ -110,8 +110,21 @@ function useMeasuredBox() {
  * doc comment). A wave-feed error shows the same unavailable message the
  * forecast drawer uses for its own wave chart, with no chart drawn
  * underneath it - a failed fetch is not the same thing as an empty series.
+ *
+ * Wrapped in memo() (item D's per-tick-render pattern - see
+ * app-tile-memoization.test.tsx) and buildSeaStateSeries kept in a useMemo
+ * keyed on its own inputs: App re-renders every gauge tick, and without
+ * these two this tile would rebuild the full 5-day hourly series and
+ * re-diff the sea-state chart on every one of those ticks even though
+ * forecast/waveForecastDays themselves change far less often.
  */
-export function ForecastConditionsTile({ forecast, waveForecastDays, waveLoading, waveError, units }: ForecastConditionsTileProps) {
+export const ForecastConditionsTile = memo(function ForecastConditionsTile({
+  forecast,
+  waveForecastDays,
+  waveLoading,
+  waveError,
+  units,
+}: ForecastConditionsTileProps) {
   const [ref, box] = useMeasuredBox()
   const width = box.width > 0 ? box.width : FALLBACK_WIDTH
   const height = box.height > 0 ? box.height : FALLBACK_HEIGHT
@@ -122,7 +135,10 @@ export function ForecastConditionsTile({ forecast, waveForecastDays, waveLoading
   const upcoming = forecast.slice(START_DAY, START_DAY + CARD_COUNT)
   const cards = Array.from({ length: CARD_COUNT }, (_, i) => upcoming[i] ?? null)
 
-  const series = buildSeaStateSeries(forecast, waveForecastDays, CARD_COUNT, START_DAY)
+  const series = useMemo(
+    () => buildSeaStateSeries(forecast, waveForecastDays, CARD_COUNT, START_DAY),
+    [forecast, waveForecastDays],
+  )
 
   return (
     <Tile title="Forecast Conditions">
@@ -182,4 +198,4 @@ export function ForecastConditionsTile({ forecast, waveForecastDays, waveLoading
       </div>
     </Tile>
   )
-}
+})

@@ -57,8 +57,10 @@
 // Open-Meteo's minutely_15, sends a negative chance rather than inventing
 // one). The host does not require or infer any particular cadence: it
 // infers the step (e.g. 1 minute for WeatherKit, 15 minutes for Open-Meteo)
-// from the gap between the first two points, and a single point has no
-// inferrable step at all. See buildWeatherNextHourResponse below.
+// from the smallest positive gap between any two consecutive points, and
+// omits next_hour entirely (logging why) when no positive gap can be found
+// at all - a single point, or every point sharing (or going backward from)
+// its predecessor's timestamp. See buildWeatherNextHourResponse below.
 //
 // Each next_hour point's "time" marks the START of the interval it
 // describes: a point covers [time, time+step) counting FORWARD from its own
@@ -840,21 +842,55 @@ type weatherNextHourResponse struct {
 	Points []weatherNextHourPointResponse `json:"points"`
 }
 
+// inferNextHourStepMinutes derives the nowcast's per-point interval width
+// from the smallest positive gap between any two chronologically-adjacent
+// points (points arrive in time order - see this file's top doc comment).
+// Using only the gap between the first two points broke down whenever the
+// provider's very first two timestamps happened to be equal (or
+// out-of-order): a non-positive first gap produced step 0, which - since
+// buildNowcastBars (lib/nowcast.ts) applies one shared step to every point -
+// silently zero-widthed and dropped every bar in the strip, not just the
+// first. Taking the smallest positive gap across the whole slice recovers
+// the provider's real cadence even when one pair is anomalous. Returns
+// (0, false) when no positive gap exists anywhere - a single point, or every
+// timestamp identical/non-increasing - so the caller can refuse to guess
+// rather than emit an unusable step (AGENTS.md fallback policy: surfaced,
+// not silent).
+func inferNextHourStepMinutes(points []weatherNextHourPoint) (int, bool) {
+	best := 0
+	found := false
+	for i := 1; i < len(points); i++ {
+		gap := int(points[i].Time.Sub(points[i-1].Time).Round(time.Minute) / time.Minute)
+		if gap <= 0 {
+			continue
+		}
+		if !found || gap < best {
+			best = gap
+			found = true
+		}
+	}
+	return best, found
+}
+
 // buildWeatherNextHourResponse maps a bundle's NextHour points (and their
-// shared NextHourSource) onto the wire shape, inferring StepMinutes from the
-// gap between the first two points (the guest contract deliberately carries
-// no explicit step field - see this file's top doc comment). Returns nil for
-// a nil or empty points slice, so a provider with no nowcast coverage
-// produces no "next_hour" key at all, distinguishable from "nowcast checked,
-// all dry" (a non-nil response whose points all read 0% chance).
+// shared NextHourSource) onto the wire shape, inferring StepMinutes via
+// inferNextHourStepMinutes (the guest contract deliberately carries no
+// explicit step field - see this file's top doc comment). Returns nil for a
+// nil or empty points slice, so a provider with no nowcast coverage produces
+// no "next_hour" key at all, distinguishable from "nowcast checked, all dry"
+// (a non-nil response whose points all read 0% chance) - and also returns
+// nil, after logging why, when the points present carry no inferrable
+// step: better to show "no nowcast" than a strip whose every bar silently
+// vanishes on the frontend.
 func buildWeatherNextHourResponse(points []weatherNextHourPoint, source string) *weatherNextHourResponse {
 	if len(points) == 0 {
 		return nil
 	}
 
-	stepMinutes := 0
-	if len(points) >= 2 {
-		stepMinutes = int(points[1].Time.Sub(points[0].Time).Round(time.Minute) / time.Minute)
+	stepMinutes, ok := inferNextHourStepMinutes(points)
+	if !ok {
+		log.Printf("weather next_hour: could not infer a positive step from %d point(s) (all gaps <= 0); omitting next_hour rather than guessing", len(points))
+		return nil
 	}
 
 	mapped := make([]weatherNextHourPointResponse, 0, len(points))
