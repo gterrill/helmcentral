@@ -1146,6 +1146,81 @@ func TestDeleteEquipmentPhotoHandler_RemovesFileAndLink(t *testing.T) {
 	}
 }
 
+// TestDeleteEquipmentPhotoHandler_SharedPhotoSurvivesRemovalFromOneItem pins
+// the most serious ADR 0127 review finding: uploads are deduplicated by
+// sha256, so the SAME bytes uploaded as a photo on two different items share
+// one documents row and one file on disk. Removing the photo from item A
+// must leave item B's photo (and the underlying file) intact.
+func TestDeleteEquipmentPhotoHandler_SharedPhotoSurvivesRemovalFromOneItem(t *testing.T) {
+	withTestDocumentStore(t)
+
+	itemA, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+
+	cA, recA := newInventoryPhotoUploadContext(t, itemA.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cA); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(A): %v", err)
+	}
+	var uploadedA struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recA.Body.Bytes(), &uploadedA); err != nil {
+		t.Fatalf("unmarshal(A): %v", err)
+	}
+	photoID := uploadedA.Item.PhotoIDs[0]
+
+	// Same bytes onto item B - Insert's own sha256 dedupe links the SAME
+	// document row rather than storing a second file.
+	cB, recB := newInventoryPhotoUploadContext(t, itemB.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cB); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(B): %v", err)
+	}
+	var uploadedB struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recB.Body.Bytes(), &uploadedB); err != nil {
+		t.Fatalf("unmarshal(B): %v", err)
+	}
+	if len(uploadedB.Item.PhotoIDs) != 1 || uploadedB.Item.PhotoIDs[0] != photoID {
+		t.Fatalf("expected B to link the SAME deduplicated document, got %+v", uploadedB.Item.PhotoIDs)
+	}
+
+	c, rec := newInventoryEquipmentIDContext(http.MethodDelete, "/api/inventory/equipment/"+itemA.ID+"/photos/"+photoID, "", itemA.ID, photoID)
+	if err := deleteEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries := documentsDirEntries(t)
+	if len(entries) != 1 {
+		t.Fatalf("expected the shared file to survive on disk, found %v", entries)
+	}
+
+	itemBAfter, err := globalDocumentStore.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(itemBAfter.PhotoIDs) != 1 || itemBAfter.PhotoIDs[0] != photoID {
+		t.Fatalf("expected item B's photo untouched, got %+v", itemBAfter.PhotoIDs)
+	}
+
+	c2, rec2 := newDocumentEchoContext(http.MethodGet, "/api/documents/"+photoID+"/content", "", photoID)
+	if err := documentContentHandler(c2); err != nil {
+		t.Fatalf("documentContentHandler: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected the shared photo's content still servable, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
 // TestDeleteEquipmentHandler_CascadesPhotoLinks is a required Verification
 // case: "Deleting the item cascades its photo links."
 func TestDeleteEquipmentHandler_CascadesPhotoLinks(t *testing.T) {

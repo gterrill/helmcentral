@@ -1528,28 +1528,35 @@ func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []strin
 	return tx.Commit()
 }
 
-// RemoveEquipmentPhoto detaches documentID from equipmentID's photo strip
-// AND deletes the underlying document row - ADR 0124: "a photo has no life
-// outside its item." Returns the document's own sha256 (like Delete) so the
-// handler can remove its on-disk file the same way deleteDocumentHandler
-// does. errEquipmentPhotoNotFound if documentID isn't currently one of
+// RemoveEquipmentPhoto detaches documentID from equipmentID's photo strip -
+// ADR 0127. Uploads are deduplicated by sha256 (Insert's own dedupe), so the
+// SAME document row can be linked as a photo on more than one item; deleting
+// it unconditionally, the way this method first shipped, cascaded the photo
+// off every OTHER item that happened to share the exact same bytes and
+// deleted their file too. So this only ever removes equipmentID's own link.
+// The document row itself (and, per ADR 0124, "a photo has no life outside
+// its item") is deleted only when no equipment_documents row references it
+// anywhere any more - documentDeleted reports which happened, so the caller
+// (deleteEquipmentPhotoHandler) knows whether it's safe to remove the file
+// from disk too; sha is returned either way, for logging/the deleted case.
+// errEquipmentPhotoNotFound if documentID isn't currently one of
 // equipmentID's own photo links.
-func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) (string, error) {
+func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) (sha string, documentDeleted bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return "", fmt.Errorf("remove equipment photo: begin: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: begin: %w", err)
 	}
 	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 	if err != nil {
-		return "", fmt.Errorf("remove equipment photo: check equipment: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: check equipment: %w", err)
 	}
 	if !ok {
-		return "", errEquipmentNotFound
+		return "", false, errEquipmentNotFound
 	}
 
 	isPhoto, err := rowExists(tx, `
@@ -1557,26 +1564,40 @@ func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) (st
 		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
 		WHERE ed.equipment_id = ? AND ed.document_id = ?`, equipmentID, documentID)
 	if err != nil {
-		return "", fmt.Errorf("remove equipment photo: check link: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: check link: %w", err)
 	}
 	if !isPhoto {
-		return "", errEquipmentPhotoNotFound
+		return "", false, errEquipmentPhotoNotFound
 	}
 
-	var sha string
 	if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, documentID).Scan(&sha); err != nil {
-		return "", fmt.Errorf("remove equipment photo: read sha: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: read sha: %w", err)
 	}
 
-	// Deleting the document cascades the equipment_documents link (ON
-	// DELETE CASCADE on document_id, documents_store.go's schema) - no
-	// separate DELETE of the link is needed.
+	if _, err := tx.Exec(
+		`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
+		equipmentID, documentID,
+	); err != nil {
+		return "", false, fmt.Errorf("remove equipment photo: unlink: %w", err)
+	}
+
+	stillLinked, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, documentID)
+	if err != nil {
+		return "", false, fmt.Errorf("remove equipment photo: check remaining links: %w", err)
+	}
+	if stillLinked {
+		if err := tx.Commit(); err != nil {
+			return "", false, fmt.Errorf("remove equipment photo: commit: %w", err)
+		}
+		return sha, false, nil
+	}
+
 	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, documentID); err != nil {
-		return "", fmt.Errorf("remove equipment photo: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("remove equipment photo: commit: %w", err)
+		return "", false, fmt.Errorf("remove equipment photo: commit: %w", err)
 	}
-	return sha, nil
+	return sha, true, nil
 }

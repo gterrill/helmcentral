@@ -714,11 +714,15 @@ func setEquipmentPhotoOrderHandler(c echo.Context) error {
 }
 
 // deleteEquipmentPhotoHandler is DELETE
-// /api/inventory/equipment/:id/photos/:documentId: detaches the photo AND
-// deletes its document (ADR 0124: "a photo has no life outside its item"),
-// the same sha-lock-then-remove-file sequence deleteDocumentHandler uses
-// (documents_handlers.go), so an upload racing the exact same content can
-// never interleave into a row with no file or a file no row points at.
+// /api/inventory/equipment/:id/photos/:documentId: detaches the photo and,
+// ONLY when no other item still links the same document (uploads are
+// deduplicated by sha256, so byte-identical photos on two items share one
+// document row - RemoveEquipmentPhoto's own doc comment), deletes the
+// document and its file too (ADR 0124: "a photo has no life outside its
+// item"). The sha-lock-then-remove-file sequence otherwise matches
+// deleteDocumentHandler (documents_handlers.go), so an upload racing the
+// exact same content can never interleave into a row with no file or a file
+// no row points at.
 func deleteEquipmentPhotoHandler(c echo.Context) error {
 	id := c.Param("id")
 	documentID := c.Param("documentId")
@@ -731,15 +735,17 @@ func deleteEquipmentPhotoHandler(c echo.Context) error {
 	unlockSHA := lockDocumentSHA(doc.SHA256)
 	defer unlockSHA()
 
-	sha, err := globalDocumentStore.RemoveEquipmentPhoto(id, documentID)
+	sha, documentDeleted, err := globalDocumentStore.RemoveEquipmentPhoto(id, documentID)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 
-	path := filepath.Join(documentsDirPath(), sha)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		log.Printf("inventory: delete photo: failed to remove file %s: %v", path, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove document file"})
+	if documentDeleted {
+		path := filepath.Join(documentsDirPath(), sha)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Printf("inventory: delete photo: failed to remove file %s: %v", path, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove document file"})
+		}
 	}
 	return respondWithUpdatedEquipment(c, id, http.StatusOK)
 }

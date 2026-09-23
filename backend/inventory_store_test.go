@@ -920,12 +920,15 @@ func TestDocumentStore_RemoveEquipmentPhotoDeletesLinkAndDocument(t *testing.T) 
 		t.Fatalf("AddEquipmentPhoto: %v", err)
 	}
 
-	sha, err := store.RemoveEquipmentPhoto(item.ID, photo.ID)
+	sha, deleted, err := store.RemoveEquipmentPhoto(item.ID, photo.ID)
 	if err != nil {
 		t.Fatalf("RemoveEquipmentPhoto: %v", err)
 	}
 	if sha != "sha-remove" {
 		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
+	}
+	if !deleted {
+		t.Fatalf("expected the document to be reported deleted when no other item references it")
 	}
 
 	if _, err := store.Get(photo.ID); !errors.Is(err, errDocumentNotFound) {
@@ -952,8 +955,63 @@ func TestDocumentStore_RemoveEquipmentPhotoNotOwnedByItemReturnsNotFound(t *test
 	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
-	if _, err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
+	if _, _, err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
 		t.Fatalf("expected errEquipmentPhotoNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt pins the
+// most serious of the ADR 0127 review findings: uploads are deduplicated by
+// sha256 (documentStore.Insert), so byte-identical photos added to two
+// different items share ONE documents row, linked twice. Removing the photo
+// from item A must drop only A's own equipment_documents link - the document
+// row (and, at the handler layer, its file) must survive because item B's
+// link still references it.
+func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	itemA, err := store.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := store.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-shared", "a.jpg")
+	if err := store.AddEquipmentPhoto(itemA.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(A): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(itemB.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(B): %v", err)
+	}
+
+	sha, deleted, err := store.RemoveEquipmentPhoto(itemA.ID, photo.ID)
+	if err != nil {
+		t.Fatalf("RemoveEquipmentPhoto: %v", err)
+	}
+	if sha != "sha-shared" {
+		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
+	}
+	if deleted {
+		t.Fatalf("expected the document to be KEPT while item B still links it")
+	}
+
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the shared document to survive, got %v", err)
+	}
+	gotA, err := store.GetEquipment(itemA.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(A): %v", err)
+	}
+	if len(gotA.PhotoIDs) != 0 {
+		t.Fatalf("expected item A's own link removed, got %#v", gotA.PhotoIDs)
+	}
+	gotB, err := store.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(gotB.PhotoIDs) != 1 || gotB.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected item B's own link untouched, got %#v", gotB.PhotoIDs)
 	}
 }
 
