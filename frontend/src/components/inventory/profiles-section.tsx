@@ -115,7 +115,13 @@ function toEditableProfile(profile: EngineProfile) {
   }
 }
 
-export function EquipmentSection() {
+// ADR 0123: moved from components/settings/sections/equipment-section.tsx -
+// profiles are reference data (gauges, alarm bands, service intervals) about
+// a make and model, not a setting, and now live beside the gear that uses
+// them rather than in Settings. Renamed EquipmentSection -> ProfilesSection
+// on the move; nothing about how it talks to /api/equipment-profiles
+// changed (that API stays where it is, ADR 0123 decisions).
+export function ProfilesSection() {
   const { profiles, loading, error: loadError, reload } = useEquipmentProfiles(true)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [isEditing, setIsEditing] = useState(false)

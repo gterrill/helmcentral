@@ -91,6 +91,91 @@ export function zoomForRangeNm(rangeNm: number, lat: number, heightPx: number): 
   return Math.max(POI_MAP_MIN_ZOOM, Math.min(POI_MAP_MAX_ZOOM, zoom))
 }
 
+// Same tile size WEB_MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 above is derived
+// from (earth's equatorial circumference / 256), so fitCameraToPoints below
+// stays in the same projection zoomForRangeNm already uses.
+const MERCATOR_TILE_SIZE_PX = 256
+
+/** Fraction of the world's width, 0 (antimeridian, west) to 1 (antimeridian, east). */
+function mercatorX(lon: number): number {
+  return (lon + 180) / 360
+}
+
+/** Fraction of the world's height, 0 (north) to 1 (south) - Web Mercator's characteristic latitude stretch. */
+function mercatorY(lat: number): number {
+  const latRad = (lat * Math.PI) / 180
+  return 0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)
+}
+
+function mercatorYToLat(y: number): number {
+  const n = Math.PI - 2 * Math.PI * y
+  // atan(sinh(n)), the Gudermannian function - the standard inverse of the
+  // Web Mercator latitude stretch above.
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+}
+
+export interface MapPoint {
+  lat: number
+  lon: number
+}
+
+/**
+ * The camera (centre + zoom) that fits every one of `points` inside a
+ * `widthPx` x `heightPx` viewport, with `paddingPx` of clearance on every
+ * edge for marker size and labels. The pure-arithmetic equivalent of
+ * maplibre's own `Map.cameraForBounds`, done in the same Web Mercator
+ * projection zoomForRangeNm above uses, so it needs no live map instance and
+ * can be unit-tested without a WebGL context (poi-map-tile-impl.tsx still
+ * uses the real map's easeTo/jumpTo to actually move the camera - this only
+ * computes where to move it to).
+ *
+ * Zoom is clamped to POI_MAP_MIN_ZOOM/MAX_ZOOM, same as zoomForRangeNm.
+ * `points` must be non-empty. When every point shares the same longitude, or
+ * the same latitude, that axis has no span to fit against and imposes no
+ * limit on zoom by itself - a single point (or several coincident ones) hits
+ * this on both axes at once and gets POI_MAP_MAX_ZOOM. Callers that also want
+ * a floor (never zoom in tighter than some minimum range) apply that
+ * themselves, e.g. `Math.min(fitCameraToPoints(...).zoom, zoomForRangeNm(...))`.
+ */
+export function fitCameraToPoints(points: MapPoint[], widthPx: number, heightPx: number, paddingPx: number): { center: MapPoint; zoom: number } {
+  const lons = points.map((p) => p.lon)
+  const xs = points.map((p) => mercatorX(p.lon))
+  const ys = points.map((p) => mercatorY(p.lat))
+
+  const minLon = Math.min(...lons)
+  const maxLon = Math.max(...lons)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+
+  const center: MapPoint = {
+    lat: mercatorYToLat((minY + maxY) / 2),
+    lon: (minLon + maxLon) / 2,
+  }
+
+  const availableWidthPx = Math.max(1, widthPx - 2 * paddingPx)
+  const availableHeightPx = Math.max(1, heightPx - 2 * paddingPx)
+  const spanX = maxX - minX
+  const spanY = maxY - minY
+
+  const worldSizeCandidates: number[] = []
+  if (spanX > 0) worldSizeCandidates.push(availableWidthPx / spanX)
+  if (spanY > 0) worldSizeCandidates.push(availableHeightPx / spanY)
+
+  if (worldSizeCandidates.length === 0) {
+    return { center, zoom: POI_MAP_MAX_ZOOM }
+  }
+
+  const worldSizePx = Math.min(...worldSizeCandidates)
+  const zoom = Math.log2(worldSizePx / MERCATOR_TILE_SIZE_PX)
+  const clampedZoom = Number.isFinite(zoom)
+    ? Math.max(POI_MAP_MIN_ZOOM, Math.min(POI_MAP_MAX_ZOOM, zoom))
+    : POI_MAP_MIN_ZOOM
+
+  return { center, zoom: clampedZoom }
+}
+
 /**
  * The top `n` features for the ranked list, one per name. The server already
  * sorts by distance ascending (decorateAndRankPOIFeatures in

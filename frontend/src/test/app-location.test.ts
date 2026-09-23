@@ -7,6 +7,7 @@ import {
   parseAppLocation,
   formatAppLocation,
   isCanonicalAppPath,
+  inventoryEditorClosedBy,
   type LocationContext,
 } from '@/lib/app-location'
 
@@ -188,7 +189,15 @@ describe('parseAppLocation', () => {
 
   it('parses /settings/<sectionId> as that section', () => {
     expect(parseAppLocation('/settings/signalk')).toEqual({ panel: 'settings', section: 'signalk' })
-    expect(parseAppLocation('/settings/equipment')).toEqual({ panel: 'settings', section: 'equipment' })
+    expect(parseAppLocation('/settings/security')).toEqual({ panel: 'settings', section: 'security' })
+  })
+
+  // ADR 0123: Equipment profiles moved out of Settings into Inventory -
+  // 'equipment' is no longer a SettingsSectionId at all, so a stale
+  // /settings/equipment bookmark degrades the same way any other unknown
+  // section id does (falls back to General), rather than resolving.
+  it('falls back to General for the retired /settings/equipment section id', () => {
+    expect(parseAppLocation('/settings/equipment')).toEqual({ panel: 'settings', section: 'general' })
   })
 
   // ADR 0093: the onboard assistant's settings section.
@@ -210,6 +219,35 @@ describe('parseAppLocation', () => {
 
   it('treats an unknown top-level path as the dashboard', () => {
     expect(parseAppLocation('/nonsense')).toEqual({ panel: null, pageId: null })
+  })
+
+  // ADR 0123: the Inventory panel. Same collapse-to-default shape as
+  // /settings - the bare path is the Equipment section (the canonical
+  // index), rather than needing its own /inventory/equipment.
+  it('parses /inventory as the Equipment index', () => {
+    expect(parseAppLocation('/inventory')).toEqual({
+      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null,
+    })
+  })
+
+  it('parses /inventory/equipment/<id> as the Equipment editor', () => {
+    expect(parseAppLocation('/inventory/equipment/eq-1')).toEqual({
+      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'eq-1',
+    })
+  })
+
+  it('decodes a percent-encoded equipment edit id', () => {
+    expect(parseAppLocation('/inventory/equipment/a%20b')).toEqual({
+      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'a b',
+    })
+  })
+
+  it('parses /inventory/profiles as the Profiles section', () => {
+    expect(parseAppLocation('/inventory/profiles')).toEqual({ panel: 'inventory', inventorySection: 'profiles' })
+  })
+
+  it('parses /inventory/locations as the Locations section', () => {
+    expect(parseAppLocation('/inventory/locations')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
   })
 })
 
@@ -275,7 +313,7 @@ describe('formatAppLocation', () => {
 
   it('formats settings, another section as /settings/<sectionId>', () => {
     expect(formatAppLocation({ panel: 'settings', section: 'signalk' }, ctx)).toBe('/settings/signalk')
-    expect(formatAppLocation({ panel: 'settings', section: 'equipment' }, ctx)).toBe('/settings/equipment')
+    expect(formatAppLocation({ panel: 'settings', section: 'security' }, ctx)).toBe('/settings/security')
   })
 
   it('formats settings, Assistant section as /settings/mate', () => {
@@ -333,6 +371,28 @@ describe('formatAppLocation', () => {
   it('drops a section with no folder open - it is meaningless on its own', () => {
     expect(formatAppLocation({ panel: 'documents', documentFolderId: null, documentSectionId: 's1' }, ctx)).toBe('/documents')
   })
+
+  it('formats the Inventory panel, Equipment section with no id, as /inventory', () => {
+    expect(formatAppLocation({ panel: 'inventory' }, ctx)).toBe('/inventory')
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null }, ctx)).toBe('/inventory')
+  })
+
+  it('formats an equipment edit id as /inventory/equipment/<id>', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'eq-1' }, ctx)).toBe(
+      '/inventory/equipment/eq-1',
+    )
+  })
+
+  it('encodes the equipment edit id', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'a b' }, ctx)).toBe(
+      '/inventory/equipment/a%20b',
+    )
+  })
+
+  it('formats the Profiles and Locations sections as /inventory/<section>', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'profiles' }, ctx)).toBe('/inventory/profiles')
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations' }, ctx)).toBe('/inventory/locations')
+  })
 })
 
 describe('parse/format fixed point', () => {
@@ -344,6 +404,7 @@ describe('parse/format fixed point', () => {
     '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
     '/documents?folder=f1&section=s1',
     '/documents/doc-1', '/documents/doc-1?folder=f1',
+    '/inventory', '/inventory/equipment/eq-1', '/inventory/profiles', '/inventory/locations',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -387,6 +448,9 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/documents', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents?folder=f1', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents?folder=f1&section=s1', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/inventory', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/inventory/equipment/eq-1', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/inventory/profiles', baseCtx)).toBe(true)
   })
 
   it('is false for the legacy /assistant alias because canonical is /mate', () => {
@@ -395,5 +459,62 @@ describe('isCanonicalAppPath', () => {
 
   it('accepts an unknown page id when the page list has not loaded (knownPageIds: null)', () => {
     expect(isCanonicalAppPath('/dashboard/zzz', { ...baseCtx, knownPageIds: null })).toBe(true)
+  })
+})
+
+describe('inventoryEditorClosedBy', () => {
+  const at = (path: string) => parseAppLocation(path)
+
+  it('says no when the editor is not showing at all', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: null, creating: false },
+      at('/inventory/locations'),
+    )).toBe(false)
+  })
+
+  it('says no when the target is the same record', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/equipment/eq-1'),
+    )).toBe(false)
+  })
+
+  it('says yes when the target is a different record', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/equipment/eq-2'),
+    )).toBe(true)
+  })
+
+  it('says yes when the target is the index', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory'),
+    )).toBe(true)
+  })
+
+  // The hole this function was extracted to close: a section switch leaves the
+  // equipment id null on both sides, so comparing ids alone saw no change and
+  // let a dirty editor close unguarded.
+  it('says yes when only the section changed', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/inventory/profiles'),
+    )).toBe(true)
+  })
+
+  // And the same hole for a New item draft, which has no id to compare with.
+  it('says yes for an unsaved New item draft, whatever the inventory target', () => {
+    const draft = { section: 'equipment' as const, equipmentEditId: null, creating: true }
+    expect(inventoryEditorClosedBy(draft, at('/inventory'))).toBe(true)
+    expect(inventoryEditorClosedBy(draft, at('/inventory/profiles'))).toBe(true)
+    expect(inventoryEditorClosedBy(draft, at('/inventory/locations'))).toBe(true)
+  })
+
+  it('says yes when leaving the panel entirely', () => {
+    expect(inventoryEditorClosedBy(
+      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
+      at('/documents'),
+    )).toBe(true)
   })
 })

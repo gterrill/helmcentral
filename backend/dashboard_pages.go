@@ -139,6 +139,13 @@ const poiMapWidgetIDPrefix = "poi-map:"
 // rejected by the GET /api/poi request it goes on to drive.
 var validPoiMapLayouts = map[string]bool{"map": true, "split": true}
 
+// Bounds for the split layout's ranked-list summary cycle; mirrors
+// POI_MAP_SUMMARY_CYCLE_SECONDS_MIN/MAX in frontend/src/lib/dashboard-widgets.ts.
+const (
+	poiMapSummaryCycleSecondsMin = 3
+	poiMapSummaryCycleSecondsMax = 120
+)
+
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
 // Display assignment fields (ADR 0089, superseded in part by ADR 0110) turn
@@ -349,6 +356,13 @@ type dashboardPoiMapConfig struct {
 	// existed keeps the byte-identical file the other ADR 0031 configs do.
 	ShowAis   bool `json:"showAis,omitempty"`
 	ShowTrail bool `json:"showTrail,omitempty"`
+	// How long the split layout's ranked list shows one POI's summary before
+	// cycling to the next one that has one. omitempty + zero-means-unset: no
+	// valid value is ever 0 (poiMapSummaryCycleSecondsMin is 3), so a widget
+	// saved before this field existed, or one that never set it, keeps the
+	// byte-identical file the other optional fields above do, and the
+	// frontend's own default (10s) applies whenever it's absent.
+	SummaryCycleSeconds int `json:"summaryCycleSeconds,omitempty"`
 }
 
 // defaultDashboardLayout recreates the pre-bento 3-column arrangement, used to
@@ -1535,6 +1549,11 @@ func validatePoiMapWidget(w dashboardLayoutItem) string {
 	}
 	if !validPoiMapLayouts[w.PoiMap.Layout] {
 		return "unknown poi map layout: " + w.PoiMap.Layout
+	}
+	if w.PoiMap.SummaryCycleSeconds != 0 &&
+		(w.PoiMap.SummaryCycleSeconds < poiMapSummaryCycleSecondsMin || w.PoiMap.SummaryCycleSeconds > poiMapSummaryCycleSecondsMax) {
+		return fmt.Sprintf("poi map summary cycle seconds must be between %d and %d: %s",
+			poiMapSummaryCycleSecondsMin, poiMapSummaryCycleSecondsMax, w.ID)
 	}
 	return ""
 }

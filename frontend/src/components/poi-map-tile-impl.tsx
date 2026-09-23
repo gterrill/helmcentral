@@ -11,9 +11,11 @@ import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type PoiFeature } from '@/lib/poi'
-import type { PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
+import { fitCameraToPoints, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
+import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
+import { useCyclingIndex } from '@/hooks/use-cycling-index'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { AlarmState } from '@/hooks/use-alarms'
 import type { TrailPoint } from '@/hooks/use-server-trails'
@@ -22,6 +24,28 @@ import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 import { hasWebGL2 } from '@/lib/webgl'
 
+/** One waypoint of the active route, as this tile needs it to draw the route layer. */
+export interface PoiMapActiveRouteWaypoint {
+  lat: number
+  lon: number
+  name?: string
+}
+
+/**
+ * The currently active route (ADR 0092's next-waypoint line, reused here):
+ * App.tsx derives this once from useRoutes/useRouteActivation and
+ * nextWaypoint, so this tile never has to know route activation exists, only
+ * how to draw one. `waypoints` is in traversal order - the order `nextIndex`
+ * indexes into - which is not always the route's authored order; see
+ * lib/next-waypoint.ts's own comment on why a reversed activation makes the
+ * two differ.
+ */
+export interface PoiMapActiveRoute {
+  name: string
+  waypoints: PoiMapActiveRouteWaypoint[]
+  nextIndex: number | null
+}
+
 export interface PoiMapTileProps {
   config: PoiMapWidgetConfig
   editing: boolean
@@ -29,6 +53,12 @@ export interface PoiMapTileProps {
   latitude: number | null
   longitude: number | null
   headingTrue: number | null
+  /**
+   * Null when no route is active, its id matches nothing in the routes list,
+   * or activation status hasn't resolved yet - the route layer draws nothing
+   * in every one of those cases.
+   */
+  activeRoute?: PoiMapActiveRoute | null
   gnssCriticalAlert: boolean
   positionLastUpdateAgeS: number | null
   nearbyVessels: NearbyVessel[]
@@ -62,26 +92,38 @@ const RANKED_LIST_SIZE = 5
 const FOLLOW_THROTTLE_MS = 2000
 const FOLLOW_EASE_DURATION_MS = 500
 
-// Fallback box for the one frame before ResizeObserver reports a real size
-// (or in an environment, such as jsdom, that never fires it at all) — the
-// same technique sea-state-tile.tsx's useMeasuredBox uses.
-const FALLBACK_HEIGHT = 240
+// Clearance kept around the fitted vessel+ranked-POIs bounding box, in
+// screen pixels, so a marker (h-7 w-7, 28px) plus its name label doesn't sit
+// flush against the tile's edge. Exported for the test suite, which computes
+// the same fit independently to check the tile's jumpTo/easeTo calls against.
+export const POI_MAP_FIT_PADDING_PX = 36
 
-function useMeasuredHeight() {
+// Fallback box for the one frame before ResizeObserver reports a real size
+// (or in an environment, such as jsdom, that never fires it at all).
+const FALLBACK_HEIGHT = 240
+const FALLBACK_WIDTH = 240
+
+// Same technique sea-state-tile.tsx's own useMeasuredBox uses - this tile
+// needs both dimensions, not just height, now that the camera fits the
+// vessel plus the ranked POIs against the actual viewport shape rather than
+// assuming height is always the binding constraint (in "split" layout the
+// map pane is half-width, so POIs east/west of the vessel used to fall off
+// the edge even though a height-only zoom said they'd fit).
+function useMeasuredBox() {
   const ref = useRef<HTMLDivElement>(null)
-  const [height, setHeight] = useState(0)
+  const [box, setBox] = useState({ width: 0, height: 0 })
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const observer = new ResizeObserver(([entry]) => {
-      setHeight(entry.contentRect.height)
+      setBox({ width: entry.contentRect.width, height: entry.contentRect.height })
     })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
 
-  return [ref, height] as const
+  return [ref, box] as const
 }
 
 function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineString> {
@@ -89,6 +131,25 @@ function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineStrin
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: points.map((p) => [p.lon, p.lat]) },
     properties: {},
+  }
+}
+
+function waypointsToLineGeoJSON(waypoints: PoiMapActiveRouteWaypoint[]): GeoJSON.Feature<GeoJSON.LineString> {
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: waypoints.map((wp) => [wp.lon, wp.lat]) },
+    properties: {},
+  }
+}
+
+function waypointsToPointsGeoJSON(waypoints: PoiMapActiveRouteWaypoint[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: waypoints.map((wp) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [wp.lon, wp.lat] },
+      properties: {},
+    })),
   }
 }
 
@@ -114,6 +175,7 @@ export default function PoiMapTileImpl({
   latitude,
   longitude,
   headingTrue,
+  activeRoute = null,
   gnssCriticalAlert,
   positionLastUpdateAgeS,
   nearbyVessels,
@@ -135,6 +197,22 @@ export default function PoiMapTileImpl({
     return ranks
   }, [rankedList])
 
+  // Cycling summary (split layout): only one ranked POI shows its detail at
+  // a time, advancing every summaryCycleSeconds. Most POIs never get a
+  // detail at all (PoiFeature's own doc: it's an editorial summary or a
+  // Wikipedia first sentence, when the provider has one), so those are
+  // skipped outright rather than getting an empty turn in the rotation.
+  const cyclableFeatures = useMemo(() => rankedList.filter((f) => f.detail !== ''), [rankedList])
+  // A plain, order-sensitive key rather than the array itself: identical ids
+  // in a new array (every poll gives rankedList a fresh reference) must not
+  // reset the cycle, but a real change to the set - a POI gaining/losing its
+  // detail, dropping out of range, or the ranking reordering - should. See
+  // useCyclingIndex's own doc for why this is what it takes as resetKey.
+  const cyclableKey = useMemo(() => cyclableFeatures.map((f) => f.id).join('|'), [cyclableFeatures])
+  const summaryCycleSeconds = config.summaryCycleSeconds ?? POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT
+  const cycleIndex = useCyclingIndex(cyclableFeatures.length, summaryCycleSeconds, cyclableKey)
+  const expandedPoiId = cycleIndex !== null ? cyclableFeatures[cycleIndex].id : null
+
   const dark = isDarkTheme || forceDark
   const mapStyle = dark ? STYLE_DARK : STYLE_LIGHT
 
@@ -146,38 +224,68 @@ export default function PoiMapTileImpl({
   const canRenderMap = hasWebGL2()
 
   const mapRef = useRef<MapRef | null>(null)
-  const [mapContainerRef, measuredHeight] = useMeasuredHeight()
-  const heightPx = measuredHeight > 0 ? measuredHeight : FALLBACK_HEIGHT
-  const zoom = zoomForRangeNm(config.rangeNm, latitude ?? 0, heightPx)
+  const collapseAttribution = useCollapsedMapAttribution(mapRef)
+  const [mapContainerRef, measuredBox] = useMeasuredBox()
+  const heightPx = measuredBox.height > 0 ? measuredBox.height : FALLBACK_HEIGHT
+  const widthPx = measuredBox.width > 0 ? measuredBox.width : FALLBACK_WIDTH
+
+  // The floor: never zoom in tighter than the configured range gives against
+  // whichever of width/height is more restrictive - previously this always
+  // used height, which is fine in "map" layout (full width) but let POIs
+  // fall off the sides in "split" layout's half-width map pane even though
+  // this same number said they'd fit.
+  const rangeZoomFloor = zoomForRangeNm(config.rangeNm, latitude ?? 0, Math.min(widthPx, heightPx))
+
+  // The camera: fits the vessel plus the ranked list (not every fetched
+  // feature - the ranked list is what the operator can actually see named in
+  // the split layout's rows, and what topPoi already limits to
+  // RANKED_LIST_SIZE) inside the measured viewport, padded for marker size
+  // and labels. Falls back to the old vessel-centred range zoom when there's
+  // nothing ranked yet (feed still loading, or "map" layout content aside,
+  // topPoi is layout-independent). Never tighter than rangeZoomFloor, so a
+  // single close POI doesn't zoom in past what the configured range implies.
+  // Deliberately excludes cycleIndex/expandedPoiId from its own inputs: the
+  // summary cycle changes which row is expanded, not where anything is, and
+  // must never move the camera.
+  const cameraTarget = useMemo((): { center: MapPoint; zoom: number } | null => {
+    if (latitude === null || longitude === null) return null
+    const vessel: MapPoint = { lat: latitude, lon: longitude }
+    if (rankedList.length === 0) return { center: vessel, zoom: rangeZoomFloor }
+    const points: MapPoint[] = [vessel, ...rankedList.map((f) => ({ lat: f.lat, lon: f.lon }))]
+    const fit = fitCameraToPoints(points, widthPx, heightPx, POI_MAP_FIT_PADDING_PX)
+    return { center: fit.center, zoom: Math.min(fit.zoom, rangeZoomFloor) }
+  }, [latitude, longitude, rankedList, widthPx, heightPx, rangeZoomFloor])
 
   const hasCenteredRef = useRef(false)
   const lastEaseAtRef = useRef(0)
 
-  // Follow the vessel: first fix jumps straight there, later fixes ease in,
-  // throttled to at most one per FOLLOW_THROTTLE_MS. Holding still while
-  // gnssCriticalAlert is set (last good centre, no jump/ease at all) is the
-  // same rule the anchor-watch gate uses for the position sentinel. This
-  // runs regardless of `interactive`: it drives the camera imperatively
-  // (map.jumpTo/easeTo), not through one of maplibre's own gesture
-  // handlers, so the kiosk's non-interactive map still follows the vessel.
+  // Follow the vessel-plus-ranked-POIs fit: first fix jumps straight there,
+  // later fixes ease in, throttled to at most one per FOLLOW_THROTTLE_MS.
+  // Holding still while gnssCriticalAlert is set (last good centre, no
+  // jump/ease at all) is the same rule the anchor-watch gate uses for the
+  // position sentinel. This runs regardless of `interactive`: it drives the
+  // camera imperatively (map.jumpTo/easeTo), not through one of maplibre's
+  // own gesture handlers, so the kiosk's non-interactive map still follows.
   useEffect(() => {
     if (gnssCriticalAlert) return
-    if (latitude === null || longitude === null) return
+    if (!cameraTarget) return
     const map = mapRef.current
     if (!map) return
+
+    const { center, zoom } = cameraTarget
 
     if (!hasCenteredRef.current) {
       hasCenteredRef.current = true
       lastEaseAtRef.current = Date.now()
-      map.jumpTo({ center: [longitude, latitude], zoom })
+      map.jumpTo({ center: [center.lon, center.lat], zoom })
       return
     }
 
     const now = Date.now()
     if (now - lastEaseAtRef.current < FOLLOW_THROTTLE_MS) return
     lastEaseAtRef.current = now
-    map.easeTo({ center: [longitude, latitude], zoom, duration: FOLLOW_EASE_DURATION_MS })
-  }, [latitude, longitude, gnssCriticalAlert, zoom])
+    map.easeTo({ center: [center.lon, center.lat], zoom, duration: FOLLOW_EASE_DURATION_MS })
+  }, [cameraTarget, gnssCriticalAlert])
 
   // Declutter POI marker labels on move-end, priority by rank then distance
   // (an unranked feature always yields to a ranked one, matching the ranked
@@ -208,6 +316,32 @@ export default function PoiMapTileImpl({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [config.showTrail, getSelfTrail, poi.features],
   )
+
+  // The active route (ADR 0092/0091): whole route as one line, plus the leg
+  // into the next waypoint drawn again on top in a brighter, thicker stroke
+  // so the leg actually being sailed reads at a glance. `activeRoute` is
+  // already null whenever no route is active or its waypoints are empty
+  // (App.tsx's job, not this tile's), so a plain line needs no extra guard
+  // beyond the usual "a line needs two points" one.
+  const routeLineGeoJSON = useMemo(
+    () => (activeRoute && activeRoute.waypoints.length >= 2 ? waypointsToLineGeoJSON(activeRoute.waypoints) : null),
+    [activeRoute],
+  )
+  const routeNextLegGeoJSON = useMemo(() => {
+    if (!activeRoute || activeRoute.nextIndex === null) return null
+    const { waypoints, nextIndex } = activeRoute
+    if (nextIndex <= 0 || nextIndex >= waypoints.length) return null
+    return waypointsToLineGeoJSON([waypoints[nextIndex - 1], waypoints[nextIndex]])
+  }, [activeRoute])
+  const routeWaypointsGeoJSON = useMemo(
+    () => (activeRoute && activeRoute.waypoints.length > 0 ? waypointsToPointsGeoJSON(activeRoute.waypoints) : null),
+    [activeRoute],
+  )
+  const routeNextWaypointGeoJSON = useMemo(() => {
+    if (!activeRoute || activeRoute.nextIndex === null) return null
+    const waypoint = activeRoute.waypoints[activeRoute.nextIndex]
+    return waypoint ? waypointsToPointsGeoJSON([waypoint]) : null
+  }, [activeRoute])
 
   const title = config.title.trim() || 'Nearby'
   const stale = isStale(positionLastUpdateAgeS)
@@ -258,7 +392,12 @@ export default function PoiMapTileImpl({
                 initialViewState={{
                   latitude: latitude ?? 0,
                   longitude: longitude ?? 0,
-                  zoom,
+                  // The mount-time jumpTo in the follow effect above fires
+                  // right after this first paint and takes over from here
+                  // (to the fitted vessel+ranked-POIs camera, once the ranked
+                  // list has anything in it) - this is only what's on screen
+                  // for that one frame before it does.
+                  zoom: rangeZoomFloor,
                 }}
                 style={{ width: '100%', height: '100%' }}
                 mapStyle={mapStyle}
@@ -266,6 +405,13 @@ export default function PoiMapTileImpl({
                 dragRotate={false}
                 onLoad={declutterLabels}
                 onMoveEnd={declutterLabels}
+                // Same reasoning as anchor-watch-map.tsx and
+                // route-planner-map.tsx: OpenSeaMap requires attribution, and
+                // compact keeps it to a single "i" until tapped rather than a
+                // permanent credit strip. useCollapsedMapAttribution's own
+                // doc covers why this can't be done in CSS.
+                attributionControl={{ compact: true }}
+                onIdle={collapseAttribution}
               >
                 {/* Sourceless anchor layer, mounted first so later rasters
                     (OpenSeaMap) have a stable beforeId to pin themselves under
@@ -286,6 +432,74 @@ export default function PoiMapTileImpl({
                       type="line"
                       paint={{ 'line-color': '#f59e0b', 'line-width': 2, 'line-opacity': 0.85 }}
                       layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+                    />
+                  </Source>
+                )}
+
+                {/* The active route (ADR 0092/0091): above the trail, below
+                    every marker below (markers are DOM overlays outside the
+                    canvas, so they're always on top regardless of JSX
+                    order — this ordering is only what it means for the GL
+                    layers among themselves). */}
+                {routeLineGeoJSON && (
+                  <Source id="poi-map-route-line" type="geojson" data={routeLineGeoJSON}>
+                    <Layer
+                      id="poi-map-route-line-layer"
+                      type="line"
+                      paint={{
+                        'line-color': dark ? '#38bdf8' : '#0284c7',
+                        'line-width': 3,
+                        'line-opacity': 0.85,
+                      }}
+                      layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+                    />
+                  </Source>
+                )}
+
+                {routeNextLegGeoJSON && (
+                  <Source id="poi-map-route-next-leg" type="geojson" data={routeNextLegGeoJSON}>
+                    <Layer
+                      id="poi-map-route-next-leg-layer"
+                      type="line"
+                      paint={{
+                        // One step brighter than the base route line above,
+                        // and thicker, so the leg actually being sailed
+                        // reads at a glance against the rest of the route.
+                        'line-color': dark ? '#7dd3fc' : '#38bdf8',
+                        'line-width': 5,
+                        'line-opacity': 1,
+                      }}
+                      layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+                    />
+                  </Source>
+                )}
+
+                {routeWaypointsGeoJSON && (
+                  <Source id="poi-map-route-waypoints" type="geojson" data={routeWaypointsGeoJSON}>
+                    <Layer
+                      id="poi-map-route-waypoints-layer"
+                      type="circle"
+                      paint={{
+                        'circle-radius': 4,
+                        'circle-color': dark ? '#38bdf8' : '#0284c7',
+                        'circle-stroke-width': 1,
+                        'circle-stroke-color': dark ? '#0c1a26' : '#ffffff',
+                      }}
+                    />
+                  </Source>
+                )}
+
+                {routeNextWaypointGeoJSON && (
+                  <Source id="poi-map-route-next-waypoint" type="geojson" data={routeNextWaypointGeoJSON}>
+                    <Layer
+                      id="poi-map-route-next-waypoint-layer"
+                      type="circle"
+                      paint={{
+                        'circle-radius': 7,
+                        'circle-color': dark ? '#7dd3fc' : '#38bdf8',
+                        'circle-stroke-width': 1.5,
+                        'circle-stroke-color': dark ? '#0c1a26' : '#ffffff',
+                      }}
                     />
                   </Source>
                 )}
@@ -314,10 +528,20 @@ export default function PoiMapTileImpl({
                   const category = poiCategoryById(feature.category)
                   const Icon = category?.icon ?? MapPin
                   const suppressed = suppressedLabelIds.has(feature.id)
+                  const expanded = feature.id === expandedPoiId
                   return (
                     <Marker key={feature.id} latitude={feature.lat} longitude={feature.lon}>
                       <div className="flex flex-col items-center" aria-label={`Point of interest: ${feature.name || category?.label || feature.category}`}>
-                        <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card shadow-md">
+                        <div
+                          data-testid={expanded ? 'poi-marker-expanded' : undefined}
+                          className={cn(
+                            'relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card shadow-md',
+                            // Subtle: the ranked list's own row already carries the
+                            // full summary, this ring only helps the eye match
+                            // that row back to its marker on the map.
+                            expanded && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+                          )}
+                        >
                           <Icon className="h-3.5 w-3.5 text-foreground" />
                           {rank !== undefined && (
                             <span
@@ -371,7 +595,13 @@ export default function PoiMapTileImpl({
               </div>
             ) : (
               rankedList.map((feature, index) => (
-                <PoiListRow key={feature.id} rank={index + 1} feature={feature} distanceUnits={distanceUnits} />
+                <PoiListRow
+                  key={feature.id}
+                  rank={index + 1}
+                  feature={feature}
+                  distanceUnits={distanceUnits}
+                  expanded={feature.id === expandedPoiId}
+                />
               ))
             )}
             <div className="mt-auto border-t border-border/60 pt-1 text-[10px] text-muted-foreground">
@@ -390,7 +620,17 @@ export default function PoiMapTileImpl({
   )
 }
 
-function PoiListRow({ rank, feature, distanceUnits }: { rank: number; feature: PoiFeature; distanceUnits: DistanceUnits }) {
+function PoiListRow({
+  rank,
+  feature,
+  distanceUnits,
+  expanded,
+}: {
+  rank: number
+  feature: PoiFeature
+  distanceUnits: DistanceUnits
+  expanded: boolean
+}) {
   const category = poiCategoryById(feature.category)
   const Icon = category?.icon ?? MapPin
   return (
@@ -406,8 +646,14 @@ function PoiListRow({ rank, feature, distanceUnits }: { rank: number; feature: P
             {formatPoiDistance(feature.distanceM, distanceUnits)} {formatBearing(feature.bearingDeg)}
           </span>
         </div>
-        {feature.detail && (
-          <div className="truncate text-[10px] text-muted-foreground">{feature.detail}</div>
+        {/* Only the currently cycled-to row shows its detail, and it shows
+            the whole thing (wrapped, capped at three lines) rather than the
+            single truncated line every row used to carry — see
+            PoiMapTileImpl's cycling effects above. */}
+        {expanded && (
+          <div data-testid="poi-list-row-summary" className="mt-0.5 line-clamp-3 text-[10px] text-muted-foreground">
+            {feature.detail}
+          </div>
         )}
       </div>
     </div>

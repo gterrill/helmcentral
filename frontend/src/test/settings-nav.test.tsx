@@ -24,10 +24,12 @@ describe('SettingsNav', () => {
     expect(screen.getByRole('button', { name: 'Mate' })).toBeInTheDocument()
   })
 
-  it('renders an Equipment profiles nav button', () => {
+  // ADR 0123: Equipment profiles moved to the Inventory panel's own nav
+  // (inventory-nav.test.tsx covers it there) - SettingsNav no longer offers it.
+  it('does not render an Equipment nav button', () => {
     render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: 'Equipment' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Equipment' })).not.toBeInTheDocument()
   })
 
   it('marks only the active section as current', () => {

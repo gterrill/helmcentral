@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { EquipmentSection } from '@/components/settings/sections/equipment-section'
+import { ProfilesSection } from '@/components/inventory/profiles-section'
 
 const profile = {
   schema_version: 1,
@@ -108,9 +108,9 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
 })
 
-describe('EquipmentSection', () => {
+describe('ProfilesSection', () => {
   it('lets the operator edit the selected profile', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
 
     await waitForFirstProfile()
 
@@ -130,7 +130,7 @@ describe('EquipmentSection', () => {
   })
 
   it('validates profile JSON before saving and does not call the API on parse failure', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
@@ -146,7 +146,7 @@ describe('EquipmentSection', () => {
   })
 
   it('saves valid JSON to the profile update endpoint', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
@@ -172,7 +172,7 @@ describe('EquipmentSection', () => {
   })
 
   it('creates a new profile from the New profile action', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'New profile' }))
@@ -190,7 +190,7 @@ describe('EquipmentSection', () => {
   })
 
   it('switches new profile template based on selected kind', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'New profile' }))
@@ -214,7 +214,7 @@ describe('EquipmentSection', () => {
   })
 
   it('asks for confirmation before deleting, naming the profile, and does not delete on cancel', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     await clickWhenEnabled('Delete equipment profile')
@@ -232,7 +232,7 @@ describe('EquipmentSection', () => {
   })
 
   it('deletes the selected profile via API once the confirmation dialog is accepted', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     await clickWhenEnabled('Delete equipment profile')
@@ -248,7 +248,7 @@ describe('EquipmentSection', () => {
   })
 
   it('opens download endpoint for the selected profile', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'Download equipment profile' }))
@@ -260,7 +260,7 @@ describe('EquipmentSection', () => {
   })
 
   it('uploads a profile file through the equipment create endpoint', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
@@ -293,7 +293,7 @@ describe('EquipmentSection', () => {
   })
 
   it('shows duplicate-id upload conflict returned by the backend', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
@@ -323,7 +323,7 @@ describe('EquipmentSection', () => {
   })
 
   it('renders schema validation path details returned on save', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
@@ -340,7 +340,7 @@ describe('EquipmentSection', () => {
   })
 
   it('rejects an uploaded file with invalid JSON before API create', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
@@ -361,7 +361,7 @@ describe('EquipmentSection', () => {
   // repro: the fallback silently substituted the first profile back in and
   // the fresh draft never appeared.
   it('shows a blank new-profile draft after selecting a profile other than the first', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     fireEvent.change(screen.getByLabelText('Profile'), { target: { value: secondProfile.id } })
@@ -378,7 +378,7 @@ describe('EquipmentSection', () => {
   })
 
   it('shows the uploaded profile immediately, and still shows it once the list reload lands', async () => {
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
     await waitForFirstProfile()
 
     // Select a profile that is not profiles[0] first — otherwise the bug
@@ -439,7 +439,7 @@ describe('EquipmentSection', () => {
       return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
     })
 
-    render(<EquipmentSection />)
+    render(<ProfilesSection />)
 
     expect(await screen.findByText(/profiles directory unreadable/i)).toBeInTheDocument()
   })
