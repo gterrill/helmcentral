@@ -664,6 +664,34 @@ func TestDocumentStore_SetEquipmentDocumentsUnknownDocumentIDFailsForeignKey(t *
 	}
 }
 
+// TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs pins the fix
+// for a caller that hands back the same document_id twice (["d1","d1"]):
+// without deduping first, the second INSERT collides with
+// equipment_documents' own (equipment_id, document_id) primary key and the
+// whole replace fails with a raw SQLite constraint error instead of just
+// linking the document once.
+func TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	doc := mustInsertDocument(t, store, "sha-inv-dup", "a.pdf", nil)
+
+	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID, doc.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments with a duplicate id: %v", err)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != doc.ID {
+		t.Fatalf("expected the duplicate id collapsed to a single link, got %+v", docs)
+	}
+}
+
 // TestDocumentStore_DeleteEquipmentCascadesLinks proves the foreign_keys
 // pragma (already enabled by newDocumentStore's DSN, verified by
 // TestNewDocumentStore_ForeignKeysPragmaEnabled in documents_store_test.go)

@@ -1182,6 +1182,15 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 // write atomic and correct - AGENTS.md's fail-fast policy: the real
 // constraint failure surfaces as-is rather than this method inventing its
 // own, possibly-differently-worded, version of "unknown document id".
+//
+// docIDs IS deduped here, first-occurrence order kept: it names "the whole
+// set" the record should end up linked to, not a sequence of individual
+// link operations, so the same id appearing twice means the same thing as
+// it appearing once. Left undeduped, a repeated id would collide with
+// equipment_documents' own (equipment_id, document_id) primary key and turn
+// an ordinary caller mistake into a raw SQLite constraint error - not a
+// real "unknown document id" data problem the fail-fast policy above is
+// about surfacing as-is.
 func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1205,7 +1214,17 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 	}
 
 	now := s.now().Unix()
+	seen := make(map[string]bool, len(docIDs))
 	for _, docID := range docIDs {
+		if seen[docID] {
+			// Deduped, not rejected: docIDs is "the whole set", not an
+			// ordered list of individual link operations, so the same id
+			// twice means the same thing as it once - not a second write
+			// that should collide with equipment_documents' own
+			// (equipment_id, document_id) primary key.
+			continue
+		}
+		seen[docID] = true
 		if _, err := tx.Exec(
 			`INSERT INTO equipment_documents (equipment_id, document_id, source, created_at) VALUES (?, ?, 'operator', ?)`,
 			id, docID, now,

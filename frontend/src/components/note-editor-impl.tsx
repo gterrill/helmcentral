@@ -295,16 +295,28 @@ export interface NoteEditorBodyProps {
    * here so every caller (the footer below, and the capture sheet) gets it
    * for free rather than re-deriving it.
    *
-   * Code review: carries the fresh Markdown body, rather than leaving a
-   * caller to read it back through the ref - `getMarkdown()` off this
-   * component's own imperative handle is a closure over `sourceText`/
-   * `editor.children` as of the LAST completed render, and calling it from
-   * inside the event handler that is itself about to cause the next render
-   * (source mode's setSourceText, in particular) reads the value from
-   * before that keystroke. Passing the string here means a caller never
-   * has to reach back through the handle just to see what it was just
-   * told. */
-  onChange?: (markdown: string) => void
+   * No payload (unlike onMarkdownChange below) - this is the sink for a
+   * caller that only needs to know an edit happened (NoteEditorImpl's own
+   * markDirty), so nothing here has to pay for serialising the Slate
+   * document just to hand over a string that gets thrown away. */
+  onChange?: () => void
+  /** Same edit gate as onChange, but carries the fresh Markdown body - for a
+   * caller that actually needs it (the capture sheet's handleBodyChange,
+   * tracking whether there's anything to Capture).
+   *
+   * Code review: this used to be onChange's own payload, computed
+   * (serializeNoteMarkdown over the whole Slate document) on every keystroke
+   * regardless of whether anything read it - wasted work for
+   * NoteEditorImpl's markDirty, which ignores its argument entirely. Kept as
+   * a second, optional prop instead of a return value or a ref read: a
+   * caller that needs it gets the same "fresh, not stale" guarantee the
+   * single onChange used to give (see the note this replaced, still true
+   * below at the Plate/source call sites) - `getMarkdown()` off the
+   * imperative handle is a closure over state as of the LAST completed
+   * render, and reading it from inside the event handler that is itself
+   * about to cause the next render reads the value from before that
+   * keystroke. */
+  onMarkdownChange?: (markdown: string) => void
   /** Forwarded to both the WYSIWYG surface and the source textarea - the
    * capture sheet uses this for Cmd/Ctrl+Enter-to-submit and for
    * useDictation's own Escape-to-cancel handler (dictation.tsx). */
@@ -333,7 +345,7 @@ export interface NoteEditorHandle {
 }
 
 export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(function NoteEditorBody(
-  { value, autoFocus, onChange, onKeyDown, placeholder },
+  { value, autoFocus, onChange, onMarkdownChange, onKeyDown, placeholder },
   ref,
 ) {
   const editor = usePlateEditor({
@@ -368,10 +380,18 @@ export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(
     mountedRef.current = true
   }, [])
 
-  const notifyChange = useCallback((markdown: string) => {
+  // Takes a thunk, not the markdown itself: the Plate call site below has to
+  // serialise the whole Slate document to produce it, and that cost is only
+  // worth paying when onMarkdownChange is actually wired up - a caller that
+  // only wants onChange (markDirty, which ignores its argument) must not
+  // pay for a serialisation nobody reads. handleSourceChange/insertDictation
+  // already have their string for free (the textarea's own value), so
+  // wrapping it in `() => next` there costs nothing either way.
+  const notifyChange = useCallback((getMarkdown: () => string) => {
     if (!mountedRef.current) return
-    onChange?.(markdown)
-  }, [onChange])
+    onChange?.()
+    if (onMarkdownChange) onMarkdownChange(getMarkdown())
+  }, [onChange, onMarkdownChange])
 
   // Computed once, from the value this component was constructed with, not
   // from anything the operator has since done - "announced once" (plan §7):
@@ -400,7 +420,7 @@ export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(
   const handleSourceChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const next = event.target.value
     setSourceText(next)
-    notifyChange(next)
+    notifyChange(() => next)
   }
 
   useImperativeHandle(ref, () => ({
@@ -419,7 +439,7 @@ export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(
         if (trimmed === '') return
         const next = sourceText.trim() === '' ? trimmed : `${sourceText} ${trimmed}`
         setSourceText(next)
-        notifyChange(next)
+        notifyChange(() => next)
         return
       }
       // insertDictatedText mutates `editor` directly (a Slate transform),
@@ -460,7 +480,7 @@ export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(
             className="h-full min-h-60 resize-none font-mono text-xs"
           />
         ) : (
-          <Plate editor={editor} onValueChange={({ value }) => notifyChange(serializeNoteMarkdown(editor, value))}>
+          <Plate editor={editor} onValueChange={({ value }) => notifyChange(() => serializeNoteMarkdown(editor, value))}>
             <PlateContent
               aria-label="Note body"
               placeholder={placeholder ?? 'Write the note…'}

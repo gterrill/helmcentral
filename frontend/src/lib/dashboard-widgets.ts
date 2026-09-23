@@ -485,7 +485,9 @@ export function isValidEmbedUrl(url: string): boolean {
  * Mirrors validatePoiMapWidget in backend/dashboard_pages.go: title length via
  * the gauge-group cap, range within GET /api/poi's own bounds, categories a
  * non-empty subset of the known catalog, layout in the closed set, and
- * summaryCycleSeconds (when set) within POI_MAP_SUMMARY_CYCLE_SECONDS_MIN/MAX.
+ * summaryCycleSeconds (when set) an integer within
+ * POI_MAP_SUMMARY_CYCLE_SECONDS_MIN/MAX - the backend field is a Go int, so a
+ * fractional value has to be rejected here too, not just out of range.
  * Duplicated rather than shared for the same reason isValidEmbedUrl is: the
  * config dialog needs synchronous feedback while the server must not trust
  * the client.
@@ -498,7 +500,9 @@ export function isValidPoiMapConfig(config: PoiMapWidgetConfig): boolean {
   if (config.layout !== 'map' && config.layout !== 'split') return false
   if (
     config.summaryCycleSeconds !== undefined
-    && (config.summaryCycleSeconds < POI_MAP_SUMMARY_CYCLE_SECONDS_MIN || config.summaryCycleSeconds > POI_MAP_SUMMARY_CYCLE_SECONDS_MAX)
+    && (!Number.isInteger(config.summaryCycleSeconds)
+      || config.summaryCycleSeconds < POI_MAP_SUMMARY_CYCLE_SECONDS_MIN
+      || config.summaryCycleSeconds > POI_MAP_SUMMARY_CYCLE_SECONDS_MAX)
   ) return false
   return true
 }

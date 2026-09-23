@@ -114,7 +114,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
         />
       )
     }
-    if (activeSectionId === 'profiles') return <ProfilesSection />
+    if (activeSectionId === 'profiles') return <ProfilesSection canWrite={canWrite} />
     if (activeSectionId === 'locations') return <LocationsSection canWrite={canWrite} />
     return null
   })()

@@ -431,6 +431,22 @@ describe('ProfilesSection', () => {
     expect(screen.getByLabelText('Profile name')).toHaveValue('Uploaded Generator')
   })
 
+  // ADR 0123 moved this section from admin-only Settings into Inventory,
+  // which any signed-in operator can open - without its own write gate, a
+  // read-only session saw New/Upload/Edit/Delete controls that would 403.
+  it('hides create/upload and disables edit/delete for a read-only session, but leaves Download alone', async () => {
+    render(<ProfilesSection canWrite={false} />)
+    await waitForFirstProfile()
+
+    expect(screen.queryByRole('button', { name: 'New profile' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Delete equipment profile' })).toBeDisabled()
+    // Download is a GET (tierRead on the backend, unlike the others) - a
+    // read-only session can still pull a profile file down.
+    expect(screen.getByRole('button', { name: 'Download equipment profile' })).toBeEnabled()
+  })
+
   it('surfaces a failed profile fetch as an error instead of an empty profile list', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (String(url).includes('/api/equipment-profiles') && (!init || init.method === undefined)) {

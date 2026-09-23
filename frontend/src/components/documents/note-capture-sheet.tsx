@@ -102,8 +102,10 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
   // and this was being called from inside the very onChange that fires
   // before that render happens (setSourceText, in source mode). One
   // keystroke landed in the buffer while Capture kept reporting empty.
-  // NoteEditorBody's onChange now hands over the fresh Markdown itself
-  // (note-editor-impl.tsx), so there is nothing left to read stale.
+  // NoteEditorBody's onMarkdownChange (note-editor-impl.tsx) now hands over
+  // the fresh Markdown itself, so there is nothing left to read stale - it
+  // is the one caller that actually needs the string (unlike NoteEditorImpl's
+  // own markDirty, which is why that's a separate prop from plain onChange).
   const handleBodyChange = useCallback((markdown: string) => {
     setEmpty(markdown.trim() === '')
   }, [])
@@ -227,7 +229,7 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
           value=""
           autoFocus
           placeholder="Write the note…"
-          onChange={handleBodyChange}
+          onMarkdownChange={handleBodyChange}
           onKeyDown={handleKeyDown}
         />
         <div className="flex items-center gap-2">
