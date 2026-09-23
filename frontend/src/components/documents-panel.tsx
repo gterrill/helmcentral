@@ -91,7 +91,7 @@ import { ChecklistRunner } from './documents/checklist-runner'
 import { ManualFolderView } from './documents/manual-folder-view'
 import { NoteTypeIconButton } from './documents/note-type-icon-button'
 import { UnfiledNotesView } from './documents/unfiled-notes-view'
-import { NoteEditor } from './note-editor'
+import { NoteEditor, prefetchNoteEditor } from './note-editor'
 import { NoteMarkdown } from './note-markdown'
 
 // ADR 0121: this panel is now the ONLY place a note gets created - the
@@ -948,7 +948,16 @@ export function DocumentsPanel({
                 <FolderPlus className="h-4 w-4" aria-hidden="true" /> Folder
               </DropdownMenuItem>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
+                {/* ADR 0124: hovering or focusing this is the earliest
+                    signal that the operator is about to open the editor -
+                    warms note-editor-impl.tsx's chunk (and the capture
+                    sheet's own) right away rather than waiting for the
+                    click, the same "prefetch on hover/focus" App.tsx's own
+                    idle prefetch complements. prefetchNoteEditor() is
+                    memoised, so a hover that never leads to a click costs
+                    nothing beyond the one fetch every other path already
+                    pays for eventually. */}
+                <DropdownMenuSubTrigger onPointerEnter={() => prefetchNoteEditor()} onFocus={() => prefetchNoteEditor()}>
                   <Pencil className="h-4 w-4" aria-hidden="true" /> Note
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>

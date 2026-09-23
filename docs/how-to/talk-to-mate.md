@@ -58,7 +58,9 @@ it got you right before you send. Tap it again (now **Stop dictation**) when
 you're done talking, or press Escape to cancel the dictation without closing
 whatever you were doing - either way, nothing sends until you press Send
 yourself. The note capture sheet's own microphone (**Documents → New →
-Note**) works exactly the same way.
+Note**) shares the same never-sends-by-itself rule, but types wherever the
+cursor is in the note rather than only at the end - see [Notes and the
+manual](../features/notes-and-the-manual.md).
 
 ## Stop it reading aloud
 

@@ -265,3 +265,73 @@ describe('dictation lifecycle', () => {
     expect(getVoiceClaimSnapshot()).toBe(false)
   })
 })
+
+// ADR 0124: the note editor's mic uses `insert` instead of `setValue` -
+// see this file's own UseDictationOptions union and lib/note-editor-
+// dictation.ts's insertDictatedText for what the editor itself does with
+// each call. This field only has to prove the CONTRACT useDictation gives
+// that sink: it receives every final, and only a final, already trimmed
+// and never empty - not whether a real Slate editor places the text
+// correctly (that's insertDictatedText's own headless test suite, note-
+// editor-dictation.test.ts).
+function TestFieldWithInsert() {
+  const [received, setReceived] = useState<string[]>([])
+  const dictation = useDictation({ insert: (text) => setReceived((prev) => [...prev, text]) })
+  return (
+    <div>
+      <ul aria-label="Received">
+        {received.map((text, i) => <li key={i}>{text}</li>)}
+      </ul>
+      <DictateButton dictation={dictation} />
+      <DictationStatus dictation={dictation} />
+    </div>
+  )
+}
+
+describe('useDictation insert sink (ADR 0124)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    stubSecureContext(true)
+  })
+
+  it('receives a final result, already trimmed', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('  fuel return is the inboard valve  ', true) })
+
+    expect(screen.getByRole('list', { name: 'Received' })).toHaveTextContent('fuel return is the inboard valve')
+  })
+
+  it('never receives an interim result', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('fuel return is the', false) })
+
+    expect(screen.queryByRole('list', { name: 'Received' })?.textContent).toBe('')
+  })
+
+  it('skips an empty (or whitespace-only) final rather than calling insert with nothing useful', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('   ', true) })
+
+    expect(screen.queryByRole('list', { name: 'Received' })?.textContent).toBe('')
+  })
+
+  it('receives each final separately, in order, rather than being joined into one string', () => {
+    render(<TestFieldWithInsert />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+
+    act(() => { current().emitResult('fuel return is the inboard valve', true) })
+    act(() => { current().emitResult('the one with the scratched handle', true) })
+
+    const items = screen.getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'fuel return is the inboard valve',
+      'the one with the scratched handle',
+    ])
+  })
+})

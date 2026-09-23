@@ -35,6 +35,10 @@ import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { AlarmBanner } from '@/components/alarm-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
+// Not lazy: prefetchNoteEditor() is a plain function that only reaches into
+// the editor-vendor chunk through a dynamic import() of its own (see that
+// file's doc comment) — importing the function itself here costs nothing.
+import { prefetchNoteEditor } from '@/components/note-editor'
 import type { SettingsPageHandle } from '@/components/settings/settings-page'
 import type { DocumentDetailsPageHandle } from '@/components/document-details-page'
 import type { InventoryPanelHandle } from '@/components/inventory/inventory-panel'
@@ -253,6 +257,12 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
+
+// ADR 0124: the max wait requestIdleCallback (or its setTimeout fallback)
+// is given before firing the note editor's own chunk prefetch regardless of
+// how busy the browser stays - generous, since nothing on screen is waiting
+// on this the way embed-tile.tsx's own mount deferral is.
+const NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS = 2000
 
 /**
  * ADR 0110: `/` (and every other collapse-to-first-page case — an unknown
@@ -536,6 +546,33 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkTheme)
   }, [isDarkTheme])
+
+  // ADR 0124: warms the note editor's own chunk (Slate plus Plate — the
+  // largest dependency graph this project puts behind a React.lazy()
+  // boundary, ADR 0117's editor-vendor chunk) once the shell has painted
+  // and the browser has spare cycles, so the first New → Note the operator
+  // picks doesn't pay a cold fetch behind the capture sheet's own Suspense
+  // fallback. requestIdleCallback, where it exists, so this never steals a
+  // frame from first paint — the same fallback-to-setTimeout shape
+  // embed-tile.tsx already uses for its own idle-scheduled mount, since the
+  // wall kiosk's WPE WebKit (Safari 16-era) has neither API. isDisplay
+  // gates it off entirely there: the kiosk route never opens a note editor
+  // (isDisplay's own screens never mount NoteEditor), so fetching the chunk
+  // would only cost that browser a startup download it will never use.
+  // prefetchNoteEditor() is memoised, so re-running this on every isDisplay
+  // flip (leaving /display resumes the ordinary shell) costs nothing beyond
+  // the first real call.
+  useEffect(() => {
+    if (isDisplay) return
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(() => { prefetchNoteEditor() }, {
+        timeout: NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS,
+      })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(() => { prefetchNoteEditor() }, NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS)
+    return () => window.clearTimeout(id)
+  }, [isDisplay])
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
   const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
   const {

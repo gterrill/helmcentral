@@ -14,16 +14,33 @@ import { claimVoice, subscribeVoicePreempt } from '@/lib/voice-arbiter'
 // (components/documents/note-capture-sheet.tsx) share, so the two fields
 // don't drift into two different mic behaviours for no reason.
 
-export interface UseDictationOptions {
-  /** Same shape as a React state setter's functional-update form - append
-   * semantics (a single space between what was already there and the new
-   * phrase, skip a final that's empty after trimming) live here so both
-   * call sites don't each reimplement the three lines note-capture-sheet.tsx
-   * used to carry directly. Pass the field's own setState function. */
-  setValue: (updater: (prev: string) => string) => void
-  /** BCP 47 language tag, forwarded to useSpeechInput. Defaults to en-AU. */
-  lang?: string
-}
+// ADR 0124: a second insertion sink alongside `setValue`, for the note
+// editor's mic - the editor has no plain string to append to, only an
+// `editor.tf.insertText` call at a Slate selection (lib/note-editor-
+// dictation.ts's insertDictatedText). Both sinks get the same trimmed,
+// non-empty final text; only what happens to it differs, so this stays a
+// union on the one options object rather than a second hook the composer
+// and capture sheet would have to choose between - "it does not grow a
+// second recognizer" (ADR 0124).
+export type UseDictationOptions = { lang?: string } & (
+  | {
+      /** Same shape as a React state setter's functional-update form -
+       * append semantics (a single space between what was already there
+       * and the new phrase, skip a final that's empty after trimming) live
+       * in handleFinal below so both call sites don't each reimplement the
+       * three lines note-capture-sheet.tsx used to carry directly before
+       * ADR 0124. Pass the field's own setState function. */
+      setValue: (updater: (prev: string) => string) => void
+      insert?: never
+    }
+  | {
+      /** Receives only the trimmed, non-empty final - handleFinal below
+       * applies the same skip-empty rule `setValue` gets before calling
+       * this, so a caller never has to re-derive it. */
+      insert: (text: string) => void
+      setValue?: never
+    }
+)
 
 export interface UseDictationResult {
   supported: boolean
@@ -48,16 +65,27 @@ export interface UseDictationResult {
    * stopPropagation is load-bearing: both call sites sit inside a Sheet or
    * a component that itself treats Escape as "close/cancel", and a mid
    * dictation Escape must mean "stop dictating," not "close the sheet out
-   * from under me." */
-  handleFieldKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+   * from under me."
+   *
+   * `HTMLElement`, not `HTMLTextAreaElement` (ADR 0124): the note editor's
+   * WYSIWYG surface is a contentEditable div, not a textarea, and this has
+   * to sit on both. Any more specific keyboard event (a real textarea's
+   * included) is still assignable here - only the reverse would be unsafe. */
+  handleFieldKeyDown: (event: KeyboardEvent<HTMLElement>) => void
 }
 
-export function useDictation({ setValue, lang }: UseDictationOptions): UseDictationResult {
+export function useDictation(options: UseDictationOptions): UseDictationResult {
+  const { lang, setValue, insert } = options
+
   const handleFinal = useCallback((text: string) => {
     const trimmed = text.trim()
     if (trimmed === '') return
-    setValue((prev) => (prev.trim() === '' ? trimmed : `${prev} ${trimmed}`))
-  }, [setValue])
+    if (insert) {
+      insert(trimmed)
+      return
+    }
+    setValue?.((prev) => (prev.trim() === '' ? trimmed : `${prev} ${trimmed}`))
+  }, [insert, setValue])
 
   const speech = useSpeechInput({ onFinal: handleFinal, lang })
   const { listening } = speech
@@ -123,7 +151,7 @@ export function useDictation({ setValue, lang }: UseDictationOptions): UseDictat
   // without checking whether it's the one actually holding the claim.
   useEffect(() => subscribeVoicePreempt(() => { speech.stop() }), [speech])
 
-  const handleFieldKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleFieldKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape' && speech.listening) {
       event.preventDefault()
       event.stopPropagation()
