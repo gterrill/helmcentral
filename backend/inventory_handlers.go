@@ -431,21 +431,63 @@ func updateEquipmentHandler(c echo.Context) error {
 // each one's sha256 - removing the FILE those rows pointed at is this
 // handler's own job, the same store/handler split
 // RemoveEquipmentPhoto/deleteEquipmentPhotoHandler already draw.
+//
+// Final pre-release review: the item's photo SHAs are locked BEFORE the
+// rows are deleted and held until their files are gone, the same span
+// deleteEquipmentPhotoHandler holds its one lock across. Locking only
+// around os.Remove left a gap in which an upload of the same bytes could
+// store a new row and file that this delete then removed. SHAs are locked
+// in sorted order so two deletes sharing photos cannot deadlock. Every file
+// is attempted even after one fails - by then the item is gone and nothing
+// would try again - and the failure says plainly that the item was deleted.
 func deleteEquipmentHandler(c echo.Context) error {
-	deletedPhotoSHAs, err := globalDocumentStore.DeleteEquipment(c.Param("id"))
+	id := c.Param("id")
+	existing, err := globalDocumentStore.GetEquipment(id)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	var shas []string
+	for _, photoID := range existing.PhotoIDs {
+		doc, err := globalDocumentStore.Get(photoID)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		shas = append(shas, doc.SHA256)
+	}
+	slices.Sort(shas)
+	locked := make(map[string]bool, len(shas))
+	for _, sha := range shas {
+		if locked[sha] {
+			continue
+		}
+		unlock := lockDocumentSHA(sha)
+		defer unlock()
+		locked[sha] = true
+	}
+
+	deletedPhotoSHAs, err := globalDocumentStore.DeleteEquipment(id)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 
+	failed := 0
 	for _, sha := range deletedPhotoSHAs {
-		unlockSHA := lockDocumentSHA(sha)
-		path := filepath.Join(documentsDirPath(), sha)
-		removeErr := os.Remove(path)
-		unlockSHA()
-		if removeErr != nil && !os.IsNotExist(removeErr) {
-			log.Printf("inventory: delete equipment: failed to remove photo file %s: %v", path, removeErr)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove photo file"})
+		// A photo added between the read above and the delete wasn't locked
+		// up front; it gets the old lock-around-remove treatment.
+		if !locked[sha] {
+			unlock := lockDocumentSHA(sha)
+			defer unlock()
 		}
+		path := filepath.Join(documentsDirPath(), sha)
+		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("inventory: delete equipment: failed to remove photo file %s: %v", path, removeErr)
+			failed++
+		}
+	}
+	if failed > 0 {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("the item was deleted, but %d of its photo files could not be removed from disk", failed),
+		})
 	}
 
 	return c.NoContent(http.StatusNoContent)

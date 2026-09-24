@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1634,5 +1636,55 @@ func TestGetEquipmentHandler_RemovingPhotoTagDropsFromPhotoIDsButKeepsLink(t *te
 	}
 	if len(resp.Documents) != 1 || resp.Documents[0].DocumentID != photo.ID {
 		t.Fatalf("expected the link itself to survive as an ordinary linked document, got %+v", resp.Documents)
+	}
+}
+
+// TestDeleteEquipmentHandler_KeepsRemovingPhotoFilesAfterOneFails is from the
+// final pre-release review: the handler used to return on the first photo
+// file it could not remove, leaving every later photo's file behind - and
+// by then the item and its photo rows were already gone, so nothing would
+// ever try again. Every file is attempted; a failure is still reported,
+// saying plainly that the item itself was deleted.
+func TestDeleteEquipmentHandler_KeepsRemovingPhotoFilesAfterOneFails(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	dir := documentsDirPath()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, sha := range []string{"sha-a-unremovable", "sha-b-removable"} {
+		photo, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: sha + ".jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+		if err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+		if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+			t.Fatalf("AddEquipmentPhoto: %v", err)
+		}
+	}
+	// A non-empty directory where the first photo's file should be makes
+	// os.Remove fail for it; the second is an ordinary file.
+	if err := os.MkdirAll(filepath.Join(dir, "sha-a-unremovable", "keep"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sha-b-removable"), []byte("jpeg"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for the file that could not be removed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "deleted") {
+		t.Fatalf("expected the error to say the item itself was deleted, got %s", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sha-b-removable")); !os.IsNotExist(err) {
+		t.Fatalf("expected the second photo's file removed despite the first failing, stat err = %v", err)
 	}
 }
