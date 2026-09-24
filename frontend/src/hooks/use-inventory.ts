@@ -531,10 +531,22 @@ export async function updateEquipment(id: string, input: EquipmentInput): Promis
 // held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
 // neither of which has a persistent hook instance to hang these off.
 
+/** Thrown by uploadEquipmentPhoto specifically for a 409 - inventory_
+ * handlers.go's "This image is already in Documents as ..." refusal, when
+ * the exact same bytes are already filed under a different, non-photo
+ * document. Carries the status the same way EquipmentNotFoundError carries
+ * its 404, rather than a caller having to match the message text - a
+ * caller that queues failed uploads for Retry (equipment-editor.tsx,
+ * bin-quick-add.tsx) checks for this specifically, because re-sending the
+ * identical bytes can only get the identical refusal: Retry is never a
+ * failure worth offering here the way a dropped connection or a 500 is. */
+export class PhotoAlreadyLinkedError extends Error {}
+
 /** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
  * 'photo' and linked at the end of the item's photo order server-side.
  * Throws the server's own message on a rejected upload (AGENTS.md fallback
- * policy: HEIC/non-image get a specific reason, never a generic one). */
+ * policy: HEIC/non-image get a specific reason, never a generic one) - a
+ * 409 throws PhotoAlreadyLinkedError specifically, see its own doc comment. */
 export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
   const form = new FormData()
   form.append('file', file, filename)
@@ -542,7 +554,11 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
     method: 'POST',
     body: form,
   })
-  if (!response.ok) throw new Error(await readErrorMessage(response))
+  if (!response.ok) {
+    const message = await readErrorMessage(response)
+    if (response.status === 409) throw new PhotoAlreadyLinkedError(message)
+    throw new Error(message)
+  }
   const data = (await response.json()) as { item: EquipmentItem }
   return data.item
 }

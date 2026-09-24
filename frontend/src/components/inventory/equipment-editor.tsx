@@ -29,6 +29,7 @@ import {
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
   InventoryValidationError,
+  PhotoAlreadyLinkedError,
   createEquipment,
   deleteEquipmentPhoto,
   setEquipmentPhotoOrder,
@@ -463,6 +464,13 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     }))
 
     const failures: FailedPhotoUpload[] = []
+    // Review finding: a 409 ("already in Documents as ...") means the exact
+    // same bytes can never be linked as a NEW photo - re-sending them on
+    // Retry can only get the identical refusal, so this is never queued in
+    // `failures` the way a genuine (transient) failure is. Tracked
+    // separately only to fold its own message into the combined notice
+    // below when a real failure also needs one.
+    const refused: string[] = []
     for (const result of downscaled) {
       if (!result.ok) {
         failures.push({ blob: result.file, filename: photoFilename(result.file.name), error: result.error })
@@ -472,12 +480,20 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         const updated = await uploadEquipmentPhoto(targetId, result.blob, photoFilename(result.file.name))
         setItem(updated)
       } catch (err) {
+        if (err instanceof PhotoAlreadyLinkedError) {
+          refused.push(err.message)
+          continue
+        }
         failures.push({ blob: result.blob, filename: photoFilename(result.file.name), error: err instanceof Error ? err.message : String(err) })
       }
     }
     if (failures.length > 0) {
       setFailedPhotoUploads(failures)
-      setPhotoNotice(`${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+      const notUploaded = failures.length + refused.length
+      setPhotoNotice(`${notUploaded} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+    } else if (refused.length > 0) {
+      setFailedPhotoUploads([])
+      setPhotoNotice(refused[0])
     }
   }
 
@@ -513,18 +529,31 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     if (id === null || failedPhotoUploads.length === 0) return
     setRetryingPhotos(true)
     const stillFailing: FailedPhotoUpload[] = []
+    // A retry landing on a 409 is an edge case (something else linked the
+    // identical bytes between the first attempt and this one) rather than
+    // the normal case Retry exists for - but the same "never re-queue a 409"
+    // rule still applies once it happens.
+    const refused: string[] = []
     for (const photo of failedPhotoUploads) {
       try {
         const updated = await uploadEquipmentPhoto(id, photo.blob, photo.filename)
         setItem(updated)
       } catch (err) {
+        if (err instanceof PhotoAlreadyLinkedError) {
+          refused.push(err.message)
+          continue
+        }
         stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
       }
     }
     setFailedPhotoUploads(stillFailing)
-    setPhotoNotice(stillFailing.length === 0
-      ? null
-      : `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
+    if (stillFailing.length > 0) {
+      setPhotoNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
+    } else if (refused.length > 0) {
+      setPhotoNotice(refused[0])
+    } else {
+      setPhotoNotice(null)
+    }
     setRetryingPhotos(false)
   }
 
@@ -559,6 +588,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           const toUpload = localPhotos
           setLocalPhotos([])
           const failures: FailedPhotoUpload[] = []
+          // See uploadPhotosToSavedItem's own comment on why a 409 is
+          // tracked separately rather than queued in `failures`.
+          const refused: string[] = []
           for (const photo of toUpload) {
             try {
               // Review finding: applied via setItem the moment each upload
@@ -574,12 +606,19 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               URL.revokeObjectURL(photo.previewUrl)
             } catch (err) {
               URL.revokeObjectURL(photo.previewUrl)
+              if (err instanceof PhotoAlreadyLinkedError) {
+                refused.push(err.message)
+                continue
+              }
               failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
             }
           }
           if (failures.length > 0) {
             setFailedPhotoUploads(failures)
-            setPhotoNotice(`Saved, but ${failures.length} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+            const notUploaded = failures.length + refused.length
+            setPhotoNotice(`Saved, but ${notUploaded} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+          } else if (refused.length > 0) {
+            setPhotoNotice(refused[0])
           }
         }
         return
@@ -686,9 +725,16 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         {photoNotice && (
           <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
             <span>{photoNotice}</span>
-            <Button type="button" variant="outline" size="sm" disabled={retryingPhotos} onClick={() => { void retryFailedPhotoUploads() }}>
-              {retryingPhotos ? 'Retrying...' : 'Retry'}
-            </Button>
+            {/* Review finding: a 409 refusal never populates
+                failedPhotoUploads (it's dropped, not queued) - Retry has
+                nothing to re-send for a notice that's ONLY a 409, so the
+                button is withheld rather than offering a retry that can
+                only ever repeat the same refusal. */}
+            {failedPhotoUploads.length > 0 && (
+              <Button type="button" variant="outline" size="sm" disabled={retryingPhotos} onClick={() => { void retryFailedPhotoUploads() }}>
+                {retryingPhotos ? 'Retrying...' : 'Retry'}
+              </Button>
+            )}
           </div>
         )}
       </FieldSet>

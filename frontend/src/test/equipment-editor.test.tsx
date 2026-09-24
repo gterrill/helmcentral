@@ -65,6 +65,11 @@ let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
+// Release-fixes code-review finding: a 409 ("already in Documents") can
+// never succeed on Retry - it's the same bytes every time - so it needs its
+// own fixture, distinct from failingPhotoUploadNames' plain 500s which DO
+// belong on the retry queue.
+let conflictPhotoUploadNames: Map<string, string>
 const fetchMock = vi.fn()
 
 // Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
@@ -149,6 +154,9 @@ function stubFetch() {
       const form = init?.body as FormData
       const file = form.get('file') as File
       uploadedPhotoOrder.push(file.name)
+      if (conflictPhotoUploadNames.has(file.name)) {
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: conflictPhotoUploadNames.get(file.name) }) })
+      }
       if (failingPhotoUploadNames.has(file.name)) {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
       }
@@ -180,6 +188,7 @@ beforeEach(() => {
   currentDocuments = []
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
+  conflictPhotoUploadNames = new Map()
   stubFetch()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -681,6 +690,44 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+  })
+
+  // Release-fixes code-review finding: a 409 refusal ("already in Documents
+  // as ...") is the server saying these exact bytes can never be linked as
+  // a NEW photo - re-sending the identical bytes on Retry can only get the
+  // identical refusal, so it must not be queued for Retry the way a genuine
+  // (transient) failure is.
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a saved item', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    // Dropped, not left on the strip as a pending/failed photo either.
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument()
+  })
+
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a brand new draft\'s create-then-upload', async () => {
+    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
+    const onCreated = vi.fn()
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(1))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
   it('shows Retry after a partial upload failure, and Retry re-sends only that one photo', async () => {

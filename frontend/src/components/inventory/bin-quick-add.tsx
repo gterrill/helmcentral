@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
-import { createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
+import { PhotoAlreadyLinkedError, createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
 import { downscaleImage } from '@/lib/image-downscale'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
@@ -146,12 +146,21 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
 
       const toUpload = photos
       const failures: FailedUpload[] = []
+      // Review finding: a 409 ("already in Documents as ...") means the
+      // exact same bytes can never be linked as a NEW photo - re-sending
+      // them on Retry can only get the identical refusal, so it is never
+      // queued in `failures` the way a genuine (transient) failure is.
+      const refused: string[] = []
       for (const photo of toUpload) {
         try {
           await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
           URL.revokeObjectURL(photo.previewUrl)
         } catch (err) {
           URL.revokeObjectURL(photo.previewUrl)
+          if (err instanceof PhotoAlreadyLinkedError) {
+            refused.push(err.message)
+            continue
+          }
           failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
         }
       }
@@ -159,7 +168,12 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       if (failures.length > 0) {
         setSavedItemId(created.id)
         setFailedUploads(failures)
-        setNotice(`Saved ${trimmedName}, but ${failures.length} photo${failures.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+        const notUploaded = failures.length + refused.length
+        setNotice(`Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+      } else if (refused.length > 0) {
+        setSavedItemId(null)
+        setFailedUploads([])
+        setNotice(refused[0])
       } else {
         setSavedItemId(null)
         setFailedUploads([])
@@ -186,17 +200,26 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     if (savedItemId === null || failedUploads.length === 0) return
     setRetrying(true)
     const stillFailing: FailedUpload[] = []
+    const refused: string[] = []
     for (const photo of failedUploads) {
       try {
         await uploadEquipmentPhoto(savedItemId, photo.blob, photo.filename)
       } catch (err) {
+        if (err instanceof PhotoAlreadyLinkedError) {
+          refused.push(err.message)
+          continue
+        }
         stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
       }
     }
     setFailedUploads(stillFailing)
-    setNotice(stillFailing.length === 0
-      ? null
-      : `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
+    if (stillFailing.length > 0) {
+      setNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
+    } else if (refused.length > 0) {
+      setNotice(refused[0])
+    } else {
+      setNotice(null)
+    }
     setRetrying(false)
     onCreated()
   }
@@ -244,9 +267,14 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       {notice && (
         <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
           <span>{notice}</span>
-          <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={() => { void handleRetry() }}>
-            {retrying ? 'Retrying...' : 'Retry'}
-          </Button>
+          {/* A 409 refusal never populates failedUploads (it's dropped, not
+              queued) - Retry has nothing to re-send for a notice that's
+              only a 409, see handleSave/handleRetry's own comments. */}
+          {failedUploads.length > 0 && (
+            <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={() => { void handleRetry() }}>
+              {retrying ? 'Retrying...' : 'Retry'}
+            </Button>
+          )}
         </div>
       )}
     </div>

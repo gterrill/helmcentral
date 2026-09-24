@@ -72,6 +72,41 @@ describe('BinQuickAdd', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('')
   })
 
+  // Release-fixes code-review finding: a 409 refusal ("already in Documents
+  // as ...") means the exact same bytes can never be linked as a NEW photo -
+  // re-sending them on Retry can only get the identical refusal, so it must
+  // not go on the retry queue the way a genuine (transient) failure does.
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/equipment') && method === 'POST') {
+        const body = JSON.parse(String(init?.body))
+        return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: { id: 'eq-new', photo_ids: [], ...body } }) })
+      }
+      const photoPost = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
+      if (photoPost && method === 'POST') {
+        const form = init?.body as FormData
+        const file = form.get('file') as File
+        uploadedPhotoOrder.push(file.name)
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'This image is already in Documents as "Fuel receipt"' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
   it('leaves the item saved and offers Retry when a photo upload fails', async () => {
     failingPhotoUploadNames.add('a.jpg')
     render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
