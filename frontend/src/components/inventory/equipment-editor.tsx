@@ -229,6 +229,11 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([])
   const [failedPhotoUploads, setFailedPhotoUploads] = useState<FailedPhotoUpload[]>([])
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+  // Which item the failed uploads and notice above belong to. The editor
+  // stays mounted across Back/Forward, so without this another item showed
+  // them and Retry filed their photos on it (final pre-release review
+  // finding). They show, and Retry sends them, only for their own item.
+  const [photoStatusItemId, setPhotoStatusItemId] = useState<string | null>(null)
   const [retryingPhotos, setRetryingPhotos] = useState(false)
 
   // Re-seeds only when a DIFFERENT record has loaded (id, or - for a brand
@@ -476,10 +481,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       }
     }
     if (failures.length > 0) {
+      setPhotoStatusItemId(targetId)
       setFailedPhotoUploads(failures)
       const notUploaded = failures.length + refused.length
       setPhotoNotice(`${notUploaded} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
     } else if (refused.length > 0) {
+      setPhotoStatusItemId(targetId)
       setFailedPhotoUploads([])
       setPhotoNotice(refused[0])
     }
@@ -514,7 +521,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // fine on the first pass are already linked server-side and are never
   // touched again.
   const retryFailedPhotoUploads = async () => {
-    if (id === null || failedPhotoUploads.length === 0) return
+    if (id === null || photoStatusItemId !== id || failedPhotoUploads.length === 0) return
+    const targetId = photoStatusItemId
     setRetryingPhotos(true)
     const stillFailing: FailedPhotoUpload[] = []
     // A retry landing on a 409 is an edge case (something else linked the
@@ -524,7 +532,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     const refused: string[] = []
     for (const photo of failedPhotoUploads) {
       try {
-        const updated = await uploadEquipmentPhoto(id, photo.blob, photo.filename)
+        const updated = await uploadEquipmentPhoto(targetId, photo.blob, photo.filename)
         setItem(updated)
       } catch (err) {
         if (err instanceof PhotoAlreadyLinkedError) {
@@ -604,10 +612,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
             }
           }
           if (failures.length > 0) {
+            setPhotoStatusItemId(created.id)
             setFailedPhotoUploads(failures)
             const notUploaded = failures.length + refused.length
             setPhotoNotice(`Saved, but ${notUploaded} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
           } else if (refused.length > 0) {
+            setPhotoStatusItemId(created.id)
             setPhotoNotice(refused[0])
           }
         }
@@ -712,7 +722,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
             if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId) }
           }}
         />
-        {photoNotice && (
+        {photoNotice && photoStatusItemId === id && (
           <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
             <span>{photoNotice}</span>
             {/* Review finding: a 409 refusal never populates

@@ -641,6 +641,28 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(3))
   })
 
+  // Final pre-release review finding: the editor stays mounted across
+  // Back/Forward, and failed photo uploads were held with no record of which
+  // item they belonged to - item B showed item A's "didn't upload" notice,
+  // and Retry filed A's photo on B.
+  it('keeps a failed photo upload with its own item: another item neither shows it nor retries it', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('b.jpg')
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await waitForLoaded()
+
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText(/didn't upload/)
+
+    currentItem = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+
+    expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
   // ADR 0127 review finding: the photo row was empty after creating an item
   // with photos - useEquipmentItem's own GET for the newly created id (the
   // id-change effect) can land BEFORE the photo uploads that follow it in
