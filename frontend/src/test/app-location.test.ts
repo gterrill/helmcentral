@@ -694,4 +694,38 @@ describe('resolveScannedText', () => {
     expect(resolveScannedText('https://example.com/inventory/locations')).toBeNull()
     expect(resolveScannedText('https://example.com/documents')).toBeNull()
   })
+
+  it('strips a ?query and #hash from a scheme-less scan before resolving', () => {
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02?foo=bar')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02#section')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+    expect(resolveScannedText('LAZ-02?foo=bar')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('percent-encodes a bare bin code before building the path', () => {
+    expect(resolveScannedText('LAZ 02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ 02',
+    })
+  })
+
+  it('does not treat a bare code containing a colon as an absolute URL', () => {
+    expect(resolveScannedText('LAZ:02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ:02',
+    })
+  })
 })
