@@ -384,6 +384,71 @@ describe('StocktakeSection: NFC scanning', () => {
     expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
   })
 
+  // Release-fixes code-review finding: handleScan reads currentBin from its
+  // OWN closure (a plain render-scoped variable), and that closure is what's
+  // still sitting in handleScanRef.current until the passive effect below
+  // re-subscribes it - a real double-tap (bin, then item, faster than a
+  // render can commit) calls the SAME stale closure for both, so the item
+  // scan's own currentBin read - even AFTER its fetchEquipment await - still
+  // sees whatever currentBin was when that closure was first created, not
+  // the bin just scanned a moment before it.
+  it('judges an item scan against the bin scanned immediately before it, even when both share the one stale NFC closure', async () => {
+    // Filed in a DIFFERENT bin than the one about to be scanned - a stale
+    // "currentBin was null when this closure was created" read takes the
+    // `currentBin === null` branch regardless (wrongly "confirmed in
+    // place"), so only a genuinely fresh read of the just-scanned bin
+    // produces the correct "elsewhere" verdict this test pins.
+    const item = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2' })
+    equipmentById['eq-2'] = item
+    let resolveItemGet!: (value: unknown) => void
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/zones') && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      }
+      const binMatch = u.match(/\/api\/inventory\/equipment\?bin=([^&]+)/)
+      if (binMatch && method === 'GET') {
+        const binId = decodeURIComponent(binMatch[1])
+        return Promise.resolve({ ok: true, json: async () => ({ items: binItemsByBinId[binId] ?? [] }) })
+      }
+      if (u.match(/\/api\/inventory\/equipment\/eq-2$/) && method === 'GET') {
+        return new Promise((resolve) => { resolveItemGet = resolve })
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: 'not found' }) })
+    })
+
+    let onUrl: ((url: string) => void) | null = null
+    mockedScanTags.mockImplementation(async (cb) => { onUrl = cb })
+
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scanning' }))
+    await waitFor(() => expect(onUrl).not.toBeNull())
+
+    // Both calls go through the ONE handleScanRef.current from mount -
+    // nothing in between gives React a chance to commit the bin scan's own
+    // re-render and run the passive effect that would otherwise refresh it.
+    act(() => {
+      onUrl!('https://boat.example/inventory/bins/LAZ-02')
+      onUrl!('https://boat.example/inventory/equipment/eq-2')
+    })
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    // eq-2's own fetchEquipment only resolves now - well after the bin scan
+    // above set the new current bin.
+    await act(async () => {
+      resolveItemGet({ ok: true, json: async () => ({ item }) })
+      await Promise.resolve()
+    })
+
+    // Judged against LAZ-02 (the bin just scanned), not the null currentBin
+    // the stale closure was created with.
+    await screen.findByText(/Recorded in SAL-04/)
+    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
+  })
+
   it('aborts the scan\'s AbortController on unmount', async () => {
     let capturedSignal: AbortSignal | undefined
     mockedScanTags.mockImplementation(async (_onUrl, signal) => { capturedSignal = signal })

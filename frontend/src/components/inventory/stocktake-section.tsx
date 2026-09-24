@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,6 +59,19 @@ interface StocktakeSectionProps {
 export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
   const { zones } = useInventoryZones()
   const [currentBin, setCurrentBin] = useState<CurrentBin | null>(null)
+  // Review finding: handleScan is a plain closure over `currentBin` (a
+  // render-scoped variable), and that specific closure is what a stale
+  // handleScanRef (below) can still be holding when a follow-up scan
+  // arrives faster than a render can commit. Even setting that aside, a
+  // SINGLE handleScan call reads `currentBin` before its own `await
+  // fetchEquipment` and again after it to decide confirmed vs elsewhere -
+  // a closure variable can't pick up a bin scanned by a LATER call while
+  // this one is still suspended, no matter how fresh that later call's own
+  // closure is. A ref's `.current` is shared by every closure and mutated
+  // synchronously the instant a bin is scanned, so reading THIS after the
+  // await - not the closure's own `currentBin` - is what makes the decision
+  // correct regardless of which closure is asking or when.
+  const currentBinRef = useRef<CurrentBin | null>(null)
   const [events, setEvents] = useState<ScanEvent[]>([])
   const [movingId, setMovingId] = useState<string | null>(null)
   const [scanFieldValue, setScanFieldValue] = useState('')
@@ -130,6 +143,11 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
         return
       }
+      // Set synchronously, before setCurrentBin - a plain assignment isn't
+      // batched the way a state update is, so any handleScan call already
+      // suspended on its own await (elsewhere) sees this the instant it
+      // resumes, not whenever React next commits.
+      currentBinRef.current = match
       setCurrentBin(match)
       pushEvent({ id: crypto.randomUUID(), kind: 'bin', code: match.bin.code, zoneName: match.zone.name })
       return
@@ -154,10 +172,17 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         return
       }
 
+      // Review finding: reads the REF here, not the `currentBin` closed over
+      // above - a bin scanned by a later handleScan call, while this one was
+      // still suspended on the fetchEquipment await just above, has already
+      // updated it synchronously even though this call's own `currentBin`
+      // variable is frozen at whatever it was when this closure was created.
+      const binNow = currentBinRef.current
+
       // ADR 0127: "An item scanned with no current bin is confirmed in
       // place" - the same branch as "recorded in the current bin", just
       // with nothing to compare the bin against.
-      if (currentBin === null || item.bin_id === currentBin.bin.id) {
+      if (binNow === null || item.bin_id === binNow.bin.id) {
         pushEvent({ id: crypto.randomUUID(), kind: 'confirmed', item })
         if (canWrite && !item.verified_aboard) {
           try {
@@ -175,7 +200,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         return
       }
 
-      pushEvent({ id: crypto.randomUUID(), kind: 'elsewhere', item, recordedBinCode: item.bin_code || null, targetBin: currentBin })
+      pushEvent({ id: crypto.randomUUID(), kind: 'elsewhere', item, recordedBinCode: item.bin_code || null, targetBin: binNow })
       return
     }
 
@@ -229,7 +254,14 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
   // through a ref that's kept current on every render is what makes the
   // NFC callback see whichever handleScan closure is actually current.
   const handleScanRef = useRef(handleScan)
-  useEffect(() => { handleScanRef.current = handleScan })
+  // Review finding: an ordinary (passive) effect runs after the browser has
+  // had a chance to paint, which a fast enough follow-up NFC tap can beat -
+  // useLayoutEffect runs synchronously right after React commits the DOM
+  // update, closing that window as far as a re-subscription can.
+  // currentBinRef above is what actually makes a SINGLE in-flight call
+  // correct regardless of timing; this just gets the NEXT call a fresh
+  // closure sooner.
+  useLayoutEffect(() => { handleScanRef.current = handleScan })
 
   const handleStartScanning = async () => {
     setScanError(null)
