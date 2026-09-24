@@ -212,14 +212,32 @@ type equipmentItem struct {
 	BinCode   string `json:"bin_code"`
 	LinkCount int    `json:"link_count"`
 
-	// PhotoIDs (ADR 0127) is the item's OWN linked documents tagged 'photo',
-	// ordered by sort_index then document_id, cover first - never nil (see
+	// PhotoIDs (ADR 0127, amended 2026-09-25) is a VIEW over the item's own
+	// linked documents: whichever ones are image/jpeg or image/png, ordered
+	// by sort_index then document_id, cover first - never nil (see
 	// equipmentByID/ListEquipment, the same "always the keys" reasoning as
-	// ZoneName/BinCode above). It is NOT every equipment_documents link
-	// (EquipmentDocuments returns that); it is the photo-tagged subset,
-	// which is what the bin page's photo strip and the editor's photo row
-	// both read.
+	// ZoneName/BinCode above). No tag is involved and none is written on
+	// upload - a document is a photo because of what it IS (an image MIME
+	// type), not because of a flag someone (an operator, Mate) happened to
+	// set on it. It is NOT every equipment_documents link (EquipmentDocuments
+	// returns that); it is the image-MIME subset, which is what the bin
+	// page's photo strip and the editor's photo row both read. A photo also
+	// still counts toward LinkCount and still shows in the Documents tab -
+	// it is a linked document like any other, just one this view also
+	// happens to surface as a picture.
 	PhotoIDs []string `json:"photo_ids"`
+
+	// ExclusivePhotoIDs (2026-09-25 amendment) is the subset of PhotoIDs that
+	// reference NOTHING else - no other equipment_documents row anywhere
+	// still links the same document. It is what the frontend's delete
+	// dialogs offer to also delete: an item delete's "Also delete N
+	// photo(s) only this item uses" checkbox, and the strip's per-photo
+	// "Remove and delete" choice. Computed only by equipmentByID (GetEquipment)
+	// - ListEquipment leaves it empty, the one place in this struct that is
+	// NOT "always the keys": the Equipment index and the bin page's grid
+	// never need it, and computing a per-row exclusivity subquery for every
+	// item in a filtered listing would be work nothing reads.
+	ExclusivePhotoIDs []string `json:"exclusive_photo_ids"`
 }
 
 // equipmentDocument is one row of EquipmentDocuments' output: an
@@ -818,17 +836,23 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	return it, nil
 }
 
-// photoIDsForEquipmentIDs returns each of ids' own photo-tagged document
-// ids, cover first - ADR 0127: "an item's photos are its linked documents
-// tagged photo, ordered by sort_index [then document_id]". One aggregate
-// query over every id at once (equipmentColumns' own doc comment gives the
-// identical reasoning for the zone/bin join above it: a handful of items
-// aboard one boat, never worth N+1 queries to avoid), shared by
-// equipmentByID (one id) and ListEquipment (the whole filtered result) so
-// the two can never compute this differently. Callers get back only the
-// ids that actually matched - an id with no photos simply has no entry in
-// the map, and every call site treats a missing key the same as an empty
-// slice.
+// photoMIMEs is the exact set of MIME types photoIDsForEquipmentIDs treats
+// as "this linked document is a photo" - image/jpeg or image/png, the same
+// pair uploadEquipmentPhotoHandler accepts (inventory_handlers.go). No tag
+// involved (2026-09-25 amendment): a document is a photo because of what it
+// IS, not a flag written on upload.
+const photoMIMEsClause = `d.mime IN ('image/jpeg', 'image/png')`
+
+// photoIDsForEquipmentIDs returns each of ids' own photo document ids
+// (image/jpeg or image/png among its linked documents), cover first -
+// ordered by sort_index then document_id. One aggregate query over every id
+// at once (equipmentColumns' own doc comment gives the identical reasoning
+// for the zone/bin join above it: a handful of items aboard one boat, never
+// worth N+1 queries to avoid), shared by equipmentByID (one id) and
+// ListEquipment (the whole filtered result) so the two can never compute
+// this differently. Callers get back only the ids that actually matched -
+// an id with no photos simply has no entry in the map, and every call site
+// treats a missing key the same as an empty slice.
 func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, error) {
 	out := map[string][]string{}
 	if len(ids) == 0 {
@@ -845,7 +869,7 @@ func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, e
 	rows, err := q.Query(`
 		SELECT ed.equipment_id, ed.document_id
 		FROM equipment_documents ed
-		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
 		WHERE ed.equipment_id IN (`+strings.Join(placeholders, ",")+`)
 		ORDER BY ed.equipment_id, ed.sort_index, ed.document_id`, args...)
 	if err != nil {
@@ -862,6 +886,40 @@ func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, e
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("photo ids for equipment: %w", err)
+	}
+	return out, nil
+}
+
+// exclusivePhotoIDsForEquipmentID returns the subset of equipmentID's own
+// photo ids (photoIDsForEquipmentIDs' same image-MIME view) that reference
+// NOTHING else - no other equipment_documents row, on any item, still links
+// the same document. This is what a delete dialog can safely offer to also
+// delete: a document some OTHER item still links must never be removed just
+// because this one's link to it is going away (the operator's own decision,
+// "never delete a document that another item still links").
+func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string, error) {
+	rows, err := q.Query(`
+		SELECT ed.document_id
+		FROM equipment_documents ed
+		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
+		WHERE ed.equipment_id = ?
+		AND (SELECT COUNT(*) FROM equipment_documents ed2 WHERE ed2.document_id = ed.document_id) = 1
+		ORDER BY ed.sort_index, ed.document_id`, equipmentID)
+	if err != nil {
+		return nil, fmt.Errorf("exclusive photo ids for equipment: %w", err)
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var documentID string
+		if err := rows.Scan(&documentID); err != nil {
+			return nil, fmt.Errorf("exclusive photo ids for equipment: scan: %w", err)
+		}
+		out = append(out, documentID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("exclusive photo ids for equipment: %w", err)
 	}
 	return out, nil
 }
@@ -888,6 +946,12 @@ func equipmentByID(q sqlQueryer, id string) (equipmentItem, error) {
 	if it.PhotoIDs == nil {
 		it.PhotoIDs = []string{}
 	}
+
+	exclusive, err := exclusivePhotoIDsForEquipmentID(q, id)
+	if err != nil {
+		return equipmentItem{}, err
+	}
+	it.ExclusivePhotoIDs = exclusive
 	return it, nil
 }
 
@@ -1063,28 +1127,32 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 // need no explicit cleanup here - ON DELETE CASCADE on
 // equipment_documents.equipment_id (documents_store.go's schema) removes
 // them as part of the same SQLite-internal operation, proved by
-// TestDocumentStore_DeleteEquipmentCascadesLinks
-// (inventory_store_test.go) rather than merely assumed from the schema
-// text.
+// TestDocumentStore_DeleteEquipmentCascadesLinks (inventory_store_test.go)
+// rather than merely assumed from the schema text. That cascade removes
+// only the LINK - every linked document (photo or not) survives an item
+// delete by default (2026-09-25 amendment: unlink only, the operator's own
+// decision that a delete must never destroy a document without being asked).
 //
-// Review finding: that cascade removes only the LINK. ADR 0127's "a photo
-// has no life outside its item" means id's own photo-tagged documents (and,
-// per the caller's own file, each one's bytes on disk) must go with the
-// item too - unless another item's own equipment_documents link still
-// references the same (sha256-deduplicated) document row, in which case it
-// survives exactly the way RemoveEquipmentPhoto already leaves a shared
-// photo alone. An ORDINARY linked document (never tagged photo, e.g. a
-// manual filed against the item) is untouched either way - only its link
-// row cascades away, same as before this fix.
+// deletePhotos, when true, additionally deletes the document row (and,
+// per the caller's own file, its bytes on disk) for each of id's own
+// EXCLUSIVE photos - the ones exclusivePhotoIDsForEquipmentID already
+// reports nothing else links, re-read fresh inside this same transaction
+// rather than trusting a caller-supplied list, so a link added between
+// that earlier read and this call can never be deleted out from under
+// whoever just added it. A shared photo (still linked to another item) is
+// never touched either way. Returns the sha256 of every document this call
+// actually deleted, so deleteEquipmentHandler (inventory_handlers.go) can
+// remove each one's file from disk too - the same store/handler split
+// RemoveEquipmentPhoto/deleteEquipmentPhotoHandler already draw.
 //
-// id's photo ids are collected BEFORE the DELETE (their equipment_documents
-// rows are about to cascade away with it) and checked for remaining links
-// AFTER, all inside the one transaction. Returns the sha256 of every photo
-// document this call actually deleted, so deleteEquipmentHandler
-// (inventory_handlers.go) can remove each one's file from disk too - the
-// same store/handler split RemoveEquipmentPhoto/deleteEquipmentPhotoHandler
-// already draw.
-func (s *documentStore) DeleteEquipment(id string) (deletedPhotoSHAs []string, err error) {
+// This inlines the same single `DELETE FROM documents WHERE id = ?`
+// documentStore.Delete (documents_store.go) itself runs, rather than
+// calling that exported method directly - Delete manages its own
+// transaction, and SQLite/database/sql here has no savepoint support to
+// nest one transaction inside another, so the only way to keep "unlink
+// this item, then delete its now-orphaned photos" atomic is to run both
+// steps' SQL inside the one transaction this method already holds.
+func (s *documentStore) DeleteEquipment(id string, deletePhotos bool) (deletedPhotoSHAs []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1102,25 +1170,24 @@ func (s *documentStore) DeleteEquipment(id string) (deletedPhotoSHAs []string, e
 		return nil, errEquipmentNotFound
 	}
 
-	photoMap, err := photoIDsForEquipmentIDs(tx, []string{id})
-	if err != nil {
-		return nil, err
+	var exclusiveIDs []string
+	if deletePhotos {
+		exclusiveIDs, err = exclusivePhotoIDsForEquipmentID(tx, id)
+		if err != nil {
+			return nil, err
+		}
 	}
-	photoIDs := photoMap[id]
 
 	if _, err := tx.Exec(`DELETE FROM equipment WHERE id = ?`, id); err != nil {
 		return nil, fmt.Errorf("delete equipment: %w", err)
 	}
 
-	for _, docID := range photoIDs {
-		stillLinked, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, docID)
-		if err != nil {
-			return nil, fmt.Errorf("delete equipment: check remaining photo links: %w", err)
-		}
-		if stillLinked {
-			continue
-		}
-
+	for _, docID := range exclusiveIDs {
+		// The equipment row (and its cascade) is already gone by this point
+		// - a fresh recheck here would only ever confirm what
+		// exclusivePhotoIDsForEquipmentID already established inside this
+		// SAME transaction, so there is nothing new for it to catch that a
+		// concurrent writer couldn't just as easily have raced regardless.
 		var sha string
 		if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, docID).Scan(&sha); err != nil {
 			return nil, fmt.Errorf("delete equipment: read photo sha: %w", err)
@@ -1269,6 +1336,11 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		if out[i].PhotoIDs == nil {
 			out[i].PhotoIDs = []string{}
 		}
+		// ExclusivePhotoIDs' own doc comment: a listing never needs it, so
+		// it is left an (always non-nil, per this struct's own "no
+		// omitempty" convention) empty slice rather than run through
+		// exclusivePhotoIDsForEquipmentID once per row.
+		out[i].ExclusivePhotoIDs = []string{}
 	}
 
 	return out, nil
@@ -1324,19 +1396,27 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	return out, nil
 }
 
-// SetEquipmentDocuments replaces id's NON-PHOTO linked documents in one
-// transaction - "replace wholesale" (plan's own phrase) narrowed by ADR
-// 0124: photo-tagged links are managed only through the photo routes
-// (AddEquipmentPhoto/SetEquipmentPhotoOrder/RemoveEquipmentPhoto below), so
-// this method leaves them exactly as they are rather than deleting and
-// reinserting every link the way it did before photos existed. Every
-// existing NON-photo equipment_documents row for id is deleted and docIDs
-// are inserted fresh, all under source='operator' (this cycle only edits
-// links from the equipment side - plan's own "Links edited from the
-// equipment side this cycle" decision - so every link this method ever
-// writes is an explicit operator action; source='suggested' has no writer
-// yet, reserved for the enrichment cycle this schema is sized to receive
-// without churn).
+// SetEquipmentDocuments replaces id's WHOLE linked-document set in one
+// transaction - "replace wholesale" (plan's own phrase), PHOTOS INCLUDED
+// (2026-09-25 amendment: the earlier photo-tagged carve-out is gone along
+// with the tag itself - the Documents tab lists every linked document,
+// photos too, and this is the one write that owns that whole set). Every
+// existing equipment_documents row for id NOT named in docIDs is deleted;
+// every id in docIDs not already linked is inserted fresh, all under
+// source='operator' (this cycle only edits links from the equipment side -
+// plan's own "Links edited from the equipment side this cycle" decision -
+// so every link this method ever writes is an explicit operator action;
+// source='suggested' has no writer yet, reserved for the enrichment cycle
+// this schema is sized to receive without churn).
+//
+// A link this call KEEPS has its sort_index left exactly as it was - the
+// operator's own decision: a document-tab save must not silently reshuffle
+// the photo strip's order just because the Documents tab (which knows
+// nothing about photo order) happened to resend the same id. Only a link
+// this call actually INSERTS gets a fresh sort_index (0 - meaningless for a
+// non-photo link, and a photo added this way was never ordered by an
+// operator action that cares where it lands; AddEquipmentPhoto is what
+// assigns max+1 for an upload that does care).
 //
 // A docID that doesn't name a real documents row fails the
 // equipment_documents.document_id foreign key and rolls back the WHOLE
@@ -1350,15 +1430,13 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 // constraint failure surfaces as-is rather than this method inventing its
 // own, possibly-differently-worded, version of "unknown document id".
 //
-// docIDs IS deduped here (against itself AND against the kept photo set),
-// first-occurrence order kept: it names "the whole non-photo set" the
-// record should end up linked to, not a sequence of individual link
-// operations, so the same id appearing twice means the same thing as it
-// appearing once. Left undeduped, a repeated id - or one that happens to
-// already be a kept photo link - would collide with equipment_documents'
-// own (equipment_id, document_id) primary key and turn an ordinary caller
-// mistake (or the document-link-picker offering something it should have
-// excluded) into a raw SQLite constraint error rather than a silent no-op.
+// docIDs IS deduped here, first-occurrence order kept: it names "the whole
+// set" the record should end up linked to, not a sequence of individual
+// link operations, so the same id appearing twice means the same thing as
+// it appearing once. Left undeduped, a repeated id would collide with
+// equipment_documents' own (equipment_id, document_id) primary key on the
+// second INSERT attempt (though the "already linked, skip" check below
+// already stops that for any id linked before this call started).
 func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1377,46 +1455,54 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 		return errEquipmentNotFound
 	}
 
-	if _, err := tx.Exec(`
-		DELETE FROM equipment_documents
-		WHERE equipment_id = ?
-		AND document_id NOT IN (SELECT document_id FROM document_tags WHERE tag = 'photo')`,
-		id,
-	); err != nil {
-		return fmt.Errorf("set equipment documents: clear: %w", err)
-	}
-
-	// Seeded with whatever the DELETE above just left standing (the item's
-	// photo links) so a docID that happens to already be one of them is a
-	// silent no-op below rather than a primary-key collision - see this
-	// method's own doc comment.
-	seen := map[string]bool{}
-	kept, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("set equipment documents: read kept links: %w", err)
-	}
-	for kept.Next() {
-		var docID string
-		if err := kept.Scan(&docID); err != nil {
-			kept.Close()
-			return fmt.Errorf("set equipment documents: scan kept link: %w", err)
-		}
-		seen[docID] = true
-	}
-	if err := kept.Err(); err != nil {
-		kept.Close()
-		return fmt.Errorf("set equipment documents: read kept links: %w", err)
-	}
-	kept.Close()
-
-	now := s.now().Unix()
+	wanted := map[string]bool{}
+	ordered := make([]string, 0, len(docIDs))
 	for _, docID := range docIDs {
-		if seen[docID] {
+		if wanted[docID] {
 			continue
 		}
-		seen[docID] = true
+		wanted[docID] = true
+		ordered = append(ordered, docID)
+	}
+
+	existing := map[string]bool{}
+	rows, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("set equipment documents: read existing links: %w", err)
+	}
+	for rows.Next() {
+		var docID string
+		if err := rows.Scan(&docID); err != nil {
+			rows.Close()
+			return fmt.Errorf("set equipment documents: scan existing link: %w", err)
+		}
+		existing[docID] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("set equipment documents: read existing links: %w", err)
+	}
+	rows.Close()
+
+	for docID := range existing {
+		if wanted[docID] {
+			continue
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO equipment_documents (equipment_id, document_id, source, created_at) VALUES (?, ?, 'operator', ?)`,
+			`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
+			id, docID,
+		); err != nil {
+			return fmt.Errorf("set equipment documents: unlink %s: %w", docID, err)
+		}
+	}
+
+	now := s.now().Unix()
+	for _, docID := range ordered {
+		if existing[docID] {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', 0, ?)`,
 			id, docID, now,
 		); err != nil {
 			return fmt.Errorf("set equipment documents: link %s: %w", docID, err)
@@ -1427,10 +1513,16 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 }
 
 // ── equipment photos ─────────────────────────────────────────────────────
-// ADR 0127: a photo is an ordinary uploaded document, tagged 'photo' and
-// linked through equipment_documents - these three methods are the ONLY
-// writers of a photo-tagged link (SetEquipmentDocuments above deliberately
-// leaves them alone).
+// 2026-09-25 amendment: a photo is no longer a tagged document - it is
+// whichever of an item's ordinary linked documents happens to be image/jpeg
+// or image/png (photoIDsForEquipmentIDs' own doc comment). AddEquipmentPhoto/
+// SetEquipmentPhotoOrder/RemoveEquipmentPhoto below still exist as their own
+// methods (the photo strip still wants "link at the end", "reorder", "unlink
+// this one" as distinct operations from SetEquipmentDocuments' whole-set
+// replace), but none of them write or read a tag any more - they read and
+// write equipment_documents links exactly like SetEquipmentDocuments does,
+// just scoped to one document at a time or ordered by photoIDsForEquipmentIDs'
+// own image-MIME view.
 
 // errEquipmentPhotoSetMismatch is returned by SetEquipmentPhotoOrder when
 // order doesn't name EXACTLY the item's current photo id set - ADR 0127:
@@ -1441,10 +1533,11 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 var errEquipmentPhotoSetMismatch = errors.New("photo set does not match the item's current photos")
 
 // errEquipmentPhotoNotFound is returned by RemoveEquipmentPhoto when
-// documentID is not currently one of equipmentID's own photo-tagged links -
-// a stale UI, an id belonging to a different item's photo, or an ordinary
-// (non-photo) linked document. Distinct from errEquipmentNotFound, which
-// means the equipment record itself doesn't exist.
+// documentID is not currently one of equipmentID's own photos (linked AND
+// image/jpeg or image/png) - a stale UI, an id belonging to a different
+// item's photo, or a linked document that isn't an image. Distinct from
+// errEquipmentNotFound, which means the equipment record itself doesn't
+// exist.
 var errEquipmentPhotoNotFound = errors.New("photo not found on this item")
 
 // sameIDSet reports whether a and b hold the same ids, in any order -
@@ -1468,14 +1561,19 @@ func sameIDSet(a, b []string) bool {
 	return true
 }
 
-// AddEquipmentPhoto links documentID to equipmentID as a photo, at the end
-// of the item's current photo order - max(sort_index)+1 among its OWN
-// photo-tagged links (ADR 0127: "the first one is the cover"), so a freshly
-// uploaded photo always lands after every photo already on the strip. A
-// no-op if the link already exists (equipment_documents' PRIMARY KEY is
-// (equipment_id, document_id) - re-adding an existing pair, e.g. identical
-// photo bytes uploaded twice for the same item, leaves its position exactly
-// where it already was rather than erroring).
+// AddEquipmentPhoto links documentID to equipmentID, at the end of the
+// item's current photo order - max(sort_index)+1 among its OWN photo
+// (image-MIME) links (ADR 0127: "the first one is the cover"), so a freshly
+// uploaded or shared photo always lands after every photo already on the
+// strip. A no-op if the link already exists (equipment_documents' PRIMARY
+// KEY is (equipment_id, document_id) - re-adding an existing pair, e.g.
+// identical photo bytes uploaded twice for the same item, leaves its
+// position exactly where it already was rather than erroring). This is also
+// the ONLY place a byte-identical upload's dedupe match gets linked
+// (inventory_handlers.go's uploadEquipmentPhotoHandler) - 2026-09-25
+// amendment: there is no longer a 409 refusal for a sha match that names a
+// document the operator filed for some other reason; it is simply linked,
+// the same as any other existing document would be.
 func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1505,7 +1603,7 @@ func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error 
 	var maxSort sql.NullInt64
 	if err := tx.QueryRow(`
 		SELECT MAX(ed.sort_index) FROM equipment_documents ed
-		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
 		WHERE ed.equipment_id = ?`, equipmentID).Scan(&maxSort); err != nil {
 		return fmt.Errorf("add equipment photo: max sort: %w", err)
 	}
@@ -1570,75 +1668,62 @@ func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []strin
 }
 
 // RemoveEquipmentPhoto detaches documentID from equipmentID's photo strip -
-// ADR 0127. Uploads are deduplicated by sha256 (Insert's own dedupe), so the
-// SAME document row can be linked as a photo on more than one item; deleting
-// it unconditionally, the way this method first shipped, cascaded the photo
-// off every OTHER item that happened to share the exact same bytes and
-// deleted their file too. So this only ever removes equipmentID's own link.
-// The document row itself (and, per ADR 0127, "a photo has no life outside
-// its item") is deleted only when no equipment_documents row references it
-// anywhere any more - documentDeleted reports which happened, so the caller
-// (deleteEquipmentPhotoHandler) knows whether it's safe to remove the file
-// from disk too; sha is returned either way, for logging/the deleted case.
-// errEquipmentPhotoNotFound if documentID isn't currently one of
-// equipmentID's own photo links.
-func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) (sha string, documentDeleted bool, err error) {
+// UNLINK ONLY (2026-09-25 amendment, superseding the earlier "a photo has no
+// life outside its item" rule: the operator's own decision is that removing
+// a photo, or deleting the item it belongs to, must never destroy a document
+// without being explicitly asked - deleteEquipmentPhotoHandler is what
+// offers that choice, via its own `delete` query flag, and does the actual
+// document deletion itself, reusing the same DELETE the exported Delete
+// method runs; this method never touches the documents table at all any
+// more). errEquipmentPhotoNotFound if documentID isn't currently one of
+// equipmentID's own photos (linked AND image/jpeg or image/png).
+func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: begin: %w", err)
+		return fmt.Errorf("remove equipment photo: begin: %w", err)
 	}
 	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 	if err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: check equipment: %w", err)
+		return fmt.Errorf("remove equipment photo: check equipment: %w", err)
 	}
 	if !ok {
-		return "", false, errEquipmentNotFound
+		return errEquipmentNotFound
 	}
 
 	isPhoto, err := rowExists(tx, `
 		SELECT 1 FROM equipment_documents ed
-		JOIN document_tags dt ON dt.document_id = ed.document_id AND dt.tag = 'photo'
+		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
 		WHERE ed.equipment_id = ? AND ed.document_id = ?`, equipmentID, documentID)
 	if err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: check link: %w", err)
+		return fmt.Errorf("remove equipment photo: check link: %w", err)
 	}
 	if !isPhoto {
-		return "", false, errEquipmentPhotoNotFound
-	}
-
-	if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, documentID).Scan(&sha); err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: read sha: %w", err)
+		return errEquipmentPhotoNotFound
 	}
 
 	if _, err := tx.Exec(
 		`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
 		equipmentID, documentID,
 	); err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: unlink: %w", err)
+		return fmt.Errorf("remove equipment photo: unlink: %w", err)
 	}
 
-	stillLinked, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, documentID)
-	if err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: check remaining links: %w", err)
-	}
-	if stillLinked {
-		if err := tx.Commit(); err != nil {
-			return "", false, fmt.Errorf("remove equipment photo: commit: %w", err)
-		}
-		return sha, false, nil
-	}
+	return tx.Commit()
+}
 
-	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, documentID); err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", false, fmt.Errorf("remove equipment photo: commit: %w", err)
-	}
-	return sha, true, nil
+// DocumentStillLinkedToEquipment reports whether ANY equipment_documents row
+// anywhere still references documentID - deleteEquipmentPhotoHandler's own
+// "re-check exclusivity server-side at delete time" (inventory_handlers.go):
+// called AFTER RemoveEquipmentPhoto's own unlink, so a document another item
+// linked in the meantime is never mistaken for orphaned just because it was
+// exclusive to THIS item a moment ago.
+func (s *documentStore) DocumentStillLinkedToEquipment(documentID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return rowExists(s.db, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, documentID)
 }

@@ -505,7 +505,7 @@ func TestDocumentStore_DeleteEquipmentRemovesRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	if _, err := store.DeleteEquipment(item.ID); err != nil {
+	if _, err := store.DeleteEquipment(item.ID, false); err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 	if _, err := store.GetEquipment(item.ID); !errors.Is(err, errEquipmentNotFound) {
@@ -515,20 +515,46 @@ func TestDocumentStore_DeleteEquipmentRemovesRow(t *testing.T) {
 
 func TestDocumentStore_DeleteEquipmentUnknownIDReturnsNotFound(t *testing.T) {
 	store := newTestDocumentStore(t)
-	if _, err := store.DeleteEquipment("does-not-exist"); !errors.Is(err, errEquipmentNotFound) {
+	if _, err := store.DeleteEquipment("does-not-exist", false); !errors.Is(err, errEquipmentNotFound) {
 		t.Fatalf("expected errEquipmentNotFound, got %v", err)
 	}
 }
 
-// TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument pins item 1
-// of the pre-release review: "a photo has no life outside its item" (ADR
-// 0127) applies to DELETEing the item itself, not just the photo-remove
-// route. A photo linked ONLY to the deleted item must have its document row
-// removed along with the equipment row - DeleteEquipment reports the freed
-// document's own sha256 back so the caller can remove its file from disk
-// too (deleteEquipmentHandler's own job, covered by the handler-level test
-// in inventory_handlers_test.go).
-func TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument(t *testing.T) {
+// TestDocumentStore_DeleteEquipmentDefaultKeepsPhotoDocument pins the
+// operator's 2026-09-25 decision (superseding "a photo has no life outside
+// its item"): an ordinary DeleteEquipment (deletePhotos=false) must never
+// destroy a linked photo document - unlink only, the item's own photo
+// document surviving as an ordinary document nothing links to any more.
+func TestDocumentStore_DeleteEquipmentDefaultKeepsPhotoDocument(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-delete-eq-default", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(item.ID, false)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 0 {
+		t.Fatalf("expected nothing deleted without the flag, got %#v", deletedSHAs)
+	}
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the photo document to survive an ordinary delete, got %v", err)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentWithFlagDeletesUnsharedPhotoDocument pins
+// the explicit-choice half: deletePhotos=true removes the document row for
+// any of the item's own EXCLUSIVE photos along with the equipment row -
+// DeleteEquipment reports the freed document's own sha256 back so the
+// caller can remove its file from disk too (deleteEquipmentHandler's own
+// job, covered by the handler-level test in inventory_handlers_test.go).
+func TestDocumentStore_DeleteEquipmentWithFlagDeletesUnsharedPhotoDocument(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
 	if err != nil {
@@ -539,7 +565,7 @@ func TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument(t *testing.T)
 		t.Fatalf("AddEquipmentPhoto: %v", err)
 	}
 
-	deletedSHAs, err := store.DeleteEquipment(item.ID)
+	deletedSHAs, err := store.DeleteEquipment(item.ID, true)
 	if err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
@@ -551,11 +577,12 @@ func TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument(t *testing.T)
 	}
 }
 
-// TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem pins the
-// same sha256-dedupe sharing rule RemoveEquipmentPhoto already honours:
-// deleting item A must not take item B's still-linked copy of the same
-// photo document down with it.
-func TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem(t *testing.T) {
+// TestDocumentStore_DeleteEquipmentWithFlagKeepsPhotoSharedWithAnotherItem
+// pins the same sha256-dedupe sharing rule RemoveEquipmentPhoto already
+// honours: deleting item A with the flag set must not take item B's
+// still-linked copy of the same photo document down with it - it is not
+// EXCLUSIVE to A, so exclusivePhotoIDsForEquipmentID never names it.
+func TestDocumentStore_DeleteEquipmentWithFlagKeepsPhotoSharedWithAnotherItem(t *testing.T) {
 	store := newTestDocumentStore(t)
 	itemA, err := store.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
 	if err != nil {
@@ -573,7 +600,7 @@ func TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem(t *testing
 		t.Fatalf("AddEquipmentPhoto(B): %v", err)
 	}
 
-	deletedSHAs, err := store.DeleteEquipment(itemA.ID)
+	deletedSHAs, err := store.DeleteEquipment(itemA.ID, true)
 	if err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
@@ -593,10 +620,10 @@ func TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem(t *testing
 }
 
 // TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument pins the
-// other half of item 1: an ordinary (non-photo) linked document, like a
+// other half of item 1: an ordinary (non-image) linked document, like a
 // manual filed against the item, is NOT a photo and must survive the
-// item's deletion untouched - only its equipment_documents link cascades
-// away, the same as it always has.
+// item's deletion untouched even with the flag set - only its
+// equipment_documents link cascades away, the same as it always has.
 func TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
@@ -608,7 +635,7 @@ func TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument(t *testing.T) 
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
 
-	deletedSHAs, err := store.DeleteEquipment(item.ID)
+	deletedSHAs, err := store.DeleteEquipment(item.ID, true)
 	if err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
@@ -810,7 +837,7 @@ func TestDocumentStore_DeleteEquipmentCascadesLinks(t *testing.T) {
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
 
-	if _, err := store.DeleteEquipment(item.ID); err != nil {
+	if _, err := store.DeleteEquipment(item.ID, false); err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 
@@ -888,12 +915,13 @@ func TestDocumentStore_CreateEquipmentDedupesAliasesCaseInsensitively(t *testing
 // Written before the store methods themselves (AGENTS.md's test-first
 // policy), the same convention every other section of this file follows.
 
-// mustInsertPhotoDocument inserts a document already tagged 'photo' -
-// mustInsertDocument's own shape, extended with the one tag every photo
-// fixture below needs.
+// mustInsertPhotoDocument inserts a document whose MIME type alone makes it
+// a photo (2026-09-25 amendment: no tag involved any more) -
+// mustInsertDocument's own shape, with image/jpeg fixed as the MIME every
+// photo fixture below needs.
 func mustInsertPhotoDocument(t *testing.T, store *documentStore, sha, filename string) document {
 	t.Helper()
-	doc, err := store.Insert(document{SHA256: sha, Filename: filename, MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	doc, err := store.Insert(document{SHA256: sha, Filename: filename, MIME: "image/jpeg"})
 	if err != nil {
 		t.Fatalf("Insert(%q): %v", filename, err)
 	}
@@ -1021,7 +1049,7 @@ func TestDocumentStore_SetEquipmentPhotoOrderRejectsUnknownEquipmentID(t *testin
 	}
 }
 
-func TestDocumentStore_RemoveEquipmentPhotoDeletesLinkAndDocument(t *testing.T) {
+func TestDocumentStore_RemoveEquipmentPhotoUnlinksOnlyDocumentSurvives(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
 	if err != nil {
@@ -1032,19 +1060,14 @@ func TestDocumentStore_RemoveEquipmentPhotoDeletesLinkAndDocument(t *testing.T) 
 		t.Fatalf("AddEquipmentPhoto: %v", err)
 	}
 
-	sha, deleted, err := store.RemoveEquipmentPhoto(item.ID, photo.ID)
-	if err != nil {
+	if err := store.RemoveEquipmentPhoto(item.ID, photo.ID); err != nil {
 		t.Fatalf("RemoveEquipmentPhoto: %v", err)
 	}
-	if sha != "sha-remove" {
-		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
-	}
-	if !deleted {
-		t.Fatalf("expected the document to be reported deleted when no other item references it")
-	}
 
-	if _, err := store.Get(photo.ID); !errors.Is(err, errDocumentNotFound) {
-		t.Fatalf("expected the document itself to be deleted, got %v", err)
+	// 2026-09-25 amendment: unlink only - the document itself survives,
+	// exactly like DeleteEquipment's own default (deletePhotos=false).
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the document itself to survive an ordinary remove, got %v", err)
 	}
 	got, err := store.GetEquipment(item.ID)
 	if err != nil {
@@ -1061,13 +1084,13 @@ func TestDocumentStore_RemoveEquipmentPhotoNotOwnedByItemReturnsNotFound(t *test
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	// A plain (non-photo) linked document is not a photo this item can remove
+	// A plain (non-image) linked document is not a photo this item can remove
 	// through the photo route, even though it IS linked.
 	doc := mustInsertDocument(t, store, "sha-not-photo", "manual.pdf", nil)
 	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
-	if _, _, err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
+	if err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
 		t.Fatalf("expected errEquipmentPhotoNotFound, got %v", err)
 	}
 }
@@ -1076,9 +1099,7 @@ func TestDocumentStore_RemoveEquipmentPhotoNotOwnedByItemReturnsNotFound(t *test
 // most serious of the ADR 0127 review findings: uploads are deduplicated by
 // sha256 (documentStore.Insert), so byte-identical photos added to two
 // different items share ONE documents row, linked twice. Removing the photo
-// from item A must drop only A's own equipment_documents link - the document
-// row (and, at the handler layer, its file) must survive because item B's
-// link still references it.
+// from item A must drop only A's own equipment_documents link.
 func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testing.T) {
 	store := newTestDocumentStore(t)
 	itemA, err := store.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
@@ -1097,15 +1118,8 @@ func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testi
 		t.Fatalf("AddEquipmentPhoto(B): %v", err)
 	}
 
-	sha, deleted, err := store.RemoveEquipmentPhoto(itemA.ID, photo.ID)
-	if err != nil {
+	if err := store.RemoveEquipmentPhoto(itemA.ID, photo.ID); err != nil {
 		t.Fatalf("RemoveEquipmentPhoto: %v", err)
-	}
-	if sha != "sha-shared" {
-		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
-	}
-	if deleted {
-		t.Fatalf("expected the document to be KEPT while item B still links it")
 	}
 
 	if _, err := store.Get(photo.ID); err != nil {
@@ -1127,11 +1141,55 @@ func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testi
 	}
 }
 
-// TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder pins
-// ADR 0127's central compatibility rule: the pre-existing whole-set-replace
-// PUT .../documents must not be able to wipe or reshuffle the photo strip a
-// completely separate part of the UI manages.
-func TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder(t *testing.T) {
+// TestDocumentStore_SetEquipmentDocumentsIncludesPhotosInWholeSetReplace pins
+// the 2026-09-25 amendment: SetEquipmentDocuments is once again a true
+// whole-set replace, photos included - a docIDs list that leaves out a
+// currently-linked photo UNLINKS it (drops it from the strip), it does not
+// leave it standing the way the earlier photo-tagged carve-out did. The
+// document itself is never touched by this call either way.
+func TestDocumentStore_SetEquipmentDocumentsIncludesPhotosInWholeSetReplace(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-wholeset-photo", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	manual := mustInsertDocument(t, store, "sha-wholeset-manual", "manual.pdf", nil)
+
+	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 0 {
+		t.Fatalf("expected the photo unlinked (left out of the replace set), got %#v", got.PhotoIDs)
+	}
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the photo document itself to survive an unlink, got %v", err)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != manual.ID {
+		t.Fatalf("expected only the manual linked, got %+v", docs)
+	}
+}
+
+// TestDocumentStore_SetEquipmentDocumentsPreservesSortIndexOfKeptPhotoLinks
+// pins task item 4's requirement directly: a document-tab save that KEEPS a
+// photo link must not reshuffle the photo strip's order, even though the
+// Documents tab (and so this call's own docIDs argument) knows nothing
+// about photo order and may list the ids in a completely different
+// sequence than the strip's own sort_index.
+func TestDocumentStore_SetEquipmentDocumentsPreservesSortIndexOfKeptPhotoLinks(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
 	if err != nil {
@@ -1145,9 +1203,12 @@ func TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder(t *testi
 	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
 		t.Fatalf("AddEquipmentPhoto(b): %v", err)
 	}
-
 	manual := mustInsertDocument(t, store, "sha-preserve-manual", "manual.pdf", nil)
-	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+
+	// The Documents tab's own order (b, a, manual) is the REVERSE of the
+	// strip's sort_index (a=0, b=1) - if this call reordered on keep, the
+	// strip would flip to [b, a] too.
+	if err := store.SetEquipmentDocuments(item.ID, []string{photoB.ID, photoA.ID, manual.ID}); err != nil {
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
 
@@ -1156,64 +1217,15 @@ func TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder(t *testi
 		t.Fatalf("GetEquipment: %v", err)
 	}
 	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoA.ID || got.PhotoIDs[1] != photoB.ID {
-		t.Fatalf("expected both photo links and their order untouched, got %#v", got.PhotoIDs)
+		t.Fatalf("expected the strip's own sort_index order [a,b] preserved, got %#v", got.PhotoIDs)
 	}
 
 	docs, err := store.EquipmentDocuments(item.ID)
 	if err != nil {
 		t.Fatalf("EquipmentDocuments: %v", err)
-	}
-	foundManual := false
-	for _, d := range docs {
-		if d.DocumentID == manual.ID {
-			foundManual = true
-		}
-	}
-	if !foundManual {
-		t.Fatalf("expected the manual to still be linked as an ordinary document, got %+v", docs)
 	}
 	if len(docs) != 3 {
 		t.Fatalf("expected 2 photo links + 1 manual link = 3, got %d: %+v", len(docs), docs)
-	}
-}
-
-// TestDocumentStore_RemovingPhotoTagLeavesLinkButDropsFromPhotoIDs pins ADR
-// 0123 §3 applied to photos: "an item's photos are its linked documents
-// tagged photo" - untag it, and it leaves the strip but the link (and the
-// document) survive as an ordinary linked document. Not a special case,
-// just the same tags-say-what-it-is rule already in force.
-func TestDocumentStore_RemovingPhotoTagLeavesLinkButDropsFromPhotoIDs(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
-	if err != nil {
-		t.Fatalf("CreateEquipment: %v", err)
-	}
-	photo := mustInsertPhotoDocument(t, store, "sha-untag", "a.jpg")
-	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto: %v", err)
-	}
-
-	// Remove the 'photo' tag the way the Documents feature's own tag editor
-	// would (UpdateMeta replaces the WHOLE operator tag set) - leaving it
-	// tagged with something else entirely, never untagged outright.
-	if err := store.UpdateMeta(photo.ID, nil, nil, []string{"consumable"}); err != nil {
-		t.Fatalf("UpdateMeta: %v", err)
-	}
-
-	got, err := store.GetEquipment(item.ID)
-	if err != nil {
-		t.Fatalf("GetEquipment: %v", err)
-	}
-	if len(got.PhotoIDs) != 0 {
-		t.Fatalf("expected the untagged document to leave the photo strip, got %#v", got.PhotoIDs)
-	}
-
-	docs, err := store.EquipmentDocuments(item.ID)
-	if err != nil {
-		t.Fatalf("EquipmentDocuments: %v", err)
-	}
-	if len(docs) != 1 || docs[0].DocumentID != photo.ID {
-		t.Fatalf("expected the link itself to survive, got %+v", docs)
 	}
 }
 
@@ -1307,5 +1319,96 @@ func TestDocumentStore_ListEquipmentQueryFilterKeepsPhotoIDsOnSurvivors(t *testi
 	}
 	if len(items[0].PhotoIDs) != 1 || items[0].PhotoIDs[0] != photo.ID {
 		t.Fatalf("expected the survivor's own photo_ids, got %#v", items[0].PhotoIDs)
+	}
+}
+
+// TestDocumentStore_GetEquipmentExclusivePhotoIDsOnlyExclusive pins the
+// 2026-09-25 amendment's own delete-dialog support: ExclusivePhotoIDs (GET
+// only, ListEquipment leaves it empty - see its own doc comment) names only
+// the item's photos nothing ELSE links, never a shared one.
+func TestDocumentStore_GetEquipmentExclusivePhotoIDsOnlyExclusive(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	other, err := store.CreateEquipment(equipmentItem{Name: "Other item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(other): %v", err)
+	}
+
+	exclusive := mustInsertPhotoDocument(t, store, "sha-exclusive", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, exclusive.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(exclusive): %v", err)
+	}
+	shared := mustInsertPhotoDocument(t, store, "sha-not-exclusive", "b.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, shared.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(shared, item): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(other.ID, shared.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(shared, other): %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 {
+		t.Fatalf("expected both photos in the strip, got %#v", got.PhotoIDs)
+	}
+	if len(got.ExclusivePhotoIDs) != 1 || got.ExclusivePhotoIDs[0] != exclusive.ID {
+		t.Fatalf("expected only the exclusive photo, got %#v", got.ExclusivePhotoIDs)
+	}
+}
+
+// TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty pins
+// ExclusivePhotoIDs' own doc comment: a listing never computes it.
+func TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-list-exclusive", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	items, err := store.ListEquipment(equipmentFilter{})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(items) != 1 || items[0].ExclusivePhotoIDs == nil || len(items[0].ExclusivePhotoIDs) != 0 {
+		t.Fatalf("expected exclusive_photo_ids left an empty (non-nil) slice by ListEquipment, got %+v", items)
+	}
+}
+
+// TestDocumentStore_DocumentStillLinkedToEquipment pins
+// deleteEquipmentPhotoHandler's own re-check helper directly.
+func TestDocumentStore_DocumentStillLinkedToEquipment(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-still-linked", "a.jpg")
+
+	stillLinked, err := store.DocumentStillLinkedToEquipment(photo.ID)
+	if err != nil {
+		t.Fatalf("DocumentStillLinkedToEquipment (unlinked): %v", err)
+	}
+	if stillLinked {
+		t.Fatalf("expected an unlinked document to report false")
+	}
+
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	stillLinked, err = store.DocumentStillLinkedToEquipment(photo.ID)
+	if err != nil {
+		t.Fatalf("DocumentStillLinkedToEquipment (linked): %v", err)
+	}
+	if !stillLinked {
+		t.Fatalf("expected a linked document to report true")
 	}
 }

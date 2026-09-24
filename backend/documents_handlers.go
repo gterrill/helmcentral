@@ -987,12 +987,26 @@ func deleteDocumentHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 
-	path := filepath.Join(documentsDirPath(), sha)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		log.Printf("documents: delete: failed to remove file %s: %v", path, err)
+	if err := removeDocumentFile(sha); err != nil {
+		log.Printf("documents: delete: failed to remove file %s: %v", filepath.Join(documentsDirPath(), sha), err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove document file"})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// removeDocumentFile removes sha's file from the documents directory,
+// tolerating "already gone" (os.IsNotExist) as success - shared by every
+// handler that deletes a document row and then its file under the same
+// sha256 lock: this one, and (2026-09-25 amendment) deleteEquipmentHandler/
+// deleteEquipmentPhotoHandler (inventory_handlers.go) reusing the item
+// delete's "also delete N photos" and the strip's "Remove and delete"
+// choices - one place decides what counts as a successful file removal.
+func removeDocumentFile(sha string) error {
+	path := filepath.Join(documentsDirPath(), sha)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // ── POST /api/documents/:id/reindex ───────────────────────────────────────
