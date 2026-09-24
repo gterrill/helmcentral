@@ -407,7 +407,23 @@ export function useEquipmentItem(id: string | null) {
     setItemState(next)
   }, [])
 
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem }
+  // Review finding: deleteEquipmentPhoto's own DELETE returns only the
+  // updated item (photo_ids with the id gone) - `documents`, fetched once at
+  // mount/refresh, still carries that same id's link until something
+  // re-fetches it. equipment-editor.tsx's Documents tab excludes photo-
+  // tagged links by checking id membership in item.photo_ids, so the moment
+  // photo_ids stops naming it, the STILL-STALE documents array makes the
+  // just-removed photo look like an ordinary linked document again - visibly
+  // reappearing in the tab, and eligible to be sent right back on the next
+  // link-set PUT. Pruning it here, at the one write that can make it stale,
+  // keeps `documents` correct without a second GET (refresh() would also
+  // fix it, but costs a redundant round trip for a response this hook
+  // already has everything it needs from).
+  const pruneDocument = useCallback((documentId: string) => {
+    setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
+  }, [])
+
+  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem, pruneDocument }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any

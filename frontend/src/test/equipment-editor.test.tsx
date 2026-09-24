@@ -444,6 +444,46 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
+  // Release-fixes code-review finding: removeSavedPhoto's setItem(updated)
+  // drops the photo from item.photo_ids, but `documents` (fetched
+  // separately, at mount) still carries its link - the Documents tab's own
+  // exclusion filter keys off photo_ids, so the instant photo_ids no longer
+  // names it, the still-stale `documents` array makes it look like an
+  // ordinary linked document. A later Save that touches the link set at all
+  // would then PUT it right back as one.
+  it('does not let a removed photo reappear in the Documents tab or get sent on the next document save', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'] })
+    currentDocuments = [
+      { document_id: 'p1', title: '', filename: 'cover.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+      { document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+    ]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Manual')
+    // The photo never shows in the Documents tab to begin with.
+    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Remove'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1/photos/p1') && (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true))
+
+    // Still not in the Documents tab after the removal.
+    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+
+    // Touch the link set (remove the genuinely-linked Manual) and save - the
+    // PUT must not resurrect the removed photo alongside it.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
+      expect(body.document_ids).toEqual([])
+    })
+  })
+
   it("POSTs a saved item's Take photo pick to /photos", async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()

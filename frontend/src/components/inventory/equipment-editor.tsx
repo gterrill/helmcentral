@@ -200,7 +200,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   { id, onBack, onCreated, onDeleted, onDirtyChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, update, remove, setLinkedDocuments, setItem } = useEquipmentItem(id)
+  const { item, documents, loading, error, update, remove, setLinkedDocuments, setItem, pruneDocument } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
@@ -250,46 +250,35 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id/item id only, see comment above.
   }, [id, item?.id])
 
+  // ADR 0127: photo-tagged links are excluded here - the photo row above
+  // shows them, and "Photo links are managed only through the photo routes"
+  // (the plan's own words) means this Documents-tab list must never offer to
+  // manage one too, the same restriction the backend's SetEquipmentDocuments
+  // already enforces on the write side. One filter feeding both docEntries'
+  // own seed effect and baselineDocIds below (review finding: these used to
+  // be two separate copies of the same filter, which is how baselineDocIds
+  // drifted from docEntries' own exclusion rule when photo-write handling
+  // changed in only one of them).
+  const nonPhotoDocuments = useMemo(() => {
+    const photoIds = new Set(item?.photo_ids ?? [])
+    return documents.filter((d) => !photoIds.has(d.document_id))
+    // Keyed on content, not reference, for both documents and photo_ids -
+    // useEquipmentItem builds a fresh `documents` array on every refresh()
+    // even when the set is unchanged, and re-seeding on every one of those
+    // would throw away a locally staged add/remove before Save ever runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
+
   useEffect(() => {
     if (id === null) {
       setDocEntries([])
       return
     }
-    // ADR 0127: photo-tagged links are excluded here - the photo row above
-    // shows them, and "Photo links are managed only through the photo
-    // routes" (the plan's own words) means this Documents-tab list must
-    // never offer to manage one too, the same restriction the backend's
-    // SetEquipmentDocuments already enforces on the write side.
-    const photoIds = new Set(item?.photo_ids ?? [])
-    setDocEntries(
-      documents
-        .filter((d) => !photoIds.has(d.document_id))
-        .map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
-    )
-    // Keyed on the fetched set's own content, not the array reference -
-    // useEquipmentItem builds a fresh `documents` array on every refresh()
-    // even when the set is unchanged, and re-seeding on every one of those
-    // would throw away a locally staged add/remove before Save ever runs.
-    // photo_ids is keyed the same way for the same reason.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
+    setDocEntries(nonPhotoDocuments.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })))
+  }, [id, nonPhotoDocuments])
 
   const baseline = id === null ? BLANK_DRAFT : (item ? draftFromItem(item) : null)
-  // Review finding: this used to be built from the RAW `documents` list,
-  // which - like docEntries' own source effect above - includes
-  // photo-tagged links. docEntries excludes them (the Documents tab never
-  // manages a photo), so any item with a photo compared its own empty-of-
-  // photos docEntries against a baseline that still had one, and stayed
-  // dirty forever with nothing actually changed. Filtered the same way, by
-  // the same photoIds set, so the two sides of linksDirty below are
-  // actually comparable.
-  const baselineDocIds = useMemo(() => {
-    const photoIds = new Set(item?.photo_ids ?? [])
-    return documents.filter((d) => !photoIds.has(d.document_id)).map((d) => d.document_id)
-    // Keyed on content, not reference, for the same reason the docEntries
-    // effect above is - see that effect's own comment.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
+  const baselineDocIds = useMemo(() => nonPhotoDocuments.map((d) => d.document_id), [nonPhotoDocuments])
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
   const linksDirty = id !== null && !sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)
   const dirty = draftDirty || linksDirty
@@ -507,6 +496,11 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     try {
       const updated = await deleteEquipmentPhoto(id, photoId)
       setItem(updated)
+      // Review finding: without this, the removed photo's still-stale entry
+      // in `documents` starts passing nonPhotoDocuments' own filter the
+      // instant item.photo_ids above stops naming it - see useEquipmentItem's
+      // own pruneDocument doc comment.
+      pruneDocument(photoId)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     }
