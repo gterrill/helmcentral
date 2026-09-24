@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
-import { PhotoAlreadyLinkedError, createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
+import { BLANK_DRAFT, PhotoAlreadyLinkedError, createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
 import { downscaleAll } from '@/lib/image-downscale'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
@@ -150,28 +150,17 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     setSaving(true)
     setSaveError(null)
     try {
-      // system is left out (set to its own server default 'other' here
-      // rather than omitted from the request body, which lands on the
-      // identical stored value) - "that is the current contract, not a new
-      // fallback" (the plan's own words).
+      // BLANK_DRAFT already carries system's own server default 'other' -
+      // "that is the current contract, not a new fallback" (the plan's own
+      // words) - so only the fields this form actually collects override it.
       const input: EquipmentInput = {
+        ...BLANK_DRAFT,
         name: trimmedName,
-        category: 'general',
-        system: 'other',
-        manufacturer: '',
-        model: '',
-        serial: '',
         quantity,
+        category: 'general',
         status: 'stored',
         zone_id: zoneId,
         bin_id: binId,
-        location_detail: '',
-        install_date: '',
-        hour_meter_path: '',
-        profile_id: '',
-        aliases: [],
-        verified_aboard: false,
-        notes: '',
       }
       const created = await createEquipment(input)
 

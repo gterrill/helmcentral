@@ -26,6 +26,7 @@ import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { formatAppLocation } from '@/lib/app-location'
 import {
+  BLANK_DRAFT,
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
   InventoryValidationError,
@@ -57,26 +58,6 @@ import { downscaleAll } from '@/lib/image-downscale'
 const NO_ZONE_VALUE = '__no_zone__'
 const NO_BIN_VALUE = '__no_bin__'
 const NO_PROFILE_VALUE = '__no_profile__'
-
-const BLANK_DRAFT: EquipmentInput = {
-  name: '',
-  category: 'general',
-  system: 'other',
-  manufacturer: '',
-  model: '',
-  serial: '',
-  quantity: 1,
-  status: 'deployed',
-  zone_id: null,
-  bin_id: null,
-  location_detail: '',
-  install_date: '',
-  hour_meter_path: '',
-  profile_id: '',
-  aliases: [],
-  verified_aboard: false,
-  notes: '',
-}
 
 function draftFromItem(item: EquipmentItem): EquipmentInput {
   return {

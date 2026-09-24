@@ -146,6 +146,33 @@ export interface EquipmentInput {
   notes: string
 }
 
+/** A brand new, unsaved equipment record - every field at its own default,
+ * matching backend validateEquipmentInput's own defaults (system 'other',
+ * status 'deployed') wherever one applies. Shared by the Equipment editor's
+ * own "New item" draft and the bin page's quick-add form (bin-quick-add.tsx),
+ * which spreads this and overrides only the handful of fields it actually
+ * collects (name, quantity, category, status, zone_id, bin_id) rather than
+ * spelling out every field of its own. */
+export const BLANK_DRAFT: EquipmentInput = {
+  name: '',
+  category: 'general',
+  system: 'other',
+  manufacturer: '',
+  model: '',
+  serial: '',
+  quantity: 1,
+  status: 'deployed',
+  zone_id: null,
+  bin_id: null,
+  location_detail: '',
+  install_date: '',
+  hour_meter_path: '',
+  profile_id: '',
+  aliases: [],
+  verified_aboard: false,
+  notes: '',
+}
+
 export interface EquipmentFilter {
   category?: EquipmentCategory | ''
   system?: EquipmentSystem | ''
