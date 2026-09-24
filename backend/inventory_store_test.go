@@ -631,8 +631,8 @@ func TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument(t *testing.T) 
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	manual := mustInsertDocument(t, store, "sha-delete-eq-manual", "manual.pdf", nil)
-	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{manual.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 
 	deletedSHAs, err := store.DeleteEquipment(item.ID, true)
@@ -723,7 +723,10 @@ func TestDocumentStore_ListEquipmentFiltersByCategorySystemStatusZoneAndQuery(t 
 
 // ── equipment documents ──────────────────────────────────────────────────
 
-func TestDocumentStore_SetEquipmentDocumentsReplacesWholesale(t *testing.T) {
+// TestDocumentStore_PatchEquipmentDocumentsAddsAndRemovesTogether is the
+// core diff-based-PATCH case: a single call names both an id to add and an
+// id to remove, and both take effect in the same transaction.
+func TestDocumentStore_PatchEquipmentDocumentsAddsAndRemovesTogether(t *testing.T) {
 	store := newTestDocumentStore(t)
 
 	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
@@ -733,44 +736,162 @@ func TestDocumentStore_SetEquipmentDocumentsReplacesWholesale(t *testing.T) {
 	docA := mustInsertDocument(t, store, "sha-inv-a", "a.pdf", nil)
 	docB := mustInsertDocument(t, store, "sha-inv-b", "b.pdf", nil)
 
-	if err := store.SetEquipmentDocuments(item.ID, []string{docA.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments (first): %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{docA.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (seed docA): %v", err)
 	}
+
+	if err := store.PatchEquipmentDocuments(item.ID, []string{docB.ID}, []string{docA.ID}); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (add B, remove A): %v", err)
+	}
+
 	docs, err := store.EquipmentDocuments(item.ID)
 	if err != nil {
 		t.Fatalf("EquipmentDocuments: %v", err)
 	}
-	if len(docs) != 1 || docs[0].DocumentID != docA.ID || docs[0].Source != "operator" || docs[0].Filename != "a.pdf" {
-		t.Fatalf("expected exactly docA joined with its filename, got %+v", docs)
-	}
-
-	if err := store.SetEquipmentDocuments(item.ID, []string{docB.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments (second): %v", err)
-	}
-	docs, err = store.EquipmentDocuments(item.ID)
-	if err != nil {
-		t.Fatalf("EquipmentDocuments: %v", err)
-	}
-	if len(docs) != 1 || docs[0].DocumentID != docB.ID {
-		t.Fatalf("expected the set REPLACED (docB only), not appended, got %+v", docs)
+	if len(docs) != 1 || docs[0].DocumentID != docB.ID || docs[0].Source != "operator" || docs[0].Filename != "b.pdf" {
+		t.Fatalf("expected exactly docB linked (docA removed, docB added), got %+v", docs)
 	}
 }
 
-func TestDocumentStore_SetEquipmentDocumentsUnknownEquipmentIDReturnsNotFound(t *testing.T) {
+// TestDocumentStore_PatchEquipmentDocumentsAddAlreadyLinkedIsNoOp: adding an
+// id that is already linked must not duplicate the row or move its
+// sort_index.
+func TestDocumentStore_PatchEquipmentDocumentsAddAlreadyLinkedIsNoOp(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA := mustInsertPhotoDocument(t, store, "sha-noop-a", "a.jpg")
+	photoB := mustInsertPhotoDocument(t, store, "sha-noop-b", "b.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+
+	if err := store.PatchEquipmentDocuments(item.ID, []string{photoA.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (re-add already-linked a): %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoA.ID || got.PhotoIDs[1] != photoB.ID {
+		t.Fatalf("expected the original order [a,b] untouched, got %#v", got.PhotoIDs)
+	}
+}
+
+// TestDocumentStore_PatchEquipmentDocumentsRemoveUnlinkedIsNoOp: removing an
+// id that isn't currently linked does nothing and returns no error.
+func TestDocumentStore_PatchEquipmentDocumentsRemoveUnlinkedIsNoOp(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	doc := mustInsertDocument(t, store, "sha-remove-noop", "a.pdf", nil)
+
+	if err := store.PatchEquipmentDocuments(item.ID, nil, []string{doc.ID}); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (remove never-linked id): %v", err)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected nothing linked, got %+v", docs)
+	}
+}
+
+// TestDocumentStore_PatchEquipmentDocumentsLeavesUnnamedLinksAlone is the
+// whole point of the diff-based PATCH versus the old whole-set replace: a
+// photo linked via AddEquipmentPhoto, never named in add or remove, must
+// survive a PATCH untouched - including its sort_index.
+func TestDocumentStore_PatchEquipmentDocumentsLeavesUnnamedLinksAlone(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-untouched-photo", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	manual := mustInsertDocument(t, store, "sha-untouched-manual", "manual.pdf", nil)
+
+	if err := store.PatchEquipmentDocuments(item.ID, []string{manual.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 1 || got.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected the photo, never named in add or remove, still linked as the only photo, got %#v", got.PhotoIDs)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected the photo link plus the new manual link = 2, got %d: %+v", len(docs), docs)
+	}
+}
+
+// TestDocumentStore_PatchEquipmentDocumentsNewLinksGoLast pins the same
+// "never take the cover" rule SetEquipmentDocuments used to enforce for its
+// own new links: an id in add gets max(sort_index)+1 among the item's own
+// existing links, so it never ties with or lands ahead of the cover.
+func TestDocumentStore_PatchEquipmentDocumentsNewLinksGoLast(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	cover := mustInsertPhotoDocument(t, store, "sha-newlink-cover", "cover.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, cover.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(cover): %v", err)
+	}
+	newPhoto := mustInsertPhotoDocument(t, store, "sha-newlink-new", "new.jpg")
+
+	if err := store.PatchEquipmentDocuments(item.ID, []string{newPhoto.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != cover.ID || got.PhotoIDs[1] != newPhoto.ID {
+		t.Fatalf("expected the cover unchanged and the new photo last, got %#v", got.PhotoIDs)
+	}
+}
+
+func TestDocumentStore_PatchEquipmentDocumentsUnknownEquipmentIDReturnsNotFound(t *testing.T) {
 	store := newTestDocumentStore(t)
 	doc := mustInsertDocument(t, store, "sha-inv-missing-eq", "a.pdf", nil)
-	if err := store.SetEquipmentDocuments("does-not-exist", []string{doc.ID}); !errors.Is(err, errEquipmentNotFound) {
+	if err := store.PatchEquipmentDocuments("does-not-exist", []string{doc.ID}, nil); !errors.Is(err, errEquipmentNotFound) {
 		t.Fatalf("expected errEquipmentNotFound, got %v", err)
 	}
 }
 
-// TestDocumentStore_SetEquipmentDocumentsUnknownDocumentIDFailsForeignKey is
-// a required Verification case: a document id that does not exist fails the
-// equipment_documents.document_id foreign key (task item 3's "pre-check the
-// RESTRICT case with COUNT" is about DELETE; this INSERT-time case is left
-// to the real constraint on purpose - see SetEquipmentDocuments' own doc
-// comment for why).
-func TestDocumentStore_SetEquipmentDocumentsUnknownDocumentIDFailsForeignKey(t *testing.T) {
+// TestDocumentStore_PatchEquipmentDocumentsUnknownDocumentIDFailsForeignKey
+// is the PATCH-form port of the old whole-set test: an id in add that does
+// not name a real documents row fails the equipment_documents.document_id
+// foreign key - deliberately left to the real constraint rather than
+// pre-checked here, same as SetEquipmentDocuments always was (see
+// PatchEquipmentDocuments' own doc comment for why).
+func TestDocumentStore_PatchEquipmentDocumentsUnknownDocumentIDFailsForeignKey(t *testing.T) {
 	store := newTestDocumentStore(t)
 
 	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
@@ -778,7 +899,7 @@ func TestDocumentStore_SetEquipmentDocumentsUnknownDocumentIDFailsForeignKey(t *
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 
-	if err := store.SetEquipmentDocuments(item.ID, []string{"does-not-exist"}); err == nil {
+	if err := store.PatchEquipmentDocuments(item.ID, []string{"does-not-exist"}, nil); err == nil {
 		t.Fatalf("expected the unknown document id to fail the foreign key")
 	}
 
@@ -787,17 +908,14 @@ func TestDocumentStore_SetEquipmentDocumentsUnknownDocumentIDFailsForeignKey(t *
 		t.Fatalf("EquipmentDocuments: %v", err)
 	}
 	if len(docs) != 0 {
-		t.Fatalf("expected the whole replace to roll back on the FK failure, got %+v", docs)
+		t.Fatalf("expected the whole PATCH to roll back on the FK failure, got %+v", docs)
 	}
 }
 
-// TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs pins the fix
-// for a caller that hands back the same document_id twice (["d1","d1"]):
-// without deduping first, the second INSERT collides with
-// equipment_documents' own (equipment_id, document_id) primary key and the
-// whole replace fails with a raw SQLite constraint error instead of just
-// linking the document once.
-func TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs(t *testing.T) {
+// TestDocumentStore_PatchEquipmentDocumentsDedupesDuplicateIDs pins the same
+// fix SetEquipmentDocuments used to pin, now on both add and remove: an id
+// named twice in the same list means the same thing as once.
+func TestDocumentStore_PatchEquipmentDocumentsDedupesDuplicateIDs(t *testing.T) {
 	store := newTestDocumentStore(t)
 
 	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
@@ -806,8 +924,8 @@ func TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs(t *testing.T) {
 	}
 	doc := mustInsertDocument(t, store, "sha-inv-dup", "a.pdf", nil)
 
-	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID, doc.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments with a duplicate id: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID, doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments with a duplicate add id: %v", err)
 	}
 
 	docs, err := store.EquipmentDocuments(item.ID)
@@ -815,7 +933,45 @@ func TestDocumentStore_SetEquipmentDocumentsDedupesDuplicateIDs(t *testing.T) {
 		t.Fatalf("EquipmentDocuments: %v", err)
 	}
 	if len(docs) != 1 || docs[0].DocumentID != doc.ID {
-		t.Fatalf("expected the duplicate id collapsed to a single link, got %+v", docs)
+		t.Fatalf("expected the duplicate add id collapsed to a single link, got %+v", docs)
+	}
+
+	if err := store.PatchEquipmentDocuments(item.ID, nil, []string{doc.ID, doc.ID}); err != nil {
+		t.Fatalf("PatchEquipmentDocuments with a duplicate remove id: %v", err)
+	}
+	docs, err = store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected the duplicate remove id to unlink cleanly, got %+v", docs)
+	}
+}
+
+// TestDocumentStore_PatchEquipmentDocumentsSameIDInBothRemoveWins documents
+// the resolution this method picks for an id named in both add and remove:
+// remove wins, matching the "removing something is the stronger, more
+// destructive intent" reasoning PatchEquipmentDocuments' own doc comment
+// gives.
+func TestDocumentStore_PatchEquipmentDocumentsSameIDInBothRemoveWins(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	doc := mustInsertDocument(t, store, "sha-both", "a.pdf", nil)
+
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID}, []string{doc.ID}); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (add and remove the same id): %v", err)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected remove to win, leaving nothing linked, got %+v", docs)
 	}
 }
 
@@ -833,8 +989,8 @@ func TestDocumentStore_DeleteEquipmentCascadesLinks(t *testing.T) {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	doc := mustInsertDocument(t, store, "sha-cascade-eq", "a.pdf", nil)
-	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 
 	if _, err := store.DeleteEquipment(item.ID, false); err != nil {
@@ -862,8 +1018,8 @@ func TestDocumentStore_DeletingDocumentRemovesEquipmentLinks(t *testing.T) {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	doc := mustInsertDocument(t, store, "sha-cascade-doc", "a.pdf", nil)
-	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 
 	if _, err := store.Delete(doc.ID); err != nil {
@@ -1087,8 +1243,8 @@ func TestDocumentStore_RemoveEquipmentPhotoNotOwnedByItemReturnsNotFound(t *test
 	// A plain (non-image) linked document is not a photo this item can remove
 	// through the photo route, even though it IS linked.
 	doc := mustInsertDocument(t, store, "sha-not-photo", "manual.pdf", nil)
-	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 	if err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
 		t.Fatalf("expected errEquipmentPhotoNotFound, got %v", err)
@@ -1138,125 +1294,6 @@ func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testi
 	}
 	if len(gotB.PhotoIDs) != 1 || gotB.PhotoIDs[0] != photo.ID {
 		t.Fatalf("expected item B's own link untouched, got %#v", gotB.PhotoIDs)
-	}
-}
-
-// TestDocumentStore_SetEquipmentDocumentsIncludesPhotosInWholeSetReplace pins
-// the 2026-09-25 amendment: SetEquipmentDocuments is once again a true
-// whole-set replace, photos included - a docIDs list that leaves out a
-// currently-linked photo UNLINKS it (drops it from the strip), it does not
-// leave it standing the way the earlier photo-tagged carve-out did. The
-// document itself is never touched by this call either way.
-func TestDocumentStore_SetEquipmentDocumentsIncludesPhotosInWholeSetReplace(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
-	if err != nil {
-		t.Fatalf("CreateEquipment: %v", err)
-	}
-	photo := mustInsertPhotoDocument(t, store, "sha-wholeset-photo", "a.jpg")
-	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto: %v", err)
-	}
-	manual := mustInsertDocument(t, store, "sha-wholeset-manual", "manual.pdf", nil)
-
-	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
-	}
-
-	got, err := store.GetEquipment(item.ID)
-	if err != nil {
-		t.Fatalf("GetEquipment: %v", err)
-	}
-	if len(got.PhotoIDs) != 0 {
-		t.Fatalf("expected the photo unlinked (left out of the replace set), got %#v", got.PhotoIDs)
-	}
-	if _, err := store.Get(photo.ID); err != nil {
-		t.Fatalf("expected the photo document itself to survive an unlink, got %v", err)
-	}
-
-	docs, err := store.EquipmentDocuments(item.ID)
-	if err != nil {
-		t.Fatalf("EquipmentDocuments: %v", err)
-	}
-	if len(docs) != 1 || docs[0].DocumentID != manual.ID {
-		t.Fatalf("expected only the manual linked, got %+v", docs)
-	}
-}
-
-// TestDocumentStore_SetEquipmentDocumentsPreservesSortIndexOfKeptPhotoLinks
-// pins task item 4's requirement directly: a document-tab save that KEEPS a
-// photo link must not reshuffle the photo strip's order, even though the
-// Documents tab (and so this call's own docIDs argument) knows nothing
-// about photo order and may list the ids in a completely different
-// sequence than the strip's own sort_index.
-func TestDocumentStore_SetEquipmentDocumentsPreservesSortIndexOfKeptPhotoLinks(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
-	if err != nil {
-		t.Fatalf("CreateEquipment: %v", err)
-	}
-	photoA := mustInsertPhotoDocument(t, store, "sha-preserve-a", "a.jpg")
-	photoB := mustInsertPhotoDocument(t, store, "sha-preserve-b", "b.jpg")
-	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto(a): %v", err)
-	}
-	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto(b): %v", err)
-	}
-	manual := mustInsertDocument(t, store, "sha-preserve-manual", "manual.pdf", nil)
-
-	// The Documents tab's own order (b, a, manual) is the REVERSE of the
-	// strip's sort_index (a=0, b=1) - if this call reordered on keep, the
-	// strip would flip to [b, a] too.
-	if err := store.SetEquipmentDocuments(item.ID, []string{photoB.ID, photoA.ID, manual.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
-	}
-
-	got, err := store.GetEquipment(item.ID)
-	if err != nil {
-		t.Fatalf("GetEquipment: %v", err)
-	}
-	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoA.ID || got.PhotoIDs[1] != photoB.ID {
-		t.Fatalf("expected the strip's own sort_index order [a,b] preserved, got %#v", got.PhotoIDs)
-	}
-
-	docs, err := store.EquipmentDocuments(item.ID)
-	if err != nil {
-		t.Fatalf("EquipmentDocuments: %v", err)
-	}
-	if len(docs) != 3 {
-		t.Fatalf("expected 2 photo links + 1 manual link = 3, got %d: %+v", len(docs), docs)
-	}
-}
-
-// TestDocumentStore_SetEquipmentDocumentsNewPhotoLinkDoesNotBecomeCover pins
-// review finding 2: a newly linked image used to get sort_index 0, tying
-// with the cover and letting the tie-break (by document_id) put it first.
-// A link this call INSERTS must land AFTER every existing link (cover
-// included), not tie with it.
-func TestDocumentStore_SetEquipmentDocumentsNewPhotoLinkDoesNotBecomeCover(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
-	if err != nil {
-		t.Fatalf("CreateEquipment: %v", err)
-	}
-	cover := mustInsertPhotoDocument(t, store, "sha-newlink-cover", "cover.jpg")
-	if err := store.AddEquipmentPhoto(item.ID, cover.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto(cover): %v", err)
-	}
-	newPhoto := mustInsertPhotoDocument(t, store, "sha-newlink-new", "new.jpg")
-
-	// The Documents tab's own PUT - links newPhoto alongside the existing cover.
-	if err := store.SetEquipmentDocuments(item.ID, []string{cover.ID, newPhoto.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
-	}
-
-	got, err := store.GetEquipment(item.ID)
-	if err != nil {
-		t.Fatalf("GetEquipment: %v", err)
-	}
-	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != cover.ID || got.PhotoIDs[1] != newPhoto.ID {
-		t.Fatalf("expected the cover unchanged and the new photo last, got %#v", got.PhotoIDs)
 	}
 }
 

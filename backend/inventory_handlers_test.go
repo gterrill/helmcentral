@@ -550,8 +550,8 @@ func TestGetEquipmentHandler_ReturnsItemAndJoinedDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if err := globalDocumentStore.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := globalDocumentStore.PatchEquipmentDocuments(item.ID, []string{doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 
 	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/equipment/"+item.ID, "", item.ID)
@@ -698,35 +698,37 @@ func TestDeleteEquipmentHandler_RemovesAndReturns204(t *testing.T) {
 	}
 }
 
-// ── PUT /api/inventory/equipment/:id/documents ───────────────────────────
+// ── PATCH /api/inventory/equipment/:id/documents ─────────────────────────
 
-func TestSetEquipmentDocumentsHandler_ReplacesTheSet(t *testing.T) {
+// TestPatchEquipmentDocumentsHandler_AddsAndRemoves is the handler-level
+// core case: a single PATCH body naming both add and remove ids applies
+// both.
+func TestPatchEquipmentDocumentsHandler_AddsAndRemoves(t *testing.T) {
 	withTestDocumentStore(t)
 
 	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	docA, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-a", Filename: "a.pdf", MIME: "application/pdf"})
+	docA, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-eq-a", Filename: "a.pdf", MIME: "application/pdf"})
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	docB, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-b", Filename: "b.pdf", MIME: "application/pdf"})
+	docB, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-eq-b", Filename: "b.pdf", MIME: "application/pdf"})
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
+	}
+	if err := globalDocumentStore.PatchEquipmentDocuments(item.ID, []string{docA.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments (seed): %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["`+docA.ID+`"]}`, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents",
+		`{"add":["`+docB.ID+`"],"remove":["`+docA.ID+`"]}`, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["`+docB.ID+`"]}`, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
 	}
 	var resp struct {
 		Documents []equipmentDocument `json:"documents"`
@@ -735,14 +737,14 @@ func TestSetEquipmentDocumentsHandler_ReplacesTheSet(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if len(resp.Documents) != 1 || resp.Documents[0].DocumentID != docB.ID {
-		t.Fatalf("expected the set REPLACED (docB only), got %+v", resp.Documents)
+		t.Fatalf("expected only docB linked (docA removed, docB added), got %+v", resp.Documents)
 	}
 }
 
-// TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName is a
-// required Verification case: plan's own API shape is "404 naming an
-// unknown document id".
-func TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *testing.T) {
+// TestPatchEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName is
+// the PATCH-form port: an unknown id in add is pre-checked and named in a
+// clean 404, same as the old PUT handler did.
+func TestPatchEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *testing.T) {
 	withTestDocumentStore(t)
 
 	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
@@ -750,9 +752,9 @@ func TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *tes
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["does-not-exist"]}`, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents", `{"add":["does-not-exist"]}`, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
@@ -770,26 +772,26 @@ func TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *tes
 	}
 }
 
-// TestSetEquipmentDocumentsHandler_AcceptsAPhoto pins the 2026-09-25
-// amendment: PUT .../documents is a true whole-set replace again, photos
-// included - an image document is linked exactly like any other, and shows
-// up in both EquipmentDocuments (the Documents tab) and, because it's an
-// image, GetEquipment's own PhotoIDs view (the strip).
-func TestSetEquipmentDocumentsHandler_AcceptsAPhoto(t *testing.T) {
+// TestPatchEquipmentDocumentsHandler_AcceptsAPhoto pins the same "a photo is
+// an ordinary linked document" rule at the PATCH handler layer: an
+// image/jpeg or image/png id in add is linked exactly like any other, and
+// shows up in both EquipmentDocuments (the Documents tab) and, because it's
+// an image, GetEquipment's own PhotoIDs view (the strip).
+func TestPatchEquipmentDocumentsHandler_AcceptsAPhoto(t *testing.T) {
 	withTestDocumentStore(t)
 
 	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-accept-photo", Filename: "engine.jpg", MIME: "image/jpeg"})
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-eq-accept-photo", Filename: "engine.jpg", MIME: "image/jpeg"})
 	if err != nil {
 		t.Fatalf("Insert(photo): %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["`+photo.ID+`"]}`, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents", `{"add":["`+photo.ID+`"]}`, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -809,6 +811,46 @@ func TestSetEquipmentDocumentsHandler_AcceptsAPhoto(t *testing.T) {
 	}
 	if len(got.PhotoIDs) != 1 || got.PhotoIDs[0] != photo.ID {
 		t.Fatalf("expected the same document to also show up in the photo strip, got %#v", got.PhotoIDs)
+	}
+}
+
+// TestPatchEquipmentDocumentsHandler_LeavesUnnamedPhotoAlone is the
+// handler-level port of the diff-based PATCH's core promise: a photo linked
+// via the photo upload route, never named in add or remove, survives a
+// PATCH that touches an unrelated ordinary document.
+func TestPatchEquipmentDocumentsHandler_LeavesUnnamedPhotoAlone(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-h-untouched-photo", Filename: "a.jpg", MIME: "image/jpeg"})
+	if err != nil {
+		t.Fatalf("Insert(photo): %v", err)
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	manual, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-h-untouched-manual", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert(manual): %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents", `{"add":["`+manual.ID+`"]}`, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	item2, err := globalDocumentStore.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(item2.PhotoIDs) != 1 || item2.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected the photo, never named in add or remove, still on the strip, got %+v", item2.PhotoIDs)
 	}
 }
 
@@ -1569,8 +1611,8 @@ func TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile(t *testing.T)
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	manual := insertTestDocumentWithFile(t, store, "sha-delete-eq-handler-manual", "manual.pdf", "application/pdf", []byte("manual bytes"))
-	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
-		t.Fatalf("SetEquipmentDocuments: %v", err)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{manual.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
 	}
 
 	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID+"?delete_photos=true", "", item.ID)
@@ -1589,35 +1631,31 @@ func TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile(t *testing.T)
 	}
 }
 
-// ── PUT /api/inventory/equipment/:id/documents is a true whole-set replace ─
+// ── PATCH /api/inventory/equipment/:id/documents removes only what's named ─
 
-// TestSetEquipmentDocumentsHandler_UnlinksPhotosLeftOutOfTheSet pins the
-// 2026-09-25 amendment at the handler layer: a docIDs set that leaves out a
-// currently-linked photo unlinks it from the strip; the document itself
-// survives.
-func TestSetEquipmentDocumentsHandler_UnlinksPhotosLeftOutOfTheSet(t *testing.T) {
+// TestPatchEquipmentDocumentsHandler_RemovesOnlyTheNamedPhoto pins the
+// PATCH-form replacement for the old whole-set "unlink what's left out"
+// test: remove must name a photo explicitly to unlink it - the document
+// itself survives.
+func TestPatchEquipmentDocumentsHandler_RemovesOnlyTheNamedPhoto(t *testing.T) {
 	withTestDocumentStore(t)
 
 	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-h-unlink-photo", Filename: "a.jpg", MIME: "image/jpeg"})
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-h-unlink-photo", Filename: "a.jpg", MIME: "image/jpeg"})
 	if err != nil {
 		t.Fatalf("Insert(photo): %v", err)
 	}
 	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
 		t.Fatalf("AddEquipmentPhoto: %v", err)
 	}
-	manual, err := globalDocumentStore.Insert(document{SHA256: "sha-h-unlink-manual", Filename: "manual.pdf", MIME: "application/pdf"})
-	if err != nil {
-		t.Fatalf("Insert(manual): %v", err)
-	}
 
-	body := `{"document_ids":["` + manual.ID + `"]}`
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", body, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	body := `{"remove":["` + photo.ID + `"]}`
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents", body, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -1635,36 +1673,33 @@ func TestSetEquipmentDocumentsHandler_UnlinksPhotosLeftOutOfTheSet(t *testing.T)
 	}
 }
 
-// TestSetEquipmentDocumentsHandler_PreservesSortIndexOfKeptPhotoLinks pins
-// task item 4's requirement at the handler layer: re-sending a set that
-// KEEPS both photos, in whatever order the Documents tab happens to list
-// them, must not reshuffle the strip.
-func TestSetEquipmentDocumentsHandler_PreservesSortIndexOfKeptPhotoLinks(t *testing.T) {
+// TestPatchEquipmentDocumentsHandler_NewLinkGoesLastNotBeforeCover pins the
+// PATCH-form replacement for the old whole-set sort_index test: an id in
+// add lands after the item's existing photos (the cover included), at the
+// handler layer.
+func TestPatchEquipmentDocumentsHandler_NewLinkGoesLastNotBeforeCover(t *testing.T) {
 	withTestDocumentStore(t)
 
 	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	photoA, err := globalDocumentStore.Insert(document{SHA256: "sha-h-preserve-a", Filename: "a.jpg", MIME: "image/jpeg"})
+	cover, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-h-cover", Filename: "cover.jpg", MIME: "image/jpeg"})
 	if err != nil {
-		t.Fatalf("Insert(a): %v", err)
+		t.Fatalf("Insert(cover): %v", err)
 	}
-	photoB, err := globalDocumentStore.Insert(document{SHA256: "sha-h-preserve-b", Filename: "b.jpg", MIME: "image/jpeg"})
+	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, cover.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(cover): %v", err)
+	}
+	newPhoto, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-h-new", Filename: "new.jpg", MIME: "image/jpeg"})
 	if err != nil {
-		t.Fatalf("Insert(b): %v", err)
-	}
-	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto(a): %v", err)
-	}
-	if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+		t.Fatalf("Insert(new): %v", err)
 	}
 
-	body := `{"document_ids":["` + photoB.ID + `","` + photoA.ID + `"]}`
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", body, item.ID)
-	if err := setEquipmentDocumentsHandler(c); err != nil {
-		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	body := `{"add":["` + newPhoto.ID + `"]}`
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/inventory/equipment/"+item.ID+"/documents", body, item.ID)
+	if err := patchEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("patchEquipmentDocumentsHandler returned error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -1674,8 +1709,8 @@ func TestSetEquipmentDocumentsHandler_PreservesSortIndexOfKeptPhotoLinks(t *test
 	if err != nil {
 		t.Fatalf("GetEquipment: %v", err)
 	}
-	if len(item2.PhotoIDs) != 2 || item2.PhotoIDs[0] != photoA.ID || item2.PhotoIDs[1] != photoB.ID {
-		t.Fatalf("expected the strip's own order [a,b] preserved despite the request's own [b,a] order, got %+v", item2.PhotoIDs)
+	if len(item2.PhotoIDs) != 2 || item2.PhotoIDs[0] != cover.ID || item2.PhotoIDs[1] != newPhoto.ID {
+		t.Fatalf("expected the cover unchanged and the new photo last, got %+v", item2.PhotoIDs)
 	}
 }
 
