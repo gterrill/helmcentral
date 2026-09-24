@@ -237,13 +237,13 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
         pushEvent({ id: crypto.randomUUID(), kind: 'confirmed', item })
         if (canWrite && !item.verified_aboard) {
           try {
-            // Fetched fresh immediately before the write (review finding:
-            // reusing the copy fetched above, moments earlier in this same
-            // call, is close to safe but not - see handleMove's own comment
-            // for why this whole function never trusts an in-hand copy for
-            // a write body) and only verified_aboard is changed on it.
-            const fresh = await fetchEquipment(item.id)
-            await updateEquipment(item.id, { ...toEquipmentInput(fresh), verified_aboard: true })
+            // Written from the copy fetched above, in this same call, with
+            // only verified_aboard changed. That fetch is itself fresh, so a
+            // second GET here only doubled the round trips on the busiest
+            // path of a stocktake (review finding). handleMove still
+            // re-fetches, because a Move is pressed later, by which time
+            // the scanned copy can be stale.
+            await updateEquipment(item.id, { ...toEquipmentInput(item), verified_aboard: true })
           } catch (err) {
             setScanError(err instanceof Error ? err.message : String(err))
           }

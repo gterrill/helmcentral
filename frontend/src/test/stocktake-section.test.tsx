@@ -127,6 +127,29 @@ describe('StocktakeSection', () => {
     })
   })
 
+  // Review finding: the confirm path fetched the item once to classify the
+  // scan and again, milliseconds later in the same call, for the write body -
+  // a doubled round trip on the busiest path of a stocktake. The classifying
+  // fetch is itself fresh, so one GET per confirmed scan is enough (Move,
+  // pressed later, keeps its own re-fetch).
+  it('confirms a scanned item with one GET for it, not two', async () => {
+    const item = makeItem({ id: 'eq-1', bin_id: 'b1', verified_aboard: false })
+    equipmentById['eq-1'] = item
+    binItemsByBinId['b1'] = [item]
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    await scan('https://boat.example/inventory/equipment/eq-1')
+    await waitFor(() => expect(putCalls.find((c) => c.id === 'eq-1')).toBeDefined())
+
+    const itemGets = fetchMock.mock.calls.filter(([url, init]) =>
+      /\/api\/inventory\/equipment\/eq-1$/.test(String(url)) && (init?.method ?? 'GET') === 'GET')
+    expect(itemGets).toHaveLength(1)
+  })
+
   it('offers Move for an item recorded elsewhere, and writes nothing until it is pressed', async () => {
     const item = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2' })
     equipmentById['eq-2'] = item
