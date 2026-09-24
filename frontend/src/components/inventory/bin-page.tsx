@@ -35,7 +35,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   // freshly created bin fall straight through `match` into the ordinary
   // BinContents render below, with its real onOpenEquipment/onNewEquipment
   // callbacks, rather than a second, dummy-callback render path.
-  const { zones, loading: zonesLoading, createZone, createBin } = useInventoryZones()
+  const { zones, loading: zonesLoading, error: zonesError, createZone, createBin } = useInventoryZones()
 
   const match = useMemo(() => findBinByCode(zones, code), [zones, code])
 
@@ -58,6 +58,26 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   // before the fetch has even landed.
   if (zonesLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+  }
+
+  // Review finding: a failed zones fetch used to be indistinguishable from
+  // a genuinely unknown code - both fell through to BinNotFound's "No bin
+  // <code>" + Create, offering to create a duplicate of a bin the zone list
+  // simply failed to load. AGENTS.md fallback policy: the failure is
+  // surfaced explicitly, and Create - a write that would land wrong - is
+  // not offered in its place.
+  if (zonesError) {
+    return (
+      <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Locations
+        </Button>
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {zonesError}
+        </p>
+      </div>
+    )
   }
 
   return (

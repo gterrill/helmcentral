@@ -93,6 +93,44 @@ describe('BinPage', () => {
     expect(screen.getByText('NOPE')).toBeInTheDocument()
   })
 
+  // Review finding: a failed zones fetch used to be indistinguishable from
+  // "no such bin" - useInventoryZones' own error was never read, so a
+  // network failure landed on the same "No bin NOPE" + Create state a
+  // genuinely unknown code does, offering to create a duplicate of a bin
+  // that may well already exist.
+  it('shows the zones fetch error instead of the not-found/create state', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).endsWith('/api/inventory/zones')) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'zones unavailable' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+
+    await screen.findByText('zones unavailable')
+    expect(screen.queryByText(/No bin/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Create bin/ })).not.toBeInTheDocument()
+  })
+
+  it('does not show "No bin" while zones are still loading', async () => {
+    let resolveZones!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).endsWith('/api/inventory/zones')) {
+        return new Promise((resolve) => { resolveZones = resolve })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+
+    expect(screen.queryByText(/No bin/)).not.toBeInTheDocument()
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+
+    resolveZones({ ok: true, json: async () => ({ zones }) })
+    await screen.findByText('LAZ-02')
+  })
+
   it('offers Create bin for an unknown code, and creating it shows the empty bin', async () => {
     render(<BinPage code="NOPE" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
     await screen.findByText('No bin')
