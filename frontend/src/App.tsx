@@ -2630,9 +2630,30 @@ export function App() {
             equipmentEditId={inventoryEquipmentEditId}
             creatingEquipment={inventoryCreatingEquipment}
             // Opening an item or starting a new one enters the editor, so
-            // there is no draft to discard yet and nothing to guard.
-            onOpenEquipment={(id) => { setInventoryEquipmentEditId(id) }}
+            // there is no draft to discard yet and nothing to guard. Both
+            // callbacks are reachable from OUTSIDE the Equipment section too
+            // - the bin page's own item rows/"Full item" button and
+            // Stocktake's photo grid (ADR 0127) - so both have to switch
+            // inventorySection to 'equipment' and clear inventoryBinCode
+            // themselves, not just set the id/creating flag. Review finding:
+            // InventoryPanel only ever renders the editor when
+            // activeSectionId === 'equipment' (its own showEquipmentEditor
+            // check), so pressing Open from a bin page used to set
+            // inventoryEquipmentEditId while activeSectionId stayed
+            // 'locations' - nothing appeared, and the bin's own binCode
+            // stayed set underneath a URL that had already moved to
+            // /inventory/equipment/<id>. Clearing binCode here is what makes
+            // the sync effect below produce that URL as a NEW history entry
+            // rather than leaving the bar disagreeing with what's on screen,
+            // so the browser's own Back returns to the bin.
+            onOpenEquipment={(id) => {
+              setInventorySection('equipment')
+              setInventoryBinCode(null)
+              setInventoryEquipmentEditId(id)
+            }}
             onNewEquipment={(preset) => {
+              setInventorySection('equipment')
+              setInventoryBinCode(null)
               setInventoryNewEquipmentPreset(preset ?? null)
               setInventoryCreatingEquipment(true)
             }}
