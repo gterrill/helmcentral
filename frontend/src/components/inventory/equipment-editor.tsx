@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 
 import {
@@ -23,6 +23,7 @@ import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/p
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
+import { photoFilename, usePhotoStaging, type FailedPhotoUpload, type LocalPhoto } from '@/hooks/use-photo-staging'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { formatAppLocation } from '@/lib/app-location'
 import {
@@ -30,11 +31,9 @@ import {
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
   InventoryValidationError,
-  PhotoAlreadyLinkedError,
   createEquipment,
   deleteEquipmentPhoto,
   setEquipmentPhotoOrder,
-  uploadEquipmentPhoto,
   useEquipmentItem,
   useInventoryZones,
   type EquipmentCategory,
@@ -122,39 +121,6 @@ interface DocEntry {
   filename: string
 }
 
-/** ADR 0127: a picked-but-not-yet-uploaded photo on a brand new draft -
- * downscaled already (lib/image-downscale.ts runs the moment a file is
- * picked, never deferred to Save), previewed through an object URL that
- * MUST be revoked once it's no longer needed (a successful upload, a
- * Remove, or the component unmounting with the draft abandoned). */
-interface LocalPhoto {
-  id: string
-  blob: Blob
-  filename: string
-  previewUrl: string
-}
-
-/** A photo whose upload failed right after Save created the item - holds
- * the Blob itself (not just an id) so Retry can re-send the exact same
- * bytes without asking the operator to pick the file again. No previewUrl:
- * by the time this exists, `id` is no longer null and the photo strip has
- * already switched to reading the saved item's own photo_ids, so there is
- * nothing left displaying this Blob to revoke a URL for. */
-interface FailedPhotoUpload {
-  blob: Blob
-  filename: string
-  error: string
-}
-
-/** ADR 0127: JPEG/PNG re-encoding always renames to .jpg (downscaleImage's
- * own output format) - a camera capture's filename is often meaningless
- * anyway ("image.heic", "blob"), and giving every upload a real extension
- * that matches its actual bytes is one less thing to get wrong. */
-function photoFilename(original: string): string {
-  const base = original.replace(/\.[^.]+$/, '').trim()
-  return `${base || 'photo'}.jpg`
-}
-
 interface EquipmentEditorProps {
   /** null is the "New item" draft - see this file's header comment. */
   id: string | null
@@ -207,7 +173,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // changes - so this local state rides straight through it, which is
   // exactly what lets the "Saved, but 2 of 5 didn't upload" notice still
   // show once the editor is showing the saved record).
-  const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([])
+  const {
+    localPhotos,
+    setLocalPhotos,
+    addLocalPhotos,
+    makeCoverLocal,
+    removeLocalPhoto,
+    uploadPhotosInOrder,
+  } = usePhotoStaging({ onDownscaleError: setSaveError, setItem })
   const [failedPhotoUploads, setFailedPhotoUploads] = useState<FailedPhotoUpload[]>([])
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
   // Which item the failed uploads and notice above belong to. The editor
@@ -352,115 +325,53 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     [paths],
   )
 
-  // Object URLs are a browser-level resource, not a React one - abandoning
-  // a draft (Back, or navigating away) without ever pressing Save must
-  // still release them, or every unfinished "New item" leaks one blob URL
-  // per photo picked for the life of the tab. Deliberately an EMPTY
-  // dependency array with a ref-mirrored read at cleanup time (not
-  // `[localPhotos]`, which would revoke and immediately re-grant new
-  // object URLs on every single photo pick) - this only ever runs once, on
-  // unmount, over whatever the list holds at that moment.
-  const localPhotosRef = useRef<LocalPhoto[]>(localPhotos)
-  useEffect(() => { localPhotosRef.current = localPhotos }, [localPhotos])
-  useEffect(() => () => {
-    for (const photo of localPhotosRef.current) URL.revokeObjectURL(photo.previewUrl)
-  }, [])
-
   // ── photo row (ADR 0127) ────────────────────────────────────────────────
   // Two independent sets of handlers below - one for a brand new draft
-  // (id === null, acting on localPhotos), one for a saved record (acting on
-  // the server immediately, like the document links already do) - composed
-  // into the single onFilesPicked/onMakeCover/onRemove PhotoStripEditor
-  // actually receives further down, which branches on `id` itself.
-
-  // Downscaling runs through downscaleAll's worker pool (at most 3 at once -
-  // review finding: Promise.all(files.map(downscaleImage)) decoded every
-  // picked file into memory at the same time, risking the tab running out
-  // of memory on a phone). The results are still applied in the ORIGINAL
-  // file order (not completion order), so a multi-pick's local photo list
-  // comes out in the order the operator picked them. A failure keeps its
-  // real reason (AGENTS.md fallback policy), never silently dropped.
-  const addLocalPhotos = async (files: File[]) => {
-    const outcomes = await downscaleAll(files)
-    let lastError: string | null = null
-    for (const { file, result } of outcomes) {
-      if (result.ok) {
-        const previewUrl = URL.createObjectURL(result.blob)
-        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl }])
-      } else {
-        lastError = result.error
-      }
-    }
-    if (lastError) setSaveError(lastError)
-  }
-
-  const makeCoverLocal = (photoId: string) => {
-    setLocalPhotos((prev) => {
-      const idx = prev.findIndex((p) => p.id === photoId)
-      if (idx <= 0) return prev
-      const next = [...prev]
-      const [moved] = next.splice(idx, 1)
-      next.unshift(moved)
-      return next
-    })
-  }
-
-  const removeLocalPhoto = (photoId: string) => {
-    setLocalPhotos((prev) => {
-      const target = prev.find((p) => p.id === photoId)
-      if (target) URL.revokeObjectURL(target.previewUrl)
-      return prev.filter((p) => p.id !== photoId)
-    })
-  }
+  // (id === null, acting on localPhotos via usePhotoStaging), one for a
+  // saved record (acting on the server immediately, like the document links
+  // already do) - composed into the single onFilesPicked/onMakeCover/
+  // onRemove PhotoStripEditor actually receives further down, which
+  // branches on `id` itself. usePhotoStaging itself owns addLocalPhotos/
+  // makeCoverLocal/removeLocalPhoto and the object-URL cleanup on unmount.
 
   // ADR 0127 review: this used to `break` on the first failed file, so the
   // remaining picks were never even tried and never offered for Retry -
-  // fixed to match the new-draft path (performSave below): every file gets
-  // its own attempt regardless of an earlier one failing. A downscale
-  // failure (no Blob to retry) still queues for Retry using the ORIGINAL
-  // file - Retry re-sends it as-is rather than losing the pick entirely.
+  // every file gets its own attempt regardless of an earlier one failing. A
+  // downscale failure (no Blob to retry) still queues for Retry using the
+  // ORIGINAL file - Retry re-sends it as-is rather than losing the pick
+  // entirely.
   //
-  // Applies each successful upload's own returned item via setItem as it
-  // lands (not a refresh() afterward) - same review finding as makeCover/
-  // remove/retry below: a write already gets the updated record back, so a
-  // second GET is redundant, and - for the create-then-upload transition in
-  // particular (performSave's id===null branch) - actively wrong, since
+  // uploadPhotosInOrder (usePhotoStaging) applies each successful upload's
+  // own returned item via setItem as it lands (not a refresh() afterward) -
+  // a write already gets the updated record back, so a second GET is
+  // redundant, and - for the create-then-upload transition in particular
+  // (performSave's id===null branch) - actively wrong, since
   // useEquipmentItem's own GET for a freshly created id can land before
   // these uploads finish and nothing else would ever catch the item up.
   const uploadPhotosToSavedItem = async (targetId: string, files: File[]) => {
     // Downscaling runs through downscaleAll's worker pool (at most 3 at
-    // once, see addLocalPhotos above) - the network uploads that follow
-    // stay strictly sequential and in the ORIGINAL file order (not
-    // completion order), because the server assigns sort_index as each one
-    // arrives.
-    const downscaled = (await downscaleAll(files)).map(({ file, result }) => (
-      result.ok ? { ok: true as const, file, blob: result.blob } : { ok: false as const, file, error: result.error }
-    ))
-
-    const failures: FailedPhotoUpload[] = []
-    // Review finding: a 409 ("already in Documents as ...") means the exact
-    // same bytes can never be linked as a NEW photo - re-sending them on
-    // Retry can only get the identical refusal, so this is never queued in
-    // `failures` the way a genuine (transient) failure is. Tracked
-    // separately only to fold its own message into the combined notice
-    // below when a real failure also needs one.
-    const refused: string[] = []
-    for (const result of downscaled) {
-      if (!result.ok) {
-        failures.push({ blob: result.file, filename: photoFilename(result.file.name), error: result.error })
-        continue
-      }
-      try {
-        const updated = await uploadEquipmentPhoto(targetId, result.blob, photoFilename(result.file.name))
-        setItem(updated)
-      } catch (err) {
-        if (err instanceof PhotoAlreadyLinkedError) {
-          refused.push(err.message)
-          continue
-        }
-        failures.push({ blob: result.blob, filename: photoFilename(result.file.name), error: err instanceof Error ? err.message : String(err) })
+    // once, see usePhotoStaging's addLocalPhotos) - the network uploads
+    // that follow stay strictly sequential and in the ORIGINAL file order
+    // (not completion order), because the server assigns sort_index as
+    // each one arrives. A downscale failure never reaches
+    // uploadPhotosInOrder at all (there is no Blob to upload) - it is
+    // recorded directly, in the same shape uploadPhotosInOrder's own
+    // failures are, so Retry treats it identically.
+    const downscaled = await downscaleAll(files)
+    const downscaleFailures: FailedPhotoUpload[] = []
+    const toUpload: LocalPhoto[] = []
+    for (const { file, result } of downscaled) {
+      if (result.ok) {
+        // previewUrl '' - nothing displays this Blob before it uploads, so
+        // there is no object URL for uploadPhotosInOrder to revoke.
+        toUpload.push({ id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl: '' })
+      } else {
+        downscaleFailures.push({ blob: file, filename: photoFilename(file.name), error: result.error })
       }
     }
+
+    const { failures: uploadFailures, refused } = await uploadPhotosInOrder(targetId, toUpload)
+    const failures = [...downscaleFailures, ...uploadFailures]
     if (failures.length > 0) {
       setPhotoStatusItemId(targetId)
       setFailedPhotoUploads(failures)
@@ -505,24 +416,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     if (id === null || photoStatusItemId !== id || failedPhotoUploads.length === 0) return
     const targetId = photoStatusItemId
     setRetryingPhotos(true)
-    const stillFailing: FailedPhotoUpload[] = []
-    // A retry landing on a 409 is an edge case (something else linked the
-    // identical bytes between the first attempt and this one) rather than
-    // the normal case Retry exists for - but the same "never re-queue a 409"
-    // rule still applies once it happens.
-    const refused: string[] = []
-    for (const photo of failedPhotoUploads) {
-      try {
-        const updated = await uploadEquipmentPhoto(targetId, photo.blob, photo.filename)
-        setItem(updated)
-      } catch (err) {
-        if (err instanceof PhotoAlreadyLinkedError) {
-          refused.push(err.message)
-          continue
-        }
-        stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
-      }
-    }
+    // No previewUrl to revoke for a retried photo (none was ever created -
+    // failedPhotoUploads holds only blob/filename/error) - uploadPhotosInOrder
+    // skips the revoke for an empty one. A retry landing on a 409 is an edge
+    // case (something else linked the identical bytes between the first
+    // attempt and this one) rather than the normal case Retry exists for -
+    // but the same "never re-queue a 409" rule still applies once it happens.
+    const toRetry: LocalPhoto[] = failedPhotoUploads.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
+    const { failures: stillFailing, refused } = await uploadPhotosInOrder(targetId, toRetry)
     setFailedPhotoUploads(stillFailing)
     if (stillFailing.length > 0) {
       setPhotoNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
@@ -564,34 +465,17 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         if (localPhotos.length > 0) {
           const toUpload = localPhotos
           setLocalPhotos([])
-          const failures: FailedPhotoUpload[] = []
-          // See uploadPhotosToSavedItem's own comment on why a 409 is
-          // tracked separately rather than queued in `failures`.
-          const refused: string[] = []
-          for (const photo of toUpload) {
-            try {
-              // Review finding: applied via setItem the moment each upload
-              // lands, not a refresh() (or nothing at all, which is what
-              // this did before) afterward - useEquipmentItem's own GET for
-              // `created.id` (fired the instant onCreated above flips the
-              // `id` prop) routinely lands before this loop finishes, and
-              // without this the photo row stayed empty: nothing was ever
-              // going to re-fetch it again once that GET's stale response
-              // was in.
-              const updated = await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
-              // adopt: this upload can land before the re-render that brings
-              // created.id in as the hook's `id` (see setItem's own comment).
-              setItem(updated, { adopt: true })
-              URL.revokeObjectURL(photo.previewUrl)
-            } catch (err) {
-              URL.revokeObjectURL(photo.previewUrl)
-              if (err instanceof PhotoAlreadyLinkedError) {
-                refused.push(err.message)
-                continue
-              }
-              failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
-            }
-          }
+          // Review finding: each upload's own returned item is applied via
+          // setItem (usePhotoStaging's uploadPhotosInOrder) the moment it
+          // lands, not a refresh() (or nothing at all, which is what this
+          // did before) afterward - useEquipmentItem's own GET for
+          // `created.id` (fired the instant onCreated above flips the `id`
+          // prop) routinely lands before this loop finishes, and without
+          // this the photo row stayed empty: nothing was ever going to
+          // re-fetch it again once that GET's stale response was in.
+          // adopt: this upload can land before the re-render that brings
+          // created.id in as the hook's `id` (see setItem's own comment).
+          const { failures, refused } = await uploadPhotosInOrder(created.id, toUpload, { adopt: true })
           if (failures.length > 0) {
             setPhotoStatusItemId(created.id)
             setFailedPhotoUploads(failures)
@@ -638,7 +522,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, update, setLinkedDocuments, setItem, onCreated])
+  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, update, setLinkedDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 

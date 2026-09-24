@@ -4,33 +4,16 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
-import { BLANK_DRAFT, PhotoAlreadyLinkedError, createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
-import { downscaleAll } from '@/lib/image-downscale'
+import { BLANK_DRAFT, createEquipment, type EquipmentInput } from '@/hooks/use-inventory'
+import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-staging'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
 // bin, photograph each thing, name it. Reuses PhotoStripEditor's local
-// photo list (photo-strip-editor.tsx) and the same create-then-upload
-// sequence equipment-editor.tsx's own draft Save runs, but as its OWN small
-// form rather than the full Specifications editor - Full item (bin-page.tsx)
-// is the escape hatch to that when a quick record isn't enough.
-
-interface LocalPhoto {
-  id: string
-  blob: Blob
-  filename: string
-  previewUrl: string
-}
-
-interface FailedUpload {
-  blob: Blob
-  filename: string
-  error: string
-}
-
-function photoFilename(original: string): string {
-  const base = original.replace(/\.[^.]+$/, '').trim()
-  return `${base || 'photo'}.jpg`
-}
+// photo list (photo-strip-editor.tsx) and usePhotoStaging's own
+// create-then-upload sequence, the same one equipment-editor.tsx's own
+// draft Save runs, but as its OWN small form rather than the full
+// Specifications editor - Full item (bin-page.tsx) is the escape hatch to
+// that when a quick record isn't enough.
 
 interface BinQuickAddProps {
   zoneId: string
@@ -52,11 +35,10 @@ interface BinQuickAddProps {
 export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState(1)
-  const [photos, setPhotos] = useState<LocalPhoto[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([])
+  const [failedUploads, setFailedUploads] = useState<FailedPhotoUpload[]>([])
   const [savedItemId, setSavedItemId] = useState<string | null>(null)
   // The item's name, for failedUploads' own onHasWorkChange detail below -
   // `name` itself is blanked as soon as the save that produced these
@@ -72,6 +54,15 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   // synchronously, so it is what actually blocks a second call that starts
   // before the first one's first await ever yields.
   const savingRef = useRef(false)
+
+  const {
+    localPhotos: photos,
+    setLocalPhotos: setPhotos,
+    addLocalPhotos: addFiles,
+    makeCoverLocal: makeCover,
+    removeLocalPhoto: removePhoto,
+    uploadPhotosInOrder,
+  } = usePhotoStaging({ onDownscaleError: setSaveError })
 
   // Release-fixes code-review finding: a partial-failure save clears name
   // and photos (the form's own "ready for the next item" contract, handleSave
@@ -103,45 +94,6 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     else onHasWorkChange?.(hasWork)
   }, [hasWork, detail, onHasWorkChange])
 
-  // Downscaling runs through downscaleAll's own worker pool (at most 3 at
-  // once - review finding: Promise.all(files.map(downscaleImage)) decoded
-  // every picked file into memory at the same time, risking the tab running
-  // out of memory on a phone) - see equipment-editor.tsx's own
-  // addLocalPhotos for the identical reasoning. Results are still applied
-  // in the ORIGINAL file order, not completion order.
-  const addFiles = async (files: File[]) => {
-    const outcomes = await downscaleAll(files)
-    let lastError: string | null = null
-    for (const { file, result } of outcomes) {
-      if (result.ok) {
-        const previewUrl = URL.createObjectURL(result.blob)
-        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl }])
-      } else {
-        lastError = result.error
-      }
-    }
-    if (lastError) setSaveError(lastError)
-  }
-
-  const makeCover = (photoId: string) => {
-    setPhotos((prev) => {
-      const idx = prev.findIndex((p) => p.id === photoId)
-      if (idx <= 0) return prev
-      const next = [...prev]
-      const [moved] = next.splice(idx, 1)
-      next.unshift(moved)
-      return next
-    })
-  }
-
-  const removePhoto = (photoId: string) => {
-    setPhotos((prev) => {
-      const target = prev.find((p) => p.id === photoId)
-      if (target) URL.revokeObjectURL(target.previewUrl)
-      return prev.filter((p) => p.id !== photoId)
-    })
-  }
-
   const handleSave = async () => {
     const trimmedName = name.trim()
     if (trimmedName === '') return
@@ -164,26 +116,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       }
       const created = await createEquipment(input)
 
-      const toUpload = photos
-      const failures: FailedUpload[] = []
-      // Review finding: a 409 ("already in Documents as ...") means the
-      // exact same bytes can never be linked as a NEW photo - re-sending
-      // them on Retry can only get the identical refusal, so it is never
-      // queued in `failures` the way a genuine (transient) failure is.
-      const refused: string[] = []
-      for (const photo of toUpload) {
-        try {
-          await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
-          URL.revokeObjectURL(photo.previewUrl)
-        } catch (err) {
-          URL.revokeObjectURL(photo.previewUrl)
-          if (err instanceof PhotoAlreadyLinkedError) {
-            refused.push(err.message)
-            continue
-          }
-          failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
-        }
-      }
+      const { failures, refused } = await uploadPhotosInOrder(created.id, photos)
 
       if (failures.length > 0) {
         setSavedItemId(created.id)
@@ -222,19 +155,11 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   const handleRetry = async () => {
     if (savedItemId === null || failedUploads.length === 0) return
     setRetrying(true)
-    const stillFailing: FailedUpload[] = []
-    const refused: string[] = []
-    for (const photo of failedUploads) {
-      try {
-        await uploadEquipmentPhoto(savedItemId, photo.blob, photo.filename)
-      } catch (err) {
-        if (err instanceof PhotoAlreadyLinkedError) {
-          refused.push(err.message)
-          continue
-        }
-        stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
-      }
-    }
+    // No previewUrl to revoke for a retried photo (none was ever created -
+    // failedUploads holds only blob/filename/error) - uploadPhotosInOrder
+    // skips the revoke for an empty one, same as it always has here.
+    const toRetry = failedUploads.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
+    const { failures: stillFailing, refused } = await uploadPhotosInOrder(savedItemId, toRetry)
     setFailedUploads(stillFailing)
     if (stillFailing.length > 0) {
       setNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
