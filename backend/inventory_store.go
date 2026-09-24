@@ -1176,10 +1176,26 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		return nil, fmt.Errorf("list equipment: %w", err)
 	}
 
-	// One aggregate photoIDsForEquipmentIDs call over the whole filtered
-	// result, not one per item (that function's own doc comment) - the bin
-	// page and the equipment index both need photo_ids on every row they
-	// show.
+	// The Go-side `q` text filter runs BEFORE photoIDsForEquipmentIDs below -
+	// review finding: this used to fetch photo ids for every structurally-
+	// matching row first and only then filter by q, doing that lookup's own
+	// work for rows the filter was about to discard. Filtering first means
+	// the aggregate photo query below only ever runs over the rows this call
+	// actually returns.
+	q := strings.ToLower(strings.TrimSpace(filter.Query))
+	if q != "" {
+		filtered := make([]equipmentItem, 0, len(out))
+		for _, it := range out {
+			if equipmentMatchesQuery(it, q) {
+				filtered = append(filtered, it)
+			}
+		}
+		out = filtered
+	}
+
+	// One aggregate photoIDsForEquipmentIDs call over the surviving result,
+	// not one per item (that function's own doc comment) - the bin page and
+	// the equipment index both need photo_ids on every row they show.
 	ids := make([]string, len(out))
 	for i, it := range out {
 		ids[i] = it.ID
@@ -1195,18 +1211,7 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		}
 	}
 
-	q := strings.ToLower(strings.TrimSpace(filter.Query))
-	if q == "" {
-		return out, nil
-	}
-
-	filtered := make([]equipmentItem, 0, len(out))
-	for _, it := range out {
-		if equipmentMatchesQuery(it, q) {
-			filtered = append(filtered, it)
-		}
-	}
-	return filtered, nil
+	return out, nil
 }
 
 // ── equipment documents ──────────────────────────────────────────────────

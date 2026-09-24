@@ -1166,3 +1166,46 @@ func TestDocumentStore_ListEquipmentCarriesPhotoIDsForEveryItem(t *testing.T) {
 		t.Fatalf("expected photo_ids carried through ListEquipment, got %+v", items)
 	}
 }
+
+// TestDocumentStore_ListEquipmentQueryFilterKeepsPhotoIDsOnSurvivors pins a
+// review finding: ListEquipment used to call photoIDsForEquipmentIDs over
+// EVERY structurally-matching row before the Go-side `q` text filter ran,
+// attaching photo ids to rows the query then discarded. Not wrong by
+// itself - the filter step only ever removes entries, it never touches the
+// PhotoIDs already set on the ones that survive - but wasted work on a
+// filter that, aboard one boat, is applied to every row on every keystroke.
+// This test pins the CORRECT behaviour (a survivor's photo_ids are exactly
+// its own) so a future change that reorders these two steps again can't
+// silently start handing back the wrong item's photos.
+func TestDocumentStore_ListEquipmentQueryFilterKeepsPhotoIDsOnSurvivors(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	match, err := store.CreateEquipment(equipmentItem{Name: "Spare impeller", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment (match): %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-query-survivor", "a.jpg")
+	if err := store.AddEquipmentPhoto(match.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	excluded, err := store.CreateEquipment(equipmentItem{Name: "Fuel filter", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment (excluded): %v", err)
+	}
+	excludedPhoto := mustInsertPhotoDocument(t, store, "sha-query-excluded", "b.jpg")
+	if err := store.AddEquipmentPhoto(excluded.ID, excludedPhoto.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto (excluded): %v", err)
+	}
+
+	items, err := store.ListEquipment(equipmentFilter{Query: "impeller"})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != match.ID {
+		t.Fatalf("expected only the matching item, got %+v", items)
+	}
+	if len(items[0].PhotoIDs) != 1 || items[0].PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected the survivor's own photo_ids, got %#v", items[0].PhotoIDs)
+	}
+}
