@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -1349,6 +1350,156 @@ func TestDeleteEquipmentHandler_CascadesPhotoLinks(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected the photo link to cascade away with the item, found %d still there", count)
+	}
+}
+
+// TestDeleteEquipmentHandler_RemovesUnsharedPhotoDocumentAndFile is item 1 of
+// the pre-release review: DeleteEquipment's own cascade removes only the
+// equipment_documents LINK (TestDeleteEquipmentHandler_CascadesPhotoLinks
+// above) - the photo's document row and its file on disk used to be left
+// behind. ADR 0127: "a photo has no life outside its item" applies to
+// deleting the item, not just to the dedicated photo-remove route.
+func TestDeleteEquipmentHandler_RemovesUnsharedPhotoDocumentAndFile(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	c1, rec1 := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c1); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler: %v", err)
+	}
+	var uploaded struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &uploaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	photoID := uploaded.Item.PhotoIDs[0]
+	if len(documentsDirEntries(t)) != 1 {
+		t.Fatalf("expected the uploaded photo's file on disk before delete")
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if entries := documentsDirEntries(t); len(entries) != 0 {
+		t.Fatalf("expected the photo's file removed from disk, found %v", entries)
+	}
+	if _, err := globalDocumentStore.Get(photoID); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected the photo document itself deleted, got %v", err)
+	}
+}
+
+// TestDeleteEquipmentHandler_SharedPhotoFileSurvivesEquipmentDelete pins the
+// sha256-dedupe sharing rule at the handler layer: item A and item B share
+// one uploaded photo (same bytes), and deleting item A must leave item B's
+// copy - document row AND file - completely alone.
+func TestDeleteEquipmentHandler_SharedPhotoFileSurvivesEquipmentDelete(t *testing.T) {
+	withTestDocumentStore(t)
+
+	itemA, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+
+	cA, recA := newInventoryPhotoUploadContext(t, itemA.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cA); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(A): %v", err)
+	}
+	var uploadedA struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recA.Body.Bytes(), &uploadedA); err != nil {
+		t.Fatalf("unmarshal(A): %v", err)
+	}
+	photoID := uploadedA.Item.PhotoIDs[0]
+
+	// Same bytes onto item B - Insert's own sha256 dedupe links the SAME
+	// document row rather than storing a second file.
+	cB, recB := newInventoryPhotoUploadContext(t, itemB.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cB); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(B): %v", err)
+	}
+	var uploadedB struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recB.Body.Bytes(), &uploadedB); err != nil {
+		t.Fatalf("unmarshal(B): %v", err)
+	}
+	if len(uploadedB.Item.PhotoIDs) != 1 || uploadedB.Item.PhotoIDs[0] != photoID {
+		t.Fatalf("expected B to link the SAME deduplicated document, got %+v", uploadedB.Item.PhotoIDs)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+itemA.ID, "", itemA.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries := documentsDirEntries(t)
+	if len(entries) != 1 {
+		t.Fatalf("expected the shared file to survive on disk, found %v", entries)
+	}
+	itemBAfter, err := globalDocumentStore.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(itemBAfter.PhotoIDs) != 1 || itemBAfter.PhotoIDs[0] != photoID {
+		t.Fatalf("expected item B's photo untouched, got %+v", itemBAfter.PhotoIDs)
+	}
+
+	c2, rec2 := newDocumentEchoContext(http.MethodGet, "/api/documents/"+photoID+"/content", "", photoID)
+	if err := documentContentHandler(c2); err != nil {
+		t.Fatalf("documentContentHandler: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected the shared photo's content still servable, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile pins the
+// other half of item 1: an ordinary (non-photo) linked document must NOT be
+// deleted along with the item - only its equipment_documents link cascades
+// away, same as before this fix.
+func TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile(t *testing.T) {
+	withTestDocumentStore(t)
+	store := globalDocumentStore
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	manual := insertTestDocumentWithFile(t, store, "sha-delete-eq-handler-manual", "manual.pdf", "application/pdf", []byte("manual bytes"))
+	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if entries := documentsDirEntries(t); len(entries) != 1 {
+		t.Fatalf("expected the ordinary linked document's file to survive, found %v", entries)
+	}
+	if _, err := store.Get(manual.ID); err != nil {
+		t.Fatalf("expected the ordinary linked document to survive, got %v", err)
 	}
 }
 

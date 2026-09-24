@@ -425,11 +425,29 @@ func updateEquipmentHandler(c echo.Context) error {
 // deleteEquipmentHandler is DELETE /api/inventory/equipment/:id: 204 on
 // success. Its equipment_documents links need no handler-side cleanup -
 // ON DELETE CASCADE already removes them (DeleteEquipment's own doc
-// comment, inventory_store.go).
+// comment, inventory_store.go). DeleteEquipment itself deletes the
+// document ROW for any of the item's own photos that no other item still
+// links (ADR 0127: "a photo has no life outside its item") and hands back
+// each one's sha256 - removing the FILE those rows pointed at is this
+// handler's own job, the same store/handler split
+// RemoveEquipmentPhoto/deleteEquipmentPhotoHandler already draw.
 func deleteEquipmentHandler(c echo.Context) error {
-	if err := globalDocumentStore.DeleteEquipment(c.Param("id")); err != nil {
+	deletedPhotoSHAs, err := globalDocumentStore.DeleteEquipment(c.Param("id"))
+	if err != nil {
 		return writeDocumentError(c, err)
 	}
+
+	for _, sha := range deletedPhotoSHAs {
+		unlockSHA := lockDocumentSHA(sha)
+		path := filepath.Join(documentsDirPath(), sha)
+		removeErr := os.Remove(path)
+		unlockSHA()
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("inventory: delete equipment: failed to remove photo file %s: %v", path, removeErr)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove photo file"})
+		}
+	}
+
 	return c.NoContent(http.StatusNoContent)
 }
 
