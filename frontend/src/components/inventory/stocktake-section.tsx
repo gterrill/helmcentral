@@ -122,7 +122,14 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
     () => events.some((e) => e.kind === 'confirmed' || e.kind === 'elsewhere') || scanning,
     [events, scanning],
   )
-  useEffect(() => { onHasWorkChange?.(hasReviewWork) }, [hasReviewWork, onHasWorkChange])
+  // useLayoutEffect, not useEffect - App.tsx's own guard (requestWithinInventory)
+  // reads inventoryHasWork the instant Open/Full item is pressed, which can
+  // follow a confirmed scan within the same handleScan call chain with no
+  // render in between for a passive effect to have caught up on. A layout
+  // effect commits synchronously with the render that added the event,
+  // closing the same class of gap currentBinRef/handleScanRef's own
+  // comments (above) already describe for the scan decision itself.
+  useLayoutEffect(() => { onHasWorkChange?.(hasReviewWork) }, [hasReviewWork, onHasWorkChange])
 
   // Takes a fully-formed ScanEvent (id included) rather than an Omit<...,
   // 'id'> - Omit collapses a discriminated union to the INTERSECTION of its

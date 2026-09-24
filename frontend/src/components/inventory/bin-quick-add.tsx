@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -66,7 +66,11 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   const savingRef = useRef(false)
 
   const hasWork = useMemo(() => name.trim() !== '' || photos.length > 0, [name, photos])
-  useEffect(() => { onHasWorkChange?.(hasWork) }, [hasWork, onHasWorkChange])
+  // useLayoutEffect - see stocktake-section.tsx's own onHasWorkChange effect
+  // for why: App.tsx's guard can read inventoryHasWork right after a state
+  // update this same effect is meant to report, with no render in between
+  // for an ordinary passive effect to be guaranteed to have caught up.
+  useLayoutEffect(() => { onHasWorkChange?.(hasWork) }, [hasWork, onHasWorkChange])
 
   // Downscaling every picked file runs concurrently (Promise.all) - see
   // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
