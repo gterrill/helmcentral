@@ -32,21 +32,29 @@ interface BinQuickAddProps {
   onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
+/** One saved item's photos still waiting for Retry. */
+interface PendingRetry {
+  itemId: string
+  name: string
+  failures: FailedPhotoUpload[]
+  notice: string
+}
+
 export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [failedUploads, setFailedUploads] = useState<FailedPhotoUpload[]>([])
-  const [savedItemId, setSavedItemId] = useState<string | null>(null)
-  // The item's name, for failedUploads' own onHasWorkChange detail below -
-  // `name` itself is blanked as soon as the save that produced these
-  // failures completes (see handleSave's own comment on why), so by the
-  // time anything reads failedUploads there is nothing else left to name
-  // the still-queued photos after.
-  const [savedItemName, setSavedItemName] = useState<string | null>(null)
-  const [retrying, setRetrying] = useState(false)
+  // A 409-only notice ("already in Documents as ..."): nothing to retry.
+  const [refusedNotice, setRefusedNotice] = useState<string | null>(null)
+  // Photos still waiting for Retry, one entry per saved item. The form
+  // clears after every save and moves on to the next item, so a single
+  // slot here used to be overwritten by the next save and the earlier
+  // item's photos were silently lost (final pre-release review finding).
+  // `name` is kept because the form's own Name field is already blank by
+  // the time anything reads an entry.
+  const [pendingRetries, setPendingRetries] = useState<PendingRetry[]>([])
+  const [retryingItemId, setRetryingItemId] = useState<string | null>(null)
   // Review finding: Enter in the Name field calls handleSave directly, with
   // no in-flight guard - the `saving` state above is too slow to catch a
   // second Enter (or a stray Enter-then-click) pressed before React has
@@ -71,8 +79,8 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   // photo, and leaving the bin used to drop them with no prompt because this
   // check never looked at them.
   const hasWork = useMemo(
-    () => name.trim() !== '' || photos.length > 0 || failedUploads.length > 0,
-    [name, photos, failedUploads],
+    () => name.trim() !== '' || photos.length > 0 || pendingRetries.length > 0,
+    [name, photos, pendingRetries],
   )
   // Wording for the failedUploads case specifically - the fallback "name and
   // photos you have added" copy App.tsx's dialog otherwise shows would be
@@ -80,11 +88,11 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   // added"). null when hasWork is true for the ordinary staged-draft reason
   // instead, so App.tsx's own generic copy still applies there.
   const detail = useMemo(() => {
-    if (failedUploads.length === 0) return undefined
-    const n = failedUploads.length
-    const who = savedItemName ?? 'this item'
+    if (pendingRetries.length === 0) return undefined
+    const n = pendingRetries.reduce((total, entry) => total + entry.failures.length, 0)
+    const who = pendingRetries.length === 1 ? pendingRetries[0].name : `${pendingRetries.length} items`
     return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
-  }, [failedUploads, savedItemName])
+  }, [pendingRetries])
   // useLayoutEffect - see stocktake-section.tsx's own onHasWorkChange effect
   // for why: App.tsx's guard can read inventoryHasWork right after a state
   // update this same effect is meant to report, with no render in between
@@ -118,22 +126,15 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
 
       const { failures, refused } = await uploadPhotosInOrder(created.id, photos)
 
+      // Only this item's own outcome changes here - an earlier item's
+      // photos still waiting for Retry are left exactly where they are.
       if (failures.length > 0) {
-        setSavedItemId(created.id)
-        setSavedItemName(trimmedName)
-        setFailedUploads(failures)
         const notUploaded = failures.length + refused.length
-        setNotice(`Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
-      } else if (refused.length > 0) {
-        setSavedItemId(null)
-        setSavedItemName(null)
-        setFailedUploads([])
-        setNotice(refused[0])
+        const notice = `Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`
+        setPendingRetries((prev) => [...prev, { itemId: created.id, name: trimmedName, failures, notice }])
+        setRefusedNotice(null)
       } else {
-        setSavedItemId(null)
-        setSavedItemName(null)
-        setFailedUploads([])
-        setNotice(null)
+        setRefusedNotice(refused.length > 0 ? refused[0] : null)
       }
 
       // The form clears and the camera is ready for the next item -
@@ -152,30 +153,21 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     }
   }
 
-  const handleRetry = async () => {
-    if (savedItemId === null || failedUploads.length === 0) return
-    setRetrying(true)
+  const handleRetry = async (entry: PendingRetry) => {
+    setRetryingItemId(entry.itemId)
     // No previewUrl to revoke for a retried photo (none was ever created -
-    // failedUploads holds only blob/filename/error) - uploadPhotosInOrder
-    // skips the revoke for an empty one, same as it always has here.
-    const toRetry = failedUploads.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
-    const { failures: stillFailing, refused } = await uploadPhotosInOrder(savedItemId, toRetry)
-    setFailedUploads(stillFailing)
-    if (stillFailing.length > 0) {
-      setNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
-    } else {
-      // Nothing left queued - savedItemName's only reader (the `detail`
-      // memo above) is gated on failedUploads.length, so this isn't load-
-      // bearing for the guard, but leaving a stale name behind here is its
-      // own kind of confusing state to carry.
-      setSavedItemName(null)
-      if (refused.length > 0) {
-        setNotice(refused[0])
-      } else {
-        setNotice(null)
-      }
-    }
-    setRetrying(false)
+    // an entry holds only blob/filename/error) - uploadPhotosInOrder skips
+    // the revoke for an empty one.
+    const toRetry = entry.failures.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
+    const { failures: stillFailing, refused } = await uploadPhotosInOrder(entry.itemId, toRetry)
+    setPendingRetries((prev) => {
+      const others = prev.filter((p) => p.itemId !== entry.itemId)
+      if (stillFailing.length === 0) return others
+      const notice = `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`
+      return prev.map((p) => (p.itemId === entry.itemId ? { ...p, failures: stillFailing, notice } : p))
+    })
+    if (stillFailing.length === 0 && refused.length > 0) setRefusedNotice(refused[0])
+    setRetryingItemId(null)
     onCreated()
   }
 
@@ -219,19 +211,19 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       {saveError && (
         <p role="alert" className="text-sm text-destructive">{saveError}</p>
       )}
-      {notice && (
-        <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
-          <span>{notice}</span>
-          {/* A 409 refusal never populates failedUploads (it's dropped, not
-              queued) - Retry has nothing to re-send for a notice that's
-              only a 409, see handleSave/handleRetry's own comments. */}
-          {failedUploads.length > 0 && (
-            <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={() => { void handleRetry() }}>
-              {retrying ? 'Retrying...' : 'Retry'}
-            </Button>
-          )}
-        </div>
+      {/* A 409 refusal is never queued - Retry could only repeat the same
+          refusal, so its notice carries no Retry button. */}
+      {refusedNotice && (
+        <p role="alert" className="rounded-md border border-border bg-muted px-3 py-2 text-sm">{refusedNotice}</p>
       )}
+      {pendingRetries.map((entry) => (
+        <div key={entry.itemId} role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+          <span className="min-w-0">{entry.notice}</span>
+          <Button type="button" variant="outline" size="sm" disabled={retryingItemId === entry.itemId} onClick={() => { void handleRetry(entry) }}>
+            {retryingItemId === entry.itemId ? 'Retrying...' : 'Retry'}
+          </Button>
+        </div>
+      ))}
     </div>
   )
 }

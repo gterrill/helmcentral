@@ -13,11 +13,16 @@ vi.mock('@/lib/image-downscale', () => ({
 
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
+// Ids handed out by successive create POSTs; empty means every create is 'eq-new'.
+let createdIdQueue: string[]
+let photoUploadTargets: string[]
 const fetchMock = vi.fn()
 
 beforeEach(() => {
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
+  createdIdQueue = []
+  photoUploadTargets = []
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     const u = String(url)
@@ -28,7 +33,7 @@ beforeEach(() => {
       return Promise.resolve({
         ok: true,
         status: 201,
-        json: async () => ({ item: { id: 'eq-new', photo_ids: [], ...body } }),
+        json: async () => ({ item: { id: createdIdQueue.shift() ?? 'eq-new', photo_ids: [], ...body } }),
       })
     }
     const photoPost = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
@@ -36,6 +41,7 @@ beforeEach(() => {
       const form = init?.body as FormData
       const file = form.get('file') as File
       uploadedPhotoOrder.push(file.name)
+      photoUploadTargets.push(photoPost[1])
       if (failingPhotoUploadNames.has(file.name)) {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
       }
@@ -204,6 +210,36 @@ describe('BinQuickAdd', () => {
 
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
     expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "2 photos for Gaffer tape haven't uploaded yet.")
+  })
+
+  // Final pre-release review finding: the Retry list held one item's failed
+  // photos at a time, so saving the next item replaced it and the earlier
+  // item's photos were silently lost - whether the next item's photos
+  // uploaded or failed too.
+  it('keeps each saved item\'s failed photos for Retry when the next item is saved', async () => {
+    createdIdQueue = ['eq-a', 'eq-b']
+    failingPhotoUploadNames.add('a.jpg')
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item A' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText(/Saved Item A, but 1 photo didn't upload/)
+
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item B' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    // Item A's failed photo is still offered for Retry, and goes to Item A.
+    expect(screen.getByText(/Saved Item A, but 1 photo didn't upload/)).toBeInTheDocument()
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(photoUploadTargets).toEqual(['eq-a', 'eq-b', 'eq-a']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
   })
 
   it('blocks Save when the name is blank', async () => {

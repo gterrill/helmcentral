@@ -663,6 +663,31 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
+  // Final pre-release review finding: the failed-upload list held one item
+  // at a time, so a failure on item B replaced item A's and A's photos were
+  // lost with no prompt.
+  it('keeps each item\'s failed photo uploads when another item\'s upload also fails', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('a.jpg')
+    failingPhotoUploadNames.add('b.jpg')
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await waitForLoaded()
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: a.jpg")
+
+    currentItem = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: b.jpg")
+
+    currentItem = makeItem({ photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-1" {...props} />)
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: a.jpg")
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
   // ADR 0127 review finding: the photo row was empty after creating an item
   // with photos - useEquipmentItem's own GET for the newly created id (the
   // id-change effect) can land BEFORE the photo uploads that follow it in

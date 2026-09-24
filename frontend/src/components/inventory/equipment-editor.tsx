@@ -121,6 +121,12 @@ interface DocEntry {
   filename: string
 }
 
+/** One item's photos waiting for Retry, and the notice shown for them. */
+interface PhotoStatus {
+  failures: FailedPhotoUpload[]
+  notice: string
+}
+
 interface EquipmentEditorProps {
   /** null is the "New item" draft - see this file's header comment. */
   id: string | null
@@ -181,14 +187,31 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     removeLocalPhoto,
     uploadPhotosInOrder,
   } = usePhotoStaging({ onDownscaleError: setSaveError, setItem })
-  const [failedPhotoUploads, setFailedPhotoUploads] = useState<FailedPhotoUpload[]>([])
-  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
-  // Which item the failed uploads and notice above belong to. The editor
-  // stays mounted across Back/Forward, so without this another item showed
-  // them and Retry filed their photos on it (final pre-release review
-  // finding). They show, and Retry sends them, only for their own item.
-  const [photoStatusItemId, setPhotoStatusItemId] = useState<string | null>(null)
+  // Failed photo uploads and their notice, per item. The editor stays
+  // mounted across Back/Forward, so a single slot let another item show
+  // them and Retry file their photos on it, and a failure on one item
+  // replaced another item's and lost its photos (final pre-release review
+  // findings). Each item's entry shows, and Retry sends, only for that item.
+  const [photoStatus, setPhotoStatus] = useState<Record<string, PhotoStatus>>({})
   const [retryingPhotos, setRetryingPhotos] = useState(false)
+  const currentPhotoStatus = id !== null ? photoStatus[id] : undefined
+  const failedPhotoUploads = currentPhotoStatus?.failures ?? []
+  const photoNotice = currentPhotoStatus?.notice ?? null
+
+  // Records one upload batch's outcome against its own item. New failures
+  // join any already waiting for that item; a batch that was only refused
+  // (409) keeps them too, and shows the refusal only when nothing else is
+  // waiting.
+  const recordPhotoOutcome = useCallback((itemId: string, failures: FailedPhotoUpload[], refused: string[], failureNotice: string) => {
+    setPhotoStatus((prev) => {
+      const existing = prev[itemId]?.failures ?? []
+      if (failures.length > 0) return { ...prev, [itemId]: { failures: [...existing, ...failures], notice: failureNotice } }
+      if (refused.length > 0) {
+        return existing.length > 0 ? prev : { ...prev, [itemId]: { failures: [], notice: refused[0] } }
+      }
+      return prev
+    })
+  }, [])
 
   // Re-seeds only when a DIFFERENT record has loaded (id, or - for a brand
   // new draft - a one-time reset to blank), not on every incidental
@@ -372,16 +395,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
 
     const { failures: uploadFailures, refused } = await uploadPhotosInOrder(targetId, toUpload)
     const failures = [...downscaleFailures, ...uploadFailures]
-    if (failures.length > 0) {
-      setPhotoStatusItemId(targetId)
-      setFailedPhotoUploads(failures)
-      const notUploaded = failures.length + refused.length
-      setPhotoNotice(`${notUploaded} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
-    } else if (refused.length > 0) {
-      setPhotoStatusItemId(targetId)
-      setFailedPhotoUploads([])
-      setPhotoNotice(refused[0])
-    }
+    const notUploaded = failures.length + refused.length
+    recordPhotoOutcome(targetId, failures, refused,
+      failures.length > 0 ? `${notUploaded} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}` : '')
   }
 
   const makeCoverSaved = async (photoId: string) => {
@@ -413,8 +429,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // fine on the first pass are already linked server-side and are never
   // touched again.
   const retryFailedPhotoUploads = async () => {
-    if (id === null || photoStatusItemId !== id || failedPhotoUploads.length === 0) return
-    const targetId = photoStatusItemId
+    if (id === null || failedPhotoUploads.length === 0) return
+    const targetId = id
     setRetryingPhotos(true)
     // No previewUrl to revoke for a retried photo (none was ever created -
     // failedPhotoUploads holds only blob/filename/error) - uploadPhotosInOrder
@@ -424,14 +440,17 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // but the same "never re-queue a 409" rule still applies once it happens.
     const toRetry: LocalPhoto[] = failedPhotoUploads.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
     const { failures: stillFailing, refused } = await uploadPhotosInOrder(targetId, toRetry)
-    setFailedPhotoUploads(stillFailing)
-    if (stillFailing.length > 0) {
-      setPhotoNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
-    } else if (refused.length > 0) {
-      setPhotoNotice(refused[0])
-    } else {
-      setPhotoNotice(null)
-    }
+    setPhotoStatus((prev) => {
+      const next = { ...prev }
+      if (stillFailing.length > 0) {
+        next[targetId] = { failures: stillFailing, notice: `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}` }
+      } else if (refused.length > 0) {
+        next[targetId] = { failures: [], notice: refused[0] }
+      } else {
+        delete next[targetId]
+      }
+      return next
+    })
     setRetryingPhotos(false)
   }
 
@@ -476,15 +495,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           // adopt: this upload can land before the re-render that brings
           // created.id in as the hook's `id` (see setItem's own comment).
           const { failures, refused } = await uploadPhotosInOrder(created.id, toUpload, { adopt: true })
-          if (failures.length > 0) {
-            setPhotoStatusItemId(created.id)
-            setFailedPhotoUploads(failures)
-            const notUploaded = failures.length + refused.length
-            setPhotoNotice(`Saved, but ${notUploaded} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
-          } else if (refused.length > 0) {
-            setPhotoStatusItemId(created.id)
-            setPhotoNotice(refused[0])
-          }
+          const notUploaded = failures.length + refused.length
+          recordPhotoOutcome(created.id, failures, refused,
+            failures.length > 0 ? `Saved, but ${notUploaded} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}` : '')
         }
         return
       }
@@ -522,7 +535,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, update, setLinkedDocuments, onCreated])
+  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, setLinkedDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -587,7 +600,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
             if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId) }
           }}
         />
-        {photoNotice && photoStatusItemId === id && (
+        {photoNotice && (
           <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
             <span>{photoNotice}</span>
             {/* Review finding: a 409 refusal never populates
