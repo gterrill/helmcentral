@@ -238,4 +238,78 @@ describe('LocationsSection', () => {
 
     expect(screen.queryByText(/no longer open this bin/)).not.toBeInTheDocument()
   })
+
+  // Item 3 of the pre-release review: the warning used to show the instant
+  // the code blurred, before the rename PUT had even resolved - optimistic,
+  // and never cleared if that PUT then failed. It must only appear once the
+  // rename has actually succeeded.
+  it('does not show the rename warning until the rename actually succeeds', async () => {
+    let resolvePut!: () => void
+    const putPromise = new Promise<void>((resolve) => { resolvePut = resolve })
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/zones') && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      }
+      if (u.match(/\/api\/inventory\/bins\/b1$/) && method === 'PUT') {
+        const body = JSON.parse(String(init?.body)) as { code?: string; name?: string }
+        return putPromise.then(() => {
+          zones = zones.map((z) => ({ ...z, bins: z.bins.map((b) => (b.id === 'b1' ? { ...b, ...body } : b)) }))
+          const updated = zones.flatMap((z) => z.bins).find((b) => b.id === 'b1')
+          return { ok: true, json: async () => ({ bin: updated }) }
+        })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<LocationsSection />)
+    const input = await screen.findByDisplayValue('ER-01')
+
+    fireEvent.change(input, { target: { value: 'ER-09' } })
+    fireEvent.blur(input)
+
+    // The PUT hasn't resolved yet - no warning shown optimistically.
+    expect(screen.queryByText(/no longer open this bin/)).not.toBeInTheDocument()
+
+    resolvePut()
+
+    await screen.findByText('Tags written for ER-01 no longer open this bin.')
+  })
+
+  // The other half of item 3: a rename that FAILS must not leave a stale
+  // warning on screen, and the failure itself must be shown.
+  it('clears the rename warning and shows the failure when a rename fails', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/zones') && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      }
+      if (u.match(/\/api\/inventory\/bins\/b1$/) && method === 'PUT') {
+        const body = JSON.parse(String(init?.body)) as { code?: string; name?: string }
+        if (body.code === 'ER-09') {
+          zones = zones.map((z) => ({ ...z, bins: z.bins.map((b) => (b.id === 'b1' ? { ...b, ...body } : b)) }))
+          const updated = zones.flatMap((z) => z.bins).find((b) => b.id === 'b1')
+          return Promise.resolve({ ok: true, json: async () => ({ bin: updated }) })
+        }
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'bin code already in use' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<LocationsSection />)
+    const input = await screen.findByDisplayValue('ER-01')
+
+    fireEvent.change(input, { target: { value: 'ER-09' } })
+    fireEvent.blur(input)
+    await screen.findByText('Tags written for ER-01 no longer open this bin.')
+
+    const updatedInput = screen.getByLabelText('Bin code')
+    fireEvent.change(updatedInput, { target: { value: 'ER-10' } })
+    fireEvent.blur(updatedInput)
+
+    await screen.findByText('bin code already in use')
+    expect(screen.queryByText(/no longer open this bin/)).not.toBeInTheDocument()
+  })
 })

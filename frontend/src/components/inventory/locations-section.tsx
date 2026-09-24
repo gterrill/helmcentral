@@ -31,7 +31,12 @@ interface LocationsSectionProps {
 interface BinRowProps {
   bin: InventoryBin
   canWrite: boolean
-  onRename: (id: string, code: string, name: string, original: { code: string; name: string }) => void
+  /** Resolves true on a successful rename (or a no-op commit that changed
+   * nothing), false on a failed one - BinRow's own commit() awaits this to
+   * decide whether the "tags no longer open this bin" warning belongs on
+   * screen, rather than showing it optimistically before the write is even
+   * known to have landed. */
+  onRename: (id: string, code: string, name: string, original: { code: string; name: string }) => Promise<boolean>
   onDelete: (id: string) => void
   onOpen: (code: string) => void
 }
@@ -72,19 +77,27 @@ function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProps) {
   // forever, and never shown for a first render / a server-driven resync
   // (the effects above), only for a code that actually changed under the
   // operator's own edit.
+  //
+  // Review finding: this used to be set BEFORE onRename's own PUT had even
+  // resolved, and was never cleared if that PUT then failed - so a failed
+  // rename left a permanent, wrong "tags no longer open this bin" notice
+  // under a bin whose code never actually changed. commit() now awaits
+  // onRename and only shows the warning once it reports success; any other
+  // outcome (a no-op commit, or a failed write) clears it instead. The
+  // failure itself still surfaces - onRename's own caller
+  // (LocationsSection's handleRenameBin) sets the shared actionError banner
+  // on the same rejection this awaits.
   const [renameWarning, setRenameWarning] = useState<string | null>(null)
 
   useEffect(() => { setCode(bin.code) }, [bin.code])
   useEffect(() => { setName(bin.name) }, [bin.name])
 
-  const commit = () => {
+  const commit = async () => {
     const trimmedCode = code.trim()
-    if (trimmedCode !== '' && trimmedCode !== bin.code) {
-      setRenameWarning(`Tags written for ${bin.code} no longer open this bin.`)
-    } else {
-      setRenameWarning(null)
-    }
-    onRename(bin.id, code, name, { code: bin.code, name: bin.name })
+    const codeChanged = trimmedCode !== '' && trimmedCode !== bin.code
+    const previousCode = bin.code
+    const ok = await onRename(bin.id, code, name, { code: bin.code, name: bin.name })
+    setRenameWarning(codeChanged && ok ? `Tags written for ${previousCode} no longer open this bin.` : null)
   }
 
   return (
@@ -107,7 +120,7 @@ function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProps) {
           className="h-9 w-28 font-mono"
           disabled={!canWrite}
           onChange={(e) => setCode(e.target.value)}
-          onBlur={commit}
+          onBlur={() => { void commit() }}
         />
         <Input
           value={name}
@@ -116,7 +129,7 @@ function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProps) {
           className="h-9 flex-1"
           disabled={!canWrite}
           onChange={(e) => setName(e.target.value)}
-          onBlur={commit}
+          onBlur={() => { void commit() }}
         />
         {canWrite && (
           <Button
@@ -196,16 +209,25 @@ export function LocationsSection({ canWrite = true, onOpenBin = () => {} }: Loca
     }
   }
 
-  const handleRenameBin = async (id: string, code: string, name: string, original: { code: string; name: string }) => {
+  // Returns whether BinRow's own tag-orphaned warning should show - true for
+  // an actual, successful write (or a no-op commit that changed nothing:
+  // BinRow only turns this into a warning when the code itself changed,
+  // so a no-op's `true` here is never shown as one), false on a rejected
+  // write. The rejection's own message still reaches the operator via
+  // actionError below either way - BinRow's own warning is additional
+  // information about tags, not the failure notice itself.
+  const handleRenameBin = async (id: string, code: string, name: string, original: { code: string; name: string }): Promise<boolean> => {
     const trimmedCode = code.trim()
     const trimmedName = name.trim()
-    if (trimmedCode === '') return
-    if (trimmedCode === original.code && trimmedName === original.name) return
+    if (trimmedCode === '') return false
+    if (trimmedCode === original.code && trimmedName === original.name) return true
     setActionError(null)
     try {
       await renameBin(id, { code: trimmedCode, name: trimmedName })
+      return true
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }
 
@@ -266,7 +288,7 @@ export function LocationsSection({ canWrite = true, onOpenBin = () => {} }: Loca
                 key={bin.id}
                 bin={bin}
                 canWrite={canWrite}
-                onRename={(id, code, name, original) => { void handleRenameBin(id, code, name, original) }}
+                onRename={(id, code, name, original) => handleRenameBin(id, code, name, original)}
                 onDelete={(id) => { void handleDeleteBin(id) }}
                 onOpen={onOpenBin}
               />
