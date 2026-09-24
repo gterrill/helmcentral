@@ -23,6 +23,7 @@ import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 // (only the tests below that stage a photo actually exercise it).
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
+  downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
 }))
 
 // This test renders the dashboard, not the auth gate - an install with

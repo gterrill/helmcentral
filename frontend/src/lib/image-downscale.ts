@@ -53,3 +53,55 @@ export async function downscaleImage(file: Blob): Promise<Blob> {
     bitmap.close()
   }
 }
+
+/** One outcome from downscaleAll, at the same index as its input file. */
+export interface DownscaleOutcome {
+  file: File
+  result: { ok: true; blob: Blob } | { ok: false; error: string }
+}
+
+/**
+ * Downscales every file in files, at most `concurrency` running at once -
+ * review finding: bin-quick-add.tsx's addFiles and equipment-editor.tsx's
+ * addLocalPhotos/uploadPhotosToSavedItem each ran
+ * Promise.all(files.map(downscaleImage)), decoding every picked photo into
+ * memory at once. A bin's worth of full-resolution phone camera photos
+ * picked in one go risks the tab running out of memory; a small worker
+ * pool bounds how many are ever mid-decode at the same time.
+ *
+ * Results come back in the ORIGINAL file order, not completion order (each
+ * call site applies them in pick order regardless of which file's canvas
+ * work happened to finish first) - one outcome per file, ok+blob or
+ * ok:false+error, so a failure on one file never loses the others'
+ * results (AGENTS.md fallback policy: no failure is silently dropped).
+ *
+ * `downscale` defaults to downscaleImage above; every real caller leaves it
+ * at the default - it exists as a parameter only so this function's own
+ * concurrency/ordering logic can be tested against a controllable stand-in
+ * rather than the real (jsdom-unavailable) canvas/createImageBitmap path.
+ */
+export async function downscaleAll(
+  files: File[],
+  concurrency = 3,
+  downscale: (file: File) => Promise<Blob> = downscaleImage,
+): Promise<DownscaleOutcome[]> {
+  const outcomes: DownscaleOutcome[] = new Array(files.length)
+  let next = 0
+
+  const worker = async () => {
+    while (next < files.length) {
+      const i = next++
+      const file = files[i]
+      try {
+        const blob = await downscale(file)
+        outcomes[i] = { file, result: { ok: true, blob } }
+      } catch (err) {
+        outcomes[i] = { file, result: { ok: false, error: err instanceof Error ? err.message : String(err) } }
+      }
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, files.length))
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return outcomes
+}

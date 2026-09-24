@@ -5,7 +5,7 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
 import { PhotoAlreadyLinkedError, createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
-import { downscaleImage } from '@/lib/image-downscale'
+import { downscaleAll } from '@/lib/image-downscale'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
 // bin, photograph each thing, name it. Reuses PhotoStripEditor's local
@@ -103,23 +103,19 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     else onHasWorkChange?.(hasWork)
   }, [hasWork, detail, onHasWorkChange])
 
-  // Downscaling every picked file runs concurrently (Promise.all) - see
-  // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
-  // Results are still applied in the ORIGINAL file order, not completion
-  // order.
+  // Downscaling runs through downscaleAll's own worker pool (at most 3 at
+  // once - review finding: Promise.all(files.map(downscaleImage)) decoded
+  // every picked file into memory at the same time, risking the tab running
+  // out of memory on a phone) - see equipment-editor.tsx's own
+  // addLocalPhotos for the identical reasoning. Results are still applied
+  // in the ORIGINAL file order, not completion order.
   const addFiles = async (files: File[]) => {
-    const results = await Promise.all(files.map(async (file) => {
-      try {
-        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
-      } catch (err) {
-        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
-      }
-    }))
+    const outcomes = await downscaleAll(files)
     let lastError: string | null = null
-    for (const result of results) {
+    for (const { file, result } of outcomes) {
       if (result.ok) {
-        const previewUrl = URL.createObjectURL(result.downscaled)
-        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
+        const previewUrl = URL.createObjectURL(result.blob)
+        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl }])
       } else {
         lastError = result.error
       }

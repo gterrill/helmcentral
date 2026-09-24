@@ -43,7 +43,7 @@ import {
   type EquipmentSystem,
   type InventoryFieldError,
 } from '@/hooks/use-inventory'
-import { downscaleImage } from '@/lib/image-downscale'
+import { downscaleAll } from '@/lib/image-downscale'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft (App.tsx's
@@ -387,29 +387,20 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // into the single onFilesPicked/onMakeCover/onRemove PhotoStripEditor
   // actually receives further down, which branches on `id` itself.
 
-  // Downscaling every picked file runs concurrently (Promise.all) - each
-  // file's own canvas work is independent of the others, so there's no
-  // reason a slow one should hold up the rest. The results are still
-  // applied in the ORIGINAL file order afterward (not completion order),
-  // so a multi-pick's local photo list comes out in the order the operator
-  // picked them regardless of which one's canvas work happened to finish
-  // first.
+  // Downscaling runs through downscaleAll's worker pool (at most 3 at once -
+  // review finding: Promise.all(files.map(downscaleImage)) decoded every
+  // picked file into memory at the same time, risking the tab running out
+  // of memory on a phone). The results are still applied in the ORIGINAL
+  // file order (not completion order), so a multi-pick's local photo list
+  // comes out in the order the operator picked them. A failure keeps its
+  // real reason (AGENTS.md fallback policy), never silently dropped.
   const addLocalPhotos = async (files: File[]) => {
-    const results = await Promise.all(files.map(async (file) => {
-      try {
-        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
-      } catch (err) {
-        // AGENTS.md fallback policy: the real reason a photo couldn't be
-        // prepared (a canvas failure, an unreadable file), never silently
-        // dropped.
-        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
-      }
-    }))
+    const outcomes = await downscaleAll(files)
     let lastError: string | null = null
-    for (const result of results) {
+    for (const { file, result } of outcomes) {
       if (result.ok) {
-        const previewUrl = URL.createObjectURL(result.downscaled)
-        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
+        const previewUrl = URL.createObjectURL(result.blob)
+        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl }])
       } else {
         lastError = result.error
       }
@@ -451,17 +442,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // useEquipmentItem's own GET for a freshly created id can land before
   // these uploads finish and nothing else would ever catch the item up.
   const uploadPhotosToSavedItem = async (targetId: string, files: File[]) => {
-    // Downscaling runs concurrently for every file (Promise.all) - the
-    // network uploads that follow stay strictly sequential and in the
-    // ORIGINAL file order (not completion order), because the server
-    // assigns sort_index as each one arrives.
-    const downscaled = await Promise.all(files.map(async (file) => {
-      try {
-        return { ok: true as const, file, blob: await downscaleImage(file) }
-      } catch (err) {
-        return { ok: false as const, file, error: err instanceof Error ? err.message : String(err) }
-      }
-    }))
+    // Downscaling runs through downscaleAll's worker pool (at most 3 at
+    // once, see addLocalPhotos above) - the network uploads that follow
+    // stay strictly sequential and in the ORIGINAL file order (not
+    // completion order), because the server assigns sort_index as each one
+    // arrives.
+    const downscaled = (await downscaleAll(files)).map(({ file, result }) => (
+      result.ok ? { ok: true as const, file, blob: result.blob } : { ok: false as const, file, error: result.error }
+    ))
 
     const failures: FailedPhotoUpload[] = []
     // Review finding: a 409 ("already in Documents as ...") means the exact

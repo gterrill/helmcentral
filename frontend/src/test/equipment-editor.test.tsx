@@ -11,6 +11,7 @@ import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/us
 // harmless pass-through so the rest of the upload flow can be exercised).
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
+  downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
 }))
 
 // A minimal stand-in for the real picker (its own search flow is a separate
