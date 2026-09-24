@@ -1,11 +1,8 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -620,79 +617,14 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 
-	req := c.Request()
-	req.Body = http.MaxBytesReader(c.Response(), req.Body, documentMaxUploadBytes)
-
-	reader, err := req.MultipartReader()
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data"})
-	}
-
 	dir := documentsDirPath()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
 	}
 
-	var (
-		tmpPath  string
-		filename string
-		size     int64
-		haveFile bool
-	)
-	removeTemp := func() {
-		if tmpPath != "" {
-			os.Remove(tmpPath)
-		}
-	}
-
-	hasher := sha256.New()
-	head := &headCapture{}
-
-	for {
-		part, partErr := reader.NextPart()
-		if partErr == io.EOF {
-			break
-		}
-		if partErr != nil {
-			removeTemp()
-			return documentUploadReadError(c, partErr)
-		}
-		if part.FormName() != "file" {
-			part.Close()
-			continue
-		}
-		if tmpPath != "" {
-			part.Close()
-			removeTemp()
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "only one file per upload"})
-		}
-		filename = part.FileName()
-		tmpFile, createErr := os.CreateTemp(dir, "upload-*.tmp")
-		if createErr != nil {
-			part.Close()
-			removeTemp()
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
-		}
-		tmpPath = tmpFile.Name()
-		mw := io.MultiWriter(tmpFile, hasher, head)
-		n, copyErr := io.Copy(mw, part)
-		closeErr := tmpFile.Close()
-		part.Close()
-		if copyErr != nil {
-			removeTemp()
-			return documentUploadReadError(c, copyErr)
-		}
-		if closeErr != nil {
-			removeTemp()
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save upload"})
-		}
-		size = n
-		haveFile = n > 0
-	}
-
-	if !haveFile {
-		removeTemp()
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "file is required"})
+	up, err := receiveUploadedFile(c, dir, nil)
+	if err != nil {
+		return err
 	}
 
 	// ADR 0127: "Accept JPEG or PNG only. Reject HEIC with the enrich
@@ -700,15 +632,15 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 	// (documents_enrich.go) is that same shared wording, so an operator
 	// sees ONE explanation for "why can't Helmcentral use this" wherever
 	// they meet it.
-	mimeType := detectDocumentMIME(head.buf, filename)
+	mimeType := detectDocumentMIME(up.head, up.filename)
 	switch mimeType {
 	case "image/jpeg", "image/png":
 		// accepted
 	case "image/heic":
-		removeTemp()
+		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": documentHEICRejectionMessage})
 	default:
-		removeTemp()
+		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "only JPEG or PNG photos are accepted"})
 	}
 
@@ -718,68 +650,42 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 	// own temp file, never an existing document's.
 	enrich, _, err := documentEnrichFlag("inventory: upload photo")
 	if err != nil {
-		removeTemp()
+		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	sha := hex.EncodeToString(hasher.Sum(nil))
-
-	unlockSHA := lockDocumentSHA(sha)
-	defer unlockSHA()
-
-	if existing, ok, err := globalDocumentStore.GetBySHA(sha); err != nil {
-		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	} else if ok {
-		// Identical bytes already in the library (Insert's own sha256
-		// dedupe, uploadDocumentHandler's own comment) - the file on disk
-		// belongs to that existing row, so only this attempt's own temp
-		// file is removed either way.
-		removeTemp()
-		return linkExistingPhotoOrRefuse(c, id, existing)
-	}
-
-	finalPath := filepath.Join(dir, sha)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to store upload"})
-	}
-	tmpPath = "" // renamed into place; removeTemp must not touch it anymore
-
-	inserted, err := globalDocumentStore.Insert(document{
-		SHA256:       sha,
-		Filename:     filename,
+	doc := document{
+		Filename:     up.filename,
 		MIME:         mimeType,
-		SizeBytes:    size,
+		SizeBytes:    up.size,
 		Enrich:       enrich,
 		OperatorTags: []string{"photo"},
-	})
-	if errors.Is(err, errDocumentDuplicate) {
-		// Insert's own sha256 race: another request created the row between
-		// our GetBySHA check and this Insert call. Same shape as the
-		// "already existed" branch above - the file belongs to that row,
-		// not to this attempt, and the SAME tagged-photo check applies:
-		// Insert returns the winning row's own OperatorTags already
-		// attached (its own doc comment), so no extra read is needed here.
-		return linkExistingPhotoOrRefuse(c, id, inserted)
-	}
-	if err != nil {
-		// Safe to remove: still holding sha's lock, and GetBySHA just
-		// confirmed no row owned this hash, so finalPath can only be this
-		// attempt's own file.
-		os.Remove(finalPath)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
-		// The document now exists but isn't linked - surfaced as-is
-		// (AGENTS.md fail-fast policy) rather than silently leaving an
-		// orphaned, unlinked photo document with no cleanup.
-		return writeDocumentError(c, err)
-	}
-
-	wakeDocumentIndexer()
-	return respondWithUpdatedEquipment(c, id, http.StatusCreated)
+	return storeUploadedFile(dir, up, doc,
+		func(existing document) error {
+			// Identical bytes already in the library, found either before
+			// Insert or by Insert's own sha256 race (uploadDocumentHandler's
+			// own comment) - the file on disk belongs to that existing row.
+			// Insert returns the winning row's own OperatorTags already
+			// attached in the race case, so no extra read is needed either
+			// way.
+			return linkExistingPhotoOrRefuse(c, id, existing)
+		},
+		func(inserted document) error {
+			if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
+				// The document now exists but isn't linked - surfaced as-is
+				// (AGENTS.md fail-fast policy) rather than silently leaving
+				// an orphaned, unlinked photo document with no cleanup.
+				return writeDocumentError(c, err)
+			}
+			wakeDocumentIndexer()
+			return respondWithUpdatedEquipment(c, id, http.StatusCreated)
+		},
+		func(err error) error {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		},
+	)
 }
 
 type setEquipmentPhotoOrderRequest struct {

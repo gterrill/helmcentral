@@ -181,3 +181,26 @@ is *not* tagged `photo` is refused with 409 instead, naming the document
 find it rather than silently gaining a second, unwanted purpose. The
 retagging call this replaced is deleted outright, not kept behind a flag:
 nothing else needs "add the photo tag to an arbitrary document."
+
+## Amendment, 2026-09-25: one shared upload intake, not two
+
+"Photo upload is a second write-tier file intake next to the general
+document upload... duplicating its narrower photo-only path was judged
+lower risk than reshaping it to serve both" turned out to be the wrong
+call once both handlers had shipped and kept changing. Fixes to upload
+handling - the sha-lock-then-dedupe ordering, the temp-file cleanup on
+every failure path, the duplicate-vs-race response shape - had to be made
+twice, once in each copy, and the two copies had already started to
+drift by the time this was noticed. `uploadDocumentHandler`
+(`documents_handlers.go`) and `uploadEquipmentPhotoHandler`
+(`inventory_handlers.go`) now share one intake: `receiveUploadedFile`
+stages the "file" part to a temp file, hashing it and capturing its head
+for MIME sniffing, and hands every other multipart field to a
+caller-supplied callback; `storeUploadedFile` does the sha-locked
+GetBySHA dedupe, the rename into the content-addressed final path, and
+the `Insert` call, calling back into the caller for a duplicate, a
+freshly created row, or an insert error. Each handler keeps only what is
+actually its own: the document route's title/tags/folder_id fields, the
+photo route's JPEG/PNG allow-list and HEIC message, and each route's own
+response shapes. Behaviour is unchanged - this is the same intake in one
+place instead of two.

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -624,37 +625,45 @@ func parseDocumentTagsField(raw string) []string {
 	return tags
 }
 
-// uploadDocumentHandler streams a multipart upload straight to disk (ADR
-// 0106): the request body is capped at documentMaxUploadBytes up front, and
-// the "file" part is read with MultipartReader (not FormFile, which would
-// otherwise spill a large file into a hidden temp file of its own before
-// this handler ever saw it) into its own upload-*.tmp, hashed as it goes.
-// Every failure path removes whatever temp/renamed file this attempt had
-// created - AGENTS.md's fallback policy has no room for an orphaned upload
-// file left behind by a request that never actually created a document.
-func uploadDocumentHandler(c echo.Context) error {
+// uploadedFile is the result of receiveUploadedFile's shared intake: a
+// staged temp file plus the sha256/head bytes callers need for their own
+// MIME check and their own document.Insert call.
+type uploadedFile struct {
+	tmpPath  string
+	filename string
+	size     int64
+	sha      string
+	head     []byte
+}
+
+// receiveUploadedFile is the multipart-to-disk intake shared by
+// uploadDocumentHandler and uploadEquipmentPhotoHandler (ADR 0127
+// amendment, 2026-09-25): caps req's body at documentMaxUploadBytes, opens
+// a MultipartReader (not FormFile, which would otherwise spill a large
+// file into a hidden temp file of its own before this ever saw it), and
+// reads the "file" part into its own upload-*.tmp under dir while hashing
+// it (sha256) and capturing its first 512 bytes for MIME sniffing. Every
+// other part is handed to onField(name, part) - nil for a caller with no
+// extra fields (the photo route), which then just closes each one unread,
+// exactly as it always has; a caller with its own fields (the document
+// route's title/tags/folder_id) reads and closes them itself and returns
+// any read error.
+//
+// Every failure path - including an onField error - removes whatever temp
+// file this attempt had already created and answers c directly, so a
+// caller's only job on a non-nil error is `return err`: it is already the
+// value handed to c.JSON. On success, up is ready for the caller's own
+// MIME check and its own call to storeUploadedFile.
+func receiveUploadedFile(c echo.Context, dir string, onField func(name string, part *multipart.Part) error) (up uploadedFile, err error) {
 	req := c.Request()
 	req.Body = http.MaxBytesReader(c.Response(), req.Body, documentMaxUploadBytes)
 
-	reader, err := req.MultipartReader()
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data"})
+	reader, rerr := req.MultipartReader()
+	if rerr != nil {
+		return uploadedFile{}, c.JSON(http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data"})
 	}
 
-	dir := documentsDirPath()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
-	}
-
-	var (
-		tmpPath  string
-		filename string
-		title    string
-		tagsRaw  string
-		folderID *string
-		size     int64
-		haveFile bool
-	)
+	var tmpPath string
 	removeTemp := func() {
 		if tmpPath != "" {
 			os.Remove(tmpPath)
@@ -663,6 +672,9 @@ func uploadDocumentHandler(c echo.Context) error {
 
 	hasher := sha256.New()
 	head := &headCapture{}
+	var filename string
+	var size int64
+	haveFile := false
 
 	for {
 		part, partErr := reader.NextPart()
@@ -671,60 +683,153 @@ func uploadDocumentHandler(c echo.Context) error {
 		}
 		if partErr != nil {
 			removeTemp()
-			return documentUploadReadError(c, partErr)
+			return uploadedFile{}, documentUploadReadError(c, partErr)
 		}
 
-		switch part.FormName() {
-		case "file":
-			if tmpPath != "" {
+		if part.FormName() != "file" {
+			if onField != nil {
+				if ferr := onField(part.FormName(), part); ferr != nil {
+					removeTemp()
+					return uploadedFile{}, documentUploadReadError(c, ferr)
+				}
+			} else {
 				part.Close()
-				removeTemp()
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "only one file per upload"})
 			}
-			filename = part.FileName()
-			tmpFile, createErr := os.CreateTemp(dir, "upload-*.tmp")
-			if createErr != nil {
-				part.Close()
-				removeTemp()
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
-			}
-			tmpPath = tmpFile.Name()
-			mw := io.MultiWriter(tmpFile, hasher, head)
-			n, copyErr := io.Copy(mw, part)
-			closeErr := tmpFile.Close()
+			continue
+		}
+
+		if tmpPath != "" {
 			part.Close()
-			if copyErr != nil {
-				removeTemp()
-				return documentUploadReadError(c, copyErr)
-			}
-			if closeErr != nil {
-				removeTemp()
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save upload"})
-			}
-			size = n
-			haveFile = n > 0
+			removeTemp()
+			return uploadedFile{}, c.JSON(http.StatusBadRequest, map[string]string{"error": "only one file per upload"})
+		}
+		filename = part.FileName()
+		tmpFile, createErr := os.CreateTemp(dir, "upload-*.tmp")
+		if createErr != nil {
+			part.Close()
+			removeTemp()
+			return uploadedFile{}, c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
+		}
+		tmpPath = tmpFile.Name()
+		mw := io.MultiWriter(tmpFile, hasher, head)
+		n, copyErr := io.Copy(mw, part)
+		closeErr := tmpFile.Close()
+		part.Close()
+		if copyErr != nil {
+			removeTemp()
+			return uploadedFile{}, documentUploadReadError(c, copyErr)
+		}
+		if closeErr != nil {
+			removeTemp()
+			return uploadedFile{}, c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save upload"})
+		}
+		size = n
+		haveFile = n > 0
+	}
+
+	if !haveFile {
+		removeTemp()
+		return uploadedFile{}, c.JSON(http.StatusBadRequest, map[string]string{"error": "file is required"})
+	}
+
+	return uploadedFile{
+		tmpPath:  tmpPath,
+		filename: filename,
+		size:     size,
+		sha:      hex.EncodeToString(hasher.Sum(nil)),
+		head:     head.buf,
+	}, nil
+}
+
+// storeUploadedFile is the shared dedupe-and-insert half of the intake
+// receiveUploadedFile stages (ADR 0127 amendment, 2026-09-25): everything
+// from the sha lock to Insert runs under up.sha's own lock, shared with
+// deleteDocumentHandler/deleteEquipmentPhotoHandler, so a concurrent
+// delete of the document this hash already belongs to can never interleave
+// with this upload discovering or creating that row. Under the lock,
+// GetBySHA - not Insert's own duplicate check - is what actually decides
+// "duplicate", because only under the lock can "no row owns this hash" be
+// trusted; that is what makes removing finalPath safe below on a later
+// failure.
+//
+// doc must already carry every field the caller's own Insert wants (SHA256
+// need not be set - up.sha is used either way). onDuplicate handles a
+// byte-identical file found either before Insert (GetBySHA) or by Insert's
+// own sha256 race, and is given whichever row it found either way; the
+// file on disk belongs to that existing row in both cases, so only up's
+// own temp file is ever removed here. onCreated handles a genuinely new
+// row, already renamed into its content-addressed final path. onInsertErr
+// handles any other Insert failure, with finalPath already removed (still
+// under the lock, and GetBySHA already confirmed no row owned this hash,
+// so finalPath can only be this attempt's own file).
+func storeUploadedFile(dir string, up uploadedFile, doc document, onDuplicate func(existing document) error, onCreated func(inserted document) error, onInsertErr func(err error) error) error {
+	doc.SHA256 = up.sha
+
+	unlockSHA := lockDocumentSHA(up.sha)
+	defer unlockSHA()
+
+	if existing, ok, err := globalDocumentStore.GetBySHA(up.sha); err != nil {
+		os.Remove(up.tmpPath)
+		return onInsertErr(err)
+	} else if ok {
+		os.Remove(up.tmpPath)
+		return onDuplicate(existing)
+	}
+
+	finalPath := filepath.Join(dir, up.sha)
+	if err := os.Rename(up.tmpPath, finalPath); err != nil {
+		os.Remove(up.tmpPath)
+		return onInsertErr(errors.New("failed to store upload"))
+	}
+
+	inserted, err := globalDocumentStore.Insert(doc)
+	if errors.Is(err, errDocumentDuplicate) {
+		return onDuplicate(inserted)
+	}
+	if err != nil {
+		os.Remove(finalPath)
+		return onInsertErr(err)
+	}
+
+	return onCreated(inserted)
+}
+
+// uploadDocumentHandler streams a multipart upload straight to disk (ADR
+// 0106) through the shared receiveUploadedFile/storeUploadedFile sequence
+// (ADR 0127 amendment): this handler keeps only its own title/tags/
+// folder_id fields and its own duplicate/created/error responses. Every
+// failure path removes whatever temp/renamed file this attempt had
+// created - AGENTS.md's fallback policy has no room for an orphaned upload
+// file left behind by a request that never actually created a document.
+func uploadDocumentHandler(c echo.Context) error {
+	dir := documentsDirPath()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
+	}
+
+	var title, tagsRaw string
+	var folderID *string
+	onField := func(name string, part *multipart.Part) error {
+		switch name {
 		case "title":
 			b, readErr := io.ReadAll(part)
 			part.Close()
 			if readErr != nil {
-				removeTemp()
-				return documentUploadReadError(c, readErr)
+				return readErr
 			}
 			title = strings.TrimSpace(string(b))
 		case "tags":
 			b, readErr := io.ReadAll(part)
 			part.Close()
 			if readErr != nil {
-				removeTemp()
-				return documentUploadReadError(c, readErr)
+				return readErr
 			}
 			tagsRaw = string(b)
 		case "folder_id":
 			b, readErr := io.ReadAll(part)
 			part.Close()
 			if readErr != nil {
-				removeTemp()
-				return documentUploadReadError(c, readErr)
+				return readErr
 			}
 			if v := strings.TrimSpace(string(b)); v != "" {
 				folderID = &v
@@ -732,14 +837,13 @@ func uploadDocumentHandler(c echo.Context) error {
 		default:
 			part.Close()
 		}
+		return nil
 	}
 
-	if !haveFile {
-		removeTemp()
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "file is required"})
+	up, err := receiveUploadedFile(c, dir, onField)
+	if err != nil {
+		return err
 	}
-
-	sha := hex.EncodeToString(hasher.Sum(nil))
 
 	// Readiness is checked before the bytes ever move to their final,
 	// content-addressed path: a failure here removes only this attempt's
@@ -750,71 +854,42 @@ func uploadDocumentHandler(c echo.Context) error {
 	// existing document's own file).
 	enrich, _, err := documentEnrichFlag("documents: upload")
 	if err != nil {
-		removeTemp()
+		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	// Everything from here to Insert runs under sha's own lock, shared with
-	// deleteDocumentHandler: a concurrent delete of the document this hash
-	// already belongs to, and this upload discovering or creating that row,
-	// can never interleave. Under the lock, GetBySHA - not Insert's own
-	// duplicate check - is what actually decides "duplicate", because only
-	// under the lock can "no row owns this hash" be trusted; that is what
-	// makes removing finalPath safe below on a later failure.
-	unlockSHA := lockDocumentSHA(sha)
-	defer unlockSHA()
-
-	if existing, ok, err := globalDocumentStore.GetBySHA(sha); err != nil {
-		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	} else if ok {
-		// Identical bytes already on file: no second copy, no second OCR
-		// charge (ADR 0106). The file on disk belongs to the existing row,
-		// so only this attempt's own temp file is removed.
-		removeTemp()
-		return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(existing), "duplicate": true})
-	}
-
-	finalPath := filepath.Join(dir, sha)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to store upload"})
-	}
-	tmpPath = "" // renamed into place; removeTemp must not touch it anymore
-
-	inserted, err := globalDocumentStore.Insert(document{
-		SHA256:       sha,
+	doc := document{
 		FolderID:     folderID,
-		Filename:     filename,
+		Filename:     up.filename,
 		Title:        title,
-		MIME:         detectDocumentMIME(head.buf, filename),
-		SizeBytes:    size,
+		MIME:         detectDocumentMIME(up.head, up.filename),
+		SizeBytes:    up.size,
 		Enrich:       enrich,
 		OperatorTags: parseDocumentTagsField(tagsRaw),
-	})
-	if errors.Is(err, errDocumentDuplicate) {
-		// Insert reports the duplicate itself here (its own sha256 check),
-		// so the file is never removed in this branch: it belongs to the
-		// existing row Insert just found, not to this attempt.
-		return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(inserted), "duplicate": true})
-	}
-	if err != nil {
-		// Safe to remove: still holding sha's lock, and GetBySHA just
-		// confirmed no row owned this hash, so finalPath can only be this
-		// attempt's own file.
-		os.Remove(finalPath)
-		if errors.Is(err, errFolderNotFound) {
-			// Upload's folder_id is part of the request body, not a path
-			// segment naming an existing resource - a bad value here is a
-			// 400 (malformed request), not the 404 the same sentinel maps
-			// to everywhere else in this file (documentErrorStatus).
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "folder not found"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	wakeDocumentIndexer()
-	return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "duplicate": false})
+	return storeUploadedFile(dir, up, doc,
+		func(existing document) error {
+			// Identical bytes already on file, found either before Insert
+			// or by Insert's own sha256 race: no second copy, no second
+			// OCR charge (ADR 0106).
+			return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(existing), "duplicate": true})
+		},
+		func(inserted document) error {
+			wakeDocumentIndexer()
+			return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "duplicate": false})
+		},
+		func(err error) error {
+			if errors.Is(err, errFolderNotFound) {
+				// Upload's folder_id is part of the request body, not a path
+				// segment naming an existing resource - a bad value here is a
+				// 400 (malformed request), not the 404 the same sentinel maps
+				// to everywhere else in this file (documentErrorStatus).
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "folder not found"})
+			}
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		},
+	)
 }
 
 // ── PATCH /api/documents/:id ──────────────────────────────────────────────
