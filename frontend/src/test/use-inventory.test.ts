@@ -182,3 +182,86 @@ describe('useEquipmentItem: the create-then-upload race', () => {
     expect(result.current.item).toEqual(newerItem)
   })
 })
+
+// Release-fixes code-review finding: setItem's seqRef bump (above) fixes the
+// create-then-upload race by invalidating a stale GET's `item` - but seqRef
+// is the SAME guard refresh() itself uses to decide whether ANY part of a
+// response should apply, so bumping it collaterally discarded that GET's
+// `documents`/`error` too, and skipped the `finally` block's setLoading(false)
+// (its own `seq === seqRef.current` check fails right along with the rest,
+// with nothing else left to ever flip loading back off). update() had the
+// opposite problem: it never bumped seqRef at all, so a slower, still-
+// in-flight GET for the same id could resolve AFTER update() and win,
+// clobbering the just-written item with stale data.
+describe('useEquipmentItem: a write racing an in-flight GET', () => {
+  it('does not leave loading stuck true when setItem races ahead of the GET that is still fetching this same item', async () => {
+    let resolveGet!: (value: Response) => void
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useEquipmentItem('eq-1'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(result.current.loading).toBe(true)
+
+    // A write (e.g. Make cover/Remove on the photo row) applies its own
+    // response while the initial GET is still in flight.
+    act(() => { result.current.setItem(equipmentItem({ id: 'eq-1', photo_ids: ['photo-1'] })) })
+
+    await act(async () => {
+      resolveGet(jsonResponse(200, { item: equipmentItem({ id: 'eq-1' }), documents: [] }))
+      await Promise.resolve()
+    })
+
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('still applies the GET\'s own documents even though its item is superseded by a race-ahead setItem', async () => {
+    let resolveGet!: (value: Response) => void
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useEquipmentItem('eq-1'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    const newerItem = equipmentItem({ id: 'eq-1', photo_ids: ['photo-1'] })
+    act(() => { result.current.setItem(newerItem) })
+
+    const docs = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    await act(async () => {
+      resolveGet(jsonResponse(200, { item: equipmentItem({ id: 'eq-1' }), documents: docs }))
+      await Promise.resolve()
+    })
+
+    // item stays the race-ahead write's own (the create-then-upload race's
+    // own assertion, above) - but documents, which the write never touched,
+    // is not collateral damage.
+    expect(result.current.item).toEqual(newerItem)
+    expect(result.current.documents).toEqual(docs)
+  })
+
+  it('update() invalidates a slower in-flight GET for the same id, so its stale item cannot win the race', async () => {
+    let resolveGet!: (value: Response) => void
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
+      .mockImplementationOnce(async () => jsonResponse(200, { item: equipmentItem({ id: 'eq-1', name: 'Updated name' }) }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useEquipmentItem('eq-1'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    // The PUT resolves (and applies) while the initial GET is still pending.
+    await act(async () => {
+      await result.current.update(equipmentInput({ name: 'Updated name' }))
+    })
+    expect(result.current.item?.name).toBe('Updated name')
+
+    // The slow GET finally resolves with a STALE name, fetched before the
+    // PUT above ever landed.
+    await act(async () => {
+      resolveGet(jsonResponse(200, { item: equipmentItem({ id: 'eq-1', name: 'Stale name' }), documents: [] }))
+      await Promise.resolve()
+    })
+
+    expect(result.current.item?.name).toBe('Updated name')
+  })
+})

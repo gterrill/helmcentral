@@ -317,6 +317,25 @@ export function useEquipmentItem(id: string | null) {
   // must not have its late reply overwrite whatever a newer call already set.
   const seqRef = useRef(0)
 
+  // Review finding: seqRef alone conflated two different races. setItem
+  // bumping it (below) correctly stops a stale GET's `item` from winning
+  // against a newer write (the create-then-upload race this hook's own
+  // history comment describes) - but a GET in flight checks the SAME
+  // seqRef for its documents/error/loading too, so that write collaterally
+  // discarded them as well, and left `loading` stuck true forever once
+  // nothing else was left to flip it back off (the `finally` block's own
+  // `seq === seqRef.current` check fails right along with everything else).
+  // update() had the opposite gap: it never touched seqRef at all, so a
+  // slower GET for the same id already in flight could still resolve AFTER
+  // it and clobber the just-written item with stale data.
+  //
+  // itemSeqRef is a SEPARATE counter, bumped only by a write applying an
+  // item directly (setItem, update()) - a GET captures it when it starts,
+  // and only skips re-applying `item` from its own response if a write has
+  // landed since; documents/error/loading are never gated by it, so a GET's
+  // own results outside the item race still land normally.
+  const itemSeqRef = useRef(0)
+
   const refresh = useCallback(async () => {
     if (id === null) {
       seqRef.current += 1
@@ -327,6 +346,7 @@ export function useEquipmentItem(id: string | null) {
       return
     }
     const seq = (seqRef.current += 1)
+    const itemSeqAtStart = itemSeqRef.current
     setLoading(true)
     try {
       const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
@@ -338,12 +358,12 @@ export function useEquipmentItem(id: string | null) {
       }
       const data = (await res.json()) as { item: EquipmentItem; documents?: EquipmentDocument[] }
       if (seq !== seqRef.current) return
-      setItemState(data.item)
+      if (itemSeqRef.current === itemSeqAtStart) setItemState(data.item)
       setDocuments(data.documents ?? [])
       setError(null)
     } catch (err) {
       if (seq !== seqRef.current) return
-      setItemState(null)
+      if (itemSeqRef.current === itemSeqAtStart) setItemState(null)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       if (seq === seqRef.current) setLoading(false)
@@ -359,6 +379,11 @@ export function useEquipmentItem(id: string | null) {
   const update = useCallback(async (input: EquipmentInput) => {
     if (id === null) throw new Error('useEquipmentItem: no id to update')
     const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
+    // Review finding: this never used to bump itemSeqRef, so a slower GET
+    // for the same id already in flight when this PUT lands could still
+    // resolve afterward and win, overwriting the just-saved item with
+    // whatever stale copy it fetched before the PUT ever happened.
+    itemSeqRef.current += 1
     setItemState(data.item)
     return data.item
   }, [id])
@@ -400,10 +425,13 @@ export function useEquipmentItem(id: string | null) {
   // then-upload race this hook's id-change GET can lose against
   // equipment-editor.tsx's own per-upload setItem(updated) calls, silently
   // dropping photos back off the strip once that GET finally landed.
-  // Bumping seqRef here, exactly like refresh() does, invalidates any GET
-  // already in flight the moment a caller hands this a fresher item.
+  // Bumping itemSeqRef here invalidates any GET already in flight's own
+  // `item` the moment a caller hands this a fresher one - see itemSeqRef's
+  // own doc comment (above, by seqRef) for why this is a separate counter
+  // from seqRef rather than reusing it: reusing it also discarded that
+  // GET's documents/error and left loading stuck true.
   const setItem = useCallback((next: EquipmentItem) => {
-    seqRef.current += 1
+    itemSeqRef.current += 1
     setItemState(next)
   }, [])
 
