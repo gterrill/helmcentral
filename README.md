@@ -1,5 +1,10 @@
 # Helmcentral
 
+> [!WARNING]
+> Helmcentral is under active development. Expect breaking changes between
+> releases, including to configuration, stored settings and the HTTP API. Read
+> the release notes before you upgrade.
+
 A dashboard and alarm system for [SignalK](https://signalk.org/). It puts anchor
 watch, tides, weather, routes, tanks, points of interest and electrical
 monitoring on one screen at the helm, drives a wall display on its own, and

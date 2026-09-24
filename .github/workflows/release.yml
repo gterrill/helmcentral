@@ -10,6 +10,23 @@ permissions:
   packages: write
 
 jobs:
+  # The release body is the tag's section of CHANGELOG.md. Extracted first so a
+  # tag without written notes fails before anything is built or published.
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extract CHANGELOG section
+        run: sh packaging/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 1
+
   # The reference tide/weather/wave/warning providers are WASM, which is
   # architecture-independent — build them once and attach the bundle to the
   # release. The installer unpacks it into <state dir>/plugins, so consumers
@@ -17,6 +34,7 @@ jobs:
   plugins:
     name: Build plugin bundle
     runs-on: ubuntu-latest
+    needs: notes
     steps:
       - uses: actions/checkout@v7
 
@@ -80,17 +98,25 @@ jobs:
           name: plugin-bundle
           path: dist-plugins
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          # Outside the checkout: GoReleaser refuses to release from a tree
+          # with untracked files.
+          path: ${{ runner.temp }}
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    needs: notes
     steps:
       - uses: actions/checkout@v7
 

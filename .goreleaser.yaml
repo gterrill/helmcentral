@@ -90,13 +90,9 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+# No changelog block: the release workflow passes the tag's CHANGELOG.md
+# section with --release-notes, which replaces the generated commit list.
+# Do not set changelog.disable, which skips loading that file as well.
 
 release:
   draft: false
