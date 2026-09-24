@@ -257,6 +257,56 @@ describe('StocktakeSection', () => {
     await screen.findByText('Not an inventory tag: some/other/path')
   })
 
+  // Release-fixes code-review finding: only `zones` was destructured from
+  // useInventoryZones() - a genuine fetch failure left `zones` at its
+  // initial `[]`, so findBinByCode found nothing and every bin scan was
+  // reported as "Not an inventory tag", indistinguishable from an actually
+  // unknown code (AGENTS.md fallback policy: the real reason has to surface,
+  // not fold into a bucket that means something else).
+  it('shows a zones fetch failure plainly, and does not classify a bin scan as unrecognised because of it', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/zones')) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'locations unavailable' }) })
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<StocktakeSection />)
+
+    await screen.findByText('locations unavailable')
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
+  })
+
+  it('reports a bin scan as "Locations still loading" rather than unrecognised while zones are still fetching', async () => {
+    let resolveZones!: (value: unknown) => void
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/zones')) {
+        return new Promise((resolve) => { resolveZones = resolve })
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<StocktakeSection />)
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+
+    await screen.findByText(/Locations still loading/)
+    expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'LAZ-02' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveZones({ ok: true, json: async () => ({ zones }) })
+      await Promise.resolve()
+    })
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+  })
+
   it('reports an unrecognised scan without writing anything', async () => {
     render(<StocktakeSection />)
     await waitFor(() => expect(zones.length).toBeGreaterThan(0))

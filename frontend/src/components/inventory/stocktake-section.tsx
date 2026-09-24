@@ -57,7 +57,14 @@ interface StocktakeSectionProps {
 }
 
 export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
-  const { zones } = useInventoryZones()
+  // Review finding: only `zones` used to be read here - a genuine fetch
+  // failure left it at its initial `[]` with no way to tell that apart from
+  // "the tree loaded fine and this code just doesn't exist", so
+  // findBinByCode found nothing either way and every bin scan during an
+  // outage was reported as an unrecognised tag (AGENTS.md fallback policy:
+  // the real reason has to surface, not fold into a bucket that means
+  // something else).
+  const { zones, loading: zonesLoading, error: zonesError } = useInventoryZones()
   const [currentBin, setCurrentBin] = useState<CurrentBin | null>(null)
   // Review finding: handleScan is a plain closure over `currentBin` (a
   // render-scoped variable), and that specific closure is what a stale
@@ -138,6 +145,17 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     const parsed = parseAppLocation(pathname)
 
     if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
+      // Review finding: neither of these is "this code doesn't exist" - a
+      // bin scan taken while the zone tree hasn't loaded yet (or failed to)
+      // can't be resolved either way, so it is reported for what it
+      // actually is instead of being folded into "unrecognised". The zones
+      // error itself is also shown plainly, below (AGENTS.md fallback
+      // policy).
+      if (zonesLoading) {
+        setScanError('Locations still loading - scan that bin again in a moment.')
+        return
+      }
+      if (zonesError) return
       const match = findBinByCode(zones, parsed.binCode)
       if (!match) {
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
@@ -317,6 +335,9 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         )}
         {scanError && (
           <p role="alert" className="text-sm text-destructive">{scanError}</p>
+        )}
+        {zonesError && (
+          <p role="alert" className="text-sm text-destructive">{zonesError}</p>
         )}
       </div>
 
