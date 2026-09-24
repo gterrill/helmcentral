@@ -1496,17 +1496,33 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 		}
 	}
 
+	// Review finding: a newly INSERTed link used to get sort_index 0 -
+	// tying with the cover (also 0), and the tie-break by document_id could
+	// then put a freshly linked image ahead of it. Every new link instead
+	// gets max(sort_index)+1 among id's OWN existing links (kept links,
+	// read above, are untouched either way), assigned in docIDs order, so a
+	// document-tab save can never silently reassign the cover.
+	var maxSort sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(sort_index) FROM equipment_documents WHERE equipment_id = ?`, id).Scan(&maxSort); err != nil {
+		return fmt.Errorf("set equipment documents: max sort: %w", err)
+	}
+	nextSort := 0
+	if maxSort.Valid {
+		nextSort = int(maxSort.Int64) + 1
+	}
+
 	now := s.now().Unix()
 	for _, docID := range ordered {
 		if existing[docID] {
 			continue
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', 0, ?)`,
-			id, docID, now,
+			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
+			id, docID, nextSort, now,
 		); err != nil {
 			return fmt.Errorf("set equipment documents: link %s: %w", docID, err)
 		}
+		nextSort++
 	}
 
 	return tx.Commit()

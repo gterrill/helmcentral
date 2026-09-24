@@ -1229,6 +1229,37 @@ func TestDocumentStore_SetEquipmentDocumentsPreservesSortIndexOfKeptPhotoLinks(t
 	}
 }
 
+// TestDocumentStore_SetEquipmentDocumentsNewPhotoLinkDoesNotBecomeCover pins
+// review finding 2: a newly linked image used to get sort_index 0, tying
+// with the cover and letting the tie-break (by document_id) put it first.
+// A link this call INSERTS must land AFTER every existing link (cover
+// included), not tie with it.
+func TestDocumentStore_SetEquipmentDocumentsNewPhotoLinkDoesNotBecomeCover(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	cover := mustInsertPhotoDocument(t, store, "sha-newlink-cover", "cover.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, cover.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(cover): %v", err)
+	}
+	newPhoto := mustInsertPhotoDocument(t, store, "sha-newlink-new", "new.jpg")
+
+	// The Documents tab's own PUT - links newPhoto alongside the existing cover.
+	if err := store.SetEquipmentDocuments(item.ID, []string{cover.ID, newPhoto.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != cover.ID || got.PhotoIDs[1] != newPhoto.ID {
+		t.Fatalf("expected the cover unchanged and the new photo last, got %#v", got.PhotoIDs)
+	}
+}
+
 func TestDocumentStore_ListEquipmentFiltersByBinID(t *testing.T) {
 	store := newTestDocumentStore(t)
 	zone, err := store.CreateZone("Lazarette")
