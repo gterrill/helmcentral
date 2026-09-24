@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -205,13 +205,28 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     void handleScan(value)
   }
 
+  // Review finding: scanTags' own onUrl callback is created ONCE, when Start
+  // scanning is pressed, and Web NFC keeps calling that exact function for
+  // every tap for the rest of the session - it never re-subscribes the way
+  // a React prop would. handleScan is a fresh closure every render (it
+  // reads currentBin/zones directly, not via a ref), so a bare `(url) => {
+  // void handleScan(url) }` passed straight to scanTags froze whichever
+  // currentBin/zones were current AT THAT MOMENT - null, since scanning
+  // always starts before any bin has been scanned - for every scan for the
+  // rest of the session, even though ordinary state updates (setCurrentBin)
+  // kept the screen itself showing the right bin throughout. Routing
+  // through a ref that's kept current on every render is what makes the
+  // NFC callback see whichever handleScan closure is actually current.
+  const handleScanRef = useRef(handleScan)
+  useEffect(() => { handleScanRef.current = handleScan })
+
   const handleStartScanning = async () => {
     setScanError(null)
     setScanning(true)
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await scanTags((url) => { void handleScan(url) }, controller.signal)
+      await scanTags((url) => { void handleScanRef.current(url) }, controller.signal)
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err))
       setScanning(false)
@@ -223,6 +238,12 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     abortRef.current = null
     setScanning(false)
   }
+
+  // Web NFC's scan keeps running until its own AbortController is aborted -
+  // leaving this section without pressing Stop first (a nav-away, closing
+  // the tab) would otherwise leave the reader open, still invoking
+  // handleScanRef.current against a component that no longer exists.
+  useEffect(() => () => { abortRef.current?.abort() }, [])
 
   const notSeen = currentBin ? binItems.filter((item) => !confirmedIds.has(item.id)) : []
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
+import { scanTags } from '@/lib/nfc'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 
 // ADR 0127 (the plan's Phase B): the manual scan field is what drives every
@@ -8,6 +9,19 @@ import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 // Enter" is deliberately also what makes this section testable on desktop
 // with no NFC hardware (the plan's own words). lib/nfc.ts's own behaviour
 // is covered by nfc.test.ts/tag-row.test.tsx, not re-tested here.
+//
+// lib/nfc.ts IS mocked (module-wide, not per-test) for the "Start
+// scanning" describe block near the bottom of this file, which needs
+// nfcSupported() true to reach the button at all and a controllable
+// scanTags to drive the NFC callback directly - a real NDEFReader has no
+// jsdom stand-in. The manual-scan-field tests above never touch either
+// mock (nfcSupported's own default below only changes whether the button
+// is ALSO on screen; they drive the text field regardless).
+vi.mock('@/lib/nfc', () => ({
+  nfcSupported: vi.fn(() => true),
+  scanTags: vi.fn(),
+}))
+const mockedScanTags = vi.mocked(scanTags)
 
 function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
   return {
@@ -288,5 +302,64 @@ describe('StocktakeSection', () => {
     await scan('https://boat.example/inventory/equipment/eq-2')
     await screen.findByText(/Recorded in SAL-04/)
     expect(screen.queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument()
+  })
+})
+
+// ── NFC scanning (Start scanning) ───────────────────────────────────────
+// Review finding: scanTags' own onUrl callback - `(url) => { void
+// handleScan(url) }` - is created ONCE, when Start scanning is pressed, and
+// Web NFC keeps invoking that exact function for every tap for the rest of
+// the session; it never re-subscribes the way a React prop would. Since
+// handleScan is a fresh closure every render (not memoized), that callback
+// froze whichever currentBin/zones were current AT THAT MOMENT - null,
+// since scanning always starts before any bin has been scanned - so every
+// item scanned afterward was judged against a currentBin that never
+// updated, even though the screen itself (driven by ordinary state) showed
+// the right bin throughout.
+describe('StocktakeSection: NFC scanning', () => {
+  beforeEach(() => {
+    mockedScanTags.mockReset()
+  })
+
+  it('resolves an item scanned mid-session against the CURRENT bin, not the bin at Start scanning time', async () => {
+    const item = makeItem({ id: 'eq-2', bin_id: 'b2', bin_code: 'SAL-04', zone_id: 'z2' })
+    equipmentById['eq-2'] = item
+    let onUrl: ((url: string) => void) | null = null
+    mockedScanTags.mockImplementation(async (cb) => { onUrl = cb })
+
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scanning' }))
+    await waitFor(() => expect(onUrl).not.toBeNull())
+
+    // Both taps go through the SAME callback scanTags was given at Start
+    // scanning - exactly what a real NFC session does.
+    act(() => { onUrl!('https://boat.example/inventory/bins/LAZ-02') })
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    act(() => { onUrl!('https://boat.example/inventory/equipment/eq-2') })
+
+    // The stale closure bug always saw currentBin as null here, so this
+    // wrongly took the "confirmed in place" branch instead of "elsewhere".
+    await screen.findByText(/Recorded in SAL-04/)
+    expect(screen.getByRole('button', { name: 'Move to LAZ-02' })).toBeInTheDocument()
+    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
+  })
+
+  it('aborts the scan\'s AbortController on unmount', async () => {
+    let capturedSignal: AbortSignal | undefined
+    mockedScanTags.mockImplementation(async (_onUrl, signal) => { capturedSignal = signal })
+
+    const { unmount } = render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scanning' }))
+    await waitFor(() => expect(capturedSignal).toBeDefined())
+    expect(capturedSignal!.aborted).toBe(false)
+
+    unmount()
+
+    expect(capturedSignal!.aborted).toBe(true)
   })
 })
