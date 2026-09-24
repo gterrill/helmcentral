@@ -21,7 +21,7 @@ describe('writeUrlTag', () => {
     await expect(writeUrlTag('https://boat.example/inventory/bins/LAZ-02')).rejects.toThrow(/not supported/)
   })
 
-  it('writes the url as a single NDEF record via the reader', async () => {
+  it('writes the url as a single NDEF URL record via the reader, not a text record', async () => {
     const write = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('NDEFReader', class {
       write = write
@@ -29,7 +29,13 @@ describe('writeUrlTag', () => {
 
     await writeUrlTag('https://boat.example/inventory/bins/LAZ-02')
 
-    expect(write).toHaveBeenCalledWith('https://boat.example/inventory/bins/LAZ-02', { signal: undefined })
+    // A bare string here (the bug) makes Web NFC write a text record - a
+    // phone tapping the tag then opens nothing, and scanTags' own
+    // recordType === 'url' filter (below) ignores it too.
+    expect(write).toHaveBeenCalledWith(
+      { records: [{ recordType: 'url', data: 'https://boat.example/inventory/bins/LAZ-02' }] },
+      { signal: undefined },
+    )
   })
 
   it('propagates the reader\'s own thrown error rather than a generic one', async () => {

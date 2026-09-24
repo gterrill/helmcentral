@@ -11,9 +11,13 @@ interface NDEFReadingEventLike extends Event {
   message: { records: { recordType: string; data?: DataView }[] }
 }
 
+interface NDEFMessageInitLike {
+  records: { recordType: string; data: string }[]
+}
+
 interface NDEFReaderLike extends EventTarget {
   scan(options?: { signal?: AbortSignal }): Promise<void>
-  write(message: string, options?: { signal?: AbortSignal }): Promise<void>
+  write(message: NDEFMessageInitLike, options?: { signal?: AbortSignal }): Promise<void>
   onreading: ((event: NDEFReadingEventLike) => void) | null
 }
 
@@ -49,7 +53,13 @@ export async function writeUrlTag(url: string, signal?: AbortSignal): Promise<vo
     throw new Error('Web NFC is not supported in this browser')
   }
   const reader = new Ctor()
-  await reader.write(url, { signal })
+  // A bare string here writes a TEXT record, not a URL record - Web NFC's
+  // own overload for "write this exact string" (fine for a text tag, wrong
+  // for this one): a phone tapping the tag then opens nothing, and
+  // scanTags' own recordType === 'url' filter below ignores it too. The
+  // explicit NDEFMessageInit shape is what actually produces "An NDEF URL
+  // record, and nothing else" (ADR 0127 §1).
+  await reader.write({ records: [{ recordType: 'url', data: url }] }, { signal })
 }
 
 /**
