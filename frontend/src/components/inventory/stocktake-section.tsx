@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BinPhotoGrid } from '@/components/inventory/bin-page'
-import { parseAppLocation } from '@/lib/app-location'
+import { resolveScannedText } from '@/lib/app-location'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
   EquipmentNotFoundError,
@@ -150,32 +150,16 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
     if (text === '') return
     setScanError(null)
 
-    // "Accepts a keyboard-wedge or pasted URL or bin code" - `new URL(text)`
-    // only succeeds for an ABSOLUTE url (a scheme included), which a scan
-    // typed into a boat's own tailnet address bar without "https://" is not
-    // (e.g. "boat.tailnet.ts.net/inventory/bins/LAZ-02"). Treating THAT
-    // whole string as a bare bin code (the naive fallback this replaced)
-    // resolved to the wrong bin - or, worse, silently to none at all. So a
-    // scheme-less scan is read three ways, in order: an /inventory/ path
-    // pulled out of wherever it starts in the string; failing that, a bare
-    // bin code ONLY if there's no slash in it at all (a real bin code never
-    // has one); anything else is reported as unrecognised rather than
-    // guessed at.
-    let pathname: string
-    try {
-      pathname = new URL(text).pathname
-    } catch {
-      const inventoryIndex = text.indexOf('/inventory/')
-      if (inventoryIndex !== -1) {
-        pathname = text.slice(inventoryIndex)
-      } else if (!text.includes('/')) {
-        pathname = `/inventory/bins/${text}`
-      } else {
-        pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
-        return
-      }
+    // "Accepts a keyboard-wedge or pasted URL or bin code" - the actual
+    // string-matching (URL vs. scheme-less path vs. bare code) lives in
+    // resolveScannedText (app-location.ts), next to parseAppLocation, which
+    // it wraps; null means "not a bin or item scan" and is reported as
+    // unrecognised rather than guessed at.
+    const parsed = resolveScannedText(text)
+    if (parsed === null) {
+      pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+      return
     }
-    const parsed = parseAppLocation(pathname)
 
     if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
       // Review finding: neither of these is "this code doesn't exist" - a

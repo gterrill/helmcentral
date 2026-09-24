@@ -246,6 +246,55 @@ export function parseAppLocation(pathname: string): AppLocation {
   return { panel: null, pageId: null }
 }
 
+// ADR 0127: turns scanned text (a keyboard-wedge or pasted URL, or a bare
+// bin code) into an AppLocation naming the bin or item it scanned, or null
+// when nothing recognisable comes out of it. Stocktake's own scan handler
+// (stocktake-section.tsx's handleScan) is the only caller; moved here,
+// next to parseAppLocation, so the string-matching stays in the one module
+// that already owns "how a path string maps to app state" rather than
+// living inline in a component.
+//
+// `new URL(text)` only succeeds for an ABSOLUTE url (a scheme included),
+// which a scan typed into a boat's own tailnet address bar without
+// "https://" is not (e.g. "boat.tailnet.ts.net/inventory/bins/LAZ-02").
+// Treating that whole string as a bare bin code (the naive approach this
+// replaced) resolved to the wrong bin - or, worse, silently to none at all.
+// So a scheme-less scan is read three ways, in order: an /inventory/ path
+// pulled out of wherever it starts in the string; failing that, a bare bin
+// code ONLY if there's no slash in it at all (a real bin code never has
+// one); anything else is unrecognised. Whatever pathname results is handed
+// to parseAppLocation, but only a bin-page or equipment-editor shape counts
+// as "recognised" here - a URL that parses fine but names some other panel
+// (or nothing) is just as unrecognised as text that never parsed as a path
+// at all.
+export function resolveScannedText(text: string): AppLocation | null {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+
+  let pathname: string
+  try {
+    pathname = new URL(trimmed).pathname
+  } catch {
+    const inventoryIndex = trimmed.indexOf('/inventory/')
+    if (inventoryIndex !== -1) {
+      pathname = trimmed.slice(inventoryIndex)
+    } else if (!trimmed.includes('/')) {
+      pathname = `/inventory/bins/${trimmed}`
+    } else {
+      return null
+    }
+  }
+
+  const parsed = parseAppLocation(pathname)
+  if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
+    return parsed
+  }
+  if (parsed.panel === 'inventory' && parsed.inventorySection === 'equipment' && parsed.equipmentEditId) {
+    return parsed
+  }
+  return null
+}
+
 // The inverse of parseAppLocation, and the only place that builds a path
 // string. Every AppLocation has exactly one canonical string here (the
 // one-to-one mapping isCanonicalAppPath and the URL sync effect both rely

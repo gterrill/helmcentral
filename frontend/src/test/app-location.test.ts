@@ -9,6 +9,7 @@ import {
   isCanonicalAppPath,
   inventoryEditorClosedBy,
   inventoryWorkClosedBy,
+  resolveScannedText,
   type LocationContext,
 } from '@/lib/app-location'
 
@@ -641,5 +642,56 @@ describe('inventoryWorkClosedBy', () => {
       { section: 'stocktake', binCode: null },
       at('/documents'),
     )).toBe(true)
+  })
+})
+
+describe('resolveScannedText', () => {
+  it('resolves a full https URL to a bin', () => {
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('resolves a full https URL to an item', () => {
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/equipment/eq-1')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'equipment',
+      equipmentEditId: 'eq-1',
+    })
+  })
+
+  it('resolves a scheme-less host + path the same way', () => {
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('resolves a bare bin code with no slash', () => {
+    expect(resolveScannedText('LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('rejects a bare code that contains a slash', () => {
+    expect(resolveScannedText('LAZ/02')).toBeNull()
+  })
+
+  it('trims surrounding whitespace before resolving', () => {
+    expect(resolveScannedText('  LAZ-02  ')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('returns null for a URL that parses but names no bin or item', () => {
+    expect(resolveScannedText('https://example.com/inventory/locations')).toBeNull()
+    expect(resolveScannedText('https://example.com/documents')).toBeNull()
   })
 })
