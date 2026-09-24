@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -39,9 +39,15 @@ interface BinQuickAddProps {
    * the bin page's own contents list refresh. */
   onCreated: () => void
   canWrite?: boolean
+  /** Release-fixes code-review finding: reports whether this form holds a
+   * staged name or photos a navigation away would silently clear -
+   * App.tsx routes the bin page's "Full item" button through the same
+   * unsaved-work guard equipment-editor.tsx's onDirtyChange already gets
+   * when this is true. */
+  onHasWorkChange?: (hasWork: boolean) => void
 }
 
-export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQuickAddProps) {
+export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [photos, setPhotos] = useState<LocalPhoto[]>([])
@@ -58,6 +64,9 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
   // synchronously, so it is what actually blocks a second call that starts
   // before the first one's first await ever yields.
   const savingRef = useRef(false)
+
+  const hasWork = useMemo(() => name.trim() !== '' || photos.length > 0, [name, photos])
+  useEffect(() => { onHasWorkChange?.(hasWork) }, [hasWork, onHasWorkChange])
 
   // Downscaling every picked file runs concurrently (Promise.all) - see
   // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.

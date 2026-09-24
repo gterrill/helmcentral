@@ -54,9 +54,21 @@ interface StocktakeSectionProps {
    * reports what it found - but nothing is written, and Move (the one press
    * that writes) is hidden rather than shown and then rejected. */
   canWrite?: boolean
+  /** Release-fixes code-review finding: reports whether this pass holds
+   * anything a navigation away would silently clear, the way the equipment
+   * editor reports dirty (onDirtyChange) - App.tsx routes Open/Full item
+   * through the same unsaved-work guard when this is true. A confirmed or
+   * elsewhere-scanned item is "work" (it took an actual scan against a real
+   * bin to produce); a bare bin scan is not - it's the normal first step of
+   * scanning INTO a bin, trivially repeated by rescanning the same tag, and
+   * gating it too would put a dialog in front of "scan bin, tap a photo's
+   * Open" for no data actually at risk. Live NFC scanning is also "work":
+   * navigating away silently stops the reader without the operator having
+   * pressed Stop. */
+  onHasWorkChange?: (hasWork: boolean) => void
 }
 
-export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
+export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, onHasWorkChange }: StocktakeSectionProps) {
   // Review finding: only `zones` used to be read here - a genuine fetch
   // failure left it at its initial `[]` with no way to tell that apart from
   // "the tree loaded fine and this code just doesn't exist", so
@@ -103,6 +115,14 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     ),
     [events],
   )
+
+  // See onHasWorkChange's own doc comment on StocktakeSectionProps for why
+  // a bare 'bin'/'unrecognised' event doesn't count.
+  const hasReviewWork = useMemo(
+    () => events.some((e) => e.kind === 'confirmed' || e.kind === 'elsewhere') || scanning,
+    [events, scanning],
+  )
+  useEffect(() => { onHasWorkChange?.(hasReviewWork) }, [hasReviewWork, onHasWorkChange])
 
   // Takes a fully-formed ScanEvent (id included) rather than an Omit<...,
   // 'id'> - Omit collapses a discriminated union to the INTERSECTION of its

@@ -25,9 +25,14 @@ interface BinPageProps {
   /** Full item (below) - pre-sets a brand new draft's location. */
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite?: boolean
+  /** Release-fixes code-review finding: forwarded to the quick-add form's
+   * own onHasWorkChange (its doc comment, bin-quick-add.tsx) - App.tsx
+   * routes Open/Full item through the same unsaved-work guard when this is
+   * true. */
+  onHasWorkChange?: (hasWork: boolean) => void
 }
 
-export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true }: BinPageProps) {
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange }: BinPageProps) {
   // ONE useInventoryZones() instance for the whole page (there is no shared
   // store between separate calls - the hook's own header comment), so that
   // when BinNotFound's Create bin below calls createBin/createZone, THIS
@@ -48,6 +53,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
         onOpenEquipment={onOpenEquipment}
         onNewEquipment={onNewEquipment}
         canWrite={canWrite}
+        onHasWorkChange={onHasWorkChange}
       />
     )
   }
@@ -295,7 +301,7 @@ export function BinPhotoGrid({ items, onOpenEquipment }: { items: EquipmentItem[
 }
 
 function BinContents({
-  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite,
+  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange,
 }: {
   zone: InventoryZone
   bin: InventoryBin
@@ -303,6 +309,7 @@ function BinContents({
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
+  onHasWorkChange?: (hasWork: boolean) => void
 }) {
   const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
 
@@ -333,7 +340,13 @@ function BinContents({
       )}
 
       {canWrite && (
-        <BinQuickAdd zoneId={zone.id} binId={bin.id} onCreated={() => { void refresh() }} canWrite={canWrite} />
+        <BinQuickAdd
+          zoneId={zone.id}
+          binId={bin.id}
+          onCreated={() => { void refresh() }}
+          canWrite={canWrite}
+          onHasWorkChange={onHasWorkChange}
+        />
       )}
 
       {canWrite && (

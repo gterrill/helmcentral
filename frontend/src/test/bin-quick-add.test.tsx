@@ -93,6 +93,33 @@ describe('BinQuickAdd', () => {
     await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
   })
 
+  // Release-fixes code-review finding: reports whether the form holds
+  // anything a navigation away would clear - App.tsx routes the bin page's
+  // "Full item" through the same unsaved-work guard when this is true.
+  it('reports hasWork as a name or photos are staged, and clears it after Save', async () => {
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('reports hasWork from a staged photo alone, with no name typed', async () => {
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    onHasWorkChange.mockClear()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+
+    await waitFor(() => expect(onHasWorkChange).toHaveBeenLastCalledWith(true))
+  })
+
   it('blocks Save when the name is blank', async () => {
     render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
 

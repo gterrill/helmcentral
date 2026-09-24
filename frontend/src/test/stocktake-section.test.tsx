@@ -354,6 +354,33 @@ describe('StocktakeSection', () => {
     expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
   })
 
+  // Release-fixes code-review finding: App.tsx's Open/Full item used to
+  // switch straight to the Equipment section with no guard, silently
+  // clearing whatever a stocktake pass had already confirmed. This section
+  // reports that work upward the way the equipment editor reports dirty -
+  // App.tsx's own guard is exercised in app-inventory-navigation.test.tsx.
+  // A bare bin scan (no item confirmed against it yet) is deliberately NOT
+  // "work" - it's the normal first step of scanning INTO a bin, trivially
+  // repeated by rescanning the same tag, and the existing "Open from
+  // Stocktake's photo grid" flow (app-inventory-navigation.test.tsx) relies
+  // on that scan-then-Open sequence staying frictionless.
+  it('reports hasWork once an item is confirmed, but not from a bare bin scan', async () => {
+    const item = makeItem({ id: 'eq-1', bin_id: 'b1', verified_aboard: true })
+    equipmentById['eq-1'] = item
+    const onHasWorkChange = vi.fn()
+    render(<StocktakeSection onHasWorkChange={onHasWorkChange} />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+
+    await scan('https://boat.example/inventory/equipment/eq-1')
+    await screen.findByText('Confirmed')
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+  })
+
   it('wires the bin photo grid\'s Open button to onOpenEquipment', async () => {
     const item = makeItem({ id: 'eq-1', bin_id: 'b1', photo_ids: [] })
     equipmentById['eq-1'] = item
@@ -497,6 +524,22 @@ describe('StocktakeSection: NFC scanning', () => {
     // the stale closure was created with.
     await screen.findByText(/Recorded in SAL-04/)
     expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
+  })
+
+  it('reports hasWork while NFC scanning is live, and clears it on Stop scanning', async () => {
+    let onUrl: ((url: string) => void) | null = null
+    mockedScanTags.mockImplementation(async (cb) => { onUrl = cb })
+    const onHasWorkChange = vi.fn()
+    render(<StocktakeSection onHasWorkChange={onHasWorkChange} />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+    onHasWorkChange.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scanning' }))
+    await waitFor(() => expect(onUrl).not.toBeNull())
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop scanning' }))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
   })
 
   it('aborts the scan\'s AbortController on unmount', async () => {

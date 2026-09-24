@@ -260,6 +260,9 @@ beforeEach(() => {
     if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'GET') {
       return { ok: true, json: async () => ({ item, documents: [] }) }
     }
+    if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
+      return { ok: true, json: async () => ({ item }) }
+    }
     if (u.endsWith('/api/equipment-profiles')) {
       return { ok: true, json: async () => ({ profiles: [], problems: [] }) }
     }
@@ -318,5 +321,68 @@ describe('App: Open/Full item from outside the Equipment section', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Spare impeller'))
     expect(window.location.pathname).toBe('/inventory/equipment/eq-1')
+  })
+})
+
+// Release-fixes code-review finding: onOpenEquipment/onNewEquipment used to
+// switch straight to the Equipment section with no guard at all - reachable
+// from Stocktake's photo grid and the bin page's "Full item" button, both of
+// which can hold real work (a stocktake pass's confirmed scans, a staged
+// quick-add) that switching sections would silently clear.
+describe('App: Open/Full item guards against losing stocktake or quick-add work', () => {
+  it('Open mid-stocktake asks first; Stay keeps the confirmed scan; Leave opens the editor', async () => {
+    window.history.replaceState({}, '', '/inventory/stocktake')
+    render(<App />)
+
+    const scanField = await screen.findByLabelText('Scan')
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/bins/LAZ-02' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/equipment/eq-1' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByText('Confirmed')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+
+    await screen.findByText('Leave stocktake?')
+    expect(screen.getByText('The scans from this pass will be cleared.')).toBeInTheDocument()
+    // Guarded - the editor has not appeared, and the pass is untouched.
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }))
+    expect(screen.queryByText('Leave stocktake?')).not.toBeInTheDocument()
+    expect(screen.getByText('Confirmed')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    await screen.findByText('Leave stocktake?')
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Spare impeller'))
+  })
+
+  it('Full item with a staged quick-add asks first; Stay keeps the draft; Leave opens a blank editor', async () => {
+    window.history.replaceState({}, '', '/inventory/bins/LAZ-02')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
+
+    await screen.findByText('Leave this bin?')
+    expect(screen.getByText('The name and photos you have added will be cleared.')).toBeInTheDocument()
+    expect(screen.queryByText('New item')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }))
+    expect(screen.queryByText('Leave this bin?')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('Gaffer tape')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
+    await screen.findByText('Leave this bin?')
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
+
+    await waitFor(() => expect(screen.getByText('New item')).toBeInTheDocument())
+    expect(screen.getByLabelText('Name')).toHaveValue('')
   })
 })

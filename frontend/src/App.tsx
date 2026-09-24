@@ -391,6 +391,11 @@ export function App() {
   // InventoryPanel forwards whichever child (EquipmentEditor) is actually
   // mounted, see its own imperative handle.
   const [inventoryDirty, setInventoryDirty] = useState(false)
+  // Release-fixes code-review finding: Stocktake's scan events/live NFC
+  // session and the bin page's quick-add draft, reported the same way
+  // inventoryDirty is (onDirtyChange) - see requestWithinInventory's own
+  // comment for why this shares that guard rather than getting a second one.
+  const [inventoryHasWork, setInventoryHasWork] = useState(false)
   const inventoryPanelRef = useRef<InventoryPanelHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
   const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
@@ -458,14 +463,24 @@ export function App() {
   // Back/onCreated/onDeleted (all routed through InventoryPanel's
   // onEquipmentEditIdChange/onCreatingEquipmentChange props, wired at the
   // 'inventory' case below).
+  // Release-fixes code-review finding: this used to guard only inventoryDirty
+  // (the Equipment editor) - Stocktake's own scan events/live NFC session and
+  // the bin page's quick-add draft can hold just as much work an operator
+  // would not want silently cleared, and nothing routed Open/Full item
+  // through this at all. inventoryHasWork is their shared "has work" flag
+  // (StocktakeSection/BinQuickAdd's own onHasWorkChange, wired below), and
+  // guarding it here - the same stash-and-let-the-dialog-decide shape
+  // inventoryDirty already used - covers both without a second guard
+  // function. The dialog itself picks its wording from which of the two
+  // reasons is actually true (pendingNavigationKind, by the dialog below).
   const requestWithinInventory = useCallback((navigate: () => void): boolean => {
-    if (inventoryDirty) {
+    if (inventoryDirty || inventoryHasWork) {
       setPendingNavigation(() => navigate)
       return false
     }
     navigate()
     return true
-  }, [inventoryDirty])
+  }, [inventoryDirty, inventoryHasWork])
 
   // Which dirty page pendingNavigation (if any) is guarding, for the
   // dialog's copy and for handleSaveAndContinue below - derived from
@@ -756,6 +771,35 @@ export function App() {
       setInventoryDirty(false)
     }
   }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment])
+  // inventoryHasWork (declared up with inventoryDirty) is only meaningful
+  // while Stocktake or the bin page's quick-add are actually mounted and
+  // reporting it - same reasoning as inventoryDirty's own clearing effect
+  // just above. Leaving the 'inventory' panel, leaving Stocktake, or
+  // leaving the bin page (inventoryBinCode back to null) unmounts whichever
+  // of the two was reporting, which stops calling onHasWorkChange the
+  // moment it does.
+  useEffect(() => {
+    if (
+      activePanel !== 'inventory'
+      || !(inventorySection === 'stocktake' || (inventorySection === 'locations' && inventoryBinCode !== null))
+    ) {
+      setInventoryHasWork(false)
+    }
+  }, [activePanel, inventorySection, inventoryBinCode])
+  // Release-fixes code-review finding: which of the two guard REASONS the
+  // dialog below is actually showing for - there is nothing to Save for
+  // Stocktake's scans or a staged quick-add, so those get their own
+  // Leave/Stay wording rather than the "Unsaved changes .../Save and
+  // Continue" copy that only makes sense for a real draft. Derived rather
+  // than stashed alongside pendingNavigation itself: nothing changes
+  // inventoryDirty/inventoryHasWork/inventorySection while the dialog is up
+  // (the underlying page is inert behind it) right up until it resolves,
+  // the same "derived from current state, not stored" reasoning
+  // dirtyPageLabel (above, by settingsDirty) already relies on.
+  const pendingNavigationKind: 'dirty' | 'stocktake-work' | 'quick-add-work' =
+    activePanel === 'inventory' && !inventoryDirty && inventoryHasWork
+      ? (inventorySection === 'stocktake' ? 'stocktake-work' : 'quick-add-work')
+      : 'dirty'
   // Ditto latch pattern (mateSheetHasOpenedRef/helpSheetHasOpenedRef
   // above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
@@ -2646,16 +2690,29 @@ export function App() {
             // the sync effect below produce that URL as a NEW history entry
             // rather than leaving the bar disagreeing with what's on screen,
             // so the browser's own Back returns to the bin.
+            // Release-fixes code-review finding: these used to set section/
+            // id state directly, with no guard at all - reachable not just
+            // from the Equipment index (nothing to lose there) but from the
+            // bin page's own item rows/"Full item" and Stocktake's photo
+            // grid, where switching straight to 'equipment' silently threw
+            // away a stocktake pass's scans or a staged quick-add.
+            // requestWithinInventory now also checks inventoryHasWork (its
+            // own comment above), so this is a no-op everywhere neither
+            // reason applies - which is everywhere except those two cases.
             onOpenEquipment={(id) => {
-              setInventorySection('equipment')
-              setInventoryBinCode(null)
-              setInventoryEquipmentEditId(id)
+              requestWithinInventory(() => {
+                setInventorySection('equipment')
+                setInventoryBinCode(null)
+                setInventoryEquipmentEditId(id)
+              })
             }}
             onNewEquipment={(preset) => {
-              setInventorySection('equipment')
-              setInventoryBinCode(null)
-              setInventoryNewEquipmentPreset(preset ?? null)
-              setInventoryCreatingEquipment(true)
+              requestWithinInventory(() => {
+                setInventorySection('equipment')
+                setInventoryBinCode(null)
+                setInventoryNewEquipmentPreset(preset ?? null)
+                setInventoryCreatingEquipment(true)
+              })
             }}
             // Back is the only exit that can throw away typed work, so it is
             // the only one guarded - and it is ONE guarded call that clears
@@ -2687,6 +2744,7 @@ export function App() {
               setInventoryCreatingEquipment(false)
             }}
             onDirtyChange={setInventoryDirty}
+            onHasWorkChange={setInventoryHasWork}
             onOpenHelp={openHelp}
             canWrite={canWrite}
             binCode={inventoryBinCode}
@@ -3211,42 +3269,75 @@ export function App() {
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* dirtyPageLabel: 'Settings', 'Details' (ADR 0115 §2) or
-                  'Inventory' (ADR 0123) - whichever page's guard actually
-                  stashed this navigation. */}
-              You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {saveAndContinueError && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-              {saveAndContinueError}
-            </div>
+          {pendingNavigationKind === 'dirty' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {/* dirtyPageLabel: 'Settings', 'Details' (ADR 0115 §2) or
+                      'Inventory' (ADR 0123) - whichever page's guard actually
+                      stashed this navigation. */}
+                  You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {saveAndContinueError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
+                  {saveAndContinueError}
+                </div>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => {
+                    setPendingNavigation(null)
+                    setSaveAndContinueError(null)
+                  }}
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    pendingNavigation?.()
+                    setPendingNavigation(null)
+                    setSaveAndContinueError(null)
+                  }}
+                >
+                  Discard
+                </AlertDialogAction>
+                <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
+                  {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
+                </Button>
+              </AlertDialogFooter>
+            </>
+          ) : (
+            // Release-fixes code-review finding: Stocktake's scans and a
+            // staged quick-add have nothing to Save - offering that button
+            // anyway (or the "Unsaved changes" copy, which implies one) would
+            // be offering an action that does not exist. Leave/Stay instead,
+            // worded for what is actually about to be cleared.
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {pendingNavigationKind === 'stocktake-work' ? 'Leave stocktake?' : 'Leave this bin?'}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pendingNavigationKind === 'stocktake-work'
+                    ? 'The scans from this pass will be cleared.'
+                    : 'The name and photos you have added will be cleared.'}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Stay</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    pendingNavigation?.()
+                    setPendingNavigation(null)
+                  }}
+                >
+                  Leave
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
           )}
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                setPendingNavigation(null)
-                setSaveAndContinueError(null)
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                pendingNavigation?.()
-                setPendingNavigation(null)
-                setSaveAndContinueError(null)
-              }}
-            >
-              Discard
-            </AlertDialogAction>
-            <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
-              {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
-            </Button>
-          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 

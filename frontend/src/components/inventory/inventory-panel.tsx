@@ -58,6 +58,11 @@ interface InventoryPanelProps {
   /** A delete that already succeeded. */
   onEquipmentDeleted: () => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Release-fixes code-review finding: forwarded to Stocktake's own
+   * onHasWorkChange and the bin page's quick-add onHasWorkChange - never
+   * both mounted at once, so one prop covers either. App.tsx routes Open/
+   * Full item through the same unsaved-work guard when this is true. */
+  onHasWorkChange?: (hasWork: boolean) => void
   onOpenHelp?: (target: HelpTarget) => void
   canWrite?: boolean
   /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
@@ -93,6 +98,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onEquipmentCreated,
     onEquipmentDeleted,
     onDirtyChange,
+    onHasWorkChange,
     onOpenHelp,
     canWrite = true,
     binCode,
@@ -152,13 +158,14 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onOpenEquipment={onOpenEquipment}
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
+            onHasWorkChange={onHasWorkChange}
           />
         )
       }
       return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
     }
     if (activeSectionId === 'stocktake') {
-      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
+      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />
     }
     return null
   })()
