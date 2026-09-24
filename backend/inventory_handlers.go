@@ -500,6 +500,34 @@ func respondWithUpdatedEquipment(c echo.Context, id string, status int) error {
 	return c.JSON(status, map[string]any{"item": item})
 }
 
+// linkExistingPhotoOrRefuse decides what a byte-identical upload does with
+// the document that already owns those bytes: link it to equipmentID (ADR
+// 0127 §3's shared-photo case) when doc is already tagged 'photo', or refuse
+// with 409 naming it otherwise - a document NOT already tagged 'photo' is
+// something the operator filed under Documents for its own reason, and
+// silently retagging and linking it as this item's photo would repurpose it
+// without being asked (ADR 0127 amendment). Shared by uploadEquipmentPhotoHandler's
+// two ways of reaching that same byte-identical document - GetBySHA finding
+// it up front, and Insert's own sha256 race finding it instead - which used
+// to duplicate this decision once per branch.
+//
+// Review finding: the refusal message used %q on doc's own title, which
+// backslash-escapes any quote already IN that title - a literal `"%s"`
+// shows it as typed instead.
+func linkExistingPhotoOrRefuse(c echo.Context, equipmentID string, doc document) error {
+	if !slices.Contains(doc.OperatorTags, "photo") {
+		label := doc.Title
+		if label == "" {
+			label = doc.Filename
+		}
+		return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as \"%s\"", label)})
+	}
+	if err := globalDocumentStore.AddEquipmentPhoto(equipmentID, doc.ID); err != nil {
+		return writeDocumentError(c, err)
+	}
+	return respondWithUpdatedEquipment(c, equipmentID, http.StatusOK)
+}
+
 // uploadEquipmentPhotoHandler is POST /api/inventory/equipment/:id/photos
 // (multipart, one "file" part): stores the file through the same path
 // uploadDocumentHandler uses (documents_handlers.go) - same
@@ -631,25 +659,7 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		// belongs to that existing row, so only this attempt's own temp
 		// file is removed either way.
 		removeTemp()
-		// ADR 0127 amendment (review finding): a document NOT already
-		// tagged 'photo' is something the operator filed under Documents
-		// for its own reason - silently retagging and linking it as this
-		// item's photo would repurpose it without being asked. Refused
-		// instead, naming the document so the operator knows what they
-		// already have. Only when the match IS already tagged 'photo' -
-		// the shared-photo case ADR 0127 §3 always meant to support - does
-		// this link it, same as before.
-		if !slices.Contains(existing.OperatorTags, "photo") {
-			label := existing.Title
-			if label == "" {
-				label = existing.Filename
-			}
-			return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as %q", label)})
-		}
-		if err := globalDocumentStore.AddEquipmentPhoto(id, existing.ID); err != nil {
-			return writeDocumentError(c, err)
-		}
-		return respondWithUpdatedEquipment(c, id, http.StatusOK)
+		return linkExistingPhotoOrRefuse(c, id, existing)
 	}
 
 	finalPath := filepath.Join(dir, sha)
@@ -671,22 +681,10 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		// Insert's own sha256 race: another request created the row between
 		// our GetBySHA check and this Insert call. Same shape as the
 		// "already existed" branch above - the file belongs to that row,
-		// not to this attempt, and the SAME tagged-photo check applies: a
-		// document that won the race untagged is refused, not silently
-		// retagged. Insert returns the winning row's own OperatorTags
-		// already attached (its own doc comment), so no extra read is
-		// needed here.
-		if !slices.Contains(inserted.OperatorTags, "photo") {
-			label := inserted.Title
-			if label == "" {
-				label = inserted.Filename
-			}
-			return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as %q", label)})
-		}
-		if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
-			return writeDocumentError(c, err)
-		}
-		return respondWithUpdatedEquipment(c, id, http.StatusOK)
+		// not to this attempt, and the SAME tagged-photo check applies:
+		// Insert returns the winning row's own OperatorTags already
+		// attached (its own doc comment), so no extra read is needed here.
+		return linkExistingPhotoOrRefuse(c, id, inserted)
 	}
 	if err != nil {
 		// Safe to remove: still holding sha's lock, and GetBySHA just

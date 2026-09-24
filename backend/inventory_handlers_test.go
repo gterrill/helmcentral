@@ -1092,6 +1092,45 @@ func TestUploadEquipmentPhotoHandler_DuplicateOntoNonPhotoLibraryDocumentReturns
 	}
 }
 
+// Release-fixes code-review finding: the refusal message used %q on the
+// document's own title, which backslash-escapes any quote already IN that
+// title - "Fuel receipt "urgent"" came back as `"Fuel receipt \"urgent\""`,
+// unreadable in the UI. A literal `"%s"` shows the title's own quotes as-is.
+func TestUploadEquipmentPhotoHandler_DuplicateMessageDoesNotBackslashEscapeQuotesInTitle(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	sum := sha256.Sum256(validJPEGBytes)
+	sha := hex.EncodeToString(sum[:])
+	if _, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: "receipt.jpg", Title: `Fuel receipt "urgent"`, MIME: "image/jpeg"}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.Contains(resp.Error, `\`) {
+		t.Fatalf("expected no backslash-escaped quotes in the message, got %q", resp.Error)
+	}
+	if !strings.Contains(resp.Error, `"Fuel receipt "urgent""`) {
+		t.Fatalf("expected the title's own quotes to show through as typed, got %q", resp.Error)
+	}
+}
+
 // ── PUT /api/inventory/equipment/:id/photos ──────────────────────────────
 
 func TestSetEquipmentPhotoOrderHandler_ReorderMovesSecondToFrontChangesCover(t *testing.T) {
