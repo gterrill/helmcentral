@@ -1009,6 +1009,50 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByText('Remove and delete')).not.toBeInTheDocument()
   })
 
+  // Finding 1 (review): a photo uploaded earlier in the session updated
+  // item.photo_ids but not the Documents tab's own docEntries/baseline - the
+  // next Documents-tab save PUT the whole link set, and that set lacked the
+  // new photo, so its link was deleted even though the upload itself had
+  // already succeeded server-side.
+  it('keeps an earlier-uploaded photo linked when the Documents tab is saved afterward', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    // Uploading a photo alone must not make the editor dirty.
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
+      expect(body.document_ids).toEqual(expect.arrayContaining(['photo-1', 'picked-doc']))
+    })
+    // Still on the strip after the save.
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+  })
+
+  it('uploading a photo alone does not make the editor dirty', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    onDirtyChange.mockClear()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+  })
+
   it('offers "Remove and delete" alongside Remove for an exclusive photo, and it sends ?delete=true', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)

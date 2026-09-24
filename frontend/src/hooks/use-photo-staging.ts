@@ -133,23 +133,43 @@ export function usePhotoStaging(options: UsePhotoStagingOptions = {}) {
   // refused with a 409 - it links the existing document and succeeds like
   // any other upload, so there is no longer a separate "refused, never
   // worth retrying" outcome to track here.
+  // Finding 1 (review): a photo upload updates item.photo_ids (via setItem
+  // above) but the caller's own Documents-tab state (equipment-editor.tsx's
+  // docEntries/baseline) has no way to learn a new id exists unless this
+  // function tells it - `linked` names exactly the document id(s) each
+  // upload actually added, in upload order, so the caller can apply the
+  // identical change to both docEntries and its saved baseline instead of
+  // one of them silently lagging until the next full refresh(). Computed by
+  // diffing each response's own photo_ids against a running set seeded from
+  // previousPhotoIds (the target's photo_ids as of before this batch
+  // started) - the server hands back the WHOLE list, not just what changed,
+  // so this is the only place that can tell "which id is new" apart from
+  // "which id already existed".
   const uploadPhotosInOrder = useCallback(async (
     targetId: string,
     photos: LocalPhoto[],
-    opts: { adopt?: boolean } = {},
-  ): Promise<{ failures: FailedPhotoUpload[] }> => {
+    opts: { adopt?: boolean; previousPhotoIds?: string[] } = {},
+  ): Promise<{ failures: FailedPhotoUpload[]; linked: { documentId: string; filename: string }[] }> => {
     const failures: FailedPhotoUpload[] = []
+    const linked: { documentId: string; filename: string }[] = []
+    const knownIds = new Set(opts.previousPhotoIds ?? [])
     for (const photo of photos) {
       try {
         const updated = await uploadEquipmentPhoto(targetId, photo.blob, photo.filename)
         if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl)
         setItem?.(updated, opts)
+        for (const docId of updated.photo_ids) {
+          if (!knownIds.has(docId)) {
+            knownIds.add(docId)
+            linked.push({ documentId: docId, filename: photo.filename })
+          }
+        }
       } catch (err) {
         if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl)
         failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
       }
     }
-    return { failures }
+    return { failures, linked }
   }, [setItem])
 
   return { localPhotos, setLocalPhotos, addLocalPhotos, makeCoverLocal, removeLocalPhoto, uploadPhotosInOrder }

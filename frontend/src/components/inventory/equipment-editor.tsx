@@ -174,6 +174,22 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
 
   const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
   const [docEntries, setDocEntries] = useState<DocEntry[]>([])
+  // Finding 1 (review): a photo write (upload, retry, remove) already
+  // succeeds server-side the moment it returns, but `documents` (from
+  // useEquipmentItem) is only refreshed on an explicit refresh() - the
+  // Documents tab's own baselineDocIds (below) is built from `documents`,
+  // so it lags a photo write until something else happens to refetch it.
+  // Left alone, a Save that touches the link set at all (adding an
+  // ordinary document, say) sends docEntries as the WHOLE set, and a photo
+  // the operator only just uploaded - never added to docEntries, since the
+  // seed effect below only runs off `documents` - is silently left out and
+  // unlinked. extraBaselineDocIds tracks ids a photo write has ADDED this
+  // session that `documents` doesn't know about yet, so baselineDocIds can
+  // agree with docEntries without waiting on a refetch. Reset only when
+  // `id` itself changes (a different record, or a fresh draft) - NOT by the
+  // documents-seed effect below, which would otherwise wipe an extra the
+  // moment an unrelated photo removal (pruneDocument) changes `documents`.
+  const [extraBaselineDocIds, setExtraBaselineDocIds] = useState<string[]>([])
   const [aliasInput, setAliasInput] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -268,7 +284,18 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       setDocEntries([])
       return
     }
-    setDocEntries(documents.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })))
+    // Finding 1: a `documents` reseed (refresh()/pruneDocument, e.g. from an
+    // unrelated photo removal) must not wipe a doc entry a photo write ADDED
+    // this session that `documents` doesn't know about yet - kept here only
+    // when its id is still in extraBaselineDocIds (removeSavedPhoto/
+    // applyPhotoLinkChange already drop it from both the moment that SAME
+    // photo is itself removed, so this never resurrects a genuinely-gone one).
+    setDocEntries((prev) => {
+      const fromServer = documents.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename }))
+      const serverIds = new Set(fromServer.map((d) => d.document_id))
+      const keptExtras = prev.filter((d) => extraBaselineDocIds.includes(d.document_id) && !serverIds.has(d.document_id))
+      return [...fromServer, ...keptExtras]
+    })
     // Keyed on content, not reference - useEquipmentItem builds a fresh
     // `documents` array on every refresh() even when the set is unchanged,
     // and re-seeding on every one of those would throw away a locally
@@ -276,13 +303,29 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, documents.map((d) => d.document_id).join(',')])
 
+  // Finding 1: extraBaselineDocIds resets only on a genuine record change -
+  // NOT bundled into the effect above, which also runs on every `documents`
+  // refetch mid-session (a photo removal's pruneDocument, in particular)
+  // that has nothing to do with leaving this record.
+  useEffect(() => {
+    setExtraBaselineDocIds([])
+  }, [id])
+
   // finding 9: id===null's own baseline is the SEEDED draft (newDraftBaseline,
   // set by the effect above the moment this draft was born), not BLANK_DRAFT
   // itself - a "Full item" draft that pre-set zone_id/bin_id must compare
   // against a baseline that already carries them, or it reads dirty on
   // arrival with nothing yet typed.
   const baseline = id === null ? newDraftBaseline : (item ? draftFromItem(item) : null)
-  const baselineDocIds = useMemo(() => documents.map((d) => d.document_id), [documents])
+  // Finding 1: the baseline the dirty check (and Save's own "did the link
+  // set actually change" guard) compares docEntries against - documents'
+  // own ids PLUS extraBaselineDocIds, so a photo write's docEntries change
+  // (applyPhotoLinkChange below) is mirrored on this side too, and neither
+  // an upload nor a remove makes the editor read dirty by itself.
+  const baselineDocIds = useMemo(
+    () => Array.from(new Set([...documents.map((d) => d.document_id), ...extraBaselineDocIds])),
+    [documents, extraBaselineDocIds],
+  )
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
   const linksDirty = id !== null && !sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)
   const dirty = draftDirty || linksDirty
@@ -384,6 +427,24 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }
   const removeDocument = (documentId: string) => setDocEntries((prev) => prev.filter((d) => d.document_id !== documentId))
 
+  // Finding 1 (review): the ONE place a successful photo write (upload,
+  // retry, remove) updates the Documents tab's own docEntries AND
+  // extraBaselineDocIds together - so the photo is never simultaneously
+  // "still linked server-side" and "missing from the set the next
+  // Documents-tab save would PUT". `meta` is omitted for a remove, where no
+  // title/filename is needed.
+  const applyPhotoLinkChange = useCallback((action: 'add' | 'remove', documentId: string, meta?: { title: string; filename: string }) => {
+    if (action === 'add') {
+      setDocEntries((prev) => (prev.some((d) => d.document_id === documentId)
+        ? prev
+        : [...prev, { document_id: documentId, title: meta?.title ?? '', filename: meta?.filename ?? '' }]))
+      setExtraBaselineDocIds((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
+    } else {
+      setDocEntries((prev) => prev.filter((d) => d.document_id !== documentId))
+      setExtraBaselineDocIds((prev) => prev.filter((docId) => docId !== documentId))
+    }
+  }, [])
+
   // Trap: SignalK publishes runTime under all sorts of prefixes
   // (electrical.generator.0.runTime, propulsion.port.runTime...) - the one
   // constant is the last segment, matched case-insensitively since some
@@ -440,8 +501,15 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       }
     }
 
-    const { failures: uploadFailures } = await uploadPhotosInOrder(targetId, toUpload)
+    // Finding 1: previousPhotoIds (captured BEFORE any upload in this batch
+    // starts) is what lets uploadPhotosInOrder tell which id(s) in each
+    // response are actually new - `item` here is a render-time snapshot, but
+    // that's exactly right: it's the target's own photo_ids as of the
+    // moment this batch started, the same baseline every upload in the
+    // batch diffs against.
+    const { failures: uploadFailures, linked } = await uploadPhotosInOrder(targetId, toUpload, { previousPhotoIds: item?.photo_ids ?? [] })
     const failures = [...downscaleFailures, ...uploadFailures]
+    for (const { documentId, filename } of linked) applyPhotoLinkChange('add', documentId, { title: '', filename })
     recordPhotoOutcome(targetId, failures,
       `${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0]?.error ?? ''}`)
   }
@@ -470,6 +538,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // instant item.photo_ids above stops naming it - see useEquipmentItem's
       // own pruneDocument doc comment.
       pruneDocument(photoId)
+      // Finding 1: docEntries/extraBaselineDocIds drop it too, the same
+      // "apply to both sides" rule an add follows above - otherwise a photo
+      // added and then removed inside the same session could leave a
+      // dangling extraBaselineDocIds entry for an id that no longer exists
+      // on this item at all.
+      applyPhotoLinkChange('remove', photoId)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setSaveError(message)
@@ -514,7 +588,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         readyToUpload.push({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' })
       }
     }
-    const { failures: stillFailingUpload } = await uploadPhotosInOrder(targetId, readyToUpload)
+    const { failures: stillFailingUpload, linked } = await uploadPhotosInOrder(targetId, readyToUpload, { previousPhotoIds: item?.photo_ids ?? [] })
+    for (const { documentId, filename } of linked) applyPhotoLinkChange('add', documentId, { title: '', filename })
     const stillFailing = [...stillNeedsDownscale, ...stillFailingUpload]
     setPhotoStatus((prev) => {
       const next = { ...prev }
