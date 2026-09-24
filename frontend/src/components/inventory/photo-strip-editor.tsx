@@ -27,11 +27,21 @@ interface PhotoStripEditorProps {
    * a plain array regardless of the input's own `multiple`-ness. */
   onFilesPicked: (files: File[]) => void
   onMakeCover: (id: string) => void
-  onRemove: (id: string) => void
+  /** 2026-09-25 amendment: `deletePhoto` is the operator's own explicit
+   * choice - false is an ordinary unlink, true is "Remove and delete",
+   * offered only for a photo named in exclusivePhotoIds (below). */
+  onRemove: (id: string, deletePhoto: boolean) => void
+  /** The subset of `photos` (by id) that reference nothing else - nothing
+   * else links them, so deleting the document alongside the unlink is safe
+   * to offer. Omitted (the draft/local-photo case, where nothing is linked
+   * or shared yet) or a photo's id absent from it means only a plain
+   * "Remove" (unlink) is offered for it. */
+  exclusivePhotoIds?: string[]
   canWrite?: boolean
 }
 
-export function PhotoStripEditor({ photos, onFilesPicked, onMakeCover, onRemove, canWrite = true }: PhotoStripEditorProps) {
+export function PhotoStripEditor({ photos, onFilesPicked, onMakeCover, onRemove, exclusivePhotoIds, canWrite = true }: PhotoStripEditorProps) {
+  const exclusiveSet = new Set(exclusivePhotoIds ?? [])
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
 
@@ -73,10 +83,19 @@ export function PhotoStripEditor({ photos, onFilesPicked, onMakeCover, onRemove,
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-destructive"
-                    onClick={() => onRemove(photo.id)}
+                    onClick={() => onRemove(photo.id, false)}
                   >
                     Remove
                   </button>
+                  {exclusiveSet.has(photo.id) && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => onRemove(photo.id, true)}
+                    >
+                      Remove and delete
+                    </button>
+                  )}
                 </div>
               )}
             </div>

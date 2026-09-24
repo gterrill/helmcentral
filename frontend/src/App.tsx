@@ -2810,10 +2810,16 @@ export function App() {
               setInventoryCreatingEquipment(false)
               setInventoryEquipmentEditId(id)
             }}
-            onEquipmentDeleted={() => {
+            onEquipmentDeleted={(message) => {
               setInventoryDirty(false)
               setInventoryEquipmentEditId(null)
               setInventoryCreatingEquipment(false)
+              // 2026-09-25 amendment: the item is gone either way - message
+              // is only ever the server's own "the item was deleted, but a
+              // photo file/document could not be removed" warning, shown on
+              // the destination (the Equipment index) rather than keeping
+              // the editor open on a record that no longer exists.
+              if (message) toast.error(message)
             }}
             onDirtyChange={setInventoryDirty}
             onHasWorkChange={(work, detail) => {

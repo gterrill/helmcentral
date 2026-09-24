@@ -115,11 +115,21 @@ export interface EquipmentItem {
   link_count: number
   created_at: string
   updated_at: string
-  /** ADR 0127: the item's OWN linked documents tagged 'photo', cover first -
-   * never every linked document (that's link_count/the Documents tab), just
-   * the photo-tagged subset the bin page's photo strip and the editor's
-   * photo row both read. */
+  /** ADR 0127, amended 2026-09-25: a VIEW over the item's own linked
+   * documents - whichever ones are image/jpeg or image/png, cover first, no
+   * tag involved. Never every linked document (that's link_count/the
+   * Documents tab, which now shows photos too) - just the image-MIME
+   * subset the bin page's photo strip and the editor's photo row both read. */
   photo_ids: string[]
+  /** 2026-09-25 amendment: the subset of photo_ids that reference NOTHING
+   * else - no other item's equipment_documents link still references the
+   * same document. This is what the delete dialogs offer to also delete:
+   * an item delete's "Also delete N photo(s) only this item uses"
+   * checkbox, and the strip's per-photo "Remove and delete" choice. Only
+   * ever populated by a single-item GET (useEquipmentItem) - a listing
+   * (useEquipment) always gets back an empty array here, see the backend's
+   * own doc comment on why. */
+  exclusive_photo_ids: string[]
 }
 
 /** The body EquipmentEditor sends on create (POST) and save (PUT) - every
@@ -415,9 +425,15 @@ export function useEquipmentItem(id: string | null) {
     return data.item
   }, [id])
 
-  const remove = useCallback(async () => {
+  // deletePhotos (2026-09-25 amendment) is the operator's own explicit
+  // choice, surfaced by the delete confirm dialog's "Also delete N
+  // photo(s) only this item uses" checkbox (off by default) - an ordinary
+  // delete only ever unlinks, never destroys a document, see equipmentItem's
+  // own exclusive_photo_ids doc comment.
+  const remove = useCallback(async (deletePhotos = false) => {
     if (id === null) throw new Error('useEquipmentItem: no id to delete')
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'DELETE')
+    const qs = deletePhotos ? '?delete_photos=true' : ''
+    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
   }, [id])
 
   // Replaces the WHOLE link set (ADR 0123: "Links edited from the equipment
@@ -574,22 +590,13 @@ export async function updateEquipment(id: string, input: EquipmentInput): Promis
 // held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
 // neither of which has a persistent hook instance to hang these off.
 
-/** Thrown by uploadEquipmentPhoto specifically for a 409 - inventory_
- * handlers.go's "This image is already in Documents as ..." refusal, when
- * the exact same bytes are already filed under a different, non-photo
- * document. Carries the status the same way EquipmentNotFoundError carries
- * its 404, rather than a caller having to match the message text - a
- * caller that queues failed uploads for Retry (equipment-editor.tsx,
- * bin-quick-add.tsx) checks for this specifically, because re-sending the
- * identical bytes can only get the identical refusal: Retry is never a
- * failure worth offering here the way a dropped connection or a 500 is. */
-export class PhotoAlreadyLinkedError extends Error {}
-
-/** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
- * 'photo' and linked at the end of the item's photo order server-side.
- * Throws the server's own message on a rejected upload (AGENTS.md fallback
- * policy: HEIC/non-image get a specific reason, never a generic one) - a
- * 409 throws PhotoAlreadyLinkedError specifically, see its own doc comment. */
+/** POST /api/inventory/equipment/:id/photos - one multipart upload, linked
+ * at the end of the item's photo order server-side. No tag is written
+ * (2026-09-25 amendment) - the item's photo_ids view is MIME-based. Throws
+ * the server's own message on a rejected upload (AGENTS.md fallback
+ * policy: HEIC/non-image get a specific reason, never a generic one). A
+ * byte-identical upload is no longer refused with a 409 - it links the
+ * existing document and returns 200, same as any other success here. */
 export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
   const form = new FormData()
   form.append('file', file, filename)
@@ -597,11 +604,7 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
     method: 'POST',
     body: form,
   })
-  if (!response.ok) {
-    const message = await readErrorMessage(response)
-    if (response.status === 409) throw new PhotoAlreadyLinkedError(message)
-    throw new Error(message)
-  }
+  if (!response.ok) throw new Error(await readErrorMessage(response))
   const data = (await response.json()) as { item: EquipmentItem }
   return data.item
 }
@@ -619,11 +622,17 @@ export async function setEquipmentPhotoOrder(equipmentId: string, documentIds: s
 }
 
 /** DELETE /api/inventory/equipment/:id/photos/:documentId - removes the
- * photo from the item AND deletes its document (ADR 0127: "a photo has no
- * life outside its item"). */
-export async function deleteEquipmentPhoto(equipmentId: string, documentId: string): Promise<EquipmentItem> {
+ * photo from the item. UNLINK ONLY by default (2026-09-25 amendment,
+ * superseding "a photo has no life outside its item") - deletePhotos is
+ * the operator's own explicit choice, from the strip's "Remove and delete"
+ * option (offered only when the photo is exclusive to this item - see
+ * EquipmentItem's own exclusive_photo_ids doc comment), and additionally
+ * deletes the document (and, server-side, its file) once nothing else
+ * links it. */
+export async function deleteEquipmentPhoto(equipmentId: string, documentId: string, deletePhotos = false): Promise<EquipmentItem> {
+  const qs = deletePhotos ? '?delete=true' : ''
   const data = await submitJSON<{ item: EquipmentItem }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}`,
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}${qs}`,
     'DELETE',
   )
   return data.item

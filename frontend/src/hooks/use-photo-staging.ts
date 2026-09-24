@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { PhotoAlreadyLinkedError, uploadEquipmentPhoto, type EquipmentItem } from '@/hooks/use-inventory'
+import { uploadEquipmentPhoto, type EquipmentItem } from '@/hooks/use-inventory'
 import { downscaleAll } from '@/lib/image-downscale'
 
 // ADR 0127: the "pick photos before the record exists yet" staging area -
@@ -8,8 +8,7 @@ import { downscaleAll } from '@/lib/image-downscale'
 // "New item" draft, which used to carry near-identical copies of this whole
 // module: the LocalPhoto/FailedPhotoUpload shapes, photoFilename, the
 // add/make-cover/remove operations, and the "upload in order, collect
-// failures, treat a 409 as refused-not-queued" loop. Pulled out once both
-// copies needed the same fixes twice.
+// failures" loop. Pulled out once both copies needed the same fixes twice.
 
 /** ADR 0127: a picked-but-not-yet-uploaded photo on a brand new draft -
  * downscaled already (lib/image-downscale.ts runs the moment a file is
@@ -29,11 +28,18 @@ export interface LocalPhoto {
 
 /** A photo whose upload failed - holds the Blob itself (not just an id) so
  * Retry can re-send the exact same bytes without asking the operator to
- * pick the file again. */
+ * pick the file again. needsDownscale (finding 10, pre-release review)
+ * marks a failure that happened at the DOWNSCALE step, before there was
+ * ever a Blob to upload - `blob` here is still the original, full-size
+ * File in that case, and Retry must downscale it again before it can be
+ * uploaded at all; re-sending it as-is would upload the full-size original
+ * straight past the size limit downscaling exists to enforce. Omitted (or
+ * false) for an ordinary upload failure, whose blob is already downscaled. */
 export interface FailedPhotoUpload {
   blob: Blob
   filename: string
   error: string
+  needsDownscale?: boolean
 }
 
 /** ADR 0127: JPEG/PNG re-encoding always renames to .jpg (downscaleImage's
@@ -60,9 +66,8 @@ export interface UsePhotoStagingOptions {
 /** ADR 0127: local-photo staging shared by a brand new draft's photo row -
  * add (downscale + stage), make cover (move to the front), remove (revoke
  * its object URL) - plus uploadPhotosInOrder, the "send each one in order,
- * apply the item it comes back with, treat a 409 (PhotoAlreadyLinkedError)
- * as refused rather than a failure to retry" sequence every upload site
- * runs once the target record actually exists. */
+ * apply the item it comes back with" sequence every upload site runs once
+ * the target record actually exists. */
 export function usePhotoStaging(options: UsePhotoStagingOptions = {}) {
   const { onDownscaleError, setItem } = options
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([])
@@ -124,17 +129,16 @@ export function usePhotoStaging(options: UsePhotoStagingOptions = {}) {
   // release the object URLs." A failed upload does NOT stop the remaining
   // photos from being tried - "there is no silent rollback" (the plan's own
   // words) means every photo gets its own attempt regardless of an earlier
-  // one failing. A 409 ("already in Documents as ...") means the exact same
-  // bytes can never be linked as a NEW photo - re-sending them on Retry can
-  // only get the identical refusal, so it is tracked in `refused` rather
-  // than queued in `failures` the way a genuine (transient) failure is.
+  // one failing. 2026-09-25 amendment: a byte-identical upload is no longer
+  // refused with a 409 - it links the existing document and succeeds like
+  // any other upload, so there is no longer a separate "refused, never
+  // worth retrying" outcome to track here.
   const uploadPhotosInOrder = useCallback(async (
     targetId: string,
     photos: LocalPhoto[],
     opts: { adopt?: boolean } = {},
-  ): Promise<{ failures: FailedPhotoUpload[]; refused: string[] }> => {
+  ): Promise<{ failures: FailedPhotoUpload[] }> => {
     const failures: FailedPhotoUpload[] = []
-    const refused: string[] = []
     for (const photo of photos) {
       try {
         const updated = await uploadEquipmentPhoto(targetId, photo.blob, photo.filename)
@@ -142,14 +146,10 @@ export function usePhotoStaging(options: UsePhotoStagingOptions = {}) {
         setItem?.(updated, opts)
       } catch (err) {
         if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl)
-        if (err instanceof PhotoAlreadyLinkedError) {
-          refused.push(err.message)
-          continue
-        }
         failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
       }
     }
-    return { failures, refused }
+    return { failures }
   }, [setItem])
 
   return { localPhotos, setLocalPhotos, addLocalPhotos, makeCoverLocal, removeLocalPhoto, uploadPhotosInOrder }
