@@ -419,6 +419,31 @@ describe('EquipmentEditor', () => {
 
   // ── photos (ADR 0127) ────────────────────────────────────────────────
 
+  // Review finding: baselineDocIds (the dirty check's own "what the server
+  // has" side) was built from the RAW `documents` list GET returns, which
+  // includes photo-tagged links - while docEntries (the Documents tab's own
+  // list, and the other side of the same comparison) excludes them, the
+  // same filtering the effect just above this component's Documents tab
+  // applies. Any item with a photo was therefore permanently dirty: the two
+  // sides could never agree, even with nothing actually changed.
+  it('is not dirty when opening a saved item that has one photo and nothing else changes', async () => {
+    currentItem = makeItem({ photo_ids: ['photo-1'] })
+    currentDocuments = [
+      { document_id: 'photo-1', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+    ]
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    await screen.findByText('Remove')
+
+    // Settles to NOT dirty - the ordinary transient true along the way
+    // (item loaded, draft not yet re-seeded from it - every dirty-check
+    // test in this file settles past that same moment) is not what this
+    // pins; a permanently mismatched baseline never settles back to false
+    // at all.
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
   it("POSTs a saved item's Take photo pick to /photos", async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()

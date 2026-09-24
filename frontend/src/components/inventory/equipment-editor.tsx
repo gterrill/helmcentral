@@ -275,7 +275,21 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }, [id, documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
 
   const baseline = id === null ? BLANK_DRAFT : (item ? draftFromItem(item) : null)
-  const baselineDocIds = useMemo(() => documents.map((d) => d.document_id), [documents])
+  // Review finding: this used to be built from the RAW `documents` list,
+  // which - like docEntries' own source effect above - includes
+  // photo-tagged links. docEntries excludes them (the Documents tab never
+  // manages a photo), so any item with a photo compared its own empty-of-
+  // photos docEntries against a baseline that still had one, and stayed
+  // dirty forever with nothing actually changed. Filtered the same way, by
+  // the same photoIds set, so the two sides of linksDirty below are
+  // actually comparable.
+  const baselineDocIds = useMemo(() => {
+    const photoIds = new Set(item?.photo_ids ?? [])
+    return documents.filter((d) => !photoIds.has(d.document_id)).map((d) => d.document_id)
+    // Keyed on content, not reference, for the same reason the docEntries
+    // effect above is - see that effect's own comment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
   const linksDirty = id !== null && !sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)
   const dirty = draftDirty || linksDirty
