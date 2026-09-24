@@ -595,6 +595,16 @@ describe('EquipmentEditor', () => {
     resolveGetNew({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
   })
 
+  // The precise "GET starts before the uploads, resolves after them" race
+  // (setItem's own seqRef bump, so that late reply is discarded) is
+  // deterministic only at the hook level, where the id-change GET's start
+  // and each upload's own setItem can be sequenced exactly - see
+  // use-inventory.test.ts's own "discards a slow GET..." test. This
+  // component-level suite proves the strip is right while that GET is
+  // in flight (the test above); forcing the GET to start before a mocked
+  // photo upload resolves, without an artificial delay that would just be
+  // testing jsdom's own scheduling, isn't reliable here.
+
   // Mirrors how InventoryPanel/App.tsx actually wire onCreated - id starts
   // null and flips to the server-assigned id once Save's create succeeds,
   // WITHOUT unmounting EquipmentEditor (same component instance, only the

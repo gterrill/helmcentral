@@ -307,7 +307,7 @@ export function useEquipment(filter: EquipmentFilter | null) {
  * unresolved Details route.
  */
 export function useEquipmentItem(id: string | null) {
-  const [item, setItem] = useState<EquipmentItem | null>(null)
+  const [item, setItemState] = useState<EquipmentItem | null>(null)
   const [documents, setDocuments] = useState<EquipmentDocument[]>([])
   const [loading, setLoading] = useState(id !== null)
   const [error, setError] = useState<string | null>(null)
@@ -320,7 +320,7 @@ export function useEquipmentItem(id: string | null) {
   const refresh = useCallback(async () => {
     if (id === null) {
       seqRef.current += 1
-      setItem(null)
+      setItemState(null)
       setDocuments([])
       setError(null)
       setLoading(false)
@@ -338,12 +338,12 @@ export function useEquipmentItem(id: string | null) {
       }
       const data = (await res.json()) as { item: EquipmentItem; documents?: EquipmentDocument[] }
       if (seq !== seqRef.current) return
-      setItem(data.item)
+      setItemState(data.item)
       setDocuments(data.documents ?? [])
       setError(null)
     } catch (err) {
       if (seq !== seqRef.current) return
-      setItem(null)
+      setItemState(null)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       if (seq === seqRef.current) setLoading(false)
@@ -359,7 +359,7 @@ export function useEquipmentItem(id: string | null) {
   const update = useCallback(async (input: EquipmentInput) => {
     if (id === null) throw new Error('useEquipmentItem: no id to update')
     const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
-    setItem(data.item)
+    setItemState(data.item)
     return data.item
   }, [id])
 
@@ -391,6 +391,22 @@ export function useEquipmentItem(id: string | null) {
   // effect fires the instant `id` turns from null into the created id, a
   // request that typically lands before the photo uploads that follow it
   // even start.
+  //
+  // Review finding: that GET is not guaranteed to land first, only to fire
+  // first. A caller's own setItem, applied while it's still in flight, used
+  // to leave seqRef untouched, so the GET's own ordering guard (seq !==
+  // seqRef.current, above) never saw anything to disagree with and its
+  // late, stale reply was free to overwrite a newer write - the create-
+  // then-upload race this hook's id-change GET can lose against
+  // equipment-editor.tsx's own per-upload setItem(updated) calls, silently
+  // dropping photos back off the strip once that GET finally landed.
+  // Bumping seqRef here, exactly like refresh() does, invalidates any GET
+  // already in flight the moment a caller hands this a fresher item.
+  const setItem = useCallback((next: EquipmentItem) => {
+    seqRef.current += 1
+    setItemState(next)
+  }, [])
+
   return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem }
 }
 
