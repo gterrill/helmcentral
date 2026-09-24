@@ -998,6 +998,31 @@ describe('EquipmentEditor', () => {
     expect(deletedWithPhotos).toBe(false)
   })
 
+  // Finding 3 (review): the delete dialog's checkbox names a COUNT, with
+  // nothing to show which pictures that count actually means - showing
+  // small thumbnails of exactly the deletable photos, once the box is
+  // ticked, is what lets the operator actually recognise them before
+  // confirming a delete that takes them along with the item.
+  it('shows a thumbnail for each exclusive photo once the "Also delete" checkbox is ticked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'], exclusive_photo_ids: ['p1', 'p2'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    // No thumbnails before the box is ticked.
+    expect(screen.queryByRole('img', { name: /photo to delete/i })).not.toBeInTheDocument()
+
+    const checkboxSpan = screen.getByRole('checkbox')
+    const hiddenInput = checkboxSpan.parentElement!.querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(hiddenInput)
+
+    const thumbs = screen.getAllByRole('img', { name: /photo to delete/i })
+    expect(thumbs).toHaveLength(2)
+    expect(thumbs.map((img) => img.getAttribute('src'))).toEqual(
+      expect.arrayContaining([expect.stringContaining('/api/documents/p1/content'), expect.stringContaining('/api/documents/p2/content')]),
+    )
+  })
+
   // ── photo strip: unlink vs. "Remove and delete" (2026-09-25 amendment) ──
 
   it('offers only a plain Remove for a photo that is not exclusive', async () => {

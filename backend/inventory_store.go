@@ -843,6 +843,18 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 // IS, not a flag written on upload.
 const photoMIMEsClause = `d.mime IN ('image/jpeg', 'image/png')`
 
+// documentDeletableAsOrphanPhotoClause is the shared predicate for "this
+// document may be deleted as a photo nothing else needs any more" (finding
+// 3, 2026-09-25 amendment): it has no folder_id (not filed in Documents or
+// a manual) and is kind='file' (an ordinary document, not a note). This is
+// TWO of the three conditions - the third, "no other equipment_documents
+// link", differs by caller (exclusivePhotoIDsForEquipmentID excludes only
+// links other than the one being asked about; the post-unlink handler
+// re-check wants NO link at all) and is expressed in each query's own WHERE
+// clause rather than folded in here. Referenced against the `documents`
+// table aliased `d` - every caller below joins or selects from it that way.
+const documentDeletableAsOrphanPhotoClause = `d.folder_id IS NULL AND d.kind = 'file'`
+
 // photoIDsForEquipmentIDs returns each of ids' own photo document ids
 // (image/jpeg or image/png among its linked documents), cover first -
 // ordered by sort_index then document_id. One aggregate query over every id
@@ -891,12 +903,15 @@ func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, e
 }
 
 // exclusivePhotoIDsForEquipmentID returns the subset of equipmentID's own
-// photo ids (photoIDsForEquipmentIDs' same image-MIME view) that reference
-// NOTHING else - no other equipment_documents row, on any item, still links
-// the same document. This is what a delete dialog can safely offer to also
-// delete: a document some OTHER item still links must never be removed just
-// because this one's link to it is going away (the operator's own decision,
-// "never delete a document that another item still links").
+// photo ids (photoIDsForEquipmentIDs' same image-MIME view) that are safe to
+// delete alongside this item - the delete dialog's "also delete N photo(s)
+// only this item uses" checkbox, and the strip's own per-photo "Remove and
+// delete" choice. Finding 3 (2026-09-25 amendment): a document counts as
+// deletable only when ALL of documentDeletableAsOrphanPhotoClause's own two
+// conditions hold AND no other equipment_documents row, on any item, still
+// links it - "only this item uses" must never silently delete a document
+// still filed in Documents/a manual, still a note, or still linked
+// elsewhere.
 func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string, error) {
 	rows, err := q.Query(`
 		SELECT ed.document_id
@@ -904,6 +919,7 @@ func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string
 		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
 		WHERE ed.equipment_id = ?
 		AND (SELECT COUNT(*) FROM equipment_documents ed2 WHERE ed2.document_id = ed.document_id) = 1
+		AND `+documentDeletableAsOrphanPhotoClause+`
 		ORDER BY ed.sort_index, ed.document_id`, equipmentID)
 	if err != nil {
 		return nil, fmt.Errorf("exclusive photo ids for equipment: %w", err)
@@ -1732,14 +1748,22 @@ func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) err
 	return tx.Commit()
 }
 
-// DocumentStillLinkedToEquipment reports whether ANY equipment_documents row
-// anywhere still references documentID - deleteEquipmentPhotoHandler's own
-// "re-check exclusivity server-side at delete time" (inventory_handlers.go):
-// called AFTER RemoveEquipmentPhoto's own unlink, so a document another item
-// linked in the meantime is never mistaken for orphaned just because it was
-// exclusive to THIS item a moment ago.
-func (s *documentStore) DocumentStillLinkedToEquipment(documentID string) (bool, error) {
+// DocumentDeletableAsOrphanPhoto reports whether documentID may be deleted
+// after being unlinked from an item's photo strip -
+// deleteEquipmentPhotoHandler's own "re-check exclusivity server-side at
+// delete time" (inventory_handlers.go): called AFTER RemoveEquipmentPhoto's
+// own unlink, so a document another item linked in the meantime is never
+// mistaken for orphaned just because it was exclusive to THIS item a moment
+// ago. Finding 3 (2026-09-25 amendment, renamed from
+// DocumentStillLinkedToEquipment): deletable only when NO equipment_documents
+// row anywhere still references it AND documentDeletableAsOrphanPhotoClause's
+// own two conditions hold - not filed in Documents/a manual, not a note.
+func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return rowExists(s.db, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, documentID)
+	return rowExists(s.db, `
+		SELECT 1 FROM documents d
+		WHERE d.id = ?
+		AND `+documentDeletableAsOrphanPhotoClause+`
+		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)`, documentID)
 }

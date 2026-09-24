@@ -1063,13 +1063,31 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               doesn't exist. Off by default: the operator's own decision
               that a delete never destroys a document without being asked. */}
           {(item?.exclusive_photo_ids.length ?? 0) > 0 && (
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={deletePhotosOnDelete}
-                onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
-              />
-              Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
-            </label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={deletePhotosOnDelete}
+                  onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
+                />
+                Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
+              </label>
+              {/* Finding 3 (review): small thumbnails of exactly the photos
+                  this checkbox would delete - a bare count gives the
+                  operator nothing to actually recognise before confirming a
+                  delete that takes them along with the item. */}
+              {deletePhotosOnDelete && (
+                <div className="flex flex-wrap gap-1.5 pl-6">
+                  {(item?.exclusive_photo_ids ?? []).map((photoId) => (
+                    <img
+                      key={photoId}
+                      src={`${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`}
+                      alt="Photo to delete"
+                      className="h-12 w-12 shrink-0 rounded-md border border-border object-cover"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

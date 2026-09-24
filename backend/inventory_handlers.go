@@ -704,11 +704,13 @@ func setEquipmentPhotoOrderHandler(c echo.Context) error {
 // /api/inventory/equipment/:id/photos/:documentId[?delete=true]: detaches
 // the photo (RemoveEquipmentPhoto - unlink only, 2026-09-25 amendment
 // superseding "a photo has no life outside its item"). delete=true
-// additionally deletes the document itself, but ONLY when nothing else
-// still links it AFTER the unlink (uploads are deduplicated by sha256, so
-// byte-identical photos on two items share one document row) -
-// DocumentStillLinkedToEquipment re-checks this fresh, rather than trusting
-// GetEquipment's own possibly-stale exclusive_photo_ids. The document row
+// additionally deletes the document itself, but ONLY when it is still
+// deletable AFTER the unlink - nothing else links it (uploads are
+// deduplicated by sha256, so byte-identical photos on two items share one
+// document row), it isn't filed in Documents or a manual, and it isn't a
+// note (finding 3, 2026-09-25 amendment) - DocumentDeletableAsOrphanPhoto
+// re-checks this fresh, rather than trusting GetEquipment's own possibly-
+// stale exclusive_photo_ids. The document row
 // is deleted through globalDocumentStore.Delete - the SAME method
 // deleteDocumentHandler (documents_handlers.go) calls - and its file
 // through the same removeDocumentFile helper, so a photo deleted this way
@@ -738,13 +740,13 @@ func deleteEquipmentPhotoHandler(c echo.Context) error {
 	}
 
 	if deleteDoc {
-		stillLinked, err := globalDocumentStore.DocumentStillLinkedToEquipment(documentID)
+		deletable, err := globalDocumentStore.DocumentDeletableAsOrphanPhoto(documentID)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{
 				"error": fmt.Sprintf("the photo was removed from the item, but checking whether it was safe to delete failed: %v", err),
 			})
 		}
-		if !stillLinked {
+		if deletable {
 			sha, err := globalDocumentStore.Delete(documentID)
 			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{

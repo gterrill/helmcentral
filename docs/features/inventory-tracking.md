@@ -224,8 +224,8 @@ photo can be made the cover, and any photo can be removed.
 A picture that is byte-for-byte identical to a file already in Documents is
 linked to the item rather than stored a second time. Removing a photo from
 an item only takes it off that item; the picture stays in Documents unless
-you choose to delete it too, which is offered only when nothing else on
-the boat is using it - see
+you choose to delete it too, which is offered only when it's a picture no
+other item uses and that isn't filed in Documents - see
 [Photograph your gear](../how-to/photograph-your-gear.md).
 
 Reading a label with a vision model to pull the manufacturer, model, serial

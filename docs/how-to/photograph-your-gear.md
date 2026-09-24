@@ -45,14 +45,14 @@ Press **Remove** on its thumbnail in the item's own Photos row. This takes
 the photo off this item; the picture itself stays in Documents, since the
 same picture can be filed against more than one item.
 
-If nothing else on the boat uses that photo, a second option, **Remove and
-delete**, appears next to Remove. Use it when you actually want the
-picture gone for good, not just off this item - a blurry shot you're
-replacing, for instance. It only appears when deleting it would not take
-it away from anything else.
+If that photo is a picture no other item uses and that isn't filed in
+Documents, a second option, **Remove and delete**, appears next to Remove.
+Use it when you actually want the picture gone for good, not just off this
+item - a blurry shot you're replacing, for instance.
 
 Deleting the whole item works the same way. The confirm dialog offers a
 checkbox, "Also delete N photo(s) only this item uses," when the item has
-photos nothing else is using. Leave it unchecked to keep those pictures in
-Documents after the item is gone; check it to remove them along with the
-item.
+photos that fit that description, with a small thumbnail of each one once
+you tick it, so you can see exactly what's about to go. Leave it unchecked
+to keep those pictures in Documents after the item is gone; check it to
+remove them along with the item.

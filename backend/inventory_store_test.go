@@ -1392,6 +1392,162 @@ func TestDocumentStore_GetEquipmentExclusivePhotoIDsOnlyExclusive(t *testing.T) 
 	}
 }
 
+// TestDocumentStore_GetEquipmentExclusivePhotoIDsExcludesFiledImage pins
+// finding 3: an image linked to only this item is NOT exclusive-deletable
+// when it's also filed in a folder (folder_id IS NULL is one of the three
+// conditions) - deleting it here would take it out of that folder/manual
+// too, which "only this item uses" must never silently do.
+func TestDocumentStore_GetEquipmentExclusivePhotoIDsExcludesFiledImage(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	folder, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	filed, err := store.Insert(document{SHA256: "sha-filed-exclusive", Filename: "a.jpg", MIME: "image/jpeg", FolderID: &folder.ID})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, filed.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.ExclusivePhotoIDs) != 0 {
+		t.Fatalf("expected a filed image left out of exclusive_photo_ids, got %#v", got.ExclusivePhotoIDs)
+	}
+}
+
+// TestDocumentStore_GetEquipmentExclusivePhotoIDsExcludesNotes pins the
+// third of finding 3's conditions: kind='file' only, never a note.
+func TestDocumentStore_GetEquipmentExclusivePhotoIDsExcludesNotes(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	note, err := store.Insert(document{SHA256: "sha-exclusive-note", Filename: "a.jpg", MIME: "image/jpeg", Kind: "note"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, note.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.ExclusivePhotoIDs) != 0 {
+		t.Fatalf("expected a note left out of exclusive_photo_ids, got %#v", got.ExclusivePhotoIDs)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentDeletePhotosLeavesFiledImageAlone pins
+// finding 3's delete-time re-check on DeleteEquipment (?delete_photos=true):
+// an image filed in a folder is not deleted just because it was this item's
+// only link.
+func TestDocumentStore_DeleteEquipmentDeletePhotosLeavesFiledImageAlone(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	folder, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	filed, err := store.Insert(document{SHA256: "sha-delete-filed", Filename: "a.jpg", MIME: "image/jpeg", FolderID: &folder.ID})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, filed.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(item.ID, true)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 0 {
+		t.Fatalf("expected the filed image left undeleted, got %#v", deletedSHAs)
+	}
+	if _, err := store.Get(filed.ID); err != nil {
+		t.Fatalf("expected the filed document to survive, got %v", err)
+	}
+}
+
+// TestDocumentStore_DocumentDeletableAsOrphanPhoto pins
+// deleteEquipmentPhotoHandler's own post-unlink re-check helper (finding 3):
+// deletable only once nothing else links it, it has no folder, and it is
+// kind='file'.
+func TestDocumentStore_DocumentDeletableAsOrphanPhoto(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-deletable-unlinked", "a.jpg")
+
+	deletable, err := store.DocumentDeletableAsOrphanPhoto(photo.ID)
+	if err != nil {
+		t.Fatalf("DocumentDeletableAsOrphanPhoto (unlinked): %v", err)
+	}
+	if !deletable {
+		t.Fatalf("expected an unlinked, unfiled, non-note document to be deletable")
+	}
+
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	deletable, err = store.DocumentDeletableAsOrphanPhoto(photo.ID)
+	if err != nil {
+		t.Fatalf("DocumentDeletableAsOrphanPhoto (linked): %v", err)
+	}
+	if deletable {
+		t.Fatalf("expected a linked document to report false")
+	}
+}
+
+// TestDocumentStore_DocumentDeletableAsOrphanPhotoExcludesFiledAndNotes pins
+// the other two conditions on the same helper.
+func TestDocumentStore_DocumentDeletableAsOrphanPhotoExcludesFiledAndNotes(t *testing.T) {
+	store := newTestDocumentStore(t)
+	folder, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	filed, err := store.Insert(document{SHA256: "sha-orphan-filed", Filename: "a.jpg", MIME: "image/jpeg", FolderID: &folder.ID})
+	if err != nil {
+		t.Fatalf("Insert(filed): %v", err)
+	}
+	deletable, err := store.DocumentDeletableAsOrphanPhoto(filed.ID)
+	if err != nil {
+		t.Fatalf("DocumentDeletableAsOrphanPhoto(filed): %v", err)
+	}
+	if deletable {
+		t.Fatalf("expected a filed document to report false")
+	}
+
+	note, err := store.Insert(document{SHA256: "sha-orphan-note", Filename: "b.jpg", MIME: "image/jpeg", Kind: "note"})
+	if err != nil {
+		t.Fatalf("Insert(note): %v", err)
+	}
+	deletable, err = store.DocumentDeletableAsOrphanPhoto(note.ID)
+	if err != nil {
+		t.Fatalf("DocumentDeletableAsOrphanPhoto(note): %v", err)
+	}
+	if deletable {
+		t.Fatalf("expected a note to report false")
+	}
+}
+
 // TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty pins
 // ExclusivePhotoIDs' own doc comment: a listing never computes it.
 func TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty(t *testing.T) {
@@ -1414,32 +1570,7 @@ func TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty(t *testing.T) {
 	}
 }
 
-// TestDocumentStore_DocumentStillLinkedToEquipment pins
-// deleteEquipmentPhotoHandler's own re-check helper directly.
-func TestDocumentStore_DocumentStillLinkedToEquipment(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
-	if err != nil {
-		t.Fatalf("CreateEquipment: %v", err)
-	}
-	photo := mustInsertPhotoDocument(t, store, "sha-still-linked", "a.jpg")
-
-	stillLinked, err := store.DocumentStillLinkedToEquipment(photo.ID)
-	if err != nil {
-		t.Fatalf("DocumentStillLinkedToEquipment (unlinked): %v", err)
-	}
-	if stillLinked {
-		t.Fatalf("expected an unlinked document to report false")
-	}
-
-	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
-		t.Fatalf("AddEquipmentPhoto: %v", err)
-	}
-	stillLinked, err = store.DocumentStillLinkedToEquipment(photo.ID)
-	if err != nil {
-		t.Fatalf("DocumentStillLinkedToEquipment (linked): %v", err)
-	}
-	if !stillLinked {
-		t.Fatalf("expected a linked document to report true")
-	}
-}
+// The old DocumentStillLinkedToEquipment link-only check is now covered by
+// TestDocumentStore_DocumentDeletableAsOrphanPhoto and
+// TestDocumentStore_DocumentDeletableAsOrphanPhotoExcludesFiledAndNotes
+// above (finding 3: the renamed helper also covers folder_id/kind).
