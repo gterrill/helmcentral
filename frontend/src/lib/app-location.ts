@@ -375,3 +375,38 @@ export function inventoryEditorClosedBy(current: InventoryEditorState, target: A
   if (current.creating) return true
   return (target.equipmentEditId ?? null) !== current.equipmentEditId
 }
+
+/**
+ * What Stocktake or the bin page's quick-add draft is showing right now, as
+ * App.tsx holds it - inventoryEditorClosedBy's own state shape, for
+ * inventoryHasWork rather than inventoryDirty.
+ */
+export interface InventoryWorkState {
+  section: InventorySectionId
+  binCode: string | null
+}
+
+/**
+ * Would navigating to `target` take Stocktake or the bin page (whichever is
+ * reporting inventoryHasWork) off screen?
+ *
+ * Release-fixes code-review finding: the popstate handler only ever asked
+ * inventoryEditorClosedBy this question, so a Back press that left Stocktake
+ * or a bin page's quick-add draft behind - the other two things
+ * inventoryHasWork guards - went straight through with no prompt. Same
+ * "is it showing, and does target still show it" shape as
+ * inventoryEditorClosedBy, generalized to the two ways inventoryHasWork's own
+ * clearing effect (App.tsx) treats as "no longer showing": leaving the
+ * 'inventory' panel, leaving Stocktake, or the bin page's own binCode going
+ * back to null.
+ */
+export function inventoryWorkClosedBy(current: InventoryWorkState, target: AppLocation): boolean {
+  const showing = current.section === 'stocktake' || (current.section === 'locations' && current.binCode !== null)
+  if (!showing) return false
+  if (target.panel !== 'inventory') return true
+  const targetSection = target.inventorySection ?? 'equipment'
+  if (current.section === 'stocktake') return targetSection !== 'stocktake'
+  // current.section === 'locations' with a bin open.
+  if (targetSection !== 'locations') return true
+  return (target.binCode ?? null) !== current.binCode
+}

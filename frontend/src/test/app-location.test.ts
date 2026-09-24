@@ -8,6 +8,7 @@ import {
   formatAppLocation,
   isCanonicalAppPath,
   inventoryEditorClosedBy,
+  inventoryWorkClosedBy,
   type LocationContext,
 } from '@/lib/app-location'
 
@@ -575,6 +576,70 @@ describe('inventoryEditorClosedBy', () => {
     expect(inventoryEditorClosedBy(
       { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
       at('/inventory/bins/LAZ-02'),
+    )).toBe(true)
+  })
+})
+
+// Release-fixes code-review finding: a Back/Forward that leaves Stocktake or
+// a bin page's quick-add draft behind - popstate's own equivalent of
+// inventoryEditorClosedBy above, for inventoryHasWork rather than
+// inventoryDirty.
+describe('inventoryWorkClosedBy', () => {
+  const at = (path: string) => parseAppLocation(path)
+
+  it('says no when neither Stocktake nor a bin page is showing', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'equipment', binCode: null },
+      at('/inventory/locations'),
+    )).toBe(false)
+  })
+
+  it('says no when a bin page is showing but the target is the same bin', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/bins/LAZ-02'),
+    )).toBe(false)
+  })
+
+  it('says yes when the target is a different bin', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/bins/LAZ-03'),
+    )).toBe(true)
+  })
+
+  it('says yes when the target is the Locations index (no bin)', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/locations'),
+    )).toBe(true)
+  })
+
+  it('says yes when only the section changed', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/equipment'),
+    )).toBe(true)
+  })
+
+  it('says no when Stocktake is showing and the target is still Stocktake', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/inventory/stocktake'),
+    )).toBe(false)
+  })
+
+  it('says yes when Stocktake is showing and the target is a different section', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/inventory/locations'),
+    )).toBe(true)
+  })
+
+  it('says yes when leaving the panel entirely', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/documents'),
     )).toBe(true)
   })
 })
