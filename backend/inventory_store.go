@@ -1403,30 +1403,6 @@ func sameIDSet(a, b []string) bool {
 	return true
 }
 
-// EnsurePhotoTag adds the 'photo' operator tag to documentID if it doesn't
-// already carry it. idempotent (insertOperatorTagsTx's own ON CONFLICT
-// DO UPDATE). Needed only for the rare case where a freshly uploaded
-// photo's bytes match a document already in the library byte-for-byte
-// (Insert's own sha256 dedupe finds the existing row instead of creating a
-// new one) - without this, that existing row would keep whatever tags it
-// already had and never show up in the item's photo strip, even though the
-// operator just told the photo route to add it as one.
-func (s *documentStore) EnsurePhotoTag(documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("ensure photo tag: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := insertOperatorTagsTx(tx, documentID, []string{"photo"}); err != nil {
-		return fmt.Errorf("ensure photo tag: %w", err)
-	}
-	return tx.Commit()
-}
-
 // AddEquipmentPhoto links documentID to equipmentID as a photo, at the end
 // of the item's current photo order - max(sort_index)+1 among its OWN
 // photo-tagged links (ADR 0127: "the first one is the cover"), so a freshly

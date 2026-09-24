@@ -163,3 +163,21 @@ without a phone.
 - Vision-based label reading (ADR 0065 §5) is unaffected by this ADR and
   remains a separate, later switch - photos land in the library and are
   indexed for search whether or not that switch is ever turned on.
+
+## Amendment, 2026-09-24: a duplicate photo refuses onto a non-photo document
+
+§3's sha256 dedupe originally had `uploadEquipmentPhotoHandler` retag any
+matching document `photo` and link it, whichever way the match was found -
+an existing row (`GetBySHA`) or one that won Insert's own dedupe race. That
+silently repurposed whatever the operator had already filed under
+Documents: a fuel receipt photographed once for the file and again, weeks
+later, as an item's photo would end up tagged `photo` and sitting in that
+item's strip, never asked for. A match that is already tagged `photo` is
+still linked, exactly as before - that is the genuine shared-photo case §3
+always meant to support, and `RemoveEquipmentPhoto`'s "delete the document
+only when no link remains" already handles it correctly. A match that
+is *not* tagged `photo` is refused with 409 instead, naming the document
+("This image is already in Documents as \"…\"") so the operator can go
+find it rather than silently gaining a second, unwanted purpose. The
+retagging call this replaced is deleted outright, not kept behind a flag:
+nothing else needs "add the photo tag to an arbitrary document."

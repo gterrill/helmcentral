@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -628,12 +629,22 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		// Identical bytes already in the library (Insert's own sha256
 		// dedupe, uploadDocumentHandler's own comment) - the file on disk
 		// belongs to that existing row, so only this attempt's own temp
-		// file is removed. EnsurePhotoTag covers the case where that row
-		// wasn't already tagged 'photo' (e.g. it was linked as an ordinary
-		// document elsewhere first).
+		// file is removed either way.
 		removeTemp()
-		if err := globalDocumentStore.EnsurePhotoTag(existing.ID); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		// ADR 0127 amendment (review finding): a document NOT already
+		// tagged 'photo' is something the operator filed under Documents
+		// for its own reason - silently retagging and linking it as this
+		// item's photo would repurpose it without being asked. Refused
+		// instead, naming the document so the operator knows what they
+		// already have. Only when the match IS already tagged 'photo' -
+		// the shared-photo case ADR 0127 §3 always meant to support - does
+		// this link it, same as before.
+		if !slices.Contains(existing.OperatorTags, "photo") {
+			label := existing.Title
+			if label == "" {
+				label = existing.Filename
+			}
+			return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as %q", label)})
 		}
 		if err := globalDocumentStore.AddEquipmentPhoto(id, existing.ID); err != nil {
 			return writeDocumentError(c, err)
@@ -660,13 +671,17 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 		// Insert's own sha256 race: another request created the row between
 		// our GetBySHA check and this Insert call. Same shape as the
 		// "already existed" branch above - the file belongs to that row,
-		// not to this attempt - and the SAME EnsurePhotoTag call is needed
-		// for the same reason: the row that won the race might not have
-		// been tagged 'photo' (e.g. an ordinary document upload racing this
-		// one for identical bytes), and without it this upload would link
-		// successfully but never actually show up in photo_ids.
-		if err := globalDocumentStore.EnsurePhotoTag(inserted.ID); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		// not to this attempt, and the SAME tagged-photo check applies: a
+		// document that won the race untagged is refused, not silently
+		// retagged. Insert returns the winning row's own OperatorTags
+		// already attached (its own doc comment), so no extra read is
+		// needed here.
+		if !slices.Contains(inserted.OperatorTags, "photo") {
+			label := inserted.Title
+			if label == "" {
+				label = inserted.Filename
+			}
+			return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as %q", label)})
 		}
 		if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
 			return writeDocumentError(c, err)

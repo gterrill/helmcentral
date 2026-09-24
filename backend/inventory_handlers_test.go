@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -1031,6 +1033,62 @@ func TestUploadEquipmentPhotoHandler_HEICReturnsEnrichStageMessage(t *testing.T)
 	}
 	if !strings.Contains(rec.Body.String(), "convert to JPEG") {
 		t.Fatalf("expected the enrich stage's own HEIC message, got %s", rec.Body.String())
+	}
+}
+
+// TestUploadEquipmentPhotoHandler_DuplicateOntoNonPhotoLibraryDocumentReturns409
+// pins the amended ADR 0127 design (review finding): uploading bytes that
+// already exist in the library as an ORDINARY document (never tagged
+// 'photo') used to silently tag that document 'photo' and link it -
+// repurposing a document the operator filed under Documents for something
+// they never asked to attach as a photo. The upload is refused instead, and
+// nothing about the existing document changes.
+func TestUploadEquipmentPhotoHandler_DuplicateOntoNonPhotoLibraryDocumentReturns409(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	sum := sha256.Sum256(validJPEGBytes)
+	sha := hex.EncodeToString(sum[:])
+	existing, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: "receipt.jpg", Title: "Fuel receipt", MIME: "image/jpeg"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !strings.Contains(resp.Error, "Fuel receipt") {
+		t.Fatalf("expected the message to name the document by its title, got %q", resp.Error)
+	}
+
+	itemAfter, err := globalDocumentStore.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(itemAfter.PhotoIDs) != 0 {
+		t.Fatalf("expected nothing linked to the item, got %+v", itemAfter.PhotoIDs)
+	}
+
+	after, err := globalDocumentStore.Get(existing.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(after.OperatorTags) != 0 {
+		t.Fatalf("expected the existing document to stay untagged, got %+v", after.OperatorTags)
 	}
 }
 
