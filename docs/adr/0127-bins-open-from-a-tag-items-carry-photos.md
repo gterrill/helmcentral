@@ -204,3 +204,71 @@ actually its own: the document route's title/tags/folder_id fields, the
 photo route's JPEG/PNG allow-list and HEIC message, and each route's own
 response shapes. Behaviour is unchanged - this is the same intake in one
 place instead of two.
+
+## Amendment, 2026-09-25: no tag, and delete is an explicit choice, never a default
+
+Two things changed, both from the same root cause: a global `photo` tag
+cannot mean "this item's photo" once links are m:n and uploads dedupe by
+sha256. A Mate-suggested `photo` tag, or an operator re-tagging a library
+document for their own reason, pulled that document into every item that
+happened to link it; removing it from one item then deleted a document
+another item, or the library itself, still needed. Every photo-deletion
+bug logged against this feature traced back to that single design choice.
+
+**The photo strip is now a view, not a tag.** `photo_ids` is whichever of
+an item's linked documents are `image/jpeg` or `image/png`, ordered by
+`sort_index` then document id, cover first - the exact same view every
+`equipment_documents` link already produces for the Documents tab, just
+filtered by MIME. No tag is read, written, or checked anywhere in this
+path any more. §3's "untag a photo and it drops out of the strip" is
+gone along with the tag it depended on: a photo stays a photo for as long
+as it stays linked and stays an image, full stop. The whole-set-replace
+`PUT .../equipment/:id/documents` §3 narrowed to leave photo-tagged links
+alone is UN-narrowed back to a true whole-set replace, photos included -
+the Documents tab lists every linked document, photos too, and a
+document-tab save that leaves a photo out of the set unlinks it exactly
+like leaving out any other document would. A link the replace KEEPS has
+its `sort_index` left untouched, so a Documents-tab save can never
+reshuffle the strip's order as a side effect.
+
+The 2026-09-24 amendment's 409 ("This image is already in Documents as
+...") is gone with it. There is no more distinction between "already
+tagged photo" (link it) and "not tagged photo" (refuse) to refuse on - a
+byte-identical upload always links the existing document, whatever it
+was filed under. `linkExistingPhotoOrRefuse` is replaced by one
+unconditional link-existing helper.
+
+**Removing a photo, and deleting an item, unlink - they never delete a
+document as their default action.** This supersedes both the 2026-09-24
+amendment and the how-to's own "a photo has no life outside its item"
+rule. The operator's own decision, reached after tracing several
+deletion bugs back to files disappearing nobody asked to remove: the
+system must never destroy a document as a side effect of removing it
+from one item, because the same document may still be exactly what
+another item, or the library on its own, needs. Every deletion is now an
+explicit, per-action choice instead:
+
+- Deleting an item shows a checkbox, "Also delete N photo(s) only this
+  item uses," off by default and shown only when N > 0. N counts the
+  item's own image-linked documents that no other `equipment_documents`
+  link references - `exclusive_photo_ids` on `GET
+  /api/inventory/equipment/:id` names them.
+- Removing one photo from the strip offers "Remove from item" (always)
+  and, only when that photo is exclusive to this item, "Remove and
+  delete the photo" alongside it.
+
+Both routes accept the choice as an explicit flag - `DELETE
+.../equipment/:id?delete_photos=true` and `DELETE
+.../equipment/:id/photos/:documentId?delete=true` - and both re-check
+exclusivity fresh at delete time rather than trusting a value read
+earlier in the request: a document another item has linked in the
+meantime is never deleted out from under it. The document (and its file)
+is removed through the same code the ordinary Documents-tab delete uses,
+so a photo deleted this way leaves exactly the same trail an operator
+deleting it from the library directly would. If the unlink succeeds but
+the underlying document or file fails to go with it, the item or photo
+is already gone either way - the failure says so explicitly rather than
+leaving the editor open on a record that no longer exists.
+
+This supersedes the amendment above and `docs/how-to/photograph-your-gear.md`'s
+prior wording; both are updated to match.
