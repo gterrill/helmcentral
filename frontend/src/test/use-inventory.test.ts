@@ -265,3 +265,41 @@ describe('useEquipmentItem: a write racing an in-flight GET', () => {
     expect(result.current.item?.name).toBe('Updated name')
   })
 })
+
+// Final pre-release review finding: the editor is not remounted between
+// records, so a photo upload for item A that resolves after Back/Forward has
+// moved the editor to item B used to setItem A's record into B's hook - and
+// bump the write counter, so B's own GET was then discarded. The editor
+// showed A's fields under B's id, and Save would have written them onto B.
+describe('useEquipmentItem: a write for a record no longer open', () => {
+  it('ignores setItem with another record, and still applies the open record\'s own GET', async () => {
+    const resolvers: Record<string, (value: Response) => void> = {}
+    const fetchMock = vi.fn().mockImplementation((url: string) => new Promise<Response>((resolve) => {
+      resolvers[String(url).split('/').pop()!] = resolve
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result, rerender } = renderHook(({ id }) => useEquipmentItem(id), { initialProps: { id: 'eq-a' as string | null } })
+    await act(async () => {
+      resolvers['eq-a'](jsonResponse(200, { item: equipmentItem({ id: 'eq-a', name: 'Item A' }), documents: [] }))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.item?.id).toBe('eq-a'))
+
+    rerender({ id: 'eq-b' })
+    await waitFor(() => expect(resolvers['eq-b']).toBeDefined())
+
+    // A's photo upload lands late, after the editor has moved on to B.
+    act(() => { result.current.setItem(equipmentItem({ id: 'eq-a', name: 'Item A', photo_ids: ['photo-a'] })) })
+    // adopt claims an id only while no record is open, so it cannot sneak A in either.
+    act(() => { result.current.setItem(equipmentItem({ id: 'eq-a', name: 'Item A' }), { adopt: true }) })
+
+    await act(async () => {
+      resolvers['eq-b'](jsonResponse(200, { item: equipmentItem({ id: 'eq-b', name: 'Item B' }), documents: [] }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(result.current.item?.id).toBe('eq-b'))
+    expect(result.current.item?.name).toBe('Item B')
+  })
+})

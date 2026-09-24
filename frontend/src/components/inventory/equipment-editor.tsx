@@ -590,7 +590,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               // going to re-fetch it again once that GET's stale response
               // was in.
               const updated = await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
-              setItem(updated)
+              // adopt: this upload can land before the re-render that brings
+              // created.id in as the hook's `id` (see setItem's own comment).
+              setItem(updated, { adopt: true })
               URL.revokeObjectURL(photo.previewUrl)
             } catch (err) {
               URL.revokeObjectURL(photo.previewUrl)

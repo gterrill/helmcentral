@@ -430,7 +430,23 @@ export function useEquipmentItem(id: string | null) {
   // own doc comment (above, by seqRef) for why this is a separate counter
   // from seqRef rather than reusing it: reusing it also discarded that
   // GET's documents/error and left loading stuck true.
-  const setItem = useCallback((next: EquipmentItem) => {
+  // The editor is not remounted between records, so a write's response can
+  // arrive after Back/Forward has already moved this hook to another id - a
+  // photo upload for item A landing while item B is open. Applying it would
+  // show A's fields under B's id (and a Save would then write them onto B),
+  // and bumping itemSeqRef would discard B's own GET. A record that isn't
+  // the one open is therefore dropped (final pre-release review finding).
+  //
+  // `adopt` is the create-then-upload case: Save's create hands the new id
+  // to App.tsx, but the first photo upload can resolve before the re-render
+  // that brings that id back in as this hook's `id`. An adopting write may
+  // claim the id only while no record is open yet (still the draft's null).
+  const idRef = useRef(id)
+  idRef.current = id
+
+  const setItem = useCallback((next: EquipmentItem, options?: { adopt?: boolean }) => {
+    if (options?.adopt && idRef.current === null) idRef.current = next.id
+    if (next.id !== idRef.current) return
     itemSeqRef.current += 1
     setItemState(next)
   }, [])
