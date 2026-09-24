@@ -101,4 +101,28 @@ describe('BinQuickAdd', () => {
 
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  // Review finding: Enter in the Name field calls handleSave directly, with
+  // no in-flight guard - two Enters pressed before the first create's POST
+  // has a chance to resolve (and re-render `saving` into the DOM) both ran
+  // the whole create flow, same as pressing Enter then clicking Save before
+  // the button had disabled itself.
+  it('Enter pressed twice in quick succession creates exactly one item', async () => {
+    const onCreated = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={onCreated} />)
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    const nameField = screen.getByLabelText('Name')
+    // Deliberately no await between these two - reproduces two Enters
+    // landing before React has re-rendered `saving` into the closures
+    // either keydown handler reads.
+    fireEvent.keyDown(nameField, { key: 'Enter' })
+    fireEvent.keyDown(nameField, { key: 'Enter' })
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+
+    const createCalls = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment') && (init as RequestInit | undefined)?.method === 'POST')
+    expect(createCalls).toHaveLength(1)
+  })
 })

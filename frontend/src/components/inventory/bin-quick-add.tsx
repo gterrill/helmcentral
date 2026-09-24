@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -51,6 +51,13 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
   const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([])
   const [savedItemId, setSavedItemId] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  // Review finding: Enter in the Name field calls handleSave directly, with
+  // no in-flight guard - the `saving` state above is too slow to catch a
+  // second Enter (or a stray Enter-then-click) pressed before React has
+  // re-rendered it into either handler's own closure. A ref updates
+  // synchronously, so it is what actually blocks a second call that starts
+  // before the first one's first await ever yields.
+  const savingRef = useRef(false)
 
   // Downscaling every picked file runs concurrently (Promise.all) - see
   // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
@@ -98,6 +105,8 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
   const handleSave = async () => {
     const trimmedName = name.trim()
     if (trimmedName === '') return
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     setSaveError(null)
     try {
@@ -159,6 +168,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
