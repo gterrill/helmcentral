@@ -220,6 +220,11 @@ from the library, downscaled on the way in so a bin of twenty items loads
 quickly over a tailscale connection. The first photo is the cover; any
 photo can be made the cover, and any photo can be removed.
 
+A picture that is byte-for-byte identical to a file already in Documents is
+refused, naming the file it matches, rather than filed a second time under
+the item's photos. Link that existing file from the item's Documents list
+instead - see [Photograph your gear](../how-to/photograph-your-gear.md).
+
 Reading a label with a vision model to pull the manufacturer, model, serial
 and part number off it automatically is designed and not yet built. Typing
 those fields by hand, or reading them off a photo yourself, works today.

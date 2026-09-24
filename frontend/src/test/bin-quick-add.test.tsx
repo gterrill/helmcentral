@@ -8,15 +8,21 @@ import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 // for real against jsdom).
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
+  downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
 }))
 
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
+// Ids handed out by successive create POSTs; empty means every create is 'eq-new'.
+let createdIdQueue: string[]
+let photoUploadTargets: string[]
 const fetchMock = vi.fn()
 
 beforeEach(() => {
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
+  createdIdQueue = []
+  photoUploadTargets = []
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     const u = String(url)
@@ -27,7 +33,7 @@ beforeEach(() => {
       return Promise.resolve({
         ok: true,
         status: 201,
-        json: async () => ({ item: { id: 'eq-new', photo_ids: [], ...body } }),
+        json: async () => ({ item: { id: createdIdQueue.shift() ?? 'eq-new', photo_ids: [], ...body } }),
       })
     }
     const photoPost = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
@@ -35,6 +41,7 @@ beforeEach(() => {
       const form = init?.body as FormData
       const file = form.get('file') as File
       uploadedPhotoOrder.push(file.name)
+      photoUploadTargets.push(photoPost[1])
       if (failingPhotoUploadNames.has(file.name)) {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
       }
@@ -72,6 +79,41 @@ describe('BinQuickAdd', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('')
   })
 
+  // Release-fixes code-review finding: a 409 refusal ("already in Documents
+  // as ...") means the exact same bytes can never be linked as a NEW photo -
+  // re-sending them on Retry can only get the identical refusal, so it must
+  // not go on the retry queue the way a genuine (transient) failure does.
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/equipment') && method === 'POST') {
+        const body = JSON.parse(String(init?.body))
+        return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: { id: 'eq-new', photo_ids: [], ...body } }) })
+      }
+      const photoPost = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
+      if (photoPost && method === 'POST') {
+        const form = init?.body as FormData
+        const file = form.get('file') as File
+        uploadedPhotoOrder.push(file.name)
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'This image is already in Documents as "Fuel receipt"' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
   it('leaves the item saved and offers Retry when a photo upload fails', async () => {
     failingPhotoUploadNames.add('a.jpg')
     render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
@@ -93,6 +135,113 @@ describe('BinQuickAdd', () => {
     await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
   })
 
+  // Release-fixes code-review finding: reports whether the form holds
+  // anything a navigation away would clear - App.tsx routes the bin page's
+  // "Full item" through the same unsaved-work guard when this is true.
+  it('reports hasWork as a name or photos are staged, and clears it after Save', async () => {
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('reports hasWork from a staged photo alone, with no name typed', async () => {
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    onHasWorkChange.mockClear()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+
+    await waitFor(() => expect(onHasWorkChange).toHaveBeenLastCalledWith(true))
+  })
+
+  // Release-fixes code-review finding: the form clears name/photos on a
+  // partial-failure save, so hasWork (name.trim() || photos.length) went
+  // straight back to false even though failedUploads/savedItemId still hold
+  // photos nothing has sent yet - leaving the bin dropped them with no
+  // prompt. They now count as work, with wording that names what is
+  // actually still queued (the cleared name/photo fields have nothing left
+  // to describe).
+  it('counts photos still queued for Retry as work, until Retry clears them', async () => {
+    failingPhotoUploadNames.add('a.jpg')
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText("Saved Gaffer tape, but 1 photo didn't upload: upload failed: a.jpg")
+    // The form itself is cleared and ready for the next item...
+    expect(screen.getByLabelText('Name')).toHaveValue('')
+    // ...but the guard still has something real to warn about.
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "1 photo for Gaffer tape hasn't uploaded yet.")
+
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('pluralizes the queued-photo wording for more than one failed upload', async () => {
+    failingPhotoUploadNames.add('a.jpg')
+    failingPhotoUploadNames.add('b.jpg')
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "2 photos for Gaffer tape haven't uploaded yet.")
+  })
+
+  // Final pre-release review finding: the Retry list held one item's failed
+  // photos at a time, so saving the next item replaced it and the earlier
+  // item's photos were silently lost - whether the next item's photos
+  // uploaded or failed too.
+  it('keeps each saved item\'s failed photos for Retry when the next item is saved', async () => {
+    createdIdQueue = ['eq-a', 'eq-b']
+    failingPhotoUploadNames.add('a.jpg')
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item A' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText(/Saved Item A, but 1 photo didn't upload/)
+
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item B' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    // Item A's failed photo is still offered for Retry, and goes to Item A.
+    expect(screen.getByText(/Saved Item A, but 1 photo didn't upload/)).toBeInTheDocument()
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(photoUploadTargets).toEqual(['eq-a', 'eq-b', 'eq-a']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+  })
+
   it('blocks Save when the name is blank', async () => {
     render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
 
@@ -100,5 +249,29 @@ describe('BinQuickAdd', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // Review finding: Enter in the Name field calls handleSave directly, with
+  // no in-flight guard - two Enters pressed before the first create's POST
+  // has a chance to resolve (and re-render `saving` into the DOM) both ran
+  // the whole create flow, same as pressing Enter then clicking Save before
+  // the button had disabled itself.
+  it('Enter pressed twice in quick succession creates exactly one item', async () => {
+    const onCreated = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={onCreated} />)
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    const nameField = screen.getByLabelText('Name')
+    // Deliberately no await between these two - reproduces two Enters
+    // landing before React has re-rendered `saving` into the closures
+    // either keydown handler reads.
+    fireEvent.keyDown(nameField, { key: 'Enter' })
+    fireEvent.keyDown(nameField, { key: 'Enter' })
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+
+    const createCalls = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment') && (init as RequestInit | undefined)?.method === 'POST')
+    expect(createCalls).toHaveLength(1)
   })
 })

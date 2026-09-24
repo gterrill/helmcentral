@@ -1,36 +1,19 @@
-import { useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
-import { createEquipment, uploadEquipmentPhoto, type EquipmentInput } from '@/hooks/use-inventory'
-import { downscaleImage } from '@/lib/image-downscale'
+import { BLANK_DRAFT, createEquipment, type EquipmentInput } from '@/hooks/use-inventory'
+import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-staging'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
 // bin, photograph each thing, name it. Reuses PhotoStripEditor's local
-// photo list (photo-strip-editor.tsx) and the same create-then-upload
-// sequence equipment-editor.tsx's own draft Save runs, but as its OWN small
-// form rather than the full Specifications editor - Full item (bin-page.tsx)
-// is the escape hatch to that when a quick record isn't enough.
-
-interface LocalPhoto {
-  id: string
-  blob: Blob
-  filename: string
-  previewUrl: string
-}
-
-interface FailedUpload {
-  blob: Blob
-  filename: string
-  error: string
-}
-
-function photoFilename(original: string): string {
-  const base = original.replace(/\.[^.]+$/, '').trim()
-  return `${base || 'photo'}.jpg`
-}
+// photo list (photo-strip-editor.tsx) and usePhotoStaging's own
+// create-then-upload sequence, the same one equipment-editor.tsx's own
+// draft Save runs, but as its OWN small form rather than the full
+// Specifications editor - Full item (bin-page.tsx) is the escape hatch to
+// that when a quick record isn't enough.
 
 interface BinQuickAddProps {
   zoneId: string
@@ -39,113 +22,119 @@ interface BinQuickAddProps {
    * the bin page's own contents list refresh. */
   onCreated: () => void
   canWrite?: boolean
+  /** Release-fixes code-review finding: reports whether this form holds a
+   * staged name or photos a navigation away would silently clear -
+   * App.tsx routes the bin page's "Full item" button through the same
+   * unsaved-work guard equipment-editor.tsx's onDirtyChange already gets
+   * when this is true. `detail`, when given, is wording for what is
+   * actually staged (see the second review finding on `hasWork` below) -
+   * App.tsx's dialog uses it in place of its own generic copy when present. */
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
-export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQuickAddProps) {
+/** One saved item's photos still waiting for Retry. */
+interface PendingRetry {
+  itemId: string
+  name: string
+  failures: FailedPhotoUpload[]
+  notice: string
+}
+
+export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState(1)
-  const [photos, setPhotos] = useState<LocalPhoto[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([])
-  const [savedItemId, setSavedItemId] = useState<string | null>(null)
-  const [retrying, setRetrying] = useState(false)
+  // A 409-only notice ("already in Documents as ..."): nothing to retry.
+  const [refusedNotice, setRefusedNotice] = useState<string | null>(null)
+  // Photos still waiting for Retry, one entry per saved item. The form
+  // clears after every save and moves on to the next item, so a single
+  // slot here used to be overwritten by the next save and the earlier
+  // item's photos were silently lost (final pre-release review finding).
+  // `name` is kept because the form's own Name field is already blank by
+  // the time anything reads an entry.
+  const [pendingRetries, setPendingRetries] = useState<PendingRetry[]>([])
+  const [retryingItemId, setRetryingItemId] = useState<string | null>(null)
+  // Review finding: Enter in the Name field calls handleSave directly, with
+  // no in-flight guard - the `saving` state above is too slow to catch a
+  // second Enter (or a stray Enter-then-click) pressed before React has
+  // re-rendered it into either handler's own closure. A ref updates
+  // synchronously, so it is what actually blocks a second call that starts
+  // before the first one's first await ever yields.
+  const savingRef = useRef(false)
 
-  // Downscaling every picked file runs concurrently (Promise.all) - see
-  // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
-  // Results are still applied in the ORIGINAL file order, not completion
-  // order.
-  const addFiles = async (files: File[]) => {
-    const results = await Promise.all(files.map(async (file) => {
-      try {
-        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
-      } catch (err) {
-        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
-      }
-    }))
-    let lastError: string | null = null
-    for (const result of results) {
-      if (result.ok) {
-        const previewUrl = URL.createObjectURL(result.downscaled)
-        setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
-      } else {
-        lastError = result.error
-      }
-    }
-    if (lastError) setSaveError(lastError)
-  }
+  const {
+    localPhotos: photos,
+    setLocalPhotos: setPhotos,
+    addLocalPhotos: addFiles,
+    makeCoverLocal: makeCover,
+    removeLocalPhoto: removePhoto,
+    uploadPhotosInOrder,
+  } = usePhotoStaging({ onDownscaleError: setSaveError })
 
-  const makeCover = (photoId: string) => {
-    setPhotos((prev) => {
-      const idx = prev.findIndex((p) => p.id === photoId)
-      if (idx <= 0) return prev
-      const next = [...prev]
-      const [moved] = next.splice(idx, 1)
-      next.unshift(moved)
-      return next
-    })
-  }
-
-  const removePhoto = (photoId: string) => {
-    setPhotos((prev) => {
-      const target = prev.find((p) => p.id === photoId)
-      if (target) URL.revokeObjectURL(target.previewUrl)
-      return prev.filter((p) => p.id !== photoId)
-    })
-  }
+  // Release-fixes code-review finding: a partial-failure save clears name
+  // and photos (the form's own "ready for the next item" contract, handleSave
+  // below) but leaves failedUploads/savedItemId holding photos nothing has
+  // actually sent - those are exactly as much unsent work as a staged name or
+  // photo, and leaving the bin used to drop them with no prompt because this
+  // check never looked at them.
+  const hasWork = useMemo(
+    () => name.trim() !== '' || photos.length > 0 || pendingRetries.length > 0,
+    [name, photos, pendingRetries],
+  )
+  // Wording for the failedUploads case specifically - the fallback "name and
+  // photos you have added" copy App.tsx's dialog otherwise shows would be
+  // wrong here (the form's own name/photo fields are empty; nothing was "just
+  // added"). null when hasWork is true for the ordinary staged-draft reason
+  // instead, so App.tsx's own generic copy still applies there.
+  const detail = useMemo(() => {
+    if (pendingRetries.length === 0) return undefined
+    const n = pendingRetries.reduce((total, entry) => total + entry.failures.length, 0)
+    const who = pendingRetries.length === 1 ? pendingRetries[0].name : `${pendingRetries.length} items`
+    return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
+  }, [pendingRetries])
+  // useLayoutEffect - see stocktake-section.tsx's own onHasWorkChange effect
+  // for why: App.tsx's guard can read inventoryHasWork right after a state
+  // update this same effect is meant to report, with no render in between
+  // for an ordinary passive effect to be guaranteed to have caught up.
+  useLayoutEffect(() => {
+    if (detail !== undefined) onHasWorkChange?.(hasWork, detail)
+    else onHasWorkChange?.(hasWork)
+  }, [hasWork, detail, onHasWorkChange])
 
   const handleSave = async () => {
     const trimmedName = name.trim()
     if (trimmedName === '') return
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     setSaveError(null)
     try {
-      // system is left out (set to its own server default 'other' here
-      // rather than omitted from the request body, which lands on the
-      // identical stored value) - "that is the current contract, not a new
-      // fallback" (the plan's own words).
+      // BLANK_DRAFT already carries system's own server default 'other' -
+      // "that is the current contract, not a new fallback" (the plan's own
+      // words) - so only the fields this form actually collects override it.
       const input: EquipmentInput = {
+        ...BLANK_DRAFT,
         name: trimmedName,
-        category: 'general',
-        system: 'other',
-        manufacturer: '',
-        model: '',
-        serial: '',
         quantity,
+        category: 'general',
         status: 'stored',
         zone_id: zoneId,
         bin_id: binId,
-        location_detail: '',
-        install_date: '',
-        hour_meter_path: '',
-        profile_id: '',
-        aliases: [],
-        verified_aboard: false,
-        notes: '',
       }
       const created = await createEquipment(input)
 
-      const toUpload = photos
-      const failures: FailedUpload[] = []
-      for (const photo of toUpload) {
-        try {
-          await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
-          URL.revokeObjectURL(photo.previewUrl)
-        } catch (err) {
-          URL.revokeObjectURL(photo.previewUrl)
-          failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
-        }
-      }
+      const { failures, refused } = await uploadPhotosInOrder(created.id, photos)
 
+      // Only this item's own outcome changes here - an earlier item's
+      // photos still waiting for Retry are left exactly where they are.
       if (failures.length > 0) {
-        setSavedItemId(created.id)
-        setFailedUploads(failures)
-        setNotice(`Saved ${trimmedName}, but ${failures.length} photo${failures.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+        const notUploaded = failures.length + refused.length
+        const notice = `Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`
+        setPendingRetries((prev) => [...prev, { itemId: created.id, name: trimmedName, failures, notice }])
+        setRefusedNotice(null)
       } else {
-        setSavedItemId(null)
-        setFailedUploads([])
-        setNotice(null)
+        setRefusedNotice(refused.length > 0 ? refused[0] : null)
       }
 
       // The form clears and the camera is ready for the next item -
@@ -159,26 +148,26 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
-  const handleRetry = async () => {
-    if (savedItemId === null || failedUploads.length === 0) return
-    setRetrying(true)
-    const stillFailing: FailedUpload[] = []
-    for (const photo of failedUploads) {
-      try {
-        await uploadEquipmentPhoto(savedItemId, photo.blob, photo.filename)
-      } catch (err) {
-        stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
-      }
-    }
-    setFailedUploads(stillFailing)
-    setNotice(stillFailing.length === 0
-      ? null
-      : `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
-    setRetrying(false)
+  const handleRetry = async (entry: PendingRetry) => {
+    setRetryingItemId(entry.itemId)
+    // No previewUrl to revoke for a retried photo (none was ever created -
+    // an entry holds only blob/filename/error) - uploadPhotosInOrder skips
+    // the revoke for an empty one.
+    const toRetry = entry.failures.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
+    const { failures: stillFailing, refused } = await uploadPhotosInOrder(entry.itemId, toRetry)
+    setPendingRetries((prev) => {
+      const others = prev.filter((p) => p.itemId !== entry.itemId)
+      if (stillFailing.length === 0) return others
+      const notice = `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`
+      return prev.map((p) => (p.itemId === entry.itemId ? { ...p, failures: stillFailing, notice } : p))
+    })
+    if (stillFailing.length === 0 && refused.length > 0) setRefusedNotice(refused[0])
+    setRetryingItemId(null)
     onCreated()
   }
 
@@ -222,14 +211,19 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true }: BinQu
       {saveError && (
         <p role="alert" className="text-sm text-destructive">{saveError}</p>
       )}
-      {notice && (
-        <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
-          <span>{notice}</span>
-          <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={() => { void handleRetry() }}>
-            {retrying ? 'Retrying...' : 'Retry'}
+      {/* A 409 refusal is never queued - Retry could only repeat the same
+          refusal, so its notice carries no Retry button. */}
+      {refusedNotice && (
+        <p role="alert" className="rounded-md border border-border bg-muted px-3 py-2 text-sm">{refusedNotice}</p>
+      )}
+      {pendingRetries.map((entry) => (
+        <div key={entry.itemId} role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+          <span className="min-w-0">{entry.notice}</span>
+          <Button type="button" variant="outline" size="sm" disabled={retryingItemId === entry.itemId} onClick={() => { void handleRetry(entry) }}>
+            {retryingItemId === entry.itemId ? 'Retrying...' : 'Retry'}
           </Button>
         </div>
-      )}
+      ))}
     </div>
   )
 }

@@ -10,7 +10,9 @@ import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 // a code against the zone/bin tree, the not-found/create flow, and the
 // contents list + photo stack.
 vi.mock('@/components/inventory/bin-quick-add', () => ({
-  BinQuickAdd: () => <div data-testid="bin-quick-add" />,
+  // An uncontrolled input stands in for the real form's draft: its typed
+  // value survives a re-render and is cleared only by a remount.
+  BinQuickAdd: () => <div data-testid="bin-quick-add"><input aria-label="Quick add draft" /></div>,
 }))
 vi.mock('@/components/inventory/tag-row', () => ({
   TagRow: (props: { path: string }) => <div data-testid="tag-row">{props.path}</div>,
@@ -93,6 +95,44 @@ describe('BinPage', () => {
     expect(screen.getByText('NOPE')).toBeInTheDocument()
   })
 
+  // Review finding: a failed zones fetch used to be indistinguishable from
+  // "no such bin" - useInventoryZones' own error was never read, so a
+  // network failure landed on the same "No bin NOPE" + Create state a
+  // genuinely unknown code does, offering to create a duplicate of a bin
+  // that may well already exist.
+  it('shows the zones fetch error instead of the not-found/create state', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).endsWith('/api/inventory/zones')) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'zones unavailable' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+
+    await screen.findByText('zones unavailable')
+    expect(screen.queryByText(/No bin/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Create bin/ })).not.toBeInTheDocument()
+  })
+
+  it('does not show "No bin" while zones are still loading', async () => {
+    let resolveZones!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).endsWith('/api/inventory/zones')) {
+        return new Promise((resolve) => { resolveZones = resolve })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+
+    expect(screen.queryByText(/No bin/)).not.toBeInTheDocument()
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+
+    resolveZones({ ok: true, json: async () => ({ zones }) })
+    await screen.findByText('LAZ-02')
+  })
+
   it('offers Create bin for an unknown code, and creating it shows the empty bin', async () => {
     render(<BinPage code="NOPE" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
     await screen.findByText('No bin')
@@ -171,5 +211,29 @@ describe('BinPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
 
     expect(onNewEquipment).toHaveBeenCalledWith({ zoneId: 'z1', binId: 'b1' })
+  })
+
+  // Final pre-release review finding: the quick-add form was not reset when
+  // the bin changed, so Back/Forward from one bin to another carried a typed
+  // name and staged photos across, and Save then filed them in the wrong bin.
+  it("starts a fresh quick-add draft when the bin changes", async () => {
+    zones = [
+      {
+        id: "z1", name: "Lazarette", sort_index: 0,
+        bins: [
+          { id: "b1", zone_id: "z1", code: "LAZ-02", name: "Adhesives", sort_index: 0 },
+          { id: "b2", zone_id: "z1", code: "LAZ-03", name: "Fasteners", sort_index: 1 },
+        ],
+      },
+    ]
+    const props = { onClose: vi.fn(), onOpenEquipment: vi.fn(), onNewEquipment: vi.fn() }
+    const { rerender } = render(<BinPage code="LAZ-02" {...props} />)
+    const draft = await screen.findByLabelText("Quick add draft")
+    fireEvent.change(draft, { target: { value: "Gaffer tape" } })
+
+    rerender(<BinPage code="LAZ-03" {...props} />)
+    await screen.findByText("Fasteners")
+
+    expect((screen.getByLabelText("Quick add draft") as HTMLInputElement).value).toBe("")
   })
 })

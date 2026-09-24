@@ -11,6 +11,23 @@ import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/us
 // harmless pass-through so the rest of the upload flow can be exercised).
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
+  downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
+}))
+
+// A minimal stand-in for the real picker (its own search flow is a separate
+// small fetch, covered by document-link-picker's own tests) - just enough
+// to drive `onPick` with a fixed result so this file's own save-error test
+// can pin what happens when the server refuses that pick.
+vi.mock('@/components/inventory/document-link-picker', () => ({
+  DocumentLinkPicker: ({ open, onPick }: { open: boolean; onPick: (doc: { document_id: string; title: string; filename: string }) => void }) => (
+    open
+      ? (
+          <button type="button" onClick={() => onPick({ document_id: 'refused-photo', title: '', filename: 'engine.jpg' })}>
+            Pick refused-photo
+          </button>
+        )
+      : null
+  ),
 }))
 
 function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
@@ -65,6 +82,11 @@ let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
+// Release-fixes code-review finding: a 409 ("already in Documents") can
+// never succeed on Retry - it's the same bytes every time - so it needs its
+// own fixture, distinct from failingPhotoUploadNames' plain 500s which DO
+// belong on the retry queue.
+let conflictPhotoUploadNames: Map<string, string>
 const fetchMock = vi.fn()
 
 // Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
@@ -103,6 +125,12 @@ function stubFetch() {
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PUT') {
       const body = JSON.parse(String(init?.body)) as { document_ids: string[] }
+      // Mirrors backend/inventory_handlers.go's own refusal: a photo-tagged
+      // docID sent through this whole-set-replace PUT is a 400 naming it,
+      // not linked as an ordinary document.
+      if (body.document_ids.includes('refused-photo')) {
+        return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: '"engine.jpg" is a photo; add photos from the item\'s photo row' }) })
+      }
       currentDocuments = currentDocuments.filter((d) => body.document_ids.includes(d.document_id))
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
@@ -149,6 +177,9 @@ function stubFetch() {
       const form = init?.body as FormData
       const file = form.get('file') as File
       uploadedPhotoOrder.push(file.name)
+      if (conflictPhotoUploadNames.has(file.name)) {
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: conflictPhotoUploadNames.get(file.name) }) })
+      }
       if (failingPhotoUploadNames.has(file.name)) {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
       }
@@ -180,6 +211,7 @@ beforeEach(() => {
   currentDocuments = []
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
+  conflictPhotoUploadNames = new Map()
   stubFetch()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -402,6 +434,23 @@ describe('EquipmentEditor', () => {
     })
   })
 
+  // Item 2 of the pre-release review: the backend now refuses a photo-
+  // tagged docID sent through the ordinary documents PUT with a 400 naming
+  // it. This pins that the refusal reaches the operator through the same
+  // save-error banner every other Save failure already uses - no separate
+  // error UI needed for this case.
+  it('shows the server\'s refusal when a picked document turns out to be a photo', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick refused-photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText('"engine.jpg" is a photo; add photos from the item\'s photo row')
+    expect(screen.getByRole('alert')).toHaveTextContent('is a photo')
+  })
+
   it('asks for confirmation before deleting and calls onDeleted once accepted', async () => {
     const onDeleted = vi.fn()
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
@@ -418,6 +467,71 @@ describe('EquipmentEditor', () => {
   })
 
   // ── photos (ADR 0127) ────────────────────────────────────────────────
+
+  // Review finding: baselineDocIds (the dirty check's own "what the server
+  // has" side) was built from the RAW `documents` list GET returns, which
+  // includes photo-tagged links - while docEntries (the Documents tab's own
+  // list, and the other side of the same comparison) excludes them, the
+  // same filtering the effect just above this component's Documents tab
+  // applies. Any item with a photo was therefore permanently dirty: the two
+  // sides could never agree, even with nothing actually changed.
+  it('is not dirty when opening a saved item that has one photo and nothing else changes', async () => {
+    currentItem = makeItem({ photo_ids: ['photo-1'] })
+    currentDocuments = [
+      { document_id: 'photo-1', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+    ]
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    await screen.findByText('Remove')
+
+    // Settles to NOT dirty - the ordinary transient true along the way
+    // (item loaded, draft not yet re-seeded from it - every dirty-check
+    // test in this file settles past that same moment) is not what this
+    // pins; a permanently mismatched baseline never settles back to false
+    // at all.
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  // Release-fixes code-review finding: removeSavedPhoto's setItem(updated)
+  // drops the photo from item.photo_ids, but `documents` (fetched
+  // separately, at mount) still carries its link - the Documents tab's own
+  // exclusion filter keys off photo_ids, so the instant photo_ids no longer
+  // names it, the still-stale `documents` array makes it look like an
+  // ordinary linked document. A later Save that touches the link set at all
+  // would then PUT it right back as one.
+  it('does not let a removed photo reappear in the Documents tab or get sent on the next document save', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'] })
+    currentDocuments = [
+      { document_id: 'p1', title: '', filename: 'cover.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+      { document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+    ]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Manual')
+    // The photo never shows in the Documents tab to begin with.
+    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Remove'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1/photos/p1') && (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true))
+
+    // Still not in the Documents tab after the removal.
+    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+
+    // Touch the link set (remove the genuinely-linked Manual) and save - the
+    // PUT must not resurrect the removed photo alongside it.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
+      expect(body.document_ids).toEqual([])
+    })
+  })
 
   it("POSTs a saved item's Take photo pick to /photos", async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
@@ -527,6 +641,53 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(3))
   })
 
+  // Final pre-release review finding: the editor stays mounted across
+  // Back/Forward, and failed photo uploads were held with no record of which
+  // item they belonged to - item B showed item A's "didn't upload" notice,
+  // and Retry filed A's photo on B.
+  it('keeps a failed photo upload with its own item: another item neither shows it nor retries it', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('b.jpg')
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await waitForLoaded()
+
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText(/didn't upload/)
+
+    currentItem = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+
+    expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
+  // Final pre-release review finding: the failed-upload list held one item
+  // at a time, so a failure on item B replaced item A's and A's photos were
+  // lost with no prompt.
+  it('keeps each item\'s failed photo uploads when another item\'s upload also fails', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('a.jpg')
+    failingPhotoUploadNames.add('b.jpg')
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await waitForLoaded()
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: a.jpg")
+
+    currentItem = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } })
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: b.jpg")
+
+    currentItem = makeItem({ photo_ids: [] })
+    rerender(<EquipmentEditor id="eq-1" {...props} />)
+    await screen.findByText("1 of 1 photo didn't upload: upload failed: a.jpg")
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
   // ADR 0127 review finding: the photo row was empty after creating an item
   // with photos - useEquipmentItem's own GET for the newly created id (the
   // id-change effect) can land BEFORE the photo uploads that follow it in
@@ -570,6 +731,16 @@ describe('EquipmentEditor', () => {
     resolveGetNew({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
   })
 
+  // The precise "GET starts before the uploads, resolves after them" race
+  // (setItem's own seqRef bump, so that late reply is discarded) is
+  // deterministic only at the hook level, where the id-change GET's start
+  // and each upload's own setItem can be sequenced exactly - see
+  // use-inventory.test.ts's own "discards a slow GET..." test. This
+  // component-level suite proves the strip is right while that GET is
+  // in flight (the test above); forcing the GET to start before a mocked
+  // photo upload resolves, without an artificial delay that would just be
+  // testing jsdom's own scheduling, isn't reliable here.
+
   // Mirrors how InventoryPanel/App.tsx actually wire onCreated - id starts
   // null and flips to the server-assigned id once Save's create succeeds,
   // WITHOUT unmounting EquipmentEditor (same component instance, only the
@@ -606,6 +777,44 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+  })
+
+  // Release-fixes code-review finding: a 409 refusal ("already in Documents
+  // as ...") is the server saying these exact bytes can never be linked as
+  // a NEW photo - re-sending the identical bytes on Retry can only get the
+  // identical refusal, so it must not be queued for Retry the way a genuine
+  // (transient) failure is.
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a saved item', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    // Dropped, not left on the strip as a pending/failed photo either.
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument()
+  })
+
+  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a brand new draft\'s create-then-upload', async () => {
+    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
+    const onCreated = vi.fn()
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(1))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
   it('shows Retry after a partial upload failure, and Retry re-sends only that one photo', async () => {

@@ -246,6 +246,55 @@ export function parseAppLocation(pathname: string): AppLocation {
   return { panel: null, pageId: null }
 }
 
+// ADR 0127: turns scanned text (a keyboard-wedge or pasted URL, or a bare
+// bin code) into an AppLocation naming the bin or item it scanned, or null
+// when nothing recognisable comes out of it. Stocktake's own scan handler
+// (stocktake-section.tsx's handleScan) is the only caller; moved here,
+// next to parseAppLocation, so the string-matching stays in the one module
+// that already owns "how a path string maps to app state" rather than
+// living inline in a component.
+//
+// `new URL(text)` only succeeds for an ABSOLUTE url (a scheme included),
+// which a scan typed into a boat's own tailnet address bar without
+// "https://" is not (e.g. "boat.tailnet.ts.net/inventory/bins/LAZ-02").
+// Treating that whole string as a bare bin code (the naive approach this
+// replaced) resolved to the wrong bin - or, worse, silently to none at all.
+// So a scheme-less scan is read three ways, in order: an /inventory/ path
+// pulled out of wherever it starts in the string; failing that, a bare bin
+// code ONLY if there's no slash in it at all (a real bin code never has
+// one); anything else is unrecognised. Whatever pathname results is handed
+// to parseAppLocation, but only a bin-page or equipment-editor shape counts
+// as "recognised" here - a URL that parses fine but names some other panel
+// (or nothing) is just as unrecognised as text that never parsed as a path
+// at all.
+export function resolveScannedText(text: string): AppLocation | null {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+
+  let pathname: string
+  try {
+    pathname = new URL(trimmed).pathname
+  } catch {
+    const inventoryIndex = trimmed.indexOf('/inventory/')
+    if (inventoryIndex !== -1) {
+      pathname = trimmed.slice(inventoryIndex)
+    } else if (!trimmed.includes('/')) {
+      pathname = `/inventory/bins/${trimmed}`
+    } else {
+      return null
+    }
+  }
+
+  const parsed = parseAppLocation(pathname)
+  if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
+    return parsed
+  }
+  if (parsed.panel === 'inventory' && parsed.inventorySection === 'equipment' && parsed.equipmentEditId) {
+    return parsed
+  }
+  return null
+}
+
 // The inverse of parseAppLocation, and the only place that builds a path
 // string. Every AppLocation has exactly one canonical string here (the
 // one-to-one mapping isCanonicalAppPath and the URL sync effect both rely
@@ -374,4 +423,39 @@ export function inventoryEditorClosedBy(current: InventoryEditorState, target: A
   // all closes it. A saved record survives only a target naming that same id.
   if (current.creating) return true
   return (target.equipmentEditId ?? null) !== current.equipmentEditId
+}
+
+/**
+ * What Stocktake or the bin page's quick-add draft is showing right now, as
+ * App.tsx holds it - inventoryEditorClosedBy's own state shape, for
+ * inventoryHasWork rather than inventoryDirty.
+ */
+export interface InventoryWorkState {
+  section: InventorySectionId
+  binCode: string | null
+}
+
+/**
+ * Would navigating to `target` take Stocktake or the bin page (whichever is
+ * reporting inventoryHasWork) off screen?
+ *
+ * Release-fixes code-review finding: the popstate handler only ever asked
+ * inventoryEditorClosedBy this question, so a Back press that left Stocktake
+ * or a bin page's quick-add draft behind - the other two things
+ * inventoryHasWork guards - went straight through with no prompt. Same
+ * "is it showing, and does target still show it" shape as
+ * inventoryEditorClosedBy, generalized to the two ways inventoryHasWork's own
+ * clearing effect (App.tsx) treats as "no longer showing": leaving the
+ * 'inventory' panel, leaving Stocktake, or the bin page's own binCode going
+ * back to null.
+ */
+export function inventoryWorkClosedBy(current: InventoryWorkState, target: AppLocation): boolean {
+  const showing = current.section === 'stocktake' || (current.section === 'locations' && current.binCode !== null)
+  if (!showing) return false
+  if (target.panel !== 'inventory') return true
+  const targetSection = target.inventorySection ?? 'equipment'
+  if (current.section === 'stocktake') return targetSection !== 'stocktake'
+  // current.section === 'locations' with a bin open.
+  if (targetSection !== 'locations') return true
+  return (target.binCode ?? null) !== current.binCode
 }

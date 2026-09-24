@@ -2,11 +2,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -765,6 +770,54 @@ func TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *tes
 	}
 }
 
+// TestSetEquipmentDocumentsHandler_RefusesPhotoTaggedDocument pins item 2 of
+// the pre-release review: PUT .../documents used to accept a document
+// tagged 'photo' (e.g. another item's own photo) as an ORDINARY link,
+// where it showed up in the target item's photo strip with no way to
+// unlink it through the documents flow - the two link kinds (ADR 0127's own
+// "photo-tagged links are managed only through the photo routes") were
+// meant to stay separate. A photo-tagged docID must be refused with a 400
+// naming it, and the equipment's document set left exactly as it was.
+func TestSetEquipmentDocumentsHandler_RefusesPhotoTaggedDocument(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	ordinary, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-refuse-ordinary", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert(ordinary): %v", err)
+	}
+	if err := globalDocumentStore.SetEquipmentDocuments(item.ID, []string{ordinary.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments (seed): %v", err)
+	}
+
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-refuse-photo", Filename: "engine.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(photo): %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["`+photo.ID+`"]}`, item.ID)
+	if err := setEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a photo-tagged docID, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !jsonBodyContains(t, rec.Body.Bytes(), "engine.jpg") {
+		t.Fatalf("expected the 400 body to name the refused photo, got %s", rec.Body.String())
+	}
+
+	docs, err := globalDocumentStore.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != ordinary.ID {
+		t.Fatalf("expected the item's document set unchanged by the rejected call, got %+v", docs)
+	}
+}
+
 // jsonBodyContains reports whether raw's top-level "error" string field
 // contains want - a small helper so the 404-names-the-id assertion above
 // doesn't need to know the exact wording of the message, only that the
@@ -1034,6 +1087,101 @@ func TestUploadEquipmentPhotoHandler_HEICReturnsEnrichStageMessage(t *testing.T)
 	}
 }
 
+// TestUploadEquipmentPhotoHandler_DuplicateOntoNonPhotoLibraryDocumentReturns409
+// pins the amended ADR 0127 design (review finding): uploading bytes that
+// already exist in the library as an ORDINARY document (never tagged
+// 'photo') used to silently tag that document 'photo' and link it -
+// repurposing a document the operator filed under Documents for something
+// they never asked to attach as a photo. The upload is refused instead, and
+// nothing about the existing document changes.
+func TestUploadEquipmentPhotoHandler_DuplicateOntoNonPhotoLibraryDocumentReturns409(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	sum := sha256.Sum256(validJPEGBytes)
+	sha := hex.EncodeToString(sum[:])
+	existing, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: "receipt.jpg", Title: "Fuel receipt", MIME: "image/jpeg"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !strings.Contains(resp.Error, "Fuel receipt") {
+		t.Fatalf("expected the message to name the document by its title, got %q", resp.Error)
+	}
+
+	itemAfter, err := globalDocumentStore.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(itemAfter.PhotoIDs) != 0 {
+		t.Fatalf("expected nothing linked to the item, got %+v", itemAfter.PhotoIDs)
+	}
+
+	after, err := globalDocumentStore.Get(existing.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(after.OperatorTags) != 0 {
+		t.Fatalf("expected the existing document to stay untagged, got %+v", after.OperatorTags)
+	}
+}
+
+// Release-fixes code-review finding: the refusal message used %q on the
+// document's own title, which backslash-escapes any quote already IN that
+// title - "Fuel receipt "urgent"" came back as `"Fuel receipt \"urgent\""`,
+// unreadable in the UI. A literal `"%s"` shows the title's own quotes as-is.
+func TestUploadEquipmentPhotoHandler_DuplicateMessageDoesNotBackslashEscapeQuotesInTitle(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	sum := sha256.Sum256(validJPEGBytes)
+	sha := hex.EncodeToString(sum[:])
+	if _, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: "receipt.jpg", Title: `Fuel receipt "urgent"`, MIME: "image/jpeg"}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	c, rec := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.Contains(resp.Error, `\`) {
+		t.Fatalf("expected no backslash-escaped quotes in the message, got %q", resp.Error)
+	}
+	if !strings.Contains(resp.Error, `"Fuel receipt "urgent""`) {
+		t.Fatalf("expected the title's own quotes to show through as typed, got %q", resp.Error)
+	}
+}
+
 // ── PUT /api/inventory/equipment/:id/photos ──────────────────────────────
 
 func TestSetEquipmentPhotoOrderHandler_ReorderMovesSecondToFrontChangesCover(t *testing.T) {
@@ -1255,6 +1403,156 @@ func TestDeleteEquipmentHandler_CascadesPhotoLinks(t *testing.T) {
 	}
 }
 
+// TestDeleteEquipmentHandler_RemovesUnsharedPhotoDocumentAndFile is item 1 of
+// the pre-release review: DeleteEquipment's own cascade removes only the
+// equipment_documents LINK (TestDeleteEquipmentHandler_CascadesPhotoLinks
+// above) - the photo's document row and its file on disk used to be left
+// behind. ADR 0127: "a photo has no life outside its item" applies to
+// deleting the item, not just to the dedicated photo-remove route.
+func TestDeleteEquipmentHandler_RemovesUnsharedPhotoDocumentAndFile(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	c1, rec1 := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c1); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler: %v", err)
+	}
+	var uploaded struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &uploaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	photoID := uploaded.Item.PhotoIDs[0]
+	if len(documentsDirEntries(t)) != 1 {
+		t.Fatalf("expected the uploaded photo's file on disk before delete")
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if entries := documentsDirEntries(t); len(entries) != 0 {
+		t.Fatalf("expected the photo's file removed from disk, found %v", entries)
+	}
+	if _, err := globalDocumentStore.Get(photoID); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected the photo document itself deleted, got %v", err)
+	}
+}
+
+// TestDeleteEquipmentHandler_SharedPhotoFileSurvivesEquipmentDelete pins the
+// sha256-dedupe sharing rule at the handler layer: item A and item B share
+// one uploaded photo (same bytes), and deleting item A must leave item B's
+// copy - document row AND file - completely alone.
+func TestDeleteEquipmentHandler_SharedPhotoFileSurvivesEquipmentDelete(t *testing.T) {
+	withTestDocumentStore(t)
+
+	itemA, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+
+	cA, recA := newInventoryPhotoUploadContext(t, itemA.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cA); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(A): %v", err)
+	}
+	var uploadedA struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recA.Body.Bytes(), &uploadedA); err != nil {
+		t.Fatalf("unmarshal(A): %v", err)
+	}
+	photoID := uploadedA.Item.PhotoIDs[0]
+
+	// Same bytes onto item B - Insert's own sha256 dedupe links the SAME
+	// document row rather than storing a second file.
+	cB, recB := newInventoryPhotoUploadContext(t, itemB.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(cB); err != nil {
+		t.Fatalf("uploadEquipmentPhotoHandler(B): %v", err)
+	}
+	var uploadedB struct {
+		Item equipmentItem `json:"item"`
+	}
+	if err := json.Unmarshal(recB.Body.Bytes(), &uploadedB); err != nil {
+		t.Fatalf("unmarshal(B): %v", err)
+	}
+	if len(uploadedB.Item.PhotoIDs) != 1 || uploadedB.Item.PhotoIDs[0] != photoID {
+		t.Fatalf("expected B to link the SAME deduplicated document, got %+v", uploadedB.Item.PhotoIDs)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+itemA.ID, "", itemA.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries := documentsDirEntries(t)
+	if len(entries) != 1 {
+		t.Fatalf("expected the shared file to survive on disk, found %v", entries)
+	}
+	itemBAfter, err := globalDocumentStore.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(itemBAfter.PhotoIDs) != 1 || itemBAfter.PhotoIDs[0] != photoID {
+		t.Fatalf("expected item B's photo untouched, got %+v", itemBAfter.PhotoIDs)
+	}
+
+	c2, rec2 := newDocumentEchoContext(http.MethodGet, "/api/documents/"+photoID+"/content", "", photoID)
+	if err := documentContentHandler(c2); err != nil {
+		t.Fatalf("documentContentHandler: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected the shared photo's content still servable, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile pins the
+// other half of item 1: an ordinary (non-photo) linked document must NOT be
+// deleted along with the item - only its equipment_documents link cascades
+// away, same as before this fix.
+func TestDeleteEquipmentHandler_KeepsOrdinaryLinkedDocumentAndFile(t *testing.T) {
+	withTestDocumentStore(t)
+	store := globalDocumentStore
+
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	manual := insertTestDocumentWithFile(t, store, "sha-delete-eq-handler-manual", "manual.pdf", "application/pdf", []byte("manual bytes"))
+	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if entries := documentsDirEntries(t); len(entries) != 1 {
+		t.Fatalf("expected the ordinary linked document's file to survive, found %v", entries)
+	}
+	if _, err := store.Get(manual.ID); err != nil {
+		t.Fatalf("expected the ordinary linked document to survive, got %v", err)
+	}
+}
+
 // ── PUT /api/inventory/equipment/:id/documents leaves photos alone ───────
 
 func TestSetEquipmentDocumentsHandler_LeavesPhotoLinksAndOrderUntouched(t *testing.T) {
@@ -1338,5 +1636,55 @@ func TestGetEquipmentHandler_RemovingPhotoTagDropsFromPhotoIDsButKeepsLink(t *te
 	}
 	if len(resp.Documents) != 1 || resp.Documents[0].DocumentID != photo.ID {
 		t.Fatalf("expected the link itself to survive as an ordinary linked document, got %+v", resp.Documents)
+	}
+}
+
+// TestDeleteEquipmentHandler_KeepsRemovingPhotoFilesAfterOneFails is from the
+// final pre-release review: the handler used to return on the first photo
+// file it could not remove, leaving every later photo's file behind - and
+// by then the item and its photo rows were already gone, so nothing would
+// ever try again. Every file is attempted; a failure is still reported,
+// saying plainly that the item itself was deleted.
+func TestDeleteEquipmentHandler_KeepsRemovingPhotoFilesAfterOneFails(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	dir := documentsDirPath()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, sha := range []string{"sha-a-unremovable", "sha-b-removable"} {
+		photo, err := globalDocumentStore.Insert(document{SHA256: sha, Filename: sha + ".jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+		if err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+		if err := globalDocumentStore.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+			t.Fatalf("AddEquipmentPhoto: %v", err)
+		}
+	}
+	// A non-empty directory where the first photo's file should be makes
+	// os.Remove fail for it; the second is an ordinary file.
+	if err := os.MkdirAll(filepath.Join(dir, "sha-a-unremovable", "keep"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sha-b-removable"), []byte("jpeg"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID, "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatalf("deleteEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for the file that could not be removed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "deleted") {
+		t.Fatalf("expected the error to say the item itself was deleted, got %s", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sha-b-removable")); !os.IsNotExist(err) {
+		t.Fatalf("expected the second photo's file removed despite the first failing, stat err = %v", err)
 	}
 }

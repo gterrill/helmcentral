@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BinPhotoGrid } from '@/components/inventory/bin-page'
-import { parseAppLocation } from '@/lib/app-location'
+import { resolveScannedText } from '@/lib/app-location'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
+  EquipmentNotFoundError,
   fetchEquipment,
   findBinByCode,
   toEquipmentInput,
@@ -53,11 +54,49 @@ interface StocktakeSectionProps {
    * reports what it found - but nothing is written, and Move (the one press
    * that writes) is hidden rather than shown and then rejected. */
   canWrite?: boolean
+  /** Release-fixes code-review finding: reports whether this pass holds
+   * anything a navigation away would silently clear, the way the equipment
+   * editor reports dirty (onDirtyChange) - App.tsx routes Open/Full item
+   * through the same unsaved-work guard when this is true. A confirmed or
+   * elsewhere-scanned item is "work" (it took an actual scan against a real
+   * bin to produce); a bare bin scan is not - it's the normal first step of
+   * scanning INTO a bin, trivially repeated by rescanning the same tag, and
+   * gating it too would put a dialog in front of "scan bin, tap a photo's
+   * Open" for no data actually at risk. Live NFC scanning is also "work":
+   * navigating away silently stops the reader without the operator having
+   * pressed Stop. */
+  // Release-fixes code-review finding: widened to match BinQuickAdd's own
+  // onHasWorkChange (bin-quick-add.tsx) - InventoryPanel forwards the exact
+  // same function to both, so the two props have to agree on a signature.
+  // Stocktake itself never has a `detail` to report; a scans-cleared warning
+  // is specific enough on its own (App.tsx's dialog copy for
+  // 'stocktake-work').
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
-export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
-  const { zones } = useInventoryZones()
+export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, onHasWorkChange }: StocktakeSectionProps) {
+  // Review finding: only `zones` used to be read here - a genuine fetch
+  // failure left it at its initial `[]` with no way to tell that apart from
+  // "the tree loaded fine and this code just doesn't exist", so
+  // findBinByCode found nothing either way and every bin scan during an
+  // outage was reported as an unrecognised tag (AGENTS.md fallback policy:
+  // the real reason has to surface, not fold into a bucket that means
+  // something else).
+  const { zones, loading: zonesLoading, error: zonesError } = useInventoryZones()
   const [currentBin, setCurrentBin] = useState<CurrentBin | null>(null)
+  // Review finding: handleScan is a plain closure over `currentBin` (a
+  // render-scoped variable), and that specific closure is what a stale
+  // handleScanRef (below) can still be holding when a follow-up scan
+  // arrives faster than a render can commit. Even setting that aside, a
+  // SINGLE handleScan call reads `currentBin` before its own `await
+  // fetchEquipment` and again after it to decide confirmed vs elsewhere -
+  // a closure variable can't pick up a bin scanned by a LATER call while
+  // this one is still suspended, no matter how fresh that later call's own
+  // closure is. A ref's `.current` is shared by every closure and mutated
+  // synchronously the instant a bin is scanned, so reading THIS after the
+  // await - not the closure's own `currentBin` - is what makes the decision
+  // correct regardless of which closure is asking or when.
+  const currentBinRef = useRef<CurrentBin | null>(null)
   const [events, setEvents] = useState<ScanEvent[]>([])
   const [movingId, setMovingId] = useState<string | null>(null)
   const [scanFieldValue, setScanFieldValue] = useState('')
@@ -83,6 +122,21 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     [events],
   )
 
+  // See onHasWorkChange's own doc comment on StocktakeSectionProps for why
+  // a bare 'bin'/'unrecognised' event doesn't count.
+  const hasReviewWork = useMemo(
+    () => events.some((e) => e.kind === 'confirmed' || e.kind === 'elsewhere') || scanning,
+    [events, scanning],
+  )
+  // useLayoutEffect, not useEffect - App.tsx's own guard (requestWithinInventory)
+  // reads inventoryHasWork the instant Open/Full item is pressed, which can
+  // follow a confirmed scan within the same handleScan call chain with no
+  // render in between for a passive effect to have caught up on. A layout
+  // effect commits synchronously with the render that added the event,
+  // closing the same class of gap currentBinRef/handleScanRef's own
+  // comments (above) already describe for the scan decision itself.
+  useLayoutEffect(() => { onHasWorkChange?.(hasReviewWork) }, [hasReviewWork, onHasWorkChange])
+
   // Takes a fully-formed ScanEvent (id included) rather than an Omit<...,
   // 'id'> - Omit collapses a discriminated union to the INTERSECTION of its
   // members' keys, which would reject every branch's own extra fields
@@ -96,39 +150,39 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     if (text === '') return
     setScanError(null)
 
-    // "Accepts a keyboard-wedge or pasted URL or bin code" - `new URL(text)`
-    // only succeeds for an ABSOLUTE url (a scheme included), which a scan
-    // typed into a boat's own tailnet address bar without "https://" is not
-    // (e.g. "boat.tailnet.ts.net/inventory/bins/LAZ-02"). Treating THAT
-    // whole string as a bare bin code (the naive fallback this replaced)
-    // resolved to the wrong bin - or, worse, silently to none at all. So a
-    // scheme-less scan is read three ways, in order: an /inventory/ path
-    // pulled out of wherever it starts in the string; failing that, a bare
-    // bin code ONLY if there's no slash in it at all (a real bin code never
-    // has one); anything else is reported as unrecognised rather than
-    // guessed at.
-    let pathname: string
-    try {
-      pathname = new URL(text).pathname
-    } catch {
-      const inventoryIndex = text.indexOf('/inventory/')
-      if (inventoryIndex !== -1) {
-        pathname = text.slice(inventoryIndex)
-      } else if (!text.includes('/')) {
-        pathname = `/inventory/bins/${text}`
-      } else {
-        pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
-        return
-      }
+    // "Accepts a keyboard-wedge or pasted URL or bin code" - the actual
+    // string-matching (URL vs. scheme-less path vs. bare code) lives in
+    // resolveScannedText (app-location.ts), next to parseAppLocation, which
+    // it wraps; null means "not a bin or item scan" and is reported as
+    // unrecognised rather than guessed at.
+    const parsed = resolveScannedText(text)
+    if (parsed === null) {
+      pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+      return
     }
-    const parsed = parseAppLocation(pathname)
 
     if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
+      // Review finding: neither of these is "this code doesn't exist" - a
+      // bin scan taken while the zone tree hasn't loaded yet (or failed to)
+      // can't be resolved either way, so it is reported for what it
+      // actually is instead of being folded into "unrecognised". The zones
+      // error itself is also shown plainly, below (AGENTS.md fallback
+      // policy).
+      if (zonesLoading) {
+        setScanError('Locations still loading - scan that bin again in a moment.')
+        return
+      }
+      if (zonesError) return
       const match = findBinByCode(zones, parsed.binCode)
       if (!match) {
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
         return
       }
+      // Set synchronously, before setCurrentBin - a plain assignment isn't
+      // batched the way a state update is, so any handleScan call already
+      // suspended on its own await (elsewhere) sees this the instant it
+      // resumes, not whenever React next commits.
+      currentBinRef.current = match
       setCurrentBin(match)
       pushEvent({ id: crypto.randomUUID(), kind: 'bin', code: match.bin.code, zoneName: match.zone.name })
       return
@@ -138,25 +192,42 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
       let item: EquipmentItem
       try {
         item = await fetchEquipment(parsed.equipmentEditId)
-      } catch {
-        pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+      } catch (err) {
+        // Review finding: every fetchEquipment failure used to be logged as
+        // an unrecognised scan - a genuine server error (a 500, a dropped
+        // connection) looked identical to "not an inventory tag", hiding
+        // the real problem instead of showing it (AGENTS.md fallback
+        // policy). Only a 404 - EquipmentNotFoundError, thrown specifically
+        // for that status - actually means "no such item."
+        if (err instanceof EquipmentNotFoundError) {
+          pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+          return
+        }
+        setScanError(err instanceof Error ? err.message : String(err))
         return
       }
+
+      // Review finding: reads the REF here, not the `currentBin` closed over
+      // above - a bin scanned by a later handleScan call, while this one was
+      // still suspended on the fetchEquipment await just above, has already
+      // updated it synchronously even though this call's own `currentBin`
+      // variable is frozen at whatever it was when this closure was created.
+      const binNow = currentBinRef.current
 
       // ADR 0127: "An item scanned with no current bin is confirmed in
       // place" - the same branch as "recorded in the current bin", just
       // with nothing to compare the bin against.
-      if (currentBin === null || item.bin_id === currentBin.bin.id) {
+      if (binNow === null || item.bin_id === binNow.bin.id) {
         pushEvent({ id: crypto.randomUUID(), kind: 'confirmed', item })
         if (canWrite && !item.verified_aboard) {
           try {
-            // Fetched fresh immediately before the write (review finding:
-            // reusing the copy fetched above, moments earlier in this same
-            // call, is close to safe but not - see handleMove's own comment
-            // for why this whole function never trusts an in-hand copy for
-            // a write body) and only verified_aboard is changed on it.
-            const fresh = await fetchEquipment(item.id)
-            await updateEquipment(item.id, { ...toEquipmentInput(fresh), verified_aboard: true })
+            // Written from the copy fetched above, in this same call, with
+            // only verified_aboard changed. That fetch is itself fresh, so a
+            // second GET here only doubled the round trips on the busiest
+            // path of a stocktake (review finding). handleMove still
+            // re-fetches, because a Move is pressed later, by which time
+            // the scanned copy can be stale.
+            await updateEquipment(item.id, { ...toEquipmentInput(item), verified_aboard: true })
           } catch (err) {
             setScanError(err instanceof Error ? err.message : String(err))
           }
@@ -164,7 +235,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         return
       }
 
-      pushEvent({ id: crypto.randomUUID(), kind: 'elsewhere', item, recordedBinCode: item.bin_code || null, targetBin: currentBin })
+      pushEvent({ id: crypto.randomUUID(), kind: 'elsewhere', item, recordedBinCode: item.bin_code || null, targetBin: binNow })
       return
     }
 
@@ -205,13 +276,35 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     void handleScan(value)
   }
 
+  // Review finding: scanTags' own onUrl callback is created ONCE, when Start
+  // scanning is pressed, and Web NFC keeps calling that exact function for
+  // every tap for the rest of the session - it never re-subscribes the way
+  // a React prop would. handleScan is a fresh closure every render (it
+  // reads currentBin/zones directly, not via a ref), so a bare `(url) => {
+  // void handleScan(url) }` passed straight to scanTags froze whichever
+  // currentBin/zones were current AT THAT MOMENT - null, since scanning
+  // always starts before any bin has been scanned - for every scan for the
+  // rest of the session, even though ordinary state updates (setCurrentBin)
+  // kept the screen itself showing the right bin throughout. Routing
+  // through a ref that's kept current on every render is what makes the
+  // NFC callback see whichever handleScan closure is actually current.
+  const handleScanRef = useRef(handleScan)
+  // Review finding: an ordinary (passive) effect runs after the browser has
+  // had a chance to paint, which a fast enough follow-up NFC tap can beat -
+  // useLayoutEffect runs synchronously right after React commits the DOM
+  // update, closing that window as far as a re-subscription can.
+  // currentBinRef above is what actually makes a SINGLE in-flight call
+  // correct regardless of timing; this just gets the NEXT call a fresh
+  // closure sooner.
+  useLayoutEffect(() => { handleScanRef.current = handleScan })
+
   const handleStartScanning = async () => {
     setScanError(null)
     setScanning(true)
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await scanTags((url) => { void handleScan(url) }, controller.signal)
+      await scanTags((url) => { void handleScanRef.current(url) }, controller.signal)
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err))
       setScanning(false)
@@ -223,6 +316,12 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     abortRef.current = null
     setScanning(false)
   }
+
+  // Web NFC's scan keeps running until its own AbortController is aborted -
+  // leaving this section without pressing Stop first (a nav-away, closing
+  // the tab) would otherwise leave the reader open, still invoking
+  // handleScanRef.current against a component that no longer exists.
+  useEffect(() => () => { abortRef.current?.abort() }, [])
 
   const notSeen = currentBin ? binItems.filter((item) => !confirmedIds.has(item.id)) : []
 
@@ -253,6 +352,9 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         )}
         {scanError && (
           <p role="alert" className="text-sm text-destructive">{scanError}</p>
+        )}
+        {zonesError && (
+          <p role="alert" className="text-sm text-destructive">{zonesError}</p>
         )}
       </div>
 

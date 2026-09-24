@@ -213,6 +213,7 @@ import {
   formatAppLocation,
   isCanonicalAppPath,
   inventoryEditorClosedBy,
+  inventoryWorkClosedBy,
   type AppLocation,
   type PanelId,
 } from '@/lib/app-location'
@@ -391,118 +392,45 @@ export function App() {
   // InventoryPanel forwards whichever child (EquipmentEditor) is actually
   // mounted, see its own imperative handle.
   const [inventoryDirty, setInventoryDirty] = useState(false)
+  // Release-fixes code-review finding: Stocktake's scan events/live NFC
+  // session and the bin page's quick-add draft, reported the same way
+  // inventoryDirty is (onDirtyChange) - see requestWithinInventory's own
+  // comment for why this shares that guard rather than getting a second one.
+  const [inventoryHasWork, setInventoryHasWork] = useState(false)
+  // Wording for what inventoryHasWork actually holds (BinQuickAdd's own
+  // onHasWorkChange doc comment) - only meaningful alongside inventoryHasWork
+  // true, cleared by the same effect that clears inventoryHasWork itself
+  // below. Read at the moment a navigation is stashed (stashPendingNavigation
+  // below), not live by the dialog - see pendingNavigationDetail's own
+  // comment for why.
+  const [inventoryWorkDetail, setInventoryWorkDetail] = useState<string | null>(null)
   const inventoryPanelRef = useRef<InventoryPanelHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
+  // Release-fixes code-review finding: which dialog form (pendingNavigationKind)
+  // and, for a quick-add-work reason, what to say (pendingNavigationDetail) -
+  // captured by stashPendingNavigation at the moment a navigation is stashed,
+  // not recomputed from live state while the dialog is open. Recomputing
+  // it live used to work only because nothing was ever assumed to change
+  // inventoryDirty/inventoryHasWork/inventorySection while the underlying
+  // page sits inert behind the modal - true for a page the operator can no
+  // longer click into, false for an async save already in flight when the
+  // dialog opened (BinQuickAdd's own Save, kicked off just before Back was
+  // pressed): its success still lands and clears inventoryHasWork, which
+  // used to flip the dialog from Leave/Stay to the "Unsaved changes"/Save and
+  // Continue form for a page that was never dirty in that sense - and whose
+  // ref (inventoryPanelRef) has no editor mounted to save with Save and
+  // Continue's own onClick.
+  const [pendingNavigationKind, setPendingNavigationKind] = useState<'dirty' | 'stocktake-work' | 'quick-add-work'>('dirty')
+  const [pendingNavigationDetail, setPendingNavigationDetail] = useState<string | null>(null)
   const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
   const [saveAndContinueError, setSaveAndContinueError] = useState<string | null>(null)
 
-  // Intercepts sidebar/breadcrumb navigation away from a dirty Settings
-  // page: instead of navigating immediately, stashes the navigation as a
-  // pending callback and lets the confirmation dialog decide (Cancel stays
-  // put, Discard runs it as-is, Save and Continue runs it only after a
-  // successful save). Navigating while NOT on a dirty Settings page (the
-  // overwhelmingly common case) is unaffected — `navigate()` runs immediately.
-  // Returns whether it ran `navigate()` (false when it stashed it instead) —
-  // existing call sites ignore this; the popstate handler (ADR 0074) uses it
-  // to know whether it needs to re-push the URL Back just moved away from.
-  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void): boolean => {
-    if (activePanel === 'settings' && targetPanel !== 'settings' && settingsDirty) {
-      setPendingNavigation(() => navigate)
-      return false
-    }
-    // ADR 0115 §2's Details-page guard, generalized from the Settings guard
-    // above: any navigation to a DIFFERENT panel while a dirty Details page
-    // is open stashes it the same way. Navigating to 'documents' itself is
-    // deliberately not caught here - the one call site that actually leaves
-    // Details while staying on the 'documents' panel (the page's own
-    // breadcrumb Back, and a Back/Forward landing on a different Details id
-    // or the bare listing) has no "leaving documents" signal for this check
-    // to key off, so it goes through its own small guard instead
-    // (requestBackFromDocumentDetails, right below).
-    if (activePanel === 'documents' && targetPanel !== 'documents' && documentDetailsDirty) {
-      setPendingNavigation(() => navigate)
-      return false
-    }
-    // ADR 0123: same generalization a third time, for a dirty Equipment
-    // editor. Navigating to 'inventory' itself is deliberately not caught
-    // here for the same reason documents' own check above isn't - switching
-    // sections or going back to the index while staying on the 'inventory'
-    // panel has no "leaving inventory" signal for this check to key off, so
-    // it goes through requestWithinInventory instead.
-    if (activePanel === 'inventory' && targetPanel !== 'inventory' && inventoryDirty) {
-      setPendingNavigation(() => navigate)
-      return false
-    }
-    navigate()
-    return true
-  }, [activePanel, settingsDirty, documentDetailsDirty, inventoryDirty])
-
-  // The page's own breadcrumb Back (document-details-page.tsx's onBack) and
-  // a Back/Forward that changes which Details page - or none - is open both
-  // stay on the 'documents' panel, so requestNavigate's targetPanel check
-  // above can never see a difference to catch for either of them. Same
-  // stash-and-return-false shape as requestNavigate, just without the panel
-  // comparison it can't use here.
-  const requestBackFromDocumentDetails = useCallback((navigate: () => void): boolean => {
-    if (documentDetailsDirty) {
-      setPendingNavigation(() => navigate)
-      return false
-    }
-    navigate()
-    return true
-  }, [documentDetailsDirty])
-
-  // ADR 0123's equivalent of requestBackFromDocumentDetails above - covers
-  // both ways an Equipment editor can close without changing `activePanel`:
-  // InventoryNav switching to a different section, and the editor's own
-  // Back/onCreated/onDeleted (all routed through InventoryPanel's
-  // onEquipmentEditIdChange/onCreatingEquipmentChange props, wired at the
-  // 'inventory' case below).
-  const requestWithinInventory = useCallback((navigate: () => void): boolean => {
-    if (inventoryDirty) {
-      setPendingNavigation(() => navigate)
-      return false
-    }
-    navigate()
-    return true
-  }, [inventoryDirty])
-
-  // Which dirty page pendingNavigation (if any) is guarding, for the
-  // dialog's copy and for handleSaveAndContinue below - derived from
-  // activePanel rather than stored alongside the stashed navigate() itself.
-  // The three dirty pages are mutually exclusive (activePanel is exactly one
-  // panel at a time), and activePanel stays exactly where it was when
-  // requestNavigate/requestBackFromDocumentDetails/requestWithinInventory
-  // stashed the navigation, right up until the dialog resolves one way or
-  // the other.
-  const dirtyPageLabel = activePanel === 'settings' ? 'Settings' : activePanel === 'inventory' ? 'Inventory' : 'Details'
-
-  const handleSaveAndContinue = useCallback(async () => {
-    setIsSavingBeforeNavigate(true)
-    setSaveAndContinueError(null)
-    try {
-      if (activePanel === 'settings') {
-        await settingsPageRef.current?.save()
-      } else if (activePanel === 'inventory') {
-        await inventoryPanelRef.current?.save()
-      } else {
-        await documentDetailsPageRef.current?.save()
-      }
-      pendingNavigation?.()
-      setPendingNavigation(null)
-    } catch (err) {
-      // Stay on the page so the user can fix it and retry. Every page
-      // renders its own error banner too, but this dialog is modal and
-      // covers it - without repeating the reason here, a rejected save
-      // (e.g. POST /api/settings refusing an unreachable SignalK address, a
-      // document PATCH rejecting a duplicate title, or an equipment PUT
-      // rejecting a zone/bin that disagree) looks like the button simply
-      // did nothing.
-      setSaveAndContinueError(err instanceof Error ? err.message : `Unable to save the ${dirtyPageLabel} page`)
-    } finally {
-      setIsSavingBeforeNavigate(false)
-    }
-  }, [pendingNavigation, activePanel, dirtyPageLabel])
+  // requestNavigate/requestBackFromDocumentDetails/requestWithinInventory and
+  // their shared stashPendingNavigation/inventoryPendingReason/
+  // dirtyPageLabel/handleSaveAndContinue live further down (after
+  // inventoryNewEquipmentPreset) - inventoryPendingReason needs
+  // inventorySection, declared there, and `const` bindings can't be read
+  // before that declaration runs.
 
   // settingsDirty is only meaningful while the Settings page is actually
   // mounted and reporting it via onDirtyChange. Once the user has left
@@ -738,6 +666,165 @@ export function App() {
   // (InventoryPanel's own newEquipmentPreset prop).
   const [inventoryNewEquipmentPreset, setInventoryNewEquipmentPreset] = useState<{ zoneId?: string; binId?: string } | null>(null)
 
+  // Stashes a navigation the same way every guard below does, capturing which
+  // dialog form to show (and, for quick-add-work, what to say) at THIS
+  // moment - see pendingNavigationKind/pendingNavigationDetail's own comment
+  // on why that has to happen here rather than being read live off
+  // inventoryDirty/inventoryHasWork by the dialog itself.
+  const stashPendingNavigation = useCallback((
+    navigate: () => void,
+    kind: 'dirty' | 'stocktake-work' | 'quick-add-work',
+    detail: string | null = null,
+  ) => {
+    setPendingNavigationKind(kind)
+    setPendingNavigationDetail(detail)
+    setPendingNavigation(() => navigate)
+  }, [])
+
+  // Which of inventoryDirty's dirty-editor reason or inventoryHasWork's two
+  // has-work reasons is actually true right now, for whichever guard below
+  // is about to stash a navigation while activePanel === 'inventory'. Pulled
+  // out into its own function (rather than inlined at each of the three call
+  // sites that need it) purely so it can be called at each of them without
+  // repeating the same three-way branch.
+  const inventoryPendingReason = useCallback((): { kind: 'dirty' | 'stocktake-work' | 'quick-add-work'; detail: string | null } => {
+    if (!inventoryDirty && inventoryHasWork) {
+      return inventorySection === 'stocktake'
+        ? { kind: 'stocktake-work', detail: null }
+        : { kind: 'quick-add-work', detail: inventoryWorkDetail }
+    }
+    return { kind: 'dirty', detail: null }
+  }, [inventoryDirty, inventoryHasWork, inventorySection, inventoryWorkDetail])
+
+  // Intercepts sidebar/breadcrumb navigation away from a dirty Settings
+  // page: instead of navigating immediately, stashes the navigation as a
+  // pending callback and lets the confirmation dialog decide (Cancel stays
+  // put, Discard runs it as-is, Save and Continue runs it only after a
+  // successful save). Navigating while NOT on a dirty Settings page (the
+  // overwhelmingly common case) is unaffected — `navigate()` runs immediately.
+  // Returns whether it ran `navigate()` (false when it stashed it instead) —
+  // existing call sites ignore this; the popstate handler (ADR 0074) uses it
+  // to know whether it needs to re-push the URL Back just moved away from.
+  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void): boolean => {
+    if (activePanel === 'settings' && targetPanel !== 'settings' && settingsDirty) {
+      stashPendingNavigation(navigate, 'dirty')
+      return false
+    }
+    // ADR 0115 §2's Details-page guard, generalized from the Settings guard
+    // above: any navigation to a DIFFERENT panel while a dirty Details page
+    // is open stashes it the same way. Navigating to 'documents' itself is
+    // deliberately not caught here - the one call site that actually leaves
+    // Details while staying on the 'documents' panel (the page's own
+    // breadcrumb Back, and a Back/Forward landing on a different Details id
+    // or the bare listing) has no "leaving documents" signal for this check
+    // to key off, so it goes through its own small guard instead
+    // (requestBackFromDocumentDetails, right below).
+    if (activePanel === 'documents' && targetPanel !== 'documents' && documentDetailsDirty) {
+      stashPendingNavigation(navigate, 'dirty')
+      return false
+    }
+    // ADR 0123: same generalization a third time, for a dirty Equipment
+    // editor. Navigating to 'inventory' itself is deliberately not caught
+    // here for the same reason documents' own check above isn't - switching
+    // sections or going back to the index while staying on the 'inventory'
+    // panel has no "leaving inventory" signal for this check to key off, so
+    // it goes through requestWithinInventory instead.
+    // Release-fixes code-review finding: this used to check inventoryDirty
+    // alone - leaving Inventory from the sidebar (or any other panel) while
+    // Stocktake or the bin page's quick-add held real work went straight
+    // through with no prompt, the same gap onSectionChange/onOpenBin had
+    // before requestWithinInventory picked up inventoryHasWork below.
+    if (activePanel === 'inventory' && targetPanel !== 'inventory' && (inventoryDirty || inventoryHasWork)) {
+      const reason = inventoryPendingReason()
+      stashPendingNavigation(navigate, reason.kind, reason.detail)
+      return false
+    }
+    navigate()
+    return true
+  }, [activePanel, settingsDirty, documentDetailsDirty, inventoryDirty, inventoryHasWork, inventoryPendingReason, stashPendingNavigation])
+
+  // The page's own breadcrumb Back (document-details-page.tsx's onBack) and
+  // a Back/Forward that changes which Details page - or none - is open both
+  // stay on the 'documents' panel, so requestNavigate's targetPanel check
+  // above can never see a difference to catch for either of them. Same
+  // stash-and-return-false shape as requestNavigate, just without the panel
+  // comparison it can't use here.
+  const requestBackFromDocumentDetails = useCallback((navigate: () => void): boolean => {
+    if (documentDetailsDirty) {
+      stashPendingNavigation(navigate, 'dirty')
+      return false
+    }
+    navigate()
+    return true
+  }, [documentDetailsDirty, stashPendingNavigation])
+
+  // ADR 0123's equivalent of requestBackFromDocumentDetails above - covers
+  // both ways an Equipment editor can close without changing `activePanel`:
+  // InventoryNav switching to a different section, and the editor's own
+  // Back/onCreated/onDeleted (all routed through InventoryPanel's
+  // onEquipmentEditIdChange/onCreatingEquipmentChange props, wired at the
+  // 'inventory' case below).
+  // Release-fixes code-review finding: this used to guard only inventoryDirty
+  // (the Equipment editor) - Stocktake's own scan events/live NFC session and
+  // the bin page's quick-add draft can hold just as much work an operator
+  // would not want silently cleared, and nothing routed Open/Full item
+  // through this at all. inventoryHasWork is their shared "has work" flag
+  // (StocktakeSection/BinQuickAdd's own onHasWorkChange, wired below), and
+  // guarding it here - the same stash-and-let-the-dialog-decide shape
+  // inventoryDirty already used - covers both without a second guard
+  // function. The dialog itself shows whichever form stashPendingNavigation
+  // captured (pendingNavigationKind, by the dialog below).
+  const requestWithinInventory = useCallback((navigate: () => void): boolean => {
+    if (inventoryDirty || inventoryHasWork) {
+      const reason = inventoryPendingReason()
+      stashPendingNavigation(navigate, reason.kind, reason.detail)
+      return false
+    }
+    navigate()
+    return true
+  }, [inventoryDirty, inventoryHasWork, inventoryPendingReason, stashPendingNavigation])
+
+  // Which dirty page pendingNavigation (if any) is guarding, for the
+  // dialog's copy and for handleSaveAndContinue below - derived from
+  // activePanel rather than stored alongside the stashed navigate() itself.
+  // The three dirty pages are mutually exclusive (activePanel is exactly one
+  // panel at a time), and activePanel stays exactly where it was when
+  // requestNavigate/requestBackFromDocumentDetails/requestWithinInventory
+  // stashed the navigation, right up until the dialog resolves one way or
+  // the other. Unlike pendingNavigationKind/pendingNavigationDetail, this one
+  // is safe to read live: activePanel cannot change while the underlying
+  // page is still on screen (behind the modal), only inventoryDirty/
+  // inventoryHasWork/inventorySection can, from an async completion - which
+  // is exactly the race those two are captured against instead.
+  const dirtyPageLabel = activePanel === 'settings' ? 'Settings' : activePanel === 'inventory' ? 'Inventory' : 'Details'
+
+  const handleSaveAndContinue = useCallback(async () => {
+    setIsSavingBeforeNavigate(true)
+    setSaveAndContinueError(null)
+    try {
+      if (activePanel === 'settings') {
+        await settingsPageRef.current?.save()
+      } else if (activePanel === 'inventory') {
+        await inventoryPanelRef.current?.save()
+      } else {
+        await documentDetailsPageRef.current?.save()
+      }
+      pendingNavigation?.()
+      setPendingNavigation(null)
+    } catch (err) {
+      // Stay on the page so the user can fix it and retry. Every page
+      // renders its own error banner too, but this dialog is modal and
+      // covers it - without repeating the reason here, a rejected save
+      // (e.g. POST /api/settings refusing an unreachable SignalK address, a
+      // document PATCH rejecting a duplicate title, or an equipment PUT
+      // rejecting a zone/bin that disagree) looks like the button simply
+      // did nothing.
+      setSaveAndContinueError(err instanceof Error ? err.message : `Unable to save the ${dirtyPageLabel} page`)
+    } finally {
+      setIsSavingBeforeNavigate(false)
+    }
+  }, [pendingNavigation, activePanel, dirtyPageLabel])
+
   // inventoryDirty (declared up with settingsDirty) is only meaningful while
   // the Equipment editor is actually mounted and reporting it via
   // onDirtyChange - same reasoning and shape as documentDetailsDirty's own
@@ -756,6 +843,22 @@ export function App() {
       setInventoryDirty(false)
     }
   }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment])
+  // inventoryHasWork/inventoryWorkDetail (declared up with inventoryDirty)
+  // are only meaningful while Stocktake or the bin page's quick-add are
+  // actually mounted and reporting them - same reasoning as inventoryDirty's
+  // own clearing effect just above. Leaving the 'inventory' panel, leaving
+  // Stocktake, or leaving the bin page (inventoryBinCode back to null)
+  // unmounts whichever of the two was reporting, which stops calling
+  // onHasWorkChange the moment it does.
+  useEffect(() => {
+    if (
+      activePanel !== 'inventory'
+      || !(inventorySection === 'stocktake' || (inventorySection === 'locations' && inventoryBinCode !== null))
+    ) {
+      setInventoryHasWork(false)
+      setInventoryWorkDetail(null)
+    }
+  }, [activePanel, inventorySection, inventoryBinCode])
   // Ditto latch pattern (mateSheetHasOpenedRef/helpSheetHasOpenedRef
   // above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
@@ -1080,9 +1183,22 @@ export function App() {
           },
           parsed,
         )
+      // Release-fixes code-review finding: this popstate handler only ever
+      // asked inventoryEditorClosedBy (the Equipment editor's own case) -
+      // Back off Stocktake or a bin page's quick-add draft never asked
+      // inventoryWorkClosedBy anything at all, so it fell all the way through
+      // to requestNavigate, whose own targetPanel check can't see a same-
+      // panel move either. inventoryWorkClosedBy is that function's exact
+      // counterpart for inventoryHasWork - see its own doc comment
+      // (app-location.ts).
+      const leavingInventoryWorkWithinInventory = activePanel === 'inventory'
+        && inventoryWorkClosedBy(
+          { section: inventorySection, binCode: inventoryBinCode },
+          parsed,
+        )
       const navigated = leavingDetailsWithinDocuments
         ? requestBackFromDocumentDetails(() => applyAppLocation(parsed))
-        : leavingInventoryEditorWithinInventory
+        : (leavingInventoryEditorWithinInventory || leavingInventoryWorkWithinInventory)
           ? requestWithinInventory(() => applyAppLocation(parsed))
           : requestNavigate(parsed.panel, () => applyAppLocation(parsed))
       if (!navigated) {
@@ -2630,11 +2746,45 @@ export function App() {
             equipmentEditId={inventoryEquipmentEditId}
             creatingEquipment={inventoryCreatingEquipment}
             // Opening an item or starting a new one enters the editor, so
-            // there is no draft to discard yet and nothing to guard.
-            onOpenEquipment={(id) => { setInventoryEquipmentEditId(id) }}
+            // there is no draft to discard yet and nothing to guard. Both
+            // callbacks are reachable from OUTSIDE the Equipment section too
+            // - the bin page's own item rows/"Full item" button and
+            // Stocktake's photo grid (ADR 0127) - so both have to switch
+            // inventorySection to 'equipment' and clear inventoryBinCode
+            // themselves, not just set the id/creating flag. Review finding:
+            // InventoryPanel only ever renders the editor when
+            // activeSectionId === 'equipment' (its own showEquipmentEditor
+            // check), so pressing Open from a bin page used to set
+            // inventoryEquipmentEditId while activeSectionId stayed
+            // 'locations' - nothing appeared, and the bin's own binCode
+            // stayed set underneath a URL that had already moved to
+            // /inventory/equipment/<id>. Clearing binCode here is what makes
+            // the sync effect below produce that URL as a NEW history entry
+            // rather than leaving the bar disagreeing with what's on screen,
+            // so the browser's own Back returns to the bin.
+            // Release-fixes code-review finding: these used to set section/
+            // id state directly, with no guard at all - reachable not just
+            // from the Equipment index (nothing to lose there) but from the
+            // bin page's own item rows/"Full item" and Stocktake's photo
+            // grid, where switching straight to 'equipment' silently threw
+            // away a stocktake pass's scans or a staged quick-add.
+            // requestWithinInventory now also checks inventoryHasWork (its
+            // own comment above), so this is a no-op everywhere neither
+            // reason applies - which is everywhere except those two cases.
+            onOpenEquipment={(id) => {
+              requestWithinInventory(() => {
+                setInventorySection('equipment')
+                setInventoryBinCode(null)
+                setInventoryEquipmentEditId(id)
+              })
+            }}
             onNewEquipment={(preset) => {
-              setInventoryNewEquipmentPreset(preset ?? null)
-              setInventoryCreatingEquipment(true)
+              requestWithinInventory(() => {
+                setInventorySection('equipment')
+                setInventoryBinCode(null)
+                setInventoryNewEquipmentPreset(preset ?? null)
+                setInventoryCreatingEquipment(true)
+              })
             }}
             // Back is the only exit that can throw away typed work, so it is
             // the only one guarded - and it is ONE guarded call that clears
@@ -2666,6 +2816,10 @@ export function App() {
               setInventoryCreatingEquipment(false)
             }}
             onDirtyChange={setInventoryDirty}
+            onHasWorkChange={(work, detail) => {
+              setInventoryHasWork(work)
+              setInventoryWorkDetail(detail ?? null)
+            }}
             onOpenHelp={openHelp}
             canWrite={canWrite}
             binCode={inventoryBinCode}
@@ -2680,10 +2834,13 @@ export function App() {
                 setInventoryBinCode(code)
               })
             }}
-            // The bin page's own Back never discards anything - there is
-            // no draft on that page (its quick-add form is deliberately
-            // ambient, ADR 0127) - so this is a plain setter.
-            onCloseBin={() => { setInventoryBinCode(null) }}
+            // Release-fixes code-review finding: this used to be a plain
+            // setter on the theory that the bin page holds no draft to
+            // discard - true of the Equipment editor, but not of the
+            // quick-add form living on this same page (ADR 0127), which can
+            // hold a staged name/photos or a photo still queued for Retry.
+            // Routed through the same guard onOpenBin/onSectionChange use.
+            onCloseBin={() => { requestWithinInventory(() => { setInventoryBinCode(null) }) }}
             newEquipmentPreset={inventoryNewEquipmentPreset}
           />
         )
@@ -3190,42 +3347,82 @@ export function App() {
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* dirtyPageLabel: 'Settings', 'Details' (ADR 0115 §2) or
-                  'Inventory' (ADR 0123) - whichever page's guard actually
-                  stashed this navigation. */}
-              You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {saveAndContinueError && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-              {saveAndContinueError}
-            </div>
+          {pendingNavigationKind === 'dirty' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {/* dirtyPageLabel: 'Settings', 'Details' (ADR 0115 §2) or
+                      'Inventory' (ADR 0123) - whichever page's guard actually
+                      stashed this navigation. */}
+                  You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {saveAndContinueError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
+                  {saveAndContinueError}
+                </div>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => {
+                    setPendingNavigation(null)
+                    setSaveAndContinueError(null)
+                  }}
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    pendingNavigation?.()
+                    setPendingNavigation(null)
+                    setSaveAndContinueError(null)
+                  }}
+                >
+                  Discard
+                </AlertDialogAction>
+                <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
+                  {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
+                </Button>
+              </AlertDialogFooter>
+            </>
+          ) : (
+            // Release-fixes code-review finding: Stocktake's scans and a
+            // staged quick-add have nothing to Save - offering that button
+            // anyway (or the "Unsaved changes" copy, which implies one) would
+            // be offering an action that does not exist. Leave/Stay instead,
+            // worded for what is actually about to be cleared.
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {pendingNavigationKind === 'stocktake-work' ? 'Leave stocktake?' : 'Leave this bin?'}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pendingNavigationKind === 'stocktake-work'
+                    ? 'The scans from this pass will be cleared.'
+                    // Release-fixes code-review finding: falls back to the
+                    // generic copy only when BinQuickAdd didn't give a more
+                    // specific one (pendingNavigationDetail, captured by
+                    // stashPendingNavigation) - a photo still queued for
+                    // Retry after a partial-failure save leaves the form's
+                    // own name/photo fields empty, so "the name and photos
+                    // you have added" would be describing nothing.
+                    : (pendingNavigationDetail ?? 'The name and photos you have added will be cleared.')}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Stay</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    pendingNavigation?.()
+                    setPendingNavigation(null)
+                  }}
+                >
+                  Leave
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
           )}
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                setPendingNavigation(null)
-                setSaveAndContinueError(null)
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                pendingNavigation?.()
-                setPendingNavigation(null)
-                setSaveAndContinueError(null)
-              }}
-            >
-              Discard
-            </AlertDialogAction>
-            <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
-              {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
-            </Button>
-          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 

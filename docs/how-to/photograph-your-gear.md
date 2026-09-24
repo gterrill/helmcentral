@@ -18,6 +18,11 @@ item or on the spot while adding a new one from a bin.
 Every photo is downscaled automatically before it uploads, so this stays
 quick even over a tailscale connection with several photos to send.
 
+If a picture is identical to a file already sitting in Documents, it is
+refused rather than added a second time. The message names the file it
+matches. Open that item's Documents list, press **Add document**, and link
+the existing file instead of photographing it again.
+
 ## Add a new item with photos from a bin
 
 This is the fast way to record what's actually in a bin, standing at the

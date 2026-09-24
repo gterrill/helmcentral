@@ -505,7 +505,7 @@ func TestDocumentStore_DeleteEquipmentRemovesRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	if err := store.DeleteEquipment(item.ID); err != nil {
+	if _, err := store.DeleteEquipment(item.ID); err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 	if _, err := store.GetEquipment(item.ID); !errors.Is(err, errEquipmentNotFound) {
@@ -515,8 +515,108 @@ func TestDocumentStore_DeleteEquipmentRemovesRow(t *testing.T) {
 
 func TestDocumentStore_DeleteEquipmentUnknownIDReturnsNotFound(t *testing.T) {
 	store := newTestDocumentStore(t)
-	if err := store.DeleteEquipment("does-not-exist"); !errors.Is(err, errEquipmentNotFound) {
+	if _, err := store.DeleteEquipment("does-not-exist"); !errors.Is(err, errEquipmentNotFound) {
 		t.Fatalf("expected errEquipmentNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument pins item 1
+// of the pre-release review: "a photo has no life outside its item" (ADR
+// 0127) applies to DELETEing the item itself, not just the photo-remove
+// route. A photo linked ONLY to the deleted item must have its document row
+// removed along with the equipment row - DeleteEquipment reports the freed
+// document's own sha256 back so the caller can remove its file from disk
+// too (deleteEquipmentHandler's own job, covered by the handler-level test
+// in inventory_handlers_test.go).
+func TestDocumentStore_DeleteEquipmentDeletesUnsharedPhotoDocument(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-delete-eq-photo", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 1 || deletedSHAs[0] != "sha-delete-eq-photo" {
+		t.Fatalf("expected the unshared photo's own sha256 back, got %#v", deletedSHAs)
+	}
+	if _, err := store.Get(photo.ID); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected the photo document itself deleted, got %v", err)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem pins the
+// same sha256-dedupe sharing rule RemoveEquipmentPhoto already honours:
+// deleting item A must not take item B's still-linked copy of the same
+// photo document down with it.
+func TestDocumentStore_DeleteEquipmentKeepsPhotoSharedWithAnotherItem(t *testing.T) {
+	store := newTestDocumentStore(t)
+	itemA, err := store.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := store.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-delete-eq-shared", "a.jpg")
+	if err := store.AddEquipmentPhoto(itemA.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(A): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(itemB.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(B): %v", err)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(itemA.ID)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 0 {
+		t.Fatalf("expected nothing deleted while item B still links the photo, got %#v", deletedSHAs)
+	}
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the shared photo document to survive, got %v", err)
+	}
+	gotB, err := store.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(gotB.PhotoIDs) != 1 || gotB.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected item B's own photo link untouched, got %#v", gotB.PhotoIDs)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument pins the
+// other half of item 1: an ordinary (non-photo) linked document, like a
+// manual filed against the item, is NOT a photo and must survive the
+// item's deletion untouched - only its equipment_documents link cascades
+// away, the same as it always has.
+func TestDocumentStore_DeleteEquipmentKeepsOrdinaryLinkedDocument(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	manual := mustInsertDocument(t, store, "sha-delete-eq-manual", "manual.pdf", nil)
+	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 0 {
+		t.Fatalf("expected no photo shas for an ordinary linked document, got %#v", deletedSHAs)
+	}
+	if _, err := store.Get(manual.ID); err != nil {
+		t.Fatalf("expected the ordinary linked document to survive, got %v", err)
 	}
 }
 
@@ -710,7 +810,7 @@ func TestDocumentStore_DeleteEquipmentCascadesLinks(t *testing.T) {
 		t.Fatalf("SetEquipmentDocuments: %v", err)
 	}
 
-	if err := store.DeleteEquipment(item.ID); err != nil {
+	if _, err := store.DeleteEquipment(item.ID); err != nil {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 
@@ -1164,5 +1264,48 @@ func TestDocumentStore_ListEquipmentCarriesPhotoIDsForEveryItem(t *testing.T) {
 	}
 	if len(items) != 1 || len(items[0].PhotoIDs) != 1 || items[0].PhotoIDs[0] != photo.ID {
 		t.Fatalf("expected photo_ids carried through ListEquipment, got %+v", items)
+	}
+}
+
+// TestDocumentStore_ListEquipmentQueryFilterKeepsPhotoIDsOnSurvivors pins a
+// review finding: ListEquipment used to call photoIDsForEquipmentIDs over
+// EVERY structurally-matching row before the Go-side `q` text filter ran,
+// attaching photo ids to rows the query then discarded. Not wrong by
+// itself - the filter step only ever removes entries, it never touches the
+// PhotoIDs already set on the ones that survive - but wasted work on a
+// filter that, aboard one boat, is applied to every row on every keystroke.
+// This test pins the CORRECT behaviour (a survivor's photo_ids are exactly
+// its own) so a future change that reorders these two steps again can't
+// silently start handing back the wrong item's photos.
+func TestDocumentStore_ListEquipmentQueryFilterKeepsPhotoIDsOnSurvivors(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	match, err := store.CreateEquipment(equipmentItem{Name: "Spare impeller", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment (match): %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-query-survivor", "a.jpg")
+	if err := store.AddEquipmentPhoto(match.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	excluded, err := store.CreateEquipment(equipmentItem{Name: "Fuel filter", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment (excluded): %v", err)
+	}
+	excludedPhoto := mustInsertPhotoDocument(t, store, "sha-query-excluded", "b.jpg")
+	if err := store.AddEquipmentPhoto(excluded.ID, excludedPhoto.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto (excluded): %v", err)
+	}
+
+	items, err := store.ListEquipment(equipmentFilter{Query: "impeller"})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != match.ID {
+		t.Fatalf("expected only the matching item, got %+v", items)
+	}
+	if len(items[0].PhotoIDs) != 1 || items[0].PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected the survivor's own photo_ids, got %#v", items[0].PhotoIDs)
 	}
 }

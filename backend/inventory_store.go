@@ -1066,15 +1066,75 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 // TestDocumentStore_DeleteEquipmentCascadesLinks
 // (inventory_store_test.go) rather than merely assumed from the schema
 // text.
-func (s *documentStore) DeleteEquipment(id string) error {
+//
+// Review finding: that cascade removes only the LINK. ADR 0127's "a photo
+// has no life outside its item" means id's own photo-tagged documents (and,
+// per the caller's own file, each one's bytes on disk) must go with the
+// item too - unless another item's own equipment_documents link still
+// references the same (sha256-deduplicated) document row, in which case it
+// survives exactly the way RemoveEquipmentPhoto already leaves a shared
+// photo alone. An ORDINARY linked document (never tagged photo, e.g. a
+// manual filed against the item) is untouched either way - only its link
+// row cascades away, same as before this fix.
+//
+// id's photo ids are collected BEFORE the DELETE (their equipment_documents
+// rows are about to cascade away with it) and checked for remaining links
+// AFTER, all inside the one transaction. Returns the sha256 of every photo
+// document this call actually deleted, so deleteEquipmentHandler
+// (inventory_handlers.go) can remove each one's file from disk too - the
+// same store/handler split RemoveEquipmentPhoto/deleteEquipmentPhotoHandler
+// already draw.
+func (s *documentStore) DeleteEquipment(id string) (deletedPhotoSHAs []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(`DELETE FROM equipment WHERE id = ?`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("delete equipment: %w", err)
+		return nil, fmt.Errorf("delete equipment: begin: %w", err)
 	}
-	return checkRowsAffected(res, errEquipmentNotFound)
+	defer tx.Rollback()
+
+	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("delete equipment: check equipment: %w", err)
+	}
+	if !ok {
+		return nil, errEquipmentNotFound
+	}
+
+	photoMap, err := photoIDsForEquipmentIDs(tx, []string{id})
+	if err != nil {
+		return nil, err
+	}
+	photoIDs := photoMap[id]
+
+	if _, err := tx.Exec(`DELETE FROM equipment WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("delete equipment: %w", err)
+	}
+
+	for _, docID := range photoIDs {
+		stillLinked, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE document_id = ?`, docID)
+		if err != nil {
+			return nil, fmt.Errorf("delete equipment: check remaining photo links: %w", err)
+		}
+		if stillLinked {
+			continue
+		}
+
+		var sha string
+		if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, docID).Scan(&sha); err != nil {
+			return nil, fmt.Errorf("delete equipment: read photo sha: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, docID); err != nil {
+			return nil, fmt.Errorf("delete equipment: delete photo document: %w", err)
+		}
+		deletedPhotoSHAs = append(deletedPhotoSHAs, sha)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("delete equipment: commit: %w", err)
+	}
+	return deletedPhotoSHAs, nil
 }
 
 // GetEquipment reads a single equipment record, zone name and bin code
@@ -1176,10 +1236,26 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		return nil, fmt.Errorf("list equipment: %w", err)
 	}
 
-	// One aggregate photoIDsForEquipmentIDs call over the whole filtered
-	// result, not one per item (that function's own doc comment) - the bin
-	// page and the equipment index both need photo_ids on every row they
-	// show.
+	// The Go-side `q` text filter runs BEFORE photoIDsForEquipmentIDs below -
+	// review finding: this used to fetch photo ids for every structurally-
+	// matching row first and only then filter by q, doing that lookup's own
+	// work for rows the filter was about to discard. Filtering first means
+	// the aggregate photo query below only ever runs over the rows this call
+	// actually returns.
+	q := strings.ToLower(strings.TrimSpace(filter.Query))
+	if q != "" {
+		filtered := make([]equipmentItem, 0, len(out))
+		for _, it := range out {
+			if equipmentMatchesQuery(it, q) {
+				filtered = append(filtered, it)
+			}
+		}
+		out = filtered
+	}
+
+	// One aggregate photoIDsForEquipmentIDs call over the surviving result,
+	// not one per item (that function's own doc comment) - the bin page and
+	// the equipment index both need photo_ids on every row they show.
 	ids := make([]string, len(out))
 	for i, it := range out {
 		ids[i] = it.ID
@@ -1195,18 +1271,7 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 		}
 	}
 
-	q := strings.ToLower(strings.TrimSpace(filter.Query))
-	if q == "" {
-		return out, nil
-	}
-
-	filtered := make([]equipmentItem, 0, len(out))
-	for _, it := range out {
-		if equipmentMatchesQuery(it, q) {
-			filtered = append(filtered, it)
-		}
-	}
-	return filtered, nil
+	return out, nil
 }
 
 // ── equipment documents ──────────────────────────────────────────────────
@@ -1401,30 +1466,6 @@ func sameIDSet(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// EnsurePhotoTag adds the 'photo' operator tag to documentID if it doesn't
-// already carry it. idempotent (insertOperatorTagsTx's own ON CONFLICT
-// DO UPDATE). Needed only for the rare case where a freshly uploaded
-// photo's bytes match a document already in the library byte-for-byte
-// (Insert's own sha256 dedupe finds the existing row instead of creating a
-// new one) - without this, that existing row would keep whatever tags it
-// already had and never show up in the item's photo strip, even though the
-// operator just told the photo route to add it as one.
-func (s *documentStore) EnsurePhotoTag(documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("ensure photo tag: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := insertOperatorTagsTx(tx, documentID, []string{"photo"}); err != nil {
-		return fmt.Errorf("ensure photo tag: %w", err)
-	}
-	return tx.Commit()
 }
 
 // AddEquipmentPhoto links documentID to equipmentID as a photo, at the end

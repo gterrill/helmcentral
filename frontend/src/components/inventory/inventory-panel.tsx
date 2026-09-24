@@ -58,6 +58,14 @@ interface InventoryPanelProps {
   /** A delete that already succeeded. */
   onEquipmentDeleted: () => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Release-fixes code-review finding: forwarded to Stocktake's own
+   * onHasWorkChange and the bin page's quick-add onHasWorkChange - never
+   * both mounted at once, so one prop covers either. App.tsx routes Open/
+   * Full item through the same unsaved-work guard when this is true.
+   * `detail`, when given, is wording for what would actually be lost -
+   * BinQuickAdd's own doc comment on its identical prop explains when it
+   * passes one. */
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   onOpenHelp?: (target: HelpTarget) => void
   canWrite?: boolean
   /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
@@ -67,9 +75,12 @@ interface InventoryPanelProps {
   binCode: string | null
   /** Locations-section bin click, or a tag/deep link landing on one. */
   onOpenBin: (code: string) => void
-  /** The bin page's own Back - never discards anything (there is no draft
-   * on that page for the same reason opening an equipment item isn't
-   * guarded either), so this is a plain setter, not routed through a guard. */
+  /** The bin page's own Back. Release-fixes code-review finding: this used
+   * to be a plain setter on the theory that the bin page holds no draft to
+   * discard - true of the equipment editor, but the quick-add form living on
+   * this same page (ADR 0127) can hold a staged name/photos or a photo still
+   * queued for Retry, so App.tsx routes this through the same
+   * requestWithinInventory guard onOpenBin/onSectionChange already use. */
   onCloseBin: () => void
   /** The zone/bin App.tsx stashed from the last onNewEquipment(preset) call
    * - read once by EquipmentEditor when it mounts a brand new draft. null
@@ -93,6 +104,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onEquipmentCreated,
     onEquipmentDeleted,
     onDirtyChange,
+    onHasWorkChange,
     onOpenHelp,
     canWrite = true,
     binCode,
@@ -152,13 +164,14 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onOpenEquipment={onOpenEquipment}
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
+            onHasWorkChange={onHasWorkChange}
           />
         )
       }
       return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
     }
     if (activeSectionId === 'stocktake') {
-      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
+      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />
     }
     return null
   })()

@@ -8,6 +8,8 @@ import {
   formatAppLocation,
   isCanonicalAppPath,
   inventoryEditorClosedBy,
+  inventoryWorkClosedBy,
+  resolveScannedText,
   type LocationContext,
 } from '@/lib/app-location'
 
@@ -576,5 +578,120 @@ describe('inventoryEditorClosedBy', () => {
       { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
       at('/inventory/bins/LAZ-02'),
     )).toBe(true)
+  })
+})
+
+// Release-fixes code-review finding: a Back/Forward that leaves Stocktake or
+// a bin page's quick-add draft behind - popstate's own equivalent of
+// inventoryEditorClosedBy above, for inventoryHasWork rather than
+// inventoryDirty.
+describe('inventoryWorkClosedBy', () => {
+  const at = (path: string) => parseAppLocation(path)
+
+  it('says no when neither Stocktake nor a bin page is showing', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'equipment', binCode: null },
+      at('/inventory/locations'),
+    )).toBe(false)
+  })
+
+  it('says no when a bin page is showing but the target is the same bin', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/bins/LAZ-02'),
+    )).toBe(false)
+  })
+
+  it('says yes when the target is a different bin', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/bins/LAZ-03'),
+    )).toBe(true)
+  })
+
+  it('says yes when the target is the Locations index (no bin)', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/locations'),
+    )).toBe(true)
+  })
+
+  it('says yes when only the section changed', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'locations', binCode: 'LAZ-02' },
+      at('/inventory/equipment'),
+    )).toBe(true)
+  })
+
+  it('says no when Stocktake is showing and the target is still Stocktake', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/inventory/stocktake'),
+    )).toBe(false)
+  })
+
+  it('says yes when Stocktake is showing and the target is a different section', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/inventory/locations'),
+    )).toBe(true)
+  })
+
+  it('says yes when leaving the panel entirely', () => {
+    expect(inventoryWorkClosedBy(
+      { section: 'stocktake', binCode: null },
+      at('/documents'),
+    )).toBe(true)
+  })
+})
+
+describe('resolveScannedText', () => {
+  it('resolves a full https URL to a bin', () => {
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('resolves a full https URL to an item', () => {
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/equipment/eq-1')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'equipment',
+      equipmentEditId: 'eq-1',
+    })
+  })
+
+  it('resolves a scheme-less host + path the same way', () => {
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('resolves a bare bin code with no slash', () => {
+    expect(resolveScannedText('LAZ-02')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('rejects a bare code that contains a slash', () => {
+    expect(resolveScannedText('LAZ/02')).toBeNull()
+  })
+
+  it('trims surrounding whitespace before resolving', () => {
+    expect(resolveScannedText('  LAZ-02  ')).toEqual({
+      panel: 'inventory',
+      inventorySection: 'locations',
+      binCode: 'LAZ-02',
+    })
+  })
+
+  it('returns null for a URL that parses but names no bin or item', () => {
+    expect(resolveScannedText('https://example.com/inventory/locations')).toBeNull()
+    expect(resolveScannedText('https://example.com/documents')).toBeNull()
   })
 })

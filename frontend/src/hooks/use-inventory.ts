@@ -146,6 +146,33 @@ export interface EquipmentInput {
   notes: string
 }
 
+/** A brand new, unsaved equipment record - every field at its own default,
+ * matching backend validateEquipmentInput's own defaults (system 'other',
+ * status 'deployed') wherever one applies. Shared by the Equipment editor's
+ * own "New item" draft and the bin page's quick-add form (bin-quick-add.tsx),
+ * which spreads this and overrides only the handful of fields it actually
+ * collects (name, quantity, category, status, zone_id, bin_id) rather than
+ * spelling out every field of its own. */
+export const BLANK_DRAFT: EquipmentInput = {
+  name: '',
+  category: 'general',
+  system: 'other',
+  manufacturer: '',
+  model: '',
+  serial: '',
+  quantity: 1,
+  status: 'deployed',
+  zone_id: null,
+  bin_id: null,
+  location_detail: '',
+  install_date: '',
+  hour_meter_path: '',
+  profile_id: '',
+  aliases: [],
+  verified_aboard: false,
+  notes: '',
+}
+
 export interface EquipmentFilter {
   category?: EquipmentCategory | ''
   system?: EquipmentSystem | ''
@@ -307,7 +334,7 @@ export function useEquipment(filter: EquipmentFilter | null) {
  * unresolved Details route.
  */
 export function useEquipmentItem(id: string | null) {
-  const [item, setItem] = useState<EquipmentItem | null>(null)
+  const [item, setItemState] = useState<EquipmentItem | null>(null)
   const [documents, setDocuments] = useState<EquipmentDocument[]>([])
   const [loading, setLoading] = useState(id !== null)
   const [error, setError] = useState<string | null>(null)
@@ -317,16 +344,36 @@ export function useEquipmentItem(id: string | null) {
   // must not have its late reply overwrite whatever a newer call already set.
   const seqRef = useRef(0)
 
+  // Review finding: seqRef alone conflated two different races. setItem
+  // bumping it (below) correctly stops a stale GET's `item` from winning
+  // against a newer write (the create-then-upload race this hook's own
+  // history comment describes) - but a GET in flight checks the SAME
+  // seqRef for its documents/error/loading too, so that write collaterally
+  // discarded them as well, and left `loading` stuck true forever once
+  // nothing else was left to flip it back off (the `finally` block's own
+  // `seq === seqRef.current` check fails right along with everything else).
+  // update() had the opposite gap: it never touched seqRef at all, so a
+  // slower GET for the same id already in flight could still resolve AFTER
+  // it and clobber the just-written item with stale data.
+  //
+  // itemSeqRef is a SEPARATE counter, bumped only by a write applying an
+  // item directly (setItem, update()) - a GET captures it when it starts,
+  // and only skips re-applying `item` from its own response if a write has
+  // landed since; documents/error/loading are never gated by it, so a GET's
+  // own results outside the item race still land normally.
+  const itemSeqRef = useRef(0)
+
   const refresh = useCallback(async () => {
     if (id === null) {
       seqRef.current += 1
-      setItem(null)
+      setItemState(null)
       setDocuments([])
       setError(null)
       setLoading(false)
       return
     }
     const seq = (seqRef.current += 1)
+    const itemSeqAtStart = itemSeqRef.current
     setLoading(true)
     try {
       const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
@@ -338,12 +385,12 @@ export function useEquipmentItem(id: string | null) {
       }
       const data = (await res.json()) as { item: EquipmentItem; documents?: EquipmentDocument[] }
       if (seq !== seqRef.current) return
-      setItem(data.item)
+      if (itemSeqRef.current === itemSeqAtStart) setItemState(data.item)
       setDocuments(data.documents ?? [])
       setError(null)
     } catch (err) {
       if (seq !== seqRef.current) return
-      setItem(null)
+      if (itemSeqRef.current === itemSeqAtStart) setItemState(null)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       if (seq === seqRef.current) setLoading(false)
@@ -359,7 +406,12 @@ export function useEquipmentItem(id: string | null) {
   const update = useCallback(async (input: EquipmentInput) => {
     if (id === null) throw new Error('useEquipmentItem: no id to update')
     const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
-    setItem(data.item)
+    // Review finding: this never used to bump itemSeqRef, so a slower GET
+    // for the same id already in flight when this PUT lands could still
+    // resolve afterward and win, overwriting the just-saved item with
+    // whatever stale copy it fetched before the PUT ever happened.
+    itemSeqRef.current += 1
+    setItemState(data.item)
     return data.item
   }, [id])
 
@@ -391,7 +443,58 @@ export function useEquipmentItem(id: string | null) {
   // effect fires the instant `id` turns from null into the created id, a
   // request that typically lands before the photo uploads that follow it
   // even start.
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem }
+  //
+  // Review finding: that GET is not guaranteed to land first, only to fire
+  // first. A caller's own setItem, applied while it's still in flight, used
+  // to leave seqRef untouched, so the GET's own ordering guard (seq !==
+  // seqRef.current, above) never saw anything to disagree with and its
+  // late, stale reply was free to overwrite a newer write - the create-
+  // then-upload race this hook's id-change GET can lose against
+  // equipment-editor.tsx's own per-upload setItem(updated) calls, silently
+  // dropping photos back off the strip once that GET finally landed.
+  // Bumping itemSeqRef here invalidates any GET already in flight's own
+  // `item` the moment a caller hands this a fresher one - see itemSeqRef's
+  // own doc comment (above, by seqRef) for why this is a separate counter
+  // from seqRef rather than reusing it: reusing it also discarded that
+  // GET's documents/error and left loading stuck true.
+  // The editor is not remounted between records, so a write's response can
+  // arrive after Back/Forward has already moved this hook to another id - a
+  // photo upload for item A landing while item B is open. Applying it would
+  // show A's fields under B's id (and a Save would then write them onto B),
+  // and bumping itemSeqRef would discard B's own GET. A record that isn't
+  // the one open is therefore dropped (final pre-release review finding).
+  //
+  // `adopt` is the create-then-upload case: Save's create hands the new id
+  // to App.tsx, but the first photo upload can resolve before the re-render
+  // that brings that id back in as this hook's `id`. An adopting write may
+  // claim the id only while no record is open yet (still the draft's null).
+  const idRef = useRef(id)
+  idRef.current = id
+
+  const setItem = useCallback((next: EquipmentItem, options?: { adopt?: boolean }) => {
+    if (options?.adopt && idRef.current === null) idRef.current = next.id
+    if (next.id !== idRef.current) return
+    itemSeqRef.current += 1
+    setItemState(next)
+  }, [])
+
+  // Review finding: deleteEquipmentPhoto's own DELETE returns only the
+  // updated item (photo_ids with the id gone) - `documents`, fetched once at
+  // mount/refresh, still carries that same id's link until something
+  // re-fetches it. equipment-editor.tsx's Documents tab excludes photo-
+  // tagged links by checking id membership in item.photo_ids, so the moment
+  // photo_ids stops naming it, the STILL-STALE documents array makes the
+  // just-removed photo look like an ordinary linked document again - visibly
+  // reappearing in the tab, and eligible to be sent right back on the next
+  // link-set PUT. Pruning it here, at the one write that can make it stale,
+  // keeps `documents` correct without a second GET (refresh() would also
+  // fix it, but costs a redundant round trip for a response this hook
+  // already has everything it needs from).
+  const pruneDocument = useCallback((documentId: string) => {
+    setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
+  }, [])
+
+  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem, pruneDocument }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any
@@ -405,13 +508,26 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
   return data.item
 }
 
+/** Thrown by fetchEquipment specifically for a 404 - the one failure
+ * stocktake-section.tsx's own scan handler treats as "no such item, report
+ * it as an unrecognised scan". Every other failure (a genuine server error,
+ * a network drop) is a distinct Error instead, so it surfaces as an actual
+ * error rather than folding into the same "not an inventory tag" bucket a
+ * bad connection would otherwise share with a mistyped id (AGENTS.md
+ * fallback policy). */
+export class EquipmentNotFoundError extends Error {}
+
 /** GET /api/inventory/equipment/:id - a standalone, one-off fetch (not
  * useEquipmentItem's own persistent hook instance) for a caller that reads
  * an ARBITRARY id it doesn't already hold state for - stocktake-section.tsx
  * scanning a different item's tag on every pass, one after another. */
 export async function fetchEquipment(id: string): Promise<EquipmentItem> {
   const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
-  if (!res.ok) throw new Error(await readErrorMessage(res))
+  if (!res.ok) {
+    const message = await readErrorMessage(res)
+    if (res.status === 404) throw new EquipmentNotFoundError(message)
+    throw new Error(message)
+  }
   const data = (await res.json()) as { item: EquipmentItem }
   return data.item
 }
@@ -458,10 +574,22 @@ export async function updateEquipment(id: string, input: EquipmentInput): Promis
 // held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
 // neither of which has a persistent hook instance to hang these off.
 
+/** Thrown by uploadEquipmentPhoto specifically for a 409 - inventory_
+ * handlers.go's "This image is already in Documents as ..." refusal, when
+ * the exact same bytes are already filed under a different, non-photo
+ * document. Carries the status the same way EquipmentNotFoundError carries
+ * its 404, rather than a caller having to match the message text - a
+ * caller that queues failed uploads for Retry (equipment-editor.tsx,
+ * bin-quick-add.tsx) checks for this specifically, because re-sending the
+ * identical bytes can only get the identical refusal: Retry is never a
+ * failure worth offering here the way a dropped connection or a 500 is. */
+export class PhotoAlreadyLinkedError extends Error {}
+
 /** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
  * 'photo' and linked at the end of the item's photo order server-side.
  * Throws the server's own message on a rejected upload (AGENTS.md fallback
- * policy: HEIC/non-image get a specific reason, never a generic one). */
+ * policy: HEIC/non-image get a specific reason, never a generic one) - a
+ * 409 throws PhotoAlreadyLinkedError specifically, see its own doc comment. */
 export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
   const form = new FormData()
   form.append('file', file, filename)
@@ -469,7 +597,11 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
     method: 'POST',
     body: form,
   })
-  if (!response.ok) throw new Error(await readErrorMessage(response))
+  if (!response.ok) {
+    const message = await readErrorMessage(response)
+    if (response.status === 409) throw new PhotoAlreadyLinkedError(message)
+    throw new Error(message)
+  }
   const data = (await response.json()) as { item: EquipmentItem }
   return data.item
 }

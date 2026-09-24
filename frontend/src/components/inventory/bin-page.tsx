@@ -25,9 +25,14 @@ interface BinPageProps {
   /** Full item (below) - pre-sets a brand new draft's location. */
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite?: boolean
+  /** Release-fixes code-review finding: forwarded to the quick-add form's
+   * own onHasWorkChange (its doc comment, bin-quick-add.tsx) - App.tsx
+   * routes Open/Full item through the same unsaved-work guard when this is
+   * true. */
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
-export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true }: BinPageProps) {
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange }: BinPageProps) {
   // ONE useInventoryZones() instance for the whole page (there is no shared
   // store between separate calls - the hook's own header comment), so that
   // when BinNotFound's Create bin below calls createBin/createZone, THIS
@@ -35,7 +40,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   // freshly created bin fall straight through `match` into the ordinary
   // BinContents render below, with its real onOpenEquipment/onNewEquipment
   // callbacks, rather than a second, dummy-callback render path.
-  const { zones, loading: zonesLoading, createZone, createBin } = useInventoryZones()
+  const { zones, loading: zonesLoading, error: zonesError, createZone, createBin } = useInventoryZones()
 
   const match = useMemo(() => findBinByCode(zones, code), [zones, code])
 
@@ -48,6 +53,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
         onOpenEquipment={onOpenEquipment}
         onNewEquipment={onNewEquipment}
         canWrite={canWrite}
+        onHasWorkChange={onHasWorkChange}
       />
     )
   }
@@ -58,6 +64,26 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   // before the fetch has even landed.
   if (zonesLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+  }
+
+  // Review finding: a failed zones fetch used to be indistinguishable from
+  // a genuinely unknown code - both fell through to BinNotFound's "No bin
+  // <code>" + Create, offering to create a duplicate of a bin the zone list
+  // simply failed to load. AGENTS.md fallback policy: the failure is
+  // surfaced explicitly, and Create - a write that would land wrong - is
+  // not offered in its place.
+  if (zonesError) {
+    return (
+      <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Locations
+        </Button>
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {zonesError}
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -275,7 +301,7 @@ export function BinPhotoGrid({ items, onOpenEquipment }: { items: EquipmentItem[
 }
 
 function BinContents({
-  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite,
+  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange,
 }: {
   zone: InventoryZone
   bin: InventoryBin
@@ -283,6 +309,7 @@ function BinContents({
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }) {
   const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
 
@@ -313,7 +340,18 @@ function BinContents({
       )}
 
       {canWrite && (
-        <BinQuickAdd zoneId={zone.id} binId={bin.id} onCreated={() => { void refresh() }} canWrite={canWrite} />
+        // Keyed on the bin so moving to another bin (Back/Forward, another
+        // tag) starts a fresh draft - otherwise a typed name, staged photos
+        // or photos waiting for Retry carried across and Save filed them in
+        // the wrong bin (final pre-release review finding).
+        <BinQuickAdd
+          key={bin.id}
+          zoneId={zone.id}
+          binId={bin.id}
+          onCreated={() => { void refresh() }}
+          canWrite={canWrite}
+          onHasWorkChange={onHasWorkChange}
+        />
       )}
 
       {canWrite && (

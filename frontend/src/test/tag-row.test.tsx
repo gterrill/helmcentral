@@ -53,7 +53,13 @@ describe('TagRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Write tag' }))
 
     await screen.findByRole('button', { name: 'Written' })
-    expect(write).toHaveBeenCalledWith(`${window.location.origin}/inventory/bins/LAZ-02`, { signal: undefined })
+    // An NDEF URL record, not a text record (lib/nfc.ts's writeUrlTag) - a
+    // bare string here is what used to leave a phone opening nothing when
+    // it tapped the written tag.
+    expect(write).toHaveBeenCalledWith(
+      { records: [{ recordType: 'url', data: `${window.location.origin}/inventory/bins/LAZ-02` }] },
+      { signal: undefined },
+    )
   })
 
   it('shows the thrown error when writing the tag fails', async () => {
