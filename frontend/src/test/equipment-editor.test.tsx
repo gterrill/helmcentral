@@ -1,7 +1,17 @@
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
+
+// ADR 0127: the photo row runs every picked file through downscaleImage
+// before it ever reaches the network (canvas/createImageBitmap aren't
+// implemented by jsdom - image-downscale.test.ts covers that function's
+// OWN logic against mocked browser APIs; this file only needs it to be a
+// harmless pass-through so the rest of the upload flow can be exercised).
+vi.mock('@/lib/image-downscale', () => ({
+  downscaleImage: vi.fn(async (file: Blob) => file),
+}))
 
 function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
   return {
@@ -28,6 +38,7 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     link_count: 0,
     created_at: '',
     updated_at: '',
+    photo_ids: [],
     ...overrides,
   }
 }
@@ -52,6 +63,8 @@ const profiles = [
 
 let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
+let uploadedPhotoOrder: string[]
+let failingPhotoUploadNames: Set<string>
 const fetchMock = vi.fn()
 
 // Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
@@ -93,7 +106,10 @@ function stubFetch() {
       currentDocuments = currentDocuments.filter((d) => body.document_ids.includes(d.document_id))
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
-    if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'GET') {
+    // Generic, not just eq-1: once a draft's create POST assigns 'eq-new'
+    // (below), the useEquipmentItem hook immediately GETs that new id -
+    // currentItem is the single record these fixtures track either way.
+    if (u.match(/\/api\/inventory\/equipment\/[^/]+$/) && method === 'GET') {
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
@@ -120,7 +136,38 @@ function stubFetch() {
     }
     if (u.match(/\/api\/inventory\/equipment$/) && method === 'POST') {
       const body = JSON.parse(String(init?.body))
-      return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: { ...makeItem(body), id: 'eq-new' } }) })
+      currentItem = { ...makeItem(body), id: 'eq-new' }
+      return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: currentItem }) })
+    }
+    // ADR 0127's photo routes - a plain in-memory stand-in for
+    // AddEquipmentPhoto/SetEquipmentPhotoOrder/RemoveEquipmentPhoto
+    // (backend/inventory_store.go), tracked on whichever record (eq-1 or a
+    // freshly created eq-new) the URL names.
+    const photoPost = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
+    if (photoPost && method === 'POST') {
+      const targetId = photoPost[1]
+      const form = init?.body as FormData
+      const file = form.get('file') as File
+      uploadedPhotoOrder.push(file.name)
+      if (failingPhotoUploadNames.has(file.name)) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
+      }
+      const photoId = `photo-${uploadedPhotoOrder.length}`
+      if (targetId === currentItem.id) {
+        currentItem = { ...currentItem, photo_ids: [...currentItem.photo_ids, photoId] }
+      }
+      return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: currentItem }) })
+    }
+    const photoPut = u.match(/\/api\/inventory\/equipment\/([^/]+)\/photos$/)
+    if (photoPut && method === 'PUT') {
+      const body = JSON.parse(String(init?.body)) as { document_ids: string[] }
+      currentItem = { ...currentItem, photo_ids: body.document_ids }
+      return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
+    }
+    const photoDelete = u.match(/\/api\/inventory\/equipment\/[^/]+\/photos\/([^/]+)$/)
+    if (photoDelete && method === 'DELETE') {
+      currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((p) => p !== photoDelete[1]) }
+      return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
     return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
   })
@@ -131,7 +178,11 @@ beforeEach(() => {
   fetchMock.mockReset()
   currentItem = makeItem()
   currentDocuments = []
+  uploadedPhotoOrder = []
+  failingPhotoUploadNames = new Set()
   stubFetch()
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 
 async function waitForLoaded() {
@@ -319,7 +370,7 @@ describe('EquipmentEditor', () => {
   })
 
   it('does not PUT the documents link set when it was not touched', async () => {
-    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator' }]
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
@@ -334,7 +385,7 @@ describe('EquipmentEditor', () => {
   })
 
   it('PUTs the reduced documents link set once a linked document is removed', async () => {
-    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator' }]
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
@@ -364,5 +415,221 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true)
+  })
+
+  // ── photos (ADR 0127) ────────────────────────────────────────────────
+
+  it("POSTs a saved item's Take photo pick to /photos", async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['data'], 'impeller.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/photos') && (init as RequestInit | undefined)?.method === 'POST')
+      expect(call).toBeDefined()
+    })
+  })
+
+  it('PUTs the reordered ids when Make cover is clicked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    // p1 is the cover already - its own "Make cover" is disabled - so the
+    // second thumbnail's (p2) is the one that actually does anything.
+    fireEvent.click(screen.getAllByText('Make cover')[1])
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/photos') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
+      expect(body.document_ids).toEqual(['p2', 'p1'])
+    })
+  })
+
+  it('DELETEs a photo when Remove is clicked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByText('Remove'))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/photos/p1') && (init as RequestInit | undefined)?.method === 'DELETE')
+      expect(call).toBeDefined()
+    })
+  })
+
+  // ADR 0127 review finding: every photo write already gets the updated
+  // item back from the server (the same shape update() applies via
+  // setItem) - Make cover/Remove should use THAT rather than firing a
+  // second, redundant GET afterward.
+  it('applies the server response directly on Make cover/Remove, without a follow-up GET', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getAllByText('Make cover')[1])
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/photos') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+    })
+    fetchMock.mockClear()
+
+    fireEvent.click(screen.getAllByText('Remove')[0])
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([, init]) =>
+        (init as RequestInit | undefined)?.method === 'DELETE')
+      expect(call).toBeDefined()
+    })
+
+    // No bare GET /api/inventory/equipment/eq-1 after either write - the
+    // returned {item} is applied directly instead of triggering a refetch.
+    const getEq1 = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+    expect(getEq1).toHaveLength(0)
+  })
+
+  // ADR 0127 review finding: uploadPhotosToSavedItem `break`s on the first
+  // failure, so the remaining files never even get tried and are never
+  // offered for Retry - unlike the new-draft path, which tries every file
+  // and queues each failure. Also proves bug #5's fix for THIS call site:
+  // the strip reflects the two successful uploads rather than staying
+  // stuck on a stale refresh().
+  it('tries every file when adding several photos to a saved item, queuing only the failure for Retry', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    failingPhotoUploadNames.add('b.jpg')
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    const fileC = new File(['c'], 'c.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB, fileC] } })
+
+    // All three tried, in order - b.jpg failing must not stop c.jpg.
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'c.jpg']))
+    await screen.findByText("1 of 3 photos didn't upload: upload failed: b.jpg")
+    // a.jpg and c.jpg made it onto the item - the strip isn't stuck empty.
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'c.jpg', 'b.jpg']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(3))
+  })
+
+  // ADR 0127 review finding: the photo row was empty after creating an item
+  // with photos - useEquipmentItem's own GET for the newly created id (the
+  // id-change effect) can land BEFORE the photo uploads that follow it in
+  // performSave finish, and nothing ever applied the uploads' own returned
+  // item afterward. Deliberately holds that GET open (rather than trusting
+  // the mock's natural timing, which doesn't reliably reproduce the race
+  // either way) so this proves the strip comes from the uploads' own
+  // responses, not from that GET landing to already show the finished
+  // state.
+  it('shows both uploaded photos even while the id-change GET is still in flight', async () => {
+    const onCreated = vi.fn()
+    let resolveGetNew!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const withoutRace = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/equipment/eq-new') && method === 'GET') {
+        return new Promise((resolve) => { resolveGetNew = resolve })
+      }
+      return withoutRace(url, init)
+    })
+
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+
+    // The id-change GET is STILL pending here - the strip must already show
+    // both photos from the uploads' own returned item, not from that GET.
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    resolveGetNew({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
+  })
+
+  // Mirrors how InventoryPanel/App.tsx actually wire onCreated - id starts
+  // null and flips to the server-assigned id once Save's create succeeds,
+  // WITHOUT unmounting EquipmentEditor (same component instance, only the
+  // `id` prop changes) - the exact transition the plan's own Retry
+  // scenario depends on (this component's local photo-failure state has
+  // to survive it). A bare `render(<EquipmentEditor id={null} .../>)` with
+  // a plain vi.fn() onCreated would never actually make that transition
+  // happen, which is why this harness exists rather than every draft test
+  // reaching for it directly.
+  function DraftHarness({ onCreatedSpy }: { onCreatedSpy: (id: string) => void }) {
+    const [id, setId] = useState<string | null>(null)
+    return (
+      <EquipmentEditor
+        id={id}
+        onBack={vi.fn()}
+        onCreated={(newId) => { onCreatedSpy(newId); setId(newId) }}
+        onDeleted={vi.fn()}
+      />
+    )
+  }
+
+  it('creates the item then uploads two draft photos in order', async () => {
+    const onCreated = vi.fn()
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+  })
+
+  it('shows Retry after a partial upload failure, and Retry re-sends only that one photo', async () => {
+    failingPhotoUploadNames.add('b.jpg')
+    const onCreated = vi.fn()
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await screen.findByText("Saved, but 1 of 2 photos didn't upload: upload failed: b.jpg")
+    expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg'])
+
+    failingPhotoUploadNames.clear() // the retry itself succeeds
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'b.jpg']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
   })
 })

@@ -91,6 +91,7 @@ export const INVENTORY_HELP_TARGETS: Record<InventorySectionId, HelpTarget> = {
   equipment: { page: 'features/inventory-tracking', heading: 'Equipment' },
   profiles: { page: 'features/inventory-tracking', heading: 'Profiles' },
   locations: { page: 'features/inventory-tracking', heading: 'Locations' },
+  stocktake: { page: 'features/inventory-tracking', heading: 'Doing a stocktake' },
 }
 
 /** Where the dashboard grid itself (panel === null) opens in the help. */

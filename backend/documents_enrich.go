@@ -49,6 +49,15 @@ const documentsImageMaxBytes = 20 << 20 // 20 MB
 // not permission to crash the process trying.
 const documentsOCRPDFMaxBytes = 40 << 20 // 40 MB
 
+// documentHEICRejectionMessage is the one explanation an operator sees for
+// "why can't Helmcentral use this" wherever a HEIC image meets this app -
+// the enrich stage below (a HEIC already accepted onto the general document
+// store) and, ADR 0127, the equipment photo upload route
+// (uploadEquipmentPhotoHandler, inventory_handlers.go), which rejects HEIC
+// outright rather than storing it unreadable. One constant, not two copies
+// of the same string that could drift.
+const documentHEICRejectionMessage = "image/heic is not supported for reading; convert to JPEG"
+
 // documentSuggestedTagsCap bounds how many of Mate's suggested tags
 // SetSuggested records. Real captures (backend/testdata/openrouter_document_*.json)
 // show a model asked for "up to 5 tags" returning 10 anyway; 8 is a
@@ -274,7 +283,7 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document, ex
 		return idx.finishIndexed(doc, expectedSeq, "local", doc.Error)
 	}
 	if doc.MIME == "image/heic" {
-		return idx.failDoc(doc.ID, "image/heic is not supported for reading; convert to JPEG")
+		return idx.failDoc(doc.ID, documentHEICRejectionMessage)
 	}
 
 	blocks, plugins, timeout, kind, err := idx.buildEnrichRequest(doc)

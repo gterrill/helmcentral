@@ -28,6 +28,7 @@ function makeItem(overrides: Partial<EquipmentItem>): EquipmentItem {
     link_count: 0,
     created_at: '',
     updated_at: '',
+    photo_ids: [],
     ...overrides,
   }
 }

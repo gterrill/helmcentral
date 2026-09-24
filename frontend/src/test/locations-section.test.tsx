@@ -206,4 +206,36 @@ describe('LocationsSection', () => {
 
     await screen.findByText('bin is in use by 1 item')
   })
+
+  // ADR 0127: "reaching it without a tag" - a bin's code opens its bin page.
+  it('opens the bin page when the bin code button is clicked', async () => {
+    const onOpenBin = vi.fn()
+    render(<LocationsSection onOpenBin={onOpenBin} />)
+    await screen.findByDisplayValue('Engine room (stbd)')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open bin ER-01' }))
+
+    expect(onOpenBin).toHaveBeenCalledWith('ER-01')
+  })
+
+  // ADR 0127: renaming a code orphans that bin's tags, and the rename UI
+  // says so.
+  it('warns that tags no longer open the bin after its code changes on blur', async () => {
+    render(<LocationsSection />)
+    const input = await screen.findByDisplayValue('ER-01')
+
+    fireEvent.change(input, { target: { value: 'ER-09' } })
+    fireEvent.blur(input)
+
+    await screen.findByText('Tags written for ER-01 no longer open this bin.')
+  })
+
+  it('does not warn when a bin is renamed with the same code (name-only edit)', async () => {
+    render(<LocationsSection />)
+    const input = await screen.findByDisplayValue('ER-01')
+
+    fireEvent.blur(input)
+
+    expect(screen.queryByText(/no longer open this bin/)).not.toBeInTheDocument()
+  })
 })

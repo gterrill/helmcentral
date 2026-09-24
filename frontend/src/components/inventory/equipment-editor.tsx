@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 
 import {
@@ -19,13 +19,20 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
+import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
+import { TagRow } from '@/components/inventory/tag-row'
+import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import { formatAppLocation } from '@/lib/app-location'
 import {
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
   InventoryValidationError,
   createEquipment,
+  deleteEquipmentPhoto,
+  setEquipmentPhotoOrder,
+  uploadEquipmentPhoto,
   useEquipmentItem,
   useInventoryZones,
   type EquipmentCategory,
@@ -35,6 +42,7 @@ import {
   type EquipmentSystem,
   type InventoryFieldError,
 } from '@/hooks/use-inventory'
+import { downscaleImage } from '@/lib/image-downscale'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft (App.tsx's
@@ -132,6 +140,39 @@ interface DocEntry {
   filename: string
 }
 
+/** ADR 0127: a picked-but-not-yet-uploaded photo on a brand new draft -
+ * downscaled already (lib/image-downscale.ts runs the moment a file is
+ * picked, never deferred to Save), previewed through an object URL that
+ * MUST be revoked once it's no longer needed (a successful upload, a
+ * Remove, or the component unmounting with the draft abandoned). */
+interface LocalPhoto {
+  id: string
+  blob: Blob
+  filename: string
+  previewUrl: string
+}
+
+/** A photo whose upload failed right after Save created the item - holds
+ * the Blob itself (not just an id) so Retry can re-send the exact same
+ * bytes without asking the operator to pick the file again. No previewUrl:
+ * by the time this exists, `id` is no longer null and the photo strip has
+ * already switched to reading the saved item's own photo_ids, so there is
+ * nothing left displaying this Blob to revoke a URL for. */
+interface FailedPhotoUpload {
+  blob: Blob
+  filename: string
+  error: string
+}
+
+/** ADR 0127: JPEG/PNG re-encoding always renames to .jpg (downscaleImage's
+ * own output format) - a camera capture's filename is often meaningless
+ * anyway ("image.heic", "blob"), and giving every upload a real extension
+ * that matches its actual bytes is one less thing to get wrong. */
+function photoFilename(original: string): string {
+  const base = original.replace(/\.[^.]+$/, '').trim()
+  return `${base || 'photo'}.jpg`
+}
+
 interface EquipmentEditorProps {
   /** null is the "New item" draft - see this file's header comment. */
   id: string | null
@@ -143,6 +184,12 @@ interface EquipmentEditorProps {
   onDeleted: () => void
   onDirtyChange?: (dirty: boolean) => void
   canWrite?: boolean
+  /** ADR 0127: the bin page's "Full item" action pre-sets a brand new
+   * draft's location - read only once, when a NEW draft (id === null)
+   * first mounts (the same "re-seed only on a different record" effect
+   * below), never on a saved record being edited. */
+  initialZoneId?: string | null
+  initialBinId?: string | null
 }
 
 export interface EquipmentEditorHandle {
@@ -150,10 +197,10 @@ export interface EquipmentEditorHandle {
 }
 
 export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditorProps>(function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDirtyChange, canWrite = true },
+  { id, onBack, onCreated, onDeleted, onDirtyChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, update, remove, setLinkedDocuments } = useEquipmentItem(id)
+  const { item, documents, loading, error, update, remove, setLinkedDocuments, setItem } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
@@ -168,6 +215,21 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const [pendingDelete, setPendingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // ADR 0127: the photo row's own state - see LocalPhoto/FailedPhotoUpload's
+  // doc comments above for why a draft needs BOTH of these (not just one
+  // list that empties on success) rather than folding into `draft` itself:
+  // photo changes are never part of the specifications form's dirty check
+  // (the plan's own "photo changes don't make the form dirty"), and they
+  // survive the id===null -> id=<created> transition Save causes (this
+  // component instance is NOT remounted by that - only `id` the prop
+  // changes - so this local state rides straight through it, which is
+  // exactly what lets the "Saved, but 2 of 5 didn't upload" notice still
+  // show once the editor is showing the saved record).
+  const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([])
+  const [failedPhotoUploads, setFailedPhotoUploads] = useState<FailedPhotoUpload[]>([])
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+  const [retryingPhotos, setRetryingPhotos] = useState(false)
+
   // Re-seeds only when a DIFFERENT record has loaded (id, or - for a brand
   // new draft - a one-time reset to blank), not on every incidental
   // re-render of the same one, mirroring document-details-page.tsx's own
@@ -175,7 +237,13 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // otherwise re-run this and discard an edit in progress.
   useEffect(() => {
     if (id === null) {
-      setDraft(BLANK_DRAFT)
+      // ADR 0127: the bin page's "Full item" pre-sets a brand new draft's
+      // location - read once, at the moment this draft is born (this
+      // effect's own "only on a different record" reasoning applies
+      // identically to a NEW record: EquipmentEditor unmounts and remounts
+      // fresh between one "New item" press and the next, so there is
+      // exactly one render where initialZoneId/initialBinId matter).
+      setDraft({ ...BLANK_DRAFT, zone_id: initialZoneId, bin_id: initialBinId })
       return
     }
     if (item) setDraft(draftFromItem(item))
@@ -187,13 +255,24 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       setDocEntries([])
       return
     }
-    setDocEntries(documents.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })))
+    // ADR 0127: photo-tagged links are excluded here - the photo row above
+    // shows them, and "Photo links are managed only through the photo
+    // routes" (the plan's own words) means this Documents-tab list must
+    // never offer to manage one too, the same restriction the backend's
+    // SetEquipmentDocuments already enforces on the write side.
+    const photoIds = new Set(item?.photo_ids ?? [])
+    setDocEntries(
+      documents
+        .filter((d) => !photoIds.has(d.document_id))
+        .map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
+    )
     // Keyed on the fetched set's own content, not the array reference -
     // useEquipmentItem builds a fresh `documents` array on every refresh()
     // even when the set is unchanged, and re-seeding on every one of those
     // would throw away a locally staged add/remove before Save ever runs.
+    // photo_ids is keyed the same way for the same reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, documents.map((d) => d.document_id).join(',')])
+  }, [id, documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
 
   const baseline = id === null ? BLANK_DRAFT : (item ? draftFromItem(item) : null)
   const baselineDocIds = useMemo(() => documents.map((d) => d.document_id), [documents])
@@ -283,6 +362,172 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     [paths],
   )
 
+  // Object URLs are a browser-level resource, not a React one - abandoning
+  // a draft (Back, or navigating away) without ever pressing Save must
+  // still release them, or every unfinished "New item" leaks one blob URL
+  // per photo picked for the life of the tab. Deliberately an EMPTY
+  // dependency array with a ref-mirrored read at cleanup time (not
+  // `[localPhotos]`, which would revoke and immediately re-grant new
+  // object URLs on every single photo pick) - this only ever runs once, on
+  // unmount, over whatever the list holds at that moment.
+  const localPhotosRef = useRef<LocalPhoto[]>(localPhotos)
+  useEffect(() => { localPhotosRef.current = localPhotos }, [localPhotos])
+  useEffect(() => () => {
+    for (const photo of localPhotosRef.current) URL.revokeObjectURL(photo.previewUrl)
+  }, [])
+
+  // ── photo row (ADR 0127) ────────────────────────────────────────────────
+  // Two independent sets of handlers below - one for a brand new draft
+  // (id === null, acting on localPhotos), one for a saved record (acting on
+  // the server immediately, like the document links already do) - composed
+  // into the single onFilesPicked/onMakeCover/onRemove PhotoStripEditor
+  // actually receives further down, which branches on `id` itself.
+
+  // Downscaling every picked file runs concurrently (Promise.all) - each
+  // file's own canvas work is independent of the others, so there's no
+  // reason a slow one should hold up the rest. The results are still
+  // applied in the ORIGINAL file order afterward (not completion order),
+  // so a multi-pick's local photo list comes out in the order the operator
+  // picked them regardless of which one's canvas work happened to finish
+  // first.
+  const addLocalPhotos = async (files: File[]) => {
+    const results = await Promise.all(files.map(async (file) => {
+      try {
+        return { ok: true as const, downscaled: await downscaleImage(file), filename: photoFilename(file.name) }
+      } catch (err) {
+        // AGENTS.md fallback policy: the real reason a photo couldn't be
+        // prepared (a canvas failure, an unreadable file), never silently
+        // dropped.
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+    let lastError: string | null = null
+    for (const result of results) {
+      if (result.ok) {
+        const previewUrl = URL.createObjectURL(result.downscaled)
+        setLocalPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob: result.downscaled, filename: result.filename, previewUrl }])
+      } else {
+        lastError = result.error
+      }
+    }
+    if (lastError) setSaveError(lastError)
+  }
+
+  const makeCoverLocal = (photoId: string) => {
+    setLocalPhotos((prev) => {
+      const idx = prev.findIndex((p) => p.id === photoId)
+      if (idx <= 0) return prev
+      const next = [...prev]
+      const [moved] = next.splice(idx, 1)
+      next.unshift(moved)
+      return next
+    })
+  }
+
+  const removeLocalPhoto = (photoId: string) => {
+    setLocalPhotos((prev) => {
+      const target = prev.find((p) => p.id === photoId)
+      if (target) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter((p) => p.id !== photoId)
+    })
+  }
+
+  // ADR 0127 review: this used to `break` on the first failed file, so the
+  // remaining picks were never even tried and never offered for Retry -
+  // fixed to match the new-draft path (performSave below): every file gets
+  // its own attempt regardless of an earlier one failing. A downscale
+  // failure (no Blob to retry) still queues for Retry using the ORIGINAL
+  // file - Retry re-sends it as-is rather than losing the pick entirely.
+  //
+  // Applies each successful upload's own returned item via setItem as it
+  // lands (not a refresh() afterward) - same review finding as makeCover/
+  // remove/retry below: a write already gets the updated record back, so a
+  // second GET is redundant, and - for the create-then-upload transition in
+  // particular (performSave's id===null branch) - actively wrong, since
+  // useEquipmentItem's own GET for a freshly created id can land before
+  // these uploads finish and nothing else would ever catch the item up.
+  const uploadPhotosToSavedItem = async (targetId: string, files: File[]) => {
+    // Downscaling runs concurrently for every file (Promise.all) - the
+    // network uploads that follow stay strictly sequential and in the
+    // ORIGINAL file order (not completion order), because the server
+    // assigns sort_index as each one arrives.
+    const downscaled = await Promise.all(files.map(async (file) => {
+      try {
+        return { ok: true as const, file, blob: await downscaleImage(file) }
+      } catch (err) {
+        return { ok: false as const, file, error: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+
+    const failures: FailedPhotoUpload[] = []
+    for (const result of downscaled) {
+      if (!result.ok) {
+        failures.push({ blob: result.file, filename: photoFilename(result.file.name), error: result.error })
+        continue
+      }
+      try {
+        const updated = await uploadEquipmentPhoto(targetId, result.blob, photoFilename(result.file.name))
+        setItem(updated)
+      } catch (err) {
+        failures.push({ blob: result.blob, filename: photoFilename(result.file.name), error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    if (failures.length > 0) {
+      setFailedPhotoUploads(failures)
+      setPhotoNotice(`${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+    }
+  }
+
+  const makeCoverSaved = async (photoId: string) => {
+    if (id === null || !item) return
+    try {
+      const updated = await setEquipmentPhotoOrder(id, [photoId, ...item.photo_ids.filter((p) => p !== photoId)])
+      setItem(updated)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const removeSavedPhoto = async (photoId: string) => {
+    if (id === null) return
+    try {
+      const updated = await deleteEquipmentPhoto(id, photoId)
+      setItem(updated)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // Retry re-sends ONLY the photos that failed - the ones that uploaded
+  // fine on the first pass are already linked server-side and are never
+  // touched again.
+  const retryFailedPhotoUploads = async () => {
+    if (id === null || failedPhotoUploads.length === 0) return
+    setRetryingPhotos(true)
+    const stillFailing: FailedPhotoUpload[] = []
+    for (const photo of failedPhotoUploads) {
+      try {
+        const updated = await uploadEquipmentPhoto(id, photo.blob, photo.filename)
+        setItem(updated)
+      } catch (err) {
+        stillFailing.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    setFailedPhotoUploads(stillFailing)
+    setPhotoNotice(stillFailing.length === 0
+      ? null
+      : `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
+    setRetryingPhotos(false)
+  }
+
+  const photoStripPhotos: PhotoStripPhoto[] = id === null
+    ? localPhotos.map((p, i) => ({ id: p.id, previewUrl: p.previewUrl, isCover: i === 0 }))
+    : (item?.photo_ids ?? []).map((photoId, i) => ({
+        id: photoId,
+        previewUrl: `${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`,
+        isCover: i === 0,
+      }))
+
   // Exposed via useImperativeHandle so App.tsx's "Save and Continue" (the
   // dirty-navigation guard, wired through InventoryPanel the same way
   // ADR 0115 §2 wires DocumentDetailsPageHandle) can save this draft without
@@ -296,6 +541,39 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (id === null) {
         const created = await createEquipment(draft)
         onCreated(created.id)
+        // ADR 0127: "create the item; upload the photos one at a time, in
+        // order; release the object URLs." A failed upload does NOT roll
+        // back the create or stop the remaining photos from being tried -
+        // "there is no silent rollback" (the plan's own words) means the
+        // item stays exactly as saved, and every photo gets its own
+        // attempt regardless of an earlier one failing.
+        if (localPhotos.length > 0) {
+          const toUpload = localPhotos
+          setLocalPhotos([])
+          const failures: FailedPhotoUpload[] = []
+          for (const photo of toUpload) {
+            try {
+              // Review finding: applied via setItem the moment each upload
+              // lands, not a refresh() (or nothing at all, which is what
+              // this did before) afterward - useEquipmentItem's own GET for
+              // `created.id` (fired the instant onCreated above flips the
+              // `id` prop) routinely lands before this loop finishes, and
+              // without this the photo row stayed empty: nothing was ever
+              // going to re-fetch it again once that GET's stale response
+              // was in.
+              const updated = await uploadEquipmentPhoto(created.id, photo.blob, photo.filename)
+              setItem(updated)
+              URL.revokeObjectURL(photo.previewUrl)
+            } catch (err) {
+              URL.revokeObjectURL(photo.previewUrl)
+              failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
+            }
+          }
+          if (failures.length > 0) {
+            setFailedPhotoUploads(failures)
+            setPhotoNotice(`Saved, but ${failures.length} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
+          }
+        }
         return
       }
       const sentDraft = draft
@@ -332,7 +610,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, update, setLinkedDocuments, onCreated])
+  }, [id, draft, docEntries, baselineDocIds, localPhotos, update, setLinkedDocuments, setItem, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -382,6 +660,36 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
 
   return (
     <div className="flex flex-col gap-4">
+      <FieldSet className="rounded-md border border-border bg-card p-4">
+        <FieldLegend variant="label">Photos</FieldLegend>
+        <PhotoStripEditor
+          photos={photoStripPhotos}
+          canWrite={canWrite}
+          onFilesPicked={(files) => {
+            if (id === null) { void addLocalPhotos(files) } else { void uploadPhotosToSavedItem(id, files) }
+          }}
+          onMakeCover={(photoId) => {
+            if (id === null) { makeCoverLocal(photoId) } else { void makeCoverSaved(photoId) }
+          }}
+          onRemove={(photoId) => {
+            if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId) }
+          }}
+        />
+        {photoNotice && (
+          <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+            <span>{photoNotice}</span>
+            <Button type="button" variant="outline" size="sm" disabled={retryingPhotos} onClick={() => { void retryFailedPhotoUploads() }}>
+              {retryingPhotos ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        )}
+      </FieldSet>
+
+      {/* formatAppLocation (not raw interpolation) - same reasoning as
+          bin-page.tsx's own Tag row, so this path is encoded exactly the
+          way the app's own /inventory/equipment/<id> URLs are. */}
+      {id !== null && <TagRow path={formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })} />}
+
       <FieldSet className="rounded-md border border-border bg-card p-4">
         <FieldLegend variant="label">{id === null ? 'New item' : 'Specifications & IDs'}</FieldLegend>
         <FieldGroup>
@@ -632,7 +940,11 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onPick={addDocument}
-        excludeIds={docEntries.map((d) => d.document_id)}
+        // ADR 0127: this item's OWN photos are excluded too, not just its
+        // already-linked non-photo documents - "the photo row shows them"
+        // (the plan's own words), so offering one here would let the
+        // operator link it a second time through the wrong control.
+        excludeIds={[...docEntries.map((d) => d.document_id), ...(item?.photo_ids ?? [])]}
       />
 
       <AlertDialog open={pendingDelete} onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}>

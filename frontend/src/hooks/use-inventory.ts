@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { readErrorMessage } from '@/lib/api-error'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
 // its zones/bins. Same idiom as use-documents.ts/use-manuals.ts throughout:
@@ -60,6 +61,9 @@ export interface EquipmentDocument {
   kind: string
   note_type: string
   source: string
+  /** ADR 0127: orders a link within its OWN item's photo strip - meaningless
+   * for a non-photo link, where the server leaves it at 0. */
+  sort_index: number
 }
 
 /** inventoryBin, backend/inventory_store.go - a numbered container within
@@ -111,6 +115,11 @@ export interface EquipmentItem {
   link_count: number
   created_at: string
   updated_at: string
+  /** ADR 0127: the item's OWN linked documents tagged 'photo', cover first -
+   * never every linked document (that's link_count/the Documents tab), just
+   * the photo-tagged subset the bin page's photo strip and the editor's
+   * photo row both read. */
+  photo_ids: string[]
 }
 
 /** The body EquipmentEditor sends on create (POST) and save (PUT) - every
@@ -142,6 +151,8 @@ export interface EquipmentFilter {
   system?: EquipmentSystem | ''
   status?: EquipmentStatus | ''
   zone?: string
+  /** ADR 0127: the bin page's own filter - `useEquipment({ bin: bin.id })`. */
+  bin?: string
   q?: string
 }
 
@@ -223,11 +234,16 @@ async function submitJSON<T>(url: string, method: string, body?: unknown): Promi
 /**
  * The Equipment index's filtered listing - `?category=&system=&status=&zone=&q=`.
  * `filter` is caller-owned (EquipmentIndex's own toolbar state), the same
- * contract useDocuments(folderId) gives folderId.
+ * contract useDocuments(folderId) gives folderId. `null` fetches nothing at
+ * all (items stay `[]`, loading false) - the same "meaningless without a
+ * scope" shape useEquipmentItem(null) gives a brand new draft - for a
+ * caller like StocktakeSection that only has something to filter BY once
+ * the operator has scanned a bin, rather than that caller having to invent
+ * a filter value that can never match a real record.
  */
-export function useEquipment(filter: EquipmentFilter) {
+export function useEquipment(filter: EquipmentFilter | null) {
   const [items, setItems] = useState<EquipmentItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(filter !== null)
   const [error, setError] = useState<string | null>(null)
 
   // Ordering guard (same idiom as use-documents.ts's refreshSeqRef): a
@@ -240,9 +256,18 @@ export function useEquipment(filter: EquipmentFilter) {
   // (EquipmentIndex builds it inline from several useState values) - keying
   // the effect on its serialized contents, not its identity, is what keeps
   // the request from refiring every render for no filter change at all.
-  const filterKey = JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.q ?? ''])
+  const filterKey = filter === null
+    ? null
+    : JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
 
   const refresh = useCallback(async () => {
+    if (filter === null) {
+      seqRef.current += 1
+      setItems([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     const seq = (seqRef.current += 1)
     setLoading(true)
     try {
@@ -251,13 +276,11 @@ export function useEquipment(filter: EquipmentFilter) {
       if (filter.system) params.set('system', filter.system)
       if (filter.status) params.set('status', filter.status)
       if (filter.zone) params.set('zone', filter.zone)
+      if (filter.bin) params.set('bin', filter.bin)
       if (filter.q) params.set('q', filter.q)
       const qs = params.toString()
       const res = await fetch(`${apiBaseUrl}/api/inventory/equipment${qs ? `?${qs}` : ''}`)
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
+      if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = (await res.json()) as { items?: EquipmentItem[] }
       if (seq !== seqRef.current) return
       setItems(data.items ?? [])
@@ -356,7 +379,19 @@ export function useEquipmentItem(id: string | null) {
     await refresh()
   }, [id, refresh])
 
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments }
+  // Exposed (rather than making every photo write below call refresh()) so
+  // a caller holding an EquipmentItem the server just handed back directly
+  // - uploadEquipmentPhoto/setEquipmentPhotoOrder/deleteEquipmentPhoto below
+  // all return the updated item the same way update() does - can apply it
+  // straight to this hook's own state instead of firing a second, redundant
+  // GET. ADR 0127 review: equipment-editor.tsx's create-with-photos flow
+  // used to do neither (no refresh, no setItem) after each upload, so the
+  // photo strip stayed empty until something else happened to re-fetch -
+  // which for a brand new draft was only the ONE GET useEquipmentItem's own
+  // effect fires the instant `id` turns from null into the created id, a
+  // request that typically lands before the photo uploads that follow it
+  // even start.
+  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any
@@ -368,6 +403,113 @@ export function useEquipmentItem(id: string | null) {
 export async function createEquipment(input: EquipmentInput): Promise<EquipmentItem> {
   const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment`, 'POST', input)
   return data.item
+}
+
+/** GET /api/inventory/equipment/:id - a standalone, one-off fetch (not
+ * useEquipmentItem's own persistent hook instance) for a caller that reads
+ * an ARBITRARY id it doesn't already hold state for - stocktake-section.tsx
+ * scanning a different item's tag on every pass, one after another. */
+export async function fetchEquipment(id: string): Promise<EquipmentItem> {
+  const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error(await readErrorMessage(res))
+  const data = (await res.json()) as { item: EquipmentItem }
+  return data.item
+}
+
+/** Strips an equipmentItem down to its own editable EquipmentInput shape -
+ * draftFromItem's own reasoning (equipment-editor.tsx), pulled out here so
+ * a caller with no editor draft of its own (stocktake-section.tsx's
+ * verified_aboard/bin_id writes) can still send a PUT's required
+ * whole-record body built from a record it only just fetched. */
+export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
+  return {
+    name: item.name,
+    category: item.category,
+    system: item.system,
+    manufacturer: item.manufacturer,
+    model: item.model,
+    serial: item.serial,
+    quantity: item.quantity,
+    status: item.status,
+    zone_id: item.zone_id,
+    bin_id: item.bin_id,
+    location_detail: item.location_detail,
+    install_date: item.install_date,
+    hour_meter_path: item.hour_meter_path,
+    profile_id: item.profile_id,
+    aliases: item.aliases,
+    verified_aboard: item.verified_aboard,
+    notes: item.notes,
+  }
+}
+
+/** PUT /api/inventory/equipment/:id - standalone, for the same "no
+ * persistent hook instance" reason fetchEquipment exists. */
+export async function updateEquipment(id: string, input: EquipmentInput): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
+  return data.item
+}
+
+// ── equipment photos (ADR 0127) ─────────────────────────────────────────
+// Three plain functions, not a hook - the same "standalone, not tied to a
+// useEquipmentItem instance" reasoning createEquipment's own doc comment
+// gives: the photo row works identically for a saved item (each action
+// calls its route immediately) and, before Save, for a brand new draft
+// held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
+// neither of which has a persistent hook instance to hang these off.
+
+/** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
+ * 'photo' and linked at the end of the item's photo order server-side.
+ * Throws the server's own message on a rejected upload (AGENTS.md fallback
+ * policy: HEIC/non-image get a specific reason, never a generic one). */
+export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
+  const form = new FormData()
+  form.append('file', file, filename)
+  const response = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!response.ok) throw new Error(await readErrorMessage(response))
+  const data = (await response.json()) as { item: EquipmentItem }
+  return data.item
+}
+
+/** PUT /api/inventory/equipment/:id/photos - {document_ids} must name
+ * EXACTLY the item's current photo set; "Make cover" is this same call
+ * with the chosen id moved to the front. */
+export async function setEquipmentPhotoOrder(equipmentId: string, documentIds: string[]): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`,
+    'PUT',
+    { document_ids: documentIds },
+  )
+  return data.item
+}
+
+/** DELETE /api/inventory/equipment/:id/photos/:documentId - removes the
+ * photo from the item AND deletes its document (ADR 0127: "a photo has no
+ * life outside its item"). */
+export async function deleteEquipmentPhoto(equipmentId: string, documentId: string): Promise<EquipmentItem> {
+  const data = await submitJSON<{ item: EquipmentItem }>(
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}`,
+    'DELETE',
+  )
+  return data.item
+}
+
+/** Case-insensitive bin-code lookup against a zone tree - a bin code is
+ * "short and human-chosen" (ADR 0127 §2), so this is never a server round
+ * trip, just a scan over the already-fetched zone list. Shared by the bin
+ * page (resolving `/inventory/bins/<code>`, bin-page.tsx) and Stocktake
+ * (resolving a scanned bin code, stocktake-section.tsx), which each
+ * duplicated this exact loop before. */
+export function findBinByCode(zones: InventoryZone[], code: string): { zone: InventoryZone; bin: InventoryBin } | null {
+  const lower = code.toLowerCase()
+  for (const zone of zones) {
+    const bin = zone.bins.find((b) => b.code.toLowerCase() === lower)
+    if (bin) return { zone, bin }
+  }
+  return null
 }
 
 /** Zones (with their nested bins) plus every zone/bin write - shared by
@@ -410,9 +552,17 @@ export function useInventoryZones() {
   // (deleteZone/deleteBin) is a plain `{error}` naming what's still filed in
   // it (ADR 0123 decisions) - submitJSON's ordinary Error path already
   // surfaces that message verbatim, so no special handling is needed here.
+  // Returns the created record (ADR 0127: the bin page's own "Create bin"
+  // flow needs the new zone's id to then create a bin under it, and the
+  // caller-side `zones` state isn't updated synchronously by refresh()'s own
+  // setZones - a caller reading it right after this resolves would see
+  // whatever this render still holds, not the new zone). Every existing
+  // caller (locations-section.tsx) already discards the return value, so
+  // this is additive.
   const createZone = useCallback(async (name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/zones`, 'POST', { name })
+    const data = await submitJSON<{ zone: InventoryZone }>(`${apiBaseUrl}/api/inventory/zones`, 'POST', { name })
     await refresh()
+    return data.zone
   }, [refresh])
 
   const renameZone = useCallback(async (id: string, name: string) => {
@@ -425,9 +575,12 @@ export function useInventoryZones() {
     await refresh()
   }, [refresh])
 
+  // Returns the created record - same reasoning as createZone's own comment
+  // just above.
   const createBin = useCallback(async (zoneId: string, code: string, name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/bins`, 'POST', { zone_id: zoneId, code, name })
+    const data = await submitJSON<{ bin: InventoryBin }>(`${apiBaseUrl}/api/inventory/bins`, 'POST', { zone_id: zoneId, code, name })
     await refresh()
+    return data.bin
   }, [refresh])
 
   const renameBin = useCallback(async (id: string, patch: { code?: string; name?: string }) => {

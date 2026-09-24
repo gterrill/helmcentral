@@ -85,6 +85,18 @@ export interface AppLocation {
    * URL of its own - see App.tsx's inventoryCreatingEquipment, which is
    * local UI state, never serialized here. */
   equipmentEditId?: string | null
+  /** ADR 0127: the Locations section's `/inventory/bins/<code>` segment -
+   * the bin page a tag tap or a Locations-section click opens. Only
+   * meaningful alongside inventorySection 'locations', the same
+   * "meaningless on its own" rule documentSectionId already follows, and
+   * present only when it names a real, non-empty code (decoded with
+   * decodeSegment). Absent everywhere else, INCLUDING a bare
+   * `/inventory/bins` with no third segment - that collapses to the
+   * ordinary Locations shape rather than carrying an explicit null, since
+   * nothing in this app ever deliberately links to a codeless bin route
+   * and a plain `/inventory/locations` is the correct place to land on one
+   * anyway (isCanonicalAppPath then just replaceState's it there). */
+  binCode?: string
 }
 
 export interface LocationContext {
@@ -203,7 +215,20 @@ export function parseAppLocation(pathname: string): AppLocation {
   // explicitly here rather than falling through to the generic
   // PANEL_ID_SET branch below.
   if (first === 'inventory') {
-    if (second === 'profiles' || second === 'locations') {
+    // ADR 0127: the bin page. Kept ahead of the plain 'locations' branch
+    // below because it carries an extra segment that one doesn't - same
+    // reasoning as /documents/<id> and /display/<slug> elsewhere in this
+    // function. A missing or empty/undecodable code collapses to the
+    // ordinary Locations shape (binCode's own doc comment on AppLocation).
+    if (second === 'bins') {
+      const codeSegment = segments[2]
+      const binCode = codeSegment !== undefined ? decodeSegment(codeSegment) : null
+      if (binCode) {
+        return { panel: 'inventory', inventorySection: 'locations', binCode }
+      }
+      return { panel: 'inventory', inventorySection: 'locations' }
+    }
+    if (second === 'profiles' || second === 'locations' || second === 'stocktake') {
       return { panel: 'inventory', inventorySection: second }
     }
     if (second === 'equipment') {
@@ -272,6 +297,13 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     if (section === 'equipment') {
       if (loc.equipmentEditId) return `/inventory/equipment/${encodeURIComponent(loc.equipmentEditId)}`
       return '/inventory'
+    }
+    // ADR 0127: binCode is only ever set alongside 'locations' - see its
+    // own doc comment on AppLocation for why a falsy (absent) value here
+    // collapses to the ordinary Locations path rather than a bare
+    // /inventory/bins.
+    if (section === 'locations' && loc.binCode) {
+      return `/inventory/bins/${encodeURIComponent(loc.binCode)}`
     }
     return `/inventory/${section}`
   }

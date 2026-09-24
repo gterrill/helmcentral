@@ -2,11 +2,13 @@ import { BookOpen } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { BinPage } from '@/components/inventory/bin-page'
 import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationsSection } from '@/components/inventory/locations-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
+import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import { INVENTORY_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
 
 // ADR 0123: InventoryNav plus whichever section is active - the Settings
@@ -45,8 +47,10 @@ interface InventoryPanelProps {
   creatingEquipment: boolean
   /** Index row click. Opening an item never discards anything. */
   onOpenEquipment: (id: string) => void
-  /** Index "New item". */
-  onNewEquipment: () => void
+  /** Index "New item", or the bin page's "Full item" (ADR 0127) - the
+   * latter passes the bin/zone to pre-set the draft with. Undefined/omitted
+   * is the ordinary "New item" button: a blank draft, nothing pre-set. */
+  onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   /** The editor's Back - the one exit that can discard an unsaved draft. */
   onCloseEditor: () => void
   /** A create that already succeeded; carries the id the server assigned. */
@@ -56,6 +60,21 @@ interface InventoryPanelProps {
   onDirtyChange?: (dirty: boolean) => void
   onOpenHelp?: (target: HelpTarget) => void
   canWrite?: boolean
+  /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
+   * null is the ordinary Locations index; a non-null code shows that bin's
+   * contents instead, the same index/page split Equipment already has for
+   * equipmentEditId. */
+  binCode: string | null
+  /** Locations-section bin click, or a tag/deep link landing on one. */
+  onOpenBin: (code: string) => void
+  /** The bin page's own Back - never discards anything (there is no draft
+   * on that page for the same reason opening an equipment item isn't
+   * guarded either), so this is a plain setter, not routed through a guard. */
+  onCloseBin: () => void
+  /** The zone/bin App.tsx stashed from the last onNewEquipment(preset) call
+   * - read once by EquipmentEditor when it mounts a brand new draft. null
+   * for the ordinary "New item" button. */
+  newEquipmentPreset: { zoneId?: string; binId?: string } | null
 }
 
 export interface InventoryPanelHandle {
@@ -76,6 +95,10 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onDirtyChange,
     onOpenHelp,
     canWrite = true,
+    binCode,
+    onOpenBin,
+    onCloseBin,
+    newEquipmentPreset,
   },
   ref,
 ) {
@@ -103,6 +126,8 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onDeleted={onEquipmentDeleted}
             onDirtyChange={onDirtyChange}
             canWrite={canWrite}
+            initialZoneId={equipmentEditId === null ? (newEquipmentPreset?.zoneId ?? null) : null}
+            initialBinId={equipmentEditId === null ? (newEquipmentPreset?.binId ?? null) : null}
           />
         )
       }
@@ -115,7 +140,26 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       )
     }
     if (activeSectionId === 'profiles') return <ProfilesSection canWrite={canWrite} />
-    if (activeSectionId === 'locations') return <LocationsSection canWrite={canWrite} />
+    if (activeSectionId === 'locations') {
+      // ADR 0127: the bin page is the SAME section as the Locations index,
+      // not a nav entry of its own - identical "index or page" split to
+      // Equipment just above (showEquipmentEditor).
+      if (binCode !== null) {
+        return (
+          <BinPage
+            code={binCode}
+            onClose={onCloseBin}
+            onOpenEquipment={onOpenEquipment}
+            onNewEquipment={onNewEquipment}
+            canWrite={canWrite}
+          />
+        )
+      }
+      return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
+    }
+    if (activeSectionId === 'stocktake') {
+      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
+    }
     return null
   })()
 

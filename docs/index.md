@@ -53,6 +53,12 @@ Steps for specific tasks.
   filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
+- [Tag bins and equipment](how-to/tag-bins-and-equipment.md), writing and
+  using an NFC tag, and the iPhone Copy route.
+- [Photograph your gear](how-to/photograph-your-gear.md), from an item's
+  editor or on the spot while adding it from a bin.
+- [Run a stocktake](how-to/run-a-stocktake.md), scanning a bin and its
+  contents to confirm what's aboard.
 - [Development](how-to/development.md), running the stack, tests and release builds.
 
 ## Reference

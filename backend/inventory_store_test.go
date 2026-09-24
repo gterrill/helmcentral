@@ -783,3 +783,386 @@ func TestDocumentStore_CreateEquipmentDedupesAliasesCaseInsensitively(t *testing
 		t.Fatalf("expected case-insensitive dedupe keeping the first spelling, got %#v", item.Aliases)
 	}
 }
+
+// ── equipment photos (ADR 0127) ─────────────────────────────────────────
+// Written before the store methods themselves (AGENTS.md's test-first
+// policy), the same convention every other section of this file follows.
+
+// mustInsertPhotoDocument inserts a document already tagged 'photo' -
+// mustInsertDocument's own shape, extended with the one tag every photo
+// fixture below needs.
+func mustInsertPhotoDocument(t *testing.T, store *documentStore, sha, filename string) document {
+	t.Helper()
+	doc, err := store.Insert(document{SHA256: sha, Filename: filename, MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(%q): %v", filename, err)
+	}
+	return doc
+}
+
+func TestDocumentStore_AddEquipmentPhotoAssignsIncrementingSortIndexCoverFirst(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA := mustInsertPhotoDocument(t, store, "sha-photo-a", "a.jpg")
+	photoB := mustInsertPhotoDocument(t, store, "sha-photo-b", "b.jpg")
+
+	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoA.ID || got.PhotoIDs[1] != photoB.ID {
+		t.Fatalf("expected photo_ids in upload order [a,b], got %#v", got.PhotoIDs)
+	}
+}
+
+func TestDocumentStore_AddEquipmentPhotoUnknownEquipmentReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	photo := mustInsertPhotoDocument(t, store, "sha-photo-orphan", "a.jpg")
+	if err := store.AddEquipmentPhoto("does-not-exist", photo.ID); !errors.Is(err, errEquipmentNotFound) {
+		t.Fatalf("expected errEquipmentNotFound, got %v", err)
+	}
+}
+
+func TestDocumentStore_AddEquipmentPhotoTwiceIsANoOpNotAnError(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-photo-twice", "a.jpg")
+
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto (first): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto (second, same pair): %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 1 {
+		t.Fatalf("expected re-adding the same link to stay a single entry, got %#v", got.PhotoIDs)
+	}
+}
+
+// TestDocumentStore_SetEquipmentPhotoOrderMakesCoverByReordering pins ADR
+// 0124's "Make cover is this call with the chosen id moved to the front".
+func TestDocumentStore_SetEquipmentPhotoOrderMakesCoverByReordering(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA := mustInsertPhotoDocument(t, store, "sha-order-a", "a.jpg")
+	photoB := mustInsertPhotoDocument(t, store, "sha-order-b", "b.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+
+	if err := store.SetEquipmentPhotoOrder(item.ID, []string{photoB.ID, photoA.ID}); err != nil {
+		t.Fatalf("SetEquipmentPhotoOrder: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoB.ID || got.PhotoIDs[1] != photoA.ID {
+		t.Fatalf("expected the new cover (b) first, got %#v", got.PhotoIDs)
+	}
+}
+
+func TestDocumentStore_SetEquipmentPhotoOrderRejectsMismatchedSet(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA := mustInsertPhotoDocument(t, store, "sha-mismatch-a", "a.jpg")
+	photoB := mustInsertPhotoDocument(t, store, "sha-mismatch-b", "b.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+
+	// Missing id (empty order against one existing photo).
+	if err := store.SetEquipmentPhotoOrder(item.ID, []string{}); !errors.Is(err, errEquipmentPhotoSetMismatch) {
+		t.Fatalf("expected errEquipmentPhotoSetMismatch for a missing id, got %v", err)
+	}
+	// Extra id (b was never added to this item).
+	if err := store.SetEquipmentPhotoOrder(item.ID, []string{photoA.ID, photoB.ID}); !errors.Is(err, errEquipmentPhotoSetMismatch) {
+		t.Fatalf("expected errEquipmentPhotoSetMismatch for an extra id, got %v", err)
+	}
+}
+
+// TestDocumentStore_SetEquipmentPhotoOrderRejectsUnknownEquipmentID pins an
+// ADR 0127 review finding: an unknown equipment id must be rejected
+// explicitly (errEquipmentNotFound), not fall through to the photo-set
+// comparison below it (which would see an empty current set and, for an
+// empty `order`, wrongly report success instead of "no such item").
+func TestDocumentStore_SetEquipmentPhotoOrderRejectsUnknownEquipmentID(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.SetEquipmentPhotoOrder("does-not-exist", []string{}); !errors.Is(err, errEquipmentNotFound) {
+		t.Fatalf("expected errEquipmentNotFound, got %v", err)
+	}
+}
+
+func TestDocumentStore_RemoveEquipmentPhotoDeletesLinkAndDocument(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-remove", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	sha, deleted, err := store.RemoveEquipmentPhoto(item.ID, photo.ID)
+	if err != nil {
+		t.Fatalf("RemoveEquipmentPhoto: %v", err)
+	}
+	if sha != "sha-remove" {
+		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
+	}
+	if !deleted {
+		t.Fatalf("expected the document to be reported deleted when no other item references it")
+	}
+
+	if _, err := store.Get(photo.ID); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected the document itself to be deleted, got %v", err)
+	}
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 0 {
+		t.Fatalf("expected no photos left, got %#v", got.PhotoIDs)
+	}
+}
+
+func TestDocumentStore_RemoveEquipmentPhotoNotOwnedByItemReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	// A plain (non-photo) linked document is not a photo this item can remove
+	// through the photo route, even though it IS linked.
+	doc := mustInsertDocument(t, store, "sha-not-photo", "manual.pdf", nil)
+	if err := store.SetEquipmentDocuments(item.ID, []string{doc.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+	if _, _, err := store.RemoveEquipmentPhoto(item.ID, doc.ID); !errors.Is(err, errEquipmentPhotoNotFound) {
+		t.Fatalf("expected errEquipmentPhotoNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt pins the
+// most serious of the ADR 0127 review findings: uploads are deduplicated by
+// sha256 (documentStore.Insert), so byte-identical photos added to two
+// different items share ONE documents row, linked twice. Removing the photo
+// from item A must drop only A's own equipment_documents link - the document
+// row (and, at the handler layer, its file) must survive because item B's
+// link still references it.
+func TestDocumentStore_RemoveEquipmentPhotoSharedWithAnotherItemKeepsIt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	itemA, err := store.CreateEquipment(equipmentItem{Name: "Bin A item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(A): %v", err)
+	}
+	itemB, err := store.CreateEquipment(equipmentItem{Name: "Bin B item", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment(B): %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-shared", "a.jpg")
+	if err := store.AddEquipmentPhoto(itemA.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(A): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(itemB.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(B): %v", err)
+	}
+
+	sha, deleted, err := store.RemoveEquipmentPhoto(itemA.ID, photo.ID)
+	if err != nil {
+		t.Fatalf("RemoveEquipmentPhoto: %v", err)
+	}
+	if sha != "sha-shared" {
+		t.Fatalf("expected the photo's own sha256 back, got %q", sha)
+	}
+	if deleted {
+		t.Fatalf("expected the document to be KEPT while item B still links it")
+	}
+
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the shared document to survive, got %v", err)
+	}
+	gotA, err := store.GetEquipment(itemA.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(A): %v", err)
+	}
+	if len(gotA.PhotoIDs) != 0 {
+		t.Fatalf("expected item A's own link removed, got %#v", gotA.PhotoIDs)
+	}
+	gotB, err := store.GetEquipment(itemB.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment(B): %v", err)
+	}
+	if len(gotB.PhotoIDs) != 1 || gotB.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected item B's own link untouched, got %#v", gotB.PhotoIDs)
+	}
+}
+
+// TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder pins
+// ADR 0127's central compatibility rule: the pre-existing whole-set-replace
+// PUT .../documents must not be able to wipe or reshuffle the photo strip a
+// completely separate part of the UI manages.
+func TestDocumentStore_SetEquipmentDocumentsPreservesPhotoLinksAndOrder(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photoA := mustInsertPhotoDocument(t, store, "sha-preserve-a", "a.jpg")
+	photoB := mustInsertPhotoDocument(t, store, "sha-preserve-b", "b.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photoA.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(a): %v", err)
+	}
+	if err := store.AddEquipmentPhoto(item.ID, photoB.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto(b): %v", err)
+	}
+
+	manual := mustInsertDocument(t, store, "sha-preserve-manual", "manual.pdf", nil)
+	if err := store.SetEquipmentDocuments(item.ID, []string{manual.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 2 || got.PhotoIDs[0] != photoA.ID || got.PhotoIDs[1] != photoB.ID {
+		t.Fatalf("expected both photo links and their order untouched, got %#v", got.PhotoIDs)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	foundManual := false
+	for _, d := range docs {
+		if d.DocumentID == manual.ID {
+			foundManual = true
+		}
+	}
+	if !foundManual {
+		t.Fatalf("expected the manual to still be linked as an ordinary document, got %+v", docs)
+	}
+	if len(docs) != 3 {
+		t.Fatalf("expected 2 photo links + 1 manual link = 3, got %d: %+v", len(docs), docs)
+	}
+}
+
+// TestDocumentStore_RemovingPhotoTagLeavesLinkButDropsFromPhotoIDs pins ADR
+// 0123 §3 applied to photos: "an item's photos are its linked documents
+// tagged photo" - untag it, and it leaves the strip but the link (and the
+// document) survive as an ordinary linked document. Not a special case,
+// just the same tags-say-what-it-is rule already in force.
+func TestDocumentStore_RemovingPhotoTagLeavesLinkButDropsFromPhotoIDs(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-untag", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	// Remove the 'photo' tag the way the Documents feature's own tag editor
+	// would (UpdateMeta replaces the WHOLE operator tag set) - leaving it
+	// tagged with something else entirely, never untagged outright.
+	if err := store.UpdateMeta(photo.ID, nil, nil, []string{"consumable"}); err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.PhotoIDs) != 0 {
+		t.Fatalf("expected the untagged document to leave the photo strip, got %#v", got.PhotoIDs)
+	}
+
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != photo.ID {
+		t.Fatalf("expected the link itself to survive, got %+v", docs)
+	}
+}
+
+func TestDocumentStore_ListEquipmentFiltersByBinID(t *testing.T) {
+	store := newTestDocumentStore(t)
+	zone, err := store.CreateZone("Lazarette")
+	if err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	binA, err := store.CreateBin(zone.ID, "LAZ-01", "")
+	if err != nil {
+		t.Fatalf("CreateBin(a): %v", err)
+	}
+	binB, err := store.CreateBin(zone.ID, "LAZ-02", "")
+	if err != nil {
+		t.Fatalf("CreateBin(b): %v", err)
+	}
+	if _, err := store.CreateEquipment(equipmentItem{Name: "Tape", Category: "general", BinID: &binA.ID}); err != nil {
+		t.Fatalf("CreateEquipment(a): %v", err)
+	}
+	if _, err := store.CreateEquipment(equipmentItem{Name: "Caulk", Category: "general", BinID: &binB.ID}); err != nil {
+		t.Fatalf("CreateEquipment(b): %v", err)
+	}
+
+	items, err := store.ListEquipment(equipmentFilter{BinID: binA.ID})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "Tape" {
+		t.Fatalf("expected only the item filed in bin A, got %+v", items)
+	}
+}
+
+func TestDocumentStore_ListEquipmentCarriesPhotoIDsForEveryItem(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Zip ties", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "sha-list-photo", "a.jpg")
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+
+	items, err := store.ListEquipment(equipmentFilter{})
+	if err != nil {
+		t.Fatalf("ListEquipment: %v", err)
+	}
+	if len(items) != 1 || len(items[0].PhotoIDs) != 1 || items[0].PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected photo_ids carried through ListEquipment, got %+v", items)
+	}
+}

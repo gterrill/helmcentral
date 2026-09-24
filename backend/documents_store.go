@@ -601,10 +601,20 @@ var documentStoreSchema = []string{
 	// thing either side of it must protect the other's existence for -
 	// deleting either the equipment record or the document itself should
 	// simply make the link vanish with it, never block the delete.
+	// sort_index (ADR 0127) orders a link within ITS OWN equipment's photo
+	// strip - meaningless for a non-photo link (left at its default 0), read
+	// only through the photo-tag join in photoIDsForEquipmentIDs
+	// (inventory_store.go). Added to the CREATE TABLE here for a database
+	// that has never seen this table before; applyDocumentStoreMigrations
+	// below ALTER TABLEs it onto the equipment_documents table ADR 0123
+	// already shipped, the same two-idiom split as documents.kind/note_type
+	// (that function's own doc comment explains why the two can't be
+	// merged).
 	`CREATE TABLE IF NOT EXISTS equipment_documents (
 		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
 		document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
 		source       TEXT NOT NULL CHECK (source IN ('operator','suggested')),
+		sort_index   INTEGER NOT NULL DEFAULT 0,
 		created_at   INTEGER NOT NULL,
 		PRIMARY KEY (equipment_id, document_id)
 	)`,
@@ -647,6 +657,10 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		`ALTER TABLE documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE document_folders ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE document_folders ADD COLUMN role TEXT NOT NULL DEFAULT '' CHECK (role IN ('','manual'))`,
+		// ADR 0127: equipment_documents predates this column (ADR 0123 shipped
+		// the table first) - single operator, no installed base, so a plain
+		// guarded ADD COLUMN is the whole of the migration story (AGENTS.md).
+		`ALTER TABLE equipment_documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
