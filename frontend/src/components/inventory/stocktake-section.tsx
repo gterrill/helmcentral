@@ -6,6 +6,7 @@ import { BinPhotoGrid } from '@/components/inventory/bin-page'
 import { parseAppLocation } from '@/lib/app-location'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
+  EquipmentNotFoundError,
   fetchEquipment,
   findBinByCode,
   toEquipmentInput,
@@ -138,8 +139,18 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
       let item: EquipmentItem
       try {
         item = await fetchEquipment(parsed.equipmentEditId)
-      } catch {
-        pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+      } catch (err) {
+        // Review finding: every fetchEquipment failure used to be logged as
+        // an unrecognised scan - a genuine server error (a 500, a dropped
+        // connection) looked identical to "not an inventory tag", hiding
+        // the real problem instead of showing it (AGENTS.md fallback
+        // policy). Only a 404 - EquipmentNotFoundError, thrown specifically
+        // for that status - actually means "no such item."
+        if (err instanceof EquipmentNotFoundError) {
+          pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
+          return
+        }
+        setScanError(err instanceof Error ? err.message : String(err))
         return
       }
 

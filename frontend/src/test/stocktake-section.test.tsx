@@ -85,7 +85,7 @@ beforeEach(() => {
     const idMatch = u.match(/\/api\/inventory\/equipment\/([^/?]+)$/)
     if (idMatch && method === 'GET') {
       const item = equipmentById[idMatch[1]]
-      if (!item) return Promise.resolve({ ok: false, json: async () => ({ error: 'equipment not found' }) })
+      if (!item) return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: 'equipment not found' }) })
       return Promise.resolve({ ok: true, json: async () => ({ item }) })
     }
     if (idMatch && method === 'PUT') {
@@ -265,6 +265,43 @@ describe('StocktakeSection', () => {
 
     await screen.findByText('Not an inventory tag: not a url or a known bin code')
     expect(putCalls).toHaveLength(0)
+  })
+
+  it('reports a well-formed equipment scan for an id that genuinely does not exist (404) as unrecognised', async () => {
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    // No 'eq-ghost' in equipmentById - the fixture's default GET answers 404.
+    await scan('https://boat.example/inventory/equipment/eq-ghost')
+
+    await screen.findByText('Not an inventory tag: https://boat.example/inventory/equipment/eq-ghost')
+  })
+
+  // Review finding: any fetchEquipment failure used to be logged as an
+  // unrecognised scan - a genuine server error (a 500, a dropped
+  // connection) looked identical to "you scanned something that isn't an
+  // inventory tag", silently hiding the real problem instead of showing it
+  // (AGENTS.md fallback policy).
+  it('shows a non-404 fetch failure as an error, not an unrecognised scan', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.endsWith('/api/inventory/zones') && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      }
+      if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'GET') {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'database unavailable' }) })
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    await scan('https://boat.example/inventory/equipment/eq-1')
+
+    await screen.findByText('database unavailable')
+    expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
   })
 
   it('wires the bin photo grid\'s Open button to onOpenEquipment', async () => {

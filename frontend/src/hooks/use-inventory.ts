@@ -421,13 +421,26 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
   return data.item
 }
 
+/** Thrown by fetchEquipment specifically for a 404 - the one failure
+ * stocktake-section.tsx's own scan handler treats as "no such item, report
+ * it as an unrecognised scan". Every other failure (a genuine server error,
+ * a network drop) is a distinct Error instead, so it surfaces as an actual
+ * error rather than folding into the same "not an inventory tag" bucket a
+ * bad connection would otherwise share with a mistyped id (AGENTS.md
+ * fallback policy). */
+export class EquipmentNotFoundError extends Error {}
+
 /** GET /api/inventory/equipment/:id - a standalone, one-off fetch (not
  * useEquipmentItem's own persistent hook instance) for a caller that reads
  * an ARBITRARY id it doesn't already hold state for - stocktake-section.tsx
  * scanning a different item's tag on every pass, one after another. */
 export async function fetchEquipment(id: string): Promise<EquipmentItem> {
   const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
-  if (!res.ok) throw new Error(await readErrorMessage(res))
+  if (!res.ok) {
+    const message = await readErrorMessage(res)
+    if (res.status === 404) throw new EquipmentNotFoundError(message)
+    throw new Error(message)
+  }
   const data = (await res.json()) as { item: EquipmentItem }
   return data.item
 }
