@@ -10,7 +10,9 @@ import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 // a code against the zone/bin tree, the not-found/create flow, and the
 // contents list + photo stack.
 vi.mock('@/components/inventory/bin-quick-add', () => ({
-  BinQuickAdd: () => <div data-testid="bin-quick-add" />,
+  // An uncontrolled input stands in for the real form's draft: its typed
+  // value survives a re-render and is cleared only by a remount.
+  BinQuickAdd: () => <div data-testid="bin-quick-add"><input aria-label="Quick add draft" /></div>,
 }))
 vi.mock('@/components/inventory/tag-row', () => ({
   TagRow: (props: { path: string }) => <div data-testid="tag-row">{props.path}</div>,
@@ -209,5 +211,29 @@ describe('BinPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
 
     expect(onNewEquipment).toHaveBeenCalledWith({ zoneId: 'z1', binId: 'b1' })
+  })
+
+  // Final pre-release review finding: the quick-add form was not reset when
+  // the bin changed, so Back/Forward from one bin to another carried a typed
+  // name and staged photos across, and Save then filed them in the wrong bin.
+  it("starts a fresh quick-add draft when the bin changes", async () => {
+    zones = [
+      {
+        id: "z1", name: "Lazarette", sort_index: 0,
+        bins: [
+          { id: "b1", zone_id: "z1", code: "LAZ-02", name: "Adhesives", sort_index: 0 },
+          { id: "b2", zone_id: "z1", code: "LAZ-03", name: "Fasteners", sort_index: 1 },
+        ],
+      },
+    ]
+    const props = { onClose: vi.fn(), onOpenEquipment: vi.fn(), onNewEquipment: vi.fn() }
+    const { rerender } = render(<BinPage code="LAZ-02" {...props} />)
+    const draft = await screen.findByLabelText("Quick add draft")
+    fireEvent.change(draft, { target: { value: "Gaffer tape" } })
+
+    rerender(<BinPage code="LAZ-03" {...props} />)
+    await screen.findByText("Fasteners")
+
+    expect((screen.getByLabelText("Quick add draft") as HTMLInputElement).value).toBe("")
   })
 })

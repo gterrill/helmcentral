@@ -340,7 +340,12 @@ function BinContents({
       )}
 
       {canWrite && (
+        // Keyed on the bin so moving to another bin (Back/Forward, another
+        // tag) starts a fresh draft - otherwise a typed name, staged photos
+        // or photos waiting for Retry carried across and Save filed them in
+        // the wrong bin (final pre-release review finding).
         <BinQuickAdd
+          key={bin.id}
           zoneId={zone.id}
           binId={bin.id}
           onCreated={() => { void refresh() }}
