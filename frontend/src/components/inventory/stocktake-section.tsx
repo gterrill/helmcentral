@@ -65,7 +65,13 @@ interface StocktakeSectionProps {
    * Open" for no data actually at risk. Live NFC scanning is also "work":
    * navigating away silently stops the reader without the operator having
    * pressed Stop. */
-  onHasWorkChange?: (hasWork: boolean) => void
+  // Release-fixes code-review finding: widened to match BinQuickAdd's own
+  // onHasWorkChange (bin-quick-add.tsx) - InventoryPanel forwards the exact
+  // same function to both, so the two props have to agree on a signature.
+  // Stocktake itself never has a `detail` to report; a scans-cleared warning
+  // is specific enough on its own (App.tsx's dialog copy for
+  // 'stocktake-work').
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
 export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, onHasWorkChange }: StocktakeSectionProps) {

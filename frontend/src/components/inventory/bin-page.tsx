@@ -29,7 +29,7 @@ interface BinPageProps {
    * own onHasWorkChange (its doc comment, bin-quick-add.tsx) - App.tsx
    * routes Open/Full item through the same unsaved-work guard when this is
    * true. */
-  onHasWorkChange?: (hasWork: boolean) => void
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
 export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange }: BinPageProps) {
@@ -309,7 +309,7 @@ function BinContents({
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
-  onHasWorkChange?: (hasWork: boolean) => void
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }) {
   const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
 

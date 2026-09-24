@@ -43,8 +43,10 @@ interface BinQuickAddProps {
    * staged name or photos a navigation away would silently clear -
    * App.tsx routes the bin page's "Full item" button through the same
    * unsaved-work guard equipment-editor.tsx's onDirtyChange already gets
-   * when this is true. */
-  onHasWorkChange?: (hasWork: boolean) => void
+   * when this is true. `detail`, when given, is wording for what is
+   * actually staged (see the second review finding on `hasWork` below) -
+   * App.tsx's dialog uses it in place of its own generic copy when present. */
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
 export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
@@ -56,6 +58,12 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   const [notice, setNotice] = useState<string | null>(null)
   const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([])
   const [savedItemId, setSavedItemId] = useState<string | null>(null)
+  // The item's name, for failedUploads' own onHasWorkChange detail below -
+  // `name` itself is blanked as soon as the save that produced these
+  // failures completes (see handleSave's own comment on why), so by the
+  // time anything reads failedUploads there is nothing else left to name
+  // the still-queued photos after.
+  const [savedItemName, setSavedItemName] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   // Review finding: Enter in the Name field calls handleSave directly, with
   // no in-flight guard - the `saving` state above is too slow to catch a
@@ -65,12 +73,35 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   // before the first one's first await ever yields.
   const savingRef = useRef(false)
 
-  const hasWork = useMemo(() => name.trim() !== '' || photos.length > 0, [name, photos])
+  // Release-fixes code-review finding: a partial-failure save clears name
+  // and photos (the form's own "ready for the next item" contract, handleSave
+  // below) but leaves failedUploads/savedItemId holding photos nothing has
+  // actually sent - those are exactly as much unsent work as a staged name or
+  // photo, and leaving the bin used to drop them with no prompt because this
+  // check never looked at them.
+  const hasWork = useMemo(
+    () => name.trim() !== '' || photos.length > 0 || failedUploads.length > 0,
+    [name, photos, failedUploads],
+  )
+  // Wording for the failedUploads case specifically - the fallback "name and
+  // photos you have added" copy App.tsx's dialog otherwise shows would be
+  // wrong here (the form's own name/photo fields are empty; nothing was "just
+  // added"). null when hasWork is true for the ordinary staged-draft reason
+  // instead, so App.tsx's own generic copy still applies there.
+  const detail = useMemo(() => {
+    if (failedUploads.length === 0) return undefined
+    const n = failedUploads.length
+    const who = savedItemName ?? 'this item'
+    return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
+  }, [failedUploads, savedItemName])
   // useLayoutEffect - see stocktake-section.tsx's own onHasWorkChange effect
   // for why: App.tsx's guard can read inventoryHasWork right after a state
   // update this same effect is meant to report, with no render in between
   // for an ordinary passive effect to be guaranteed to have caught up.
-  useLayoutEffect(() => { onHasWorkChange?.(hasWork) }, [hasWork, onHasWorkChange])
+  useLayoutEffect(() => {
+    if (detail !== undefined) onHasWorkChange?.(hasWork, detail)
+    else onHasWorkChange?.(hasWork)
+  }, [hasWork, detail, onHasWorkChange])
 
   // Downscaling every picked file runs concurrently (Promise.all) - see
   // equipment-editor.tsx's own addLocalPhotos for the identical reasoning.
@@ -171,15 +202,18 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
 
       if (failures.length > 0) {
         setSavedItemId(created.id)
+        setSavedItemName(trimmedName)
         setFailedUploads(failures)
         const notUploaded = failures.length + refused.length
         setNotice(`Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`)
       } else if (refused.length > 0) {
         setSavedItemId(null)
+        setSavedItemName(null)
         setFailedUploads([])
         setNotice(refused[0])
       } else {
         setSavedItemId(null)
+        setSavedItemName(null)
         setFailedUploads([])
         setNotice(null)
       }
@@ -219,10 +253,17 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     setFailedUploads(stillFailing)
     if (stillFailing.length > 0) {
       setNotice(`Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`)
-    } else if (refused.length > 0) {
-      setNotice(refused[0])
     } else {
-      setNotice(null)
+      // Nothing left queued - savedItemName's only reader (the `detail`
+      // memo above) is gated on failedUploads.length, so this isn't load-
+      // bearing for the guard, but leaving a stale name behind here is its
+      // own kind of confusing state to carry.
+      setSavedItemName(null)
+      if (refused.length > 0) {
+        setNotice(refused[0])
+      } else {
+        setNotice(null)
+      }
     }
     setRetrying(false)
     onCreated()

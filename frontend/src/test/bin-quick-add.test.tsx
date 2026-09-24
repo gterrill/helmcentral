@@ -155,6 +155,56 @@ describe('BinQuickAdd', () => {
     await waitFor(() => expect(onHasWorkChange).toHaveBeenLastCalledWith(true))
   })
 
+  // Release-fixes code-review finding: the form clears name/photos on a
+  // partial-failure save, so hasWork (name.trim() || photos.length) went
+  // straight back to false even though failedUploads/savedItemId still hold
+  // photos nothing has sent yet - leaving the bin dropped them with no
+  // prompt. They now count as work, with wording that names what is
+  // actually still queued (the cleared name/photo fields have nothing left
+  // to describe).
+  it('counts photos still queued for Retry as work, until Retry clears them', async () => {
+    failingPhotoUploadNames.add('a.jpg')
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText("Saved Gaffer tape, but 1 photo didn't upload: upload failed: a.jpg")
+    // The form itself is cleared and ready for the next item...
+    expect(screen.getByLabelText('Name')).toHaveValue('')
+    // ...but the guard still has something real to warn about.
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "1 photo for Gaffer tape hasn't uploaded yet.")
+
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('pluralizes the queued-photo wording for more than one failed upload', async () => {
+    failingPhotoUploadNames.add('a.jpg')
+    failingPhotoUploadNames.add('b.jpg')
+    const onHasWorkChange = vi.fn()
+    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+
+    const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [fileA, fileB] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "2 photos for Gaffer tape haven't uploaded yet.")
+  })
+
   it('blocks Save when the name is blank', async () => {
     render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
 
