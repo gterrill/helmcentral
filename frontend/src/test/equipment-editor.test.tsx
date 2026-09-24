@@ -13,6 +13,22 @@ vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
 }))
 
+// A minimal stand-in for the real picker (its own search flow is a separate
+// small fetch, covered by document-link-picker's own tests) - just enough
+// to drive `onPick` with a fixed result so this file's own save-error test
+// can pin what happens when the server refuses that pick.
+vi.mock('@/components/inventory/document-link-picker', () => ({
+  DocumentLinkPicker: ({ open, onPick }: { open: boolean; onPick: (doc: { document_id: string; title: string; filename: string }) => void }) => (
+    open
+      ? (
+          <button type="button" onClick={() => onPick({ document_id: 'refused-photo', title: '', filename: 'engine.jpg' })}>
+            Pick refused-photo
+          </button>
+        )
+      : null
+  ),
+}))
+
 function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
   return {
     id: 'eq-1',
@@ -108,6 +124,12 @@ function stubFetch() {
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PUT') {
       const body = JSON.parse(String(init?.body)) as { document_ids: string[] }
+      // Mirrors backend/inventory_handlers.go's own refusal: a photo-tagged
+      // docID sent through this whole-set-replace PUT is a 400 naming it,
+      // not linked as an ordinary document.
+      if (body.document_ids.includes('refused-photo')) {
+        return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: '"engine.jpg" is a photo; add photos from the item\'s photo row' }) })
+      }
       currentDocuments = currentDocuments.filter((d) => body.document_ids.includes(d.document_id))
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
@@ -409,6 +431,23 @@ describe('EquipmentEditor', () => {
       const body = JSON.parse(String((call?.[1] as RequestInit).body))
       expect(body.document_ids).toEqual([])
     })
+  })
+
+  // Item 2 of the pre-release review: the backend now refuses a photo-
+  // tagged docID sent through the ordinary documents PUT with a 400 naming
+  // it. This pins that the refusal reaches the operator through the same
+  // save-error banner every other Save failure already uses - no separate
+  // error UI needed for this case.
+  it('shows the server\'s refusal when a picked document turns out to be a photo', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick refused-photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText('"engine.jpg" is a photo; add photos from the item\'s photo row')
+    expect(screen.getByRole('alert')).toHaveTextContent('is a photo')
   })
 
   it('asks for confirmation before deleting and calls onDeleted once accepted', async () => {

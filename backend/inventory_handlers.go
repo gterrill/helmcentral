@@ -476,11 +476,28 @@ func setEquipmentDocumentsHandler(c echo.Context) error {
 	}
 
 	for _, docID := range req.DocumentIDs {
-		if _, err := globalDocumentStore.Get(docID); err != nil {
+		doc, err := globalDocumentStore.Get(docID)
+		if err != nil {
 			if errors.Is(err, errDocumentNotFound) {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": fmt.Sprintf("document %s not found", docID)})
 			}
 			return writeDocumentError(c, err)
+		}
+		// Review finding: this whole-set-replace PUT used to accept a
+		// photo-tagged docID (e.g. another item's own photo) as an ORDINARY
+		// link - ADR 0127's "photo-tagged links are managed only through
+		// the photo routes" (SetEquipmentDocuments' own doc comment,
+		// inventory_store.go) means that split has to be enforced here too,
+		// not just left to SetEquipmentDocuments' silent no-op on an
+		// already-kept photo id.
+		if slices.Contains(doc.OperatorTags, "photo") {
+			label := doc.Title
+			if label == "" {
+				label = doc.Filename
+			}
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("\"%s\" is a photo; add photos from the item's photo row", label),
+			})
 		}
 	}
 

@@ -768,6 +768,54 @@ func TestSetEquipmentDocumentsHandler_UnknownDocumentIDReturns404WithName(t *tes
 	}
 }
 
+// TestSetEquipmentDocumentsHandler_RefusesPhotoTaggedDocument pins item 2 of
+// the pre-release review: PUT .../documents used to accept a document
+// tagged 'photo' (e.g. another item's own photo) as an ORDINARY link,
+// where it showed up in the target item's photo strip with no way to
+// unlink it through the documents flow - the two link kinds (ADR 0127's own
+// "photo-tagged links are managed only through the photo routes") were
+// meant to stay separate. A photo-tagged docID must be refused with a 400
+// naming it, and the equipment's document set left exactly as it was.
+func TestSetEquipmentDocumentsHandler_RefusesPhotoTaggedDocument(t *testing.T) {
+	withTestDocumentStore(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	ordinary, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-refuse-ordinary", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert(ordinary): %v", err)
+	}
+	if err := globalDocumentStore.SetEquipmentDocuments(item.ID, []string{ordinary.ID}); err != nil {
+		t.Fatalf("SetEquipmentDocuments (seed): %v", err)
+	}
+
+	photo, err := globalDocumentStore.Insert(document{SHA256: "sha-set-eq-refuse-photo", Filename: "engine.jpg", MIME: "image/jpeg", OperatorTags: []string{"photo"}})
+	if err != nil {
+		t.Fatalf("Insert(photo): %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID+"/documents", `{"document_ids":["`+photo.ID+`"]}`, item.ID)
+	if err := setEquipmentDocumentsHandler(c); err != nil {
+		t.Fatalf("setEquipmentDocumentsHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a photo-tagged docID, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !jsonBodyContains(t, rec.Body.Bytes(), "engine.jpg") {
+		t.Fatalf("expected the 400 body to name the refused photo, got %s", rec.Body.String())
+	}
+
+	docs, err := globalDocumentStore.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != ordinary.ID {
+		t.Fatalf("expected the item's document set unchanged by the rejected call, got %+v", docs)
+	}
+}
+
 // jsonBodyContains reports whether raw's top-level "error" string field
 // contains want - a small helper so the 404-names-the-id assertion above
 // doesn't need to know the exact wording of the message, only that the
