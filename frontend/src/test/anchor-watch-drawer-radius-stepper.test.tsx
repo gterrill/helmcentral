@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
+import { AnchorRequestError } from '@/lib/anchor-request'
 import { toast } from 'sonner'
 
 // Interim radius control (Phase 1 of the anchor-adjust-sheet plan): the
@@ -143,7 +144,7 @@ describe('AnchorWatchDrawer radius stepper', () => {
     expect(onRadiusChange).toHaveBeenCalledWith(5)
   })
 
-  it('shows a Retry toast on a failed radius change, and Retry re-sends the same value', async () => {
+  it('shows a Retry toast with the failure message on a network-ish error, and Retry re-sends the same value', async () => {
     const onRadiusChange = vi.fn()
       .mockRejectedValueOnce(new Error('network down'))
       .mockResolvedValueOnce(undefined)
@@ -153,6 +154,7 @@ describe('AnchorWatchDrawer radius stepper', () => {
 
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
     expect(toast.error).toHaveBeenCalledWith('Could not set alarm radius', {
+      description: 'network down',
       action: { label: 'Retry', onClick: expect.any(Function) },
     })
 
@@ -162,6 +164,38 @@ describe('AnchorWatchDrawer radius stepper', () => {
 
     await vi.waitFor(() => expect(onRadiusChange).toHaveBeenCalledTimes(2))
     expect(onRadiusChange).toHaveBeenNthCalledWith(2, 25)
+  })
+
+  // code-review finding: applyRadius's catch used to discard the rejection
+  // entirely — a hardcoded title, no description, and Retry offered
+  // unconditionally even for a failure retrying could never fix (a bad
+  // radius, or no active watch to PATCH — both 4xx from the backend).
+  it('shows the server message and offers no Retry for a non-retryable (4xx) failure', async () => {
+    const onRadiusChange = vi.fn().mockRejectedValueOnce(new AnchorRequestError('no active anchor watch', 404))
+    render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} onRadiusChange={onRadiusChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
+
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error).toHaveBeenCalledWith('Could not set alarm radius', {
+      description: 'no active anchor watch',
+      action: undefined,
+    })
+  })
+
+  it('offers Retry for a retryable 5xx failure, with the server message', async () => {
+    const onRadiusChange = vi.fn()
+      .mockRejectedValueOnce(new AnchorRequestError('SignalK publish failed', 502))
+      .mockResolvedValueOnce(undefined)
+    render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} onRadiusChange={onRadiusChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
+
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error).toHaveBeenCalledWith('Could not set alarm radius', {
+      description: 'SignalK publish failed',
+      action: { label: 'Retry', onClick: expect.any(Function) },
+    })
   })
 
   it('does not toast on a successful radius change', async () => {
@@ -200,6 +234,47 @@ describe('AnchorWatchDrawer radius stepper', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
 
     expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
+  })
+
+  // code-review finding: pendingRadiusM was only ever cleared by an effect
+  // keyed on the radiusMeters prop *changing*. A request whose target equals
+  // the value already showing (pressing - at the 5 m floor, where
+  // max(5, 5-5) is still 5) settles with the prop never moving, so that
+  // effect never fires and pendingRadiusM is stuck at 5 forever. A later,
+  // genuinely different radius from elsewhere (e.g. the Rode Planner's
+  // "Apply as alarm radius") then gets hidden behind the stale pending value.
+  it('picks up a later external radius change even after a settled request whose target equalled the value already showing', async () => {
+    const onRadiusChange = vi.fn().mockResolvedValue(undefined)
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} radiusMeters={5} onRadiusChange={onRadiusChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Decrease alarm radius' }))
+    expect(onRadiusChange).toHaveBeenCalledWith(5)
+    await vi.waitFor(() => expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('5'))
+
+    // The Rode Planner applies a genuinely different radius; App.tsx passes
+    // the new server-echoed value down as a prop change.
+    rerender(<AnchorWatchDrawer {...baseProps} radiusMeters={40} onRadiusChange={onRadiusChange} />)
+
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('40')
+  })
+
+  // code-review finding: a request still in flight (or stuck pending, per
+  // the settle bug above) when the anchor is raised belonged to a session
+  // that no longer exists — re-dropping must not resume from it.
+  it('clears a pending target on Raise, so a re-drop starts from the new watch\'s own radius', () => {
+    const onRadiusChange = vi.fn().mockReturnValue(new Promise<void>(() => {})) // never resolves
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} onRadiusChange={onRadiusChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
+
+    // Raise: anchorState goes to 'none', the stepper itself unmounts.
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="none" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+    // Re-drop, at the new watch's own default radius — nothing left over
+    // from the raised session's in-flight request.
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="set" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('20')
   })
 
   it('resets the base to the server value once a pending request fails, rather than stepping from the failed target', async () => {
