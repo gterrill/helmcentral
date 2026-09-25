@@ -648,14 +648,14 @@ func TestComputeAnomalyReadingSilentSourceEvidenceNamesTheSource(t *testing.T) {
 func tickVoltageHistory(tr *voltageHistoryTracker, start time.Time, n int, voltageAt func(i int) float64) float64 {
 	var got float64
 	for i := 0; i < n; i++ {
-		got = tr.observe(voltageAt(i), start.Add(time.Duration(i)*time.Second))
+		got = tr.observe(voltageAt(i), start.Add(time.Duration(i)*time.Second), true)
 	}
 	return got
 }
 
 func TestVoltageHistoryTrackerZeroWithFewerThanTwoSamples(t *testing.T) {
 	var tr voltageHistoryTracker
-	if got := tr.observe(28.0, anomalyDetectorTestNow); got != 0 {
+	if got := tr.observe(28.0, anomalyDetectorTestNow, true); got != 0 {
 		t.Fatalf("first sample: got %v, want 0 (nothing to compare against yet)", got)
 	}
 }
@@ -672,10 +672,49 @@ func TestVoltageHistoryTrackerZeroWithFewerThanTwoSamples(t *testing.T) {
 func TestVoltageHistoryTrackerTwoSamples60sApartNoLongerProducesARate(t *testing.T) {
 	var tr voltageHistoryTracker
 	start := anomalyDetectorTestNow
-	tr.observe(28.0, start)
-	got := tr.observe(28.01, start.Add(60*time.Second))
+	tr.observe(28.0, start, true)
+	got := tr.observe(28.01, start.Add(60*time.Second), true)
 	if got != 0 {
 		t.Fatalf("two samples 60s apart: got %v, want 0 (not enough samples to trust a fit)", got)
+	}
+}
+
+// TestVoltageHistoryTrackerGapDoesNotSurviveAsAStaleAnchor is the direct
+// regression case for code review finding 4: observe used to keep a single
+// anchor sample at or before the cutoff no matter how old it was, so the
+// window's effective span stayed close to dVdtWindow rather than shrinking
+// every tick. After a real gap (the detector paused, or the house bank was
+// briefly unconfigured), that anchor could be far older than one tick
+// before the cutoff -- combined with a burst of fresh samples right after
+// the gap, dVdtMinSamples/dVdtMinSpan were satisfied from what was really
+// just two points spanning the whole gap, not a genuine window's worth of
+// history. A stale anchor must be dropped along with everything before it,
+// the same as if it had never qualified as the anchor at all.
+func TestVoltageHistoryTrackerGapDoesNotSurviveAsAStaleAnchor(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+
+	// A full window of steady, flat voltage before the gap.
+	flatSeconds := int(dVdtWindow.Seconds())
+	for i := 0; i < flatSeconds; i++ {
+		tr.observe(28.0, start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// A 30-minute gap, then a single very different reading -- if the last
+	// pre-gap sample survives as the window's anchor, it alone (plus this
+	// one) would satisfy neither dVdtMinSamples nor dVdtMinSpan yet, so keep
+	// ticking fresh samples past the gap until dVdtMinSamples is reached.
+	// With the bug, that stale anchor still counts toward the total, so the
+	// span from it to "now" clears dVdtMinSpan long before dVdtMinSamples
+	// genuine post-gap samples do, and the resulting fit is dominated by the
+	// stale anchor rather than the actual recent behaviour.
+	gapEnd := start.Add(time.Duration(flatSeconds)*time.Second + 30*time.Minute)
+	var last float64
+	for i := 0; i < dVdtMinSamples-1; i++ {
+		last = tr.observe(30.0, gapEnd.Add(time.Duration(i)*time.Second), true)
+	}
+	if last != 0 {
+		t.Fatalf("expected 0 with only %d genuine post-gap samples spanning %ds (well under dVdtMinSpan), got %v -- the stale pre-gap anchor is still being counted", dVdtMinSamples-1, dVdtMinSamples-2, last)
 	}
 }
 
@@ -709,7 +748,7 @@ func TestVoltageHistoryTrackerWindowSlidesAndDropsOldSamples(t *testing.T) {
 	const risingRatePerMinute = 0.09
 
 	for i := 0; i < flatSeconds; i++ {
-		tr.observe(28.0, start.Add(time.Duration(i)*time.Second))
+		tr.observe(28.0, start.Add(time.Duration(i)*time.Second), true)
 	}
 	// Another full window's worth of ticks, now genuinely rising -- by the
 	// last one, the flat period has aged all the way out of the window.
@@ -718,6 +757,65 @@ func TestVoltageHistoryTrackerWindowSlidesAndDropsOldSamples(t *testing.T) {
 	})
 	if math.Abs(got-risingRatePerMinute) > 0.002 {
 		t.Fatalf("dV/dt after the window slid past the flat period: got %v, want close to %v", got, risingRatePerMinute)
+	}
+}
+
+// TestVoltageHistoryTrackerSkipsRecordingAnInvalidSample is the direct
+// regression case for code review finding 5: observe used to append every
+// sample regardless of whether the caller's own validity check trusted it,
+// so a single stale or glitched reading (a 0 V dropout) sat in the trailing
+// 5-minute window for as long as the window itself, skewing the fit the
+// whole time. A tick observed with valid=false must not be recorded at all
+// -- the fit afterwards should read as if that tick never happened.
+func TestVoltageHistoryTrackerSkipsRecordingAnInvalidSample(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+	const ratePerMinute = 0.06
+
+	n := int(dVdtWindow.Seconds())
+	for i := 0; i < n; i++ {
+		tr.observe(28.0+ratePerMinute*(float64(i)/60.0), start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// A single 0 V dropout, explicitly marked invalid -- must not join the
+	// window at all.
+	glitchAt := start.Add(time.Duration(n) * time.Second)
+	tr.observe(0, glitchAt, false)
+
+	// A few more genuine, on-trend samples.
+	var last float64
+	for i := 1; i <= 5; i++ {
+		last = tr.observe(28.0+ratePerMinute*(float64(n+i)/60.0), glitchAt.Add(time.Duration(i)*time.Second), true)
+	}
+
+	if math.Abs(last-ratePerMinute) > 0.002 {
+		t.Fatalf("dV/dt after an invalid 0V dropout: got %v, want close to %v (the dropout must not have been recorded)", last, ratePerMinute)
+	}
+}
+
+// TestVoltageHistoryTrackerResetsWhenBankPathChanges is the direct
+// regression case for the second half of code review finding 5: the tracker
+// used to hold onto its samples forever regardless of which house bank they
+// came from, so choosing a different bank in Settings -> Vessel -> Power (or
+// unsetting and reconfiguring one) blended a trailing run of the OLD pack's
+// voltage into the new one's dV/dt fit.
+func TestVoltageHistoryTrackerResetsWhenBankPathChanges(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+
+	n := int(dVdtWindow.Seconds())
+	for i := 0; i < n; i++ {
+		tr.resetIfBankChanged("electrical.batteries.0")
+		tr.observe(28.0+0.2*(float64(i)/60.0), start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// The operator repoints the detector at a different bank -- a single
+	// fresh sample on the new path must not inherit the old one's history.
+	switchAt := start.Add(time.Duration(n) * time.Second)
+	tr.resetIfBankChanged("electrical.batteries.1")
+	got := tr.observe(12.0, switchAt, true)
+	if got != 0 {
+		t.Fatalf("expected 0 on the first sample of a newly-chosen bank, got %v -- the old bank's samples survived the switch", got)
 	}
 }
 

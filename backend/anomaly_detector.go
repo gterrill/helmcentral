@@ -346,27 +346,73 @@ type voltageHistorySample struct {
 // minute, fullBankChargingInputs.DVdtPerMinute's own input.
 type voltageHistoryTracker struct {
 	samples []voltageHistorySample
+	// bankPath is the house bank path the current run of samples belongs
+	// to. resetIfBankChanged drops the whole run the moment this changes,
+	// so a different bank chosen in Settings -> Vessel -> Power (or the
+	// same bank unset then reconfigured) never blends a trailing run of one
+	// pack's voltage into a completely different pack's dV/dt fit (code
+	// review finding 5).
+	bankPath string
 }
 
-// observe appends a new sample, prunes the window down to dVdtWindow (kept
-// anchored on the single newest sample at or before the cutoff, so the
-// window's effective span stays close to dVdtWindow rather than shrinking
-// every tick as samples inside it age past the cutoff too), and returns a
-// least-squares fit of the rate of change across every sample still in the
-// window -- not a two-point slope between the oldest and newest alone,
-// which a single noisy or quantized reading at either end could swing on
-// its own (code review finding 10). 0 -- not an error, and not treated as
-// "flat" by the caller -- until both dVdtMinSamples and dVdtMinSpan are
-// satisfied, matching fullBankChargingInputs.DVdtPerMinute's own "zero
-// means unknown, only ever promotes to level 2, never blocks it" contract.
-func (t *voltageHistoryTracker) observe(voltage float64, now time.Time) float64 {
-	t.samples = append(t.samples, voltageHistorySample{at: now, value: voltage})
+// resetIfBankChanged clears the tracker's samples when bankPath differs from
+// the path the current run belongs to -- called once per tick, before
+// observe, so a bank switch takes effect on the very next reading rather
+// than after dVdtWindow ages the old bank's samples out on its own.
+func (t *voltageHistoryTracker) resetIfBankChanged(bankPath string) {
+	if t.bankPath != bankPath {
+		t.samples = nil
+		t.bankPath = bankPath
+	}
+}
+
+// observe appends a new sample when valid is true, prunes the window down
+// to dVdtWindow, and returns a least-squares fit of the rate of change
+// across every sample still in the window -- not a two-point slope between
+// the oldest and newest alone, which a single noisy or quantized reading at
+// either end could swing on its own (code review finding 10). 0 -- not an
+// error, and not treated as "flat" by the caller -- until both
+// dVdtMinSamples and dVdtMinSpan are satisfied, matching
+// fullBankChargingInputs.DVdtPerMinute's own "zero means unknown, only ever
+// promotes to level 2, never blocks it" contract.
+//
+// valid false (a stale or glitched reading -- a 0 V dropout -- that the
+// caller's own validity check already rejected this tick) skips recording
+// the sample entirely, rather than letting it sit in the trailing window for
+// up to dVdtWindow the way every other sample does (code review finding 5):
+// the window is still pruned and re-fit from whatever genuine samples
+// remain, so a single bad tick does not also blank an already-established
+// rate to 0.
+func (t *voltageHistoryTracker) observe(voltage float64, now time.Time, valid bool) float64 {
+	if valid {
+		t.samples = append(t.samples, voltageHistorySample{at: now, value: voltage})
+	}
 
 	cutoff := now.Add(-dVdtWindow)
+	// anchorFloor is how far before cutoff the single retained anchor
+	// sample (see below) may be and still count as a genuine continuation
+	// of the window, rather than a stale point left over from a gap (the
+	// detector paused, or the house bank was briefly unconfigured). Without
+	// this floor, that anchor survives no matter how old it is, and a burst
+	// of fresh samples right after a gap can satisfy dVdtMinSamples and
+	// dVdtMinSpan from what is really just two points spanning the whole
+	// gap, not a genuine window's worth of history (code review finding 4).
+	// One tick's tolerance either side of the cutoff is enough for the
+	// anchor's own purpose -- keeping the window's effective span close to
+	// dVdtWindow across ordinary ticking -- without also trusting a gap.
+	anchorFloor := cutoff.Add(-anomalyDetectorInterval)
+
 	keepFrom := 0
 	for i, s := range t.samples {
 		if s.at.After(cutoff) {
 			break
+		}
+		if s.at.Before(anchorFloor) {
+			// Too old to serve as the window's anchor -- drop it, and
+			// everything before it, rather than keep stretching the
+			// window back across a gap.
+			keepFrom = i + 1
+			continue
 		}
 		keepFrom = i
 	}
@@ -597,12 +643,26 @@ func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, val
 		return
 	}
 
+	// A different bank than the one this tracker's samples belong to (a
+	// fresh choice in Settings -> Vessel -> Power, or the same bank unset
+	// then reconfigured) must not blend its trailing voltage into this
+	// bank's dV/dt fit (code review finding 5).
+	voltageHistory.resetIfBankChanged(hb.Path)
+
+	// Only record a voltage reading the caller's own validity check already
+	// trusts -- a stale or glitched reading (a 0 V dropout) must not sit in
+	// the trailing window for up to dVdtWindow corrupting the fit the whole
+	// time (code review finding 5). A nil valid trusts every input, the
+	// same "nil means trust everything" contract fullBankChargingLevel's
+	// own valid param already documents.
+	voltageValid := valid == nil || valid(hb.Path+".voltage")
+
 	inputs := fullBankChargingInputs{
 		SoC: soc, Voltage: voltage, Current: current,
 		// The rising-pack half of level 2's OR condition (+5 mV/min over
 		// 60s): a trailing voltage history the caller's own goroutine holds
 		// across ticks (voltageHistoryTracker), not recomputed here.
-		DVdtPerMinute: voltageHistory.observe(voltage, now),
+		DVdtPerMinute: voltageHistory.observe(voltage, now, voltageValid),
 		ChargeSources: discoverChargeSources(snapshot),
 	}
 
