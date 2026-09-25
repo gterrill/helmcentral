@@ -426,7 +426,41 @@ export function AnchorWatchMap({
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pinCandidate, setPinCandidate] = useState<PinCandidate | null>(null)
   const [selectedPlacemarkId, setSelectedPlacemarkId] = useState<string | null>(null)
+  // Every marker on this map (self vessel, AIS, placemarks, the anchor, the
+  // pin-candidate tooltip buttons) sets this so its own click doesn't fall
+  // through to handleMapClick's "place a pin here" handling below. Each of
+  // those markers' React onClick already calls e.stopPropagation() too, and
+  // — confirmed against both maplibre-gl's own source (Marker.addTo appends
+  // the marker's element into map.getCanvasContainer(), the exact element
+  // HandlerManager binds its native 'click' listener to) and React's event
+  // system (a portaled child's stopPropagation() halts the underlying native
+  // event during React's root-level dispatch, before the browser's own
+  // bubble phase ever reaches canvasContainer) — that alone already keeps
+  // maplibre from ever seeing a marker tap as a map click in the first
+  // place. This ref exists for the input types or embedding quirks where
+  // that isn't reliable (code-review finding: a flag set but never consumed
+  // by a map click that never arrives just sits there and swallows the
+  // *next*, unrelated, genuine tap instead). suppressNextMapClick below is
+  // the only way it's ever set, so it can never outlive a stray tick.
   const suppressNextMapClickRef = useRef(false)
+  const suppressNextMapClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressNextMapClick = useCallback(() => {
+    suppressNextMapClickRef.current = true
+    if (suppressNextMapClickTimerRef.current !== null) {
+      clearTimeout(suppressNextMapClickTimerRef.current)
+    }
+    // A genuine map click for the same tap, if maplibre ever does see one,
+    // fires synchronously within the same event — well inside this window.
+    // Anything arriving after it is a separate, later tap that deserves to
+    // be treated normally.
+    suppressNextMapClickTimerRef.current = setTimeout(() => {
+      suppressNextMapClickRef.current = false
+      suppressNextMapClickTimerRef.current = null
+    }, 300)
+  }, [])
+  useEffect(() => () => {
+    if (suppressNextMapClickTimerRef.current !== null) clearTimeout(suppressNextMapClickTimerRef.current)
+  }, [])
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   // Track zoom for marker scaling. No onZoom handler: that used to fire
   // setCurrentZoom on every animation frame of a zoom gesture, and a
@@ -696,47 +730,47 @@ export function AnchorWatchMap({
   // way the AIS and placemark markers do.
   const handleConfirmPin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     if (!pinCandidate) return
     onPlacemarkCreate?.(pinCandidate.lat, pinCandidate.lon)
     setPinCandidate(null)
-  }, [pinCandidate, onPlacemarkCreate])
+  }, [pinCandidate, onPlacemarkCreate, suppressNextMapClick])
 
   const handleDismissPin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     setPinCandidate(null)
-  }, [])
+  }, [suppressNextMapClick])
 
   const handleSelfVesselClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
-  }, [])
+    suppressNextMapClick()
+  }, [suppressNextMapClick])
 
   const handlePlacemarkClick = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     setPinCandidate(null)
     setSelectedPlacemarkId((current) => (current === id ? null : id))
-  }, [])
+  }, [suppressNextMapClick])
 
   const handleRemovePlacemark = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     onPlacemarkRemove?.(id)
     setSelectedPlacemarkId(null)
-  }, [onPlacemarkRemove])
+  }, [onPlacemarkRemove, suppressNextMapClick])
 
   // ── AIS vessel click ─────────────────────────────────────────────────────
   const handleAisClick = useCallback(
     (e: React.MouseEvent, vessel: NearbyVessel) => {
       e.stopPropagation()
-      suppressNextMapClickRef.current = true
+      suppressNextMapClick()
       setPinCandidate(null)
       setSelectedPlacemarkId(null)
       selectVessel(vessel.id)
     },
-    [selectVessel],
+    [selectVessel, suppressNextMapClick],
   )
 
   // ── Anchor marker click ──────────────────────────────────────────────────
@@ -746,8 +780,8 @@ export function AnchorWatchMap({
   // other marker on this map (self vessel, AIS, placemarks).
   const handleAnchorMarkerClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
-  }, [])
+    suppressNextMapClick()
+  }, [suppressNextMapClick])
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
   const handleZoomIn = useCallback(() => {
