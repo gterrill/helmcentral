@@ -552,16 +552,3 @@ func getTracksHandler(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, payload)
 }
 
-// GET /api/tracks/motoring
-// Returns the full motoring approach track, built purely from live polling
-// while motoring. Fetched once by the client when entering anchor
-// reposition mode.
-func getMotoringTrackHandler(c echo.Context) error {
-	motoringTrailMu.RLock()
-	pts := motoringTrail.pointsSince(time.Time{})
-	motoringTrailMu.RUnlock()
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"points": toWire(pts),
-	})
-}

@@ -17,7 +17,6 @@ describe('useAnchorWatch mutation failures', () => {
 
   it.each([
     ['Drop', 'Could not drop anchor'],
-    ['reposition', 'Could not reposition anchor'],
     ['Raise', 'Could not raise anchor'],
   ])('%s surfaces publish and network failures without changing watch state', async (operation, title) => {
     const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
@@ -34,7 +33,6 @@ describe('useAnchorWatch mutation failures', () => {
       } as Response)
       await act(async () => {
         if (operation === 'Drop') await result.current.setAnchorHere(-22, 150, { planningDepthM: null, planningTideHeightFt: null })
-        else if (operation === 'reposition') await result.current.updatePosition(-22, 150)
         else await result.current.clearAnchor()
       })
       expect(toast.error).toHaveBeenLastCalledWith(title, {
@@ -57,10 +55,8 @@ describe('useAnchorWatch mutation failures', () => {
 })
 
 // setAnchorHere is fed the live GPS fix (App.tsx / anchor-watch-tile.tsx), so
-// it must ask the backend to apply the bow-offset correction. updatePosition
-// is a user-dragged map point that is already meant to be the anchor
-// (AnchorWatchMap's onAnchorReposition), so it must NOT — or dragging the
-// anchor would shove it `d` metres forward on every reposition.
+// it must ask the backend to apply the bow-offset correction (projecting
+// forward by gps_from_bow_m along heading).
 describe('useAnchorWatch bow-offset request shape', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -87,25 +83,6 @@ describe('useAnchorWatch bow-offset request shape', () => {
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(init!.body as string)
     expect(body.apply_bow_offset).toBe(true)
-  })
-
-  it('updatePosition does not send apply_bow_offset', async () => {
-    const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
-
-    await act(async () => { await Promise.resolve() })
-    fetchMock.mockClear()
-
-    await act(async () => {
-      await result.current.updatePosition(-21.1, 149.2)
-    })
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({
-      method: 'POST',
-    }))
-    const [, init] = fetchMock.mock.calls[0]
-    const body = JSON.parse(init!.body as string)
-    expect(body).not.toHaveProperty('apply_bow_offset')
   })
 })
 
@@ -151,29 +128,13 @@ describe('useAnchorWatch planning-depth capture', () => {
     expect(body.planning_depth_m).toBe(-1)
     expect(body.planning_tide_height_ft).toBe(-1)
   })
-
-  it('updatePosition omits the depth/tide pair entirely, letting the backend carry it forward', async () => {
-    const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
-    await act(async () => { await Promise.resolve() })
-    fetchMock.mockClear()
-
-    await act(async () => {
-      await result.current.updatePosition(-21.1, 149.2)
-    })
-
-    const [, init] = fetchMock.mock.calls[0]
-    const body = JSON.parse(init!.body as string)
-    expect(body).not.toHaveProperty('planning_depth_m')
-    expect(body).not.toHaveProperty('planning_tide_height_ft')
-  })
 })
 
 // P1 from the impeccable critique of the anchor-watch map (2026-09-25):
 // updateRadius silently no-op'd on a failed PATCH, so a rejected alarm-radius
 // change looked identical to a successful one. Fixed by routing all three
-// PATCH mutations through anchorRequest (same as updatePosition/setAnchorHere
-// already do), which throws on a non-OK response or a network error rather
+// PATCH mutations through anchorRequest (same as setAnchorHere already does),
+// which throws on a non-OK response or a network error rather
 // than swallowing it — the caller (the drawer's radius stepper, the rode
 // planner's Apply-as-alarm-radius path) is what shows the toast, so the hook
 // itself just has to not eat the failure.
@@ -352,7 +313,7 @@ describe('useAnchorWatch memoized result', () => {
     expect(result.current).toBe(first)
   })
 
-  it('keeps stable identities for updatePosition, updateRadius, clearAnchor and updateRodeAndConditions across re-renders', async () => {
+  it('keeps stable identities for updateRadius, clearAnchor and updateRodeAndConditions across re-renders', async () => {
     const { result, rerender } = renderHook(
       ({ lat, lon }: { lat: number; lon: number }) => useAnchorWatch(lat, lon),
       { initialProps: { lat: -21.1, lon: 149.2 } },
@@ -362,7 +323,6 @@ describe('useAnchorWatch memoized result', () => {
 
     rerender({ lat: -21.1, lon: 149.2 })
 
-    expect(result.current.updatePosition).toBe(first.updatePosition)
     expect(result.current.updateRadius).toBe(first.updateRadius)
     expect(result.current.clearAnchor).toBe(first.clearAnchor)
     expect(result.current.updateRodeAndConditions).toBe(first.updateRodeAndConditions)

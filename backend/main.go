@@ -710,7 +710,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
 		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
-		{http.MethodGet, "/api/tracks/motoring", tierRead, getMotoringTrackHandler},
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
 		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
 		{http.MethodGet, "/api/equipment-profiles", tierRead, equipmentProfilesHandler},
