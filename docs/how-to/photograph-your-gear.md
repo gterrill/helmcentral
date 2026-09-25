@@ -19,9 +19,8 @@ Every photo is downscaled automatically before it uploads, so this stays
 quick even over a tailscale connection with several photos to send.
 
 If a picture is identical to a file already sitting in Documents, it is
-refused rather than added a second time. The message names the file it
-matches. Open that item's Documents list, press **Add document**, and link
-the existing file instead of photographing it again.
+linked to the item rather than stored a second time - it shows up in the
+Photos row and in the item's Documents list both.
 
 ## Add a new item with photos from a bin
 
@@ -42,6 +41,18 @@ range; it only re-sends the ones that failed.
 
 ## Remove or replace a photo
 
-Press **Remove** on its thumbnail in the item's own Photos row. This
-deletes the photo outright, not just the link to it - a photo has no life
-outside the item it belongs to.
+Press **Remove** on its thumbnail in the item's own Photos row. This takes
+the photo off this item; the picture itself stays in Documents, since the
+same picture can be filed against more than one item.
+
+If that photo is a picture no other item uses and that isn't filed in
+Documents, a second option, **Remove and delete**, appears next to Remove.
+Use it when you actually want the picture gone for good, not just off this
+item - a blurry shot you're replacing, for instance.
+
+Deleting the whole item works the same way. The confirm dialog offers a
+checkbox, "Also delete N photo(s) only this item uses," when the item has
+photos that fit that description, with a small thumbnail of each one once
+you tick it, so you can see exactly what's about to go. Leave it unchecked
+to keep those pictures in Documents after the item is gone; check it to
+remove them along with the item.

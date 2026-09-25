@@ -49,6 +49,7 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     created_at: '',
     updated_at: '',
     photo_ids: [],
+    exclusive_photo_ids: [],
     ...overrides,
   }
 }

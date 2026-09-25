@@ -56,8 +56,9 @@ the record's Documents list; search runs over the whole library.
 Links point at documents, they do not copy them. What a document *is*
 already comes from its tags, so a manual tagged "manual" reads as one
 wherever you meet it. Delete a document from the library and the link goes
-with it. A record's own photos (above) live in their own Photos row and
-never show up in this list, so the two stay easy to tell apart.
+with it. A record's own photos (above) appear here too - the Photos row is
+simply the picture-sized view of the same list, so removing a document
+here that happens to be a photo takes it off the Photos row as well.
 
 ## Profiles
 
@@ -221,9 +222,11 @@ quickly over a tailscale connection. The first photo is the cover; any
 photo can be made the cover, and any photo can be removed.
 
 A picture that is byte-for-byte identical to a file already in Documents is
-refused, naming the file it matches, rather than filed a second time under
-the item's photos. Link that existing file from the item's Documents list
-instead - see [Photograph your gear](../how-to/photograph-your-gear.md).
+linked to the item rather than stored a second time. Removing a photo from
+an item only takes it off that item; the picture stays in Documents unless
+you choose to delete it too, which is offered only when it's a picture no
+other item uses and that isn't filed in Documents - see
+[Photograph your gear](../how-to/photograph-your-gear.md).
 
 Reading a label with a vision model to pull the manufacturer, model, serial
 and part number off it automatically is designed and not yet built. Typing

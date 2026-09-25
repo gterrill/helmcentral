@@ -419,14 +419,21 @@ func updateEquipmentHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"item": updated})
 }
 
-// deleteEquipmentHandler is DELETE /api/inventory/equipment/:id: 204 on
-// success. Its equipment_documents links need no handler-side cleanup -
-// ON DELETE CASCADE already removes them (DeleteEquipment's own doc
-// comment, inventory_store.go). DeleteEquipment itself deletes the
-// document ROW for any of the item's own photos that no other item still
-// links (ADR 0127: "a photo has no life outside its item") and hands back
-// each one's sha256 - removing the FILE those rows pointed at is this
-// handler's own job, the same store/handler split
+// deleteEquipmentHandler is DELETE /api/inventory/equipment/:id[?delete_photos=true]:
+// 204 on success. Its equipment_documents links need no handler-side
+// cleanup - ON DELETE CASCADE already removes them (DeleteEquipment's own
+// doc comment, inventory_store.go). By default that is ALL this does: every
+// linked document (photo or not) survives the item, unlink only (2026-09-25
+// amendment, superseding "a photo has no life outside its item" - the
+// operator's own decision that a delete must never destroy a document
+// without being explicitly asked).
+//
+// delete_photos=true additionally deletes the document ROW for any of the
+// item's own photos that no OTHER item still links (DeleteEquipment's own
+// re-check, done fresh inside its transaction rather than trusting
+// existing.ExclusivePhotoIDs, which could be stale by the time this call
+// actually runs) and hands back each one's sha256 - removing the FILE those
+// rows pointed at is this handler's own job, the same store/handler split
 // RemoveEquipmentPhoto/deleteEquipmentPhotoHandler already draw.
 //
 // Final pre-release review: the item's photo SHAs are locked BEFORE the
@@ -439,17 +446,21 @@ func updateEquipmentHandler(c echo.Context) error {
 // would try again - and the failure says plainly that the item was deleted.
 func deleteEquipmentHandler(c echo.Context) error {
 	id := c.Param("id")
+	deletePhotos := c.QueryParam("delete_photos") == "true"
+
 	existing, err := globalDocumentStore.GetEquipment(id)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 	var shas []string
-	for _, photoID := range existing.PhotoIDs {
-		doc, err := globalDocumentStore.Get(photoID)
-		if err != nil {
-			return writeDocumentError(c, err)
+	if deletePhotos {
+		for _, photoID := range existing.ExclusivePhotoIDs {
+			doc, err := globalDocumentStore.Get(photoID)
+			if err != nil {
+				return writeDocumentError(c, err)
+			}
+			shas = append(shas, doc.SHA256)
 		}
-		shas = append(shas, doc.SHA256)
 	}
 	slices.Sort(shas)
 	locked := make(map[string]bool, len(shas))
@@ -462,7 +473,7 @@ func deleteEquipmentHandler(c echo.Context) error {
 		locked[sha] = true
 	}
 
-	deletedPhotoSHAs, err := globalDocumentStore.DeleteEquipment(id)
+	deletedPhotoSHAs, err := globalDocumentStore.DeleteEquipment(id, deletePhotos)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -475,9 +486,8 @@ func deleteEquipmentHandler(c echo.Context) error {
 			unlock := lockDocumentSHA(sha)
 			defer unlock()
 		}
-		path := filepath.Join(documentsDirPath(), sha)
-		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-			log.Printf("inventory: delete equipment: failed to remove photo file %s: %v", path, removeErr)
+		if removeErr := removeDocumentFile(sha); removeErr != nil {
+			log.Printf("inventory: delete equipment: failed to remove photo file %s: %v", filepath.Join(documentsDirPath(), sha), removeErr)
 			failed++
 		}
 	}
@@ -492,55 +502,48 @@ func deleteEquipmentHandler(c echo.Context) error {
 
 // ── equipment documents ──────────────────────────────────────────────────
 
-type setEquipmentDocumentsRequest struct {
-	DocumentIDs []string `json:"document_ids"`
+type patchEquipmentDocumentsRequest struct {
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
 }
 
-// setEquipmentDocumentsHandler is PUT /api/inventory/equipment/:id/documents:
-// {document_ids: []}, replacing the equipment's WHOLE linked-document set
-// (plan's "replace wholesale"). Every id is checked against
-// globalDocumentStore.Get BEFORE SetEquipmentDocuments is ever called, so a
-// bad id can be named in a clean 404 ("document %s not found") rather than
-// surfacing as SetEquipmentDocuments' own foreign-key failure, which names
-// no id at all (SetEquipmentDocuments' own doc comment explains why that
-// split - pre-check here, real constraint there - is deliberate rather
-// than duplicated logic).
-func setEquipmentDocumentsHandler(c echo.Context) error {
+// patchEquipmentDocumentsHandler is PATCH
+// /api/inventory/equipment/:id/documents: {add: [], remove: []}, applying a
+// DIFF to the equipment's linked-document set - PHOTOS INCLUDED (a photo is
+// an ordinary link, added/removed exactly like any other document id).
+// This replaces the old PUT's whole-set replace: the Documents tab no
+// longer has to restate every id it isn't touching, only what changed,
+// which is the fix for the client-side mirror the whole-set PUT forced on
+// every caller (PatchEquipmentDocuments' own doc comment, inventory_store.go).
+//
+// Every id in add is checked against globalDocumentStore.Get BEFORE
+// PatchEquipmentDocuments is ever called, so a bad id can be named in a
+// clean 404 ("document %s not found") rather than surfacing as
+// PatchEquipmentDocuments' own foreign-key failure, which names no id at
+// all - the same pre-check-here/real-constraint-there split the old PUT
+// handler used (PatchEquipmentDocuments' own doc comment explains why that
+// split is deliberate rather than duplicated logic). remove ids are never
+// looked up this way: unlinking an id that doesn't exist, or was never
+// linked, is simply a no-op (PatchEquipmentDocuments' own doc comment).
+func patchEquipmentDocumentsHandler(c echo.Context) error {
 	limitNoteRequestBody(c)
 	id := c.Param("id")
 
-	var req setEquipmentDocumentsRequest
+	var req patchEquipmentDocumentsRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
-	for _, docID := range req.DocumentIDs {
-		doc, err := globalDocumentStore.Get(docID)
-		if err != nil {
+	for _, docID := range req.Add {
+		if _, err := globalDocumentStore.Get(docID); err != nil {
 			if errors.Is(err, errDocumentNotFound) {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": fmt.Sprintf("document %s not found", docID)})
 			}
 			return writeDocumentError(c, err)
 		}
-		// Review finding: this whole-set-replace PUT used to accept a
-		// photo-tagged docID (e.g. another item's own photo) as an ORDINARY
-		// link - ADR 0127's "photo-tagged links are managed only through
-		// the photo routes" (SetEquipmentDocuments' own doc comment,
-		// inventory_store.go) means that split has to be enforced here too,
-		// not just left to SetEquipmentDocuments' silent no-op on an
-		// already-kept photo id.
-		if slices.Contains(doc.OperatorTags, "photo") {
-			label := doc.Title
-			if label == "" {
-				label = doc.Filename
-			}
-			return c.JSON(http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("\"%s\" is a photo; add photos from the item's photo row", label),
-			})
-		}
 	}
 
-	if err := globalDocumentStore.SetEquipmentDocuments(id, req.DocumentIDs); err != nil {
+	if err := globalDocumentStore.PatchEquipmentDocuments(id, req.Add, req.Remove); err != nil {
 		return writeDocumentError(c, err)
 	}
 
@@ -574,28 +577,17 @@ func respondWithUpdatedEquipment(c echo.Context, id string, status int) error {
 	return c.JSON(status, map[string]any{"item": item})
 }
 
-// linkExistingPhotoOrRefuse decides what a byte-identical upload does with
-// the document that already owns those bytes: link it to equipmentID (ADR
-// 0127 §3's shared-photo case) when doc is already tagged 'photo', or refuse
-// with 409 naming it otherwise - a document NOT already tagged 'photo' is
-// something the operator filed under Documents for its own reason, and
-// silently retagging and linking it as this item's photo would repurpose it
-// without being asked (ADR 0127 amendment). Shared by uploadEquipmentPhotoHandler's
-// two ways of reaching that same byte-identical document - GetBySHA finding
-// it up front, and Insert's own sha256 race finding it instead - which used
-// to duplicate this decision once per branch.
-//
-// Review finding: the refusal message used %q on doc's own title, which
-// backslash-escapes any quote already IN that title - a literal `"%s"`
-// shows it as typed instead.
-func linkExistingPhotoOrRefuse(c echo.Context, equipmentID string, doc document) error {
-	if !slices.Contains(doc.OperatorTags, "photo") {
-		label := doc.Title
-		if label == "" {
-			label = doc.Filename
-		}
-		return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This image is already in Documents as \"%s\"", label)})
-	}
+// linkExistingDocument links doc to equipmentID and answers with the
+// updated item - 2026-09-25 amendment: a byte-identical upload always links
+// the document that already owns those bytes, whatever it was filed under
+// or already linked to. There is no longer a 409 refusal for a match that
+// isn't already "a photo" - that distinction no longer exists (no tag is
+// written or read any more; PhotoIDs is a MIME-based view, and this route
+// only ever reaches here for an image/jpeg or image/png upload in the first
+// place). Shared by uploadEquipmentPhotoHandler's two ways of reaching that
+// same byte-identical document - GetBySHA finding it up front, and Insert's
+// own sha256 race finding it instead.
+func linkExistingDocument(c echo.Context, equipmentID string, doc document) error {
 	if err := globalDocumentStore.AddEquipmentPhoto(equipmentID, doc.ID); err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -606,11 +598,13 @@ func linkExistingPhotoOrRefuse(c echo.Context, equipmentID string, doc document)
 // (multipart, one "file" part): stores the file through the same path
 // uploadDocumentHandler uses (documents_handlers.go) - same
 // documentMaxUploadBytes cap, same content-sniffed MIME detection, same
-// sha256 dedupe - tags it 'photo', and links it at the end of the item's
-// photo order. Existence is checked FIRST, before the multipart body is
-// ever read, so an upload to an unknown id never writes a file at all
-// (ADR 0127's own test list: "An upload to an unknown id stores no
-// document").
+// sha256 dedupe - and links it at the end of the item's photo order. No tag
+// is written (2026-09-25 amendment) - it is simply an ordinary document
+// whose MIME type happens to be image/jpeg or image/png, which is all
+// PhotoIDs' own view (inventory_store.go) has ever needed to know. Existence
+// is checked FIRST, before the multipart body is ever read, so an upload to
+// an unknown id never writes a file at all (ADR 0127's own test list: "An
+// upload to an unknown id stores no document").
 func uploadEquipmentPhotoHandler(c echo.Context) error {
 	id := c.Param("id")
 	if _, err := globalDocumentStore.GetEquipment(id); err != nil {
@@ -655,11 +649,10 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 	}
 
 	doc := document{
-		Filename:     up.filename,
-		MIME:         mimeType,
-		SizeBytes:    up.size,
-		Enrich:       enrich,
-		OperatorTags: []string{"photo"},
+		Filename:  up.filename,
+		MIME:      mimeType,
+		SizeBytes: up.size,
+		Enrich:    enrich,
 	}
 
 	return storeUploadedFile(dir, up, doc,
@@ -667,10 +660,9 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 			// Identical bytes already in the library, found either before
 			// Insert or by Insert's own sha256 race (uploadDocumentHandler's
 			// own comment) - the file on disk belongs to that existing row.
-			// Insert returns the winning row's own OperatorTags already
-			// attached in the race case, so no extra read is needed either
-			// way.
-			return linkExistingPhotoOrRefuse(c, id, existing)
+			// No tag check any more (2026-09-25 amendment): it is simply
+			// linked, whatever it was filed under.
+			return linkExistingDocument(c, id, existing)
 		},
 		func(inserted document) error {
 			if err := globalDocumentStore.AddEquipmentPhoto(id, inserted.ID); err != nil {
@@ -699,7 +691,7 @@ type setEquipmentPhotoOrderRequest struct {
 // photo set (errEquipmentPhotoSetMismatch -> 400, mapped through
 // writeDocumentError/documentErrorStatus) - see SetEquipmentPhotoOrder's
 // own doc comment (inventory_store.go) for why a partial reorder isn't
-// accepted the way SetEquipmentDocuments' whole-set replace is for
+// accepted the way PatchEquipmentDocuments' add/remove diff is for
 // ordinary links.
 func setEquipmentPhotoOrderHandler(c echo.Context) error {
 	limitNoteRequestBody(c)
@@ -717,18 +709,31 @@ func setEquipmentPhotoOrderHandler(c echo.Context) error {
 }
 
 // deleteEquipmentPhotoHandler is DELETE
-// /api/inventory/equipment/:id/photos/:documentId: detaches the photo and,
-// ONLY when no other item still links the same document (uploads are
+// /api/inventory/equipment/:id/photos/:documentId[?delete=true]: detaches
+// the photo (RemoveEquipmentPhoto - unlink only, 2026-09-25 amendment
+// superseding "a photo has no life outside its item"). delete=true
+// additionally deletes the document itself, but ONLY when it is still
+// deletable AFTER the unlink - nothing else links it (uploads are
 // deduplicated by sha256, so byte-identical photos on two items share one
-// document row - RemoveEquipmentPhoto's own doc comment), deletes the
-// document and its file too (ADR 0127: "a photo has no life outside its
-// item"). The sha-lock-then-remove-file sequence otherwise matches
-// deleteDocumentHandler (documents_handlers.go), so an upload racing the
-// exact same content can never interleave into a row with no file or a file
-// no row points at.
+// document row), it isn't filed in Documents or a manual, and it isn't a
+// note (finding 3, 2026-09-25 amendment) - DocumentDeletableAsOrphanPhoto
+// re-checks this fresh, rather than trusting GetEquipment's own possibly-
+// stale exclusive_photo_ids. The document row
+// is deleted through globalDocumentStore.Delete - the SAME method
+// deleteDocumentHandler (documents_handlers.go) calls - and its file
+// through the same removeDocumentFile helper, so a photo deleted this way
+// goes through exactly the code path an ordinary Documents delete would.
+// The sha lock spans the unlink AND the delete, so an upload racing the
+// exact same content can never interleave into a row with no file or a
+// file no row points at.
+//
+// If the unlink succeeds but the document delete fails, that failure says
+// so explicitly (AGENTS.md fail-fast policy) - the photo is gone from the
+// item either way; only the underlying document/file failed to go with it.
 func deleteEquipmentPhotoHandler(c echo.Context) error {
 	id := c.Param("id")
 	documentID := c.Param("documentId")
+	deleteDoc := c.QueryParam("delete") == "true"
 
 	doc, err := globalDocumentStore.Get(documentID)
 	if err != nil {
@@ -738,16 +743,30 @@ func deleteEquipmentPhotoHandler(c echo.Context) error {
 	unlockSHA := lockDocumentSHA(doc.SHA256)
 	defer unlockSHA()
 
-	sha, documentDeleted, err := globalDocumentStore.RemoveEquipmentPhoto(id, documentID)
-	if err != nil {
+	if err := globalDocumentStore.RemoveEquipmentPhoto(id, documentID); err != nil {
 		return writeDocumentError(c, err)
 	}
 
-	if documentDeleted {
-		path := filepath.Join(documentsDirPath(), sha)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			log.Printf("inventory: delete photo: failed to remove file %s: %v", path, err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to remove document file"})
+	if deleteDoc {
+		deletable, err := globalDocumentStore.DocumentDeletableAsOrphanPhoto(documentID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("the photo was removed from the item, but checking whether it was safe to delete failed: %v", err),
+			})
+		}
+		if deletable {
+			sha, err := globalDocumentStore.Delete(documentID)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("the photo was removed from the item, but deleting it failed: %v", err),
+				})
+			}
+			if err := removeDocumentFile(sha); err != nil {
+				log.Printf("inventory: delete photo: failed to remove file %s: %v", filepath.Join(documentsDirPath(), sha), err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{
+					"error": "the photo was removed from the item, but its file could not be removed from disk",
+				})
+			}
 		}
 	}
 	return respondWithUpdatedEquipment(c, id, http.StatusOK)

@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 
 import {
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -43,7 +44,7 @@ import {
   type EquipmentSystem,
   type InventoryFieldError,
 } from '@/hooks/use-inventory'
-import { downscaleAll } from '@/lib/image-downscale'
+import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft (App.tsx's
@@ -82,17 +83,6 @@ function draftFromItem(item: EquipmentItem): EquipmentInput {
 
 function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
-}
-
-// Order-insensitive, same reasoning as document-details-page.tsx's own
-// sameTagSet: the draft only ever grows an id at the end (picker "pick") or
-// removes one in place (Remove), but comparing as sets is what actually
-// matches "did the link SET change", not "did the array happen to reorder".
-function sameIdSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const sortedA = [...a].sort()
-  const sortedB = [...b].sort()
-  return sortedA.every((v, i) => v === sortedB[i])
 }
 
 function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
@@ -135,8 +125,20 @@ interface EquipmentEditorProps {
    * navigate to `/inventory/equipment/<id>` (plan: "Create flow: POST, then
    * navigate to the new id; do not leave the operator on a blank form"). */
   onCreated: (id: string) => void
-  onDeleted: () => void
+  /** Fired once the item is gone. `message`, when given (2026-09-25
+   * amendment), is the server's own word that a photo file or document
+   * could not be removed AFTER the item itself was already deleted
+   * (deleteEquipmentHandler's own "the item was deleted, but ..." case) -
+   * the item is still gone either way, so this still fires; App.tsx shows
+   * the message on the destination rather than leaving the editor open on
+   * a record that no longer exists. */
+  onDeleted: (message?: string) => void
   onDirtyChange?: (dirty: boolean) => void
+  /** 2026-09-25 amendment (finding 8): photos still waiting for Retry on
+   * the open item are unsaved work for the SAME leave guard bin-quick-add's
+   * identical prop drives - Leave/Stay wording with a detail, not the
+   * Save-and-Continue wording onDirtyChange's own dirty-draft case gets. */
+  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   canWrite?: boolean
   /** ADR 0127: the bin page's "Full item" action pre-sets a brand new
    * draft's location - read only once, when a NEW draft (id === null)
@@ -151,16 +153,47 @@ export interface EquipmentEditorHandle {
 }
 
 export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditorProps>(function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDirtyChange, canWrite = true, initialZoneId = null, initialBinId = null },
+  { id, onBack, onCreated, onDeleted, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, update, remove, setLinkedDocuments, setItem, pruneDocument } = useEquipmentItem(id)
+  const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
 
   const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
-  const [docEntries, setDocEntries] = useState<DocEntry[]>([])
+  // 2026-09-25 refactor: the Documents tab's own PENDING diff - what the
+  // operator has picked to add or removed, not yet saved. Replaces the
+  // whole-set mirror (docEntries) the whole-set PUT used to require: now
+  // that the write is a diff (patchLinkedDocuments), the tab only ever has
+  // to say what IT changed, never restate `documents` itself (the server's
+  // current truth, including a link some other code path - a photo upload -
+  // just added, which this tab never has to know or care about).
+  const [pendingAdds, setPendingAdds] = useState<DocEntry[]>([])
+  // After a photo write, reloads the Documents list for the item it touched.
+  // A failure is shown, not swallowed: the write itself succeeded, but a
+  // stale list would still show a removed photo as linked.
+  const reloadDocuments = useCallback((targetId: string) => {
+    refreshDocuments(targetId).catch((err: unknown) => {
+      setSaveError(`The documents list could not be reloaded: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, [refreshDocuments])
+  const [pendingRemoves, setPendingRemoves] = useState<string[]>([])
+  // Resets pendingAdds/pendingRemoves the moment `id` itself changes - in
+  // the SAME render as the change, via React's own "adjust state while
+  // rendering" pattern, not a passive effect. A passive effect can still
+  // run after some OTHER effect has already read the stale pending state
+  // for the previous id (the exact ordering trap the whole-set mirror this
+  // replaces needed extra machinery to paper over) - this instead forces an
+  // immediate re-render with the reset already applied, before anything
+  // else (a photo write's own setItem, say) can observe the old id's
+  // pending state under the new id.
+  const [pendingForId, setPendingForId] = useState(id)
+  if (pendingForId !== id) {
+    setPendingForId(id)
+    setPendingAdds([])
+    setPendingRemoves([])
+  }
   const [aliasInput, setAliasInput] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -168,6 +201,11 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const [fieldErrors, setFieldErrors] = useState<InventoryFieldError[]>([])
   const [pendingDelete, setPendingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // 2026-09-25 amendment: the delete confirm dialog's own "Also delete N
+  // photo(s) only this item uses" checkbox - off by default (the operator's
+  // own decision: a delete must never destroy a document without being
+  // explicitly asked), reset every time the dialog is (re)opened.
+  const [deletePhotosOnDelete, setDeletePhotosOnDelete] = useState(false)
 
   // ADR 0127: the photo row's own state - see LocalPhoto/FailedPhotoUpload's
   // doc comments above for why a draft needs BOTH of these (not just one
@@ -199,19 +237,23 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const photoNotice = currentPhotoStatus?.notice ?? null
 
   // Records one upload batch's outcome against its own item. New failures
-  // join any already waiting for that item; a batch that was only refused
-  // (409) keeps them too, and shows the refusal only when nothing else is
-  // waiting.
-  const recordPhotoOutcome = useCallback((itemId: string, failures: FailedPhotoUpload[], refused: string[], failureNotice: string) => {
+  // join any already waiting for that item.
+  const recordPhotoOutcome = useCallback((itemId: string, failures: FailedPhotoUpload[], failureNotice: string) => {
+    if (failures.length === 0) return
     setPhotoStatus((prev) => {
       const existing = prev[itemId]?.failures ?? []
-      if (failures.length > 0) return { ...prev, [itemId]: { failures: [...existing, ...failures], notice: failureNotice } }
-      if (refused.length > 0) {
-        return existing.length > 0 ? prev : { ...prev, [itemId]: { failures: [], notice: refused[0] } }
-      }
-      return prev
+      return { ...prev, [itemId]: { failures: [...existing, ...failures], notice: failureNotice } }
     })
   }, [])
+
+  // finding 9 (pre-release review): a "Full item" draft's baseline used to
+  // stay BLANK_DRAFT even when initialZoneId/initialBinId seeded the draft
+  // itself with a real zone/bin - draftDirty compared the seeded draft
+  // against a baseline that never saw the seed, so the form read dirty the
+  // instant it opened. newDraftBaseline is the SAME seeded value the effect
+  // below writes into `draft`, kept alongside it so id===null's own
+  // baseline (below) is what was actually seeded, not the unseeded default.
+  const [newDraftBaseline, setNewDraftBaseline] = useState<EquipmentInput>(BLANK_DRAFT)
 
   // Re-seeds only when a DIFFERENT record has loaded (id, or - for a brand
   // new draft - a one-time reset to blank), not on every incidental
@@ -226,47 +268,76 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // identically to a NEW record: EquipmentEditor unmounts and remounts
       // fresh between one "New item" press and the next, so there is
       // exactly one render where initialZoneId/initialBinId matter).
-      setDraft({ ...BLANK_DRAFT, zone_id: initialZoneId, bin_id: initialBinId })
+      const seeded = { ...BLANK_DRAFT, zone_id: initialZoneId, bin_id: initialBinId }
+      setDraft(seeded)
+      setNewDraftBaseline(seeded)
       return
     }
     if (item) setDraft(draftFromItem(item))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id/item id only, see comment above.
   }, [id, item?.id])
 
-  // ADR 0127: photo-tagged links are excluded here - the photo row above
-  // shows them, and "Photo links are managed only through the photo routes"
-  // (the plan's own words) means this Documents-tab list must never offer to
-  // manage one too, the same restriction the backend's SetEquipmentDocuments
-  // already enforces on the write side. One filter feeding both docEntries'
-  // own seed effect and baselineDocIds below (review finding: these used to
-  // be two separate copies of the same filter, which is how baselineDocIds
-  // drifted from docEntries' own exclusion rule when photo-write handling
-  // changed in only one of them).
-  const nonPhotoDocuments = useMemo(() => {
-    const photoIds = new Set(item?.photo_ids ?? [])
-    return documents.filter((d) => !photoIds.has(d.document_id))
-    // Keyed on content, not reference, for both documents and photo_ids -
-    // useEquipmentItem builds a fresh `documents` array on every refresh()
-    // even when the set is unchanged, and re-seeding on every one of those
-    // would throw away a locally staged add/remove before Save ever runs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents.map((d) => d.document_id).join(','), (item?.photo_ids ?? []).join(',')])
-
-  useEffect(() => {
-    if (id === null) {
-      setDocEntries([])
-      return
-    }
-    setDocEntries(nonPhotoDocuments.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })))
-  }, [id, nonPhotoDocuments])
-
-  const baseline = id === null ? BLANK_DRAFT : (item ? draftFromItem(item) : null)
-  const baselineDocIds = useMemo(() => nonPhotoDocuments.map((d) => d.document_id), [nonPhotoDocuments])
+  // finding 9: id===null's own baseline is the SEEDED draft (newDraftBaseline,
+  // set by the effect above the moment this draft was born), not BLANK_DRAFT
+  // itself - a "Full item" draft that pre-set zone_id/bin_id must compare
+  // against a baseline that already carries them, or it reads dirty on
+  // arrival with nothing yet typed.
+  const baseline = id === null ? newDraftBaseline : (item ? draftFromItem(item) : null)
+  // 2026-09-25 refactor: the Documents tab's own list is `documents` (the
+  // server's current truth) with pendingRemoves filtered out and pendingAdds
+  // appended - never a stored mirror of the whole set. A photo linked by
+  // some other code path (an upload) shows up here the instant `documents`
+  // itself picks it up (refreshDocuments, below) - this tab never has to be
+  // told about it separately.
+  //
+  // Pending changes are read against `documents` as it is now, not as it was
+  // when they were staged (Documents-save review): a removal whose document
+  // has since been unlinked another way (the photo strip's Remove) is no
+  // longer a change, and an addition that has since been linked another way
+  // (the same image uploaded as a photo) is already there. Counting either
+  // would leave the editor reading unsaved with nothing to save, or list the
+  // document twice.
+  const linkedIds = useMemo(() => new Set(documents.map((d) => d.document_id)), [documents])
+  const effectiveRemoves = useMemo(() => pendingRemoves.filter((docId) => linkedIds.has(docId)), [pendingRemoves, linkedIds])
+  const effectiveAdds = useMemo(() => pendingAdds.filter((d) => !linkedIds.has(d.document_id)), [pendingAdds, linkedIds])
+  const displayedDocuments = useMemo(
+    () => [
+      ...documents.filter((d) => !effectiveRemoves.includes(d.document_id)).map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
+      ...effectiveAdds,
+    ],
+    [documents, effectiveRemoves, effectiveAdds],
+  )
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
-  const linksDirty = id !== null && !sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)
+  // Any pending change at all means dirty - no comparison against a moving
+  // baseline needed, unlike the whole-set mirror this replaces.
+  const linksDirty = effectiveAdds.length > 0 || effectiveRemoves.length > 0
   const dirty = draftDirty || linksDirty
 
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+
+  // finding 8 (pre-release review): photos still waiting for Retry on the
+  // OPEN item are unsaved work for the leave guard, the same way
+  // bin-quick-add's own pendingRetries drive its onHasWorkChange - a
+  // navigation away used to be free to drop them with no prompt at all,
+  // because only draftDirty/linksDirty above ever fed onDirtyChange, and a
+  // Retry failure by itself changes neither. Routed through onHasWorkChange
+  // (not onDirtyChange) so App.tsx shows the Leave/Stay wording this
+  // failure actually needs, not the dirty-draft Save-and-Continue prompt.
+  const photoWorkDetail = useMemo(() => {
+    const n = failedPhotoUploads.length
+    if (n === 0) return undefined
+    const who = (item?.name || draft.name || '').trim() || 'this item'
+    return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
+  }, [failedPhotoUploads.length, item?.name, draft.name])
+  const hasPhotoWork = photoWorkDetail !== undefined
+  // useLayoutEffect - see bin-quick-add.tsx's own onHasWorkChange effect for
+  // why: App.tsx's guard can read inventoryHasWork right after a state
+  // update this same effect is meant to report, with no render in between
+  // for an ordinary passive effect to be guaranteed to have caught up.
+  useLayoutEffect(() => {
+    if (photoWorkDetail !== undefined) onHasWorkChange?.(hasPhotoWork, photoWorkDetail)
+    else onHasWorkChange?.(hasPhotoWork)
+  }, [hasPhotoWork, photoWorkDetail, onHasWorkChange])
 
   // Trap: the bin select is constrained to the CHOSEN zone's bins - with no
   // zone chosen yet, every bin across every zone is offered instead (so a
@@ -333,11 +404,31 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }
   const removeAlias = (name: string) => setDraft((prev) => ({ ...prev, aliases: prev.aliases.filter((a) => a !== name) }))
 
+  // Picking a document already linked server-side but staged for removal
+  // (the operator removed it, then picked it again before Save) just
+  // un-stages the removal - it's already linked, there's nothing to add.
+  // Otherwise it's a genuinely new pick, staged in pendingAdds (a no-op if
+  // already staged - a duplicate pick from the picker).
   const addDocument = (doc: DocumentLinkPickerResult) => {
-    if (docEntries.some((d) => d.document_id === doc.document_id)) return
-    setDocEntries((prev) => [...prev, doc])
+    const alreadyLinked = documents.some((d) => d.document_id === doc.document_id)
+    if (alreadyLinked && pendingRemoves.includes(doc.document_id)) {
+      setPendingRemoves((prev) => prev.filter((docId) => docId !== doc.document_id))
+      return
+    }
+    setPendingAdds((prev) => (prev.some((d) => d.document_id === doc.document_id) ? prev : [...prev, doc]))
   }
-  const removeDocument = (documentId: string) => setDocEntries((prev) => prev.filter((d) => d.document_id !== documentId))
+
+  // Removing a document that's only a pending add (never actually saved)
+  // just un-stages the add - there's nothing server-side to unlink yet.
+  // Otherwise it's one of `documents` (the server's current set), staged
+  // for removal on the next Save.
+  const removeDocument = (documentId: string) => {
+    if (pendingAdds.some((d) => d.document_id === documentId) && !linkedIds.has(documentId)) {
+      setPendingAdds((prev) => prev.filter((d) => d.document_id !== documentId))
+      return
+    }
+    setPendingRemoves((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
+  }
 
   // Trap: SignalK publishes runTime under all sorts of prefixes
   // (electrical.generator.0.runTime, propulsion.port.runTime...) - the one
@@ -360,9 +451,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // ADR 0127 review: this used to `break` on the first failed file, so the
   // remaining picks were never even tried and never offered for Retry -
   // every file gets its own attempt regardless of an earlier one failing. A
-  // downscale failure (no Blob to retry) still queues for Retry using the
-  // ORIGINAL file - Retry re-sends it as-is rather than losing the pick
-  // entirely.
+  // downscale failure queues for Retry using the ORIGINAL file, flagged
+  // needsDownscale so Retry re-runs downscaling before it ever tries to
+  // upload again (finding 10 below).
   //
   // uploadPhotosInOrder (usePhotoStaging) applies each successful upload's
   // own returned item via setItem as it lands (not a refresh() afterward) -
@@ -379,7 +470,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // each one arrives. A downscale failure never reaches
     // uploadPhotosInOrder at all (there is no Blob to upload) - it is
     // recorded directly, in the same shape uploadPhotosInOrder's own
-    // failures are, so Retry treats it identically.
+    // failures are, so Retry treats it identically (finding 10: except it
+    // is also flagged needsDownscale, since the blob it holds is still the
+    // full-size original).
     const downscaled = await downscaleAll(files)
     const downscaleFailures: FailedPhotoUpload[] = []
     const toUpload: LocalPhoto[] = []
@@ -389,15 +482,22 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         // there is no object URL for uploadPhotosInOrder to revoke.
         toUpload.push({ id: crypto.randomUUID(), blob: result.blob, filename: photoFilename(file.name), previewUrl: '' })
       } else {
-        downscaleFailures.push({ blob: file, filename: photoFilename(file.name), error: result.error })
+        downscaleFailures.push({ blob: file, filename: photoFilename(file.name), error: result.error, needsDownscale: true })
       }
     }
 
-    const { failures: uploadFailures, refused } = await uploadPhotosInOrder(targetId, toUpload)
+    const { failures: uploadFailures } = await uploadPhotosInOrder(targetId, toUpload)
     const failures = [...downscaleFailures, ...uploadFailures]
-    const notUploaded = failures.length + refused.length
-    recordPhotoOutcome(targetId, failures, refused,
-      failures.length > 0 ? `${notUploaded} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}` : '')
+    recordPhotoOutcome(targetId, failures,
+      `${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0]?.error ?? ''}`)
+    // 2026-09-25 refactor: a successful upload already links the photo
+    // server-side the instant it returns (item.photo_ids, applied above via
+    // setItem inside uploadPhotosInOrder) - this documents-only refetch just
+    // catches `documents` up to it, so the Documents tab shows it too. The
+    // Documents tab's own pendingAdds/pendingRemoves are untouched - they're
+    // only for what THIS tab has staged, orthogonal to what `documents`
+    // itself contains.
+    reloadDocuments(targetId)
   }
 
   const makeCoverSaved = async (photoId: string) => {
@@ -410,18 +510,32 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     }
   }
 
-  const removeSavedPhoto = async (photoId: string) => {
+  // 2026-09-25 amendment: removing a photo from the strip is unlink-only by
+  // default - `deletePhoto` (PhotoStripEditor's own "Remove and delete"
+  // choice, offered only when item.exclusive_photo_ids names this photo)
+  // additionally deletes the underlying document once nothing else links it.
+  const removeSavedPhoto = async (photoId: string, deletePhoto: boolean) => {
     if (id === null) return
     try {
-      const updated = await deleteEquipmentPhoto(id, photoId)
+      const updated = await deleteEquipmentPhoto(id, photoId, deletePhoto)
       setItem(updated)
       // Review finding: without this, the removed photo's still-stale entry
-      // in `documents` starts passing nonPhotoDocuments' own filter the
-      // instant item.photo_ids above stops naming it - see useEquipmentItem's
-      // own pruneDocument doc comment.
-      pruneDocument(photoId)
+      // in `documents` starts passing the Documents tab's own list the
+      // instant item.photo_ids above stops naming it. 2026-09-25 refactor:
+      // a documents-only refetch (replacing pruneDocument) catches
+      // `documents` up to the removal - the Documents tab is a view over
+      // `documents` now, not a stored mirror this write has to patch
+      // directly.
+      reloadDocuments(id)
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setSaveError(message)
+      // deleteEquipmentPhotoHandler only ever fails AFTER the unlink itself
+      // has already committed (its own "the photo was removed from the
+      // item, but ..." wording) - re-syncing from the server here is what
+      // keeps this item's local state from still claiming the photo is
+      // linked when the server no longer agrees.
+      if (message.includes('was removed from the item')) void refresh()
     }
   }
 
@@ -432,20 +546,40 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     if (id === null || failedPhotoUploads.length === 0) return
     const targetId = id
     setRetryingPhotos(true)
-    // No previewUrl to revoke for a retried photo (none was ever created -
-    // failedPhotoUploads holds only blob/filename/error) - uploadPhotosInOrder
-    // skips the revoke for an empty one. A retry landing on a 409 is an edge
-    // case (something else linked the identical bytes between the first
-    // attempt and this one) rather than the normal case Retry exists for -
-    // but the same "never re-queue a 409" rule still applies once it happens.
-    const toRetry: LocalPhoto[] = failedPhotoUploads.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
-    const { failures: stillFailing, refused } = await uploadPhotosInOrder(targetId, toRetry)
+    // finding 10 (pre-release review): a photo that failed to DOWNSCALE was
+    // queued holding the original, full-size File (needsDownscale: true) -
+    // re-running downscaleImage here, before this photo is ever handed to
+    // uploadPhotosInOrder, is what actually retries the failure that
+    // happened. Simply re-sending photo.blob as-is (the old behaviour)
+    // uploaded the full-size original straight past the size limit
+    // downscaling exists to enforce. A photo that still fails to downscale
+    // stays queued with that error and is never uploaded.
+    const stillNeedsDownscale: FailedPhotoUpload[] = []
+    const readyToUpload: LocalPhoto[] = []
+    for (const photo of failedPhotoUploads) {
+      if (photo.needsDownscale) {
+        try {
+          const blob = await downscaleImage(photo.blob)
+          readyToUpload.push({ id: crypto.randomUUID(), blob, filename: photo.filename, previewUrl: '' })
+        } catch (err) {
+          stillNeedsDownscale.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
+        }
+      } else {
+        // No previewUrl to revoke for an already-downscaled retry (none was
+        // ever created - failedPhotoUploads holds only blob/filename/error)
+        // - uploadPhotosInOrder skips the revoke for an empty one.
+        readyToUpload.push({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' })
+      }
+    }
+    const { failures: stillFailingUpload } = await uploadPhotosInOrder(targetId, readyToUpload)
+    // 2026-09-25 refactor: same documents-only refetch as a fresh upload -
+    // a retry that lands a photo links it server-side immediately too.
+    reloadDocuments(targetId)
+    const stillFailing = [...stillNeedsDownscale, ...stillFailingUpload]
     setPhotoStatus((prev) => {
       const next = { ...prev }
       if (stillFailing.length > 0) {
         next[targetId] = { failures: stillFailing, notice: `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}` }
-      } else if (refused.length > 0) {
-        next[targetId] = { failures: [], notice: refused[0] }
       } else {
         delete next[targetId]
       }
@@ -482,8 +616,13 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         // item stays exactly as saved, and every photo gets its own
         // attempt regardless of an earlier one failing.
         if (localPhotos.length > 0) {
+          // finding 7 (pre-release review): this used to clear the WHOLE
+          // localPhotos list once the upload settled - the same gap
+          // bin-quick-add's own handleSave had, and the same fix: snapshot
+          // exactly what this save is about to send, and afterward remove
+          // only those ids, by id, leaving anything staged after this save
+          // started untouched.
           const toUpload = localPhotos
-          setLocalPhotos([])
           // Review finding: each upload's own returned item is applied via
           // setItem (usePhotoStaging's uploadPhotosInOrder) the moment it
           // lands, not a refresh() (or nothing at all, which is what this
@@ -494,10 +633,15 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           // re-fetch it again once that GET's stale response was in.
           // adopt: this upload can land before the re-render that brings
           // created.id in as the hook's `id` (see setItem's own comment).
-          const { failures, refused } = await uploadPhotosInOrder(created.id, toUpload, { adopt: true })
-          const notUploaded = failures.length + refused.length
-          recordPhotoOutcome(created.id, failures, refused,
-            failures.length > 0 ? `Saved, but ${notUploaded} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}` : '')
+          const { failures } = await uploadPhotosInOrder(created.id, toUpload, { adopt: true })
+          recordPhotoOutcome(created.id, failures,
+            `Saved, but ${failures.length} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0]?.error ?? ''}`)
+          const uploadedIds = new Set(toUpload.map((p) => p.id))
+          setLocalPhotos((prev) => prev.filter((p) => !uploadedIds.has(p.id)))
+          // 2026-09-25 refactor: catches `documents` up to the newly created
+          // item's own just-uploaded photos, the same documents-only
+          // refetch every other photo write site now does.
+          reloadDocuments(created.id)
         }
         return
       }
@@ -525,17 +669,23 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // save's own record), so `dirty` correctly stays true instead of
       // dropping with no warning that the newer edit was never sent.
       setDraft((current) => (sameDraft(current, sentDraft) ? draftFromItem(updated) : current))
-      // Trap: only sent when the link SET actually changed - comparing ids
-      // as sets, not array order, so re-saving an untouched Documents list
-      // never issues a no-op PUT.
-      if (!sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)) {
-        await setLinkedDocuments(docEntries.map((d) => d.document_id))
+      // PATCH-based diff (backend replaced the whole-set PUT): this tab only
+      // ever sends what IT staged - a link it doesn't know about (a photo
+      // some other code path just uploaded) is never named in either list,
+      // so it can never be silently unlinked. patchLinkedDocuments' own
+      // refresh() afterward catches `documents` up; pendingAdds/pendingRemoves
+      // are cleared here rather than left for the id-change reset, since
+      // nothing about id changed - this Save just succeeded.
+      if (effectiveAdds.length > 0 || effectiveRemoves.length > 0) {
+        await patchLinkedDocuments(effectiveAdds.map((d) => d.document_id), effectiveRemoves)
+        setPendingAdds([])
+        setPendingRemoves([])
       }
     } catch (err) {
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, setLinkedDocuments, onCreated])
+  }, [id, draft, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -556,10 +706,22 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     setPendingDelete(false)
     setDeleting(true)
     try {
-      await remove()
+      await remove(deletePhotosOnDelete)
       onDeleted()
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      // deleteEquipmentHandler only ever fails AFTER the item row itself is
+      // already gone - its one post-delete failure path is a photo file
+      // that could not be removed, worded "the item was deleted, but ..."
+      // (inventory_handlers.go). onDeleted still fires either way; the
+      // message travels with it so App.tsx can show it on the destination
+      // instead of leaving this editor open on a record that no longer
+      // exists (2026-09-25 amendment).
+      if (message.includes('the item was deleted')) {
+        onDeleted(message)
+      } else {
+        setSaveError(message)
+      }
     } finally {
       setDeleting(false)
     }
@@ -596,9 +758,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           onMakeCover={(photoId) => {
             if (id === null) { makeCoverLocal(photoId) } else { void makeCoverSaved(photoId) }
           }}
-          onRemove={(photoId) => {
-            if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId) }
+          onRemove={(photoId, deletePhoto) => {
+            // A draft's local photos have no exclusivity to speak of yet -
+            // nothing is linked or shared until Save - so deletePhoto is
+            // never offered (exclusivePhotoIds is omitted below) and this
+            // branch never receives true for one.
+            if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId, deletePhoto) }
           }}
+          exclusivePhotoIds={id === null ? undefined : item?.exclusive_photo_ids}
         />
         {photoNotice && (
           <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
@@ -826,7 +993,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               variant="ghost"
               className="ml-auto gap-2 text-destructive"
               aria-label="Delete equipment"
-              onClick={() => setPendingDelete(true)}
+              onClick={() => { setDeletePhotosOnDelete(false); setPendingDelete(true) }}
               disabled={deleting || !canWrite}
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -840,8 +1007,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         <FieldSet className="rounded-md border border-border bg-card p-4">
           <FieldLegend variant="label">Documents</FieldLegend>
           <div className="flex flex-col gap-2">
-            {docEntries.length === 0 && <p className="text-sm text-muted-foreground">No documents linked yet.</p>}
-            {docEntries.map((doc) => (
+            {displayedDocuments.length === 0 && <p className="text-sm text-muted-foreground">No documents linked yet.</p>}
+            {displayedDocuments.map((doc) => (
               <div key={doc.document_id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{doc.title || doc.filename}</p>
@@ -872,11 +1039,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onPick={addDocument}
-        // ADR 0127: this item's OWN photos are excluded too, not just its
-        // already-linked non-photo documents - "the photo row shows them"
-        // (the plan's own words), so offering one here would let the
-        // operator link it a second time through the wrong control.
-        excludeIds={[...docEntries.map((d) => d.document_id), ...(item?.photo_ids ?? [])]}
+        // Excludes whatever the Documents tab is CURRENTLY showing -
+        // displayedDocuments, not just `documents` - so a document already
+        // staged as a pending add (not yet saved) is excluded too, the same
+        // "no offering the same document twice" rule as an already-linked
+        // one.
+        excludeIds={displayedDocuments.map((d) => d.document_id)}
       />
 
       <AlertDialog open={pendingDelete} onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}>
@@ -885,6 +1053,38 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
             <AlertDialogTitle>Delete &quot;{item?.name}&quot;?</AlertDialogTitle>
             <AlertDialogDescription>This removes the equipment record. It can&apos;t be undone.</AlertDialogDescription>
           </AlertDialogHeader>
+          {/* 2026-09-25 amendment: only shown when N > 0 - an item with no
+              exclusive photos has nothing this checkbox could offer to
+              delete, and showing it anyway would ask about a choice that
+              doesn't exist. Off by default: the operator's own decision
+              that a delete never destroys a document without being asked. */}
+          {(item?.exclusive_photo_ids.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={deletePhotosOnDelete}
+                  onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
+                />
+                Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
+              </label>
+              {/* Finding 3 (review): small thumbnails of exactly the photos
+                  this checkbox would delete - a bare count gives the
+                  operator nothing to actually recognise before confirming a
+                  delete that takes them along with the item. */}
+              {deletePhotosOnDelete && (
+                <div className="flex flex-wrap gap-1.5 pl-6">
+                  {(item?.exclusive_photo_ids ?? []).map((photoId) => (
+                    <img
+                      key={photoId}
+                      src={`${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`}
+                      alt="Photo to delete"
+                      className="h-12 w-12 shrink-0 rounded-md border border-border object-cover"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction

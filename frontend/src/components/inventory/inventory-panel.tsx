@@ -55,8 +55,11 @@ interface InventoryPanelProps {
   onCloseEditor: () => void
   /** A create that already succeeded; carries the id the server assigned. */
   onEquipmentCreated: (id: string) => void
-  /** A delete that already succeeded. */
-  onEquipmentDeleted: () => void
+  /** A delete that already succeeded. `message`, when given (2026-09-25
+   * amendment), is EquipmentEditor's own "the item was deleted, but ..."
+   * warning about a photo file/document that could not be removed
+   * afterward - the item is gone either way. */
+  onEquipmentDeleted: (message?: string) => void
   onDirtyChange?: (dirty: boolean) => void
   /** Release-fixes code-review finding: forwarded to Stocktake's own
    * onHasWorkChange and the bin page's quick-add onHasWorkChange - never
@@ -137,6 +140,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onCreated={onEquipmentCreated}
             onDeleted={onEquipmentDeleted}
             onDirtyChange={onDirtyChange}
+            onHasWorkChange={onHasWorkChange}
             canWrite={canWrite}
             initialZoneId={equipmentEditId === null ? (newEquipmentPreset?.zoneId ?? null) : null}
             initialBinId={equipmentEditId === null ? (newEquipmentPreset?.binId ?? null) : null}

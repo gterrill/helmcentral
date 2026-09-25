@@ -271,15 +271,34 @@ export function resolveScannedText(text: string): AppLocation | null {
   const trimmed = text.trim()
   if (trimmed === '') return null
 
+  // Only an explicit http(s):// scheme counts as absolute. `new URL(...)`
+  // alone used to accept ANY "scheme:rest" shape - including a bare bin
+  // code that happens to contain a colon (e.g. "LAZ:02"), which `new URL`
+  // parses as a valid (if useless) custom-scheme URL rather than throwing,
+  // so it never reached the bare-code branch below at all.
   let pathname: string
-  try {
-    pathname = new URL(trimmed).pathname
-  } catch {
-    const inventoryIndex = trimmed.indexOf('/inventory/')
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      pathname = new URL(trimmed).pathname
+    } catch {
+      return null
+    }
+  } else {
+    // A scheme-less scan is never run through `new URL` (URL has no base to
+    // resolve a relative string against), so its own ?query/#hash has to be
+    // stripped by hand before it's read as a path or a bare code - left in,
+    // either one corrupts a bin code or an inventory path beyond recognition.
+    const bare = trimmed.split(/[?#]/)[0]
+    const inventoryIndex = bare.indexOf('/inventory/')
     if (inventoryIndex !== -1) {
-      pathname = trimmed.slice(inventoryIndex)
-    } else if (!trimmed.includes('/')) {
-      pathname = `/inventory/bins/${trimmed}`
+      pathname = bare.slice(inventoryIndex)
+    } else if (bare !== '' && !bare.includes('/')) {
+      // A bare bin code is never percent-decoded on the way in (it's typed
+      // or scanned as plain text) - encoding it here, the same way every
+      // other segment this module builds is encoded, is what keeps a code
+      // containing '%' or '#'-adjacent characters intact through
+      // parseAppLocation's own decodeSegment on the way back out.
+      pathname = `/inventory/bins/${encodeURIComponent(bare)}`
     } else {
       return null
     }

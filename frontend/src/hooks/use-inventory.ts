@@ -115,11 +115,21 @@ export interface EquipmentItem {
   link_count: number
   created_at: string
   updated_at: string
-  /** ADR 0127: the item's OWN linked documents tagged 'photo', cover first -
-   * never every linked document (that's link_count/the Documents tab), just
-   * the photo-tagged subset the bin page's photo strip and the editor's
-   * photo row both read. */
+  /** ADR 0127, amended 2026-09-25: a VIEW over the item's own linked
+   * documents - whichever ones are image/jpeg or image/png, cover first, no
+   * tag involved. Never every linked document (that's link_count/the
+   * Documents tab, which now shows photos too) - just the image-MIME
+   * subset the bin page's photo strip and the editor's photo row both read. */
   photo_ids: string[]
+  /** 2026-09-25 amendment: the subset of photo_ids that reference NOTHING
+   * else - no other item's equipment_documents link still references the
+   * same document. This is what the delete dialogs offer to also delete:
+   * an item delete's "Also delete N photo(s) only this item uses"
+   * checkbox, and the strip's per-photo "Remove and delete" choice. Only
+   * ever populated by a single-item GET (useEquipmentItem) - a listing
+   * (useEquipment) always gets back an empty array here, see the backend's
+   * own doc comment on why. */
+  exclusive_photo_ids: string[]
 }
 
 /** The body EquipmentEditor sends on create (POST) and save (PUT) - every
@@ -362,6 +372,11 @@ export function useEquipmentItem(id: string | null) {
   // landed since; documents/error/loading are never gated by it, so a GET's
   // own results outside the item race still land normally.
   const itemSeqRef = useRef(0)
+  // Orders `documents` updates: refreshDocuments' own background reloads
+  // bump it, and so does refresh() below, so a slow background reload
+  // started by a photo write can't land after a later full reload (the
+  // one after a Save) and put an older list back (Documents-save review).
+  const documentsSeqRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (id === null) {
@@ -373,6 +388,7 @@ export function useEquipmentItem(id: string | null) {
       return
     }
     const seq = (seqRef.current += 1)
+    documentsSeqRef.current += 1
     const itemSeqAtStart = itemSeqRef.current
     setLoading(true)
     try {
@@ -415,19 +431,30 @@ export function useEquipmentItem(id: string | null) {
     return data.item
   }, [id])
 
-  const remove = useCallback(async () => {
+  // deletePhotos (2026-09-25 amendment) is the operator's own explicit
+  // choice, surfaced by the delete confirm dialog's "Also delete N
+  // photo(s) only this item uses" checkbox (off by default) - an ordinary
+  // delete only ever unlinks, never destroys a document, see equipmentItem's
+  // own exclusive_photo_ids doc comment.
+  const remove = useCallback(async (deletePhotos = false) => {
     if (id === null) throw new Error('useEquipmentItem: no id to delete')
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'DELETE')
+    const qs = deletePhotos ? '?delete_photos=true' : ''
+    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
   }, [id])
 
-  // Replaces the WHOLE link set (ADR 0123: "Links edited from the equipment
-  // side this cycle... replace wholesale"). Re-fetches afterward rather than
-  // trusting a locally-merged guess at the response shape - the join back to
-  // each document's title/filename/kind/note_type only the server can do,
-  // and this is the one place that already knows how to ask for it.
-  const setLinkedDocuments = useCallback(async (documentIds: string[]) => {
-    if (id === null) throw new Error('useEquipmentItem: no id to set documents on')
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}/documents`, 'PUT', { document_ids: documentIds })
+  // Applies a DIFF to the link set (backend PATCH /documents: {add, remove}
+  // - replaces the old whole-set PUT, ADR 0123's "Links edited from the
+  // equipment side this cycle" is still true, only the wire shape changed).
+  // The caller only ever has to say what changed, not restate the ids it
+  // isn't touching - a link this call doesn't name (a just-uploaded photo,
+  // say) is never at risk of being silently unlinked. Re-fetches afterward
+  // rather than trusting a locally-merged guess at the response shape - the
+  // join back to each document's title/filename/kind/note_type only the
+  // server can do, and this is the one place that already knows how to ask
+  // for it.
+  const patchLinkedDocuments = useCallback(async (add: string[], remove: string[]) => {
+    if (id === null) throw new Error('useEquipmentItem: no id to patch documents on')
+    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}/documents`, 'PATCH', { add, remove })
     await refresh()
   }, [id, refresh])
 
@@ -478,23 +505,48 @@ export function useEquipmentItem(id: string | null) {
     setItemState(next)
   }, [])
 
-  // Review finding: deleteEquipmentPhoto's own DELETE returns only the
-  // updated item (photo_ids with the id gone) - `documents`, fetched once at
-  // mount/refresh, still carries that same id's link until something
-  // re-fetches it. equipment-editor.tsx's Documents tab excludes photo-
-  // tagged links by checking id membership in item.photo_ids, so the moment
-  // photo_ids stops naming it, the STILL-STALE documents array makes the
-  // just-removed photo look like an ordinary linked document again - visibly
-  // reappearing in the tab, and eligible to be sent right back on the next
-  // link-set PUT. Pruning it here, at the one write that can make it stale,
-  // keeps `documents` correct without a second GET (refresh() would also
-  // fix it, but costs a redundant round trip for a response this hook
-  // already has everything it needs from).
-  const pruneDocument = useCallback((documentId: string) => {
-    setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
+  // Same ordering guard as documents/error/loading above, but its OWN
+  // counter - a documents-only refetch (below) is fired off the back of a
+  // photo write and never touches itemSeqRef/seqRef, so it needs a race
+  // guard that doesn't accidentally interact with either of those.
+
+  // 2026-09-25 refactor: replaces pruneDocument. A photo write (upload,
+  // retry, remove) already updates `item` directly via the response's own
+  // returned record (setItem, above) - but `documents` (fetched once, at
+  // mount/refresh) is a SEPARATE field that write's response never carries,
+  // and the Documents tab reads `documents`, not item.photo_ids, for what
+  // it shows. This re-fetches the same GET useEquipmentItem's own refresh()
+  // uses, but applies ONLY the `documents` field from it - NEVER
+  // setItemState, which would risk re-opening the exact create-then-upload
+  // race itemSeqRef exists to close (a slow GET landing after a newer write
+  // and overwriting it).
+  //
+  // Two races guarded against, both mirroring idioms already in this file:
+  // (a) the operator has since navigated to a different item entirely (the
+  // editor stays mounted across Back/Forward, the same reasoning setItem's
+  // own doc comment gives) - idRef.current is the hook's LIVE id, checked
+  // against `targetId`, the id this fetch was actually FOR (an explicit
+  // parameter, not read off the hook's own `id` closed over at call time,
+  // because the caller - equipment-editor.tsx - already knows exactly which
+  // item a given photo write belonged to, independent of whatever record is
+  // open by the time this resolves); (b) a slower, OLDER refreshDocuments
+  // call for the SAME id landing after a newer one already has - guarded by
+  // documentsSeqRef, the same idiom seqRef/itemSeqRef use above.
+  //
+  // Throws the server's own message on failure (AGENTS.md fallback policy):
+  // the photo write already succeeded, but a list that silently stays stale
+  // shows a removed photo as still linked, so the caller reports it.
+  const refreshDocuments = useCallback(async (targetId: string) => {
+    const seq = (documentsSeqRef.current += 1)
+    const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(targetId)}`)
+    if (!res.ok) throw new Error(await readErrorMessage(res))
+    const data = (await res.json()) as { documents?: EquipmentDocument[] }
+    if (idRef.current !== targetId) return
+    if (seq !== documentsSeqRef.current) return
+    setDocuments(data.documents ?? [])
   }, [])
 
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem, pruneDocument }
+  return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any
@@ -574,22 +626,13 @@ export async function updateEquipment(id: string, input: EquipmentInput): Promis
 // held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
 // neither of which has a persistent hook instance to hang these off.
 
-/** Thrown by uploadEquipmentPhoto specifically for a 409 - inventory_
- * handlers.go's "This image is already in Documents as ..." refusal, when
- * the exact same bytes are already filed under a different, non-photo
- * document. Carries the status the same way EquipmentNotFoundError carries
- * its 404, rather than a caller having to match the message text - a
- * caller that queues failed uploads for Retry (equipment-editor.tsx,
- * bin-quick-add.tsx) checks for this specifically, because re-sending the
- * identical bytes can only get the identical refusal: Retry is never a
- * failure worth offering here the way a dropped connection or a 500 is. */
-export class PhotoAlreadyLinkedError extends Error {}
-
-/** POST /api/inventory/equipment/:id/photos - one multipart upload, tagged
- * 'photo' and linked at the end of the item's photo order server-side.
- * Throws the server's own message on a rejected upload (AGENTS.md fallback
- * policy: HEIC/non-image get a specific reason, never a generic one) - a
- * 409 throws PhotoAlreadyLinkedError specifically, see its own doc comment. */
+/** POST /api/inventory/equipment/:id/photos - one multipart upload, linked
+ * at the end of the item's photo order server-side. No tag is written
+ * (2026-09-25 amendment) - the item's photo_ids view is MIME-based. Throws
+ * the server's own message on a rejected upload (AGENTS.md fallback
+ * policy: HEIC/non-image get a specific reason, never a generic one). A
+ * byte-identical upload is no longer refused with a 409 - it links the
+ * existing document and returns 200, same as any other success here. */
 export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
   const form = new FormData()
   form.append('file', file, filename)
@@ -597,11 +640,7 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
     method: 'POST',
     body: form,
   })
-  if (!response.ok) {
-    const message = await readErrorMessage(response)
-    if (response.status === 409) throw new PhotoAlreadyLinkedError(message)
-    throw new Error(message)
-  }
+  if (!response.ok) throw new Error(await readErrorMessage(response))
   const data = (await response.json()) as { item: EquipmentItem }
   return data.item
 }
@@ -619,11 +658,17 @@ export async function setEquipmentPhotoOrder(equipmentId: string, documentIds: s
 }
 
 /** DELETE /api/inventory/equipment/:id/photos/:documentId - removes the
- * photo from the item AND deletes its document (ADR 0127: "a photo has no
- * life outside its item"). */
-export async function deleteEquipmentPhoto(equipmentId: string, documentId: string): Promise<EquipmentItem> {
+ * photo from the item. UNLINK ONLY by default (2026-09-25 amendment,
+ * superseding "a photo has no life outside its item") - deletePhotos is
+ * the operator's own explicit choice, from the strip's "Remove and delete"
+ * option (offered only when the photo is exclusive to this item - see
+ * EquipmentItem's own exclusive_photo_ids doc comment), and additionally
+ * deletes the document (and, server-side, its file) once nothing else
+ * links it. */
+export async function deleteEquipmentPhoto(equipmentId: string, documentId: string, deletePhotos = false): Promise<EquipmentItem> {
+  const qs = deletePhotos ? '?delete=true' : ''
   const data = await submitJSON<{ item: EquipmentItem }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}`,
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}${qs}`,
     'DELETE',
   )
   return data.item

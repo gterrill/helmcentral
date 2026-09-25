@@ -45,8 +45,6 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
   const [quantity, setQuantity] = useState(1)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // A 409-only notice ("already in Documents as ..."): nothing to retry.
-  const [refusedNotice, setRefusedNotice] = useState<string | null>(null)
   // Photos still waiting for Retry, one entry per saved item. The form
   // clears after every save and moves on to the next item, so a single
   // slot here used to be overwritten by the next save and the earlier
@@ -109,6 +107,13 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     savingRef.current = true
     setSaving(true)
     setSaveError(null)
+    // Captured before the first await: finding 7 (pre-release review) - a
+    // save clearing `name`/`photos` unconditionally at the end wiped a name
+    // typed or a photo taken WHILE the create/upload round trip was still in
+    // flight. Only what THIS save actually captured gets cleared below - the
+    // exact snapshot taken here, nothing added afterward.
+    const nameAtSaveStart = name
+    const photosSnapshot = photos
     try {
       // BLANK_DRAFT already carries system's own server default 'other' -
       // "that is the current contract, not a new fallback" (the plan's own
@@ -124,26 +129,28 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       }
       const created = await createEquipment(input)
 
-      const { failures, refused } = await uploadPhotosInOrder(created.id, photos)
+      const { failures } = await uploadPhotosInOrder(created.id, photosSnapshot)
 
       // Only this item's own outcome changes here - an earlier item's
       // photos still waiting for Retry are left exactly where they are.
       if (failures.length > 0) {
-        const notUploaded = failures.length + refused.length
-        const notice = `Saved ${trimmedName}, but ${notUploaded} photo${notUploaded === 1 ? '' : 's'} didn't upload: ${failures[0].error}`
+        const notice = `Saved ${trimmedName}, but ${failures.length} photo${failures.length === 1 ? '' : 's'} didn't upload: ${failures[0].error}`
         setPendingRetries((prev) => [...prev, { itemId: created.id, name: trimmedName, failures, notice }])
-        setRefusedNotice(null)
-      } else {
-        setRefusedNotice(refused.length > 0 ? refused[0] : null)
       }
 
-      // The form clears and the camera is ready for the next item -
-      // "there is no silent rollback" (the plan's own words) means a
-      // partial photo failure still leaves the item saved, not the form
-      // reopened on it for correction.
-      setName('')
+      // The camera is ready for the next item - "there is no silent
+      // rollback" (the plan's own words) means a partial photo failure
+      // still leaves the item saved, not the form reopened on it for
+      // correction. Remove exactly the photos THIS save captured, by id -
+      // every one of them is now accounted for, uploaded or moved into
+      // pendingRetries above with its own blob copy - leaving any photo
+      // added to the strip while this save was still running. The name
+      // resets only if it still equals what this save sent; an operator who
+      // has since typed a new name for the next item keeps it.
+      const uploadedIds = new Set(photosSnapshot.map((p) => p.id))
+      setPhotos((prev) => prev.filter((p) => !uploadedIds.has(p.id)))
+      setName((prev) => (prev === nameAtSaveStart ? '' : prev))
       setQuantity(1)
-      setPhotos([])
       onCreated()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -159,14 +166,13 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     // an entry holds only blob/filename/error) - uploadPhotosInOrder skips
     // the revoke for an empty one.
     const toRetry = entry.failures.map((photo) => ({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' }))
-    const { failures: stillFailing, refused } = await uploadPhotosInOrder(entry.itemId, toRetry)
+    const { failures: stillFailing } = await uploadPhotosInOrder(entry.itemId, toRetry)
     setPendingRetries((prev) => {
       const others = prev.filter((p) => p.itemId !== entry.itemId)
       if (stillFailing.length === 0) return others
       const notice = `Saved, but ${stillFailing.length} photo${stillFailing.length === 1 ? '' : 's'} didn't upload: ${stillFailing[0].error}`
       return prev.map((p) => (p.itemId === entry.itemId ? { ...p, failures: stillFailing, notice } : p))
     })
-    if (stillFailing.length === 0 && refused.length > 0) setRefusedNotice(refused[0])
     setRetryingItemId(null)
     onCreated()
   }
@@ -181,7 +187,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
         photos={photoStripPhotos}
         onFilesPicked={(files) => { void addFiles(files) }}
         onMakeCover={makeCover}
-        onRemove={removePhoto}
+        onRemove={(photoId) => removePhoto(photoId)}
       />
       <div className="flex flex-wrap items-end gap-2">
         <Field className="min-w-0 flex-1">
@@ -210,11 +216,6 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
       </div>
       {saveError && (
         <p role="alert" className="text-sm text-destructive">{saveError}</p>
-      )}
-      {/* A 409 refusal is never queued - Retry could only repeat the same
-          refusal, so its notice carries no Retry button. */}
-      {refusedNotice && (
-        <p role="alert" className="rounded-md border border-border bg-muted px-3 py-2 text-sm">{refusedNotice}</p>
       )}
       {pendingRetries.map((entry) => (
         <div key={entry.itemId} role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">

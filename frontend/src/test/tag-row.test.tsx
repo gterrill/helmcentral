@@ -58,7 +58,7 @@ describe('TagRow', () => {
     // it tapped the written tag.
     expect(write).toHaveBeenCalledWith(
       { records: [{ recordType: 'url', data: `${window.location.origin}/inventory/bins/LAZ-02` }] },
-      { signal: undefined },
+      { signal: expect.any(AbortSignal) },
     )
   })
 
@@ -71,5 +71,40 @@ describe('TagRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Write tag' }))
 
     await screen.findByText('NotAllowedError: permission denied')
+  })
+
+  it('shows a Cancel button while waiting for the tag, and aborts the write on click', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const write = vi.fn((_message: unknown, options?: { signal?: AbortSignal }) => {
+      capturedSignal = options?.signal
+      return new Promise<void>(() => {}) // never resolves - the operator cancels instead
+    })
+    vi.stubGlobal('NDEFReader', class { write = write })
+
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Write tag' }))
+
+    const cancelButton = await screen.findByRole('button', { name: 'Cancel' })
+    expect(capturedSignal?.aborted).toBe(false)
+    fireEvent.click(cancelButton)
+
+    expect(capturedSignal?.aborted).toBe(true)
+    await screen.findByRole('button', { name: 'Write tag' })
+  })
+
+  it('aborts an in-flight write when the component unmounts', () => {
+    let capturedSignal: AbortSignal | undefined
+    const write = vi.fn((_message: unknown, options?: { signal?: AbortSignal }) => {
+      capturedSignal = options?.signal
+      return new Promise<void>(() => {})
+    })
+    vi.stubGlobal('NDEFReader', class { write = write })
+
+    const { unmount } = render(<TagRow path="/inventory/bins/LAZ-02" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Write tag' }))
+    expect(capturedSignal?.aborted).toBe(false)
+
+    unmount()
+    expect(capturedSignal?.aborted).toBe(true)
   })
 })

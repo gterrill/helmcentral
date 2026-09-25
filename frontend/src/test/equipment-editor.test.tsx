@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
+import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 
 // ADR 0127: the photo row runs every picked file through downscaleImage
 // before it ever reaches the network (canvas/createImageBitmap aren't
@@ -22,8 +23,8 @@ vi.mock('@/components/inventory/document-link-picker', () => ({
   DocumentLinkPicker: ({ open, onPick }: { open: boolean; onPick: (doc: { document_id: string; title: string; filename: string }) => void }) => (
     open
       ? (
-          <button type="button" onClick={() => onPick({ document_id: 'refused-photo', title: '', filename: 'engine.jpg' })}>
-            Pick refused-photo
+          <button type="button" onClick={() => onPick({ document_id: 'picked-doc', title: '', filename: 'engine.jpg' })}>
+            Pick document
           </button>
         )
       : null
@@ -56,6 +57,7 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     created_at: '',
     updated_at: '',
     photo_ids: [],
+    exclusive_photo_ids: [],
     ...overrides,
   }
 }
@@ -80,13 +82,13 @@ const profiles = [
 
 let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
+// When set, every item GET fails with this server message.
+let failItemGetsWith: string | null
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
-// Release-fixes code-review finding: a 409 ("already in Documents") can
-// never succeed on Retry - it's the same bytes every time - so it needs its
-// own fixture, distinct from failingPhotoUploadNames' plain 500s which DO
-// belong on the retry queue.
-let conflictPhotoUploadNames: Map<string, string>
+/** Whether the last DELETE /api/inventory/equipment/eq-1 carried
+ * ?delete_photos=true - the delete-checkbox tests' own assertion. */
+let deletedWithPhotos: boolean
 const fetchMock = vi.fn()
 
 // Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
@@ -123,24 +125,33 @@ function stubFetch() {
         json: async () => ({ paths: [{ path: 'electrical.generator.0.runTime' }, { path: 'navigation.speedOverGround' }] }),
       })
     }
-    if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PUT') {
-      const body = JSON.parse(String(init?.body)) as { document_ids: string[] }
-      // Mirrors backend/inventory_handlers.go's own refusal: a photo-tagged
-      // docID sent through this whole-set-replace PUT is a 400 naming it,
-      // not linked as an ordinary document.
-      if (body.document_ids.includes('refused-photo')) {
-        return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: '"engine.jpg" is a photo; add photos from the item\'s photo row' }) })
-      }
-      currentDocuments = currentDocuments.filter((d) => body.document_ids.includes(d.document_id))
+    if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as { add: string[]; remove: string[] }
+      // Diff-based PATCH (replaces the old whole-set PUT): add links every
+      // id not already known (e.g. 'picked-doc' from the picker mock
+      // above), remove unlinks only the ids named - anything not named in
+      // either list is left exactly as it was.
+      currentDocuments = [
+        ...currentDocuments.filter((d) => !body.remove.includes(d.document_id)),
+        ...body.add
+          .filter((docId) => !currentDocuments.some((d) => d.document_id === docId))
+          .map((docId) => ({ document_id: docId, title: '', filename: 'engine.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 })),
+      ]
+      currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((id) => !body.remove.includes(id)) }
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
     // Generic, not just eq-1: once a draft's create POST assigns 'eq-new'
     // (below), the useEquipmentItem hook immediately GETs that new id -
     // currentItem is the single record these fixtures track either way.
     if (u.match(/\/api\/inventory\/equipment\/[^/]+$/) && method === 'GET') {
+      if (failItemGetsWith) return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: failItemGetsWith }) })
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
     }
-    if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
+    // Generic, not just eq-1 (same reasoning as the GET matcher just below):
+    // a second Save after the create-then-navigate transition (id ===
+    // null -> the server-assigned id, with no remount) PUTs to that new
+    // id, not eq-1.
+    if (u.match(/\/api\/inventory\/equipment\/[^/]+$/) && method === 'PUT') {
       const body = JSON.parse(String(init?.body))
       // Same normalisation the real handler applies (backend/inventory_
       // handlers.go / inventory_store.go) before it ever echoes the item
@@ -159,7 +170,8 @@ function stubFetch() {
       }
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
-    if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'DELETE') {
+    if (u.match(/\/api\/inventory\/equipment\/eq-1(\?|$)/) && method === 'DELETE') {
+      deletedWithPhotos = u.includes('delete_photos=true')
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
     if (u.match(/\/api\/inventory\/equipment$/) && method === 'POST') {
@@ -177,15 +189,21 @@ function stubFetch() {
       const form = init?.body as FormData
       const file = form.get('file') as File
       uploadedPhotoOrder.push(file.name)
-      if (conflictPhotoUploadNames.has(file.name)) {
-        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: conflictPhotoUploadNames.get(file.name) }) })
-      }
       if (failingPhotoUploadNames.has(file.name)) {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: `upload failed: ${file.name}` }) })
       }
       const photoId = `photo-${uploadedPhotoOrder.length}`
       if (targetId === currentItem.id) {
         currentItem = { ...currentItem, photo_ids: [...currentItem.photo_ids, photoId] }
+        // A photo IS an ordinary equipmentDocument link server-side the
+        // instant it uploads (2026-09-25 amendment) - refreshDocuments'
+        // own GET needs to see it here, not just in item.photo_ids, or the
+        // Documents tab would never show a photo that hasn't ALSO gone
+        // through a whole-item refresh() for some unrelated reason.
+        currentDocuments = [
+          ...currentDocuments,
+          { document_id: photoId, title: '', filename: file.name, kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+        ]
       }
       return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: currentItem }) })
     }
@@ -195,9 +213,14 @@ function stubFetch() {
       currentItem = { ...currentItem, photo_ids: body.document_ids }
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
-    const photoDelete = u.match(/\/api\/inventory\/equipment\/[^/]+\/photos\/([^/]+)$/)
+    const photoDelete = u.match(/\/api\/inventory\/equipment\/[^/]+\/photos\/([^/?]+)/)
     if (photoDelete && method === 'DELETE') {
+      // Unlink happens either way (2026-09-25 amendment) - the `?delete=true`
+      // flag this fixture doesn't otherwise model only controls whether the
+      // underlying document ROW also goes away, which currentDocuments (this
+      // item's own LINKS) reflects the same way regardless: the link is gone.
       currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((p) => p !== photoDelete[1]) }
+      currentDocuments = currentDocuments.filter((d) => d.document_id !== photoDelete[1])
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
     return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
@@ -209,9 +232,10 @@ beforeEach(() => {
   fetchMock.mockReset()
   currentItem = makeItem()
   currentDocuments = []
+  failItemGetsWith = null
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
-  conflictPhotoUploadNames = new Map()
+  deletedWithPhotos = false
   stubFetch()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -401,7 +425,7 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
-  it('does not PUT the documents link set when it was not touched', async () => {
+  it('does not PATCH the documents link set when it was not touched', async () => {
     currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
@@ -416,7 +440,7 @@ describe('EquipmentEditor', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/documents'))).toBe(false)
   })
 
-  it('PUTs the reduced documents link set once a linked document is removed', async () => {
+  it('PATCHes remove with the dropped id once a linked document is removed', async () => {
     currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
@@ -427,28 +451,34 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
       const body = JSON.parse(String((call?.[1] as RequestInit).body))
-      expect(body.document_ids).toEqual([])
+      expect(body.add).toEqual([])
+      expect(body.remove).toEqual(['d1'])
     })
   })
 
-  // Item 2 of the pre-release review: the backend now refuses a photo-
-  // tagged docID sent through the ordinary documents PUT with a 400 naming
-  // it. This pins that the refusal reaches the operator through the same
-  // save-error banner every other Save failure already uses - no separate
-  // error UI needed for this case.
-  it('shows the server\'s refusal when a picked document turns out to be a photo', async () => {
+  // 2026-09-25 amendment (still true under the PATCH-based diff): a picked
+  // document (whatever its own MIME type) is linked as an ordinary document
+  // through the picker, with no refusal.
+  it('links a document picked through the picker on Save', async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Pick refused-photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await screen.findByText('"engine.jpg" is a photo; add photos from the item\'s photo row')
-    expect(screen.getByRole('alert')).toHaveTextContent('is a photo')
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual(['picked-doc'])
+      expect(body.remove).toEqual([])
+    })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('asks for confirmation before deleting and calls onDeleted once accepted', async () => {
@@ -493,14 +523,16 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
-  // Release-fixes code-review finding: removeSavedPhoto's setItem(updated)
-  // drops the photo from item.photo_ids, but `documents` (fetched
-  // separately, at mount) still carries its link - the Documents tab's own
-  // exclusion filter keys off photo_ids, so the instant photo_ids no longer
-  // names it, the still-stale `documents` array makes it look like an
-  // ordinary linked document. A later Save that touches the link set at all
-  // would then PUT it right back as one.
-  it('does not let a removed photo reappear in the Documents tab or get sent on the next document save', async () => {
+  // 2026-09-25 amendment: the Documents tab now lists ALL of an item's
+  // linked documents, photos included - the earlier "the photo never shows
+  // in the Documents tab" exclusion is gone along with the photo tag
+  // itself. removeSavedPhoto's setItem(updated) drops the photo from
+  // item.photo_ids, but `documents` (fetched separately, at mount) still
+  // carries its link until pruneDocument removes it too - without that,
+  // the still-stale `documents` array would make the just-removed photo
+  // look like it's STILL an ordinary linked document, and a later Save
+  // that touches the link set at all would PUT it right back as one.
+  it('keeps a removed photo out of the Documents tab and off the next document save', async () => {
     currentItem = makeItem({ photo_ids: ['p1'] })
     currentDocuments = [
       { document_id: 'p1', title: '', filename: 'cover.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
@@ -509,27 +541,35 @@ describe('EquipmentEditor', () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
-    // The photo never shows in the Documents tab to begin with.
-    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+    // The photo IS in the Documents tab to begin with - it's an ordinary
+    // linked document too, the strip is just a view over the same links.
+    // (Two matches: the doc entry's title falls back to its filename, and
+    // the filename shows again underneath it.)
+    expect(screen.getAllByText('cover.jpg')).toHaveLength(2)
 
     fireEvent.click(screen.getByText('Remove'))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
       String(url).endsWith('/api/inventory/equipment/eq-1/photos/p1') && (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true))
 
-    // Still not in the Documents tab after the removal.
-    expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
+    // Gone from the Documents tab after the removal - via refreshDocuments'
+    // own documents-only refetch (2026-09-25 refactor: replaces
+    // pruneDocument), which lands after the DELETE itself, hence waitFor
+    // rather than a synchronous assertion.
+    await waitFor(() => expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument())
 
     // Touch the link set (remove the genuinely-linked Manual) and save - the
-    // PUT must not resurrect the removed photo alongside it.
+    // PATCH must name only Manual in remove, never the already-unlinked
+    // photo (which this diff-based call never has to mention at all).
     fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
-      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
-      expect(body.document_ids).toEqual([])
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual([])
+      expect(body.remove).toEqual(['d1'])
     })
   })
 
@@ -581,12 +621,18 @@ describe('EquipmentEditor', () => {
 
   // ADR 0127 review finding: every photo write already gets the updated
   // item back from the server (the same shape update() applies via
-  // setItem) - Make cover/Remove should use THAT rather than firing a
-  // second, redundant GET afterward.
-  it('applies the server response directly on Make cover/Remove, without a follow-up GET', async () => {
+  // setItem) - Make cover should use THAT rather than firing a second,
+  // redundant GET afterward. 2026-09-25 refactor: Remove is different now -
+  // the DELETE response updates `item` directly the same way, but the
+  // Documents tab also needs `documents` (a separate field the DELETE
+  // response doesn't carry) kept in sync, which is refreshDocuments' own
+  // one job - so Remove DOES trigger a follow-up GET, deliberately, while
+  // Make cover still does not.
+  it('applies the server response directly on Make cover, and only Remove triggers a documents-only refetch', async () => {
     currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
+    fetchMock.mockClear()
 
     fireEvent.click(screen.getAllByText('Make cover')[1])
     await waitFor(() => {
@@ -594,8 +640,15 @@ describe('EquipmentEditor', () => {
         String(url).endsWith('/api/inventory/equipment/eq-1/photos') && (init as RequestInit | undefined)?.method === 'PUT')
       expect(call).toBeDefined()
     })
-    fetchMock.mockClear()
 
+    // No bare GET /api/inventory/equipment/eq-1 after Make cover (since the
+    // mount's own initial GET was just cleared) - the returned {item} is
+    // applied directly instead of triggering a refetch.
+    const getEq1AfterMakeCover = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+    expect(getEq1AfterMakeCover).toHaveLength(0)
+
+    fetchMock.mockClear()
     fireEvent.click(screen.getAllByText('Remove')[0])
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([, init]) =>
@@ -603,11 +656,12 @@ describe('EquipmentEditor', () => {
       expect(call).toBeDefined()
     })
 
-    // No bare GET /api/inventory/equipment/eq-1 after either write - the
-    // returned {item} is applied directly instead of triggering a refetch.
-    const getEq1 = fetchMock.mock.calls.filter(([url, init]) =>
-      String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
-    expect(getEq1).toHaveLength(0)
+    // Remove DOES follow up with a documents-only GET (refreshDocuments).
+    await waitFor(() => {
+      const getEq1AfterRemove = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+      expect(getEq1AfterRemove.length).toBeGreaterThan(0)
+    })
   })
 
   // ADR 0127 review finding: uploadPhotosToSavedItem `break`s on the first
@@ -779,41 +833,20 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
   })
 
-  // Release-fixes code-review finding: a 409 refusal ("already in Documents
-  // as ...") is the server saying these exact bytes can never be linked as
-  // a NEW photo - re-sending the identical bytes on Retry can only get the
-  // identical refusal, so it must not be queued for Retry the way a genuine
-  // (transient) failure is.
-  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a saved item', async () => {
+  // 2026-09-25 amendment: a byte-identical upload is no longer refused with
+  // a 409 - the server links the existing document and returns 200/201
+  // like any other successful upload, so it shows up on the strip exactly
+  // like a fresh upload would, no notice and no Retry queue involved.
+  it('a duplicate upload links successfully with no refusal notice', async () => {
     currentItem = makeItem({ photo_ids: [] })
-    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
 
-    await screen.findByText('This image is already in Documents as "Fuel receipt"')
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
-    // Dropped, not left on the strip as a pending/failed photo either.
-    expect(screen.queryByText('Remove')).not.toBeInTheDocument()
-  })
-
-  it('shows a 409 duplicate-photo refusal as a plain notice with no Retry, on a brand new draft\'s create-then-upload', async () => {
-    conflictPhotoUploadNames.set('a.jpg', 'This image is already in Documents as "Fuel receipt"')
-    const onCreated = vi.fn()
-    render(<DraftHarness onCreatedSpy={onCreated} />)
-    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
-
-    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
-    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
-    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(1))
-
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
-    await screen.findByText('This image is already in Documents as "Fuel receipt"')
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
@@ -840,5 +873,470 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg', 'b.jpg']))
     await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+  })
+
+  // finding 9 (pre-release review): the bin page's "Full item" pre-sets a
+  // brand new draft's zone/bin (initialZoneId/initialBinId) - the baseline
+  // this draft compares against must ALSO carry them, or draftDirty reads
+  // true the instant the form opens, with nothing yet typed.
+  it('is not dirty when a "Full item" draft opens with a pre-set zone and bin', async () => {
+    const onDirtyChange = vi.fn()
+    render(
+      <EquipmentEditor
+        id={null}
+        onBack={vi.fn()}
+        onCreated={vi.fn()}
+        onDeleted={vi.fn()}
+        onDirtyChange={onDirtyChange}
+        initialZoneId="z1"
+        initialBinId="b1"
+      />,
+    )
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zone' })).toHaveTextContent('Engine room (stbd)'))
+
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+
+  // finding 8 (pre-release review): photos still waiting for Retry on the
+  // OPEN item are unsaved work for the leave guard - routed through
+  // onHasWorkChange (Leave/Stay wording, with a detail), not onDirtyChange
+  // (which would give the Save-and-Continue wording bin-quick-add's own
+  // identical case deliberately avoids for this failure).
+  it('reports a failed photo upload on the open item as hasWork, with Leave/Stay wording', async () => {
+    failingPhotoUploadNames.add('a.jpg')
+    const onHasWorkChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    await waitForLoaded()
+    onHasWorkChange.mockClear()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await screen.findByText(/didn't upload/)
+
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "1 photo for Generator hasn't uploaded yet.")
+
+    failingPhotoUploadNames.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+  })
+
+  // finding 10 (pre-release review): a photo that fails to DOWNSCALE used to
+  // be queued holding the original, full-size File, and Retry re-sent that
+  // original as-is - never downscaling it - straight past the size limit
+  // downscaling exists to enforce. Retry must downscale it again first.
+  it('re-downscales a photo that failed to downscale before Retry uploads it', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    vi.mocked(downscaleAll).mockImplementationOnce(async (files: File[]) =>
+      files.map((file) => ({ file, result: { ok: false, error: 'canvas failed' } })))
+
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await screen.findByText("1 of 1 photo didn't upload: canvas failed")
+    // Nothing was ever uploaded - the downscale failure never reached the
+    // network at all.
+    expect(uploadedPhotoOrder).toEqual([])
+
+    vi.mocked(downscaleImage).mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    // downscaleImage (not downscaleAll - Retry re-downscales one photo at a
+    // time) is what actually retries the failure that happened.
+    await waitFor(() => expect(downscaleImage).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg']))
+    await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
+  })
+
+  // finding 10, the "still fails" half: a photo that fails to downscale
+  // AGAIN on Retry stays queued with that error and is never uploaded as
+  // the raw original.
+  it('keeps a photo queued, never uploaded raw, when Retry also fails to downscale it', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    vi.mocked(downscaleAll).mockImplementationOnce(async (files: File[]) =>
+      files.map((file) => ({ file, result: { ok: false, error: 'canvas failed' } })))
+    vi.mocked(downscaleImage).mockRejectedValueOnce(new Error('still cannot downscale'))
+
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await screen.findByText("1 of 1 photo didn't upload: canvas failed")
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await screen.findByText("Saved, but 1 photo didn't upload: still cannot downscale")
+    expect(uploadedPhotoOrder).toEqual([])
+  })
+
+  // ── delete confirm dialog (2026-09-25 amendment) ─────────────────────────
+
+  it('shows no "Also delete" checkbox when the item has no exclusive photos', async () => {
+    currentItem = makeItem({ photo_ids: [], exclusive_photo_ids: [] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    expect(screen.queryByText(/Also delete/)).not.toBeInTheDocument()
+  })
+
+  it('shows the "Also delete N photos" checkbox, off by default, when the item has exclusive photos', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'], exclusive_photo_ids: ['p1'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    expect(screen.getByText('Also delete 1 photo only this item uses')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+  })
+
+  it('sends delete_photos=true only when the checkbox is checked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
+    const onDeleted = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    // The Checkbox component (Base UI) exposes role="checkbox" on a
+    // non-form <span> and drives the actual toggle through a real, visually
+    // hidden <input type="checkbox"> sibling - that hidden input is what a
+    // plain fireEvent.click needs to land on for jsdom's native checkbox
+    // activation behavior (toggling .checked, firing 'change') to run at all.
+    // The Checkbox component (Base UI) exposes role="checkbox" on a
+    // non-form <span> and drives the actual toggle through a real, visually
+    // hidden <input type="checkbox"> sibling - a plain fireEvent.click needs
+    // to land on THAT hidden input for jsdom's native checkbox activation
+    // behavior (toggling .checked, firing 'change') to run. Scoped to the
+    // checkbox span's own parent - the form's unrelated "Verified aboard"
+    // Switch is ALSO backed by an input[type=checkbox], so an unscoped
+    // document-wide query can find the wrong one.
+    const checkboxSpan = screen.getByRole('checkbox')
+    const hiddenInput = checkboxSpan.parentElement!.querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(hiddenInput)
+    expect(hiddenInput).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled())
+    expect(deletedWithPhotos).toBe(true)
+  })
+
+  it('does not send delete_photos when the checkbox is left unchecked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
+    const onDeleted = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled())
+    expect(deletedWithPhotos).toBe(false)
+  })
+
+  // Finding 3 (review): the delete dialog's checkbox names a COUNT, with
+  // nothing to show which pictures that count actually means - showing
+  // small thumbnails of exactly the deletable photos, once the box is
+  // ticked, is what lets the operator actually recognise them before
+  // confirming a delete that takes them along with the item.
+  it('shows a thumbnail for each exclusive photo once the "Also delete" checkbox is ticked', async () => {
+    currentItem = makeItem({ photo_ids: ['p1', 'p2'], exclusive_photo_ids: ['p1', 'p2'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    // No thumbnails before the box is ticked.
+    expect(screen.queryByRole('img', { name: /photo to delete/i })).not.toBeInTheDocument()
+
+    const checkboxSpan = screen.getByRole('checkbox')
+    const hiddenInput = checkboxSpan.parentElement!.querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(hiddenInput)
+
+    const thumbs = screen.getAllByRole('img', { name: /photo to delete/i })
+    expect(thumbs).toHaveLength(2)
+    expect(thumbs.map((img) => img.getAttribute('src'))).toEqual(
+      expect.arrayContaining([expect.stringContaining('/api/documents/p1/content'), expect.stringContaining('/api/documents/p2/content')]),
+    )
+  })
+
+  // ── photo strip: unlink vs. "Remove and delete" (2026-09-25 amendment) ──
+
+  // Documents-save review: a photo staged for removal in the Documents tab
+  // and then removed from the photo strip stayed counted as a pending
+  // change, so the editor read unsaved with nothing left to save.
+  it('is not left unsaved when a photo staged for removal is then removed from the strip', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove document Pump label' }))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+
+    fireEvent.click(screen.getByText('Remove'))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  // Documents-save review: the documents reload after a photo write
+  // swallowed its failures, leaving a removed photo listed with no error.
+  it('shows an error when the documents list cannot be reloaded after a photo write', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Remove')
+
+    failItemGetsWith = 'database is locked'
+    fireEvent.click(screen.getByText('Remove'))
+
+    await screen.findByText(/database is locked/)
+  })
+
+  it('offers only a plain Remove for a photo that is not exclusive', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Remove')
+
+    expect(screen.queryByText('Remove and delete')).not.toBeInTheDocument()
+  })
+
+  // Finding 1 (review, originally against the whole-set PUT): a photo
+  // uploaded earlier in the session updated item.photo_ids but not the
+  // Documents tab's own docEntries/baseline - the next Documents-tab save
+  // PUT the whole link set, and that set lacked the new photo, so its link
+  // was deleted even though the upload itself had already succeeded
+  // server-side. The PATCH-based diff removes the failure mode outright:
+  // the earlier-uploaded photo is never named in add at all, since it's
+  // already linked and untouched by this save - only the genuinely new
+  // picked document is.
+  it('keeps an earlier-uploaded photo linked when the Documents tab is saved afterward', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    // Uploading a photo alone must not make the editor dirty.
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      // The photo, already linked server-side the instant it uploaded, is
+      // never restated here - only the genuinely new picked document is.
+      expect(body.add).toEqual(['picked-doc'])
+      expect(body.remove).toEqual([])
+    })
+    // Still on the strip after the save.
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  // Mirrors the test above, but through the create (id === null -> created)
+  // flow rather than an already-saved item - the created item's own photos
+  // must never be restated in `add` either, the same "already linked,
+  // never touched by this save" reasoning.
+  it('POSTs a new item with photos, then PATCHes only the added document on Save - never the created photo', async () => {
+    const onCreated = vi.fn()
+    render(<DraftHarness onCreatedSpy={onCreated} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getAllByText('Remove')).toHaveLength(1))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg']))
+    await screen.findByRole('button', { name: 'Add document' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-new/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual(['picked-doc'])
+      expect(body.remove).toEqual([])
+    })
+  })
+
+  // The Documents tab's own X button (as opposed to the photo strip's own
+  // Remove) unlinks a photo that is ALREADY saved server-side - unlike
+  // removing a still-pending add, this genuinely has to go in `remove`.
+  it('PATCHes remove when an uploaded photo is removed from the Documents tab (not the photo strip), and clears dirty', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+    // Wait for the documents-only refetch to land, so the photo shows in
+    // the Documents tab (title falls back to filename, twice - the entry's
+    // own title line and the filename line beneath it).
+    await waitFor(() => expect(screen.getAllByText('a.jpg')).toHaveLength(2))
+
+    onDirtyChange.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove document a.jpg' }))
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual([])
+      expect(body.remove).toEqual(['photo-1'])
+    })
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  it('is not dirty when the editor mounts fresh on a saved item', async () => {
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  // Bug #3 in the workaround this pending-diff model replaces: an effect
+  // ordering trap where extras staged on item A leaked into item B once the
+  // editor switched ids without remounting. The render-time reset
+  // (`pendingForId !== id`) is what this proves - it lands in the SAME
+  // commit as the id change, not a later effect.
+  it('clears pending document adds/removes staged on one item when switching to a different item', async () => {
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await waitForLoaded()
+    await screen.findByText('Manual')
+
+    // Stage a remove and an add on item A, but never save either.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
+    await waitFor(() => expect(screen.getAllByText('engine.jpg')).toHaveLength(2))
+
+    currentItem = makeItem({ id: 'eq-2', name: 'Item B' })
+    currentDocuments = [{ document_id: 'd2', title: 'Spec sheet', filename: 'spec.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+    await screen.findByText('Spec sheet')
+
+    // Neither A's pending add nor its pending (but never saved) removal of
+    // Manual leaked onto B - B shows only its own actual document.
+    expect(screen.queryByText('engine.jpg')).not.toBeInTheDocument()
+    expect(screen.queryByText('Manual')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-2') && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/documents') && (init as RequestInit | undefined)?.method === 'PATCH')).toBe(false)
+  })
+
+  // The precise cross-item race: a photo write for item A can resolve AFTER
+  // the operator has already switched to item B (Back/Forward without
+  // remounting) - refreshDocuments' own idRef guard (mirroring setItem's)
+  // must drop that late response rather than write A's document onto B's
+  // open record.
+  it('drops a documents-only refetch for an item the operator has since switched away from', async () => {
+    const itemA = makeItem({ id: 'eq-1', name: 'Item A', photo_ids: [] })
+    const itemB = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
+    const itemsById: Record<string, EquipmentItem> = { 'eq-1': itemA, 'eq-2': itemB }
+    const docsByItem: Record<string, EquipmentDocument[]> = { 'eq-1': [], 'eq-2': [] }
+
+    let resolveUpload!: (value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void
+    const withoutRace = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      const getMatch = u.match(/\/api\/inventory\/equipment\/([^/]+)$/)
+      if (getMatch && method === 'GET') {
+        const targetId = getMatch[1]
+        return Promise.resolve({ ok: true, json: async () => ({ item: itemsById[targetId], documents: docsByItem[targetId] }) })
+      }
+      if (u.endsWith('/api/inventory/equipment/eq-1/photos') && method === 'POST') {
+        return new Promise((resolve) => { resolveUpload = resolve })
+      }
+      return withoutRace(url, init)
+    })
+
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+    await screen.findByDisplayValue('Item A')
+
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
+
+    rerender(<EquipmentEditor id="eq-2" {...props} />)
+    await screen.findByDisplayValue('Item B')
+
+    const getCallsForA = () => fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-1') && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+    const getsBeforeResolve = getCallsForA().length
+
+    itemsById['eq-1'] = { ...itemA, photo_ids: ['photo-a'] }
+    docsByItem['eq-1'] = [{ document_id: 'photo-a', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    resolveUpload({ ok: true, status: 201, json: async () => ({ item: itemsById['eq-1'] }) })
+
+    await waitFor(() => expect(getCallsForA().length).toBeGreaterThan(getsBeforeResolve))
+
+    // B's Documents tab must never show A's photo.
+    expect(screen.queryByText('a.jpg')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment/eq-2') && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/documents') && (init as RequestInit | undefined)?.method === 'PATCH')).toBe(false)
+  })
+
+  it('uploading a photo alone does not make the editor dirty', async () => {
+    currentItem = makeItem({ photo_ids: [] })
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    onDirtyChange.mockClear()
+
+    const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
+
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+  })
+
+  it('offers "Remove and delete" alongside Remove for an exclusive photo, and it sends ?delete=true', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Remove and delete')
+
+    fireEvent.click(screen.getByText('Remove and delete'))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).includes('/api/inventory/equipment/eq-1/photos/p1') && (init as RequestInit | undefined)?.method === 'DELETE')
+      expect(call).toBeDefined()
+      expect(String(call?.[0])).toContain('delete=true')
+    })
   })
 })
