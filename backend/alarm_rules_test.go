@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -952,5 +953,47 @@ func TestSeedAnomalySet_RefusesAGenuineIDConflict(t *testing.T) {
 	}
 	if err := seedAnomalySet("test-marker-conflict", rules); err == nil {
 		t.Fatalf("expected a genuine id conflict (different path under the same id) to stay a fatal error")
+	}
+}
+
+// TestSeedAnomalySet_ConcurrentCallsRecordTheMarkerOnce is code review
+// finding 9: the "already seeded" check ran under an RLock that was
+// released before the rules were created and the marker itself appended, so
+// two goroutines racing seedAnomalySet for the same not-yet-seeded marker
+// could both pass the check and both append it, leaving
+// alarmRulesSeededSets holding the same marker twice (and writing the rules
+// file out from under each other while doing it). Run with -race:
+//
+//	go test -race -run TestSeedAnomalySet_ConcurrentCallsRecordTheMarkerOnce ./...
+func TestSeedAnomalySet_ConcurrentCallsRecordTheMarkerOnce(t *testing.T) {
+	withTempAlarmRules(t)
+
+	rules := []alarmRule{
+		{ID: "test:seed-concurrent", Label: "Seed Concurrent", Enabled: true, Path: "helmcentral.test.concurrent", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn},
+	}
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			if err := seedAnomalySet("test-marker-concurrent", rules); err != nil {
+				t.Errorf("seedAnomalySet: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	alarmRulesMu.RLock()
+	count := 0
+	for _, m := range alarmRulesSeededSets {
+		if m == "test-marker-concurrent" {
+			count++
+		}
+	}
+	alarmRulesMu.RUnlock()
+	if count != 1 {
+		t.Fatalf("expected the marker recorded exactly once, got %d (alarmRulesSeededSets=%+v)", count, alarmRulesSeededSets)
 	}
 }
