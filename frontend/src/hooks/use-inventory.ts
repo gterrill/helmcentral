@@ -499,23 +499,52 @@ export function useEquipmentItem(id: string | null) {
     setItemState(next)
   }, [])
 
-  // Review finding: deleteEquipmentPhoto's own DELETE returns only the
-  // updated item (photo_ids with the id gone) - `documents`, fetched once at
-  // mount/refresh, still carries that same id's link until something
-  // re-fetches it. equipment-editor.tsx's Documents tab excludes photo-
-  // tagged links by checking id membership in item.photo_ids, so the moment
-  // photo_ids stops naming it, the STILL-STALE documents array makes the
-  // just-removed photo look like an ordinary linked document again - visibly
-  // reappearing in the tab, and eligible to be sent right back on the next
-  // link-set PUT. Pruning it here, at the one write that can make it stale,
-  // keeps `documents` correct without a second GET (refresh() would also
-  // fix it, but costs a redundant round trip for a response this hook
-  // already has everything it needs from).
-  const pruneDocument = useCallback((documentId: string) => {
-    setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
+  // Same ordering guard as documents/error/loading above, but its OWN
+  // counter - a documents-only refetch (below) is fired off the back of a
+  // photo write and never touches itemSeqRef/seqRef, so it needs a race
+  // guard that doesn't accidentally interact with either of those.
+  const documentsSeqRef = useRef(0)
+
+  // 2026-09-25 refactor: replaces pruneDocument. A photo write (upload,
+  // retry, remove) already updates `item` directly via the response's own
+  // returned record (setItem, above) - but `documents` (fetched once, at
+  // mount/refresh) is a SEPARATE field that write's response never carries,
+  // and the Documents tab reads `documents`, not item.photo_ids, for what
+  // it shows. This re-fetches the same GET useEquipmentItem's own refresh()
+  // uses, but applies ONLY the `documents` field from it - NEVER
+  // setItemState, which would risk re-opening the exact create-then-upload
+  // race itemSeqRef exists to close (a slow GET landing after a newer write
+  // and overwriting it).
+  //
+  // Two races guarded against, both mirroring idioms already in this file:
+  // (a) the operator has since navigated to a different item entirely (the
+  // editor stays mounted across Back/Forward, the same reasoning setItem's
+  // own doc comment gives) - idRef.current is the hook's LIVE id, checked
+  // against `targetId`, the id this fetch was actually FOR (an explicit
+  // parameter, not read off the hook's own `id` closed over at call time,
+  // because the caller - equipment-editor.tsx - already knows exactly which
+  // item a given photo write belonged to, independent of whatever record is
+  // open by the time this resolves); (b) a slower, OLDER refreshDocuments
+  // call for the SAME id landing after a newer one already has - guarded by
+  // documentsSeqRef, the same idiom seqRef/itemSeqRef use above.
+  const refreshDocuments = useCallback(async (targetId: string) => {
+    const seq = (documentsSeqRef.current += 1)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(targetId)}`)
+      if (!res.ok) return
+      const data = (await res.json()) as { documents?: EquipmentDocument[] }
+      if (idRef.current !== targetId) return
+      if (seq !== documentsSeqRef.current) return
+      setDocuments(data.documents ?? [])
+    } catch {
+      // Best effort: the photo write itself already succeeded server-side
+      // (this only ever runs after one has) - a failed background refetch
+      // here just leaves the Documents tab stale until the next explicit
+      // refresh(), not a lost write, so there is nothing to surface.
+    }
   }, [])
 
-  return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, pruneDocument }
+  return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any

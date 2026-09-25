@@ -85,17 +85,6 @@ function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
-// Order-insensitive, same reasoning as document-details-page.tsx's own
-// sameTagSet: the draft only ever grows an id at the end (picker "pick") or
-// removes one in place (Remove), but comparing as sets is what actually
-// matches "did the link SET change", not "did the array happen to reorder".
-function sameIdSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const sortedA = [...a].sort()
-  const sortedB = [...b].sort()
-  return sortedA.every((v, i) => v === sortedB[i])
-}
-
 function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
   return a.name === b.name
     && a.category === b.category
@@ -167,29 +156,36 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   { id, onBack, onCreated, onDeleted, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, pruneDocument } = useEquipmentItem(id)
+  const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
 
   const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
-  const [docEntries, setDocEntries] = useState<DocEntry[]>([])
-  // Finding 1 (review): a photo write (upload, retry, remove) already
-  // succeeds server-side the moment it returns, but `documents` (from
-  // useEquipmentItem) is only refreshed on an explicit refresh() - the
-  // Documents tab's own baselineDocIds (below) is built from `documents`,
-  // so it lags a photo write until something else happens to refetch it.
-  // Left alone, a Save that touches the link set at all (adding an
-  // ordinary document, say) sends docEntries as the WHOLE set, and a photo
-  // the operator only just uploaded - never added to docEntries, since the
-  // seed effect below only runs off `documents` - is silently left out and
-  // unlinked. extraBaselineDocIds tracks ids a photo write has ADDED this
-  // session that `documents` doesn't know about yet, so baselineDocIds can
-  // agree with docEntries without waiting on a refetch. Reset only when
-  // `id` itself changes (a different record, or a fresh draft) - NOT by the
-  // documents-seed effect below, which would otherwise wipe an extra the
-  // moment an unrelated photo removal (pruneDocument) changes `documents`.
-  const [extraBaselineDocIds, setExtraBaselineDocIds] = useState<string[]>([])
+  // 2026-09-25 refactor: the Documents tab's own PENDING diff - what the
+  // operator has picked to add or removed, not yet saved. Replaces the
+  // whole-set mirror (docEntries) the whole-set PUT used to require: now
+  // that the write is a diff (patchLinkedDocuments), the tab only ever has
+  // to say what IT changed, never restate `documents` itself (the server's
+  // current truth, including a link some other code path - a photo upload -
+  // just added, which this tab never has to know or care about).
+  const [pendingAdds, setPendingAdds] = useState<DocEntry[]>([])
+  const [pendingRemoves, setPendingRemoves] = useState<string[]>([])
+  // Resets pendingAdds/pendingRemoves the moment `id` itself changes - in
+  // the SAME render as the change, via React's own "adjust state while
+  // rendering" pattern, not a passive effect. A passive effect can still
+  // run after some OTHER effect has already read the stale pending state
+  // for the previous id (the exact ordering trap the whole-set mirror this
+  // replaces needed extra machinery to paper over) - this instead forces an
+  // immediate re-render with the reset already applied, before anything
+  // else (a photo write's own setItem, say) can observe the old id's
+  // pending state under the new id.
+  const [pendingForId, setPendingForId] = useState(id)
+  if (pendingForId !== id) {
+    setPendingForId(id)
+    setPendingAdds([])
+    setPendingRemoves([])
+  }
   const [aliasInput, setAliasInput] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -273,62 +269,29 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id/item id only, see comment above.
   }, [id, item?.id])
 
-  // 2026-09-25 amendment: the Documents tab lists ALL of an item's linked
-  // documents, photos included - the earlier photo-tagged exclusion here is
-  // gone along with the tag itself. docEntries is now seeded straight from
-  // `documents` (every link EquipmentDocuments returns), and a photo shown
-  // there and removed there is an ordinary unlink through the PATCH-based
-  // patchLinkedDocuments (backend's PatchEquipmentDocuments), the same as
-  // any other document.
-  useEffect(() => {
-    if (id === null) {
-      setDocEntries([])
-      return
-    }
-    // Finding 1: a `documents` reseed (refresh()/pruneDocument, e.g. from an
-    // unrelated photo removal) must not wipe a doc entry a photo write ADDED
-    // this session that `documents` doesn't know about yet - kept here only
-    // when its id is still in extraBaselineDocIds (removeSavedPhoto/
-    // applyPhotoLinkChange already drop it from both the moment that SAME
-    // photo is itself removed, so this never resurrects a genuinely-gone one).
-    setDocEntries((prev) => {
-      const fromServer = documents.map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename }))
-      const serverIds = new Set(fromServer.map((d) => d.document_id))
-      const keptExtras = prev.filter((d) => extraBaselineDocIds.includes(d.document_id) && !serverIds.has(d.document_id))
-      return [...fromServer, ...keptExtras]
-    })
-    // Keyed on content, not reference - useEquipmentItem builds a fresh
-    // `documents` array on every refresh() even when the set is unchanged,
-    // and re-seeding on every one of those would throw away a locally
-    // staged add/remove before Save ever runs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, documents.map((d) => d.document_id).join(',')])
-
-  // Finding 1: extraBaselineDocIds resets only on a genuine record change -
-  // NOT bundled into the effect above, which also runs on every `documents`
-  // refetch mid-session (a photo removal's pruneDocument, in particular)
-  // that has nothing to do with leaving this record.
-  useEffect(() => {
-    setExtraBaselineDocIds([])
-  }, [id])
-
   // finding 9: id===null's own baseline is the SEEDED draft (newDraftBaseline,
   // set by the effect above the moment this draft was born), not BLANK_DRAFT
   // itself - a "Full item" draft that pre-set zone_id/bin_id must compare
   // against a baseline that already carries them, or it reads dirty on
   // arrival with nothing yet typed.
   const baseline = id === null ? newDraftBaseline : (item ? draftFromItem(item) : null)
-  // Finding 1: the baseline the dirty check (and Save's own "did the link
-  // set actually change" guard) compares docEntries against - documents'
-  // own ids PLUS extraBaselineDocIds, so a photo write's docEntries change
-  // (applyPhotoLinkChange below) is mirrored on this side too, and neither
-  // an upload nor a remove makes the editor read dirty by itself.
-  const baselineDocIds = useMemo(
-    () => Array.from(new Set([...documents.map((d) => d.document_id), ...extraBaselineDocIds])),
-    [documents, extraBaselineDocIds],
+  // 2026-09-25 refactor: the Documents tab's own list is `documents` (the
+  // server's current truth) with pendingRemoves filtered out and pendingAdds
+  // appended - never a stored mirror of the whole set. A photo linked by
+  // some other code path (an upload) shows up here the instant `documents`
+  // itself picks it up (refreshDocuments, below) - this tab never has to be
+  // told about it separately.
+  const displayedDocuments = useMemo(
+    () => [
+      ...documents.filter((d) => !pendingRemoves.includes(d.document_id)).map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
+      ...pendingAdds,
+    ],
+    [documents, pendingRemoves, pendingAdds],
   )
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
-  const linksDirty = id !== null && !sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)
+  // Any pending change at all means dirty - no comparison against a moving
+  // baseline needed, unlike the whole-set mirror this replaces.
+  const linksDirty = pendingAdds.length > 0 || pendingRemoves.length > 0
   const dirty = draftDirty || linksDirty
 
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
@@ -422,29 +385,31 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }
   const removeAlias = (name: string) => setDraft((prev) => ({ ...prev, aliases: prev.aliases.filter((a) => a !== name) }))
 
+  // Picking a document already linked server-side but staged for removal
+  // (the operator removed it, then picked it again before Save) just
+  // un-stages the removal - it's already linked, there's nothing to add.
+  // Otherwise it's a genuinely new pick, staged in pendingAdds (a no-op if
+  // already staged - a duplicate pick from the picker).
   const addDocument = (doc: DocumentLinkPickerResult) => {
-    if (docEntries.some((d) => d.document_id === doc.document_id)) return
-    setDocEntries((prev) => [...prev, doc])
-  }
-  const removeDocument = (documentId: string) => setDocEntries((prev) => prev.filter((d) => d.document_id !== documentId))
-
-  // Finding 1 (review): the ONE place a successful photo write (upload,
-  // retry, remove) updates the Documents tab's own docEntries AND
-  // extraBaselineDocIds together - so the photo is never simultaneously
-  // "still linked server-side" and "missing from the set the next
-  // Documents-tab save would PUT". `meta` is omitted for a remove, where no
-  // title/filename is needed.
-  const applyPhotoLinkChange = useCallback((action: 'add' | 'remove', documentId: string, meta?: { title: string; filename: string }) => {
-    if (action === 'add') {
-      setDocEntries((prev) => (prev.some((d) => d.document_id === documentId)
-        ? prev
-        : [...prev, { document_id: documentId, title: meta?.title ?? '', filename: meta?.filename ?? '' }]))
-      setExtraBaselineDocIds((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
-    } else {
-      setDocEntries((prev) => prev.filter((d) => d.document_id !== documentId))
-      setExtraBaselineDocIds((prev) => prev.filter((docId) => docId !== documentId))
+    const alreadyLinked = documents.some((d) => d.document_id === doc.document_id)
+    if (alreadyLinked && pendingRemoves.includes(doc.document_id)) {
+      setPendingRemoves((prev) => prev.filter((docId) => docId !== doc.document_id))
+      return
     }
-  }, [])
+    setPendingAdds((prev) => (prev.some((d) => d.document_id === doc.document_id) ? prev : [...prev, doc]))
+  }
+
+  // Removing a document that's only a pending add (never actually saved)
+  // just un-stages the add - there's nothing server-side to unlink yet.
+  // Otherwise it's one of `documents` (the server's current set), staged
+  // for removal on the next Save.
+  const removeDocument = (documentId: string) => {
+    if (pendingAdds.some((d) => d.document_id === documentId)) {
+      setPendingAdds((prev) => prev.filter((d) => d.document_id !== documentId))
+      return
+    }
+    setPendingRemoves((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
+  }
 
   // Trap: SignalK publishes runTime under all sorts of prefixes
   // (electrical.generator.0.runTime, propulsion.port.runTime...) - the one
@@ -502,17 +467,18 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       }
     }
 
-    // Finding 1: previousPhotoIds (captured BEFORE any upload in this batch
-    // starts) is what lets uploadPhotosInOrder tell which id(s) in each
-    // response are actually new - `item` here is a render-time snapshot, but
-    // that's exactly right: it's the target's own photo_ids as of the
-    // moment this batch started, the same baseline every upload in the
-    // batch diffs against.
-    const { failures: uploadFailures, linked } = await uploadPhotosInOrder(targetId, toUpload, { previousPhotoIds: item?.photo_ids ?? [] })
+    const { failures: uploadFailures } = await uploadPhotosInOrder(targetId, toUpload)
     const failures = [...downscaleFailures, ...uploadFailures]
-    for (const { documentId, filename } of linked) applyPhotoLinkChange('add', documentId, { title: '', filename })
     recordPhotoOutcome(targetId, failures,
       `${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} didn't upload: ${failures[0]?.error ?? ''}`)
+    // 2026-09-25 refactor: a successful upload already links the photo
+    // server-side the instant it returns (item.photo_ids, applied above via
+    // setItem inside uploadPhotosInOrder) - this documents-only refetch just
+    // catches `documents` up to it, so the Documents tab shows it too. The
+    // Documents tab's own pendingAdds/pendingRemoves are untouched - they're
+    // only for what THIS tab has staged, orthogonal to what `documents`
+    // itself contains.
+    void refreshDocuments(targetId)
   }
 
   const makeCoverSaved = async (photoId: string) => {
@@ -536,15 +502,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       setItem(updated)
       // Review finding: without this, the removed photo's still-stale entry
       // in `documents` starts passing the Documents tab's own list the
-      // instant item.photo_ids above stops naming it - see useEquipmentItem's
-      // own pruneDocument doc comment.
-      pruneDocument(photoId)
-      // Finding 1: docEntries/extraBaselineDocIds drop it too, the same
-      // "apply to both sides" rule an add follows above - otherwise a photo
-      // added and then removed inside the same session could leave a
-      // dangling extraBaselineDocIds entry for an id that no longer exists
-      // on this item at all.
-      applyPhotoLinkChange('remove', photoId)
+      // instant item.photo_ids above stops naming it. 2026-09-25 refactor:
+      // a documents-only refetch (replacing pruneDocument) catches
+      // `documents` up to the removal - the Documents tab is a view over
+      // `documents` now, not a stored mirror this write has to patch
+      // directly.
+      void refreshDocuments(id)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setSaveError(message)
@@ -589,8 +552,10 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         readyToUpload.push({ id: crypto.randomUUID(), blob: photo.blob, filename: photo.filename, previewUrl: '' })
       }
     }
-    const { failures: stillFailingUpload, linked } = await uploadPhotosInOrder(targetId, readyToUpload, { previousPhotoIds: item?.photo_ids ?? [] })
-    for (const { documentId, filename } of linked) applyPhotoLinkChange('add', documentId, { title: '', filename })
+    const { failures: stillFailingUpload } = await uploadPhotosInOrder(targetId, readyToUpload)
+    // 2026-09-25 refactor: same documents-only refetch as a fresh upload -
+    // a retry that lands a photo links it server-side immediately too.
+    void refreshDocuments(targetId)
     const stillFailing = [...stillNeedsDownscale, ...stillFailingUpload]
     setPhotoStatus((prev) => {
       const next = { ...prev }
@@ -654,6 +619,10 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
             `Saved, but ${failures.length} of ${toUpload.length} photo${toUpload.length === 1 ? '' : 's'} didn't upload: ${failures[0]?.error ?? ''}`)
           const uploadedIds = new Set(toUpload.map((p) => p.id))
           setLocalPhotos((prev) => prev.filter((p) => !uploadedIds.has(p.id)))
+          // 2026-09-25 refactor: catches `documents` up to the newly created
+          // item's own just-uploaded photos, the same documents-only
+          // refetch every other photo write site now does.
+          void refreshDocuments(created.id)
         }
         return
       }
@@ -681,24 +650,23 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // save's own record), so `dirty` correctly stays true instead of
       // dropping with no warning that the newer edit was never sent.
       setDraft((current) => (sameDraft(current, sentDraft) ? draftFromItem(updated) : current))
-      // PATCH-based diff (backend replaced the whole-set PUT): only the ids
-      // that actually changed since baselineDocIds are sent, never a
-      // restatement of the ones that didn't. A link this tab doesn't know
-      // about (a just-uploaded photo the Documents tab hasn't seen yet) is
-      // never named in either list, so it can never be silently unlinked -
-      // the fragile part of the old whole-set replace (extraBaselineDocIds
-      // above exists only to patch over that gap) no longer matters here.
-      const currentIds = docEntries.map((d) => d.document_id)
-      const add = currentIds.filter((docId) => !baselineDocIds.includes(docId))
-      const remove = baselineDocIds.filter((docId) => !currentIds.includes(docId))
-      if (add.length > 0 || remove.length > 0) {
-        await patchLinkedDocuments(add, remove)
+      // PATCH-based diff (backend replaced the whole-set PUT): this tab only
+      // ever sends what IT staged - a link it doesn't know about (a photo
+      // some other code path just uploaded) is never named in either list,
+      // so it can never be silently unlinked. patchLinkedDocuments' own
+      // refresh() afterward catches `documents` up; pendingAdds/pendingRemoves
+      // are cleared here rather than left for the id-change reset, since
+      // nothing about id changed - this Save just succeeded.
+      if (pendingAdds.length > 0 || pendingRemoves.length > 0) {
+        await patchLinkedDocuments(pendingAdds.map((d) => d.document_id), pendingRemoves)
+        setPendingAdds([])
+        setPendingRemoves([])
       }
     } catch (err) {
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, onCreated])
+  }, [id, draft, pendingAdds, pendingRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, refreshDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -1020,8 +988,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         <FieldSet className="rounded-md border border-border bg-card p-4">
           <FieldLegend variant="label">Documents</FieldLegend>
           <div className="flex flex-col gap-2">
-            {docEntries.length === 0 && <p className="text-sm text-muted-foreground">No documents linked yet.</p>}
-            {docEntries.map((doc) => (
+            {displayedDocuments.length === 0 && <p className="text-sm text-muted-foreground">No documents linked yet.</p>}
+            {displayedDocuments.map((doc) => (
               <div key={doc.document_id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{doc.title || doc.filename}</p>
@@ -1052,11 +1020,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onPick={addDocument}
-        // 2026-09-25 amendment: only already-linked documents are excluded
-        // now - the Documents tab lists photos too (docEntries' own seed
-        // effect above), so a photo already linked is already excluded by
-        // this same rule, with no separate photo_ids exclusion needed.
-        excludeIds={docEntries.map((d) => d.document_id)}
+        // Excludes whatever the Documents tab is CURRENTLY showing -
+        // displayedDocuments, not just `documents` - so a document already
+        // staged as a pending add (not yet saved) is excluded too, the same
+        // "no offering the same document twice" rule as an already-linked
+        // one.
+        excludeIds={displayedDocuments.map((d) => d.document_id)}
       />
 
       <AlertDialog open={pendingDelete} onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}>
