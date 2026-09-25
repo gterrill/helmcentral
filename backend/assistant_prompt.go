@@ -682,6 +682,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("The composable units of a Helmcentral dashboard page are called tiles, and tile is the word " +
 		"to use when talking to the operator about one. Widget is not a term this product uses.\n\n")
 
+	// 2c. Nearby vessels (ADR 0128) - fixed wording, identical for every
+	// turn. in_range_since's lower-bound caveat has to be stated here, not
+	// left for the tool result alone to carry: a model reading a plain ISO
+	// timestamp under that name will otherwise report it as an arrival time.
+	b.WriteString("For any question about other boats - who is nearby, how close, neighbours at anchor or in a " +
+		"marina, collision risk, or how long a boat has been on a mooring - call get_nearby_vessels; it also " +
+		"answers \"when did we last see X\" for a boat no longer in range. Its in_range_since is only a lower " +
+		"bound on how long a vessel has actually been near us, since it may have arrived earlier and simply not " +
+		"been noticed until then; say so rather than stating it as an arrival time. Its stationary_since, when " +
+		"present, comes from that vessel's own logged position history and is usually the more precise figure.\n\n")
+
 	// Planning horizon: every live-data rule below assumes a departure from
 	// here, now. A trip months away, or from somewhere else, has to be
 	// recognised first or Mate briefs today's weather for a passage that

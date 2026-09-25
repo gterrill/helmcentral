@@ -71,6 +71,20 @@ occurred, not a guarantee: a head sea will add time and fuel beyond what
 the log shows. Without InfluxDB configured, it skips this and reasons about
 the passage in general terms instead.
 
+Mate can also tell you who else is around. Ask about a boat by name - a
+neighbour anchored nearby, one crossing your path, a boat sharing your
+marina - and it reports range, bearing, speed, and how long it has been
+sitting there. That last figure is a floor, not a fact: Mate only knows a
+boat has been within about five kilometres of you since it first showed up
+on your own instruments, so a boat that arrived before you did reads as "in
+range" for less time than it has actually been there. Ask "when did we last
+see Solaris" and it also answers for a boat that has since moved on, from
+the record of past encounters. If your boat's own data logger has been set
+up to record other vessels' position history and not just your own - most
+boats leave this off - Mate reads that vessel's own track and gives a
+tighter answer for how long it has actually been sitting at its current
+spot.
+
 Mate also knows two things about the app itself: what you're looking at when
 you ask, and how Helmcentral's own features work. A question asked from the
 sheet over the Forecast panel arrives with that noted, so "explain how the

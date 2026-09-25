@@ -120,6 +120,26 @@ type assistantToolDeps struct {
 	// so every existing search_documents test that predates E1d keeps
 	// working unchanged, keyword-only.
 	documentSearchReadiness func() (assistantReadiness, string, error)
+	// nearbyVessels resolves the live AIS list around the vessel's own
+	// position, capped at limit and sorted by range - production wires
+	// fetchSignalKNearbyVesselsLimit (signalk.go, ADR 0128), reading fresh
+	// on every call the same way vesselState does, so a target that just
+	// came into range reaches get_nearby_vessels on the very next question.
+	nearbyVessels func(selfLat, selfLon float64, now time.Time, limit int) ([]nearbyVessel, error)
+	// contacts is get_nearby_vessels' own seam into the sighting log
+	// (globalNearbyContactStore, nearby_contacts.go) for in_range_since and
+	// past_sightings - nil (a test that never sets it, same as documents
+	// and help above) is a real possibility, not just a test artefact: the
+	// store might not be initialised yet, and get_nearby_vessels treats
+	// that as "no sighting history available" rather than an error.
+	contacts func() *nearbyContactStore
+	// signalKPositionHistory is get_nearby_vessels' seam into the SignalK
+	// History API (fetchSignalKPositionHistory, signalk.go, ADR 0128) for a
+	// vessel's own logged dwell at its current position - a separate,
+	// usually more precise figure than the sighting log's in_range_since,
+	// that lights up once the boat's InfluxDB writer records other vessels
+	// (today it records self only).
+	signalKPositionHistory func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -149,6 +169,14 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		documents:         func() *documentStore { return globalDocumentStore },
 		documentSearchReadiness: func() (assistantReadiness, string, error) {
 			return checkAssistantReadiness(settingsPath)
+		},
+		nearbyVessels: func(selfLat, selfLon float64, now time.Time, limit int) ([]nearbyVessel, error) {
+			excluded := []string{fetchSignalKSelfName()}
+			return fetchSignalKNearbyVesselsLimit(selfLat, selfLon, now, excluded, limit)
+		},
+		contacts: func() *nearbyContactStore { return globalNearbyContactStore },
+		signalKPositionHistory: func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
+			return fetchSignalKPositionHistory(settingsPath, mmsi, from, to, resolutionSeconds)
 		},
 	}
 }
@@ -394,6 +422,34 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "get_nearby_vessels",
+				Description: "List the other vessels (AIS targets) currently around this one, or look up when " +
+					"one was last seen. Use this for any question about other boats: who is nearby, how close, " +
+					"neighbours at anchor or in a marina, collision risk, or how long a boat has been sitting on " +
+					"a mooring. Filter by name (or MMSI) to answer about one vessel specifically, including a " +
+					"boat that is no longer in range.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string",
+							"description": "Filter to a vessel whose name contains this text (case-insensitive), or an exact MMSI. Omit to list every vessel currently in range."
+						},
+						"max_results": {
+							"type": "integer",
+							"description": "Maximum number of vessels to return (default 10, maximum 25)."
+						},
+						"include_history": {
+							"type": "boolean",
+							"description": "Include each matched vessel's past sightings. Defaults to true when name is given, false otherwise. Logged position history (stationary_since) only ever runs when name is also given, regardless of this flag - it is a lookup per specific vessel, not something a bare listing can do."
+						}
+					}
+				}`),
+			},
+		},
 	}
 }
 
@@ -428,6 +484,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeSearchDocuments(ctx, args)
 	case "read_document":
 		return d.executeReadDocument(ctx, args)
+	case "get_nearby_vessels":
+		return d.executeGetNearbyVessels(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -497,6 +555,16 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return "Reading a document…"
 		}
 		return fmt.Sprintf("Reading document %s…", id)
+	case "get_nearby_vessels":
+		var a assistantGetNearbyVesselsArgs
+		vesselName := ""
+		if json.Unmarshal(args, &a) == nil {
+			vesselName = strings.TrimSpace(a.Name)
+		}
+		if vesselName == "" {
+			return "Checking nearby vessels…"
+		}
+		return fmt.Sprintf("Looking up %s…", vesselName)
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}
@@ -719,12 +787,16 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	}
 
 	var candidates []assistantPlaceCandidate
-	lowerQuery := strings.ToLower(query)
 	waypointHit := false
 	for _, route := range d.routes() {
 		for _, wp := range route.Waypoints {
 			name := strings.TrimSpace(wp.Name)
-			if name == "" || !strings.Contains(strings.ToLower(name), lowerQuery) {
+			// A waypoint has no MMSI-like identifier of its own, so id is
+			// always "" here - assistantNameOrExactIDMatches then reduces to
+			// the case-insensitive substring check this line always did
+			// (shared with matchAssistantNearbyVessels and
+			// latestContactsByName - code-review finding, 2026-09-25).
+			if !assistantNameOrExactIDMatches(name, "", query) {
 				continue
 			}
 			waypointHit = true

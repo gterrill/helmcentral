@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1765,7 +1766,29 @@ const (
 	nearbyMaxRangeMeters = 5000.0
 )
 
+// nearbyVesselsDefaultLimit is the map tile's own cap: fetchSignalKNearbyVessels
+// (the /api/nearby-vessels handler and the contact poller, tracks.go) has
+// always kept only the 10 closest vessels. fetchSignalKNearbyVesselsLimit
+// (ADR 0128) generalizes that cap for a caller - Mate's get_nearby_vessels
+// tool - that needs more than the tile itself ever shows.
+const nearbyVesselsDefaultLimit = 10
+
+// nearbyVesselsUnlimited is fetchSignalKNearbyVesselsLimit's sentinel for
+// "keep every vessel currently in range, no cap at all" - get_nearby_vessels'
+// (ADR 0128) own use when a name/MMSI filter names one specific vessel: a
+// second, merely-larger-but-still-finite cap could still miss a vessel in a
+// crowded anchorage, where an outright unlimited search cannot.
+const nearbyVesselsUnlimited = -1
+
 func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
+	return fetchSignalKNearbyVesselsLimit(selfLatitude, selfLongitude, now, excludedNames, nearbyVesselsDefaultLimit)
+}
+
+// fetchSignalKNearbyVesselsLimit is fetchSignalKNearbyVessels with a
+// caller-chosen cap on how many of the sorted-by-range results to keep,
+// instead of the tile's hard-coded 10 (ADR 0128) - a behaviour-preserving
+// split, not a change to fetchSignalKNearbyVessels' own contract.
+func fetchSignalKNearbyVesselsLimit(selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string, limit int) ([]nearbyVessel, error) {
 	payload, err := signalKVesselsPayload()
 	if err != nil {
 		return nil, err
@@ -1864,11 +1887,154 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 	}
 
 	sort.Slice(vessels, func(i int, j int) bool { return vessels[i].RangeM < vessels[j].RangeM })
-	if len(vessels) > 10 {
-		vessels = vessels[:10]
+	switch {
+	case limit == nearbyVesselsUnlimited:
+		// no trim - every in-range vessel is kept.
+	case limit <= 0:
+		limit = nearbyVesselsDefaultLimit
+		if len(vessels) > limit {
+			vessels = vessels[:limit]
+		}
+	case len(vessels) > limit:
+		vessels = vessels[:limit]
 	}
 
 	return vessels, nil
+}
+
+// ── SignalK History API (ADR 0128) ──────────────────────────────────────
+
+// signalKHistoryContextPrefix is what the SignalK History API expects a
+// non-self vessel's context to be namespaced under. This app only ever has a
+// bare MMSI on hand (nearbyVessel.Mmsi / vesselContactKey's own identity),
+// so vesselHistoryContext builds the same "vessels.urn:mrn:imo:mmsi:<mmsi>"
+// form an AIS MMSI's SignalK identity actually takes - confirmed against a
+// live server (2026-09-25): /signalk/v2/api/history/contexts lists this
+// vessel's own context in exactly this form.
+const signalKHistoryContextPrefix = "vessels.urn:mrn:imo:mmsi:"
+
+func vesselHistoryContext(mmsi string) string {
+	return signalKHistoryContextPrefix + mmsi
+}
+
+// signalKHistoryValuesAPIPath is the v2 History API endpoint that answers
+// "where was this context over this time range" - distinct from every other
+// SignalK path in this file, which reads the live data-model tree rather
+// than a time series. Confirmed against a live server (2026-09-25): it needs
+// context, paths, from, to and resolution query parameters, and returns
+// {"data":[[iso-time, [lon,lat]], ...]}.
+const signalKHistoryValuesAPIPath = "/signalk/v2/api/history/values"
+
+// signalKHistoryPoint is one point of a SignalK History API position series
+// - get_nearby_vessels' stationary-since figure (ADR 0128): when the fix was
+// recorded, and where.
+type signalKHistoryPoint struct {
+	Time time.Time
+	Lat  float64
+	Lon  float64
+}
+
+// parseSignalKHistoryValues decodes a /signalk/v2/api/history/values response
+// body into a slice of points, in whatever order the server returned them
+// (ascending by time on the live server this was confirmed against, but the
+// caller sorts explicitly rather than assuming that). Each data row is
+// [iso-timestamp, [lon, lat]] - a resolution bucket with nothing sampled in
+// it comes back with a null second element rather than being omitted, which
+// is skipped rather than failing the whole decode over one empty bucket. An
+// empty data array (confirmed live, 2026-09-25, for a vessel this boat's own
+// InfluxDB writer has never recorded - see ADR 0128) decodes to an empty,
+// nil-error slice: "no history for this vessel" is a normal outcome, not a
+// parse failure.
+func parseSignalKHistoryValues(body []byte) ([]signalKHistoryPoint, error) {
+	var parsed struct {
+		Data [][]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("decode signalk history response: %w", err)
+	}
+
+	points := make([]signalKHistoryPoint, 0, len(parsed.Data))
+	for _, row := range parsed.Data {
+		if len(row) != 2 {
+			continue
+		}
+		var ts string
+		if err := json.Unmarshal(row[0], &ts); err != nil {
+			continue
+		}
+		// An empty resolution bucket comes back with a literal JSON null
+		// here rather than a [lon,lat] pair. Unmarshaling null into a fixed
+		// [2]float64 array is a silent no-op in encoding/json (null only
+		// resets interface/map/pointer/slice targets), so this must be
+		// checked explicitly - without it, an empty bucket would decode as
+		// a bogus fix at (0, 0) instead of being skipped.
+		if string(row[1]) == "null" {
+			continue
+		}
+		// Decoded as a slice, not straight into a fixed [2]float64: Go's
+		// encoding/json silently zero-fills a JSON array shorter than the Go
+		// array it targets, and silently discards extra elements of a longer
+		// one - neither is an error, so a malformed one-element [lon] row
+		// would otherwise decode into a bogus (lon, 0) point instead of
+		// being skipped (code-review finding, 2026-09-25). The explicit
+		// length check below is what actually enforces "must be [lon,lat]".
+		var lonLat []float64
+		if err := json.Unmarshal(row[1], &lonLat); err != nil || len(lonLat) != 2 {
+			// Any other shape that isn't exactly a [lon,lat] pair - skip
+			// this one row rather than failing the whole response over it.
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, ts)
+		if err != nil {
+			continue
+		}
+		points = append(points, signalKHistoryPoint{Time: t, Lon: lonLat[0], Lat: lonLat[1]})
+	}
+
+	return points, nil
+}
+
+// fetchSignalKPositionHistory reads mmsi's navigation.position history from
+// the SignalK History API over [from, to], aggregated to resolutionSeconds
+// buckets. A non-2xx status or an undecodable body is returned as an
+// explicit error (AGENTS.md's fallback policy) - never a fabricated point;
+// an empty result set is not an error (see parseSignalKHistoryValues) since
+// today that is the expected outcome for every vessel but self (ADR 0128).
+func fetchSignalKPositionHistory(settingsPath, mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
+	// Unlike buildNearbyVesselsPayload's use of loadSignalKSettings, a
+	// settings-read failure here must not silently fall back to
+	// defaultSignalKAddress: this result feeds get_nearby_vessels'
+	// per-vessel position_history_error field, and reporting a request
+	// against a wrong, made-up host as if it were this boat's actual
+	// SignalK server would misattribute the real failure entirely
+	// (AGENTS.md's fallback policy; code-review finding, 2026-09-25).
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		return nil, fmt.Errorf("load signalk settings: %w", err)
+	}
+	signalkURL := buildSignalKURL(address, port)
+
+	query := url.Values{}
+	query.Set("context", vesselHistoryContext(mmsi))
+	query.Set("paths", "navigation.position")
+	query.Set("from", from.UTC().Format(time.RFC3339))
+	query.Set("to", to.UTC().Format(time.RFC3339))
+	query.Set("resolution", strconv.Itoa(resolutionSeconds))
+	path := signalKHistoryValuesAPIPath + "?" + query.Encode()
+
+	status, body, err := signalkRequestJSONWithAuthBody(signalkURL, settingsPath, path, http.MethodGet, nil)
+	if err != nil {
+		return nil, fmt.Errorf("signalk history request for %s: %w", mmsi, err)
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("signalk history endpoint returned status %d for %s: %s", status, mmsi, string(body))
+	}
+
+	points, err := parseSignalKHistoryValues(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w (vessel %s)", err, mmsi)
+	}
+	return points, nil
 }
 
 func fetchSignalKVesselNameMap() (map[string]string, error) {

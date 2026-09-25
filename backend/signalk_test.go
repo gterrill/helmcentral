@@ -6,6 +6,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1461,6 +1463,104 @@ func TestFetchSignalKNearbyVessels_PopulatesStableID(t *testing.T) {
 	}
 }
 
+// TestFetchSignalKNearbyVessels_CapsAtTen confirms fetchSignalKNearbyVessels
+// (the map tile's own feed) still caps at 10 after the fetchSignalKNearbyVesselsLimit
+// refactor (ADR 0128) - a behaviour-preserving split, not a change to the
+// tile's own contract.
+func TestFetchSignalKNearbyVessels_CapsAtTen(t *testing.T) {
+	trees := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("vessel-%d", i)
+		trees = append(trees, fmt.Sprintf(`%q: {"name": "V%d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`, id, i, -21.592000-float64(i)*0.0005))
+	}
+	body := "{" + strings.Join(trees, ",") + "}"
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 10 {
+		t.Fatalf("expected fetchSignalKNearbyVessels to still cap at 10, got %d", len(vessels))
+	}
+}
+
+// TestFetchSignalKNearbyVesselsLimit_ReturnsMoreThanTenWhenAsked is
+// get_nearby_vessels' (Mate's onboard-assistant tool, ADR 0128) own reason
+// for fetchSignalKNearbyVesselsLimit to exist: it needs up to 25 vessels
+// sorted by range, not the map tile's 10, so a name filter can still find a
+// vessel that isn't among the 10 closest.
+func TestFetchSignalKNearbyVesselsLimit_ReturnsMoreThanTenWhenAsked(t *testing.T) {
+	trees := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("vessel-%d", i)
+		trees = append(trees, fmt.Sprintf(`%q: {"name": "V%d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`, id, i, -21.592000-float64(i)*0.0005))
+	}
+	body := "{" + strings.Join(trees, ",") + "}"
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVesselsLimit(-21.595297, 149.796444, now, nil, 25)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVesselsLimit: %v", err)
+	}
+	if len(vessels) != 12 {
+		t.Fatalf("expected all 12 vessels within range with a limit of 25, got %d", len(vessels))
+	}
+	for i := 0; i+1 < len(vessels); i++ {
+		if vessels[i].RangeM > vessels[i+1].RangeM {
+			t.Fatalf("expected vessels sorted by range ascending, got %+v", vessels)
+		}
+	}
+}
+
+// TestFetchSignalKNearbyVesselsLimit_RespectsASmallerLimit confirms a limit
+// smaller than the vessel count still trims to that limit, same as the
+// existing top-10 cap did.
+func TestFetchSignalKNearbyVesselsLimit_RespectsASmallerLimit(t *testing.T) {
+	trees := make([]string, 0, 5)
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("vessel-%d", i)
+		trees = append(trees, fmt.Sprintf(`%q: {"name": "V%d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`, id, i, -21.592000-float64(i)*0.0005))
+	}
+	body := "{" + strings.Join(trees, ",") + "}"
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVesselsLimit(-21.595297, 149.796444, now, nil, 3)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVesselsLimit: %v", err)
+	}
+	if len(vessels) != 3 {
+		t.Fatalf("expected the limit of 3 to be respected, got %d", len(vessels))
+	}
+}
+
+// TestFetchSignalKNearbyVesselsLimit_NegativeLimitIsUnlimited is
+// get_nearby_vessels' (ADR 0128) own reason nearbyVesselsUnlimited exists: a
+// name/MMSI lookup needs to search every vessel currently in range, not a
+// second, arbitrarily-larger-but-still-finite cap.
+func TestFetchSignalKNearbyVesselsLimit_NegativeLimitIsUnlimited(t *testing.T) {
+	const vesselCount = 30
+	trees := make([]string, 0, vesselCount)
+	for i := 0; i < vesselCount; i++ {
+		id := fmt.Sprintf("vessel-%d", i)
+		trees = append(trees, fmt.Sprintf(`%q: {"name": "V%d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`, id, i, -21.592000-float64(i)*0.0005))
+	}
+	body := "{" + strings.Join(trees, ",") + "}"
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVesselsLimit(-21.595297, 149.796444, now, nil, nearbyVesselsUnlimited)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVesselsLimit: %v", err)
+	}
+	if len(vessels) != vesselCount {
+		t.Fatalf("expected all %d in-range vessels with the unlimited sentinel, got %d", vesselCount, len(vessels))
+	}
+}
+
 func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
 	body := []byte(`{
 		"timestamp": "2026-07-22T00:00:00Z",
@@ -1963,5 +2063,207 @@ func TestFreshestAge_AllUnknownReturnsUnknown(t *testing.T) {
 func TestFreshestAge_NoArgumentsReturnsUnknown(t *testing.T) {
 	if got := freshestAge(); got != -1 {
 		t.Fatalf("expected -1 for an empty set of ages, got %v", got)
+	}
+}
+
+// ── SignalK History API parsing (get_nearby_vessels' stationary_since, ADR 0128) ──
+
+// TestFetchSignalKPositionHistory_BuildsExpectedRequestAndParsesSuccess
+// confirms fetchSignalKPositionHistory's own HTTP plumbing: the request
+// path/method and every query parameter (context, paths, from, to,
+// resolution), and that a 200 response is decoded via parseSignalKHistoryValues.
+func TestFetchSignalKPositionHistory_BuildsExpectedRequestAndParsesSuccess(t *testing.T) {
+	withSeededSecretsStore(t, nil) // unauthenticated: no SIGNALK_USERNAME/PASSWORD set
+
+	var gotMethod, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[["2026-09-24T22:35:00.000Z",[146.1,-18.1]]]}`))
+	}))
+	t.Cleanup(srv.Close)
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	from := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	points, err := fetchSignalKPositionHistory(settingsPath, "518999323", from, to, 600)
+	if err != nil {
+		t.Fatalf("fetchSignalKPositionHistory: %v", err)
+	}
+
+	if gotMethod != http.MethodGet {
+		t.Errorf("expected GET, got %s", gotMethod)
+	}
+	if gotPath != signalKHistoryValuesAPIPath {
+		t.Errorf("expected path %s, got %s", signalKHistoryValuesAPIPath, gotPath)
+	}
+	query, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse recorded query %q: %v", gotQuery, err)
+	}
+	if got := query.Get("context"); got != "vessels.urn:mrn:imo:mmsi:518999323" {
+		t.Errorf("expected context=vessels.urn:mrn:imo:mmsi:518999323, got %q", got)
+	}
+	if got := query.Get("paths"); got != "navigation.position" {
+		t.Errorf("expected paths=navigation.position, got %q", got)
+	}
+	if got := query.Get("from"); got != from.Format(time.RFC3339) {
+		t.Errorf("expected from=%s, got %q", from.Format(time.RFC3339), got)
+	}
+	if got := query.Get("to"); got != to.Format(time.RFC3339) {
+		t.Errorf("expected to=%s, got %q", to.Format(time.RFC3339), got)
+	}
+	if got := query.Get("resolution"); got != "600" {
+		t.Errorf("expected resolution=600, got %q", got)
+	}
+
+	if len(points) != 1 || points[0].Lat != -18.1 || points[0].Lon != 146.1 {
+		t.Fatalf("expected the 200 response's single point decoded via parseSignalKHistoryValues, got %+v", points)
+	}
+}
+
+// TestFetchSignalKPositionHistory_NonTwoXXStatusIsError confirms a non-2xx
+// SignalK response surfaces as an explicit error carrying the status and
+// body, never a silently-empty result.
+func TestFetchSignalKPositionHistory_NonTwoXXStatusIsError(t *testing.T) {
+	withSeededSecretsStore(t, nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("upstream unavailable"))
+	}))
+	t.Cleanup(srv.Close)
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	_, err := fetchSignalKPositionHistory(settingsPath, "518999323", time.Now().Add(-time.Hour), time.Now(), 600)
+	if err == nil {
+		t.Fatalf("expected an error for a 502 response")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Fatalf("expected the error to carry the status code, got %v", err)
+	}
+}
+
+// TestFetchSignalKPositionHistory_SettingsErrorSurfacesRatherThanFallingBack
+// is a code-review finding: this must not silently retry against
+// defaultSignalKAddress/Port when settings can't be read, since doing so
+// would misattribute a settings failure as a request against the wrong host.
+// A missing settings file is not itself an error (readSettings treats it as
+// "nothing configured yet" and falls back to defaults) - genuinely malformed
+// YAML is what actually makes loadSignalKSettings fail.
+func TestFetchSignalKPositionHistory_SettingsErrorSurfacesRatherThanFallingBack(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/settings.yaml"
+	if err := os.WriteFile(path, []byte("signalk:\n  address: [unterminated\n"), 0o644); err != nil {
+		t.Fatalf("write malformed settings file: %v", err)
+	}
+
+	_, err := fetchSignalKPositionHistory(path, "518999323", time.Now().Add(-time.Hour), time.Now(), 600)
+	if err == nil {
+		t.Fatalf("expected an error when settings.yaml is malformed")
+	}
+}
+
+func TestVesselHistoryContext_BuildsMMSIURN(t *testing.T) {
+	got := vesselHistoryContext("518999323")
+	want := "vessels.urn:mrn:imo:mmsi:518999323"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+// TestParseSignalKHistoryValues_ParsesLiveFixture is trimmed from a live
+// capture against this vessel's own SignalK server (2026-09-25, self MMSI
+// 518999323): GET /signalk/v2/api/history/values?context=vessels.urn:mrn:imo:mmsi:518999323
+// &paths=navigation.position&from=...&to=...&resolution=300 (ADR 0128).
+// Confirms the [timestamp, [lon,lat]] row shape decodes correctly, including
+// the millisecond-fraction timestamps the server actually sends.
+func TestParseSignalKHistoryValues_ParsesLiveFixture(t *testing.T) {
+	body := []byte(`{"context":"vessels.urn:mrn:imo:mmsi:518999323","range":{"from":"2026-09-24T22:39:50Z","to":"2026-09-25T00:39:50Z"},"values":[{"path":"navigation.position","method":"first"}],"data":[["2026-09-24T22:35:00.000Z",[146.48689133333335,-18.6481485]],["2026-09-24T22:40:00.000Z",[146.48689566666667,-18.6481465]],["2026-09-24T23:45:00.000Z",[146.48592116666666,-18.6446525]],["2026-09-25T00:35:00.000Z",[146.48653,-18.597018666666667]]]}`)
+
+	points, err := parseSignalKHistoryValues(body)
+	if err != nil {
+		t.Fatalf("parseSignalKHistoryValues: %v", err)
+	}
+	if len(points) != 4 {
+		t.Fatalf("expected 4 points, got %d: %+v", len(points), points)
+	}
+	wantFirst := time.Date(2026, time.September, 24, 22, 35, 0, 0, time.UTC)
+	if !points[0].Time.Equal(wantFirst) {
+		t.Fatalf("expected first point's time %s, got %s", wantFirst, points[0].Time)
+	}
+	if points[0].Lon != 146.48689133333335 || points[0].Lat != -18.6481485 {
+		t.Fatalf("expected [lon,lat] decoded as Lon=146.48689133333335 Lat=-18.6481485, got Lon=%v Lat=%v", points[0].Lon, points[0].Lat)
+	}
+	wantLast := time.Date(2026, time.September, 25, 0, 35, 0, 0, time.UTC)
+	last := points[len(points)-1]
+	if !last.Time.Equal(wantLast) {
+		t.Fatalf("expected last point's time %s, got %s", wantLast, last.Time)
+	}
+}
+
+// TestParseSignalKHistoryValues_EmptyDataReturnsEmptySlice is the live-
+// confirmed shape (2026-09-25) for a vessel this boat's InfluxDB writer has
+// never recorded - every vessel but self, today (ADR 0128): the endpoint
+// responds 200 with an empty data array, not an error.
+func TestParseSignalKHistoryValues_EmptyDataReturnsEmptySlice(t *testing.T) {
+	body := []byte(`{"context":"vessels.urn:mrn:imo:mmsi:503999999","range":{"from":"2026-09-24T22:40:03Z","to":"2026-09-25T00:40:03Z"},"data":[]}`)
+	points, err := parseSignalKHistoryValues(body)
+	if err != nil {
+		t.Fatalf("parseSignalKHistoryValues: %v", err)
+	}
+	if len(points) != 0 {
+		t.Fatalf("expected an empty slice for an empty data array, got %+v", points)
+	}
+}
+
+// TestParseSignalKHistoryValues_SkipsBucketsWithNoSample confirms a
+// resolution bucket with nothing in it (a null second element, rather than a
+// [lon,lat] pair) is skipped rather than failing the whole response.
+func TestParseSignalKHistoryValues_SkipsBucketsWithNoSample(t *testing.T) {
+	body := []byte(`{"data":[["2026-09-24T22:35:00.000Z",[146.1,-18.1]],["2026-09-24T22:40:00.000Z",null],["2026-09-24T22:45:00.000Z",[146.3,-18.3]]]}`)
+	points, err := parseSignalKHistoryValues(body)
+	if err != nil {
+		t.Fatalf("parseSignalKHistoryValues: %v", err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("expected the null-position bucket to be skipped, leaving 2 points, got %d: %+v", len(points), points)
+	}
+}
+
+// TestParseSignalKHistoryValues_SkipsMalformedPositionArrays is a code-review
+// finding: unmarshaling a JSON array of the wrong length straight into a Go
+// [2]float64 is not an error - encoding/json silently zero-fills a short
+// array and silently discards extra elements of a long one - so a
+// one-element [lon] row would otherwise decode into a bogus (lon, 0) point
+// instead of being skipped like the documented null case above.
+func TestParseSignalKHistoryValues_SkipsMalformedPositionArrays(t *testing.T) {
+	body := []byte(`{"data":[` +
+		`["2026-09-24T22:30:00.000Z",[146.1]],` + // too short: missing lat
+		`["2026-09-24T22:35:00.000Z",[146.2,-18.2]],` + // valid
+		`["2026-09-24T22:40:00.000Z",[146.3,-18.3,99.0]],` + // too long
+		`["2026-09-24T22:45:00.000Z",[146.4,-18.4]]` + // valid
+		`]}`)
+
+	points, err := parseSignalKHistoryValues(body)
+	if err != nil {
+		t.Fatalf("parseSignalKHistoryValues: %v", err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("expected the malformed-length rows to be skipped, leaving 2 points, got %d: %+v", len(points), points)
+	}
+	for _, p := range points {
+		if p.Lon == 146.1 || p.Lon == 146.3 {
+			t.Fatalf("expected the malformed rows never to produce a point at all, got %+v", points)
+		}
+	}
+}
+
+func TestParseSignalKHistoryValues_ErrorsOnUndecodableBody(t *testing.T) {
+	if _, err := parseSignalKHistoryValues([]byte("not json")); err == nil {
+		t.Fatalf("expected an error for a body that isn't valid JSON")
 	}
 }
