@@ -1412,115 +1412,138 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	return out, nil
 }
 
-// SetEquipmentDocuments replaces id's WHOLE linked-document set in one
-// transaction - "replace wholesale" (plan's own phrase), PHOTOS INCLUDED
-// (2026-09-25 amendment: the earlier photo-tagged carve-out is gone along
-// with the tag itself - the Documents tab lists every linked document,
-// photos too, and this is the one write that owns that whole set). Every
-// existing equipment_documents row for id NOT named in docIDs is deleted;
-// every id in docIDs not already linked is inserted fresh, all under
-// source='operator' (this cycle only edits links from the equipment side -
-// plan's own "Links edited from the equipment side this cycle" decision -
-// so every link this method ever writes is an explicit operator action;
-// source='suggested' has no writer yet, reserved for the enrichment cycle
-// this schema is sized to receive without churn).
+// PatchEquipmentDocuments applies a DIFF to id's linked-document set in one
+// transaction, PHOTOS INCLUDED (same "no tagged carve-out" rule
+// SetEquipmentDocuments used to state, now on this method instead - a photo
+// is an ordinary link, added/removed exactly like any other document id).
+// This supersedes SetEquipmentDocuments' whole-set replace (2026-09-25
+// amendment, again): the Documents tab used to have to resend every id it
+// wanted linked, including ones it knew nothing about (a just-uploaded
+// photo's own docEntries mirror had to be kept in exact lockstep or a save
+// would silently unlink it); PATCH instead only ever says what changed.
 //
-// A link this call KEEPS has its sort_index left exactly as it was - the
-// operator's own decision: a document-tab save must not silently reshuffle
-// the photo strip's order just because the Documents tab (which knows
-// nothing about photo order) happened to resend the same id. Only a link
-// this call actually INSERTS gets a fresh sort_index (0 - meaningless for a
-// non-photo link, and a photo added this way was never ordered by an
-// operator action that cares where it lands; AddEquipmentPhoto is what
-// assigns max+1 for an upload that does care).
+// add: links every id not already linked, at max(sort_index)+1 among id's
+// OWN existing links, assigned in add's own order - the same "never take
+// the cover" rule SetEquipmentDocuments enforced for its own new links (see
+// its superseded doc comment's "review finding" this method inherits
+// verbatim). Linking something already linked is a no-op - its sort_index
+// is left exactly where it was, never re-examined.
 //
-// A docID that doesn't name a real documents row fails the
+// remove: unlinks every id given. Unlinking something not currently linked
+// is a no-op. This only ever deletes the equipment_documents row, never the
+// document itself - the same unlink-only rule RemoveEquipmentPhoto already
+// follows for the photo strip.
+//
+// Any equipment_documents row not named in EITHER add or remove is never
+// touched, not even read - this is the entire point of the diff versus
+// SetEquipmentDocuments' old "everything not in the set gets deleted"
+// behaviour.
+//
+// An id in add that doesn't name a real documents row fails the
 // equipment_documents.document_id foreign key and rolls back the WHOLE
-// replace - deliberately NOT pre-checked here. inventory_handlers.go's own
-// PUT handler pre-checks every id itself (via globalDocumentStore.Get) so
-// it can name the specific offending id in a clean 404 before ever reaching
-// this method; duplicating that same lookup here, only to throw its result
-// away and let the FK re-derive the same answer, would be two places
-// deciding the identical question. This method's job is only to make the
-// write atomic and correct - AGENTS.md's fail-fast policy: the real
-// constraint failure surfaces as-is rather than this method inventing its
-// own, possibly-differently-worded, version of "unknown document id".
+// patch (both the add and the remove side) - deliberately NOT pre-checked
+// here, for the same reason SetEquipmentDocuments never pre-checked it:
+// inventory_handlers.go's own PATCH handler pre-checks every add id itself
+// (via globalDocumentStore.Get) so it can name the specific offending id in
+// a clean 404 before ever reaching this method; duplicating that same
+// lookup here, only to throw its result away and let the FK re-derive the
+// same answer, would be two places deciding the identical question. This
+// method's job is only to make the write atomic and correct - AGENTS.md's
+// fail-fast policy: the real constraint failure surfaces as-is.
 //
-// docIDs IS deduped here, first-occurrence order kept: it names "the whole
-// set" the record should end up linked to, not a sequence of individual
-// link operations, so the same id appearing twice means the same thing as
-// it appearing once. Left undeduped, a repeated id would collide with
-// equipment_documents' own (equipment_id, document_id) primary key on the
-// second INSERT attempt (though the "already linked, skip" check below
-// already stops that for any id linked before this call started).
-func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error {
+// add and remove are EACH deduped here, first-occurrence order kept within
+// each list, for the same reason SetEquipmentDocuments deduped docIDs: an
+// id named twice in the same list means the same thing as once, and left
+// undeduped a repeated add id would collide with equipment_documents' own
+// (equipment_id, document_id) primary key on the second INSERT attempt.
+//
+// An id named in BOTH add and remove is resolved by letting remove win -
+// unlinking is the more destructive, more explicit of the two operations a
+// single PATCH can request for the same id, and "the operator just asked to
+// remove this" reads as the stronger intent than an add sitting alongside
+// it in the same call. No caller in this codebase actually sends the same
+// id in both lists; this is a documented tie-break for a case the spec
+// leaves open, not a behaviour anything currently exercises.
+func (s *documentStore) PatchEquipmentDocuments(id string, add, remove []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("set equipment documents: begin: %w", err)
+		return fmt.Errorf("patch equipment documents: begin: %w", err)
 	}
 	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("set equipment documents: check equipment: %w", err)
+		return fmt.Errorf("patch equipment documents: check equipment: %w", err)
 	}
 	if !ok {
 		return errEquipmentNotFound
 	}
 
-	wanted := map[string]bool{}
-	ordered := make([]string, 0, len(docIDs))
-	for _, docID := range docIDs {
-		if wanted[docID] {
+	removeSet := map[string]bool{}
+	removeOrdered := make([]string, 0, len(remove))
+	for _, docID := range remove {
+		if removeSet[docID] {
 			continue
 		}
-		wanted[docID] = true
-		ordered = append(ordered, docID)
+		removeSet[docID] = true
+		removeOrdered = append(removeOrdered, docID)
+	}
+
+	addSeen := map[string]bool{}
+	addOrdered := make([]string, 0, len(add))
+	for _, docID := range add {
+		if addSeen[docID] || removeSet[docID] {
+			// Deduped, and remove wins when an id names both - see this
+			// method's own doc comment for why.
+			continue
+		}
+		addSeen[docID] = true
+		addOrdered = append(addOrdered, docID)
+	}
+
+	for _, docID := range removeOrdered {
+		if _, err := tx.Exec(
+			`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
+			id, docID,
+		); err != nil {
+			return fmt.Errorf("patch equipment documents: unlink %s: %w", docID, err)
+		}
+	}
+
+	if len(addOrdered) == 0 {
+		return tx.Commit()
 	}
 
 	existing := map[string]bool{}
 	rows, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("set equipment documents: read existing links: %w", err)
+		return fmt.Errorf("patch equipment documents: read existing links: %w", err)
 	}
 	for rows.Next() {
 		var docID string
 		if err := rows.Scan(&docID); err != nil {
 			rows.Close()
-			return fmt.Errorf("set equipment documents: scan existing link: %w", err)
+			return fmt.Errorf("patch equipment documents: scan existing link: %w", err)
 		}
 		existing[docID] = true
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return fmt.Errorf("set equipment documents: read existing links: %w", err)
+		return fmt.Errorf("patch equipment documents: read existing links: %w", err)
 	}
 	rows.Close()
 
-	for docID := range existing {
-		if wanted[docID] {
-			continue
-		}
-		if _, err := tx.Exec(
-			`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
-			id, docID,
-		); err != nil {
-			return fmt.Errorf("set equipment documents: unlink %s: %w", docID, err)
-		}
-	}
-
-	// Review finding: a newly INSERTed link used to get sort_index 0 -
-	// tying with the cover (also 0), and the tie-break by document_id could
-	// then put a freshly linked image ahead of it. Every new link instead
-	// gets max(sort_index)+1 among id's OWN existing links (kept links,
-	// read above, are untouched either way), assigned in docIDs order, so a
-	// document-tab save can never silently reassign the cover.
+	// Same "never take the cover" rule SetEquipmentDocuments enforced: every
+	// id this call actually links gets max(sort_index)+1 among id's OWN
+	// existing links (computed AFTER remove above has already run, so a
+	// remove+add pair for the same slot lands after whatever remains), in
+	// add's own order.
 	var maxSort sql.NullInt64
 	if err := tx.QueryRow(`SELECT MAX(sort_index) FROM equipment_documents WHERE equipment_id = ?`, id).Scan(&maxSort); err != nil {
-		return fmt.Errorf("set equipment documents: max sort: %w", err)
+		return fmt.Errorf("patch equipment documents: max sort: %w", err)
 	}
 	nextSort := 0
 	if maxSort.Valid {
@@ -1528,7 +1551,7 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 	}
 
 	now := s.now().Unix()
-	for _, docID := range ordered {
+	for _, docID := range addOrdered {
 		if existing[docID] {
 			continue
 		}
@@ -1536,7 +1559,7 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
 			id, docID, nextSort, now,
 		); err != nil {
-			return fmt.Errorf("set equipment documents: link %s: %w", docID, err)
+			return fmt.Errorf("patch equipment documents: link %s: %w", docID, err)
 		}
 		nextSort++
 	}
@@ -1550,18 +1573,18 @@ func (s *documentStore) SetEquipmentDocuments(id string, docIDs []string) error 
 // or image/png (photoIDsForEquipmentIDs' own doc comment). AddEquipmentPhoto/
 // SetEquipmentPhotoOrder/RemoveEquipmentPhoto below still exist as their own
 // methods (the photo strip still wants "link at the end", "reorder", "unlink
-// this one" as distinct operations from SetEquipmentDocuments' whole-set
-// replace), but none of them write or read a tag any more - they read and
-// write equipment_documents links exactly like SetEquipmentDocuments does,
+// this one" as distinct operations from PatchEquipmentDocuments' add/remove
+// diff), but none of them write or read a tag any more - they read and
+// write equipment_documents links exactly like PatchEquipmentDocuments does,
 // just scoped to one document at a time or ordered by photoIDsForEquipmentIDs'
 // own image-MIME view.
 
 // errEquipmentPhotoSetMismatch is returned by SetEquipmentPhotoOrder when
 // order doesn't name EXACTLY the item's current photo id set - ADR 0127:
 // "must name exactly the item's current photo set, or it returns 400",
-// deliberately not a partial-reorder/subset-allowed API the way
-// SetEquipmentDocuments' whole-set replace is for ordinary links, so a
-// stale client's PUT can never silently add or drop a photo.
+// deliberately not a partial/diff-based API the way PatchEquipmentDocuments'
+// add/remove is for ordinary links, so a stale client's PUT can never
+// silently add or drop a photo.
 var errEquipmentPhotoSetMismatch = errors.New("photo set does not match the item's current photos")
 
 // errEquipmentPhotoNotFound is returned by RemoveEquipmentPhoto when
@@ -1660,7 +1683,7 @@ func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error 
 // call with the chosen id moved to the front. order must name EXACTLY the
 // item's current photo id set (errEquipmentPhotoSetMismatch otherwise - see
 // its own doc comment for why a partial reorder isn't accepted the way
-// SetEquipmentDocuments' whole-set replace is for ordinary links).
+// PatchEquipmentDocuments' add/remove diff is for ordinary links).
 func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -502,31 +502,39 @@ func deleteEquipmentHandler(c echo.Context) error {
 
 // ── equipment documents ──────────────────────────────────────────────────
 
-type setEquipmentDocumentsRequest struct {
-	DocumentIDs []string `json:"document_ids"`
+type patchEquipmentDocumentsRequest struct {
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
 }
 
-// setEquipmentDocumentsHandler is PUT /api/inventory/equipment/:id/documents:
-// {document_ids: []}, replacing the equipment's WHOLE linked-document set
-// (plan's "replace wholesale") - PHOTOS INCLUDED (2026-09-25 amendment: the
-// Documents tab lists every linked document, its own photos too, and there
-// is no longer a photo-tagged carve-out to enforce here). Every id is
-// checked against globalDocumentStore.Get BEFORE SetEquipmentDocuments is
-// ever called, so a bad id can be named in a clean 404 ("document %s not
-// found") rather than surfacing as SetEquipmentDocuments' own foreign-key
-// failure, which names no id at all (SetEquipmentDocuments' own doc comment
-// explains why that split - pre-check here, real constraint there - is
-// deliberate rather than duplicated logic).
-func setEquipmentDocumentsHandler(c echo.Context) error {
+// patchEquipmentDocumentsHandler is PATCH
+// /api/inventory/equipment/:id/documents: {add: [], remove: []}, applying a
+// DIFF to the equipment's linked-document set - PHOTOS INCLUDED (a photo is
+// an ordinary link, added/removed exactly like any other document id).
+// This replaces the old PUT's whole-set replace: the Documents tab no
+// longer has to restate every id it isn't touching, only what changed,
+// which is the fix for the client-side mirror the whole-set PUT forced on
+// every caller (PatchEquipmentDocuments' own doc comment, inventory_store.go).
+//
+// Every id in add is checked against globalDocumentStore.Get BEFORE
+// PatchEquipmentDocuments is ever called, so a bad id can be named in a
+// clean 404 ("document %s not found") rather than surfacing as
+// PatchEquipmentDocuments' own foreign-key failure, which names no id at
+// all - the same pre-check-here/real-constraint-there split the old PUT
+// handler used (PatchEquipmentDocuments' own doc comment explains why that
+// split is deliberate rather than duplicated logic). remove ids are never
+// looked up this way: unlinking an id that doesn't exist, or was never
+// linked, is simply a no-op (PatchEquipmentDocuments' own doc comment).
+func patchEquipmentDocumentsHandler(c echo.Context) error {
 	limitNoteRequestBody(c)
 	id := c.Param("id")
 
-	var req setEquipmentDocumentsRequest
+	var req patchEquipmentDocumentsRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
-	for _, docID := range req.DocumentIDs {
+	for _, docID := range req.Add {
 		if _, err := globalDocumentStore.Get(docID); err != nil {
 			if errors.Is(err, errDocumentNotFound) {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": fmt.Sprintf("document %s not found", docID)})
@@ -535,7 +543,7 @@ func setEquipmentDocumentsHandler(c echo.Context) error {
 		}
 	}
 
-	if err := globalDocumentStore.SetEquipmentDocuments(id, req.DocumentIDs); err != nil {
+	if err := globalDocumentStore.PatchEquipmentDocuments(id, req.Add, req.Remove); err != nil {
 		return writeDocumentError(c, err)
 	}
 
@@ -683,7 +691,7 @@ type setEquipmentPhotoOrderRequest struct {
 // photo set (errEquipmentPhotoSetMismatch -> 400, mapped through
 // writeDocumentError/documentErrorStatus) - see SetEquipmentPhotoOrder's
 // own doc comment (inventory_store.go) for why a partial reorder isn't
-// accepted the way SetEquipmentDocuments' whole-set replace is for
+// accepted the way PatchEquipmentDocuments' add/remove diff is for
 // ordinary links.
 func setEquipmentPhotoOrderHandler(c echo.Context) error {
 	limitNoteRequestBody(c)

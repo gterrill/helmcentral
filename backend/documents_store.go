@@ -594,9 +594,10 @@ var documentStoreSchema = []string{
 	// a second, competing way to say the same thing. source is
 	// 'operator'|'suggested', mirroring document_tags.source, for the later
 	// enrichment cycle this schema is deliberately sized to receive without
-	// churn - nothing writes 'suggested' yet (SetEquipmentDocuments always
-	// writes 'operator', plan's "links edited from the equipment side this
-	// cycle" decision). ON DELETE CASCADE on BOTH foreign keys, not RESTRICT:
+	// churn - nothing writes 'suggested' yet (AddEquipmentPhoto and
+	// PatchEquipmentDocuments always write 'operator', plan's "links edited
+	// from the equipment side this cycle" decision). ON DELETE CASCADE on
+	// BOTH foreign keys, not RESTRICT:
 	// a link is metadata ABOUT the equipment-document relationship, not a
 	// thing either side of it must protect the other's existence for -
 	// deleting either the equipment record or the document itself should
