@@ -167,6 +167,55 @@ other's history.
   changes behaviour for its existing callers. `fetchSignalKNearbyVessels`'s
   own contract (10 closest vessels) is unchanged.
 
+## Amendment 2026-09-25: a code review, four fixes
+
+A `/code-review high` pass over this branch after it merged found four more
+issues, all fixed on `review-fixes` with a test that fails against the
+pre-fix code (verified by hand) and passes against the fix:
+
+- `computeStationarySince` took the median of the most recent
+  `assistantStationaryCentreWindow` points as "current position" without
+  ever confirming the vessel is STILL there. For a vessel under way in a
+  roughly straight line, the median of an odd-length window lands almost
+  exactly on that window's own middle sample - a mathematical inevitability,
+  not a real arrival - so a still-moving vessel could get a false, recent
+  `stationary_since`. It now also requires that at most one of the centre
+  window's own most recent `assistantStationaryConsecutiveOutliers` points
+  be far from that median (the same one-off noise tolerance the existing
+  walk already extends), returning "not stationary" (`position_history`:
+  `"under way - not currently stationary"`) otherwise.
+- The same-MMSI name guard this ADR's own "Consequences" section describes
+  discarded a vessel's ENTIRE sighting history whenever the name recorded at
+  encounter start differs from its current live name - which is the
+  ORDINARY case, not the rare true-collision fault the guard exists for:
+  `recordNearbyVesselContacts` (`tracks.go`) falls back to `compactVesselID`
+  (the MMSI itself) as a vessel's name before AIS static data has arrived,
+  and that data often arrives only after the sighting log's 5-minute
+  confirmation dwell has already frozen the row's name. A stored or live
+  name that is just a placeholder (empty, or the vessel_key itself) no
+  longer counts as a mismatch on either side; the guard still rejects two
+  distinct, non-placeholder names sharing one MMSI.
+- `get_nearby_vessels` cut a matched list down to `max_results` with neither
+  `truncated` nor a note - indistinguishable from "this is everyone in
+  range." It now sets `truncated` and names both the total matched and the
+  shown count.
+- `recordNearbyVesselContacts` fetched through `fetchSignalKNearbyVessels`,
+  which caps at 10 (the map tile's own display limit) - not through
+  `fetchSignalKNearbyVesselsLimit` this ADR already introduced for the tool
+  itself, which lists up to 25. So an 11th-25th vessel in a crowded
+  anchorage never got a sighting-log row, leaving `in_range_since` missing
+  or wrong for it. `recordNearbyVesselContacts` now fetches with
+  `nearbyVesselsUnlimited` - the sighting log is the authoritative record of
+  "who has been in range" and must not inherit a display cap that belongs to
+  a different caller. This runs once per 5s poll tick, not per HTTP request;
+  the extra cost is a few dozen more indexed SQLite reads in a crowded
+  anchorage, negligible next to what that tick already does. This ADR's own
+  "Consequences" section above, which called `fetchSignalKNearbyVessels`'s
+  10-closest contract unchanged, is still true of that function itself - it
+  is `recordNearbyVesselContacts` that no longer calls it.
+
+`go test -short -race ./...` and `go vet ./...` pass.
+
 ## Related
 
 - [ADR 0093](0093-onboard-assistant-over-openrouter.md) for the tool-calling

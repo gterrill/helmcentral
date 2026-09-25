@@ -14,6 +14,9 @@ steps for running it from the anchor watch map.
 
 ## Resize or reposition after dropping
 
+Do this on the anchor watch page. The Anchor Watch tile on a dashboard page
+shows the circle but does not change it.
+
 - **Resize the radius**: click or tap the edge of the circle, move to the new
   distance, then click or tap again (or double-click) to set it. Nothing is
   saved until that second click.

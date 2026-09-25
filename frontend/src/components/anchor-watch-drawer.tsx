@@ -47,6 +47,10 @@ interface AnchorWatchDrawerProps {
   // The watch's set_at, passed straight through to the map: it centres on
   // the anchor whenever the session changes.
   anchorSetAt: string | null
+  // useAnchorWatch's own `loaded` — whether the first GET /api/anchor-watch
+  // has actually resolved, passed straight through to the map so it can
+  // tell "no watch" from "haven't heard back yet" (anchorSetAt alone can't).
+  anchorStateKnown: boolean
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -116,6 +120,7 @@ export function AnchorWatchDrawer({
   bowOffsetApplied = false,
   bowOffsetReason = '',
   anchorSetAt,
+  anchorStateKnown,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -237,6 +242,7 @@ export function AnchorWatchDrawer({
                 anchorLat={anchorLat}
                 anchorLon={anchorLon}
                 anchorSetAt={anchorSetAt}
+                anchorStateKnown={anchorStateKnown}
                 radiusMeters={radiusMeters}
                 depthMeters={depthMeters}
                 currentDriftKts={currentDriftKts}

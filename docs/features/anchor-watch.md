@@ -85,6 +85,13 @@ A sidebar on the anchor watch page for pay-out and swing-radius planning,
 against tide-corrected depth and gust-seeded wind. It can be used before
 lowering the anchor.
 
+Its Depth field shows the figure the plan is computed against: depth at this
+spot at the next high tide, plus your bow roller height above the water.
+That is the depth the chain has to reach on a rising tide, not just the
+depth under the keel right now. Type over it to plan against a different
+figure; the field will not accept a number that leaves no water at all once
+the tide and bow height are backed out, and says so rather than saving it.
+
 Its map takes pins: click open water to mark a bombie, a mooring block or the
 nearest bit of shoreline, and watch the range close as you swing. Pins are
 shared across every device watching the anchorage, so marking a hazard from the

@@ -164,12 +164,11 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     anchorLat,
     anchorLon,
     setAt,
+    loaded,
     radiusMeters,
     distanceMeters,
     bearingDeg,
     setAnchorHere,
-    updatePosition,
-    updateRadius,
     clearAnchor,
     seaState,
     seabedType,
@@ -352,6 +351,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               anchorLat={anchorLat}
               anchorLon={anchorLon}
               anchorSetAt={setAt}
+              anchorStateKnown={loaded}
               radiusMeters={radiusMeters}
               depthMeters={depthMeters}
               currentDriftKts={currentDriftKts}
@@ -373,8 +373,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               onImageryToggle={onImageryToggle}
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={onRadarEchoToggle}
-              onAnchorReposition={updatePosition}
-              onRadiusChange={updateRadius}
               onFullscreen={onFullscreen}
               placemarks={placemarks}
               onPlacemarkCreate={onPlacemarkCreate}

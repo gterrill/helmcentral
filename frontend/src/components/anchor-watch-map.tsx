@@ -265,6 +265,16 @@ export interface AnchorWatchMapProps {
   // every client swings to the new anchorage instead of sitting over the
   // water it was left looking at.
   anchorSetAt?: string | null
+  // Whether the host has actually resolved anchor state — useAnchorWatch's
+  // own `loaded` (true only once the first GET /api/anchor-watch has
+  // succeeded). `anchorSetAt: null` alone is ambiguous between "no watch is
+  // running" and "still waiting to hear back", and a stored map centre from
+  // a past anchorage must only be discarded once "no watch" is actually
+  // confirmed — discarding it on the ambiguous case would flash the vessel
+  // position and then jump back to the stored centre the moment the poll
+  // resolves active. Defaults to true so every existing caller/test that
+  // never considered this ambiguity keeps mounting exactly as before.
+  anchorStateKnown?: boolean
   radiusMeters: number
   depthMeters: number | null
   currentDriftKts: number | null
@@ -307,8 +317,13 @@ export interface AnchorWatchMapProps {
   onImageryToggle?: (enabled: boolean) => void
   showRadarEcho?: boolean
   onRadarEchoToggle?: (enabled: boolean) => void
-  onAnchorReposition: (lat: number, lon: number) => void
-  onRadiusChange: (radiusMeters: number) => void
+  // Optional: editing the anchor point/swing radius is only offered when the
+  // host supplies both. The dashboard tile omits them (it is view-only —
+  // editing lives on the full-page Anchor Watch view instead), and the map
+  // never enters reposition/radius edit mode, shows the ew-resize edge
+  // cursor, or advertises "click to reposition" without one.
+  onAnchorReposition?: (lat: number, lon: number) => void
+  onRadiusChange?: (radiusMeters: number) => void
   onFullscreen?: () => void
   // Design critique item 3: six controls stacked in-tile clipped the bottom
   // two at tile height. Defaults to the collapsed three (fullscreen + zoom)
@@ -341,6 +356,7 @@ export function AnchorWatchMap({
   anchorLat,
   anchorLon,
   anchorSetAt = null,
+  anchorStateKnown = true,
   radiusMeters,
   depthMeters,
   currentDriftKts,
@@ -644,12 +660,12 @@ export function AnchorWatchMap({
       }
       if (e.key === 'Enter') {
         if (editMode === 'reposition' && ghostAnchor) {
-          onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
+          onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
           setGhostAnchor(null)
           setEditMode('none')
           setCursor('grab')
         } else if (editMode === 'radius' && liveRadius !== null) {
-          onRadiusChange(liveRadius)
+          onRadiusChange?.(liveRadius)
           setLiveRadius(null)
           setEditMode('none')
           setCursor('grab')
@@ -686,14 +702,14 @@ export function AnchorWatchMap({
         return
       }
       if (editMode === 'reposition' && ghostAnchor) {
-        onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
+        onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
         setGhostAnchor(null)
         setEditMode('none')
         setCursor('grab')
         return
       }
       if (editMode === 'radius' && liveRadius !== null) {
-        onRadiusChange(liveRadius)
+        onRadiusChange?.(liveRadius)
         setLiveRadius(null)
         setEditMode('none')
         setCursor('grab')
@@ -777,6 +793,9 @@ export function AnchorWatchMap({
         const { lat, lng } = e.lngLat
         setGhostAnchor({ lat, lon: lng })
       } else {
+        // No radius editing available (view-only hosts, e.g. the dashboard
+        // tile) — never hint at an edge drag that can't happen.
+        if (!onRadiusChange) return
         // Detect hover over circle edge — within ±15px projected distance
         const map = mapRef.current
         if (!map) return
@@ -799,12 +818,15 @@ export function AnchorWatchMap({
         }
       }
     },
-    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, setCursor],
+    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, setCursor, onRadiusChange],
   )
 
   // ── Circle edge click detection ──────────────────────────────────────────
   const handleCircleEdgeClick = useCallback(
     (e: maplibregl.MapMouseEvent) => {
+      // No radius editing available (view-only hosts) — the circle edge is
+      // just a display line, not a drag handle.
+      if (!onRadiusChange) return
       if (editMode === 'radius' && liveRadius !== null) {
         e.preventDefault()
         suppressNextMapClickRef.current = true
@@ -847,6 +869,9 @@ export function AnchorWatchMap({
   // ── Touch start: circle-edge detection for tablet radius adjustment ──────
   const handleTouchStartEdge = useCallback(
     (e: maplibregl.MapTouchEvent) => {
+      // No radius editing available (view-only hosts) — the circle edge is
+      // just a display line, not a drag handle.
+      if (!onRadiusChange) return
       if (editMode === 'radius' && liveRadius !== null) {
         suppressNextMapClickRef.current = true
         onRadiusChange(liveRadius)
@@ -907,7 +932,7 @@ export function AnchorWatchMap({
     (e: maplibregl.MapMouseEvent) => {
       if (editMode === 'radius' && liveRadius !== null) {
         e.preventDefault()
-        onRadiusChange(liveRadius)
+        onRadiusChange?.(liveRadius)
         setLiveRadius(null)
         setEditMode('none')
         setCursor('grab')
@@ -931,7 +956,7 @@ export function AnchorWatchMap({
   const confirmAnchorReposition = useCallback(() => {
     if (!ghostAnchor) return
     suppressNextMapClickRef.current = true
-    onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
+    onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
     setGhostAnchor(null)
     setEditMode('none')
     setCursor('grab')
@@ -940,10 +965,16 @@ export function AnchorWatchMap({
   // ── Anchor marker click ──────────────────────────────────────────────────
   const handleAnchorMarkerClick = useCallback(
     (e: React.MouseEvent) => {
+      // Still swallowed even on a view-only host (no onAnchorReposition):
+      // without this, the click would fall through to the map's own
+      // "place a pin here" handler, same as every other marker on this map.
       e.stopPropagation()
       // Belt-and-braces: the marker itself only renders when hasAnchor, so
       // this shouldn't be reachable without one.
       if (!hasAnchor) return
+      // View-only host (the dashboard tile) — reposition editing lives on
+      // the full-page Anchor Watch view only.
+      if (!onAnchorReposition) return
       if (editMode === 'reposition' && ghostAnchor) {
         confirmAnchorReposition()
         return
@@ -954,7 +985,7 @@ export function AnchorWatchMap({
       setCursor('grabbing')
       void fetchMotoringTrail()
     },
-    [confirmAnchorReposition, editMode, hasAnchor, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail],
+    [confirmAnchorReposition, editMode, hasAnchor, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail, onAnchorReposition],
   )
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
@@ -977,12 +1008,23 @@ export function AnchorWatchMap({
 
   // Resolved once, at mount. A stored centre is the operator's pan, but only
   // for the anchorage it was made in: against a different session it is a
-  // view of water the boat has left, so the anchor wins. anchorSetAt is null
-  // while the first watch poll is in flight, and that is not evidence of a
-  // new session — trust the stored centre for now and let the effect below
-  // correct it the moment a session id lands.
+  // view of water the boat has left, so the anchor wins. `hasAnchor` false
+  // is ambiguous until anchorStateKnown is true — it means either "no watch
+  // is running" or "we haven't heard back from the first poll yet", and only
+  // the former should discard a stored centre. Once anchorStateKnown
+  // confirms there is genuinely no anchor, a stored centre from any session
+  // must not win, or the operator opens on last night's bay instead of the
+  // boat while about to drop a new anchor. While it's still unknown, trust
+  // the stored centre for now and let the effects below correct it the
+  // moment a session id lands, or the moment "no watch" is confirmed. Keyed
+  // on hasAnchor rather than anchorSetAt: a legacy watch record with no
+  // recorded set_at can still have an anchor, and that anchor must win over
+  // a stale stored centre exactly as it always has.
   const [mountView] = useState(() => {
     const stored = readStoredCenter()
+    if (anchorStateKnown && !hasAnchor) {
+      return { center: null, sessionId: null }
+    }
     const belongsToCurrentSession =
       stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
     return {
@@ -992,6 +1034,10 @@ export function AnchorWatchMap({
   })
   // The anchor session the view on screen is currently following.
   const viewSessionRef = useRef<string | null>(mountView.sessionId)
+  // Whether the view on screen at mount came from a stored centre rather
+  // than the live vessel/anchor fallback — the one case the effect below
+  // (confirming "no watch" while already mounted) has anything to correct.
+  const mountedFromStoredCenterRef = useRef(mountView.center !== null)
 
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
@@ -1044,6 +1090,35 @@ export function AnchorWatchMap({
     writeStoredCenter(anchorLat, anchorLon, anchorSetAt)
     mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
   }, [anchorSetAt, anchorLat, anchorLon])
+
+  // Tracks the previous anchorStateKnown so the effect below fires on
+  // exactly one transition: false -> true. Ordinary Raise (an already-known
+  // active watch going inactive) never touches this, since anchorStateKnown
+  // was already true well before the Raise — this only fires the first time
+  // ambiguity resolves.
+  const anchorStateWasKnownRef = useRef(anchorStateKnown)
+
+  // The mount-time gate above only helps a fresh mount. A map that was
+  // already on screen while the first poll was in flight — trusting a
+  // stored centre because the ambiguous null hadn't resolved yet — needs
+  // its own correction once "no watch" is confirmed: swing to the vessel,
+  // the same way a fresh mount would have opened. Fires at most once (the
+  // ref above), and only when there's actually a stored centre to override —
+  // if the view was already tracking the vessel/anchor fallback, easing to
+  // the vessel again is a no-op anyway, but there's nothing to correct.
+  useEffect(() => {
+    const wasKnown = anchorStateWasKnownRef.current
+    anchorStateWasKnownRef.current = anchorStateKnown
+    if (wasKnown || !anchorStateKnown) return
+    if (hasAnchor) return // resolved active - the effect above handles centring on the anchor
+    if (!mountedFromStoredCenterRef.current) return
+    mountedFromStoredCenterRef.current = false
+    viewSessionRef.current = null
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
+    }
+    mapRef.current?.easeTo({ center: [vesselLon, vesselLat], duration: 600 })
+  }, [anchorStateKnown, hasAnchor, vesselLat, vesselLon])
 
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
@@ -1553,8 +1628,12 @@ export function AnchorWatchMap({
             <button
               onClick={handleAnchorMarkerClick}
               className="flex items-center justify-center"
-              style={{ width: 40, height: 40, cursor: editMode === 'none' ? 'grab' : 'default' }}
-              aria-label="Anchor position — click to reposition"
+              style={{
+                width: 40,
+                height: 40,
+                cursor: onAnchorReposition && editMode === 'none' ? 'grab' : 'default',
+              }}
+              aria-label={onAnchorReposition ? 'Anchor position — click to reposition' : 'Anchor position'}
             >
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"

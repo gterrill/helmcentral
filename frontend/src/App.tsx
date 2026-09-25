@@ -1296,7 +1296,6 @@ export function App() {
     windDirectionTrueDeg,
     maxGustKts,
     maxGustTrueKts,
-    maxTrueWindKts1h,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,
@@ -2061,7 +2060,7 @@ export function App() {
             depthLastUpdateAgeS={depthLastUpdateAgeS}
             windSpeedTrueKts={windSpeedTrueKts}
             windDirectionTrueDeg={windDirectionTrueDeg}
-            maxTrueWindKts1h={maxTrueWindKts1h}
+            maxTrueWindKts1h={maxGustTrueKts['1h']}
             weather={weather}
             forecast={forecast}
             nextHour={forecastNextHour}
@@ -2903,6 +2902,7 @@ export function App() {
               bowOffsetApplied={anchorWatch.bowOffsetApplied}
               bowOffsetReason={anchorWatch.bowOffsetReason}
               anchorSetAt={anchorWatch.setAt}
+              anchorStateKnown={anchorWatch.loaded}
               vesselTrail={getSelfTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}

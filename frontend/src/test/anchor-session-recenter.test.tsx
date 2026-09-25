@@ -152,8 +152,11 @@ describe('AnchorWatchMap follows the anchor session', () => {
     storeCentre(-20.2900, 148.9600, FIRST_SESSION)
 
     // Mount is the first paint, before GET /api/anchor-watch answers: the
-    // map has no session id to judge the stored centre against yet.
-    const { rerender } = render(mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null }))
+    // map has no session id to judge the stored centre against yet, and the
+    // host says so via anchorStateKnown={false}.
+    const { rerender } = render(
+      mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null, anchorStateKnown: false }),
+    )
     expect(lastInitialViewState).toMatchObject({ latitude: -20.2900, longitude: 148.9600 })
 
     // The poll lands on the same session the pan was made in.
@@ -171,5 +174,124 @@ describe('AnchorWatchMap follows the anchor session', () => {
       center: [FIRST_ANCHOR.lon, FIRST_ANCHOR.lat],
       duration: 600,
     })
+  })
+})
+
+// The operator's actual symptom: with no active anchor, a stored centre from
+// a past anchorage used to win regardless, so the map opened on last night's
+// bay instead of the boat — right when the operator is about to drop a fresh
+// anchor and most needs to see where the vessel actually is. anchorSetAt is
+// null both "no watch" and "haven't heard back yet", so these tests use the
+// caller's anchorStateKnown (useAnchorWatch's own `loaded`) to disambiguate.
+describe('AnchorWatchMap discards a stale stored centre once "no watch" is confirmed', () => {
+  const CURRENT_VESSEL = { lat: -20.1500, lon: 148.9000 }
+
+  beforeEach(() => {
+    localStorage.clear()
+    easeToMock.mockClear()
+    lastInitialViewState = null
+  })
+
+  it('opens on the vessel, not a stored centre from an old anchorage, once the watch is confirmed inactive at mount', () => {
+    storeCentre(-20.2900, 148.9600, FIRST_SESSION)
+
+    render(
+      mapElement({
+        anchorLat: null,
+        anchorLon: null,
+        anchorSetAt: null,
+        anchorStateKnown: true,
+        vesselLat: CURRENT_VESSEL.lat,
+        vesselLon: CURRENT_VESSEL.lon,
+      }),
+    )
+
+    expect(lastInitialViewState).toMatchObject({
+      latitude: CURRENT_VESSEL.lat,
+      longitude: CURRENT_VESSEL.lon,
+    })
+  })
+
+  it('eases to the vessel once "no watch" is confirmed for a map that mounted before the first poll resolved', () => {
+    storeCentre(-20.2900, 148.9600, FIRST_SESSION)
+
+    // Mount before the poll answers — the ambiguous case, so the stored
+    // centre is trusted for now, same as ever.
+    const { rerender } = render(
+      mapElement({
+        anchorLat: null,
+        anchorLon: null,
+        anchorSetAt: null,
+        anchorStateKnown: false,
+        vesselLat: CURRENT_VESSEL.lat,
+        vesselLon: CURRENT_VESSEL.lon,
+      }),
+    )
+    expect(lastInitialViewState).toMatchObject({ latitude: -20.2900, longitude: 148.9600 })
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    // The poll resolves: there is genuinely no watch running.
+    rerender(
+      mapElement({
+        anchorLat: null,
+        anchorLon: null,
+        anchorSetAt: null,
+        anchorStateKnown: true,
+        vesselLat: CURRENT_VESSEL.lat,
+        vesselLon: CURRENT_VESSEL.lon,
+      }),
+    )
+
+    expect(easeToMock).toHaveBeenCalledWith({
+      center: [CURRENT_VESSEL.lon, CURRENT_VESSEL.lat],
+      duration: 600,
+    })
+    // Nothing left to restore on a later reload — the stale centre is gone,
+    // not merely overridden for this session.
+    expect(storedCentre()).toBeNull()
+  })
+
+  it('keeps the stored centre once the same-session poll resolves active, then eases to the anchor on a genuinely new drop', () => {
+    storeCentre(-20.2900, 148.9600, FIRST_SESSION)
+
+    // Mount before the poll answers.
+    const { rerender } = render(
+      mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null, anchorStateKnown: false }),
+    )
+    expect(lastInitialViewState).toMatchObject({ latitude: -20.2900, longitude: 148.9600 })
+
+    // The poll resolves, confirming the very anchorage the stored pan
+    // belongs to — nothing should move.
+    rerender(mapElement({ anchorStateKnown: true }))
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    // A genuinely new drop: a different session, a different anchorage.
+    rerender(
+      mapElement({
+        anchorLat: SECOND_ANCHOR.lat,
+        anchorLon: SECOND_ANCHOR.lon,
+        anchorSetAt: SECOND_SESSION,
+        vesselLat: SECOND_ANCHOR.lat,
+        vesselLon: SECOND_ANCHOR.lon,
+        anchorStateKnown: true,
+      }),
+    )
+
+    expect(easeToMock).toHaveBeenCalledWith({
+      center: [SECOND_ANCHOR.lon, SECOND_ANCHOR.lat],
+      duration: 600,
+    })
+  })
+
+  it('does not yank the view on an ordinary Raise while mounted (already-known active going inactive)', () => {
+    const { rerender } = render(mapElement())
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    // Raise: the anchor goes away, but anchorStateKnown was already true
+    // throughout — this must not be mistaken for the unknown -> known
+    // transition the effect above exists for.
+    rerender(mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null }))
+
+    expect(easeToMock).not.toHaveBeenCalled()
   })
 })

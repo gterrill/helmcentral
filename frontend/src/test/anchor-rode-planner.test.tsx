@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { AnchorRodePlanner, type AnchorRodePlannerProps } from '@/components/anchor-rode-planner'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { TideToday } from '@/hooks/use-tide-today'
-import { catenaryMethod, ratioMethod, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
+import { catenaryMethod, planningFigureM, ratioMethod, rawDepthFromPlanningFigureM, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
 
 const tide: TideToday = {
   datetime: new Date(0).toISOString(),
@@ -643,11 +643,14 @@ describe('AnchorRodePlanner — forecast wind band', () => {
   })
 })
 
-// ADR 0063: the Depth cell is a real, editable input, seeded from the depth
-// at the moment the anchor was dropped. The highest-consequence trap here is
-// double tide correction, so these tests pin that the input always holds the
-// RAW reading (never plan.planningDepthM, which is already tide-corrected)
-// while the caption alone reports whether a correction was applied.
+// ADR 0063 (amended): the Depth cell is a real, editable input, seeded with
+// the figure the plan is actually computed against — depth at the next high
+// tide plus bow roller height (planningFigureM) — not the raw sounder/
+// recorded reading. The highest-consequence trap here is double tide
+// correction on override: these tests pin that typing over the corrected
+// figure persists the *raw* depth that figure implies
+// (rawDepthFromPlanningFigureM), not the typed figure itself, which is what
+// avoids feeding the rise back in and compounding it on every render.
 describe('AnchorRodePlanner — Depth cell', () => {
   function depthInput() {
     return screen.getByLabelText('Depth') as HTMLInputElement
@@ -661,11 +664,15 @@ describe('AnchorRodePlanner — Depth cell', () => {
     expect(depthInput()).not.toBeDisabled()
   })
 
-  it('shows the recorded planning depth, not the live sounder, while anchored', () => {
+  it('shows the tide+bow corrected planning figure computed from the recorded planning depth, not the live sounder, while anchored', () => {
     renderPlanner({ depthM: 99, planningDepthM: 5, planningTideHeightFt: 2 })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(depthInput().value).toBe('5.0')
+    // datum {depthM: 5, tideHeightFt: 2}, tide (high 5) -> rise 3ft/3.28084,
+    // + bowRollerHeightM 1 from baseProps' anchorConfig.
+    const expected = planningFigureM({ depthM: 5, tideHeightFt: 2 }, tide, 1)!
+    expect(depthInput().value).toBe(expected.toFixed(1))
+    expect(depthInput().value).toBe('6.9')
   })
 
   it('renders an empty input and names the reason when anchored with nothing recorded — never a live-depth fallback', () => {
@@ -676,20 +683,39 @@ describe('AnchorRodePlanner — Depth cell', () => {
     // Exact string, not a loose regex: the open method panel also shows
     // "Unavailable — no depth entered" for the same reason, so a looser
     // match would find two hits instead of the Depth cell's own caption.
-    expect(screen.getByText('No depth entered — type the depth')).toBeInTheDocument()
+    // Names the figure the field expects: typing the bare sounder reading
+    // here would have bow height and tide rise subtracted from it.
+    expect(screen.getByText('No depth entered, type depth at high tide + 1.0 m bow')).toBeInTheDocument()
+  })
+
+  it('names the sounder-plus-bow figure when anchored with nothing recorded and no tide station', () => {
+    renderPlanner({ depthM: 42, planningDepthM: null, planningTideHeightFt: null, tide: { ...tide, current_tide_height_ft: -1, high_tide_height_ft: -1 } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText('No depth entered, type depth + 1.0 m bow')).toBeInTheDocument()
   })
 
   // The double-correction guard: baseProps' tide has current_tide_height_ft 2,
   // high_tide_height_ft 5 -> a 3ft rise -> 3/3.28084 = 0.914m corrected onto the
-  // 5m raw reading. The input must show the raw 5.0, never the 5.9 corrected
-  // figure — typing over a corrected figure and storing the result would feed
-  // the rise back in and compound it on every render.
-  it('holds the raw reading in the input while the caption reports the tide correction', () => {
+  // 5m raw reading, plus the 1m bow roller height. The input shows that
+  // corrected 6.9 figure, and the caption names both the correction and the
+  // bow height baked into it.
+  it('holds the tide- and bow-corrected figure in the input, and the caption names both', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(depthInput().value).toBe('5.0')
-    expect(screen.getByText('Tide adjusted')).toBeInTheDocument()
+    expect(depthInput().value).toBe('6.9')
+    expect(screen.getByText('High tide + 1.0 m bow')).toBeInTheDocument()
+  })
+
+  it('shows the sounder-plus-bow caption when the datum carries no tide stamp', () => {
+    renderPlanner({ planningDepthM: 5, planningTideHeightFt: null })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    // No tide stamp on the datum -> maxExpectedDepthM is null -> figure is
+    // just the raw 5 + bow 1 = 6.
+    expect(depthInput().value).toBe('6.0')
+    expect(screen.getByText('Sounder + 1.0 m bow, no tide station')).toBeInTheDocument()
   })
 
   describe('persistence', () => {
@@ -697,7 +723,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
       vi.useFakeTimers()
     })
 
-    it('debounces the change to metres, 800ms, when a watch is anchored', () => {
+    it('debounces the change to metres, 800ms, when a watch is anchored, persisting the raw depth the typed figure implies', () => {
       const onPlanningDepthChange = vi.fn()
       renderPlanner({ onPlanningDepthChange })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
@@ -706,12 +732,17 @@ describe('AnchorRodePlanner — Depth cell', () => {
       expect(onPlanningDepthChange).not.toHaveBeenCalled()
 
       vi.advanceTimersByTime(800)
-      // baseProps' tide has current_tide_height_ft: 2 — the edit is stamped
-      // with the tide right now, at the moment it was typed.
-      expect(onPlanningDepthChange).toHaveBeenCalledWith(8, 2)
+      // The typed "8" is the corrected figure (high tide + bow height), not
+      // the raw depth — rawDepthFromPlanningFigureM inverts it back to what
+      // gets persisted, stamped with the tide right now (2).
+      const expectedRawDepthM = rawDepthFromPlanningFigureM(8, 2, tide, 1)!
+      expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
+      const [depthMArg, tideArg] = onPlanningDepthChange.mock.calls[0]
+      expect(depthMArg).toBeCloseTo(expectedRawDepthM, 6)
+      expect(tideArg).toBe(2)
     })
 
-    it('converts a typed feet value to metres under imperial before persisting', () => {
+    it('converts a typed feet value to metres under imperial, then inverts to the raw depth before persisting', () => {
       const onPlanningDepthChange = vi.fn()
       renderPlanner({ onPlanningDepthChange, isImperial: true })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
@@ -721,7 +752,9 @@ describe('AnchorRodePlanner — Depth cell', () => {
 
       expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
       const [depthMArg] = onPlanningDepthChange.mock.calls[0]
-      expect(depthMArg).toBeCloseTo(20 / 3.28084, 6)
+      const figureM = 20 / 3.28084
+      const expectedRawDepthM = rawDepthFromPlanningFigureM(figureM, 2, tide, 1)!
+      expect(depthMArg).toBeCloseTo(expectedRawDepthM, 6)
     })
 
     it('fires immediately, with no debounce, when there is no active watch', () => {
@@ -730,7 +763,11 @@ describe('AnchorRodePlanner — Depth cell', () => {
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
       fireEvent.change(depthInput(), { target: { value: '8' } })
-      expect(onPlanningDepthChange).toHaveBeenCalledWith(8, 2)
+      const expectedRawDepthM = rawDepthFromPlanningFigureM(8, 2, tide, 1)!
+      expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
+      const [depthMArg, tideArg] = onPlanningDepthChange.mock.calls[0]
+      expect(depthMArg).toBeCloseTo(expectedRawDepthM, 6)
+      expect(tideArg).toBe(2)
     })
 
     it('clears both the sea-state and depth debounce timers on unmount, so a stray PATCH cannot fire after Raise', () => {
@@ -746,6 +783,47 @@ describe('AnchorRodePlanner — Depth cell', () => {
 
       expect(onPlanningDepthChange).not.toHaveBeenCalled()
       expect(onUpdateRodeAndConditions).not.toHaveBeenCalled()
+    })
+
+    // The new fail-visibly path: a typed figure that doesn't clear bow
+    // height plus tide rise implies a raw depth <= 0, which is not a
+    // sensible reading — it must not be persisted, and the caption must say
+    // why instead of silently keeping the last good value's caption.
+    it('does not persist and shows a caption when the typed figure is below bow height plus tide rise', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ onPlanningDepthChange })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      // rise (3ft/3.28084 ~= 0.914m) + bow (1m) ~= 1.914m; 1 m clears neither.
+      fireEvent.change(depthInput(), { target: { value: '1' } })
+      vi.advanceTimersByTime(800)
+
+      expect(onPlanningDepthChange).not.toHaveBeenCalled()
+      expect(screen.getByText('Below bow height plus tide rise, not saved')).toBeInTheDocument()
+    })
+
+    it('shows the refusal caption when anchored with nothing recorded', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ onPlanningDepthChange, depthM: 42, planningDepthM: null, planningTideHeightFt: null })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '1' } })
+      vi.advanceTimersByTime(800)
+
+      expect(onPlanningDepthChange).not.toHaveBeenCalled()
+      expect(screen.getByText('Below bow height plus tide rise, not saved')).toBeInTheDocument()
+    })
+
+    it('shows the refusal caption for zero rather than silently ignoring it', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ onPlanningDepthChange })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '0' } })
+      vi.advanceTimersByTime(800)
+
+      expect(onPlanningDepthChange).not.toHaveBeenCalled()
+      expect(screen.getByText('Below bow height plus tide rise, not saved')).toBeInTheDocument()
     })
   })
 })

@@ -8,6 +8,8 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import {
   buildRodePlan,
   maxExpectedDepthM,
+  planningFigureM,
+  rawDepthFromPlanningFigureM,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -288,23 +290,31 @@ export function AnchorRodePlanner({
   }, [isInactive, configuredSwingRadiusM, onApplyAlarmRadius])
 
   const unit = isImperial ? 'ft' : 'm'
+  const bowRollerHeightM = anchorConfig.bowRollerHeightM
 
-  // ADR 0063 — the editable Depth input holds the RAW reading
-  // (resolvedDepth.depthM), never plan.planningDepthM, which is already
-  // tide-corrected: typing over a corrected figure and storing the result
-  // would feed the rise back in and compound it on every render. The
-  // corrected figure moves into the caption below instead.
-  const seedDepthM = resolvedDepth?.depthM ?? null
+  // ADR 0063 (amended) — the editable Depth input holds the figure the plan
+  // is actually computed against: depth at the next high tide plus bow
+  // roller height (depth-from-hawse at high water), via planningFigureM.
+  // Typing over it does not store that corrected figure as the raw
+  // reading — rawDepthFromPlanningFigureM below inverts it back to the raw
+  // depth first, which is what avoids feeding the rise back in and
+  // compounding it on every render.
+  const seedFigureM = planningFigureM(resolvedDepth, tide, bowRollerHeightM)
   const [depthInputValue, setDepthInputValue] = useState<string>('')
+  // Set whenever a typed figure doesn't clear bow height plus tide rise
+  // (rawDepthFromPlanningFigureM returns null) — the caption below reports
+  // it and the value is not persisted (fail visibly, no fallback).
+  const [depthOverrideBelowMinimum, setDepthOverrideBelowMinimum] = useState(false)
 
-  // Re-seeds from the datum's VALUE, not the object — resolvedDepth is a
-  // fresh object every render (an unchanged 10s poll still builds a new
-  // one), so keying this off seedDepthM (a primitive) is what lets a poll
+  // Re-seeds from the figure's VALUE, not the datum/tide objects — both are
+  // fresh objects every render (an unchanged 10s poll still builds new
+  // ones), so keying this off seedFigureM (a primitive) is what lets a poll
   // that returns the same number write an identical string and React bail
   // out, rather than clobbering the field mid-typing.
   useEffect(() => {
-    setDepthInputValue(seedDepthM !== null ? toDisplayDistance(seedDepthM, isImperial).toFixed(1) : '')
-  }, [seedDepthM, isImperial])
+    setDepthInputValue(seedFigureM !== null ? toDisplayDistance(seedFigureM, isImperial).toFixed(1) : '')
+    setDepthOverrideBelowMinimum(false)
+  }, [seedFigureM, isImperial])
 
   const persistPlanningDepth = useCallback((nextDepthM: number) => {
     // Stamped with the tide right now, at the moment it was entered —
@@ -332,21 +342,53 @@ export function AnchorRodePlanner({
     // an in-progress edit simply doesn't persist yet.
     if (raw.trim() === '') return
     const parsed = Number(raw)
-    if (!Number.isFinite(parsed) || parsed <= 0) return
-    const nextDepthM = isImperial ? parsed / METERS_TO_FEET : parsed
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDepthOverrideBelowMinimum(true)
+      return
+    }
+    const figureM = isImperial ? parsed / METERS_TO_FEET : parsed
+    // The typed value is the corrected figure (depth at high tide + bow
+    // height), never the raw reading — invert it back to raw before
+    // persisting, stamped with the tide right now (the same tide
+    // rawDepthFromPlanningFigureM used for the rise, and the same one
+    // persistPlanningDepth stamps the datum with).
+    const tideNowFt = tideHeightFtOrNull(tide)
+    const nextDepthM = rawDepthFromPlanningFigureM(figureM, tideNowFt, tide, bowRollerHeightM)
+    if (nextDepthM === null) {
+      // Fail visibly rather than persisting a nonsensical (<= 0) raw depth:
+      // the typed figure doesn't clear bow height plus the tide rise it implies.
+      setDepthOverrideBelowMinimum(true)
+      return
+    }
+    setDepthOverrideBelowMinimum(false)
     persistPlanningDepth(nextDepthM)
-  }, [isImperial, persistPlanningDepth])
+  }, [isImperial, tide, bowRollerHeightM, persistPlanningDepth])
 
-  // Whether the rise to the next high got added — the caption's only job is
-  // to say so; the corrected figure itself isn't shown here (ADR 0047 still
-  // requires the visible fallback to sounder-only when uncorrected).
+  // Whether the rise to the next high got added — the caption says so and
+  // names the bow height baked into the figure the input shows.
   const isDepthTideCorrected = useMemo(() => maxExpectedDepthM(resolvedDepth, tide) !== null, [resolvedDepth, tide])
 
   const depthCaption = (() => {
-    if (resolvedDepth === null) {
-      return isAnchored ? 'No depth entered — type the depth' : 'no depth reading'
+    // Checked first: a refused figure leaves nothing recorded, so the
+    // empty-state caption below would otherwise read as if it were accepted.
+    if (depthOverrideBelowMinimum) {
+      return 'Below bow height plus tide rise, not saved'
     }
-    return isDepthTideCorrected ? 'Tide adjusted' : 'sounder only — no tide station'
+    const bowLabel = `${toDisplayDistance(bowRollerHeightM, isImperial).toFixed(1)} ${unit} bow`
+    if (resolvedDepth === null) {
+      if (!isAnchored) return 'no depth reading'
+      // Names the figure the field expects, not "the depth": a bare sounder
+      // reading typed here would have bow height and tide rise taken off it.
+      // Whether a rise applies is the same test the inversion uses, run
+      // against the tide right now.
+      const riseApplies = maxExpectedDepthM({ depthM: 0, tideHeightFt: tideHeightFtOrNull(tide) }, tide) !== null
+      return riseApplies
+        ? `No depth entered, type depth at high tide + ${bowLabel}`
+        : `No depth entered, type depth + ${bowLabel}`
+    }
+    return isDepthTideCorrected
+      ? `High tide + ${bowLabel}`
+      : `Sounder + ${bowLabel}, no tide station`
   })()
 
   if (!open) {
@@ -400,15 +442,19 @@ export function AnchorRodePlanner({
             <SidebarGroupContent className="grid grid-cols-1 gap-2 lg:grid-cols-2">
               <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
                 <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Depth ({unit})</p>
-                {/* Holds the RAW reading, never plan.planningDepthM — that
-                    figure is already tide-corrected, so typing over it and
-                    storing the result would feed the rise back in and
-                    compound it on every render (ADR 0063's highest-
-                    consequence trap here). The corrected figure lives in the
-                    caption below instead. Empty (not prefilled with live
-                    depth) when anchored with nothing recorded — that is the
-                    strict no-fallback rule made visible, and this input is
-                    the remedy. */}
+                {/* Holds the figure the plan is actually computed against —
+                    depth at the next high tide plus bow roller height
+                    (planningFigureM), not the raw sounder/recorded reading.
+                    Typing over it does not store that figure as raw:
+                    handleDepthInputChange inverts it back to the raw depth
+                    first (rawDepthFromPlanningFigureM), stamped with the
+                    tide right now, which is what avoids feeding the rise
+                    back in and compounding it on every render (ADR 0063's
+                    amendment; see the "input holds the raw reading" ADR for
+                    the original, higher-consequence version of this trap).
+                    Empty (not prefilled with live depth) when anchored with
+                    nothing recorded — that is the strict no-fallback rule
+                    made visible, and this input is the remedy. */}
                 <input
                   aria-label="Depth"
                   type="number"

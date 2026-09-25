@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -405,6 +406,428 @@ func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]t
 		return nil, result.Err()
 	}
 	return points, nil
+}
+
+// queryInfluxPathStatRange reads one aggregate statistic - mean, min or max -
+// of a SignalK path's history over an explicit [start, stop) range,
+// aggregated to every-sized buckets, optionally restricted to one $source tag
+// value. It generalises queryInfluxPathRange (which always mean-aggregates,
+// with no source filter) two ways for get_path_history's per-bucket
+// min/mean/max (Mate diagnostics, ADR 0131): aggFn picks which InfluxDB
+// aggregate function runs per bucket, and source, when given, narrows to one
+// $source rather than mixing every source that has ever published this path.
+//
+// aggFn is interpolated into the Flux query unquoted, same as every already
+// is in queryInfluxPathRange - safe here for the same reason: it is never
+// model-supplied text, only ever one of the three fixed literals ("min",
+// "mean", "max") assistant_diagnostics.go calls this with.
+//
+// ctx is the caller's own context (executeGetPathHistory's tool ctx), not
+// context.Background() - the 8s cap below is derived FROM it, not a
+// standalone timeout that outlives the tool call's own cancellation. Before
+// this (a code-review finding, 2026-09-25), get_path_history's three stat
+// queries (min/mean/max) each built its own context.Background() timeout,
+// so cancelling the tool call - or the model's own context deadline - never
+// reached InfluxDB at all, and running them sequentially meant a genuinely
+// slow bucket could cost up to three separate 8s waits instead of one.
+// executeGetPathHistory now fires all of its Influx queries concurrently
+// off this same ctx, so the worst case is one shared 8s timeout and a
+// cancelled tool ctx stops every one of them immediately.
+func queryInfluxPathStatRange(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxPathStatFlux(bucket, field, path, source, start, stop, every, aggFn)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var points []telemetryPoint
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok {
+			continue
+		}
+		points = append(points, telemetryPoint{Timestamp: rec.Time(), Value: v})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return points, nil
+}
+
+// buildInfluxPathStatFlux builds queryInfluxPathStatRange's Flux query text,
+// pulled out as its own pure function so its string-escaping and clause
+// construction can be unit-tested without a live InfluxDB connection - the
+// same reasoning fluxStringLiteral's own tests already apply one layer down.
+// Every value that can carry attacker- or model-chosen text (path, source,
+// bucket, field) goes through fluxStringLiteral; every() and aggFn never do,
+// since callers only ever pass one of a fixed set of literals for both (see
+// queryInfluxPathStatRange's own doc comment).
+func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop time.Time, every, aggFn string) (string, error) {
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return "", fmt.Errorf("path: %w", err)
+	}
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filter := fmt.Sprintf("r._measurement == %s and r._field == %s", pathLiteral, fieldLiteral)
+	if source != "" {
+		sourceLiteral, err := fluxStringLiteral(source)
+		if err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		filter += fmt.Sprintf(" and r.source == %s", sourceLiteral)
+	}
+
+	// timeSrc: "_start" - unlike every other aggregateWindow call in this
+	// file, this one feeds computePathHistoryGaps (assistant_diagnostics.go),
+	// which checks presence by truncating each point's own timestamp down to
+	// a bucket boundary and comparing it against the SAME boundary the gap
+	// loop steps through starting at range.start. Flux's own default
+	// (timeSrc: "_stop") labels every bucket with its STOP time instead, one
+	// whole bucket width later than range.start's own boundary - so with the
+	// default, the gap loop's very first checked boundary would never have a
+	// matching point (the real first bucket lands one width later), reporting
+	// a false one-bucket gap at the start of every range regardless of actual
+	// data completeness. Requesting "_start" instead makes each bucket's
+	// reported time the boundary computePathHistoryGaps already assumes.
+	return fmt.Sprintf(
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, every, aggFn,
+	), nil
+}
+
+// queryInfluxPathFirstLast reads the ACTUAL first and last recorded sample
+// times for a path over [start, stop) - not a bucket boundary. get_path_history
+// (assistant_diagnostics.go) previously reported first_seen/last_seen from
+// the min/mean/max aggregateWindow series' own first/last bucket, which -
+// because those buckets are timeSrc: "_start" labelled (buildInfluxPathStatFlux's
+// own doc comment) - names the START of whichever bucket happened to hold
+// the real first/last point, not the point itself. On a 90-day range bucketed
+// to 2-day buckets (assistantPathHistoryBucketWidth), that is up to two days
+// off from the moment a source actually stopped - exactly the question this
+// tool exists to answer precisely (a code-review finding, 2026-09-25). This
+// query answers it directly instead of inferring it from the bucketed series.
+//
+// ctx is the tool's own ctx (see queryInfluxPathStatRange's doc comment) -
+// executeGetPathHistory fires this concurrently alongside the min/mean/max
+// queries, all sharing one derived timeout.
+func queryInfluxPathFirstLast(ctx context.Context, path, source string, start, stop time.Time) (first, last time.Time, found bool, err error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxFirstLastFlux(bucket, field, path, source, start, stop)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(qctx, flux)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+	defer result.Close()
+
+	var times []time.Time
+	for result.Next() {
+		times = append(times, result.Record().Time())
+	}
+	if result.Err() != nil {
+		return time.Time{}, time.Time{}, false, result.Err()
+	}
+	if len(times) == 0 {
+		return time.Time{}, time.Time{}, false, nil
+	}
+
+	first, last = times[0], times[0]
+	for _, t := range times[1:] {
+		if t.Before(first) {
+			first = t
+		}
+		if t.After(last) {
+			last = t
+		}
+	}
+	return first, last, true, nil
+}
+
+// buildInfluxFirstLastFlux builds queryInfluxPathFirstLast's Flux query text,
+// pulled out as its own pure function for the same unit-testability reason
+// buildInfluxPathStatFlux and buildInfluxLastRecordedFlux are. Every value
+// that can carry model-chosen text goes through fluxStringLiteral, same as
+// every other Flux builder in this file.
+//
+// group() (bare - drops every existing group key) before sort()/first()/
+// last() combines whatever distinct raw series matched the filter (e.g.
+// several $source values, when source is empty) into one table first, the
+// same reasoning buildInfluxLastRecordedFlux's own group()-then-sort()-
+// then-last() dance uses: first()/last() on a per-series table would only
+// ever see one arbitrary series' own endpoint, not the path's genuine
+// overall first/last point across every source that has ever written it.
+func buildInfluxFirstLastFlux(bucket, field, path, source string, start, stop time.Time) (string, error) {
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return "", fmt.Errorf("path: %w", err)
+	}
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filter := fmt.Sprintf("r._measurement == %s and r._field == %s", pathLiteral, fieldLiteral)
+	if source != "" {
+		sourceLiteral, err := fluxStringLiteral(source)
+		if err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		filter += fmt.Sprintf(" and r.source == %s", sourceLiteral)
+	}
+
+	return fmt.Sprintf(
+		"data = from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> group() |> sort(columns: [\"_time\"])\n"+
+			"first = data |> first() |> keep(columns: [\"_time\", \"_value\"])\n"+
+			"last = data |> last() |> keep(columns: [\"_time\", \"_value\"])\n"+
+			"union(tables: [first, last])",
+		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter,
+	), nil
+}
+
+// influxLastRecordedRow is one measurement+source pair's most recent
+// recorded point, as get_last_recorded (Mate diagnostics, ADR 0131) reports
+// it. This answers "when did X stop" for a path that queryInfluxPathTrend/
+// queryInfluxPathRange cannot: both need the path named up front and a
+// window to look in, and return nothing once no point falls in that window -
+// indistinguishable from "never existed" without already knowing when to
+// stop looking.
+//
+// Value is `any`, not float64: signalk-to-influxdb2 (the upstream plugin
+// that writes this bucket - src/influx.ts, tkurki/signalk-to-influxdb2,
+// checked live 2026-09-25) always writes to a field literally named
+// "value" regardless of the SignalK value's own type - point.floatField
+// ('value', v) for a number, point.stringField('value', v) for a string,
+// point.booleanField('value', v) for a boolean (and stringField with
+// JSON.stringify for anything else, e.g. an object). So the _field == "value"
+// filter this file already uses is correct for every type; the bug was
+// entirely on the Go side, only ever accepting a float64 record value and
+// silently dropping the row otherwise (see influxRecordValueOK) - which
+// made every string path (a mode/state enum), boolean path (an alarm flag)
+// or whole-number path decoded as an integer type look permanently
+// unrecorded to get_last_recorded, a data/source problem this tool exists
+// specifically to catch (AGENTS.md's fallback policy).
+type influxLastRecordedRow struct {
+	Path   string
+	Source string
+	Time   time.Time
+	Value  any
+}
+
+// influxRecordValueOK reports whether v (an Influx query record's decoded
+// field value) is one of the types get_last_recorded can report as JSON,
+// returning it unchanged when it is. float64 covers every SignalK number
+// (signalk-to-influxdb2 always writes numbers via floatField - see
+// influxLastRecordedRow's own doc comment); string and bool cover SignalK's
+// other two JSON-native value types; int64/uint64 are accepted defensively
+// for any other integer-field writer, even though nothing in this fleet's
+// own write path produces one today. Anything else (nil - a genuinely
+// missing value - or an exotic decoded type) is not something get_last_recorded
+// can represent honestly, so it is rejected rather than coerced.
+func influxRecordValueOK(v any) (any, bool) {
+	switch v.(type) {
+	case float64, string, bool, int64, uint64:
+		return v, true
+	default:
+		return nil, false
+	}
+}
+
+// queryInfluxLastRecorded finds, for every measurement (SignalK path) and
+// $source combination matching pathPrefix and/or source within the last
+// lookbackDays, that combination's most recent recorded point.
+//
+// At least one of pathPrefix/source must be non-empty - the caller
+// (assistant_diagnostics.go) enforces that before calling this, since neither
+// filter bounds the query's own cost the way a single named path does for
+// queryInfluxPathRange: an empty prefix would scan the bucket's entire
+// measurement set.
+func queryInfluxLastRecorded(pathPrefix, source string, lookbackDays int) ([]influxLastRecordedRow, error) {
+	if pathPrefix == "" && source == "" {
+		return nil, fmt.Errorf("path_prefix or source is required")
+	}
+
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var rows []influxLastRecordedRow
+	for result.Next() {
+		rec := result.Record()
+		v, ok := influxRecordValueOK(rec.Value())
+		if !ok {
+			continue
+		}
+		source, _ := rec.ValueByKey("source").(string)
+		rows = append(rows, influxLastRecordedRow{
+			Path:   rec.Measurement(),
+			Source: source,
+			Time:   rec.Time(),
+			Value:  v,
+		})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return rows, nil
+}
+
+// assistantDiagnosticsIdentifierPattern is the character allowlist
+// get_last_recorded's path_prefix/source must match before being turned
+// into an anchored Flux regex literal (^prefix) by buildInfluxLastRecordedFlux.
+// A Flux regex literal is delimited by '/', so a value containing '/' would
+// otherwise break out of it - rejecting outright, rather than trying to
+// escape '/' into something inert, matches this file's existing
+// fluxStringLiteral rule for Flux's OWN '${...}' interpolation syntax
+// (AGENTS.md's fallback policy): a caller that genuinely needs a value
+// outside this charset gets a clear error, not a silently mis-scoped query.
+//
+// Every $source label seen on this fleet (YachtDevices.6,
+// venus.com.victronenergy.gps, Vesper_Cortex, WLN10.GP) and every SignalK
+// path prefix fits this charset (letters, digits, and the handful of
+// separators - dot, underscore, colon, hyphen - that actually turn up in a
+// path or a source label); widen only once a real one does not.
+var assistantDiagnosticsIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+
+// validateAssistantDiagnosticsIdentifier checks value (a get_last_recorded
+// path_prefix or source argument) against
+// assistantDiagnosticsIdentifierPattern, naming which argument failed. An
+// empty value always passes - both arguments are optional; the "at least one
+// of the two" rule is enforced separately by buildInfluxLastRecordedFlux and
+// executeGetLastRecorded.
+func validateAssistantDiagnosticsIdentifier(label, value string) error {
+	if value == "" {
+		return nil
+	}
+	if !assistantDiagnosticsIdentifierPattern.MatchString(value) {
+		return fmt.Errorf("%s %q contains characters not valid in a SignalK path or source label", label, value)
+	}
+	return nil
+}
+
+// buildInfluxLastRecordedFlux builds queryInfluxLastRecorded's Flux query
+// text, pulled out as its own pure function for the same reason
+// buildInfluxPathStatFlux is: unit-testable string construction and escaping
+// with no live InfluxDB connection required. At least one of pathPrefix/
+// source must be non-empty, and both must pass
+// assistantDiagnosticsIdentifierPattern before being turned into an anchored
+// regex literal (=~ /^.../), since both can carry model-chosen text.
+//
+// A regex, not strings.hasPrefix: hasPrefix cannot be pushed down to
+// InfluxDB's storage engine, so a broad filter like source "YachtDevices"
+// over a 30-180 day lookback would materialise and scan every point in the
+// bucket in Flux's own execution engine, risking this query's own timeout
+// (a code-review finding, 2026-09-25). An anchored regex comparison against
+// a tag (=~ /^prefix/) DOES push down. regexp.QuoteMeta on the
+// already-allowlisted value is still required even though the input is
+// already restricted to a safe charset: '.' is itself a regex metacharacter
+// (matches any character), so an unescaped "tanks.fuel" would match
+// "tanksXfuel" too, not just a genuine dotted prefix.
+func buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source string, lookbackDays int) (string, error) {
+	if pathPrefix == "" && source == "" {
+		return "", fmt.Errorf("path_prefix or source is required")
+	}
+	if err := validateAssistantDiagnosticsIdentifier("path_prefix", pathPrefix); err != nil {
+		return "", err
+	}
+	if err := validateAssistantDiagnosticsIdentifier("source", source); err != nil {
+		return "", err
+	}
+
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filters := []string{fmt.Sprintf("r._field == %s", fieldLiteral)}
+	if pathPrefix != "" {
+		filters = append(filters, fmt.Sprintf("r._measurement =~ /^%s/", regexp.QuoteMeta(pathPrefix)))
+	}
+	if source != "" {
+		filters = append(filters, fmt.Sprintf("(exists r.source and r.source =~ /^%s/)", regexp.QuoteMeta(source)))
+	}
+
+	// last() runs twice, deliberately. The first, right after filter(), runs
+	// once per raw series (each series being one full underlying tag set,
+	// e.g. distinguished by a context tag this query does not group on) and
+	// pushes down to storage - InfluxDB can answer "the last point of each
+	// series" cheaply. group(columns: ["_measurement", "source"]) then
+	// regroups those already-reduced rows by measurement+source alone,
+	// combining rows from what may be several distinct raw series into one
+	// new table - in whatever order Flux happens to concatenate them, not
+	// necessarily chronological. Taking last() there without sorting first
+	// could return whichever series Flux processed last, not the
+	// actually-newest point (a code-review finding, 2026-09-25); sort(columns:
+	// ["_time"]) orders that combined table chronologically first, so the
+	// second last() is the genuine most-recent point.
+	return fmt.Sprintf(
+		"from(bucket: %s)\n"+
+			"  |> range(start: -%dd)\n"+
+			"  |> filter(fn: (r) => %s)\n"+
+			"  |> last()\n"+
+			"  |> group(columns: [\"_measurement\", \"source\"])\n"+
+			"  |> sort(columns: [\"_time\"])\n"+
+			"  |> last()\n"+
+			"  |> keep(columns: [\"_measurement\", \"source\", \"_time\", \"_value\"])",
+		bucketLiteral, lookbackDays, strings.Join(filters, " and "),
+	), nil
 }
 
 // influxTrendResolution keeps a long window from returning thousands of points

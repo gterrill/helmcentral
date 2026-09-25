@@ -39,6 +39,15 @@ export interface AnchorWatchResult {
   distanceMeters: number | null
   bearingDeg: number | null
   setAt: string | null
+  /** True once the first GET /api/anchor-watch has resolved successfully.
+   * Until then, `setAt: null` is ambiguous — it means either "no watch is
+   * running" or "we haven't heard back yet" — and a caller that treats
+   * those the same (e.g. discarding a stored map centre because "there's no
+   * anchor") is acting on data it doesn't have. Only flips true on a
+   * successful response; a failed or errored poll leaves it false and lets
+   * the next poll retry, rather than masking the failure by treating
+   * "attempted" as "confirmed". */
+  loaded: boolean
   bowOffsetM: number
   bowOffsetApplied: boolean
   bowOffsetReason: string
@@ -85,6 +94,10 @@ export function useAnchorWatch(
   gnssCritical = false,
 ): AnchorWatchResult {
   const [serverState, setServerState] = useState<AnchorWatchServerState>({ active: false })
+  // Only ever set true, and only on a genuine successful response — see the
+  // `loaded` doc comment above for why a failed/errored poll must leave this
+  // false rather than a fallback that reads "attempted" as "confirmed".
+  const [loaded, setLoaded] = useState(false)
 
   const fetchState = useCallback(async () => {
     try {
@@ -92,6 +105,7 @@ export function useAnchorWatch(
       if (!res.ok) return
       const data = (await res.json()) as AnchorWatchServerState
       setServerState(data)
+      setLoaded(true)
     } catch {
       // silently retain last known state
     }
@@ -313,6 +327,7 @@ export function useAnchorWatch(
     distanceMeters,
     bearingDeg,
     setAt,
+    loaded,
     bowOffsetM,
     bowOffsetApplied,
     bowOffsetReason,
@@ -327,7 +342,7 @@ export function useAnchorWatch(
     clearAnchor,
   }), [
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
-    seaState, seabedType, distanceMeters, bearingDeg, setAt, bowOffsetM, lastAutoRaise,
+    seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
     setAnchorHere, updatePosition, updateRadius, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,

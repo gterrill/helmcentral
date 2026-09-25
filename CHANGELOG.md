@@ -19,6 +19,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
 
+## [0.32.0] - 2026-09-25
+
 ### Added
 
 - Anomaly detection: three new alarm checks. A frozen, impossible or newly
@@ -34,6 +36,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Mate can now answer questions about nearby vessels: who is around, how
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.
+- Mate can now diagnose missing or stale vessel telemetry itself: ask "is the
+  depth reading working" or "when did the tank levels stop updating" and it
+  checks the live instrument connection and, with a history log configured
+  for the boat, finds the last recorded time for a reading and names the
+  specific feed that went quiet, instead of pointing you at the SignalK
+  admin console.
 - The Wind tile (previously "Apparent Wind") adds two toggles: switch the
   reading between apparent and true wind, and switch the compass between
   Course Up, which turns with your heading, and North Up, which holds true
@@ -51,6 +59,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - In Course Up, the Wind tile's set arrow now points relative to the bow,
   matching the compass beside it; before, it always pointed as if North Up.
+- The rode planner's Depth field now shows the figure the plan is actually
+  computed against: depth at this spot at the next high tide, plus bow
+  roller height. Before, it showed the bare sounder reading labelled "Tide
+  adjusted", though the recommended rode already allowed for the tide.
+  Typing over it still overrides the plan, and a figure with no water left
+  once tide and bow height are backed out is refused rather than saved.
+- The Anchor Watch tile on a dashboard page no longer moves the anchor or
+  resizes the swing radius when you touch its map. Adjust both from the
+  Anchor Watch page.
+- The anchor watch map now opens on the boat when no anchor is set, instead
+  of the last anchorage.
 
 ## [0.31.0] - 2026-09-25
 
@@ -192,7 +211,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/gterrill/helmcentral/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/gterrill/helmcentral/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/gterrill/helmcentral/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/gterrill/helmcentral/compare/v0.28.0...v0.29.0

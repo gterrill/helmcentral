@@ -151,6 +151,59 @@ function planningDepthWithTide(datum: PlanningDepthDatum, tide: TideToday | null
     : { planningDepthM: datum.depthM, tideCorrected: false }
 }
 
+/**
+ * The figure the Depth field displays and lets the operator type over (ADR
+ * 0063's amendment): depth at the current location at the next high tide,
+ * plus bow roller height — depth-from-hawse at high water. This is *not*
+ * what the rest of the module plans against internally (planningDepthWithTide
+ * omits the bow height, and buildRodePlan adds it separately as
+ * depthFromHawseM) — it exists purely as the operator-facing figure, with
+ * rawDepthFromPlanningFigureM below as its exact inverse so typing over it
+ * round-trips without compounding the tide correction.
+ *
+ * null only when the datum itself is null (nothing recorded/no live
+ * reading) — the same "fail visibly, no fallback" rule every other
+ * datum-shaped function in this module follows.
+ */
+export function planningFigureM(datum: PlanningDepthDatum | null, tide: TideToday | null, bowRollerHeightM: number): number | null {
+  if (datum === null) return null
+  return (maxExpectedDepthM(datum, tide) ?? datum.depthM) + bowRollerHeightM
+}
+
+/**
+ * The exact inverse of planningFigureM, used to turn a typed Depth-field
+ * figure back into the raw depth that gets persisted (ADR 0063's pair rule:
+ * a depth is stored with the tide height at the moment it was read). Seeding
+ * the input with the corrected figure and then storing the typed value as
+ * raw would feed the rise back in and compound it on every render — this
+ * function is the fix: it subtracts bow height and the same rise
+ * planningFigureM would have added, so a persisted datum stamped with
+ * `tideNowFt` reads back through planningFigureM to the figure the operator
+ * typed.
+ *
+ * The rise is computed by asking maxExpectedDepthM for the rise alone: a
+ * zero-depth datum stamped with `tideNowFt` (the tide at the moment of
+ * typing, i.e. what the persisted datum will itself carry) returns exactly
+ * the rise, or null under precisely the conditions planningFigureM's own
+ * call falls back to zero rise — reusing that function rather than
+ * re-deriving the null ladder keeps the two in lockstep by construction.
+ *
+ * Returns null when the typed figure doesn't clear bow height plus the tide
+ * rise — a raw depth of zero or less isn't a sensible reading, and this is
+ * the fail-visibly signal the caller uses to refuse the persist rather than
+ * storing a nonsensical number.
+ */
+export function rawDepthFromPlanningFigureM(
+  figureM: number,
+  tideNowFt: number | null,
+  tide: TideToday | null,
+  bowRollerHeightM: number,
+): number | null {
+  const riseM = maxExpectedDepthM({ depthM: 0, tideHeightFt: tideNowFt }, tide) ?? 0
+  const rawDepthM = figureM - bowRollerHeightM - riseM
+  return rawDepthM > 0 ? rawDepthM : null
+}
+
 /** The division inlined in the old tile: current rode over depth-from-hawse. */
 export function scopeRatio(rodeM: number, depthFromHawseM: number): number | null {
   if (depthFromHawseM <= 0) return null

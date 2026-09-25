@@ -198,24 +198,26 @@ describe('useVesselState true wind', () => {
 })
 
 // ADR 0129: the Current Conditions tile's true-wind readout. windSpeedTrueKts/
-// windDirectionTrueDeg/maxTrueWindKts1h follow the same -1-sentinel-becomes-null
-// contract every other sentinel-bearing field in this hook already follows
-// (see windSpeedApparentKts above), so a boat with no true-wind source reads
-// as null, never a fabricated 0.
+// windDirectionTrueDeg follow the same -1-sentinel-becomes-null contract
+// every other sentinel-bearing field in this hook already follows (see
+// windSpeedApparentKts above), so a boat with no true-wind source reads as
+// null, never a fabricated 0. The tile's "obs" marker no longer has its own
+// field here - it reads maxGustTrueKts['1h'] instead (a code-review finding,
+// 2026-09-25: a separate max_true_wind_kts_1h field could disagree with the
+// Wind tile's own ladder), covered by the 'useVesselState maxGustTrueKts
+// identity' tests below rather than duplicated here.
 describe('useVesselState true wind fields', () => {
-  it('parses windSpeedTrueKts, windDirectionTrueDeg and maxTrueWindKts1h when present', () => {
+  it('parses windSpeedTrueKts and windDirectionTrueDeg when present', () => {
     const { result } = renderHook(() => useVesselState())
 
     emit({
       ...basePayload,
       wind_speed_true_kts: 13.4,
       wind_direction_true_deg: 126,
-      max_true_wind_kts_1h: 15.9,
     })
 
     expect(result.current.windSpeedTrueKts).toBe(13.4)
     expect(result.current.windDirectionTrueDeg).toBe(126)
-    expect(result.current.maxTrueWindKts1h).toBe(15.9)
   })
 
   it('reads the -1 sentinel as null rather than a negative reading, and never falls back to apparent', () => {
@@ -226,12 +228,10 @@ describe('useVesselState true wind fields', () => {
       wind_speed_apparent_kts: 9.5,
       wind_speed_true_kts: -1,
       wind_direction_true_deg: -1,
-      max_true_wind_kts_1h: -1,
     })
 
     expect(result.current.windSpeedTrueKts).toBeNull()
     expect(result.current.windDirectionTrueDeg).toBeNull()
-    expect(result.current.maxTrueWindKts1h).toBeNull()
   })
 
   it('starts null before any event arrives', () => {
@@ -239,6 +239,5 @@ describe('useVesselState true wind fields', () => {
 
     expect(result.current.windSpeedTrueKts).toBeNull()
     expect(result.current.windDirectionTrueDeg).toBeNull()
-    expect(result.current.maxTrueWindKts1h).toBeNull()
   })
 })

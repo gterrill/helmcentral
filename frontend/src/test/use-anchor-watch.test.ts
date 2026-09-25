@@ -322,3 +322,53 @@ describe('useAnchorWatch memoized result', () => {
     expect(result.current.distanceMeters).not.toBe(first.distanceMeters)
   })
 })
+
+// `loaded` disambiguates setAt/anchorLat being null for "no watch is
+// running" from "the first GET hasn't answered yet" — AnchorWatchMap uses it
+// to decide whether a stored map centre from a past anchorage should still
+// be discarded (anchor-session-recenter.test.tsx covers that consumer).
+describe('useAnchorWatch loaded', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('starts false and flips true once the first GET resolves successfully', async () => {
+    let resolveFetch!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise((resolve) => { resolveFetch = resolve })))
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    expect(result.current.loaded).toBe(false)
+
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({ active: false }) })
+      await Promise.resolve()
+    })
+
+    expect(result.current.loaded).toBe(true)
+  })
+
+  // Fallback policy: a failed/errored poll must not be mistaken for a
+  // confirmed "no watch" — that would be exactly the fallback that hides a
+  // real fetch failure by reading "attempted" as "resolved". The next poll
+  // (the idle-cadence interval, already covered on its own by the "poll
+  // cadence" describe block above) is what actually gets a fresh try.
+  it.each([
+    ['a non-ok response', () => Promise.resolve({ ok: false, status: 502, json: async () => ({}) })],
+    ['a network error', () => Promise.reject(new Error('Connection lost'))],
+  ])('stays false after %s, and a later successful retry still flips it true', async (_label, failingFetch) => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockImplementationOnce(failingFetch)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.loaded).toBe(false)
+
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ active: false }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(ANCHOR_WATCH_IDLE_REFRESH_SECONDS * 1000) })
+
+    expect(result.current.loaded).toBe(true)
+
+    vi.useRealTimers()
+  })
+})

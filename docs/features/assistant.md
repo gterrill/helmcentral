@@ -85,6 +85,20 @@ boats leave this off - Mate reads that vessel's own track and gives a
 tighter answer for how long it has actually been sitting at its current
 spot.
 
+If a reading looks wrong - missing, stuck on one value, or just not there
+where you'd expect it on a tile - ask Mate before you go hunting for it
+yourself. It checks the live instrument connection directly: whether it's up
+at all, which feeds are currently updating and which have gone quiet, and
+the value and age of anything you name. Ask "why is the exhaust temperature
+not showing" or "is the depth reading working" and it answers from that
+check rather than guessing. With a history log configured for the boat, it
+goes further: ask "when did the tank levels stop updating" and it finds the
+last recorded time for each one, names the specific feed behind it if that
+feed has gone quiet, and can pull up what a reading was doing in the run-up
+to when it stopped - flat-lined, dropping in and out, or just gone. Without
+a history log configured, Mate can still tell you what's live right now; it
+just can't look further back than that.
+
 Mate also knows two things about the app itself: what you're looking at when
 you ask, and how Helmcentral's own features work. A question asked from the
 sheet over the Forecast panel arrives with that noted, so "explain how the

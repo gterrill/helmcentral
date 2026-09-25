@@ -1308,6 +1308,15 @@ func TestExecuteGetNearbyVessels_MaxResultsDefaultAndClamp(t *testing.T) {
 	if len(result.Vessels) != 10 {
 		t.Fatalf("expected the default max_results=10, got %d", len(result.Vessels))
 	}
+	// A code-review finding (2026-09-25): cutting 15 matches down to the
+	// default 10 used to leave truncated=false and no note at all -
+	// indistinguishable from "these are the only 10 vessels in range."
+	if !result.Truncated {
+		t.Fatalf("expected truncated=true once max_results(10) cuts 15 matched vessels down")
+	}
+	if !strings.Contains(result.Note, "15") || !strings.Contains(result.Note, "10") {
+		t.Fatalf("expected the note to name both the total matched (15) and the shown count (10), got %q", result.Note)
+	}
 
 	// max_results above the 25 ceiling clamps to 25 (only 15 live, so this
 	// also confirms the ceiling doesn't truncate below what's available).
@@ -1315,11 +1324,18 @@ func TestExecuteGetNearbyVessels_MaxResultsDefaultAndClamp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute (clamped): %v", err)
 	}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	// A fresh result, not a reuse of the one above: Truncated is
+	// `omitempty`, so unmarshalling a false value into an already-true
+	// field would silently leave the stale true in place.
+	var clampedResult assistantGetNearbyVesselsResult
+	if err := json.Unmarshal([]byte(raw), &clampedResult); err != nil {
 		t.Fatalf("unmarshal (clamped): %v", err)
 	}
-	if len(result.Vessels) != 15 {
-		t.Fatalf("expected all 15 live vessels once max_results is clamped to 25, got %d", len(result.Vessels))
+	if len(clampedResult.Vessels) != 15 {
+		t.Fatalf("expected all 15 live vessels once max_results is clamped to 25, got %d", len(clampedResult.Vessels))
+	}
+	if clampedResult.Truncated {
+		t.Fatalf("expected truncated=false when every matched vessel fits under max_results")
 	}
 }
 
@@ -1660,6 +1676,50 @@ func TestExecuteGetNearbyVessels_DuplicateMMSIOnlyAttachesMatchingVesselsHistory
 	}
 }
 
+// TestExecuteGetNearbyVessels_PlaceholderStoredNameIsNotTreatedAsAMismatch is
+// the direct regression test for a code-review finding (2026-09-25): the
+// same-MMSI name guard above discarded a vessel's ENTIRE sighting history
+// whenever the name recorded at encounter start differs from the live
+// vessel's current name - which is the ordinary case, not the rare fault
+// the guard exists for. recordNearbyVesselContacts (tracks.go) falls back to
+// compactVesselID - the MMSI itself - as a vessel's Name when its AIS static
+// data (the real name) has not arrived by the time the sighting log's
+// 5-minute confirmation dwell elapses; the real name often arrives only
+// afterward, on the SAME continuous encounter. A stored name that is just
+// the vessel_key must not disqualify what is otherwise an exact MMSI match.
+func TestExecuteGetNearbyVessels_PlaceholderStoredNameIsNotTreatedAsAMismatch(t *testing.T) {
+	vesselLat, vesselLon := -20.10, 149.10
+	store := newTestNearbyContactStore(t)
+	seenAt := time.Date(2026, 9, 24, 6, 30, 0, 0, time.UTC)
+	// The row was written before AIS static data had arrived, so its Name
+	// is the placeholder compactVesselID falls back to: the MMSI itself.
+	if err := store.recordContactIfNew("234567890", "234567890", -20.2, 149.2, "Nara Inlet", "anchored", seenAt, seenAt); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	// By the time get_nearby_vessels runs, AIS static data has arrived and
+	// the live target now reports its real name.
+	live := []nearbyVessel{{Name: "HOT CHILLI", Mmsi: "234567890", RangeM: 500, Lat: vesselLat, Lon: vesselLon}}
+	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
+	deps.contacts = func() *nearbyContactStore { return store }
+
+	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetNearbyVesselsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(result.Vessels) != 1 {
+		t.Fatalf("expected 1 vessel, got %d: %+v", len(result.Vessels), result.Vessels)
+	}
+	v := result.Vessels[0]
+	if v.InRangeSince == nil {
+		t.Fatalf("expected in_range_since to still be populated: a placeholder stored name (the MMSI itself) must not be treated as a mismatch against the vessel's later-arrived real name")
+	}
+}
+
 // TestExecuteGetNearbyVessels_PastSightingsIncludedWithNameDefault confirms
 // include_history defaults to true when name is given: past_sightings
 // carries the vessel's prior (non-current) encounters.
@@ -1958,7 +2018,10 @@ func TestComputeStationarySince_SwingingOnMooringNeverTriggersFalseMovement(t *t
 		points = append(points, signalKHistoryPoint{Time: base.Add(time.Duration(i) * time.Hour), Lat: p.lat, Lon: p.lon})
 	}
 
-	got := computeStationarySince(points)
+	got, stationary := computeStationarySince(points)
+	if !stationary {
+		t.Fatalf("expected mooring swing to still be reported as stationary, got stationary=false")
+	}
 	if !got.Equal(points[0].Time) {
 		t.Fatalf("expected mooring swing (never %d consecutive far points) to report stationary since the oldest point (%s), got %s", assistantStationaryConsecutiveOutliers, points[0].Time, got)
 	}
@@ -1985,7 +2048,10 @@ func TestComputeStationarySince_SingleOutlierAtLatestFixIgnored(t *testing.T) {
 		{Time: base.Add(4 * time.Hour), Lat: glitchLat, Lon: glitchLon}, // the latest fix
 	}
 
-	got := computeStationarySince(points)
+	got, stationary := computeStationarySince(points)
+	if !stationary {
+		t.Fatalf("expected a single noisy latest fix still to be reported as stationary, got stationary=false")
+	}
 	if !got.Equal(points[0].Time) {
 		t.Fatalf("expected a single noisy latest fix not to be mistaken for a real move, got stationary_since=%s want=%s", got, points[0].Time)
 	}
@@ -2006,7 +2072,10 @@ func TestComputeStationarySince_GenuineMoveIsDetected(t *testing.T) {
 		{Time: base.Add(5 * time.Hour), Lat: -20.2000, Lon: 149.2000},
 	}
 
-	got := computeStationarySince(points)
+	got, stationary := computeStationarySince(points)
+	if !stationary {
+		t.Fatalf("expected the vessel to be reported as stationary once settled, got stationary=false")
+	}
 	want := base.Add(3 * time.Hour)
 	if !got.Equal(want) {
 		t.Fatalf("expected stationary_since=%s (first point after the 3 consecutive far points), got %s", want, got)
@@ -2024,9 +2093,124 @@ func TestComputeStationarySince_UnsortedInputIsSortedFirst(t *testing.T) {
 	}
 	shuffled := []signalKHistoryPoint{inOrder[2], inOrder[0], inOrder[1]}
 
-	got := computeStationarySince(shuffled)
+	got, stationary := computeStationarySince(shuffled)
+	if !stationary {
+		t.Fatalf("expected a tightly-clustered history to be reported as stationary, got stationary=false")
+	}
 	if !got.Equal(inOrder[0].Time) {
 		t.Fatalf("expected the oldest point's time (%s) regardless of input order, got %s", inOrder[0].Time, got)
+	}
+}
+
+// TestComputeStationarySince_ContinuousMotionNeverReportsFalseStationary is
+// the direct regression test for a code-review finding (2026-09-25):
+// computeStationarySince took the median of the most recent
+// assistantStationaryCentreWindow points as "current position" without ever
+// confirming the vessel is STILL there, so a vessel continuously under way
+// in a roughly straight line got a false, recent stationary_since. The
+// points below are evenly spaced along a line, each ~1.4km from the next -
+// far more than assistantStationaryThresholdMeters - so the window's own
+// median lands almost exactly on the middle sample (w[2] of the 5-point
+// window) purely because the path is linear and the window length is odd:
+// the exact coincidence the previous version mistook for "arrived here."
+func TestComputeStationarySince_ContinuousMotionNeverReportsFalseStationary(t *testing.T) {
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	points := []signalKHistoryPoint{
+		{Time: base, Lat: -20.20, Lon: 149.20},
+		{Time: base.Add(10 * time.Minute), Lat: -20.19, Lon: 149.21},
+		{Time: base.Add(20 * time.Minute), Lat: -20.18, Lon: 149.22},
+		{Time: base.Add(30 * time.Minute), Lat: -20.17, Lon: 149.23},
+		{Time: base.Add(40 * time.Minute), Lat: -20.16, Lon: 149.24},
+	}
+
+	_, stationary := computeStationarySince(points)
+	if stationary {
+		t.Fatalf("expected a vessel continuously under way in a straight line never to be reported as stationary")
+	}
+}
+
+// TestExecuteGetNearbyVessels_UnderWayVesselIsNotReportedStationary is
+// TestComputeStationarySince_ContinuousMotionNeverReportsFalseStationary's
+// end-to-end counterpart through get_nearby_vessels: a vessel under way
+// gets position_history="under way - not currently stationary", never a
+// stationary_since.
+func TestExecuteGetNearbyVessels_UnderWayVesselIsNotReportedStationary(t *testing.T) {
+	vesselLat, vesselLon := -20.10, 149.10
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	points := []signalKHistoryPoint{
+		{Time: base, Lat: -20.20, Lon: 149.20},
+		{Time: base.Add(10 * time.Minute), Lat: -20.19, Lon: 149.21},
+		{Time: base.Add(20 * time.Minute), Lat: -20.18, Lon: 149.22},
+		{Time: base.Add(30 * time.Minute), Lat: -20.17, Lon: 149.23},
+		{Time: base.Add(40 * time.Minute), Lat: -20.16, Lon: 149.24},
+	}
+
+	live := []nearbyVessel{{Name: "HOT CHILLI", Mmsi: "234567890", RangeM: 500, Lat: vesselLat, Lon: vesselLon}}
+	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
+	deps.signalKPositionHistory = func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
+		return points, nil
+	}
+
+	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetNearbyVesselsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	v := result.Vessels[0]
+	if v.StationarySince != nil {
+		t.Fatalf("expected no stationary_since for a vessel under way, got %s", *v.StationarySince)
+	}
+	if v.PositionHistory != "under way - not currently stationary" {
+		t.Fatalf(`expected position_history="under way - not currently stationary", got %q`, v.PositionHistory)
+	}
+}
+
+// TestExecuteGetNearbyVessels_JustArrivedVesselIsReportedStationarySinceArrival
+// is the "just arrived" counterpart: a genuine relocation (3+ consecutive
+// far points) immediately followed by the vessel settling, checked right at
+// the edge of the position-history window rather than hours into the settled
+// period (TestExecuteGetNearbyVessels_StationarySinceWalksBackToLastMovement
+// already covers that case) - confirming the new "is it still there"
+// check (computeStationarySince's recentFar guard) does not itself demand
+// more settled samples than the existing consecutive-outliers rule already
+// requires.
+func TestExecuteGetNearbyVessels_JustArrivedVesselIsReportedStationarySinceArrival(t *testing.T) {
+	vesselLat, vesselLon := -20.10, 149.10
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	arrived := base.Add(30 * time.Minute)
+	points := []signalKHistoryPoint{
+		{Time: base, Lat: -19.0, Lon: 148.0},
+		{Time: base.Add(10 * time.Minute), Lat: -19.001, Lon: 148.001},
+		{Time: base.Add(20 * time.Minute), Lat: -19.002, Lon: 148.002},
+		{Time: arrived, Lat: -20.20, Lon: 149.20},
+		{Time: arrived.Add(10 * time.Minute), Lat: -20.2001, Lon: 149.2001},
+		{Time: arrived.Add(20 * time.Minute), Lat: -20.2000, Lon: 149.2000},
+	}
+
+	live := []nearbyVessel{{Name: "HOT CHILLI", Mmsi: "234567890", RangeM: 500, Lat: vesselLat, Lon: vesselLon}}
+	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
+	deps.signalKPositionHistory = func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
+		return points, nil
+	}
+
+	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetNearbyVesselsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	v := result.Vessels[0]
+	if v.StationarySince == nil {
+		t.Fatalf("expected stationary_since to be set for a vessel that has genuinely just arrived and settled")
+	}
+	want := arrived.UTC().Format(time.RFC3339)
+	if *v.StationarySince != want {
+		t.Fatalf("expected stationary_since=%s (the moment it arrived), got %s", want, *v.StationarySince)
 	}
 }
 
@@ -2241,10 +2425,10 @@ func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRi
 	t.Fatal("get_nearby_vessels tool definition not found")
 }
 
-func TestAssistantToolDefinitions_EightToolsIncludingNearbyVessels(t *testing.T) {
+func TestAssistantToolDefinitions_ElevenToolsIncludingDiagnostics(t *testing.T) {
 	tools := assistantToolDefinitions()
-	if len(tools) != 8 {
-		t.Fatalf("expected 8 tool definitions, got %d: %+v", len(tools), tools)
+	if len(tools) != 11 {
+		t.Fatalf("expected 11 tool definitions, got %d: %+v", len(tools), tools)
 	}
 
 	var names []string
@@ -2254,6 +2438,7 @@ func TestAssistantToolDefinitions_EightToolsIncludingNearbyVessels(t *testing.T)
 	for _, want := range []string{
 		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_help",
 		"search_documents", "read_document", "get_nearby_vessels",
+		"check_signalk_paths", "get_last_recorded", "get_path_history",
 	} {
 		found := false
 		for _, name := range names {
