@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-26
+
 ### Breaking
 
 - **House bank capacity moved.** The Overnight electrical estimate no
@@ -18,37 +20,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the house bank you pick under Settings → Vessel → Power. Re-enter your
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
-- **Anchor watch now survives an update.** On a Docker install, updating
-  cleared a running anchor watch and its marks without warning. The watch
-  now lives with the rest of your saved settings. On any install, Docker or
-  not, this upgrade drops a running anchor watch one last time: drop the
-  anchor again once you're on the new version. From here on, the watch and
-  its marks survive updates and restarts. If the saved watch is ever damaged
-  and can't be read back, the Anchor Watch tile and page now say so plainly
-  instead of guessing at a position — the rest of the boat's alarms are
-  unaffected, and dropping the anchor again starts a fresh watch.
-
-### Changed
-
-- The anchor alarm radius is now set with − / + buttons on the Anchor Watch
-  page, next to the radius reading, or by choosing Apply as alarm radius in
-  the rode planner. Dragging the swing circle's edge and dragging the anchor
-  marker are gone until a later release brings back moving the anchor.
-
-### Fixed
-
-- When a question needs many lookups (for example, tracing when several
-  instrument feeds went quiet), Mate now answers from what it found instead
-  of stopping with "did not produce an answer," and says plainly what it
-  wasn't able to check.
-- Tapping or panning the anchor watch map no longer changes the alarm radius
-  or moves the anchor.
-- The anchor watch map now opens with the whole swing circle in view, instead
-  of it being hidden under the anchor marker at some radii.
-- A failed alarm-radius change now says so and offers Retry, instead of
-  silently doing nothing.
-
-## [0.32.0] - 2026-09-25
+- **Drop the anchor again after upgrading.** On a Docker install, updating
+  used to clear a running anchor watch and its marks without warning. The
+  watch now lives with the rest of your saved settings, so from here on it
+  survives updates and restarts. This upgrade clears a running watch one
+  last time, on any install: drop the anchor again once you're on the new
+  version. If the saved watch is ever damaged and can't be read back, the
+  Anchor Watch tile and page say so plainly instead of guessing at a
+  position. The rest of the boat's alarms keep running, and dropping the
+  anchor again starts a fresh watch.
 
 ### Added
 
@@ -62,6 +42,34 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   [Anomaly detection](https://github.com/gterrill/helmcentral/blob/main/docs/features/anomaly-detection.md)
   and
   [Set up your vessel](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/set-up-your-vessel.md).
+
+### Changed
+
+- The anchor alarm radius is now set with − / + buttons on the Anchor Watch
+  page, next to the radius reading, or by choosing Apply as alarm radius in
+  the rode planner. A change that fails says why, and offers Retry when
+  trying again could work. Dragging the swing circle's edge and dragging the
+  anchor marker are gone until a later release brings back moving the
+  anchor.
+
+### Fixed
+
+- When a question needs many lookups (for example, tracing when several
+  instrument feeds went quiet), Mate now answers from what it found instead
+  of stopping with "did not produce an answer," and says plainly what it
+  wasn't able to check.
+- Tapping or panning the anchor watch map, on the Anchor Watch page or on a
+  dashboard tile, no longer changes the alarm radius or moves the anchor.
+- The anchor watch map now opens with the whole swing circle in view,
+  instead of it being hidden under the anchor marker at some radii, and
+  opens on the boat when no anchor is set, instead of the last anchorage.
+- A rode planner change that fails to save now goes back to the saved value
+  and says so, instead of showing a figure the boat never stored.
+
+## [0.32.0] - 2026-09-25
+
+### Added
+
 - Mate can now answer questions about nearby vessels: who is around, how
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.
@@ -94,11 +102,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   adjusted", though the recommended rode already allowed for the tide.
   Typing over it still overrides the plan, and a figure with no water left
   once tide and bow height are backed out is refused rather than saved.
-- The Anchor Watch tile on a dashboard page no longer moves the anchor or
-  resizes the swing radius when you touch its map. Adjust both from the
-  Anchor Watch page.
-- The anchor watch map now opens on the boat when no anchor is set, instead
-  of the last anchorage.
 
 ## [0.31.0] - 2026-09-25
 
@@ -240,7 +243,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/gterrill/helmcentral/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/gterrill/helmcentral/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/gterrill/helmcentral/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/gterrill/helmcentral/compare/v0.29.0...v0.30.0
