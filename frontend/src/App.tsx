@@ -2912,6 +2912,7 @@ export function App() {
               bowOffsetReason={anchorWatch.bowOffsetReason}
               anchorSetAt={anchorWatch.setAt}
               anchorStateKnown={anchorWatch.loaded}
+              error={anchorWatch.error}
               vesselTrail={getSelfTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}

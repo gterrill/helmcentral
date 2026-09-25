@@ -440,3 +440,58 @@ describe('useAnchorWatch loaded', () => {
     vi.useRealTimers()
   })
 })
+
+// The backend puts a damaged anchor_watch.json into an explicit error state
+// rather than an invented or empty watch: GET /api/anchor-watch reports it as
+// an `error` string naming the file path and the parse error, alongside
+// active: false. This hook must pass that straight through so the tile and
+// the drawer can show it, and must not confuse it with the ordinary "no
+// watch is set" case that also has active: false but no error.
+describe('useAnchorWatch error', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('surfaces the server error field once the GET resolves', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: false, error: 'parsing anchor watch state (data/anchor_watch.json): unexpected end of JSON input' }),
+    }))
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.error).toBe('parsing anchor watch state (data/anchor_watch.json): unexpected end of JSON input')
+    expect(result.current.anchorState).toBe('none')
+  })
+
+  it('is null for the ordinary no-watch-set response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: false }),
+    }))
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.error).toBeNull()
+  })
+
+  it('is null once a later successful poll reports an active watch', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ active: false, error: 'parsing anchor watch state (data/anchor_watch.json): boom' }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20 }) })
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.error).toBe('parsing anchor watch state (data/anchor_watch.json): boom')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(ANCHOR_WATCH_IDLE_REFRESH_SECONDS * 1000) })
+    expect(result.current.error).toBeNull()
+    expect(result.current.anchorState).toBe('set')
+
+    vi.useRealTimers()
+  })
+})

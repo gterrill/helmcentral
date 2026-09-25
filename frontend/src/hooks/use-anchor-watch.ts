@@ -9,6 +9,11 @@ export type AnchorWatchState = 'none' | 'set' | 'dragging'
 
 interface AnchorWatchServerState {
   active: boolean
+  // Set instead of lat/lon/radius_meters etc. when the persisted watch could
+  // not be loaded (a damaged anchor_watch.json) — never alongside them, and
+  // never invented lat/lon in that case. Names the file path and the parse
+  // error (backend/anchor_watch_load_error.go).
+  error?: string
   lat?: number
   lon?: number
   radius_meters?: number
@@ -48,6 +53,12 @@ export interface AnchorWatchResult {
    * the next poll retry, rather than masking the failure by treating
    * "attempted" as "confirmed". */
   loaded: boolean
+  /** The persisted anchor watch couldn't be read back (a damaged
+   * anchor_watch.json) — the backend's own explicit error state, naming the
+   * file path and the parse error, never an invented or empty watch in its
+   * place. Null in the ordinary "no watch is set" case, which also has
+   * anchorState 'none' but carries no error. */
+  error: string | null
   bowOffsetM: number
   bowOffsetApplied: boolean
   bowOffsetReason: string
@@ -284,6 +295,11 @@ export function useAnchorWatch(
     }
   }
 
+  // Not gated on serverState.active — it never is true alongside an error —
+  // but explicitly typeof-checked so a stray non-string value from a future
+  // backend change can't leak through as a truthy, unrenderable object.
+  const error = typeof serverState.error === 'string' ? serverState.error : null
+
   const setAt = serverState.active && serverState.set_at ? serverState.set_at : null
   const bowOffsetM = serverState.active && typeof serverState.bow_offset_m === 'number' ? serverState.bow_offset_m : 0
   const bowOffsetApplied = serverState.active ? Boolean(serverState.bow_offset_applied) : false
@@ -329,6 +345,7 @@ export function useAnchorWatch(
     bearingDeg,
     setAt,
     loaded,
+    error,
     bowOffsetM,
     bowOffsetApplied,
     bowOffsetReason,
@@ -343,7 +360,7 @@ export function useAnchorWatch(
     clearAnchor,
   }), [
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
-    seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, bowOffsetM, lastAutoRaise,
+    seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, error, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
     setAnchorHere, updatePosition, updateRadius, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,
