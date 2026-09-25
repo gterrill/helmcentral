@@ -417,6 +417,37 @@ describe('WindTile orientation', () => {
   })
 })
 
+// Coordinator fix (2026-09-25): the SET card's arrow used to rotate by the
+// current's absolute compass bearing in both orientations. That's only
+// correct in North Up, where true north holds the ring's 12 o'clock. In
+// Course Up the ring (and the bow beside it) turns with heading, so the
+// arrow has to be bow-relative - normalize(set - heading) - or it points as
+// if North Up regardless of which mode is active.
+describe('WindTile SET arrow orientation', () => {
+  test('course-up rotates the set arrow relative to the bow: normalize(set - heading)', () => {
+    render(<WindTile {...baseProps} headingTrue={90} currentSetDeg={0} currentDriftKts={1.5} />)
+
+    const arrow = screen.getAllByTestId('wind-set-arrow')[0]
+    expect(arrow).toHaveStyle({ transform: 'rotate(270deg)' })
+  })
+
+  test('north-up rotates the set arrow by the absolute compass bearing, ignoring heading', () => {
+    render(<WindTile {...baseProps} headingTrue={90} currentSetDeg={0} currentDriftKts={1.5} />)
+
+    fireEvent.click(getOrientationToggle())
+
+    const arrow = screen.getAllByTestId('wind-set-arrow')[0]
+    expect(arrow).toHaveStyle({ transform: 'rotate(0deg)' })
+  })
+
+  test('course-up with no heading hides the set arrow rather than guessing, but keeps the degree readout', () => {
+    render(<WindTile {...baseProps} headingTrue={null} currentSetDeg={0} currentDriftKts={1.5} />)
+
+    expect(screen.queryAllByTestId('wind-set-arrow')).toHaveLength(0)
+    expect(screen.getAllByText('0°').length).toBeGreaterThan(0)
+  })
+})
+
 // use-vessel-state.ts carries no per-field age for wind today (see
 // VesselState in use-vessel-state.ts - no wind_*_age_s field), so
 // lastUpdateAgeS is null until a source actually publishes one - these only

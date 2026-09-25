@@ -29,6 +29,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   direction, and its observed-gust marker reads the last hour's highest
   true wind.
 
+### Fixed
+
+- In Course Up, the Wind tile's set arrow now points relative to the bow,
+  matching the compass beside it; before, it always pointed as if North Up.
+
 ## [0.31.0] - 2026-09-25
 
 ### Added

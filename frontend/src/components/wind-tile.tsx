@@ -333,7 +333,22 @@ export const WindTile = memo(function WindTile({
 
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
   const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
-  const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
+  // North Up: the ring holds true north at 12 o'clock, so the set arrow
+  // points at the current's absolute compass bearing directly. Course Up:
+  // the ring (and the bow triangle beside it) turns with heading instead, so
+  // the arrow has to be drawn bow-relative - normalize(set - heading) - or
+  // it silently points as if the tile were in North Up. With no heading to
+  // convert by, that relative angle is unknowable, so the arrow is hidden
+  // (null) rather than guessed at 0; the degree readout stays the absolute
+  // compass bearing regardless; see setDegreesLabel above.
+  const setArrowRotation = currentSetDeg === null
+    ? null
+    : orientation === 'north-up'
+      ? normalizeDeg(currentSetDeg)
+      : headingTrue !== null
+        ? normalizeDeg(currentSetDeg - headingTrue)
+        : null
+  const setArrowTitle = `Set direction ${setDirectionLabel}${setArrowRotation === null && currentSetDeg !== null ? ' — heading unavailable' : ''}`
   const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
   const currentColorClass = currentFavorable === null ? '' : currentFavorable ? 'text-gauge-secondary' : 'text-amber-600'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
@@ -396,13 +411,16 @@ export const WindTile = memo(function WindTile({
         <span>{setDegreesLabel}</span>
         <span
           className={cn('inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70', currentColorClass || 'text-muted-foreground')}
-          title={`Set direction ${setDirectionLabel}`}
+          title={setArrowTitle}
         >
-          <ArrowUp
-            className={highDriftImpact ? 'h-5 w-5' : 'h-4 w-4'}
-            strokeWidth={highDriftImpact ? 2.75 : 2}
-            style={{ transform: `rotate(${setArrowRotation}deg)` }}
-          />
+          {setArrowRotation !== null && (
+            <ArrowUp
+              data-testid="wind-set-arrow"
+              className={highDriftImpact ? 'h-5 w-5' : 'h-4 w-4'}
+              strokeWidth={highDriftImpact ? 2.75 : 2}
+              style={{ transform: `rotate(${setArrowRotation}deg)` }}
+            />
+          )}
         </span>
       </span>
     )
