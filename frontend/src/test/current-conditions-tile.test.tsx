@@ -49,8 +49,6 @@ function day(overrides: Partial<WeatherForecastDay> = {}): WeatherForecastDay {
   }
 }
 
-const NO_GUSTS = { '10m': null, '30m': null, '1h': null, '24h': null }
-
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-06-14T14:00:00Z'))
@@ -66,8 +64,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={12.3}
         depthLastUpdateAgeS={5}
-        windSpeedApparentKts={14}
-        maxGustKts={{ ...NO_GUSTS, '1h': 19 }}
+        windSpeedTrueKts={14}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={19}
         weather={weather()}
         forecast={[day()]}
         distanceUnits="metric"
@@ -84,8 +83,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={10}
         depthLastUpdateAgeS={5}
-        windSpeedApparentKts={null}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={null}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         distanceUnits="imperial"
@@ -101,8 +101,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={null}
         depthLastUpdateAgeS={null}
-        windSpeedApparentKts={null}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={null}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather({ temperature_f: -1 })}
         forecast={[]}
         distanceUnits="metric"
@@ -117,8 +118,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={12}
         depthLastUpdateAgeS={999}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         distanceUnits="metric"
@@ -128,13 +130,14 @@ describe('CurrentConditionsTile', () => {
     expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
   })
 
-  test('passes the forecast gust max and the observed 1h gust as bullet-gauge markers', () => {
+  test('passes the forecast gust max and the observed 1h true wind max as bullet-gauge markers', () => {
     render(
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={14}
-        maxGustKts={{ ...NO_GUSTS, '1h': 19 }}
+        windSpeedTrueKts={14}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={19}
         weather={weather()}
         forecast={[day({ hourlyWind: [{ label: '2PM', hourOfDay: 14, windSpeed: 12, windGust: 18, windDirection: 'ENE', windDirectionDeg: 70 }] })]}
         distanceUnits="metric"
@@ -153,8 +156,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[
           day({
@@ -176,8 +180,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day({ hourlyPrecip: [] })]}
         distanceUnits="metric"
@@ -194,8 +199,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         nextHour={{
@@ -228,8 +234,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         nextHour={{
@@ -255,8 +262,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         nextHour={{
@@ -285,8 +293,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day()]}
         nextHour={{
@@ -312,8 +321,9 @@ describe('CurrentConditionsTile', () => {
       <CurrentConditionsTile
         depth={5}
         depthLastUpdateAgeS={0}
-        windSpeedApparentKts={10}
-        maxGustKts={NO_GUSTS}
+        windSpeedTrueKts={10}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
         weather={weather()}
         forecast={[day({ hourlyPrecip: [] })]}
         nextHour={{
@@ -330,5 +340,47 @@ describe('CurrentConditionsTile', () => {
 
     expect(screen.queryByTestId('nowcast-strip')).not.toBeInTheDocument()
     expect(screen.getByText('—', { selector: 'p' })).toBeInTheDocument()
+  })
+
+  // ADR 0129: the true-wind direction arrow, rendered inline next to the
+  // speed readout rather than as a second row (the tile is sized for the
+  // wall display's fixed fold and must not grow).
+  test('shows a wind direction arrow rotated for the true wind direction, with an accessible label', () => {
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedTrueKts={15}
+        windDirectionTrueDeg={126}
+        maxTrueWindKts1h={null}
+        weather={weather()}
+        forecast={[day()]}
+        distanceUnits="metric"
+      />,
+    )
+
+    const arrow = screen.getByRole('img', { name: /wind from se, 126° true/i })
+    expect(arrow).toBeInTheDocument()
+    // Points downwind (weather-map convention): rotated direction + 180.
+    expect(arrow).toHaveStyle({ transform: 'rotate(306deg)' })
+    expect(screen.getByText('SE')).toBeInTheDocument()
+    expect(screen.queryByText(/126°/)).not.toBeInTheDocument()
+  })
+
+  test('renders no arrow when the true wind direction is unknown, never a fake 0°', () => {
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedTrueKts={15}
+        windDirectionTrueDeg={null}
+        maxTrueWindKts1h={null}
+        weather={weather()}
+        forecast={[day()]}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.queryByRole('img', { name: /wind from/i })).not.toBeInTheDocument()
   })
 })

@@ -77,7 +77,7 @@ describe('useVesselState maxGustKts identity', () => {
   })
 })
 
-// ADR 0129 — maxGustTrueKts is a second, independent gust ladder alongside
+// ADR 0130 — maxGustTrueKts is a second, independent gust ladder alongside
 // maxGustKts, so it needs the same unchanged-object memo (see the comment on
 // setMaxGustTrueKts in use-vessel-state.ts) for the same reason: it arrives
 // on the same 1Hz tick and must not defeat WindTile's own memoization when
@@ -132,7 +132,7 @@ describe('useVesselState maxGustTrueKts identity', () => {
   })
 })
 
-// ADR 0129 — true wind parses the same -1/absent-is-null way as apparent,
+// ADR 0130 — true wind parses the same -1/absent-is-null way as apparent,
 // but into its own fields, and must not borrow apparent's values when true
 // wind itself is absent from the payload.
 describe('useVesselState true wind', () => {
@@ -194,5 +194,51 @@ describe('useVesselState true wind', () => {
 
     expect(result.current.windSpeedTrueKts).toBeNull()
     expect(result.current.windSideTrue).toBeNull()
+  })
+})
+
+// ADR 0129: the Current Conditions tile's true-wind readout. windSpeedTrueKts/
+// windDirectionTrueDeg/maxTrueWindKts1h follow the same -1-sentinel-becomes-null
+// contract every other sentinel-bearing field in this hook already follows
+// (see windSpeedApparentKts above), so a boat with no true-wind source reads
+// as null, never a fabricated 0.
+describe('useVesselState true wind fields', () => {
+  it('parses windSpeedTrueKts, windDirectionTrueDeg and maxTrueWindKts1h when present', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    emit({
+      ...basePayload,
+      wind_speed_true_kts: 13.4,
+      wind_direction_true_deg: 126,
+      max_true_wind_kts_1h: 15.9,
+    })
+
+    expect(result.current.windSpeedTrueKts).toBe(13.4)
+    expect(result.current.windDirectionTrueDeg).toBe(126)
+    expect(result.current.maxTrueWindKts1h).toBe(15.9)
+  })
+
+  it('reads the -1 sentinel as null rather than a negative reading, and never falls back to apparent', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    emit({
+      ...basePayload,
+      wind_speed_apparent_kts: 9.5,
+      wind_speed_true_kts: -1,
+      wind_direction_true_deg: -1,
+      max_true_wind_kts_1h: -1,
+    })
+
+    expect(result.current.windSpeedTrueKts).toBeNull()
+    expect(result.current.windDirectionTrueDeg).toBeNull()
+    expect(result.current.maxTrueWindKts1h).toBeNull()
+  })
+
+  it('starts null before any event arrives', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    expect(result.current.windSpeedTrueKts).toBeNull()
+    expect(result.current.windDirectionTrueDeg).toBeNull()
+    expect(result.current.maxTrueWindKts1h).toBeNull()
   })
 })

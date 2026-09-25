@@ -23,6 +23,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   instrument; where that isn't fitted, True mode reads a dash rather than
   showing the apparent figures in its place.
 
+### Changed
+
+- Current Conditions now shows true wind speed with an arrow for its
+  direction, and its observed-gust marker reads the last hour's highest
+  true wind.
+
 ## [0.31.0] - 2026-09-25
 
 ### Added

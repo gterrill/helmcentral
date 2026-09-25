@@ -185,7 +185,7 @@ describe('WindTile MAX GUST cards', () => {
   })
 })
 
-// ADR 0129 — the tile's title becomes the plain string "Wind" (both wind
+// ADR 0130 — the tile's title becomes the plain string "Wind" (both wind
 // mode and orientation are toggles, not part of the title text itself).
 describe('WindTile title', () => {
   test('renders the plain title "Wind", not "Apparent Wind" or a mode-qualified variant', () => {
@@ -196,7 +196,7 @@ describe('WindTile title', () => {
   })
 })
 
-// ADR 0129 — the two title-bar toggles: wind mode (apparent/true) and
+// ADR 0130 — the two title-bar toggles: wind mode (apparent/true) and
 // orientation (course-up/north-up), each a per-device localStorage setting.
 describe('WindTile mode and orientation toggles', () => {
   test('default to Apparent and Course Up with no localStorage seeded', () => {
@@ -306,7 +306,7 @@ describe('WindTile toggle chip width stability', () => {
   })
 })
 
-// ADR 0129 — True mode reads the true-wind fields and true gust ladder
+// ADR 0130 — True mode reads the true-wind fields and true gust ladder
 // throughout the compass, not a converted/borrowed copy of apparent's.
 describe('WindTile true wind mode', () => {
   test('shows the true wind speed, side/angle and gust ladder once switched, not apparent\'s', () => {
@@ -351,7 +351,7 @@ describe('WindTile true wind mode', () => {
   })
 })
 
-// ADR 0129 — orientation: Course Up (default) rotates the ring with heading
+// ADR 0130 — orientation: Course Up (default) rotates the ring with heading
 // and fixes the bow at the top; North Up holds true north fixed at the top
 // and sweeps the bow marker to the heading instead.
 describe('WindTile orientation', () => {

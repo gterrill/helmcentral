@@ -195,7 +195,7 @@ func sampleTracks(settingsPath string) {
 		if state.WindSpeedApparentKts >= 0 {
 			windGustHistory.record(state.WindSpeedApparentKts, now)
 		}
-		// True wind's own gust history (ADR 0129), recorded on the same tick
+		// True wind's own gust history (ADR 0130), recorded on the same tick
 		// alongside the apparent one above so the two MAX GUST ladders stay
 		// directly comparable. Gated on its own sentinel, independently of
 		// whether apparent wind is present this tick.
@@ -220,11 +220,26 @@ func sampleTracks(settingsPath string) {
 	if pressure := trend(outsidePressurePath); pressure.Present {
 		barometerHistory.record(pressure.Value, now)
 	}
+	// Present alone is not enough here: derived-data can stop producing
+	// speedTrue/directionTrue while the rest of the snapshot - including the
+	// anemometer's own apparent-wind path - keeps updating, and a bare
+	// Present check would keep re-recording that stalled path's last value
+	// on every tick forever, pinning the Current Conditions tile's 1h "obs"
+	// marker (and the storm/squash-zone derived paths these two buffers also
+	// feed) on a frozen number. alarmSampleAge reports each sample's own
+	// LastSeen age (-1 when never seen), the same fact the alarm engine and
+	// the gauge-values stream already gate staleness on, so a stalled
+	// speedTrue is caught even while directionTrue (or apparent wind) keeps
+	// arriving on its own, unrelated path.
 	if windSpeed := trend(windSpeedTruePath); windSpeed.Present {
-		trueWindSpeedHistory.record(windSpeed.Value, now)
+		if age := alarmSampleAge(windSpeed, now); age >= 0 && age <= defaultWindMaxAge.Seconds() {
+			trueWindSpeedHistory.record(windSpeed.Value, now)
+		}
 	}
 	if windDirection := trend(windDirectionTruePath); windDirection.Present {
-		trueWindDirectionHistory.record(windDirection.Value, now)
+		if age := alarmSampleAge(windDirection, now); age >= 0 && age <= defaultWindMaxAge.Seconds() {
+			trueWindDirectionHistory.record(windDirection.Value, now)
+		}
 	}
 
 	solar, solarErr := fetchSignalKSolarState()

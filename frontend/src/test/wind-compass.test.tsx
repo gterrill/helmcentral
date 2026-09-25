@@ -85,7 +85,7 @@ describe('WindCompass', () => {
     expect(summary).toHaveTextContent(/unknown/)
   })
 
-  // ADR 0129 — the wind-mode toggle. The screen-reader summary names which
+  // ADR 0130 — the wind-mode toggle. The screen-reader summary names which
   // reading is being shown, since the SVG itself carries no "APPARENT"/
   // "TRUE" label of its own (that lives on the tile's title chip).
   it('names the reading as apparent wind in the DOM mirror for kind="apparent"', () => {
@@ -98,7 +98,7 @@ describe('WindCompass', () => {
     expect(screen.getByTestId('wind-compass-summary')).toHaveTextContent(/^Wind compass\. True wind speed/)
   })
 
-  // ADR 0129 — North Up orientation. WindCompass itself stays "pure": it
+  // ADR 0130 — North Up orientation. WindCompass itself stays "pure": it
   // draws whatever ringRotationDeg/bowRotationDeg/arrowAngleDeg it is given,
   // trusting WindTile to have worked out the mode logic already.
   it('rotates the bow marker to bowRotationDeg instead of leaving it fixed', () => {

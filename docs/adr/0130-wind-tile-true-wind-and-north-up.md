@@ -1,4 +1,4 @@
-# ADR 0129: Wind Tile Gains True Wind and North Up
+# ADR 0130: Wind Tile Gains True Wind and North Up
 
 ## Status
 
@@ -6,7 +6,16 @@ Accepted (2026-09-25). Renames the Apparent Wind tile
 ([ADR 0008](0008-wind-tile-corner-masks.md)) to Wind and adds a true-wind
 reading and a North Up orientation alongside the apparent/Course Up view it
 has always shown, plus a parallel true-wind gust history and ladder next to
-the apparent one ([ADR 0030](0030-selectable-max-gust-windows.md)).
+the apparent one ([ADR 0030](0030-selectable-max-gust-windows.md)). Landed
+the same day as, and merged alongside,
+[ADR 0129](0129-current-conditions-shows-true-wind.md), which independently
+added the Current Conditions tile's own true-wind readout - the two share
+`vesselStateData`'s `WindSpeedTrueKts`/`WindDirectionTrueDeg` fields and
+`fetchSignalKVesselState`'s per-leaf speedTrue/directionTrue parsing outright
+(one definition, two readers); this ADR covers what it adds on top:
+`angleTrueWater` (`WindAngleTrueDeg`/`WindSideTrue`/`WindAngleTrueRelativeDeg`,
+gated the same per-leaf way), the True/North-Up toggles, and the Wind tile's
+own gust ladder.
 
 ## Context
 
@@ -49,8 +58,8 @@ itself becomes the plain string "Wind": neither toggle's state belongs in
 the title text, since both are now visible, editable controls of their
 own.
 
-### True wind is parsed and gated exactly like apparent, but never
-### substituted for it
+### True wind is parsed and gated per leaf, but never substituted for
+### apparent
 
 `fetchSignalKVesselState` (`signalk.go`) parses `speedTrue`/`angleTrueWater`/
 `directionTrue` the same way it has always parsed
@@ -64,20 +73,27 @@ boat-speed sensor feeding the wind unit) must show apparent normally and
 read true wind as unknown, never the other way around.
 
 True wind's recency gate is deliberately narrower than apparent's, not an
-exact copy of it. Apparent's `windTimestamp` falls back to the generic
+exact copy of it, and narrower again than this ADR's own first draft.
+Apparent's `windTimestamp` falls back to the generic
 `environment.wind.timestamp`, and its `windDataRecent` falls back again to
 the GNSS fix time (`state.Datetime`) if even that is missing - apparent has
 always effectively read as "recent enough" whenever *anything* in the wind
-subtree, or the boat's own clock, looked current. True wind's
-`windTimestampTrue` is instead built only from the three true-wind leaves'
-own timestamps (`speedTrue`, `angleTrueWater`, `directionTrue`), and
-`windDataRecentTrue` carries no GNSS-datetime fallback at all. A first
-version of this ADR's implementation copied apparent's fallback chain
-verbatim, which meant a true-wind instrument that had stopped reporting
-still read as fresh for as long as the GPS fix (or even just the apparent
-reading) kept updating - the exact silent-staleness bug the fallback policy
-exists to prevent. No timestamp, or a stale one, on any of the three leaves
-now means every true-wind field stays at its sentinel, full stop.
+subtree, or the boat's own clock, looked current. [ADR 0129](0129-current-conditions-shows-true-wind.md)
+established the true-wind rule instead: `speedTrue` and `directionTrue` are
+each gated on *their own* leaf's timestamp only
+(`windSpeedTrueRecent`/`windDirectionTrueRecent`), with no fallback to
+`state.Datetime` and no fallback to a sibling leaf's timestamp either. This
+ADR's `angleTrueWater` parse (`WindAngleTrueDeg`/`WindSideTrue`/
+`WindAngleTrueRelativeDeg`) follows the identical pattern
+(`windAngleTrueRecent`, its own leaf's timestamp only) rather than the
+combined, all-three-leaves-share-one-gate approach this ADR shipped with
+initially - merging alongside ADR 0129 surfaced that a combined gate lets
+one fresh leaf (say `angleTrueWater` still ticking) paper over a sibling
+leaf whose own source has actually gone quiet (`speedTrue`'s derived-data
+calculation stalled), reviving a frozen reading exactly the way apparent's
+old GNSS fallback did. No timestamp, or a stale one, on a given leaf now
+means only that leaf's own field(s) stay at their sentinel - independent of
+whatever the other two leaves or the GPS fix are doing.
 
 Where apparent's absent/stale case has always defaulted speed to `0` and
 angle to `0`/starboard (a long-standing quirk, left alone here since fixing
@@ -128,7 +144,12 @@ recency gate of its own, on a different contract than a gust ladder needs.
 Reusing it would have meant either double-converting units or silently
 losing the gust-specific staleness gate; a second buffer, matching
 `windGustHistory`'s own contract (already-converted knots, recency-gated at
-the point of recording) was the simpler, correct choice.
+the point of recording) was the simpler, correct choice. This is also the
+buffer ADR 0129's own `max_true_wind_kts_1h` (the Current Conditions tile's
+single last-hour "obs" marker) reads, via `inMemoryMaxTrueWindKts` - a
+different figure, on a different scale, sourced from `trueWindSpeedHistory`
+rather than `trueWindGustHistory`, so the two features' true-wind numbers
+stay independently correct rather than one borrowing the other's buffer.
 
 One gap, left open rather than built out here: `max_gust_kts` has an
 Influx-backed path for boats with InfluxDB configured
@@ -203,6 +224,12 @@ existing rotate-a-`<g>` machinery.
 
 ## Related
 
+- [ADR 0129](0129-current-conditions-shows-true-wind.md) for the shared
+  true-wind parsing this ADR builds on: `WindSpeedTrueKts`/
+  `WindDirectionTrueDeg`, `fetchSignalKVesselState`'s per-leaf
+  speedTrue/directionTrue gate, and the Current Conditions tile's own
+  `max_true_wind_kts_1h`/`trueWindSpeedHistory` reading, none of which this
+  ADR duplicates.
 - [ADR 0008](0008-wind-tile-corner-masks.md) for the corner-mask geometry
   this leaves untouched.
 - [ADR 0030](0030-selectable-max-gust-windows.md) for the gust window ladder

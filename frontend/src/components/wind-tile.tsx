@@ -169,7 +169,7 @@ export interface WindTileProps {
   windAngleRelativeDeg: number | null
   windSpeedApparentKts: number | null
   /**
-   * True wind (ADR 0129), parsed by the backend the same way as apparent but
+   * True wind (ADR 0130), parsed by the backend the same way as apparent but
    * never substituted for it: a boat with no true-wind source shows '—' in
    * True mode rather than silently falling back to the apparent reading.
    */
@@ -183,7 +183,7 @@ export interface WindTileProps {
   currentDriftKts: number | null
   currentDriftImpactKts: number | null
   maxGustKts: Record<GustWindow, number | null>
-  /** True wind's own MAX GUST ladder (ADR 0129); read instead of maxGustKts in True mode. */
+  /** True wind's own MAX GUST ladder (ADR 0130); read instead of maxGustKts in True mode. */
   maxGustTrueKts: Record<GustWindow, number | null>
   /**
    * Seconds since the wind feed last reported, or null if the upstream
@@ -229,13 +229,13 @@ type WindToggleChipProps = {
   active: 'a' | 'b'
   labelA: string
   labelB: string
-  /** Shown instead of labelA/labelB once the tile's own column drops under ~20rem (ADR 0129). */
+  /** Shown instead of labelA/labelB once the tile's own column drops under ~20rem (ADR 0130). */
   shortLabelA: string
   shortLabelB: string
 }
 
 /**
- * The shared chip shape for both title-bar toggles (ADR 0129): a compact
+ * The shared chip shape for both title-bar toggles (ADR 0130): a compact
  * flip button showing the current mode as text, uppercased via CSS rather
  * than in the string itself, matching the autopilot mode badge's
  * micro-label.

@@ -160,8 +160,9 @@ describe('wall-display tiles fit their registered grid constraint', () => {
       <CurrentConditionsTile
         depth={12.4}
         depthLastUpdateAgeS={5}
-        windSpeedApparentKts={14}
-        maxGustKts={{ '10m': 16, '30m': 17, '1h': 19, '24h': 22 }}
+        windSpeedTrueKts={14}
+        windDirectionTrueDeg={126}
+        maxTrueWindKts1h={19}
         weather={WEATHER_TODAY}
         forecast={[weatherDay()]}
         distanceUnits="metric"
