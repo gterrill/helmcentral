@@ -371,7 +371,9 @@ func TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync(t *testing.T) {
 	anchorWatchMu.Lock()
 	anchorWatchState = nil
 	anchorWatchMu.Unlock()
-	loadAnchorWatch()
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatalf("loadAnchorWatch: %v", err)
+	}
 
 	anchorWatchMu.RLock()
 	reloaded := anchorWatchState
@@ -567,7 +569,9 @@ func TestPatchAnchorWatch_CarriesPlanningDepthThrough(t *testing.T) {
 
 	// Survives a disk round trip, not just held in memory.
 	resetAnchorWatchState(t)
-	loadAnchorWatch()
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatalf("loadAnchorWatch: %v", err)
+	}
 
 	anchorWatchMu.RLock()
 	reloaded := anchorWatchState
@@ -617,7 +621,9 @@ func TestPatchAnchorWatch_UpdatesPlanningDepthAndPersists(t *testing.T) {
 
 	// Survives a disk round trip, not just held in memory.
 	resetAnchorWatchState(t)
-	loadAnchorWatch()
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatalf("loadAnchorWatch: %v", err)
+	}
 
 	anchorWatchMu.RLock()
 	reloaded := anchorWatchState
@@ -755,7 +761,9 @@ func TestLoadAnchorWatch_LegacyFileWithNoPlanningDepthReadsAsUnset(t *testing.T)
 	}
 
 	resetAnchorWatchState(t)
-	loadAnchorWatch()
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatalf("loadAnchorWatch: %v", err)
+	}
 
 	anchorWatchMu.RLock()
 	loaded := anchorWatchState
@@ -777,6 +785,52 @@ func TestLoadAnchorWatch_LegacyFileWithNoPlanningDepthReadsAsUnset(t *testing.T)
 	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
 	if got, _ := getResp["planning_depth_m"].(float64); got != 0 {
 		t.Fatalf("expected GET planning_depth_m 0 for a legacy record, got %v", getResp["planning_depth_m"])
+	}
+}
+
+// A missing anchor_watch.json is the ordinary "fresh install, nothing ever
+// dropped" case: loadAnchorWatch must return no error and leave the watch
+// inactive, silently.
+func TestLoadAnchorWatch_MissingFileIsSilentNoWatch(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatalf("expected no error when no anchor watch file exists, got %v", err)
+	}
+
+	anchorWatchMu.RLock()
+	state := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if state != nil {
+		t.Fatalf("expected anchor watch state to stay nil with no file, got %+v", state)
+	}
+}
+
+// A corrupt anchor_watch.json is a different case from "missing": it means
+// something on disk did not survive intact (a truncated write, a bad
+// upgrade, disk corruption), and the operator's anchor alarm silently going
+// absent because of it would be a lot worse than a startup failure that says
+// so. Per the fallback policy this must surface explicitly rather than be
+// swallowed as "no watch" - matching loadAlarmRules's shape (alarm_rules.go)
+// for the same class of file.
+func TestLoadAnchorWatch_CorruptFileReturnsErrorInsteadOfSilentlyDiscarding(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	if err := os.WriteFile(anchorWatchFilePath(), []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	if err := loadAnchorWatch(); err == nil {
+		t.Fatalf("expected loadAnchorWatch to return an error for a corrupt file, got nil")
+	}
+
+	anchorWatchMu.RLock()
+	state := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if state != nil {
+		t.Fatalf("expected anchor watch state to stay nil after a failed load, got %+v", state)
 	}
 }
 

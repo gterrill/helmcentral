@@ -515,7 +515,9 @@ func main() {
 
 	registerStaticHandler(e)
 
-	loadAnchorWatch()
+	if err := loadAnchorWatch(); err != nil {
+		log.Fatalf("failed to load anchor watch: %v", err)
+	}
 	loadAnchorPlacemarks()
 	loadRoutes()
 	loadDashboardPages()

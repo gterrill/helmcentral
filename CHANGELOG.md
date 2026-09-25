@@ -18,6 +18,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the house bank you pick under Settings → Vessel → Power. Re-enter your
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
+- **Anchor watch now survives an update.** A dropped anchor and its marks
+  used to live in a scratch area that update wiped out, so an anchor watch
+  running when you updated was gone afterwards with no warning. This
+  upgrade is the one time that happens: if you have an anchor watch
+  running, drop it again once you're on the new version. From here on, the
+  watch and its marks survive updates and restarts.
 
 ### Changed
 

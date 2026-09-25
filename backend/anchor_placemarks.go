@@ -43,7 +43,7 @@ var (
 )
 
 func anchorPlacemarksFilePath() string {
-	return cacheFilePath("ANCHOR_PLACEMARKS_FILE", "cache/anchor_placemarks.json")
+	return cacheFilePath("ANCHOR_PLACEMARKS_FILE", "data/anchor_placemarks.json")
 }
 
 func anchorWatchActive() bool {

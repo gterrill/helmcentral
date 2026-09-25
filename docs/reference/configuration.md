@@ -121,7 +121,7 @@ dir when one is set.
 
 | Variable | Default |
 | --- | --- |
-| `ANCHOR_WATCH_FILE` | `cache/anchor_watch.json` |
+| `ANCHOR_WATCH_FILE` | `data/anchor_watch.json` |
 | `ROUTES_FILE` | `data/routes.json` |
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |

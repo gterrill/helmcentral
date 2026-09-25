@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -137,7 +138,7 @@ var (
 )
 
 func anchorWatchFilePath() string {
-	return cacheFilePath("ANCHOR_WATCH_FILE", "cache/anchor_watch.json")
+	return cacheFilePath("ANCHOR_WATCH_FILE", "data/anchor_watch.json")
 }
 
 // recordSelfTrailPoint appends to post-anchor ring buffer only when active.
@@ -167,17 +168,27 @@ func getSelfTrailSince(since time.Time) []*trailPoint {
 	return selfTrail.pointsSince(since)
 }
 
-func loadAnchorWatch() {
+// loadAnchorWatch restores the watch on startup. A missing file is the
+// ordinary "fresh install, nothing ever dropped" case and is not an error.
+// A file that exists but fails to parse is a different case entirely — the
+// operator's anchor alarm going silently absent because of it would be far
+// worse than a startup failure that says so — so that is surfaced to the
+// caller rather than swallowed, matching loadAlarmRules's shape for the
+// same class of file.
+func loadAnchorWatch() error {
 	path := anchorWatchFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// No file yet — start with no watch active.
-		return
+		if os.IsNotExist(err) {
+			// No file yet — start with no watch active.
+			return nil
+		}
+		return fmt.Errorf("reading anchor watch: %w", err)
 	}
 
 	var loaded anchorWatchData
 	if err := json.Unmarshal(data, &loaded); err != nil {
-		return
+		return fmt.Errorf("parsing anchor watch: %w", err)
 	}
 
 	anchorWatchMu.Lock()
@@ -186,6 +197,7 @@ func loadAnchorWatch() {
 		lastAnchorWatchRadiusMeters = loaded.RadiusMeters
 	}
 	anchorWatchMu.Unlock()
+	return nil
 }
 
 func saveAnchorWatch(aw *anchorWatchData) error {
