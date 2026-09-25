@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -340,7 +341,13 @@ type assistantLastRecordedRow struct {
 	Source     string  `json:"source,omitempty"`
 	LastSeenAt string  `json:"last_seen_at"`
 	AgeDays    float64 `json:"age_days"`
-	LastValue  float64 `json:"last_value"`
+	// LastValue is `any`, not float64: a string (mode/state enum) or
+	// boolean (alarm flag) path is just as legitimately "last recorded" as
+	// a numeric one - see influxLastRecordedRow's own doc comment (influx.go)
+	// for why the previous float64-only field silently dropped every
+	// non-numeric path from this tool's results entirely (a code-review
+	// finding, 2026-09-25).
+	LastValue any `json:"last_value"`
 }
 
 type assistantGetLastRecordedResult struct {
@@ -468,7 +475,9 @@ const (
 	// get_path_history lists explicitly - past this, gap_count alone (the
 	// true total) says enough; a path that has been down for 80 of its 90
 	// requested days does not need 80 individual gap entries to make that
-	// point.
+	// point. The MOST RECENT gaps are kept (see executeGetPathHistory's own
+	// comment), not the oldest, so a still-open gap - the one that actually
+	// answers "when did it die" - always survives the cap.
 	assistantPathHistoryMaxReportedGaps = 10
 )
 
@@ -719,8 +728,21 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	if !stop.After(start) {
 		return "", fmt.Errorf("get_path_history: end must be after start")
 	}
+	// A range longer than assistantPathHistoryMaxSpan is clamped, not
+	// rejected - but silently moving the caller's own requested start
+	// without saying so left a model unable to tell "you got the range you
+	// asked for" from "you got a shorter one" (a code-review finding,
+	// 2026-09-25). rangeClampedNote, when non-empty, says exactly what start
+	// was requested and what it was moved to; it becomes part of the
+	// result's Note below, alongside (not instead of) any no-data/gaps note.
+	var rangeClampedNote string
 	if stop.Sub(start) > assistantPathHistoryMaxSpan {
+		requestedStart := start
 		start = stop.Add(-assistantPathHistoryMaxSpan)
+		rangeClampedNote = fmt.Sprintf(
+			"requested start %s is more than this tool's %d-day limit before end; start moved to %s.",
+			requestedStart.UTC().Format(time.RFC3339), int(assistantPathHistoryMaxSpan/(24*time.Hour)), start.UTC().Format(time.RFC3339),
+		)
 	}
 
 	every, width := assistantPathHistoryBucketWidth(stop.Sub(start))
@@ -729,17 +751,51 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		return "", err
 	}
 
-	minPts, err := d.influxPathHistoryStat(path, source, start, stop, every, "min")
-	if err != nil {
-		return "", fmt.Errorf("get_path_history: %w", err)
+	// The three bucketed stat queries (min/mean/max) and the actual-first/
+	// last-sample query all share the same range and filter, and none
+	// depends on another's result, so they run concurrently off the SAME
+	// tool ctx rather than sequentially each building its own
+	// context.Background() timeout (a code-review finding, 2026-09-25): the
+	// worst case is now one shared timeout, and cancelling ctx (the caller
+	// going away, or the model's own deadline) stops every one of them
+	// instead of none.
+	var minPts, meanPts, maxPts []telemetryPoint
+	var minErr, meanErr, maxErr error
+	var firstSeenAt, lastSeenAt time.Time
+	var firstLastFound bool
+	var firstLastErr error
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		minPts, minErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "min")
+	}()
+	go func() {
+		defer wg.Done()
+		meanPts, meanErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "mean")
+	}()
+	go func() {
+		defer wg.Done()
+		maxPts, maxErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "max")
+	}()
+	go func() {
+		defer wg.Done()
+		firstSeenAt, lastSeenAt, firstLastFound, firstLastErr = d.influxPathHistoryFirstLast(ctx, path, source, start, stop)
+	}()
+	wg.Wait()
+
+	if minErr != nil {
+		return "", fmt.Errorf("get_path_history: %w", minErr)
 	}
-	meanPts, err := d.influxPathHistoryStat(path, source, start, stop, every, "mean")
-	if err != nil {
-		return "", fmt.Errorf("get_path_history: %w", err)
+	if meanErr != nil {
+		return "", fmt.Errorf("get_path_history: %w", meanErr)
 	}
-	maxPts, err := d.influxPathHistoryStat(path, source, start, stop, every, "max")
-	if err != nil {
-		return "", fmt.Errorf("get_path_history: %w", err)
+	if maxErr != nil {
+		return "", fmt.Errorf("get_path_history: %w", maxErr)
+	}
+	if firstLastErr != nil {
+		return "", fmt.Errorf("get_path_history: %w", firstLastErr)
 	}
 
 	loc := time.UTC
@@ -803,25 +859,46 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		OverallMax:  overallMax,
 	}
 
+	// first_seen/last_seen come from influxPathHistoryFirstLast - the ACTUAL
+	// first/last recorded sample time - not from merged's own endpoints,
+	// which are bucket-START boundaries (buildInfluxPathStatFlux's
+	// timeSrc: "_start" doc comment): on a 90-day range bucketed to 2-day
+	// buckets, the real last sample could be reported up to two days later
+	// than when a source actually stopped (a code-review finding,
+	// 2026-09-25). Gap detection below stays bucket-based - it is about
+	// which buckets have no data at all, not the exact sample time within
+	// one - only first/last seen needed the precise query.
+	var notes []string
+	if rangeClampedNote != "" {
+		notes = append(notes, rangeClampedNote)
+	}
+	if firstLastFound {
+		result.FirstSeen = firstSeenAt.In(loc).Format("Mon 2 Jan 15:04")
+		result.FirstSeenISO = firstSeenAt.UTC().Format(time.RFC3339)
+		result.LastSeen = lastSeenAt.In(loc).Format("Mon 2 Jan 15:04")
+		result.LastSeenISO = lastSeenAt.UTC().Format(time.RFC3339)
+	}
 	if len(merged) == 0 {
-		result.Note = "no data recorded for this path in the requested range"
-	} else {
-		first, last := merged[0].T, merged[len(merged)-1].T
-		result.FirstSeen = first.In(loc).Format("Mon 2 Jan 15:04")
-		result.FirstSeenISO = first.UTC().Format(time.RFC3339)
-		result.LastSeen = last.In(loc).Format("Mon 2 Jan 15:04")
-		result.LastSeenISO = last.UTC().Format(time.RFC3339)
+		notes = append(notes, "no data recorded for this path in the requested range")
 	}
 
 	gaps, gapCount := computePathHistoryGaps(start, stop, width, merged)
 	result.GapCount = gapCount
 	if len(gaps) > assistantPathHistoryMaxReportedGaps {
-		gaps = gaps[:assistantPathHistoryMaxReportedGaps]
-		if result.Note == "" {
-			result.Note = fmt.Sprintf("%d gaps found; showing the first %d.", gapCount, assistantPathHistoryMaxReportedGaps)
-		}
+		// Keep the MOST RECENT gaps, not the oldest - gaps is already
+		// chronologically ascending (computePathHistoryGaps' own walk order),
+		// so its tail is both the most recent gaps and, when the path is
+		// still down at the end of the range, always includes that final
+		// open gap too. The previous gaps[:N] kept the oldest N instead,
+		// which meant a long-dead path's most telling gap - the one still
+		// open right up to `stop`, the actual answer to "when did it die" -
+		// was exactly the one silently dropped once gap_count exceeded 10 (a
+		// code-review finding, 2026-09-25).
+		gaps = gaps[len(gaps)-assistantPathHistoryMaxReportedGaps:]
+		notes = append(notes, fmt.Sprintf("%d gaps found; showing the most recent %d.", gapCount, assistantPathHistoryMaxReportedGaps))
 	}
 	result.Gaps = gaps
+	result.Note = strings.Join(notes, " ")
 
 	shrink := func() bool {
 		if len(result.Buckets) == 0 {

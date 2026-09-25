@@ -1119,12 +1119,18 @@ func buildVesselStatePayload() map[string]any {
 	// (longer-window-never-less-than-shorter) clamp only starts applying
 	// once a shorter window has actually produced a real (>=0) value -
 	// previousTrue itself starts at -1 (nothing to enforce yet) and is only
-	// ever updated from a real value, never from an untouched sentinel. This
-	// is the Wind tile's True-mode MAX GUST ladder specifically - it is a
-	// different figure from maxTrueWindKts1h below (the Current Conditions
-	// tile's single "obs" marker), sourced from a different, already-knots
-	// buffer; see trueWindGustHistory's own doc comment in
-	// telemetry_history.go for why the two don't share one.
+	// ever updated from a real value, never from an untouched sentinel.
+	//
+	// This ladder's own "1h" entry IS the Current Conditions tile's "obs"
+	// marker too (ADR 0129), not a separate maxTrueWindKts1h field anymore:
+	// that field used to read a second, independent buffer
+	// (trueWindSpeedHistory, raw m/s, gated by the heavy-weather trend's own
+	// staleness check) behind a DIFFERENT freshness gate than this ladder's
+	// trueWindGustHistory (already-knots, gated on state.WindSpeedTrueKts
+	// >= 0), so the two tiles could show two different "last hour" true wind
+	// figures for the same boat at the same moment - a code-review finding,
+	// 2026-09-25; see docs/adr/0130's amendment. The frontend now reads
+	// max_gust_true_kts['1h'] directly for both.
 	maxGustTrueKts := computeMaxGustTrueKtsFor(gustWindowLadder)
 	previousTrue := -1.0
 	for _, window := range gustWindowLadder {
@@ -1137,14 +1143,6 @@ func buildVesselStatePayload() map[string]any {
 		}
 		maxGustTrueKts[window] = value
 	}
-
-	// The Current Conditions tile's own "obs" marker (ADR 0129), on the true
-	// wind scale rather than max_gust_kts' apparent one: the last hour's
-	// highest trueWindSpeedHistory sample, or the -1 sentinel with no
-	// samples - never clamped or defaulted to 0, unlike the gust ladder
-	// above, since this is a single figure with no shorter window to fall
-	// back on.
-	maxTrueWindKts1h := inMemoryMaxTrueWindKts("1h")
 
 	vesselPrefix := loadBoatVesselPrefix(settingsPath)
 	if vesselPrefix == "" {
@@ -1194,7 +1192,6 @@ func buildVesselStatePayload() map[string]any {
 		"wind_last_update_age_s":         state.WindLastUpdateAge,
 		"max_gust_kts":                   maxGustKts,
 		"max_gust_true_kts":              maxGustTrueKts,
-		"max_true_wind_kts_1h":           maxTrueWindKts1h,
 		"generator_state":                state.GeneratorState,
 		"generator_manual_start":         state.GeneratorManualStart,
 		"generator_manual_start_timer":   state.GeneratorManualStartTimer,

@@ -34,7 +34,6 @@ interface VesselState {
   wind_direction_true_deg: number
   max_gust_kts: Record<string, number>
   max_gust_true_kts: Record<string, number>
-  max_true_wind_kts_1h: number
   generator_state: string
   generator_manual_start: boolean
   generator_manual_start_timer: number
@@ -76,15 +75,16 @@ export function useVesselState() {
   // True wind (ADR 0129 / ADR 0130) — parsed the same -1/null-is-absent way
   // as the apparent fields above, but never derived from them: a boat with
   // no true-wind source reads null here even while apparent is present.
-  // Feeds the Current Conditions tile (ADR 0129: speed/direction/
-  // maxTrueWindKts1h) and the Wind tile's True mode (ADR 0130: adds
-  // angle/side/relative-angle and maxGustTrueKts above).
+  // Feeds the Current Conditions tile (ADR 0129: speed/direction, and the
+  // "obs" marker, which reads maxGustTrueKts['1h'] below rather than a
+  // separate field - see maxGustTrueKts' own comment) and the Wind tile's
+  // True mode (ADR 0130: adds angle/side/relative-angle and the rest of the
+  // maxGustTrueKts ladder).
   const [windSpeedTrueKts, setWindSpeedTrueKts] = useState<number | null>(null)
   const [windAngleTrueDeg, setWindAngleTrueDeg] = useState<number | null>(null)
   const [windSideTrue, setWindSideTrue] = useState<'port' | 'starboard' | null>(null)
   const [windAngleTrueRelativeDeg, setWindAngleTrueRelativeDeg] = useState<number | null>(null)
   const [windDirectionTrueDeg, setWindDirectionTrueDeg] = useState<number | null>(null)
-  const [maxTrueWindKts1h, setMaxTrueWindKts1h] = useState<number | null>(null)
   const [speedOverGroundKts, setSpeedOverGroundKts] = useState<number | null>(null)
   const [maxGustKts, setMaxGustKts] = useState<Record<GustWindow, number | null>>(
     () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
@@ -150,7 +150,6 @@ export function useVesselState() {
       setWindSideTrue(data.wind_side_true === 'port' || data.wind_side_true === 'starboard' ? data.wind_side_true : null)
       setWindAngleTrueRelativeDeg(typeof data.wind_angle_true_relative_deg === 'number' && data.wind_angle_true_relative_deg >= 0 ? data.wind_angle_true_relative_deg : null)
       setWindDirectionTrueDeg(typeof data.wind_direction_true_deg === 'number' && data.wind_direction_true_deg >= 0 ? data.wind_direction_true_deg : null)
-      setMaxTrueWindKts1h(typeof data.max_true_wind_kts_1h === 'number' && data.max_true_wind_kts_1h >= 0 ? data.max_true_wind_kts_1h : null)
       // Keeps the previous object when every window's value is unchanged:
       // this arrives on the same 1Hz vessel-state tick as everything else in
       // this hook, and a fresh object literal every second defeats WindTile's
@@ -164,7 +163,14 @@ export function useVesselState() {
         return unchanged ? previous : next
       })
       // Same unchanged-object memo trick as maxGustKts above, for the
-      // true-wind ladder's own consumer (WindTile in True mode).
+      // true-wind ladder's own consumer (WindTile in True mode) - and, via
+      // its '1h' entry, the Current Conditions tile's "obs" marker too
+      // (ADR 0129). The backend used to expose a separate max_true_wind_kts_1h
+      // field for that marker, computed from a different in-memory buffer
+      // behind a different freshness gate than this ladder's, so the two
+      // tiles could show two different "last hour" true wind figures at the
+      // same moment (a code-review finding, 2026-09-25; see docs/adr/0130's
+      // amendment). Consolidated onto this one ladder, read by both tiles.
       setMaxGustTrueKts((previous) => {
         const next = Object.fromEntries(GUST_WINDOWS.map((window) => {
           const value = data.max_gust_true_kts?.[window]
@@ -232,7 +238,6 @@ export function useVesselState() {
     windDirectionTrueDeg,
     maxGustKts,
     maxGustTrueKts,
-    maxTrueWindKts1h,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,

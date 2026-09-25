@@ -127,8 +127,11 @@ type assistantNearbyVesselOut struct {
 	// history (the SignalK History API), a separate and usually more
 	// precise figure than InRangeSince above - it lights up once the boat's
 	// InfluxDB writer records other vessels, not just self (ADR 0128).
-	// Exactly one of StationarySince, PositionHistory ("none recorded") or
-	// PositionHistoryError is set, whenever history was requested at all.
+	// Exactly one of StationarySince, PositionHistory ("none recorded", or
+	// "under way - not currently stationary" when computeStationarySince
+	// finds the vessel's own most recent points are not actually settled -
+	// a code-review finding, 2026-09-25) or PositionHistoryError is set,
+	// whenever history was requested at all.
 	StationarySince      *string `json:"stationary_since,omitempty"`
 	HistoryCoversFrom    *string `json:"history_covers_from,omitempty"`
 	PositionHistory      string  `json:"position_history,omitempty"`
@@ -259,6 +262,7 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 	}
 
 	matched := matchAssistantNearbyVessels(live, nameQuery)
+	matchedCount := len(matched)
 	if len(matched) > maxResults {
 		matched = matched[:maxResults]
 	}
@@ -344,6 +348,15 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 		result.Note += " position history (stationary_since) only runs for a specific vessel - give name to also see how long it has been sitting at its current position."
 	}
 
+	// matchedCount > maxResults means the max_results cap (not the earlier
+	// fetch cap - see fetchLimit above) cut the list; that must be visible,
+	// not a silent truncation indistinguishable from "this is everyone in
+	// range" (a code-review finding, 2026-09-25).
+	if matchedCount > maxResults {
+		result.Truncated = true
+		result.Note += fmt.Sprintf(" %d vessels matched; showing the nearest %d. Raise max_results (up to %d) to see more.", matchedCount, maxResults, assistantNearbyVesselsMaxMaxResults)
+	}
+
 	if nameQuery != "" && len(vessels) == 0 {
 		notInRange, err := assistantSearchNotInRange(d, nameQuery, maxResults)
 		if err != nil {
@@ -378,6 +391,25 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 	return capToolResultJSON(&result, shrink)
 }
 
+// isPlaceholderVesselContactName reports whether name is not a genuine AIS
+// static-data name at all: empty, compactVesselID's own "UNKNOWN" fallback
+// (signalk.go, an empty vesselID), or the vessel_key itself - what
+// compactVesselID returns for an ordinary vesselID before static data has
+// arrived (the trailing "urn:mrn:imo:mmsi:<mmsi>" segment, which IS the
+// MMSI/vesselKey get_nearby_vessels already keys the sighting log on).
+// fillAssistantSightingHistory's own doc comment explains why a placeholder
+// on either side of its name comparison must never count as a mismatch.
+func isPlaceholderVesselContactName(name, vesselKey string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	if strings.EqualFold(name, "UNKNOWN") {
+		return true
+	}
+	return strings.EqualFold(name, vesselKey)
+}
+
 // fillAssistantSightingHistory populates out's in_range_since,
 // previous_sightings_count and (when includeHistory) past_sightings from the
 // sighting log. A pending (unconfirmed) candidate encounter never has
@@ -402,7 +434,23 @@ func fillAssistantSightingHistory(store *nearbyContactStore, vesselKey, liveName
 	// attaching it here would cross the two vessels' identities
 	// (code-review finding, 2026-09-25). No error: this vessel simply gets
 	// no sighting-log enrichment, the same as a vessel with no rows at all.
-	if !strings.EqualFold(sightings[0].Name, liveName) {
+	//
+	// A name that is itself a placeholder (empty, or the MMSI/compact id
+	// recordNearbyVesselContacts falls back to - compactVesselID, signalk.go
+	// - when AIS static data has not arrived yet) never counts as a
+	// mismatch on EITHER side, even against a genuine name: this is the
+	// NORMAL case, not the fault the guard exists for. The sighting log's
+	// confirmation dwell (nearby_contacts.go) is 5 minutes; a vessel's name
+	// often has not been broadcast yet the moment an encounter is confirmed
+	// and gets its row's Name frozen at insert time, so the row is
+	// legitimately still "this same vessel" once its real name later
+	// arrives - both vessels already matched on the one identity this store
+	// actually keys on, the MMSI (a code-review finding, 2026-09-25: the
+	// original guard discarded a returning vessel's entire sighting history
+	// on exactly this ordinary sequencing, not just the rare true collision
+	// it was meant to catch).
+	if !isPlaceholderVesselContactName(sightings[0].Name, vesselKey) && !isPlaceholderVesselContactName(liveName, vesselKey) &&
+		!strings.EqualFold(sightings[0].Name, liveName) {
 		return nil
 	}
 
@@ -452,7 +500,17 @@ func fillAssistantPositionHistory(d assistantToolDeps, mmsi string, out *assista
 		return
 	}
 
-	since := computeStationarySince(points).UTC().Format(time.RFC3339)
+	sinceAt, stationary := computeStationarySince(points)
+	if !stationary {
+		// A code-review finding, 2026-09-25: reporting stationary_since at
+		// all here requires the vessel to actually still be near that
+		// position - see computeStationarySince's own doc comment for why a
+		// vessel genuinely under way can otherwise get a false, recent
+		// stationary_since.
+		out.PositionHistory = "under way - not currently stationary"
+		return
+	}
+	since := sinceAt.UTC().Format(time.RFC3339)
 	out.StationarySince = &since
 	coversFrom := from.UTC().Format(time.RFC3339)
 	out.HistoryCoversFrom = &coversFrom
@@ -467,18 +525,34 @@ func fillAssistantPositionHistory(d assistantToolDeps, mmsi string, out *assista
 // assistantStationaryConsecutiveOutliers of them occur consecutively; a
 // shorter run is treated as noise (a single bad GPS fix, or mooring/anchor
 // swing that happens to oscillate past the threshold and back) and ignored.
-// Returns the oldest point's own time - a lower bound, paired with
-// history_covers_from on the caller's side - when no qualifying run is
-// found at all.
+// since is only meaningful when stationary is true; when it is false, the
+// caller must not report a stationary_since at all (see
+// fillAssistantPositionHistory).
 //
-// Both robustness measures exist for the same underlying reason
-// (code-review finding, 2026-09-25): the previous version measured every
-// point against the single latest fix and treated any one point beyond the
-// threshold as a confirmed move, so a single noisy GPS reading on the
-// latest fix reported "just arrived," and ordinary mooring swing between
-// two points genuinely more than the threshold apart reported a false
-// recent relocation.
-func computeStationarySince(points []signalKHistoryPoint) time.Time {
+// The two robustness measures in the walk below (median centre, consecutive-
+// outlier run length) fixed a code-review finding, 2026-09-25: the previous
+// version measured every point against the single latest fix and treated
+// any one point beyond the threshold as a confirmed move, so a single noisy
+// GPS reading on the latest fix reported "just arrived," and ordinary
+// mooring swing between two points genuinely more than the threshold apart
+// reported a false recent relocation.
+//
+// The recentFar check just below the median calculation fixes a SEPARATE
+// code-review finding (2026-09-25) the walk above did not catch: it took
+// the median of the last assistantStationaryCentreWindow points as "current
+// position" without ever confirming the vessel is STILL there. For a
+// vessel underway in a roughly straight line, the median of an odd-length
+// window landing almost exactly on that window's own middle sample is a
+// mathematical inevitability, not a real arrival - the walk above would
+// then treat that single coincidental match as the moment a still-moving
+// vessel "settled," even though it is moving away again on every sample
+// before and after. Requiring that at most one of the CENTRE WINDOW'S OWN
+// most recent assistantStationaryConsecutiveOutliers points be far from
+// that median - the same one-off tolerance the walk already extends to
+// noise - catches this: a vessel genuinely still near a stable position has
+// at most one recent outlier, while one still moving has most of its most
+// recent points far from any single reference.
+func computeStationarySince(points []signalKHistoryPoint) (since time.Time, stationary bool) {
 	sorted := make([]signalKHistoryPoint, len(points))
 	copy(sorted, points)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
@@ -488,6 +562,20 @@ func computeStationarySince(points []signalKHistoryPoint) time.Time {
 		windowStart = 0
 	}
 	centreLat, centreLon := medianLatLon(sorted[windowStart:])
+
+	recentWindowSize := assistantStationaryConsecutiveOutliers
+	if recentWindowSize > len(sorted) {
+		recentWindowSize = len(sorted)
+	}
+	recentFar := 0
+	for _, p := range sorted[len(sorted)-recentWindowSize:] {
+		if haversineMeters(p.Lat, p.Lon, centreLat, centreLon) > assistantStationaryThresholdMeters {
+			recentFar++
+		}
+	}
+	if recentFar*2 > recentWindowSize {
+		return time.Time{}, false
+	}
 
 	stationarySince := sorted[0].Time
 	consecutiveFar := 0
@@ -503,7 +591,7 @@ func computeStationarySince(points []signalKHistoryPoint) time.Time {
 		}
 		consecutiveFar = 0
 	}
-	return stationarySince
+	return stationarySince, true
 }
 
 // medianLatLon returns the per-axis median latitude and longitude across

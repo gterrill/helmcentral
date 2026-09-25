@@ -421,7 +421,19 @@ func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]t
 // is in queryInfluxPathRange - safe here for the same reason: it is never
 // model-supplied text, only ever one of the three fixed literals ("min",
 // "mean", "max") assistant_diagnostics.go calls this with.
-func queryInfluxPathStatRange(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+//
+// ctx is the caller's own context (executeGetPathHistory's tool ctx), not
+// context.Background() - the 8s cap below is derived FROM it, not a
+// standalone timeout that outlives the tool call's own cancellation. Before
+// this (a code-review finding, 2026-09-25), get_path_history's three stat
+// queries (min/mean/max) each built its own context.Background() timeout,
+// so cancelling the tool call - or the model's own context deadline - never
+// reached InfluxDB at all, and running them sequentially meant a genuinely
+// slow bucket could cost up to three separate 8s waits instead of one.
+// executeGetPathHistory now fires all of its Influx queries concurrently
+// off this same ctx, so the worst case is one shared 8s timeout and a
+// cancelled tool ctx stops every one of them immediately.
+func queryInfluxPathStatRange(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
@@ -433,7 +445,7 @@ func queryInfluxPathStatRange(path, source string, start, stop time.Time, every,
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
 	result, err := client.QueryAPI(org).Query(ctx, flux)
@@ -506,6 +518,110 @@ func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop tim
 	), nil
 }
 
+// queryInfluxPathFirstLast reads the ACTUAL first and last recorded sample
+// times for a path over [start, stop) - not a bucket boundary. get_path_history
+// (assistant_diagnostics.go) previously reported first_seen/last_seen from
+// the min/mean/max aggregateWindow series' own first/last bucket, which -
+// because those buckets are timeSrc: "_start" labelled (buildInfluxPathStatFlux's
+// own doc comment) - names the START of whichever bucket happened to hold
+// the real first/last point, not the point itself. On a 90-day range bucketed
+// to 2-day buckets (assistantPathHistoryBucketWidth), that is up to two days
+// off from the moment a source actually stopped - exactly the question this
+// tool exists to answer precisely (a code-review finding, 2026-09-25). This
+// query answers it directly instead of inferring it from the bucketed series.
+//
+// ctx is the tool's own ctx (see queryInfluxPathStatRange's doc comment) -
+// executeGetPathHistory fires this concurrently alongside the min/mean/max
+// queries, all sharing one derived timeout.
+func queryInfluxPathFirstLast(ctx context.Context, path, source string, start, stop time.Time) (first, last time.Time, found bool, err error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxFirstLastFlux(bucket, field, path, source, start, stop)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(qctx, flux)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+	defer result.Close()
+
+	var times []time.Time
+	for result.Next() {
+		times = append(times, result.Record().Time())
+	}
+	if result.Err() != nil {
+		return time.Time{}, time.Time{}, false, result.Err()
+	}
+	if len(times) == 0 {
+		return time.Time{}, time.Time{}, false, nil
+	}
+
+	first, last = times[0], times[0]
+	for _, t := range times[1:] {
+		if t.Before(first) {
+			first = t
+		}
+		if t.After(last) {
+			last = t
+		}
+	}
+	return first, last, true, nil
+}
+
+// buildInfluxFirstLastFlux builds queryInfluxPathFirstLast's Flux query text,
+// pulled out as its own pure function for the same unit-testability reason
+// buildInfluxPathStatFlux and buildInfluxLastRecordedFlux are. Every value
+// that can carry model-chosen text goes through fluxStringLiteral, same as
+// every other Flux builder in this file.
+//
+// group() (bare - drops every existing group key) before sort()/first()/
+// last() combines whatever distinct raw series matched the filter (e.g.
+// several $source values, when source is empty) into one table first, the
+// same reasoning buildInfluxLastRecordedFlux's own group()-then-sort()-
+// then-last() dance uses: first()/last() on a per-series table would only
+// ever see one arbitrary series' own endpoint, not the path's genuine
+// overall first/last point across every source that has ever written it.
+func buildInfluxFirstLastFlux(bucket, field, path, source string, start, stop time.Time) (string, error) {
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return "", fmt.Errorf("path: %w", err)
+	}
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filter := fmt.Sprintf("r._measurement == %s and r._field == %s", pathLiteral, fieldLiteral)
+	if source != "" {
+		sourceLiteral, err := fluxStringLiteral(source)
+		if err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		filter += fmt.Sprintf(" and r.source == %s", sourceLiteral)
+	}
+
+	return fmt.Sprintf(
+		"data = from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> group() |> sort(columns: [\"_time\"])\n"+
+			"first = data |> first() |> keep(columns: [\"_time\", \"_value\"])\n"+
+			"last = data |> last() |> keep(columns: [\"_time\", \"_value\"])\n"+
+			"union(tables: [first, last])",
+		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter,
+	), nil
+}
+
 // influxLastRecordedRow is one measurement+source pair's most recent
 // recorded point, as get_last_recorded (Mate diagnostics, ADR 0131) reports
 // it. This answers "when did X stop" for a path that queryInfluxPathTrend/
@@ -513,11 +629,45 @@ func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop tim
 // window to look in, and return nothing once no point falls in that window -
 // indistinguishable from "never existed" without already knowing when to
 // stop looking.
+//
+// Value is `any`, not float64: signalk-to-influxdb2 (the upstream plugin
+// that writes this bucket - src/influx.ts, tkurki/signalk-to-influxdb2,
+// checked live 2026-09-25) always writes to a field literally named
+// "value" regardless of the SignalK value's own type - point.floatField
+// ('value', v) for a number, point.stringField('value', v) for a string,
+// point.booleanField('value', v) for a boolean (and stringField with
+// JSON.stringify for anything else, e.g. an object). So the _field == "value"
+// filter this file already uses is correct for every type; the bug was
+// entirely on the Go side, only ever accepting a float64 record value and
+// silently dropping the row otherwise (see influxRecordValueOK) - which
+// made every string path (a mode/state enum), boolean path (an alarm flag)
+// or whole-number path decoded as an integer type look permanently
+// unrecorded to get_last_recorded, a data/source problem this tool exists
+// specifically to catch (AGENTS.md's fallback policy).
 type influxLastRecordedRow struct {
 	Path   string
 	Source string
 	Time   time.Time
-	Value  float64
+	Value  any
+}
+
+// influxRecordValueOK reports whether v (an Influx query record's decoded
+// field value) is one of the types get_last_recorded can report as JSON,
+// returning it unchanged when it is. float64 covers every SignalK number
+// (signalk-to-influxdb2 always writes numbers via floatField - see
+// influxLastRecordedRow's own doc comment); string and bool cover SignalK's
+// other two JSON-native value types; int64/uint64 are accepted defensively
+// for any other integer-field writer, even though nothing in this fleet's
+// own write path produces one today. Anything else (nil - a genuinely
+// missing value - or an exotic decoded type) is not something get_last_recorded
+// can represent honestly, so it is rejected rather than coerced.
+func influxRecordValueOK(v any) (any, bool) {
+	switch v.(type) {
+	case float64, string, bool, int64, uint64:
+		return v, true
+	default:
+		return nil, false
+	}
 }
 
 // queryInfluxLastRecorded finds, for every measurement (SignalK path) and
@@ -557,7 +707,7 @@ func queryInfluxLastRecorded(pathPrefix, source string, lookbackDays int) ([]inf
 	var rows []influxLastRecordedRow
 	for result.Next() {
 		rec := result.Record()
-		v, ok := rec.Value().(float64)
+		v, ok := influxRecordValueOK(rec.Value())
 		if !ok {
 			continue
 		}

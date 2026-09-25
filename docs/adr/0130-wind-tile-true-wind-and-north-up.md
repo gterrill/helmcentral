@@ -222,14 +222,41 @@ existing rotate-a-`<g>` machinery.
   future third orientation or wind reading is a new case in `WindTile`'s
   table above, not a new prop threaded through the SVG component.
 
+## Amendment 2026-09-25: max_true_wind_kts_1h retired, one buffer instead of two
+
+A `/code-review high` pass found that the design above - `max_true_wind_kts_1h`
+(ADR 0129's Current Conditions "obs" marker) sourced from `trueWindSpeedHistory`,
+kept deliberately separate from this ADR's `max_gust_true_kts` ladder and its
+`trueWindGustHistory` buffer, "so the two features' true-wind numbers stay
+independently correct" - did not hold up: the two buffers are recorded on
+different freshness gates (`trueWindSpeedHistory` via `alarmSampleAge(...) <=
+defaultWindMaxAge`, the heavy-weather trend's own staleness check;
+`trueWindGustHistory` via a bare `state.WindSpeedTrueKts >= 0`), so the same
+"last hour" true wind figure could genuinely differ between Current
+Conditions and the Wind tile at the same moment - independently WRONG, not
+independently correct.
+
+`max_true_wind_kts_1h` is retired. The vessel-state payload no longer carries
+it; the frontend's Current Conditions tile now reads `max_gust_true_kts['1h']`
+- the same ladder entry the Wind tile's True mode already showed - via
+`useVesselState`'s existing `maxGustTrueKts`. `computeMaxGustTrueKtsFor` and
+`trueWindGustHistory` are unchanged; `inMemoryMaxTrueWindKts` (the function
+that read `trueWindSpeedHistory` for the old field) is deleted.
+`trueWindSpeedHistory` itself is untouched and still backs ADR 0070's
+heavy-weather slope/tendency calculation, which this amendment does not
+touch - only the marker that used to also read it.
+
+`go test -short ./...`/`go vet ./...` (backend) and `npx tsc --noEmit`/
+`npx vitest run` (frontend) pass.
+
 ## Related
 
 - [ADR 0129](0129-current-conditions-shows-true-wind.md) for the shared
   true-wind parsing this ADR builds on: `WindSpeedTrueKts`/
-  `WindDirectionTrueDeg`, `fetchSignalKVesselState`'s per-leaf
-  speedTrue/directionTrue gate, and the Current Conditions tile's own
-  `max_true_wind_kts_1h`/`trueWindSpeedHistory` reading, none of which this
-  ADR duplicates.
+  `WindDirectionTrueDeg` and `fetchSignalKVesselState`'s per-leaf
+  speedTrue/directionTrue gate. Its own `max_true_wind_kts_1h` reading is
+  retired by this ADR's 2026-09-25 amendment above - the Current Conditions
+  tile now reads this ADR's own `max_gust_true_kts['1h']` instead.
 - [ADR 0008](0008-wind-tile-corner-masks.md) for the corner-mask geometry
   this leaves untouched.
 - [ADR 0030](0030-selectable-max-gust-windows.md) for the gust window ladder

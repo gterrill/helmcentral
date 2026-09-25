@@ -110,6 +110,17 @@ shared between the two tiles rather than duplicated (see ADR 0130's own
 Status section), and the Current Conditions tile's own readout, marker and
 arrow are unaffected.
 
+**Update (2026-09-25, later the same day):** the tile's "obs" marker no
+longer has its own `max_true_wind_kts_1h` field, described under Decision
+above. A code review found that field's separate buffer
+(`trueWindSpeedHistory`) and ADR 0130's `max_gust_true_kts` ladder
+(`trueWindGustHistory`) were recorded behind two different freshness gates,
+so the two tiles could show different "last hour" true wind figures for the
+same moment - see [ADR 0130](0130-wind-tile-true-wind-and-north-up.md)'s own
+amendment for the fix. The marker now reads `max_gust_true_kts['1h']`
+instead; everything else in this ADR (the speed/direction readout and
+arrow) is unaffected.
+
 ## Related
 
 - [ADR 0092](0092-wall-display-tiles.md) for the tile's own wall-display

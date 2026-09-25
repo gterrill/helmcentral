@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -432,21 +433,46 @@ func (e *influxNotConfiguredTestError) Error() string { return "influxdb is not 
 // ── get_path_history ─────────────────────────────────────────────────────
 
 // stubInfluxPathHistoryStat builds a get_path_history dep from a fixed
-// min/mean/max series per aggFn ("min"/"mean"/"max"), and records the last
-// call's arguments for assertions.
+// min/mean/max series per aggFn ("min"/"mean"/"max"), and records each
+// call's arguments for assertions. executeGetPathHistory now fires its
+// min/mean/max (and first/last) queries concurrently (a code-review
+// finding, 2026-09-25), so appends to calls go through a mutex - a plain
+// slice append from concurrent goroutines is a data race.
 type capturedPathHistoryCall struct {
 	path, source string
 	start, stop  time.Time
 	every, aggFn string
 }
 
-func stubInfluxPathHistoryStat(series map[string][]telemetryPoint, calls *[]capturedPathHistoryCall) func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
-	return func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+func stubInfluxPathHistoryStat(series map[string][]telemetryPoint, calls *[]capturedPathHistoryCall) func(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+	var mu sync.Mutex
+	return func(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
 		if calls != nil {
+			mu.Lock()
 			*calls = append(*calls, capturedPathHistoryCall{path, source, start, stop, every, aggFn})
+			mu.Unlock()
 		}
 		return series[aggFn], nil
 	}
+}
+
+// stubInfluxPathHistoryFirstLast builds a get_path_history
+// influxPathHistoryFirstLast dependency returning a fixed first/last pair -
+// the actual-sample-time counterpart to stubInfluxPathHistoryStat's bucketed
+// series (see queryInfluxPathFirstLast's own doc comment, influx.go, for why
+// get_path_history needs both, and TestExecuteGetPathHistory_
+// ComputesOverallStatsAndFirstLastSeen for why they can legitimately differ).
+func stubInfluxPathHistoryFirstLast(first, last time.Time, found bool) func(ctx context.Context, path, source string, start, stop time.Time) (time.Time, time.Time, bool, error) {
+	return func(ctx context.Context, path, source string, start, stop time.Time) (time.Time, time.Time, bool, error) {
+		return first, last, found, nil
+	}
+}
+
+// stubInfluxPathHistoryFirstLastNotFound is stubInfluxPathHistoryFirstLast's
+// "no raw samples in range" case, for tests that only care about the
+// bucketed series and not first/last seen.
+func stubInfluxPathHistoryFirstLastNotFound(ctx context.Context, path, source string, start, stop time.Time) (time.Time, time.Time, bool, error) {
+	return time.Time{}, time.Time{}, false, nil
 }
 
 func TestExecuteGetPathHistory_RequiresPath(t *testing.T) {
@@ -461,9 +487,10 @@ func TestExecuteGetPathHistory_DefaultsToLast24Hours(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	var calls []capturedPathHistoryCall
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(nil, &calls),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
 	if err != nil {
@@ -489,9 +516,10 @@ func TestExecuteGetPathHistory_HoursBackOverridesDefault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	var calls []capturedPathHistoryCall
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(nil, &calls),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":2}`))
 	if err != nil {
@@ -529,19 +557,35 @@ func TestExecuteGetPathHistory_ClampsSpanToMax90Days(t *testing.T) {
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	var calls []capturedPathHistoryCall
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(nil, &calls),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	start := "2020-01-01T00:00:00Z"
 	end := now.Format(time.RFC3339)
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"`+start+`","end":"`+end+`"}`))
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"`+start+`","end":"`+end+`"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	span := calls[0].stop.Sub(calls[0].start)
 	if span > assistantPathHistoryMaxSpan {
 		t.Errorf("expected span capped at %v, got %v", assistantPathHistoryMaxSpan, span)
+	}
+
+	// A code-review finding (2026-09-25): the clamp used to happen silently -
+	// the model asked for a 2020 start and had no way to tell it got 2026-06-27
+	// instead short of noticing the returned start_iso didn't match its own
+	// request.
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !strings.Contains(result.Note, "2020-01-01T00:00:00Z") {
+		t.Errorf("expected the note to name the originally-requested start, got %q", result.Note)
+	}
+	if !strings.Contains(result.Note, result.StartISO) {
+		t.Errorf("expected the note to name the moved-to start %s, got %q", result.StartISO, result.Note)
 	}
 }
 
@@ -657,8 +701,8 @@ func parseFluxEveryDurationForTest(t *testing.T, every string) time.Duration {
 // (min/mean/max all identical), so a test can assert against a
 // fully-populated series without hardcoding the exact bucket width an
 // allowlist will choose ahead of time.
-func stubInfluxPathHistoryStatFullyPopulated(t *testing.T) func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
-	return func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+func stubInfluxPathHistoryStatFullyPopulated(t *testing.T) func(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+	return func(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
 		width := parseFluxEveryDurationForTest(t, every)
 		var pts []telemetryPoint
 		for at := start.Truncate(width); at.Before(stop); at = at.Add(width) {
@@ -677,9 +721,10 @@ func TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpan
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	for _, hoursBack := range []float64{3, 24 * 7} {
 		deps := assistantToolDeps{
-			now:                   func() time.Time { return now },
-			vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-			influxPathHistoryStat: stubInfluxPathHistoryStatFullyPopulated(t),
+			now:                        func() time.Time { return now },
+			vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+			influxPathHistoryStat:      stubInfluxPathHistoryStatFullyPopulated(t),
+			influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 		}
 
 		args := fmt.Sprintf(`{"path":"tanks.fuel.2.currentLevel","hours_back":%v}`, hoursBack)
@@ -733,9 +778,10 @@ func TestExecuteGetPathHistory_RoundsBucketValuesForCompactness(t *testing.T) {
 		"max":  {{Timestamp: t0, Value: 0.750686467065874}},
 	}
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(series, nil),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":1}`))
 	if err != nil {
@@ -795,7 +841,7 @@ func TestComputePathHistoryGaps_FindsGapsAndTrueCount(t *testing.T) {
 	}
 }
 
-func TestExecuteGetPathHistory_ComputesOverallStatsAndFirstLastSeen(t *testing.T) {
+func TestExecuteGetPathHistory_ComputesOverallStats(t *testing.T) {
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	t0 := now.Add(-2 * time.Hour)
 	t1 := now.Add(-time.Hour)
@@ -806,9 +852,10 @@ func TestExecuteGetPathHistory_ComputesOverallStatsAndFirstLastSeen(t *testing.T
 		"max":  {{Timestamp: t0, Value: 0.32}, {Timestamp: t1, Value: 0.30}},
 	}
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(series, nil),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 
 	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
@@ -828,14 +875,95 @@ func TestExecuteGetPathHistory_ComputesOverallStatsAndFirstLastSeen(t *testing.T
 	if result.OverallMean == nil || *result.OverallMean != 0.30 {
 		t.Errorf("expected overall_mean 0.30, got %+v", result.OverallMean)
 	}
-	if result.FirstSeenISO != t0.UTC().Format(time.RFC3339) {
-		t.Errorf("expected first_seen_iso %s, got %s", t0.UTC().Format(time.RFC3339), result.FirstSeenISO)
-	}
-	if result.LastSeenISO != t1.UTC().Format(time.RFC3339) {
-		t.Errorf("expected last_seen_iso %s, got %s", t1.UTC().Format(time.RFC3339), result.LastSeenISO)
-	}
 	if len(result.Buckets) != 2 {
 		t.Errorf("expected 2 buckets, got %d", len(result.Buckets))
+	}
+}
+
+// TestExecuteGetPathHistory_FirstLastSeenComesFromActualSampleTimesNotBucketStarts
+// is the direct regression test for a code-review finding (2026-09-25):
+// first_seen/last_seen used to come from merged's own endpoints, which are
+// bucket-START boundaries (buildInfluxPathStatFlux's timeSrc: "_start" doc
+// comment), not the real first/last recorded sample - on a 90-day range
+// bucketed to 2-day buckets, that is up to two days off from when a source
+// actually stopped. The bucketed series here deliberately uses DIFFERENT
+// timestamps (t0/t1) than the injected "actual" first/last sample times
+// (realFirst/realLast) so the two can never accidentally agree; the result
+// must reflect realFirst/realLast, not t0/t1.
+func TestExecuteGetPathHistory_FirstLastSeenComesFromActualSampleTimesNotBucketStarts(t *testing.T) {
+	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	t0 := now.Add(-2 * time.Hour)
+	t1 := now.Add(-time.Hour)
+	// The real first/last sample times deliberately fall INSIDE their
+	// respective buckets rather than on the bucket boundary, so a
+	// regression back to using merged[0].T/merged[-1].T would fail loudly
+	// rather than by coincidence.
+	realFirst := t0.Add(17 * time.Minute)
+	realLast := t1.Add(42 * time.Minute)
+
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: t0, Value: 0.30}, {Timestamp: t1, Value: 0.28}},
+		"mean": {{Timestamp: t0, Value: 0.31}, {Timestamp: t1, Value: 0.29}},
+		"max":  {{Timestamp: t0, Value: 0.32}, {Timestamp: t1, Value: 0.30}},
+	}
+	deps := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(realFirst, realLast, true),
+	}
+
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.FirstSeenISO != realFirst.UTC().Format(time.RFC3339) {
+		t.Errorf("expected first_seen_iso %s (the real first sample), got %s", realFirst.UTC().Format(time.RFC3339), result.FirstSeenISO)
+	}
+	if result.LastSeenISO != realLast.UTC().Format(time.RFC3339) {
+		t.Errorf("expected last_seen_iso %s (the real last sample), got %s", realLast.UTC().Format(time.RFC3339), result.LastSeenISO)
+	}
+	if result.FirstSeenISO == t0.UTC().Format(time.RFC3339) {
+		t.Errorf("first_seen_iso must not be the bucket-start boundary %s", t0.UTC().Format(time.RFC3339))
+	}
+	if result.LastSeenISO == t1.UTC().Format(time.RFC3339) {
+		t.Errorf("last_seen_iso must not be the bucket-start boundary %s", t1.UTC().Format(time.RFC3339))
+	}
+}
+
+// TestExecuteGetPathHistory_NoFirstLastSampleLeavesFirstLastSeenEmpty covers
+// influxPathHistoryFirstLast's found=false case (no raw sample at all in
+// range, e.g. Influx has the measurement but nothing in this window) even
+// while the bucketed series is non-empty - first_seen/last_seen must stay
+// unset rather than falling back to a bucket boundary.
+func TestExecuteGetPathHistory_NoFirstLastSampleLeavesFirstLastSeenEmpty(t *testing.T) {
+	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	t0 := now.Add(-2 * time.Hour)
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: t0, Value: 0.30}},
+		"mean": {{Timestamp: t0, Value: 0.31}},
+		"max":  {{Timestamp: t0, Value: 0.32}},
+	}
+	deps := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
+	}
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.FirstSeen != "" || result.LastSeen != "" {
+		t.Errorf("expected first/last seen to stay empty when influxPathHistoryFirstLast found nothing, got %+v / %+v", result.FirstSeen, result.LastSeen)
 	}
 }
 
@@ -865,9 +993,10 @@ func TestExecuteGetPathHistory_NoGapsWhenFullyPopulated(t *testing.T) {
 	series := map[string][]telemetryPoint{"min": pts, "mean": pts, "max": pts}
 
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(series, nil),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","hours_back":1}`))
 	if err != nil {
@@ -888,9 +1017,10 @@ func TestExecuteGetPathHistory_NoGapsWhenFullyPopulated(t *testing.T) {
 func TestExecuteGetPathHistory_NoDataAddsExplicitNote(t *testing.T) {
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	deps := assistantToolDeps{
-		now:                   func() time.Time { return now },
-		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
-		influxPathHistoryStat: stubInfluxPathHistoryStat(nil, nil),
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
 	if err != nil {
@@ -1070,6 +1200,179 @@ func TestBuildInfluxPathStatFlux_IncludesSourceFilterOnlyWhenGiven(t *testing.T)
 func TestBuildInfluxPathStatFlux_RejectsHostileInterpolationInPath(t *testing.T) {
 	start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
 	_, err := buildInfluxPathStatFlux("SignalK_Data", "value", "tanks.${r._measurement}", "", start, start.Add(time.Hour), "1m", "mean")
+	if err == nil {
+		t.Fatalf("expected an error for hostile path input")
+	}
+}
+
+// TestExecuteGetPathHistory_CapsGapsToMostRecentIncludingOpenGap is the
+// direct regression test for a code-review finding (2026-09-25): capping
+// the reported gap list used to keep gaps[:N] - the OLDEST N ranges - which
+// meant a path still down at the end of the requested range had its own
+// still-open gap (the actual answer to "when did it die") silently dropped
+// once gap_count exceeded the cap, while several long-past, less relevant
+// gaps were kept instead.
+func TestExecuteGetPathHistory_CapsGapsToMostRecentIncludingOpenGap(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	const hoursBack = 24.0
+	start := now.Add(-hoursBack * time.Hour)
+	const width = 30 * time.Minute
+	const totalBuckets = int(24 * time.Hour / width) // 48, matching the "30m" tier at span==24h
+
+	// 12 scattered single-bucket gaps across the older three quarters of the
+	// range, then every bucket from index 40 onward missing - an "open" gap
+	// still running at `stop`.
+	missing := map[int]bool{}
+	for _, i := range []int{1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23} {
+		missing[i] = true
+	}
+	const openGapStartIndex = 40
+	for i := openGapStartIndex; i < totalBuckets; i++ {
+		missing[i] = true
+	}
+
+	var pts []telemetryPoint
+	for i := 0; i < totalBuckets; i++ {
+		if missing[i] {
+			continue
+		}
+		pts = append(pts, telemetryPoint{Timestamp: start.Add(time.Duration(i) * width), Value: 1})
+	}
+	series := map[string][]telemetryPoint{"min": pts, "mean": pts, "max": pts}
+
+	deps := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
+	}
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(fmt.Sprintf(`{"path":"x","hours_back":%v}`, hoursBack)))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(result.Gaps) != assistantPathHistoryMaxReportedGaps {
+		t.Fatalf("expected exactly %d reported gaps, got %d: %+v", assistantPathHistoryMaxReportedGaps, len(result.Gaps), result.Gaps)
+	}
+
+	wantOpenFrom := start.Add(openGapStartIndex * width).UTC().Format(time.RFC3339)
+	wantOpenTo := now.UTC().Format(time.RFC3339)
+	last := result.Gaps[len(result.Gaps)-1]
+	if last.From != wantOpenFrom || last.To != wantOpenTo {
+		t.Errorf("expected the final reported gap to be the still-open one [%s, %s), got [%s, %s)", wantOpenFrom, wantOpenTo, last.From, last.To)
+	}
+
+	oldestFrom := start.Add(1 * width).UTC().Format(time.RFC3339)
+	for _, g := range result.Gaps {
+		if g.From == oldestFrom {
+			t.Errorf("expected the oldest gap %s to be dropped once gap_count exceeds the cap, but it is still reported: %+v", oldestFrom, result.Gaps)
+		}
+	}
+
+	if !strings.Contains(result.Note, "most recent") {
+		t.Errorf(`expected the note to say the MOST RECENT gaps are shown, got %q`, result.Note)
+	}
+}
+
+// ── get_last_recorded value types (influx.go) ────────────────────────────
+
+// TestInfluxRecordValueOK_AcceptsEveryTypeSignalkToInfluxdb2Writes is the
+// direct regression test for a code-review finding (2026-09-25):
+// queryInfluxLastRecorded used to accept only a float64 record value,
+// silently dropping the row otherwise - which made every string path (a
+// mode/state enum), boolean path (an alarm flag), or whole-number path
+// decoded as an integer type look permanently unrecorded to get_last_recorded.
+//
+// signalk-to-influxdb2 (the upstream plugin that writes this bucket -
+// tkurki/signalk-to-influxdb2, src/influx.ts, checked live 2026-09-25 via
+// `gh api repos/tkurki/signalk-to-influxdb2/contents/src/influx.ts`) always
+// writes to a field literally named "value" regardless of type:
+// point.floatField('value', v) for a number (JsValueType.number),
+// point.stringField('value', v) for a string, point.booleanField('value', v)
+// for a boolean, and point.stringField('value', JSON.stringify(v)) for
+// anything else - so the existing _field == "value" filter this file already
+// uses is correct for every type; the bug was entirely the Go-side type
+// assertion. int64/uint64 are accepted defensively even though no writer in
+// this fleet's own path produces them today.
+func TestInfluxRecordValueOK_AcceptsEveryTypeSignalkToInfluxdb2Writes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		ok   bool
+	}{
+		{"number (floatField)", 12.5, true},
+		{"string (stringField - a mode/state enum)", "charging", true},
+		{"bool (booleanField - an alarm flag)", true, true},
+		{"int64 (defensive)", int64(3), true},
+		{"uint64 (defensive)", uint64(3), true},
+		{"nil (no value at all)", nil, false},
+	}
+	for _, c := range cases {
+		got, ok := influxRecordValueOK(c.in)
+		if ok != c.ok {
+			t.Errorf("%s: expected ok=%v, got %v", c.name, c.ok, ok)
+			continue
+		}
+		if ok && got != c.in {
+			t.Errorf("%s: expected the value passed through unchanged, got %v", c.name, got)
+		}
+	}
+}
+
+// ── first/last seen (influx.go) ───────────────────────────────────────────
+
+// TestBuildInfluxFirstLastFlux_GroupsBeforeFirstAndLast is
+// buildInfluxLastRecordedFlux's own group()-then-sort()-then-last() reasoning
+// applied here: first()/last() must run on the raw series REGROUPED into one
+// table (group(), bare), not per-source, or a path written by several
+// $source labels would report one arbitrary source's own first/last point
+// rather than the path's genuine overall first/last sample.
+func TestBuildInfluxFirstLastFlux_GroupsBeforeFirstAndLast(t *testing.T) {
+	start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	stop := start.Add(time.Hour)
+	flux, err := buildInfluxFirstLastFlux("SignalK_Data", "value", "tanks.fuel.2.currentLevel", "", start, stop)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(flux, "|> group()") {
+		t.Errorf("expected a bare group() before first()/last(), got:\n%s", flux)
+	}
+	if !strings.Contains(flux, "|> first()") || !strings.Contains(flux, "|> last()") {
+		t.Errorf("expected both first() and last(), got:\n%s", flux)
+	}
+	if !strings.Contains(flux, "union(tables:") {
+		t.Errorf("expected the first/last tables combined with union(), got:\n%s", flux)
+	}
+}
+
+func TestBuildInfluxFirstLastFlux_IncludesSourceFilterOnlyWhenGiven(t *testing.T) {
+	start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	stop := start.Add(time.Hour)
+
+	withSource, err := buildInfluxFirstLastFlux("SignalK_Data", "value", "tanks.fuel.2.currentLevel", "YachtDevices.6", start, stop)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(withSource, `r.source == "YachtDevices.6"`) {
+		t.Errorf("expected an exact source filter, got:\n%s", withSource)
+	}
+
+	withoutSource, err := buildInfluxFirstLastFlux("SignalK_Data", "value", "tanks.fuel.2.currentLevel", "", start, stop)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if strings.Contains(withoutSource, "r.source") {
+		t.Errorf("expected no source filter when source is empty, got:\n%s", withoutSource)
+	}
+}
+
+func TestBuildInfluxFirstLastFlux_RejectsHostileInterpolationInPath(t *testing.T) {
+	start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	_, err := buildInfluxFirstLastFlux("SignalK_Data", "value", "tanks.${r._measurement}", "", start, start.Add(time.Hour))
 	if err == nil {
 		t.Fatalf("expected an error for hostile path input")
 	}
