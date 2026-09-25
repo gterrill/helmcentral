@@ -17,6 +17,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.
 
+### Changed
+
+- Current Conditions now shows true wind speed with an arrow for its
+  direction, and its observed-gust marker reads the last hour's highest
+  true wind.
+
 ## [0.31.0] - 2026-09-25
 
 ### Added

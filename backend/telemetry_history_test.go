@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"sort"
 	"testing"
 	"time"
@@ -97,6 +98,46 @@ func TestInMemoryMaxWindGustKts_DoesNotReapplyMetersPerSecondConversion(t *testi
 	got := inMemoryMaxWindGustKts("10m")
 	if got != 20.0 {
 		t.Fatalf("expected 20.0 kts unchanged, got %v (metersPerSecondToKnots re-applied?)", got)
+	}
+}
+
+// TestInMemoryMaxTrueWindKts_ReturnsMaxInWindowConvertedToKnots covers the
+// Current Conditions tile's "obs" marker (ADR 0129): unlike windGustHistory
+// (already knots by the time sampleTracks records it), trueWindSpeedHistory
+// records the raw m/s value straight off environment.wind.speedTrue
+// (tracks.go), so this function - not the caller - owns the one
+// metersPerSecondToKnots conversion.
+func TestInMemoryMaxTrueWindKts_ReturnsMaxInWindowConvertedToKnots(t *testing.T) {
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	now := time.Now().UTC()
+	trueWindSpeedHistory.record(5.0, now.Add(-5*time.Minute))
+	trueWindSpeedHistory.record(9.0, now.Add(-2*time.Minute)) // the max, in m/s
+	trueWindSpeedHistory.record(3.0, now.Add(-1*time.Minute))
+
+	got := inMemoryMaxTrueWindKts("10m")
+	want := math.Round(9.0*metersPerSecondToKnots*10) / 10
+	if got != want {
+		t.Fatalf("expected max true wind %v kts (9.0 m/s converted), got %v", want, got)
+	}
+}
+
+func TestInMemoryMaxTrueWindKts_NoSamplesReturnsSentinel(t *testing.T) {
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	got := inMemoryMaxTrueWindKts("1h")
+	if got != -1 {
+		t.Fatalf("expected sentinel -1 for no samples, got %v", got)
+	}
+}
+
+// TestInMemoryMaxTrueWindKts_InvalidWindowReturnsSentinel mirrors
+// inMemoryMaxWindGustKts's own unparsable-window contract.
+func TestInMemoryMaxTrueWindKts_InvalidWindowReturnsSentinel(t *testing.T) {
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	got := inMemoryMaxTrueWindKts("not-a-duration")
+	if got != -1 {
+		t.Fatalf("expected sentinel -1 for an unparsable window, got %v", got)
 	}
 }
 

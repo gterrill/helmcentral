@@ -1289,7 +1289,10 @@ export function App() {
     windAngleApparentDeg,
     windSide,
     windAngleRelativeDeg,
+    windSpeedTrueKts,
+    windDirectionTrueDeg,
     maxGustKts,
+    maxTrueWindKts1h,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,
@@ -2046,8 +2049,9 @@ export function App() {
           <CurrentConditionsTile
             depth={depth}
             depthLastUpdateAgeS={depthLastUpdateAgeS}
-            windSpeedApparentKts={windSpeedApparentKts}
-            maxGustKts={maxGustKts}
+            windSpeedTrueKts={windSpeedTrueKts}
+            windDirectionTrueDeg={windDirectionTrueDeg}
+            maxTrueWindKts1h={maxTrueWindKts1h}
             weather={weather}
             forecast={forecast}
             nextHour={forecastNextHour}
