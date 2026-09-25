@@ -944,7 +944,14 @@ func TestAssistantRunner_ToolCallCapPerRoundRefusesCallsBeyondTheLimit(t *testin
 	}
 }
 
-func TestAssistantRunner_ForcedFinalRoundSendsNoToolsAndToolChoiceNone(t *testing.T) {
+// TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone checks
+// the forced final round still lists every tool (Tools is left populated)
+// and only sets ToolChoice to "none" - not, as an earlier version of this
+// fix tried, Tools: nil. An empty Tools list gives some providers nothing
+// to apply "none" to, which is the likely reason a tool-choice-none request
+// with no tools listed did not reliably stop google/gemini-3.8-flash from
+// calling one anyway.
+func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *testing.T) {
 	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
 	errs := make([]error, 0, assistantMaxToolRounds+1)
 	for i := 0; i < assistantMaxToolRounds; i++ {
@@ -971,27 +978,27 @@ func TestAssistantRunner_ForcedFinalRoundSendsNoToolsAndToolChoiceNone(t *testin
 	}
 
 	forced := doer.requests[assistantMaxToolRounds]
-	if len(forced.Tools) != 0 {
-		t.Fatalf("expected the forced final round to send no tools, got %d", len(forced.Tools))
+	if len(forced.Tools) == 0 {
+		t.Fatalf("expected the forced final round to still list every tool, got none")
+	}
+	if len(forced.Tools) != len(doer.requests[0].Tools) {
+		t.Fatalf("expected the forced final round to list the same tools as round 0, got %d vs %d", len(forced.Tools), len(doer.requests[0].Tools))
 	}
 	if forced.ToolChoice != "none" {
 		t.Fatalf("expected the forced final round's tool_choice to be %q, got %q", "none", forced.ToolChoice)
 	}
 
-	// The forced round must end with the budget-spent instruction telling
-	// the model plainly to stop calling tools and answer from what it
-	// already has - see assistantForcedFinalInstructionMessage's own doc
-	// comment for why this exists (google/gemini-3.8-flash returned
-	// structured tool_calls on the forced round despite tool_choice
-	// "none", with nothing in the conversation telling it its budget was
-	// spent).
-	if n := len(forced.Messages); n == 0 || forced.Messages[n-1].Role != "user" || string(forced.Messages[n-1].Content) != assistantForcedFinalInstruction {
-		t.Fatalf("expected the forced final round's last message to be the budget-spent instruction, got %+v", forced.Messages)
+	// The forced round's system message (always messages[0]) must carry the
+	// instruction telling the model plainly to answer now instead of
+	// calling another tool - see assistantForcedFinalSystemMessage's own
+	// doc comment for why it lives here rather than a trailing message.
+	if len(forced.Messages) == 0 || forced.Messages[0].Role != "system" || !strings.Contains(string(forced.Messages[0].Content), assistantForcedFinalInstruction) {
+		t.Fatalf("expected the forced final round's system message to carry the instruction, got %+v", forced.Messages)
 	}
 
-	// Every earlier round must still have offered tools normally, and must
-	// not yet carry the budget-spent instruction - it only applies once
-	// the budget is actually spent.
+	// Every earlier round must still have offered tools normally, without
+	// tool_choice forced, and without the instruction in its system
+	// message - it only applies once the round is actually forced.
 	for i := 0; i < assistantMaxToolRounds; i++ {
 		if len(doer.requests[i].Tools) == 0 {
 			t.Fatalf("expected round %d to offer tools", i)
@@ -999,10 +1006,8 @@ func TestAssistantRunner_ForcedFinalRoundSendsNoToolsAndToolChoiceNone(t *testin
 		if doer.requests[i].ToolChoice == "none" {
 			t.Fatalf("round %d should not have forced tool_choice none", i)
 		}
-		for _, msg := range doer.requests[i].Messages {
-			if string(msg.Content) == assistantForcedFinalInstruction {
-				t.Fatalf("round %d should not yet carry the budget-spent instruction", i)
-			}
+		if strings.Contains(string(doer.requests[i].Messages[0].Content), assistantForcedFinalInstruction) {
+			t.Fatalf("round %d's system message should not yet carry the forced-final instruction", i)
 		}
 	}
 }
@@ -1029,6 +1034,105 @@ func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testin
 	}
 	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
 		t.Fatalf("expected the error to name the round cap, got %q", err)
+	}
+}
+
+// TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged checks
+// assistantForcedFinalSystemMessage's Anthropic path (assistant_run.go):
+// the instruction is appended to the live (second) content block only, so
+// the stable (first) block - the one OpenRouter's provider-side cache
+// matches against, per assistantSystemMessage's own doc comment - is
+// byte-for-byte the same on the forced round as on every earlier one.
+// openRouterMessage.Content's decode path collapses a content-blocks array
+// back into one joined string (openRouterContent.UnmarshalJSON), which
+// would hide a missing cache_control breakpoint, so this reads
+// doer.rawBodies directly rather than the decoded openRouterChatRequest -
+// the same approach TestAssistantRunner_AnthropicModelRequestCarriesCacheControlBreakpoint
+// already uses for the same reason.
+func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testing.T) {
+	const model = "anthropic/claude-sonnet-4.5"
+
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "forced final answer", model, openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: model, tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "STABLE PREFIX", "LIVE SUFFIX", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.rawBodies) != assistantMaxToolRounds+1 {
+		t.Fatalf("expected %d requests, got %d", assistantMaxToolRounds+1, len(doer.rawBodies))
+	}
+
+	type block struct {
+		Type         string `json:"type"`
+		Text         string `json:"text"`
+		CacheControl *struct {
+			Type string `json:"type"`
+		} `json:"cache_control"`
+	}
+	systemBlocks := func(raw []byte) []block {
+		t.Helper()
+		// Only messages[0] (the system message) is decoded as a content-
+		// blocks array - every other message's content is a plain string
+		// (a tool-role result, or an assistant message with no content at
+		// all alongside tool_calls), which would fail to unmarshal into
+		// []block if decoded with the same fixed shape.
+		var decoded struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(decoded.Messages) == 0 || decoded.Messages[0].Role != "system" {
+			t.Fatalf("expected messages[0] to be the system message, got %+v", decoded.Messages)
+		}
+		var blocks []block
+		if err := json.Unmarshal(decoded.Messages[0].Content, &blocks); err != nil {
+			t.Fatalf("decode system message content blocks: %v", err)
+		}
+		return blocks
+	}
+
+	round0 := systemBlocks(doer.rawBodies[0])
+	if len(round0) != 2 {
+		t.Fatalf("expected 2 content blocks on round 0, got %+v", round0)
+	}
+	if round0[0].Text != "STABLE PREFIX" || round0[0].CacheControl == nil || round0[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("expected round 0's first block to carry the stable prefix and cache_control, got %+v", round0[0])
+	}
+	if round0[1].Text != "LIVE SUFFIX" || round0[1].CacheControl != nil {
+		t.Fatalf("expected round 0's second block to carry the plain live suffix with no instruction yet, got %+v", round0[1])
+	}
+
+	forced := systemBlocks(doer.rawBodies[assistantMaxToolRounds])
+	if len(forced) != 2 {
+		t.Fatalf("expected 2 content blocks on the forced round, got %+v", forced)
+	}
+	// CacheControl is a pointer, so it is compared by field rather than
+	// with != (which would compare pointer identity across two separately
+	// decoded structs and always differ, regardless of content).
+	if forced[0].Text != round0[0].Text || forced[0].CacheControl == nil || round0[0].CacheControl == nil || forced[0].CacheControl.Type != round0[0].CacheControl.Type {
+		t.Fatalf("expected the forced round's cached stable block to be unchanged, got %+v, want %+v", forced[0], round0[0])
+	}
+	wantLive := "LIVE SUFFIX\n\n" + assistantForcedFinalInstruction
+	if forced[1].Text != wantLive {
+		t.Fatalf("expected the forced round's live block to carry the instruction appended, got %q, want %q", forced[1].Text, wantLive)
+	}
+	if forced[1].CacheControl != nil {
+		t.Fatalf("expected the forced round's live block to still carry no cache_control, got %+v", forced[1].CacheControl)
 	}
 }
 

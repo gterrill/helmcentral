@@ -21,10 +21,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
-- Mate no longer gives up with "did not produce an answer" on a question
-  that takes many lookups to answer (for example, tracing when several
-  instrument feeds went quiet). Once it runs out of lookups it now answers
-  from what it already found, and says plainly what it wasn't able to check.
+- When a question needs many lookups (for example, tracing when several
+  instrument feeds went quiet), Mate now answers from what it found instead
+  of stopping with "did not produce an answer," and says plainly what it
+  wasn't able to check.
 
 ## [0.32.0] - 2026-09-25
 

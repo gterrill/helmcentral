@@ -182,43 +182,62 @@ func assistantExcessToolCallResult(name string) (string, error) {
 	return string(body), nil
 }
 
-// assistantForcedFinalInstruction is the text of the message run appends on
-// the forced final round (see assistantForcedFinalInstructionMessage) - see
-// its own doc comment for why this exists.
-const assistantForcedFinalInstruction = "Your tool budget for this question is spent - no more tool calls are available, and none will be run even if you request one. Answer the operator's question now, using only the information already gathered in this conversation. If something you needed is missing or you were not able to check it, say so plainly in your answer rather than attempting another tool call."
+// assistantForcedFinalInstruction is appended to the system message's live
+// suffix on the forced final round only (see assistantForcedFinalSystemMessage).
+//
+// An incident on v0.32.0 (google/gemini-3.8-flash) ran all
+// assistantMaxToolRounds rounds diagnosing a stale-telemetry question with
+// entirely sensible tool calls, then on the forced final round returned
+// structured tool_calls again anyway, tripping the "forcedFinal but still
+// got tool calls" error below with no answer at all - even though the
+// model plainly had everything it needed from the rounds already run.
+// tool_choice "none" alone was not a strong enough signal that this round
+// was different from every other one.
+//
+// It is worded for the model, not the operator, but written on the
+// assumption it may end up quoted back verbatim anyway, so it avoids
+// internal jargon ("tool", "budget", "round") that would read strangely in
+// an answer, and it asks explicitly for what it could not check to be
+// named plainly rather than glossed over.
+//
+// It goes into the system message rather than a new trailing message for
+// two reasons. First, this round's messages end with the previous round's
+// tool-role results, and a "user" role immediately after "tool" is
+// rejected outright by some providers behind OpenRouter ("Unexpected role
+// 'user' after role 'tool'") - the system message is the one place in the
+// conversation this round is free to change without touching that
+// sequence. Second, a message shaped like a new user turn reads to the
+// model as the operator speaking, which is not who is asking for a
+// wrap-up.
+const assistantForcedFinalInstruction = "There is no more time to check anything further before you reply. Give your best answer now, in plain prose, using only what you have already found. If there is something you were not able to check, say so plainly in the answer."
 
-// assistantForcedFinalInstructionMessage builds the message run appends to
-// the forced final round's request (never to any earlier round, and never
-// to anything persisted or shown to the operator - see run's own use of
-// it) telling the model plainly that its tool budget is gone and it must
-// answer now.
+// assistantForcedFinalSystemMessage returns a copy of base - run's own
+// system message, always messages[0] - with assistantForcedFinalInstruction
+// appended to its live suffix. base itself is never modified, so the copy
+// this returns can be substituted into the forced final round's own request
+// only, leaving run's messages (and the history the next turn is built
+// from) untouched.
 //
-// This exists because withdrawing tools (Tools: nil, ToolChoice: "none")
-// turned out not to be a strong enough signal on its own: an incident on
-// v0.32.0 (google/gemini-3.8-flash) ran all assistantMaxToolRounds rounds
-// diagnosing a stale-telemetry question with entirely sensible tool calls,
-// then on the forced final round returned structured tool_calls again
-// anyway, tripping the "forcedFinal but still got tool calls" error below
-// with no answer at all - even though the model plainly had everything it
-// needed from the rounds already run. Silently withdrawing the tools left
-// the model to infer why no more results were coming; telling it outright,
-// in the conversation itself, is what actually gets a real answer instead
-// of a second attempt at the thing that was just taken away.
-//
-// Role "user": this is appended after the last round's tool-role results,
-// and a user turn is the shape every OpenRouter-routed model already
-// expects to see following tool output (the model itself replies as
-// "assistant" next) - unlike a second "system" message, which not every
-// provider behind OpenRouter is documented to honour mid-conversation.
-//
-// This message is built fresh into run's own local messages slice for this
-// request only; it is never written back into the history slice callers
-// pass in, so it cannot leak into the conversation the next turn is built
-// from, and assistant_handlers.go never persists anything from run's
-// internal messages at all - only reply.Content, the model's own answer -
-// so it can never reach the conversation store or the operator's screen.
-func assistantForcedFinalInstructionMessage() openRouterMessage {
-	return openRouterMessage{Role: "user", Content: openRouterContent(assistantForcedFinalInstruction)}
+// For an Anthropic model, base.contentBlocks holds exactly two blocks
+// (assistantSystemMessage): the stable prefix carrying the cache_control
+// breakpoint, and the live suffix. The instruction is appended to the
+// second (live) block only, so the first block's bytes - and therefore
+// OpenRouter's provider-side prompt cache match against it - are
+// unaffected by a round that, being forced-final, never repeats anyway.
+// Every other model carries the system prompt as a plain string in
+// Content, which the instruction is appended to directly.
+func assistantForcedFinalSystemMessage(base openRouterMessage) openRouterMessage {
+	msg := base
+	if len(base.contentBlocks) > 0 {
+		blocks := make([]openRouterContentBlock, len(base.contentBlocks))
+		copy(blocks, base.contentBlocks)
+		live := len(blocks) - 1
+		blocks[live].Text += "\n\n" + assistantForcedFinalInstruction
+		msg.contentBlocks = blocks
+		return msg
+	}
+	msg.Content = base.Content + openRouterContent("\n\n"+assistantForcedFinalInstruction)
+	return msg
 }
 
 // assistantEmitter pushes one named progress event to the SSE stream a
@@ -515,12 +534,17 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 
 // run asks the model for a reply, answers any tool calls it makes, and
 // repeats until the model returns plain text or assistantMaxToolRounds is
-// reached, at which point tools are withdrawn (tool_choice "none") to force
-// a final answer. A model that still calls a tool on that forced round is a
-// bug in the model's behaviour Helmcentral cannot paper over, so that
-// surfaces as an error rather than a fabricated reply (AGENTS.md's fallback
-// policy). The same is true of a model that swaps the structured tool_calls
-// field for its own text tool-call markup instead of a real answer (see
+// reached, at which point tool_choice is set to "none" to force a final
+// answer - Tools stays populated on that request (assistantForcedFinalSystemMessage's
+// own doc comment covers why: an empty Tools list gives some providers
+// nothing to apply "none" to). The system message on that request also
+// carries assistantForcedFinalInstruction, appended by
+// assistantForcedFinalSystemMessage. A model that still calls a tool on
+// that forced round is a bug in the model's behaviour Helmcentral cannot
+// paper over, so that surfaces as an error rather than a fabricated reply
+// (AGENTS.md's fallback policy). The same is true of a model that swaps the
+// structured tool_calls field for its own text tool-call markup instead of
+// a real answer (see
 // assistantTextToolCallMarker) - accepting that text as the reply would
 // show the operator raw model-internal syntax instead of an error, so it is
 // checked and rejected on every round, not only the forced one, since a
@@ -589,14 +613,16 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {
-			req.Tools = nil
 			req.ToolChoice = "none"
-			// See assistantForcedFinalInstructionMessage's doc comment: this
-			// is appended to a copy of messages built just for this request,
-			// never to messages itself, so it never reaches a later round
-			// (there is none - forcedFinal is always the last) or leaks into
-			// anything persisted.
-			req.Messages = append(append([]openRouterMessage{}, messages...), assistantForcedFinalInstructionMessage())
+			// Substituted into a copy of messages built just for this
+			// request - messages itself, and the system message at its
+			// index 0, are never modified. See assistantForcedFinalSystemMessage's
+			// own doc comment for why the instruction goes here rather than
+			// a trailing message.
+			forced := make([]openRouterMessage, len(messages))
+			copy(forced, messages)
+			forced[0] = assistantForcedFinalSystemMessage(forced[0])
+			req.Messages = forced
 		}
 
 		// roundText mirrors, fragment by fragment, the content
