@@ -638,7 +638,14 @@ export function AnchorWatchMap({
   }, [attemptFit])
 
   useEffect(() => {
-    if (!hasAnchor || anchorLat === null || anchorLon === null) return
+    if (!hasAnchor || anchorLat === null || anchorLon === null) {
+      // Raised: any fit still owed to the previous anchor no longer applies
+      // to anything. Left uncleared, a later unrelated resize or style
+      // reload (retryPendingFit, below) would apply that stale geometry to
+      // a map that now has no anchor at all (code review finding 6).
+      pendingFitRef.current = null
+      return
+    }
     const sessionChanged = viewSessionRef.current !== anchorSetAt
     if (sessionChanged) {
       // A new anchorage pulls every client's view to it — the alternative is
@@ -653,7 +660,17 @@ export function AnchorWatchMap({
     // Same session this component has already been following (including
     // "always has, since mount") — only a catch-up fit is owed, and only if
     // this host has no matching persisted zoom of its own yet.
-    if (didFitInitialZoomRef.current || pendingFitRef.current) return
+    if (didFitInitialZoomRef.current) return
+    if (pendingFitRef.current) {
+      // A fit for this same session is already deferred (map not ready, or
+      // container unmeasurable) — keep its radius current rather than
+      // silently dropping a radius change (the stepper, or the Rode
+      // Planner's "Apply as alarm radius") that lands before it resolves;
+      // otherwise the eventual retry fits the STALE radius this effect was
+      // first deferred with (code review finding 6).
+      pendingFitRef.current = { ...pendingFitRef.current, radiusM: radiusMeters }
+      return
+    }
     const stored = readStoredZoom(viewKey)
     const zoomBelongsToCurrentSession = stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
     if (zoomBelongsToCurrentSession) {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render } from '@testing-library/react'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { fitRadiusZoom } from '@/lib/anchor-view'
 
 // react-map-gl constructs the underlying maplibre.Map instance
 // asynchronously — mapRef.current can still be null the first time
@@ -266,5 +267,93 @@ describe('AnchorWatchMap defers a session-change fit until the map loads', () =>
       longitude: baseProps.anchorLon,
       sessionId: SESSION,
     })
+  })
+})
+
+// code-review finding 6: pendingFitRef was not cleared when the anchor was
+// raised, so a fit deferred against the pre-raise anchor (map not yet ready,
+// or the container unmeasurable) was still sitting there when the map
+// eventually did load or the container was resized -- applying stale
+// geometry to a map that, by then, has no anchor at all.
+describe('AnchorWatchMap clears a deferred fit when the anchor is raised', () => {
+  beforeEach(() => {
+    mapReady.value = false
+    captured.onLoad = null
+    jumpToMock.mockClear()
+    easeToMock.mockClear()
+    localStorage.clear()
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 390, height: 500, top: 0, left: 0, right: 390, bottom: 500, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('does not apply the pre-raise anchor geometry once the map finally loads', () => {
+    const { rerender } = render(<AnchorWatchMap {...baseProps} />)
+
+    // Raised before the map ever finished constructing -- a fit for the
+    // pre-raise anchor is still deferred in pendingFitRef at this point.
+    rerender(<AnchorWatchMap {...baseProps} anchorLat={null} anchorLon={null} anchorSetAt={null} />)
+
+    mapReady.value = true
+    rerender(<AnchorWatchMap {...baseProps} anchorLat={null} anchorLon={null} anchorSetAt={null} />)
+    act(() => {
+      captured.onLoad?.()
+    })
+
+    expect(jumpToMock).not.toHaveBeenCalled()
+    expect(easeToMock).not.toHaveBeenCalled()
+  })
+})
+
+// code-review finding 6 (the other half): a fit already deferred for the
+// CURRENT session (map not ready, or container unmeasurable) short-circuited
+// out of the effect entirely on a later render, so a radius change (the
+// stepper, or the Rode Planner's "Apply as alarm radius") landing before it
+// resolved was silently dropped -- the eventual retry fit the STALE radius
+// the deferral was first created with.
+describe("AnchorWatchMap keeps a deferred fit's radius current", () => {
+  const SESSION = '2026-09-01T00:00:00Z'
+
+  beforeEach(() => {
+    mapReady.value = false
+    captured.onLoad = null
+    jumpToMock.mockClear()
+    easeToMock.mockClear()
+    localStorage.clear()
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 390, height: 500, top: 0, left: 0, right: 390, bottom: 500, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('applies the latest radius, not the one a deferred fit was first created with', () => {
+    const { rerender } = render(<AnchorWatchMap {...baseProps} anchorLat={null} anchorLon={null} anchorSetAt={null} />)
+
+    // A session starts (radius 34, from baseProps) while the map is still
+    // under construction -- deferred into pendingFitRef.
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} radiusMeters={34} />)
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    // The radius changes before the map ever finishes loading -- still the
+    // same session, so this lands on the "already deferred" branch.
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} radiusMeters={60} />)
+
+    mapReady.value = true
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} radiusMeters={60} />)
+    act(() => {
+      captured.onLoad?.()
+    })
+
+    expect(easeToMock).toHaveBeenCalledTimes(1)
+    const [call] = easeToMock.mock.calls
+    const expectedZoom = fitRadiusZoom(60, baseProps.anchorLat, 390)
+    expect(call[0].zoom).toBeCloseTo(expectedZoom, 6)
   })
 })
