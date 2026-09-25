@@ -391,6 +391,51 @@ it server-side and out of `coreEnvSecretKeys` in the first place.
   has in that mode, applied to a feature that now has a literal dollar cost
   attached.
 
+## Amendment 2026-09-25: the forced final round keeps its tools listed and tells the model why it's asking again
+
+On v0.32.0, google/gemini-3.8-flash was asked when the exhaust temperature
+and tank levels had stopped updating, ran eight perfectly sensible rounds
+of `check_signalk_paths`, `get_last_recorded` and `get_path_history`, and
+on the forced final round returned structured `tool_calls` again anyway.
+ADR 0103's guard did exactly what it was built to do - it refused the tool
+call rather than fabricating a reply, and the run failed with "the
+assistant did not produce an answer within 8 tool rounds" - but the model
+had everything it needed from the rounds already run, and the operator got
+that error instead of an answer.
+
+Two changes to the forced final round address this, neither of which this
+ADR had recorded a reason not to do already.
+
+First, the forced round's request now keeps `Tools: assistantToolDefinitions()`
+populated and sets only `tool_choice: "none"`, rather than the original
+`Tools: nil` this ADR shipped with. An empty tools list gives some
+providers nothing to apply `"none"` to; the likely reason `tool_choice:
+"none"` did not reliably stop Gemini from calling one anyway is that
+OpenRouter, or the provider behind it, had no function-calling schema left
+to put into "none" mode against.
+
+Second, `run` (`assistant_run.go`) now appends a plain instruction to the
+forced round's own copy of the system message's live suffix only - never
+to any earlier round, never to the history the next turn is built from,
+and never persisted or shown to the operator, since only the model's own
+final answer (`reply.Content`) is ever written to the conversation store -
+telling the model there is no more time to check anything further and it
+must give its best answer now from what it has already found, naming
+plainly anything it could not check. It goes into the system message
+rather than a new trailing message for two reasons: this round's messages
+end with the previous round's tool-role results, and a `user` message
+immediately after a `tool` message is rejected outright by some providers
+behind OpenRouter ("Unexpected role 'user' after role 'tool'"); and a
+message shaped like a new user turn reads to the model as the operator
+speaking, which is not who is actually asking for a wrap-up. For an
+Anthropic model the instruction is appended to the second content block
+only, leaving the first block - the one OpenRouter's provider-side cache
+matches against - byte-for-byte unchanged.
+
+ADR 0103's guard is otherwise unchanged: a model that still returns
+`tool_calls` after both of these still fails the run with the same error
+rather than falling back to whatever partial text it produced.
+
 ## Related
 
 - ADR 0023 (encrypted secrets store): the mechanism `OPENROUTER_API_KEY`
