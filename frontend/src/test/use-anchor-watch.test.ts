@@ -439,4 +439,54 @@ describe('useAnchorWatch loaded', () => {
 
     vi.useRealTimers()
   })
+
+  // code-review finding: `loaded` used to be set only by fetchState (the GET
+  // poll). A successful mutation response is just as authoritative about
+  // "we have heard from the server" as a GET — and on a fresh mount, the
+  // operator can drop anchor (or the tile can auto-populate a session write)
+  // before the first GET has even resolved, so waiting on the GET alone
+  // would report "not loaded" while a real, current server state already
+  // sits in hand.
+  it('flips loaded true on a successful setAnchorHere even while the initial GET is still in flight', async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init === undefined) {
+        // The initial GET /api/anchor-watch poll — left permanently pending
+        // for this test, so `loaded` can only come from the POST below.
+        return new Promise(() => {})
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ active: true, lat: -21.1, lon: 149.2 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    expect(result.current.loaded).toBe(false)
+
+    await act(async () => {
+      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: null, planningTideHeightFt: null })
+    })
+
+    expect(result.current.loaded).toBe(true)
+  })
+
+  it.each([
+    ['updateRadius', (r: ReturnType<typeof useAnchorWatch>) => r.updateRadius(25)],
+    ['updateRodeAndConditions', (r: ReturnType<typeof useAnchorWatch>) => r.updateRodeAndConditions(30, 'calm', 'sand')],
+    ['updatePlanningDepth', (r: ReturnType<typeof useAnchorWatch>) => r.updatePlanningDepth(5, 1)],
+    ['clearAnchor', (r: ReturnType<typeof useAnchorWatch>) => r.clearAnchor()],
+  ])('flips loaded true on a successful %s while the initial GET is still in flight', async (_name, call) => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init === undefined) {
+        return new Promise(() => {})
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    expect(result.current.loaded).toBe(false)
+
+    await act(async () => { await call(result.current) })
+
+    expect(result.current.loaded).toBe(true)
+  })
 })

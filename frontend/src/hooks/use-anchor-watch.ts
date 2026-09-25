@@ -166,6 +166,12 @@ export function useAnchorWatch(
         body: JSON.stringify(payload),
       })
       setServerState(await res.json() as AnchorWatchServerState)
+      // A successful mutation response is just as authoritative about "we
+      // have heard from the server" as a GET — see `loaded`'s own doc
+      // comment. Without this, dropping anchor before the first GET
+      // resolves would leave `loaded` false despite a real, current server
+      // state already sitting in hand.
+      setLoaded(true)
     } catch (error) {
       toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
@@ -188,6 +194,7 @@ export function useAnchorWatch(
       body: JSON.stringify({ radius_meters: radiusMeters }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
 
   const updateRodeAndConditions = useCallback(async (
@@ -205,6 +212,7 @@ export function useAnchorWatch(
       }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
 
   const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
@@ -220,6 +228,7 @@ export function useAnchorWatch(
       }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
 
   const updatePosition = useCallback(async (lat: number, lon: number) => {
@@ -244,6 +253,7 @@ export function useAnchorWatch(
     try {
       await anchorRequest({ method: 'DELETE' })
       setServerState({ active: false })
+      setLoaded(true)
     } catch (error) {
       toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
