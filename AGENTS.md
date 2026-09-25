@@ -6,6 +6,22 @@
 - Do not create date-based or ad-hoc tags.
 - If tagging is requested, determine the next SemVer from existing tags.
 
+## Release Notes
+
+- `CHANGELOG.md` is the release notes. The release workflow publishes the
+  tag's section as the GitHub release body and fails the release if the tag
+  has no section.
+- Add an entry under `## [Unreleased]` in the same commit as any change an
+  operator would notice. Refactors, tests and tooling get no entry.
+- Any change that makes an operator act on upgrade (moved setting, removed
+  environment variable, changed URL, rewritten stored state, anything they
+  must re-enter or place again) goes under **Breaking**, and says what to do.
+- Before tagging, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a
+  fresh empty `## [Unreleased]` above it, and update the compare links at the
+  foot of the file. Check it with `sh packaging/release-notes.sh vX.Y.Z`.
+- Entries are written for the operator, under the user-facing writing rules in
+  the Documentation Location Policy: no ADR numbers, no implementation detail.
+
 ## Checks Before Commit And Release
 
 - Run `/code-review medium` on the working tree before committing a batch of changes.

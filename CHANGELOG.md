@@ -1,0 +1,157 @@
+# Changelog
+
+What changed in each Helmcentral release, written for the person upgrading the
+boat. Read the **Breaking** section of every release between the one you run and
+the one you are installing: it says what you have to change before or after the
+upgrade.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+releases use [Semantic Versioning](https://semver.org/). While the version is
+0.x, a minor release can break things.
+
+## [Unreleased]
+
+### Added
+
+- Every storage bin has its own URL. Write it to an NFC tag from the bin page,
+  and tapping the tag with a phone opens that bin.
+- Equipment can carry photos, taken or picked on a phone and shown on the item
+  and on its bin.
+- Quick add, for putting an item into the bin you are standing at without
+  opening the full editor.
+- Stocktake: scan bins in turn and confirm, move or flag what is in each.
+
+### Changed
+
+- Removing a photo from an item, or deleting an item, only takes the picture
+  off that item. The picture stays in Documents. When you delete an item, you
+  can also delete photos no other item uses.
+- Pictures already linked to an item as documents now also appear in its
+  photo row.
+- Adding a photo that is already in Documents links that picture instead of
+  being refused.
+
+### Fixed
+
+- A photo that fails to upload stays queued against its own item until you
+  retry it.
+- Retrying a photo that could not be prepared no longer sends the full-size
+  original.
+- Leaving the bin page, quick add, stocktake or an item with photos waiting to
+  retry asks first.
+- A photo or name entered while quick add is still saving is no longer lost.
+- "Full item" from a bin no longer asks about changes you never made.
+- Write tag can be cancelled.
+- Saving an item's documents can no longer unlink photos added earlier in the
+  same visit.
+
+## [0.30.0] - 2026-09-23
+
+### Added
+
+- Forecast Conditions tile for a wall display.
+- The wall clock shows the ETA at the next waypoint when a route is active.
+- A next-hour rain nowcast on the wall display.
+
+## [0.29.0] - 2026-09-23
+
+### Added
+
+- Inventory: an equipment registry organised by zone and bin. Equipment
+  profiles now live under the Inventory panel.
+- Nearby tile shows the active route, cycles through place summaries, and
+  frames the map to fit the points of interest.
+- Select text in a note or manual section and ask Mate about it.
+- One dictation control, shared by the Mate composer and the note editor.
+- A new note opens straight into the editor.
+
+### Changed
+
+- Turning Mate on is the consent to index your documents. Mate indexes them in
+  the background and no longer asks item by item.
+- Notes are created from Documents only.
+
+### Fixed
+
+- An alarm on a SignalK value that goes missing reads as absent, not as -1.
+- The tide chart tooltip lines up with the cursor.
+- Long notes scroll in the document viewer.
+
+## [0.28.0] - 2026-09-21
+
+### Added
+
+- Notes: capture, file and read notes in Documents, with photos, links between
+  notes, and a rich-text editor.
+- Checklists run as a checklist, from either place a note is read.
+- A folder of documents is a manual.
+- Save one of Mate's answers as a note. Mate sees pinned notes and knows which
+  manuals exist.
+- Acknowledge an alarm from the banner. Forecast warnings link to the bulletin.
+- The alarm banner is coloured by the alarm's severity.
+- Wall displays are managed on their own page.
+- Uploaded satellite charts can be removed.
+- Edit a document's details on its own page.
+
+### Changed
+
+- The sidebar is ordered the way the boat is run, and the manual is called
+  Help.
+
+## [0.27.0] - 2026-09-19
+
+### Breaking
+
+- **Wall displays have a new address.** A wall display is now set up as its
+  own screen, with a name, size, magnification and orientation, and is opened
+  at `/display/<name>`. The old `/kiosk` address no longer exists. After
+  upgrading, create the display under Wall displays, assign its pages to it,
+  and point the wall browser at the new address. See
+  [Set up a wall display](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/set-up-a-wall-display.md).
+- **SignalK and InfluxDB credentials are no longer read from environment
+  variables.** `SIGNALK_USERNAME`, `SIGNALK_PASSWORD` and `INFLUXDB_TOKEN` are
+  ignored. If you set them in the environment, enter them in the SignalK and
+  InfluxDB sections of Settings before upgrading, or Helmcentral will connect
+  to SignalK without logging in and its alarm writes will be refused.
+
+### Added
+
+- More than one wall display, each with its own pages. A television display
+  gets slow pixel shift against burn-in, remote-control keys to step and pause
+  the rotation, and an optional screen wake lock.
+
+### Changed
+
+- Wall display pages are listed under their screen in the sidebar, not among
+  the navigation pages.
+
+### Security
+
+- Plugins can no longer read the key that protects stored credentials.
+- Clearing or repointing a notification destination clears the credential
+  bound to it.
+- Webhooks cannot be aimed at addresses on the Helmcentral host itself, and
+  dashboard embeds cannot point back at Helmcentral.
+- A document's contents cannot instruct Mate as if they came from you.
+- A malformed PDF, an oversized satellite chart upload or a bad SignalK update
+  can no longer stall or crash the helm display.
+
+## [0.26.0] - 2026-09-18
+
+### Added
+
+- Document search matches by meaning as well as by keyword, when Mate is set
+  up with an OpenRouter key. Search says when it ran keyword-only and offers to
+  index the rest.
+- A new dashboard page opens already named, with its controls at the top.
+
+### Changed
+
+- Everything on a dashboard page is called a tile.
+
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/gterrill/helmcentral/compare/v0.29.0...v0.30.0
+[0.29.0]: https://github.com/gterrill/helmcentral/compare/v0.28.0...v0.29.0
+[0.28.0]: https://github.com/gterrill/helmcentral/compare/v0.27.0...v0.28.0
+[0.27.0]: https://github.com/gterrill/helmcentral/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/gterrill/helmcentral/releases/tag/v0.26.0
