@@ -23,7 +23,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   now lives with the rest of your saved settings. On any install, Docker or
   not, this upgrade drops a running anchor watch one last time: drop the
   anchor again once you're on the new version. From here on, the watch and
-  its marks survive updates and restarts.
+  its marks survive updates and restarts. If the saved watch is ever damaged
+  and can't be read back, the Anchor Watch tile and page now say so plainly
+  instead of guessing at a position — the rest of the boat's alarms are
+  unaffected, and dropping the anchor again starts a fresh watch.
 
 ### Changed
 
