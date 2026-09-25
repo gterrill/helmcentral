@@ -21,12 +21,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   opening the full editor.
 - Stocktake: scan bins in turn and confirm, move or flag what is in each.
 
+### Changed
+
+- Removing a photo from an item, or deleting an item, only takes the picture
+  off that item. The picture stays in Documents. When you delete an item, you
+  can also delete photos no other item uses.
+- Pictures already linked to an item as documents now also appear in its
+  photo row.
+- Adding a photo that is already in Documents links that picture instead of
+  being refused.
+
 ### Fixed
 
 - A photo that fails to upload stays queued against its own item until you
-  retry it, and removing a photo from one item no longer deletes it from
-  another.
-- Leaving the bin page, quick add or stocktake with work unsaved asks first.
+  retry it.
+- Retrying a photo that could not be prepared no longer sends the full-size
+  original.
+- Leaving the bin page, quick add, stocktake or an item with photos waiting to
+  retry asks first.
+- A photo or name entered while quick add is still saving is no longer lost.
+- "Full item" from a bin no longer asks about changes you never made.
+- Write tag can be cancelled.
+- Saving an item's documents can no longer unlink photos added earlier in the
+  same visit.
 
 ## [0.30.0] - 2026-09-23
 
