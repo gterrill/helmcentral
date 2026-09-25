@@ -115,6 +115,20 @@ func signalKPathsHandler(c echo.Context) error {
 		paths = append(paths, entry)
 	}
 
+	// The anomaly engine-differential paths are dynamic (one per configured
+	// engine per quantity), so they cannot live in derivedPathIDs' static
+	// list the way every other derived path does.
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err == nil {
+		for _, path := range anomalyEngineResidualPathIDs(vessel.Engines) {
+			entry := signalKPath{Path: path, Units: unitForAlarmPath(globalSignalKSnapshot, path)}
+			if value := derivedValues[path]; value != nil {
+				entry.Value = value
+			}
+			paths = append(paths, entry)
+		}
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{"paths": paths})
 }
 

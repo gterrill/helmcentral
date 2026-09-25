@@ -23,6 +23,8 @@ export type QuantityId =
   | 'length'
   | 'frequency'
   | 'raw'
+  | 'temperatureDelta'
+  | 'pressureDelta'
 
 export interface UnitOption {
   /** Stored in the widget config, so it must stay stable. */
@@ -185,6 +187,25 @@ export const QUANTITIES: Quantity[] = [
     label: 'Unitless',
     siUnit: '',
     units: [{ id: 'raw', label: '', fromSI: identity, decimals: 2 }],
+  },
+  // Difference quantities, for a residual between two readings rather than
+  // an absolute one (the twin-engine differential detector). 'temperature'
+  // above offsets by -273.15, which is correct for an absolute reading but
+  // would print a 4 K residual as -269.1 degC; a difference in kelvin is the
+  // same difference in Celsius, so this only scales. 'pressureDelta' reads
+  // in kPa, the unit an operator reads an oil or boost pressure gap in, not
+  // 'pressure'’s mb (which is for an absolute barometric reading).
+  {
+    id: 'temperatureDelta',
+    label: 'Temperature difference',
+    siUnit: 'deltaK',
+    units: [{ id: 'deltaC', label: '°C', fromSI: identity, decimals: 1 }],
+  },
+  {
+    id: 'pressureDelta',
+    label: 'Pressure difference',
+    siUnit: 'deltaPa',
+    units: [{ id: 'deltaKPa', label: 'kPa', fromSI: (v) => v / 1000, decimals: 1 }],
   },
 ]
 

@@ -19,6 +19,15 @@ func TestFormatAlarmReading(t *testing.T) {
 		{0.5, "ratio", "50 %"},
 		{50, "Hz", "3000 RPM"},
 		{12.34, "V", "12.3 V"},
+		// deltaK and deltaPa are difference units, not absolute ones: a
+		// residual carried in K would otherwise convert through the -273.15
+		// offset like an absolute temperature and print a 4 K gap as -269 C.
+		// See alarm_units.go for why "Pa"/"K" (absolute) and "deltaPa"/"deltaK"
+		// (difference) have to stay separate entries.
+		{4, "deltaK", "4.0 °C"},
+		{-4, "deltaK", "-4.0 °C"},
+		{50000, "deltaPa", "50.0 kPa"},
+		{-15000, "deltaPa", "-15.0 kPa"},
 		{-150, "", "-150"},
 		{-0.027777, "", "-0.03"},
 		{-0.03, "furlongs", "-0.03"},

@@ -37,7 +37,17 @@ const (
 	profileKindEngine       = "engine"
 	profileKindAlternator   = "alternator"
 	profileKindGenerator    = "generator"
+	// profileKindBattery (anomaly-detection plan, ADR 0102's "nil threshold
+	// is a slot" idea reused): chemistry plus per-cell charge thresholds,
+	// rather than gauges/zones -- a house bank's full-bank-charging detector
+	// needs a chemistry-specific SoC/voltage answer, not a dashboard tile.
+	profileKindBattery = "battery"
 )
+
+// batteryFullSOCMax is the upper sanity bound for a battery profile's
+// full_soc slot: a ratio, with the same 1.05 sensor-headroom convention
+// anomaly_sensor_health.go's physicalLimits table uses for state of charge.
+const batteryFullSOCMax = 1.05
 
 // engineProfileZone is a band expressed the way the zone editor expresses one:
 // a direction and a threshold, never a free from/to pair. A profile therefore
@@ -86,18 +96,52 @@ type engineProfileService struct {
 	Source         string   `json:"source,omitempty"`
 }
 
+// batteryProfileThreshold is one of a battery profile's per-cell/pack
+// numbers (full_soc, charge_warn, charge_high). A nil Value is a slot --
+// the profile knows this number exists but not what it is, exactly like
+// engineProfileZone's nil Threshold -- and survives loading so the Vessel
+// settings UI can show "not set". Source is that value's citation (a
+// datasheet or manual); validateEngineProfile requires one whenever Value
+// is filled, since a battery threshold with no citation is indistinguishable
+// from a guess, and this one feeds an alarm about the failure mode that
+// caused the 2026-09-21 dead-ship event.
+type batteryProfileThreshold struct {
+	Value  *float64 `json:"value"`
+	Source string   `json:"source,omitempty"`
+	Note   string   `json:"note,omitempty"`
+}
+
 type engineProfile struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Kind          string                 `json:"kind"`
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Manufacturer  string                 `json:"manufacturer,omitempty"`
-	Model         string                 `json:"model,omitempty"`
-	RatingHP      int                    `json:"rating_hp,omitempty"`
-	Source        string                 `json:"source,omitempty"`
-	Notes         string                 `json:"notes,omitempty"`
-	Gauges        []engineProfileGauge   `json:"gauges"`
-	Service       []engineProfileService `json:"service,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Kind          string `json:"kind"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Manufacturer  string `json:"manufacturer,omitempty"`
+	Model         string `json:"model,omitempty"`
+	RatingHP      int    `json:"rating_hp,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Notes         string `json:"notes,omitempty"`
+	// omitempty: a battery profile has no gauges at all, and a profile that
+	// only ships service intervals is already legal (validateEngineProfile's
+	// "neither gauges nor service" check). Without it, marshalling a
+	// decoded request straight back to disk (createEquipmentProfileHandler's
+	// writeJSONFileAtomic) turns an absent "gauges" key into a literal
+	// "gauges": null, which the battery schema's additionalProperties:false
+	// then rejects on the very next load.
+	Gauges  []engineProfileGauge   `json:"gauges,omitempty"`
+	Service []engineProfileService `json:"service,omitempty"`
+
+	// Battery-only fields (Kind == profileKindBattery). Chemistry is a free
+	// label ("LiFePO4", "AGM lead-acid"); the three thresholds are the
+	// per-cell charge voltages (ChargeWarn/ChargeHigh) and the pack SoC
+	// ratio (FullSOC) fullBankChargingLevel needs (anomaly_battery.go).
+	// Pack voltage thresholds are ChargeWarn/ChargeHigh multiplied by the
+	// house bank's own cell count -- batteryPackThresholds below -- not
+	// stored here, since this profile does not know the pack size.
+	Chemistry  string                   `json:"chemistry,omitempty"`
+	FullSOC    *batteryProfileThreshold `json:"full_soc,omitempty"`
+	ChargeWarn *batteryProfileThreshold `json:"charge_warn,omitempty"`
+	ChargeHigh *batteryProfileThreshold `json:"charge_high,omitempty"`
 }
 
 // engineProfileProblem names a file that could not be loaded and why. A bad
@@ -132,7 +176,7 @@ func validateEngineProfile(p engineProfile) error {
 	if p.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported schema_version %d", p.SchemaVersion)
 	}
-	if p.Kind != profileKindEngine && p.Kind != profileKindAlternator && p.Kind != profileKindGenerator {
+	if p.Kind != profileKindEngine && p.Kind != profileKindAlternator && p.Kind != profileKindGenerator && p.Kind != profileKindBattery {
 		return fmt.Errorf("unsupported kind %q", p.Kind)
 	}
 	if strings.TrimSpace(p.ID) == "" {
@@ -141,6 +185,11 @@ func validateEngineProfile(p engineProfile) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("profile requires a name")
 	}
+
+	if p.Kind == profileKindBattery {
+		return validateBatteryProfile(p)
+	}
+
 	if len(p.Gauges) == 0 && len(p.Service) == 0 {
 		return fmt.Errorf("profile has neither gauges nor service intervals")
 	}
@@ -198,6 +247,85 @@ func validateEngineProfile(p engineProfile) error {
 		}
 	}
 	return nil
+}
+
+// validateBatteryProfile is validateEngineProfile's branch for
+// Kind == profileKindBattery: chemistry plus per-cell charge thresholds
+// instead of gauges/zones. Called only after the shared id/name/schema
+// checks above, with p.Kind already normalised.
+func validateBatteryProfile(p engineProfile) error {
+	if strings.TrimSpace(p.Chemistry) == "" {
+		return fmt.Errorf("battery profile requires a chemistry")
+	}
+	if p.FullSOC == nil && p.ChargeWarn == nil && p.ChargeHigh == nil {
+		return fmt.Errorf("battery profile has no threshold slots at all (full_soc, charge_warn or charge_high)")
+	}
+
+	if err := validateBatteryThreshold("full_soc", p.FullSOC, 0, batteryFullSOCMax); err != nil {
+		return err
+	}
+	if err := validateBatteryThreshold("charge_warn", p.ChargeWarn, 0, 0); err != nil {
+		return err
+	}
+	if err := validateBatteryThreshold("charge_high", p.ChargeHigh, 0, 0); err != nil {
+		return err
+	}
+	if p.ChargeWarn != nil && p.ChargeWarn.Value != nil && p.ChargeHigh != nil && p.ChargeHigh.Value != nil &&
+		*p.ChargeHigh.Value <= *p.ChargeWarn.Value {
+		return fmt.Errorf("charge_high must be above charge_warn")
+	}
+	return nil
+}
+
+// validateBatteryThreshold checks one battery profile threshold slot. min
+// and max bound a filled Value; max <= 0 means "no upper bound" (per-cell
+// voltages have no fixed ceiling here -- chemistry varies too widely to
+// pick one). A filled Value with no Source is rejected: the plan's "ship
+// only profiles whose numbers can be cited from a public datasheet;
+// anything else is a slot" is a safety rule, not a style preference, since
+// this feeds the full-bank-charging alarm.
+func validateBatteryThreshold(field string, t *batteryProfileThreshold, min, max float64) error {
+	if t == nil || t.Value == nil {
+		return nil
+	}
+	if *t.Value <= min {
+		return fmt.Errorf("%s must be above %v", field, min)
+	}
+	if max > 0 && *t.Value > max {
+		return fmt.Errorf("%s must be at most %v", field, max)
+	}
+	if strings.TrimSpace(t.Source) == "" {
+		return fmt.Errorf("%s has a value but no source to cite it", field)
+	}
+	return nil
+}
+
+// batteryPackThresholds multiplies a battery profile's per-cell charge_warn
+// and charge_high by cells to get the pack-level voltage thresholds
+// fullBankChargingSettings.WarnVoltage/HighVoltage need -- the plan's "pack
+// thresholds are per-cell x cells, shown and overridable" (the vessel
+// settings house-bank record's own WarnVoltage/HighVoltage fields hold the
+// operator's override, applied by the caller, not here).
+//
+// ok is false when cells <= 0 or charge_warn has no filled value:
+// fullBankChargingLevel reads WarnVoltage <= 0 as "house bank not
+// configured", so a missing warn slot has to produce that same signal
+// rather than a zero-valued threshold that would silently pass it. Like
+// fullBankChargingSettings.HighVoltage itself, charge_high is optional --
+// highV comes back 0 when it has no filled value, and that alone does not
+// affect ok.
+func batteryPackThresholds(p engineProfile, cells int) (warnV, highV float64, ok bool) {
+	if cells <= 0 {
+		return 0, 0, false
+	}
+	if p.ChargeWarn == nil || p.ChargeWarn.Value == nil {
+		return 0, 0, false
+	}
+	warnV = *p.ChargeWarn.Value * float64(cells)
+	if p.ChargeHigh != nil && p.ChargeHigh.Value != nil {
+		highV = *p.ChargeHigh.Value * float64(cells)
+	}
+	return warnV, highV, true
 }
 
 func validateEngineProfileGauge(gauge engineProfileGauge) error {

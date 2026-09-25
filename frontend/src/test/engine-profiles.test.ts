@@ -94,8 +94,8 @@ describe('profile hero gauge', () => {
     const withHero: EngineProfile = {
       ...profile,
       gauges: [
-        { ...profile.gauges[0] },
-        { ...profile.gauges[1], hero: true },
+        { ...profile.gauges![0] },
+        { ...profile.gauges![1], hero: true },
       ],
     }
     expect(profileHeroGaugeIndex(withHero)).toBe(1)
@@ -126,7 +126,7 @@ describe('alarmZoneCount', () => {
     const armed: EngineProfile = {
       ...profile,
       gauges: [{
-        ...profile.gauges[0],
+        ...profile.gauges![0],
         zones: [
           { direction: 'below', threshold: 15, state: 'alarm' },
           { direction: 'below', threshold: 25, state: 'warn' },
@@ -190,7 +190,7 @@ describe('mergeGaugeSettingsBySuffix', () => {
     { path: 'propulsion.stbd.rudderAngle', label: 'Rudder', display: 'numeric' as const, quantity: 'raw', unit: 'raw' },
   ]
   const incoming = () => profileToGauges(profile, 'propulsion.stbd')
-  const suffixes = profile.gauges.map((g) => g.path_suffix)
+  const suffixes = profile.gauges!.map((g) => g.path_suffix)
 
   test('copies settings onto matching gauges, keeping path and label', () => {
     const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming(), suffixes)
@@ -303,7 +303,7 @@ describe('dotted path suffixes', () => {
     const { gauges } = mergeGaugeSettingsBySuffix(
       existing,
       profileToGauges(dotted, 'propulsion.port'),
-      dotted.gauges.map((g) => g.path_suffix),
+      dotted.gauges!.map((g) => g.path_suffix),
     )
 
     expect(gauges[0].quantity).toBe('temperature')
@@ -324,7 +324,7 @@ describe('dotted path suffixes', () => {
     const { added } = mergeGaugeSettingsBySuffix(
       existing,
       profileToGauges(dotted, 'propulsion.port'),
-      dotted.gauges.map((g) => g.path_suffix),
+      dotted.gauges!.map((g) => g.path_suffix),
     )
     expect(added).toBe(1)
   })
@@ -391,7 +391,7 @@ describe('instance seeding against a real vessel', () => {
   // other slots, so the whole thing gave up and fell back to the candidates.
   test('finds the shared prefix even when a slot has a dotted suffix', () => {
     const slots = profileToGauges(engine, 'propulsion.port')
-    expect(commonInstancePrefix(slots, engine.gauges.map((g) => g.path_suffix))).toBe('propulsion.port')
+    expect(commonInstancePrefix(slots, engine.gauges!.map((g) => g.path_suffix))).toBe('propulsion.port')
   })
 
   test('is still null when the slots genuinely disagree', () => {
@@ -399,6 +399,6 @@ describe('instance seeding against a real vessel', () => {
       ...profileToGauges(engine, 'propulsion.port').slice(0, 2),
       ...profileToGauges(engine, 'propulsion.starboard').slice(2),
     ]
-    expect(commonInstancePrefix(slots, engine.gauges.map((g) => g.path_suffix))).toBeNull()
+    expect(commonInstancePrefix(slots, engine.gauges!.map((g) => g.path_suffix))).toBeNull()
   })
 })

@@ -17,11 +17,24 @@ import (
 // lookupBool functions.
 type signalKSnapshot struct {
 	mu          sync.RWMutex
-	contexts    map[string]map[string]any // context string → nested tree
-	pathSeen    map[string]time.Time      // "<context>|<dotted path>" → last update time
-	selfCtx     string                    // which context is this vessel, per the stream's hello frame
+	contexts    map[string]map[string]any  // context string → nested tree
+	pathSeen    map[string]time.Time       // "<context>|<dotted path>" → last update time
+	sourceSeen  map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	selfCtx     string                     // which context is this vessel, per the stream's hello frame
 	connected   bool
 	lastMessage time.Time
+}
+
+// sourceSeenEntry tracks one $source's publishing history within a context:
+// enough for the sensor-health "silent source" check (anomaly_sensor_health.go)
+// to tell a source that has gone quiet mid-stream from one that never
+// established a publishing cadence in the first place. First/Last are wall
+// times the update carrying that $source was received; Count is how many
+// update blocks have carried it.
+type sourceSeenEntry struct {
+	First time.Time
+	Last  time.Time
+	Count int
 }
 
 // vesselContextPrefix separates vessel contexts from the other trees a
@@ -89,6 +102,21 @@ const signalKDeltaMaxPathSegments = signalKPathMaxDepth
 // right now.
 const signalKContextMaxDistinctPaths = 10000
 
+// signalKContextMaxDistinctSources caps how many distinct $source values a
+// single context's sourceSeen history may hold, self included -- the same
+// "count cap survives a flood, ordinary boats never approach it" reasoning
+// signalKContextMaxDistinctPaths documents above, scaled down to match how
+// few distinct $source strings even a large N2K/SignalK installation
+// actually uses (one source per gateway/bus/plugin, not one per path).
+// sourceSeen has no path-count-style eviction trigger of its own -- it is
+// keyed by $source, not by path, so evictExcessPaths never touches it --
+// and it is exempt from evictStaleVesselContexts' own age cutoff for self,
+// the one context that eviction can never drop wholesale. Without this cap,
+// a hostile or malformed delta stream that varies $source per message would
+// grow sourceSeen without bound under self in exactly the way K-2 (backend
+// security audit) already found for distinct paths.
+const signalKContextMaxDistinctSources = 500
+
 // signalKDelta is a SignalK delta message received over the WebSocket stream.
 type signalKDelta struct {
 	// omitempty on both string fields is load-bearing for publishing
@@ -124,8 +152,9 @@ type signalKValue struct {
 // newSignalKSnapshot creates a new empty snapshot.
 func newSignalKSnapshot() *signalKSnapshot {
 	return &signalKSnapshot{
-		contexts: make(map[string]map[string]any),
-		pathSeen: make(map[string]time.Time),
+		contexts:   make(map[string]map[string]any),
+		pathSeen:   make(map[string]time.Time),
+		sourceSeen: make(map[string]sourceSeenEntry),
 	}
 }
 
@@ -157,6 +186,22 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	tree := s.contexts[d.Context]
 
 	for _, update := range d.Updates {
+		// Tracked once per update block, independent of which (if any)
+		// individual values below get kept: the silent-source check cares
+		// about this $source's publishing cadence, not which paths a given
+		// block happened to carry (a block that is entirely radar targets,
+		// dropped below, is still a real heartbeat from that source).
+		if update.SourceRef != "" && len(update.Values) > 0 {
+			key := d.Context + "|" + update.SourceRef
+			entry := s.sourceSeen[key]
+			if entry.Count == 0 {
+				entry.First = now
+			}
+			entry.Last = now
+			entry.Count++
+			s.sourceSeen[key] = entry
+		}
+
 		for _, val := range update.Values {
 			// mayara's ARPA target nodes are never read off this snapshot --
 			// radar_source.go's REST poller owns radar targets entirely -- and
@@ -507,6 +552,26 @@ func (s *signalKSnapshot) knownContexts() []string {
 	return result
 }
 
+// sourcesFor returns a copy of every $source seen under context, keyed by
+// the bare source id (not "<context>|<$source>"). A copy, like nodeAt's, so
+// a caller (anomaly_sensor_health.go's silentSources) can iterate it without
+// holding the snapshot lock across its own arithmetic.
+func (s *signalKSnapshot) sourcesFor(context string) map[string]sourceSeenEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	prefix := context + "|"
+	result := make(map[string]sourceSeenEntry)
+	for key, entry := range s.sourceSeen {
+		source, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+		result[source] = entry
+	}
+	return result
+}
+
 // lastSeen reports when a path last carried an update, or the zero time if it
 // never has. Alarm rules use it to tell a live sensor from a frozen one.
 func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
@@ -580,6 +645,15 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 		for key := range s.pathSeen {
 			if strings.HasPrefix(key, prefix) {
 				delete(s.pathSeen, key)
+			}
+		}
+		// sourceSeen is keyed "<context>|<$source>", the same shape as
+		// pathSeen's own "<context>|<path>" -- an evicted context must lose
+		// these too, or a contact heard once leaks one entry per $source it
+		// ever used for as long as the process runs.
+		for key := range s.sourceSeen {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.sourceSeen, key)
 			}
 		}
 	}
@@ -660,17 +734,59 @@ func (s *signalKSnapshot) evictExcessPaths() map[string]int {
 	return evicted
 }
 
+// evictExcessSources bounds every context (self included) at
+// signalKContextMaxDistinctSources distinct $source entries in sourceSeen,
+// dropping the least-recently-seen ones first until each is back at the
+// cap. Mirrors evictExcessPaths exactly, one map over: same shape of key,
+// same age-ordered eviction, same "return what was evicted per context so
+// the caller can log it" contract.
+func (s *signalKSnapshot) evictExcessSources() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type seenSource struct {
+		source string
+		seen   time.Time
+	}
+	byContext := map[string][]seenSource{}
+	for key, entry := range s.sourceSeen {
+		context, source, ok := strings.Cut(key, "|")
+		if !ok {
+			continue
+		}
+		byContext[context] = append(byContext[context], seenSource{source: source, seen: entry.Last})
+	}
+
+	evicted := map[string]int{}
+	for context, sources := range byContext {
+		if len(sources) <= signalKContextMaxDistinctSources {
+			continue
+		}
+
+		sort.Slice(sources, func(i, j int) bool { return sources[i].seen.Before(sources[j].seen) })
+
+		excess := len(sources) - signalKContextMaxDistinctSources
+		for i := 0; i < excess; i++ {
+			delete(s.sourceSeen, context+"|"+sources[i].source)
+		}
+		evicted[context] = excess
+	}
+
+	return evicted
+}
+
 // vesselContextSweepInterval is how often startVesselContextSweeper checks
 // for stale vessel contexts to evict. A one-minute cadence keeps the scan
 // (one pass over pathSeen, see evictStaleVesselContexts) cheap enough not to
 // measure while staying well under vesselContextStaleAfter's own hour.
 const vesselContextSweepInterval = 1 * time.Minute
 
-// startVesselContextSweeper runs evictStaleVesselContexts and
-// evictExcessPaths on vesselContextSweepInterval until ctx is cancelled
-// (backend-perf-audit.md Tier 1 #3, "the snapshot never forgets"; K-2,
-// backend security audit, extends the same sweep to per-path growth within a
-// context that never itself goes stale). A dedicated ticker rather than
+// startVesselContextSweeper runs evictStaleVesselContexts, evictExcessPaths
+// and evictExcessSources on vesselContextSweepInterval until ctx is
+// cancelled (backend-perf-audit.md Tier 1 #3, "the snapshot never forgets";
+// K-2, backend security audit, extends the same sweep to per-path and
+// per-source growth within a context that never itself goes stale). A
+// dedicated ticker rather than
 // piggybacking on the stream watchdog's 15s tick: the sweep's cadence has no
 // reason to track the watchdog's, and keeping them separate means changing
 // one interval can never accidentally change the other.
@@ -701,6 +817,21 @@ func startVesselContextSweeper(ctx context.Context, interval time.Duration) {
 				}
 				log.Printf("signalk snapshot: evicted excess distinct paths, oldest-updated-first, to stay under %d per context: %s",
 					signalKContextMaxDistinctPaths, strings.Join(parts, ", "))
+			}
+
+			if excessByContext := globalSignalKSnapshot.evictExcessSources(); len(excessByContext) > 0 {
+				contexts := make([]string, 0, len(excessByContext))
+				for context := range excessByContext {
+					contexts = append(contexts, context)
+				}
+				sort.Strings(contexts)
+
+				parts := make([]string, 0, len(contexts))
+				for _, context := range contexts {
+					parts = append(parts, fmt.Sprintf("%s (%d)", context, excessByContext[context]))
+				}
+				log.Printf("signalk snapshot: evicted excess distinct sources, oldest-seen-first, to stay under %d per context: %s",
+					signalKContextMaxDistinctSources, strings.Join(parts, ", "))
 			}
 		}
 	}

@@ -22,6 +22,9 @@ meets your needs.
   heavy-weather warning signs the wave graph watches for.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
 - [Alarms](features/alarms.md), rules, transports and the decisions behind them.
+- [Anomaly detection](features/anomaly-detection.md), frozen and impossible
+  sensor readings, charging into a full house bank, and engines pulling
+  apart from each other.
 - [Mate](features/assistant.md), a chat assistant that answers
   passage-planning questions using the boat's own live data, from any page
   and by voice.
@@ -52,6 +55,8 @@ Steps for specific tasks.
 - [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
   filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
+- [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
+  house bank anomaly detection watches.
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
 - [Tag bins and equipment](how-to/tag-bins-and-equipment.md), writing and
   using an NFC tag, and the iPhone Copy route.

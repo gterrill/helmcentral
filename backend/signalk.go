@@ -78,9 +78,8 @@ type settingsPayload struct {
 		Port    int    `json:"port"`
 	} `json:"signalk"`
 	Boat struct {
-		VesselPrefix           string  `json:"vessel_prefix"`
-		Model                  string  `json:"model"`
-		HouseBatteryCapacityAh float64 `json:"house_battery_capacity_ah"`
+		VesselPrefix string `json:"vessel_prefix"`
+		Model        string `json:"model"`
 	} `json:"boat"`
 	UI struct {
 		TankLabels      map[string]string `json:"tank_labels"`
@@ -249,9 +248,8 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Signalk.Port,
 	}
 	settings["boat"] = map[string]any{
-		"vessel_prefix":             normalized.Boat.VesselPrefix,
-		"model":                     normalized.Boat.Model,
-		"house_battery_capacity_ah": normalized.Boat.HouseBatteryCapacityAh,
+		"vessel_prefix": normalized.Boat.VesselPrefix,
+		"model":         normalized.Boat.Model,
 	}
 
 	uiMap := map[string]any{}
@@ -443,10 +441,6 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if model := strings.TrimSpace(coerceString(boatMap["model"])); model != "" {
 			payload.Boat.Model = model
 		}
-		capacity := coerceFloat(boatMap["house_battery_capacity_ah"])
-		if capacity > 0 {
-			payload.Boat.HouseBatteryCapacityAh = capacity
-		}
 	}
 
 	if uiMap, ok := settings["ui"].(map[string]any); ok {
@@ -624,10 +618,6 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		normalized.Boat.VesselPrefix = "M/V"
 	}
 	normalized.Boat.Model = strings.TrimSpace(req.Boat.Model)
-	normalized.Boat.HouseBatteryCapacityAh = req.Boat.HouseBatteryCapacityAh
-	if normalized.Boat.HouseBatteryCapacityAh <= 0 {
-		normalized.Boat.HouseBatteryCapacityAh = defaultHouseBatteryCapacityAh
-	}
 
 	if req.UI.TankLabels != nil {
 		normalized.UI.TankLabels = map[string]string{}
@@ -1359,9 +1349,6 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	}
 	if batteryCapacityAh == -1 {
 		batteryCapacityAh = loadHouseBatteryCapacityAh(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	}
-	if batteryCapacityAh == -1 {
-		batteryCapacityAh = defaultHouseBatteryCapacityAh
 	}
 	if batteryCapacityAh > 0 {
 		state.BatteryCapacityAh = roundTo1(batteryCapacityAh)
@@ -2957,14 +2944,6 @@ func compactVesselID(vesselID string) string {
 
 func loadBoatVesselPrefix(settingsPath string) string {
 	return loadSettingString(settingsPath, []string{"boat", "name"})
-}
-
-func loadHouseBatteryCapacityAh(settingsPath string) float64 {
-	capacity := loadSettingFloat(settingsPath, []string{"boat", "house_battery_capacity_ah"})
-	if capacity <= 0 {
-		return -1
-	}
-	return capacity
 }
 
 func fetchSignalKSelfName() string {

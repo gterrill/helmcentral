@@ -45,6 +45,33 @@ export interface ActiveAlarm {
   encounter?: string
 
   /**
+   * The "why" sentence behind an anomaly-detection alarm, e.g. "House bank
+   * 96% SoC, 28.90 V, charging 42 A" or "At 2,400 rpm port 84.0 degC, peers
+   * 79.0 degC; usually 1.2 degC off (38m learned); now 3.8 degC beyond
+   * that." Built server-side and frozen at the moment the alarm raised
+   * (anomaly_detector.go's per-tick evidence, captured once in
+   * advanceAlarmRule) -- unlike `encounter` above, it does not keep
+   * following the live reading while the alarm stays up. Absent for every
+   * non-anomaly alarm.
+   */
+  evidence?: string
+
+  /**
+   * The sensor identifiers (SignalK paths or $source ids) actually failing
+   * RIGHT NOW, for the three sensor-health count alarms (frozen/impossible/
+   * silent-source) only -- absent for every other alarm. Unlike `evidence`
+   * above, this is recomputed on every /api/alarms read from the live
+   * detector state (alarm_engine.go's withLiveSensorEvidence), because a
+   * count alarm can stay continuously active for a long time while its
+   * specific offenders drift: one sensor recovers, another starts failing,
+   * and the count itself never dips enough to clear and re-raise. The
+   * "Ignore this sensor" action is built from this field, not `evidence`,
+   * so it always offers what is failing now rather than whatever first
+   * tripped the alarm.
+   */
+  live_evidence?: string
+
+  /**
    * SignalK's own alert status and capabilities (ADR 0038). Silencing stops the
    * sound; acknowledging also stops the visual alert and moves the alarm out of
    * the active phase. What a given alarm supports is the server's answer — an

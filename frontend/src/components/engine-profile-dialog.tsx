@@ -39,6 +39,16 @@ interface EngineProfileDialogProps {
    * summary.
    */
   existingGauges?: readonly GaugeWidgetConfig[]
+  /**
+   * Pre-selects a profile and seeds the instance field with a known value
+   * instead of guessing one from live paths - Settings -> Vessel's Engines
+   * row already knows both (the operator ticked the engine and picked the
+   * profile), so this dialog should not ask again. Ignored once the
+   * operator edits either field by hand, the same touched-tracking every
+   * other seed in this dialog already uses.
+   */
+  initialProfileId?: string
+  initialInstance?: string
 }
 
 /**
@@ -49,14 +59,48 @@ interface EngineProfileDialogProps {
  * do — which is why applying is a dialog rather than a menu item.
  */
 export function EngineProfileDialog({
-  open, onCancel, onApply, applyLabel = 'Add tile', existingGauges,
+  open, onCancel, onApply, applyLabel = 'Add tile', existingGauges, initialProfileId, initialInstance,
 }: EngineProfileDialogProps) {
-  const { profiles, problems, loading, error } = useEquipmentProfiles(open)
+  const { profiles: allProfiles, problems, loading, error } = useEquipmentProfiles(open)
   const { paths } = useSignalKPaths(open)
+
+  // Battery profiles carry no gauges at all (Settings -> Vessel -> Power is
+  // where those live) - excluded here rather than made to render an empty
+  // preview for a "tile" this profile kind was never meant to build.
+  const profiles = useMemo(() => allProfiles.filter((p) => p.kind !== 'battery'), [allProfiles])
 
   const [profileID, setProfileID] = useState('')
   const [instance, setInstance] = useState('')
   const [title, setTitle] = useState('')
+
+  // The seed candidates come from a separate fetch (useSignalKPaths) than
+  // the one that resolves `profile`, so it can still land after the operator
+  // has already typed an instance by hand. `instanceTouchedRef` is what
+  // stops that clobber; `seededProfileIdRef` is what still lets a genuine
+  // profile switch reseed even after the field has been touched.
+  const instanceTouchedRef = useRef(false)
+  const seededProfileIdRef = useRef<string | undefined>(undefined)
+
+  // initialProfileId/initialInstance (Settings -> Vessel's Engines row
+  // already knows both) seed once, the moment the dialog opens with a
+  // profile list to resolve against, and mark the instance as touched so
+  // the live-paths auto-seed effect below never guesses over a value that
+  // is already known - not a guess to reconcile with, this IS the answer.
+  const seededInitialRef = useRef(false)
+  useEffect(() => {
+    if (!open) { seededInitialRef.current = false; return }
+    if (seededInitialRef.current || profiles.length === 0) return
+    seededInitialRef.current = true
+    if (initialProfileId) {
+      setProfileID(initialProfileId)
+      seededProfileIdRef.current = initialProfileId
+    }
+    if (initialInstance) {
+      setInstance(initialInstance)
+      setTitle(titleFor(initialInstance))
+      instanceTouchedRef.current = true
+    }
+  }, [open, profiles, initialProfileId, initialInstance])
 
   const profile: EngineProfile | undefined = useMemo(
     () => profiles.find((p) => p.id === profileID) ?? profiles[0],
@@ -71,22 +115,10 @@ export function EngineProfileDialog({
   // A tile being edited names its own engine; the published paths are only a
   // fallback for a tile that has none yet.
   const seededPrefix = useMemo(
-    () => (existingGauges && profile ? commonInstancePrefix(existingGauges, profile.gauges.map((g) => g.path_suffix)) : null)
+    () => (existingGauges && profile ? commonInstancePrefix(existingGauges, (profile.gauges ?? []).map((g) => g.path_suffix)) : null)
       ?? candidates[0] ?? '',
     [existingGauges, candidates, profile],
   )
-
-  // The seed candidates come from a separate fetch (useSignalKPaths) than
-  // the one that resolves `profile`, so it can still land after the operator
-  // has already typed an instance by hand. `instanceTouchedRef` is what
-  // stops that clobber; `seededProfileIdRef` is what still lets a genuine
-  // profile switch reseed even after the field has been touched. Both live
-  // in one effect (rather than a separate profile-change effect resetting
-  // the ref for this one to read) so there is no cross-effect ordering to
-  // rely on - each render's seeding decision is made from values current as
-  // of that same synchronous pass.
-  const instanceTouchedRef = useRef(false)
-  const seededProfileIdRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     if (!profile) return
@@ -107,7 +139,7 @@ export function EngineProfileDialog({
     const { updated, added } = mergeGaugeSettingsBySuffix(
       existingGauges,
       profileToGauges(profile, instance),
-      profile.gauges.map((g) => g.path_suffix),
+      (profile.gauges ?? []).map((g) => g.path_suffix),
     )
     return { updated, added }
   }, [profile, existingGauges, instance])
@@ -214,7 +246,7 @@ export function EngineProfileDialog({
                 )}
 
                 <div data-testid="engine-profile-preview" className="mt-2 grid gap-1.5">
-                  {profile.gauges.map((gauge) => (
+                  {(profile.gauges ?? []).map((gauge) => (
                     <GaugeRow key={gauge.path_suffix} gauge={gauge} instance={instance} />
                   ))}
                 </div>
@@ -234,7 +266,7 @@ export function EngineProfileDialog({
             onClick={() => profile && onApply(
               title.trim(),
               profileToGauges(profile, instance),
-              profile.gauges.map((g) => g.path_suffix),
+              (profile.gauges ?? []).map((g) => g.path_suffix),
               profileHeroGaugeIndex(profile),
             )}
           >

@@ -18,7 +18,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import type { EngineProfile, EquipmentProfileValidationError } from '@/lib/engine-profiles'
 
-type ProfileKind = 'engine' | 'alternator' | 'generator'
+type ProfileKind = 'engine' | 'alternator' | 'generator' | 'battery'
 
 // Shown only before the first profile has actually loaded and settled (or
 // after the last one is deleted). It must never resemble real profile data:
@@ -89,6 +89,20 @@ const newProfileTemplates: Record<ProfileKind, EngineProfile> = {
         unit: 'Hz',
       },
     ],
+  },
+  // No gauges - a battery profile is chemistry plus per-cell charge
+  // thresholds for Settings -> Vessel -> Power, never a dashboard tile.
+  // Every threshold starts as a slot (null value): ship only a number that
+  // can be cited from a public datasheet, per AGENTS.md.
+  battery: {
+    schema_version: 1,
+    kind: 'battery',
+    id: 'new-battery-profile',
+    name: 'New battery profile',
+    chemistry: '',
+    full_soc: { value: null },
+    charge_warn: { value: null },
+    charge_high: { value: null },
   },
 }
 
@@ -541,6 +555,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
                 <option value="engine">Engine</option>
                 <option value="alternator">Alternator</option>
                 <option value="generator">Generator</option>
+                <option value="battery">Battery</option>
               </select>
               <FieldDescription>
                 Pick a kind to start from an explicit template before editing JSON.

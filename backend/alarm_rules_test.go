@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,10 +16,11 @@ func withTempAlarmRules(t *testing.T) string {
 
 	alarmRulesMu.Lock()
 	alarmRulesState = map[string]*alarmRule{}
-	// The seed markers are part of the rules file's state, so a helper that
-	// stands up a fresh install has to clear them too - otherwise one test's
-	// seeding suppresses every later test's.
+	// The seed markers and ignored-sensor list are part of the rules file's
+	// state, so a helper that stands up a fresh install has to clear them
+	// too - otherwise one test's seeding/ignoring suppresses another's.
 	alarmRulesSeededSets = nil
+	alarmRulesIgnoredSensors = nil
 	alarmRulesMu.Unlock()
 
 	return path
@@ -587,5 +590,302 @@ func TestSeedLawOfStormsRules_SeedsIndependentlyOfTheOtherMarkers(t *testing.T) 
 	rules := listAlarmRules()
 	if len(rules) != before+7 {
 		t.Fatalf("expected the law-of-storms set to add 7 rules on top of the others, got %d total (was %d)", len(rules), before)
+	}
+}
+
+// findAlarmRule returns the persisted rule with the given id, or ok=false.
+// Used by the anomaly seed tests below to check a rule survived seeding
+// under its own fixed ID (code review finding 7), rather than under
+// whatever ID createAlarmRule would otherwise have assigned it.
+func findAlarmRule(t *testing.T, id string) (alarmRule, bool) {
+	t.Helper()
+	for _, rule := range listAlarmRules() {
+		if rule.ID == id {
+			return rule, true
+		}
+	}
+	return alarmRule{}, false
+}
+
+// --- Anomaly detection seed set (anomaly-v1) --------------------------------
+
+func TestSeedAnomalyRules_BaseSetNeedsNoVesselSetup(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) != 2 {
+		t.Fatalf("expected only the 2 base rules (impossible + silent source) with no vessel setup, got %d: %+v", len(rules), rules)
+	}
+	byID := map[string]alarmRule{}
+	for _, rule := range rules {
+		byID[rule.ID] = rule
+		if rule.Path != anomalySensorOutOfRangeCountPath && rule.Path != anomalySensorSilentSourceCountPath {
+			t.Fatalf("unexpected rule seeded with no vessel setup: %+v", rule)
+		}
+		if !rule.Enabled {
+			t.Fatalf("%s must ship enabled -- it needs no setup and no tuning", rule.Label)
+		}
+	}
+	// The rules must persist under their own fixed IDs (code review finding
+	// 7), not whatever createAlarmRule would otherwise assign -- see
+	// createSeededAlarmRule's own doc comment.
+	if _, ok := byID[anomalyImpossibleRuleID]; !ok {
+		t.Fatalf("expected a rule persisted under the fixed id %q, got %+v", anomalyImpossibleRuleID, rules)
+	}
+	if _, ok := byID[anomalySilentSourceRuleID]; !ok {
+		t.Fatalf("expected a rule persisted under the fixed id %q, got %+v", anomalySilentSourceRuleID, rules)
+	}
+}
+
+func TestSeedAnomalyRules_FrozenNeedsAtLeastOneEngine(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedAnomalyRules(vesselSettings{
+		Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}},
+	}); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	rule, ok := findAlarmRule(t, anomalyFrozenRuleID)
+	if !ok {
+		t.Fatalf("expected the frozen rule persisted under its fixed id %q once at least one engine is configured", anomalyFrozenRuleID)
+	}
+	if rule.Path != anomalySensorFrozenCountPath || !rule.Enabled || rule.Op != alarmOpAbove {
+		t.Fatalf("unexpected frozen rule: %+v", rule)
+	}
+}
+
+func TestSeedAnomalyRules_BatteryNeedsACompleteHouseBank(t *testing.T) {
+	withTempAlarmRules(t)
+
+	// A house bank is chosen but has no linked profile at all yet.
+	incomplete := vesselSettings{
+		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", CapacityAh: 400, Cells: 8},
+	}
+	if err := seedAnomalyRules(incomplete); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+	for _, rule := range listAlarmRules() {
+		if rule.ID == anomalyFullBankWarnRuleID {
+			t.Fatalf("did not expect the full-bank-charging rule with no linked battery profile: %+v", rule)
+		}
+	}
+}
+
+func TestSeedAnomalyRules_BatterySeedsOnceTheProfileIsComplete(t *testing.T) {
+	withTempAlarmRules(t)
+	equipmentID := setupBatteryTestStore(t)
+	setupBatteryProfileFixture(t)
+
+	vessel := vesselSettings{
+		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
+	}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	warn, ok := findAlarmRule(t, anomalyFullBankWarnRuleID)
+	if !ok || !warn.Enabled || warn.Value != 0.5 || warn.Path != anomalyBatteryFullBankChargingPath || warn.Label != "Charging into a full house bank" {
+		t.Fatalf("unexpected/missing full-bank warn rule under its fixed id %q: %+v", anomalyFullBankWarnRuleID, warn)
+	}
+	trip, ok := findAlarmRule(t, anomalyFullBankAlarmRuleID)
+	if !ok || trip.Enabled || trip.Label != "House bank overcharge risk" {
+		t.Fatalf("unexpected/missing near-trip rule under its fixed id %q: %+v", anomalyFullBankAlarmRuleID, trip)
+	}
+}
+
+// TestSeedAnomalyRules_EngineResidualRulesKeepFixedIDs covers the dynamic
+// (per-instance) half of code review finding 7: the twin-residual pair's
+// IDs are built from the engine's own instance id (anomalyEngineSeedRules),
+// and must survive seeding unchanged the same way the fixed top-level
+// rules do -- not just for one arbitrarily-chosen quantity, but for all
+// four seeded pairs, so re-seeding after (say) an app restart recognises
+// the exact same rules rather than creating a duplicate set under fresh
+// UUIDs (which alarmRulesSeededSets' own marker prevents by short-
+// circuiting, but only ever worked because the marker doesn't depend on
+// IDs -- this test is what actually pins the ID side down).
+func TestSeedAnomalyRules_EngineResidualRulesKeepFixedIDs(t *testing.T) {
+	withTempAlarmRules(t)
+
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"},
+		{Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	for _, seed := range anomalyResidualSeeds {
+		highID := fmt.Sprintf("helmcentral:anomaly-%s-port-high", seed.IDSuffix)
+		lowID := fmt.Sprintf("helmcentral:anomaly-%s-port-low", seed.IDSuffix)
+		if _, ok := findAlarmRule(t, highID); !ok {
+			t.Fatalf("expected a residual rule persisted under its fixed id %q", highID)
+		}
+		if _, ok := findAlarmRule(t, lowID); !ok {
+			t.Fatalf("expected a residual rule persisted under its fixed id %q", lowID)
+		}
+	}
+}
+
+func TestSeedAnomalyRules_TwoEnginesSeedOnlyTheFirstEnginesResiduals(t *testing.T) {
+	withTempAlarmRules(t)
+
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"},
+		{Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	portResidual := 0
+	starboardResidual := 0
+	for _, rule := range listAlarmRules() {
+		switch {
+		case strings.Contains(rule.Path, "anomaly.engines.port."):
+			portResidual++
+			if rule.Enabled {
+				t.Fatalf("expected twin residual rules seeded disabled: %+v", rule)
+			}
+		case strings.Contains(rule.Path, "anomaly.engines.starboard."):
+			starboardResidual++
+		}
+	}
+	// 4 quantities x 2 (high/low) = 8.
+	if portResidual != 8 {
+		t.Fatalf("expected 8 residual rules for port, got %d", portResidual)
+	}
+	if starboardResidual != 0 {
+		t.Fatalf("expected no residual rules seeded for starboard (mirror of port on a twin), got %d", starboardResidual)
+	}
+}
+
+func TestSeedAnomalyRules_ThreeEnginesSeedEveryEnginesResiduals(t *testing.T) {
+	withTempAlarmRules(t)
+
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"},
+		{Instance: "center", Name: "Center"},
+		{Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, rule := range listAlarmRules() {
+		for _, instance := range []string{"port", "center", "starboard"} {
+			if strings.Contains(rule.Path, "anomaly.engines."+instance+".") {
+				counts[instance]++
+			}
+		}
+	}
+	for _, instance := range []string{"port", "center", "starboard"} {
+		if counts[instance] != 8 {
+			t.Fatalf("expected 8 residual rules for %s with 3 engines configured, got %d", instance, counts[instance])
+		}
+	}
+}
+
+func TestSeedAnomalyRules_RunsRepeatedlyWithoutDuplicating(t *testing.T) {
+	withTempAlarmRules(t)
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
+	}}
+
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	first := len(listAlarmRules())
+
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != first {
+		t.Fatalf("re-seeding changed the rule count from %d to %d", first, got)
+	}
+}
+
+// TestSeedAnomalyRules_RenamingAnEngineDoesNotReseedOrOrphanItsRules covers
+// code review finding 6's seeding half: anomalyEngineSeedMarker used to be
+// keyed on the operator's own editable display name, so renaming "Port" to
+// "Port Main" and saving again (an ordinary vessel-settings save, which
+// calls seedAnomalyRules every time) would look like a brand new engine --
+// a second marker, a second set of 8 residual rules bound to the new name's
+// path, and the original 8 left behind bound to a path nothing publishes to
+// any more. The marker (and the residual path under it) must follow the
+// stable Signal K instance id, so a rename re-seeds nothing at all.
+func TestSeedAnomalyRules_RenamingAnEngineDoesNotReseedOrOrphanItsRules(t *testing.T) {
+	withTempAlarmRules(t)
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	first := len(listAlarmRules())
+
+	renamed := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port Main"}, {Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(renamed); err != nil {
+		t.Fatalf("seed after rename: %v", err)
+	}
+
+	if got := len(listAlarmRules()); got != first {
+		t.Fatalf("renaming the engine and re-seeding changed the rule count from %d to %d (a second set was seeded under the new name)", first, got)
+	}
+	for _, rule := range listAlarmRules() {
+		if strings.Contains(rule.Path, "anomaly.engines.port main.") {
+			t.Fatalf("expected no rules seeded under the renamed display name's own path, got %+v", rule)
+		}
+	}
+}
+
+func TestSeedAnomalyRules_AddingAnEngineLaterSeedsItsOwnRules(t *testing.T) {
+	withTempAlarmRules(t)
+
+	// Start with a single engine: only the frozen rule, no residual pair
+	// yet (needs >= 2).
+	if err := seedAnomalyRules(vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	beforeSecondEngine := len(listAlarmRules())
+
+	// The operator adds starboard and saves again.
+	vessel := vesselSettings{Engines: []vesselEngineSetting{
+		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
+	}}
+	if err := seedAnomalyRules(vessel); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+
+	after := len(listAlarmRules())
+	if after != beforeSecondEngine+8 {
+		t.Fatalf("expected exactly 8 new residual rules once a second engine was added, got %d new (was %d, now %d)", after-beforeSecondEngine, beforeSecondEngine, after)
+	}
+}
+
+func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	rules := listAlarmRules()
+	if err := deleteAlarmRule(rules[0].ID); err != nil {
+		t.Fatalf("deleting a seeded rule: %v", err)
+	}
+	remaining := len(listAlarmRules())
+
+	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("re-seeding resurrected a deleted rule: got %d, want %d", got, remaining)
 	}
 }

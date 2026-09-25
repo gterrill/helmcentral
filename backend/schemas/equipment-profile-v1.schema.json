@@ -5,7 +5,8 @@
   "oneOf": [
     { "$ref": "#/definitions/engineProfile" },
     { "$ref": "#/definitions/alternatorProfile" },
-    { "$ref": "#/definitions/generatorProfile" }
+    { "$ref": "#/definitions/generatorProfile" },
+    { "$ref": "#/definitions/batteryProfile" }
   ],
   "definitions": {
     "baseProfile": {
@@ -98,6 +99,34 @@
           }
         }
       ]
+    },
+    "batteryProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "id", "name", "chemistry"],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "kind": { "const": "battery" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "manufacturer": { "type": "string" },
+        "model": { "type": "string" },
+        "source": { "type": "string" },
+        "notes": { "type": "string" },
+        "chemistry": { "type": "string", "minLength": 1 },
+        "full_soc": { "$ref": "#/definitions/batteryThreshold" },
+        "charge_warn": { "$ref": "#/definitions/batteryThreshold" },
+        "charge_high": { "$ref": "#/definitions/batteryThreshold" }
+      }
+    },
+    "batteryThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "source": { "type": "string" },
+        "note": { "type": "string" }
+      }
     },
     "zone": {
       "type": "object",

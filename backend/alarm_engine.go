@@ -120,6 +120,35 @@ type alarmStatus struct {
 	// raise event.
 	Encounter string `json:"encounter,omitempty"`
 
+	// Evidence is the "why" sentence behind an anomaly-detection alarm
+	// (anomaly_detector.go's anomalyReading.Evidence, e.g. "House bank 96%
+	// SoC, 28.90 V, charging 42 A"), and empty for every other alarm source.
+	// Unlike Encounter above, it is frozen at raise (evidenceFor(rule.Path),
+	// captured once in advanceAlarmRule) rather than recomputed on every
+	// read: an anomaly reading is a point-in-time snapshot of what tripped
+	// the alarm, not a running commentary that should keep changing while
+	// the alarm stays up, and the bus watcher's raise/clear still keys on
+	// RuleID alone, so freezing it here never affects that.
+	Evidence string `json:"evidence,omitempty"`
+
+	// LiveEvidence is set only for the three sensor-health count alarms
+	// (frozen/impossible/silent-source), filled in by activeAlarms
+	// (withLiveSensorEvidence) rather than by the engine itself. Unlike
+	// Evidence above, it re-reads the anomaly detector's CURRENT tick on
+	// every list, the same "computed live" contract Encounter documents --
+	// because the alarm card's "Ignore this sensor" action needs to offer
+	// whatever is actually failing right now, not whichever sensors were
+	// behind the count the instant it first crossed the threshold. A count
+	// alarm can stay continuously active for a long time while its specific
+	// offenders drift (one clears, another starts failing) without the
+	// count itself ever dropping enough to clear and re-raise, so Evidence
+	// alone would leave the action offering a sensor that already recovered
+	// while never offering the one that is actually failing (code review
+	// finding 9). Evidence itself keeps meaning "why this first fired" --
+	// this field exists so the ignore action does not have to overload that
+	// meaning into "what is failing at this exact moment" too.
+	LiveEvidence string `json:"live_evidence,omitempty"`
+
 	// Silenced and the two capability flags mirror the SignalK Notifications
 	// API's own status object. Silencing is not acknowledging — a silenced
 	// alarm has stopped sounding but is still demanding attention — so it is a
@@ -281,6 +310,7 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 			status.AckedAt = time.Time{}
 			status.escalated = false
 			status.Message = fmt.Sprintf("%s cleared", rule.Label)
+			status.Evidence = ""
 			return alarmEvent{Kind: alarmEventCleared, Rule: rule, Status: *status}, true
 		}
 
@@ -315,7 +345,8 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	status.RaisedAt = now
 	status.AckedAt = time.Time{}
 	status.escalated = false
-	status.Message = alarmMessageFor(rule, sample, status.Unit)
+	status.Evidence = evidenceFor(rule.Path, now)
+	status.Message = alarmMessageFor(rule, sample, status.Unit, status.Evidence)
 	return alarmEvent{Kind: alarmEventRaised, Rule: rule, Status: *status}, true
 }
 
@@ -406,7 +437,26 @@ func alarmClearValueFor(rule alarmRule) *float64 {
 // banner. Unit is passed in rather than looked up here so this stays testable
 // with a bare rule and sample -- no snapshot required -- while the caller
 // (the engine, which does have a unit lookup wired) decides what "known" means.
-func alarmMessageFor(rule alarmRule, sample alarmSample, unit string) string {
+// alarmMessageFor builds the plain-text sentence every non-browser
+// notification (ntfy, email, the SignalK bus) actually carries -- the
+// frontend re-derives its own richer sentence from the structured fields
+// instead (alarm-display.ts's alarmConditionSentence). evidence, when
+// non-empty, is appended as its own clause so those transports carry the
+// same "why" an anomaly-detection alarm's card shows, e.g. "House bank
+// overcharge risk: 2, clears below 1.5. House bank 96% SoC, 28.90 V,
+// charging 42 A."
+func alarmMessageFor(rule alarmRule, sample alarmSample, unit, evidence string) string {
+	message := alarmConditionMessageFor(rule, sample, unit)
+	if evidence == "" {
+		return message
+	}
+	return message + " " + evidence
+}
+
+// alarmConditionMessageFor is alarmMessageFor's own arithmetic, split out so
+// a caller (or a test) that only cares about the condition sentence itself
+// does not have to pass -- and strip back off -- an evidence clause.
+func alarmConditionMessageFor(rule alarmRule, sample alarmSample, unit string) string {
 	if rule.Op == alarmOpStale {
 		return fmt.Sprintf("%s: no data for %ds", rule.Label, rule.StaleAfterSeconds)
 	}
@@ -428,6 +478,53 @@ func alarmMessageFor(rule alarmRule, sample alarmSample, unit string) string {
 		// clause to add -- just the label and the value that tripped it.
 		return fmt.Sprintf("%s: %s", rule.Label, valueText)
 	}
+}
+
+// evidenceFor is the "why" sentence behind path's current anomaly-detection
+// reading, or "" for a path the anomaly detector does not own (every
+// non-anomaly rule) or when the slot is stale (anomalySlotMaxAge) --
+// exactly the same staleness rule addAnomalyValues applies to the derived
+// path values themselves, so an alarm can never carry evidence describing a
+// reading the derived path itself is simultaneously reporting absent. now
+// is the caller's own tick time (advanceAlarmRule already has one), not
+// time.Now(), so this stays testable against a fixed clock like every other
+// staleness check in this file.
+func evidenceFor(path string, now time.Time) string {
+	reading, ok := globalAnomalySlot.get()
+	if !ok {
+		return ""
+	}
+	if now.Sub(reading.ComputedAt) > anomalySlotMaxAge {
+		return ""
+	}
+	return reading.Evidence[path]
+}
+
+// sensorHealthCountPaths are the three anomaly detector paths the alarm
+// card's "Ignore this sensor" action targets (anomaly_sensor_health.go;
+// alarm-display.ts's IGNORABLE_SENSOR_PATHS mirrors this list client-side).
+var sensorHealthCountPaths = map[string]bool{
+	anomalySensorFrozenCountPath:       true,
+	anomalySensorOutOfRangeCountPath:   true,
+	anomalySensorSilentSourceCountPath: true,
+}
+
+// withLiveSensorEvidence fills LiveEvidence for any status whose Path is
+// one of the three sensor-health count alarms, from the SAME evidenceFor
+// lookup Evidence itself used at raise -- but called fresh here, every
+// time activeAlarms builds its list, rather than once. See LiveEvidence's
+// own doc comment for why Evidence can't serve this on its own (code
+// review finding 9). Every other status (a different rule-driven alarm, or
+// a bus/collision notification, neither of which has a Path matching one
+// of these three) passes through unchanged.
+func withLiveSensorEvidence(statuses []alarmStatus, now time.Time) []alarmStatus {
+	for i := range statuses {
+		if !sensorHealthCountPaths[statuses[i].Path] {
+			continue
+		}
+		statuses[i].LiveEvidence = evidenceFor(statuses[i].Path, now)
+	}
+	return statuses
 }
 
 // formatAlarmValue renders a value the way an operator wants to read it, not

@@ -51,6 +51,63 @@ func TestEvaluateAlarmsOnceClearsStatusesWhenLastRuleIsDeleted(t *testing.T) {
 	}
 }
 
+// TestActiveAlarmsCarriesLiveSensorEvidenceSeparatelyFromFrozenEvidence
+// covers code review finding 9: a sensor-health count alarm (out-of-range,
+// frozen, silent-source) can stay continuously active for a long time while
+// the SPECIFIC sensors behind that count change -- one recovers, another
+// starts failing, and the count never drops back to 0 in between, so the
+// alarm never clears and re-raises. Evidence (the "why it fired" sentence)
+// is deliberately frozen at raise (TestEngineFreezesEvidenceAtRaise), but
+// the alarm card's "Ignore this sensor" action reads a SEPARATE field,
+// LiveEvidence, that must keep following the live detector tick the same
+// way Encounter does -- otherwise it offers to ignore a sensor that already
+// recovered while never offering the one actually failing right now.
+func TestActiveAlarmsCarriesLiveSensorEvidenceSeparatelyFromFrozenEvidence(t *testing.T) {
+	withTempAlarmRules(t)
+	withGlobalSnapshot(t, snapshotWithSelfDelta("electrical.batteries.house.voltage", 11.0, alarmNow))
+
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	withAnomalySlot(t, anomalySensorOutOfRangeCountPath, "propulsion.port.temperature", alarmNow)
+
+	rule := alarmRule{ID: "anomaly-out-of-range", Label: "Impossible sensor reading", Enabled: true,
+		Path: anomalySensorOutOfRangeCountPath, Op: alarmOpAbove, Value: 0.5, State: alarmStateAlert}
+	globalAlarmEngine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow)
+
+	// The count stays above threshold (still 1) throughout, so the alarm
+	// never clears -- but WHICH sensor is behind it changes: port's
+	// temperature sensor recovers and starboard's oil pressure sensor
+	// starts failing instead. activeAlarms (unlike engine.evaluate) has no
+	// caller-supplied clock -- it reads real time.Now() for exactly this
+	// kind of live lookup (see its own doc comment) -- so ComputedAt here
+	// has to be real-wall-clock-fresh for withLiveSensorEvidence to accept
+	// it, not alarmNow-relative like the engine's own raise above.
+	globalAnomalySlot.set(anomalyReading{
+		Evidence:   map[string]string{anomalySensorOutOfRangeCountPath: "propulsion.starboard.oilPressure"},
+		ComputedAt: time.Now().UTC(),
+	})
+	globalAlarmEngine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow.Add(2*time.Second))
+
+	var got *alarmStatus
+	for _, s := range activeAlarms() {
+		if s.RuleID == "anomaly-out-of-range" {
+			found := s
+			got = &found
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected the out-of-range alarm to be active")
+	}
+	if got.Evidence != "propulsion.port.temperature" {
+		t.Fatalf("expected the frozen Evidence ('why it fired') to stay at raise time, got %q", got.Evidence)
+	}
+	if got.LiveEvidence != "propulsion.starboard.oilPressure" {
+		t.Fatalf("expected LiveEvidence to follow the current detector tick, got %q", got.LiveEvidence)
+	}
+}
+
 // The reported bug, end to end: an alarm raised by another producer on the bus
 // (here a course-provider arrival-circle notification) answered 409 "alarm is
 // not acknowledgeable", because acknowledgeAlarmHandler only ever consulted

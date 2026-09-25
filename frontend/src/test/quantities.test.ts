@@ -160,3 +160,27 @@ describe('fuel economy', () => {
     expect(quantityForSIUnit('m/m3').id).toBe('fuelEconomy')
   })
 })
+
+// deltaK and deltaPa are difference units for a residual between two
+// readings (the twin-engine differential detector), not an absolute one.
+// "temperature"'s K offsets by -273.15, which is correct for an absolute
+// reading but would print a 4 K residual as -269.1 degC; a difference in
+// kelvin is the same difference in Celsius, so these only scale.
+describe('difference quantities', () => {
+  it('converts a temperature delta with no K offset', () => {
+    expect(convertFromSI(4, 'temperatureDelta', 'deltaC')).toBeCloseTo(4, 6)
+    expect(formatQuantity(4, 'temperatureDelta', 'deltaC')).toBe('4.0')
+    expect(formatQuantity(-4, 'temperatureDelta', 'deltaC')).toBe('-4.0')
+  })
+
+  it('converts a pressure delta to kPa, not mb', () => {
+    expect(convertFromSI(50000, 'pressureDelta', 'deltaKPa')).toBeCloseTo(50, 6)
+    expect(formatQuantity(50000, 'pressureDelta', 'deltaKPa')).toBe('50.0')
+    expect(formatQuantity(-15000, 'pressureDelta', 'deltaKPa')).toBe('-15.0')
+  })
+
+  it('infers each from its own SignalK-style unit string', () => {
+    expect(quantityForSIUnit('deltaK').id).toBe('temperatureDelta')
+    expect(quantityForSIUnit('deltaPa').id).toBe('pressureDelta')
+  })
+})

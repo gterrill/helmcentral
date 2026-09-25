@@ -51,6 +51,15 @@ describe('alarmDisplayUnitId', () => {
     expect(alarmDisplayUnitId('A')).toBe('A')
   })
 
+  // deltaK/deltaPa are the twin-engine differential detector's residual
+  // units. They must resolve through their own difference quantities, not
+  // through 'temperature'/'pressure', or a residual would gain K's -273.15
+  // offset it must never carry.
+  it('maps the difference units to their own operator units', () => {
+    expect(alarmDisplayUnitId('deltaK')).toBe('deltaC')
+    expect(alarmDisplayUnitId('deltaPa')).toBe('deltaKPa')
+  })
+
   it('returns null for an unknown or empty SI unit, meaning show the raw number', () => {
     expect(alarmDisplayUnitId('parsecs')).toBeNull()
     expect(alarmDisplayUnitId('')).toBeNull()
@@ -65,6 +74,16 @@ describe('formatAlarmReading', () => {
 
   it('formats a voltage reading', () => {
     expect(formatAlarmReading(12.3, 'V')).toBe('12.3 V')
+  })
+
+  it('formats a temperature residual with no K offset', () => {
+    expect(formatAlarmReading(4, 'deltaK')).toBe('4.0 °C')
+    expect(formatAlarmReading(-4, 'deltaK')).toBe('-4.0 °C')
+  })
+
+  it('formats a pressure residual in kPa, not mb', () => {
+    expect(formatAlarmReading(50000, 'deltaPa')).toBe('50.0 kPa')
+    expect(formatAlarmReading(-15000, 'deltaPa')).toBe('-15.0 kPa')
   })
 
   it('formats an unknown-unit reading as a bare number, no trailing space', () => {

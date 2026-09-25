@@ -103,6 +103,16 @@ var siQuantities = []siQuantity{
 		identityUnit("Hz"),
 	}},
 	{ID: "raw", Units: []siUnitOption{identityUnit("raw")}},
+	// Difference quantities, for a residual between two readings rather than
+	// an absolute one (the twin-engine differential detector). A difference
+	// in kelvin is numerically the same difference in Celsius, so unlike
+	// "temperature" above, deltaK only scales -- it must never carry K's
+	// -273.15 offset, or a 4 K gap would render as -269.1 degC. deltaPa
+	// mirrors it in kPa, the unit an operator reads an oil or boost pressure
+	// gap in, not "pressure"'s mb (which is for an absolute barometric
+	// reading).
+	{ID: "temperatureDelta", Units: []siUnitOption{identityUnit("deltaC"), identityUnit("deltaK")}},
+	{ID: "pressureDelta", Units: []siUnitOption{linear("deltaKPa", 1.0/1000), identityUnit("deltaPa")}},
 }
 
 // convertToSI turns a value in a gauge's display unit into the SI value

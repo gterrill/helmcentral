@@ -11,7 +11,6 @@ export type SettingsPayload = {
   boat?: {
     vessel_prefix?: string
     model?: string
-    house_battery_capacity_ah?: number
   }
   ui?: {
     tank_labels?: Record<string, string>

@@ -74,7 +74,7 @@ describe('EngineProfileDialog', () => {
     stubProfiles([{
       ...bundled,
       gauges: [{
-        ...bundled.gauges[0],
+        ...bundled.gauges![0],
         zones: [
           { direction: 'below', threshold: 15, state: 'alarm' },
           { direction: 'below', threshold: 25, state: 'warn' },
@@ -197,8 +197,8 @@ describe('EngineProfileDialog', () => {
     stubProfiles([{
       ...bundled,
       gauges: [
-        { ...bundled.gauges[0] },
-        { ...bundled.gauges[1], hero: true },
+        { ...bundled.gauges![0] },
+        { ...bundled.gauges![1], hero: true },
       ],
     }])
 
