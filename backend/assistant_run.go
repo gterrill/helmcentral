@@ -182,6 +182,45 @@ func assistantExcessToolCallResult(name string) (string, error) {
 	return string(body), nil
 }
 
+// assistantForcedFinalInstruction is the text of the message run appends on
+// the forced final round (see assistantForcedFinalInstructionMessage) - see
+// its own doc comment for why this exists.
+const assistantForcedFinalInstruction = "Your tool budget for this question is spent - no more tool calls are available, and none will be run even if you request one. Answer the operator's question now, using only the information already gathered in this conversation. If something you needed is missing or you were not able to check it, say so plainly in your answer rather than attempting another tool call."
+
+// assistantForcedFinalInstructionMessage builds the message run appends to
+// the forced final round's request (never to any earlier round, and never
+// to anything persisted or shown to the operator - see run's own use of
+// it) telling the model plainly that its tool budget is gone and it must
+// answer now.
+//
+// This exists because withdrawing tools (Tools: nil, ToolChoice: "none")
+// turned out not to be a strong enough signal on its own: an incident on
+// v0.32.0 (google/gemini-3.8-flash) ran all assistantMaxToolRounds rounds
+// diagnosing a stale-telemetry question with entirely sensible tool calls,
+// then on the forced final round returned structured tool_calls again
+// anyway, tripping the "forcedFinal but still got tool calls" error below
+// with no answer at all - even though the model plainly had everything it
+// needed from the rounds already run. Silently withdrawing the tools left
+// the model to infer why no more results were coming; telling it outright,
+// in the conversation itself, is what actually gets a real answer instead
+// of a second attempt at the thing that was just taken away.
+//
+// Role "user": this is appended after the last round's tool-role results,
+// and a user turn is the shape every OpenRouter-routed model already
+// expects to see following tool output (the model itself replies as
+// "assistant" next) - unlike a second "system" message, which not every
+// provider behind OpenRouter is documented to honour mid-conversation.
+//
+// This message is built fresh into run's own local messages slice for this
+// request only; it is never written back into the history slice callers
+// pass in, so it cannot leak into the conversation the next turn is built
+// from, and assistant_handlers.go never persists anything from run's
+// internal messages at all - only reply.Content, the model's own answer -
+// so it can never reach the conversation store or the operator's screen.
+func assistantForcedFinalInstructionMessage() openRouterMessage {
+	return openRouterMessage{Role: "user", Content: openRouterContent(assistantForcedFinalInstruction)}
+}
+
 // assistantEmitter pushes one named progress event to the SSE stream a
 // caller is writing (assistant_handlers.go). This file emits "status"
 // events with a {"text": "..."} payload (see assistantStatus), "delta"
@@ -552,6 +591,12 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		if forcedFinal {
 			req.Tools = nil
 			req.ToolChoice = "none"
+			// See assistantForcedFinalInstructionMessage's doc comment: this
+			// is appended to a copy of messages built just for this request,
+			// never to messages itself, so it never reaches a later round
+			// (there is none - forcedFinal is always the last) or leaks into
+			// anything persisted.
+			req.Messages = append(append([]openRouterMessage{}, messages...), assistantForcedFinalInstructionMessage())
 		}
 
 		// roundText mirrors, fragment by fragment, the content

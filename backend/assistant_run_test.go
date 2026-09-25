@@ -978,13 +978,31 @@ func TestAssistantRunner_ForcedFinalRoundSendsNoToolsAndToolChoiceNone(t *testin
 		t.Fatalf("expected the forced final round's tool_choice to be %q, got %q", "none", forced.ToolChoice)
 	}
 
-	// Every earlier round must still have offered tools normally.
+	// The forced round must end with the budget-spent instruction telling
+	// the model plainly to stop calling tools and answer from what it
+	// already has - see assistantForcedFinalInstructionMessage's own doc
+	// comment for why this exists (google/gemini-3.8-flash returned
+	// structured tool_calls on the forced round despite tool_choice
+	// "none", with nothing in the conversation telling it its budget was
+	// spent).
+	if n := len(forced.Messages); n == 0 || forced.Messages[n-1].Role != "user" || string(forced.Messages[n-1].Content) != assistantForcedFinalInstruction {
+		t.Fatalf("expected the forced final round's last message to be the budget-spent instruction, got %+v", forced.Messages)
+	}
+
+	// Every earlier round must still have offered tools normally, and must
+	// not yet carry the budget-spent instruction - it only applies once
+	// the budget is actually spent.
 	for i := 0; i < assistantMaxToolRounds; i++ {
 		if len(doer.requests[i].Tools) == 0 {
 			t.Fatalf("expected round %d to offer tools", i)
 		}
 		if doer.requests[i].ToolChoice == "none" {
 			t.Fatalf("round %d should not have forced tool_choice none", i)
+		}
+		for _, msg := range doer.requests[i].Messages {
+			if string(msg.Content) == assistantForcedFinalInstruction {
+				t.Fatalf("round %d should not yet carry the budget-spent instruction", i)
+			}
 		}
 	}
 }

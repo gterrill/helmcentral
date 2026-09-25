@@ -391,6 +391,31 @@ it server-side and out of `coreEnvSecretKeys` in the first place.
   has in that mode, applied to a feature that now has a literal dollar cost
   attached.
 
+## Amendment 2026-09-25: the forced final round now tells the model its budget is spent
+
+Withdrawing tools on the forced final round (`Tools: nil`, `tool_choice:
+"none"`) turned out not to be a strong enough signal on its own. On
+v0.32.0, google/gemini-3.8-flash was asked when the exhaust temperature and
+tank levels had stopped updating, ran eight perfectly sensible rounds of
+`check_signalk_paths`, `get_last_recorded` and `get_path_history`, and on
+the forced final round returned structured `tool_calls` again anyway. ADR
+0103's guard did exactly what it was built to do - it refused the tool call
+rather than fabricating a reply - but the model had everything it needed
+from the rounds already run, and the operator got the error above instead
+of an answer.
+
+`run` (`assistant_run.go`) now appends one extra message to the forced
+final round's request only - never to any earlier round, never to the
+history the next turn is built from, and never persisted or shown to the
+operator, since only the model's own final answer (`reply.Content`) is ever
+written to the conversation store: a plain instruction, role `user`
+(chosen over a second `system` message, which not every provider behind
+OpenRouter is documented to honour mid-conversation), stating that the
+tool budget is spent, that no further call will actually run even if
+requested, and that the model must answer now from what it already has and
+say plainly what it could not check. ADR 0103's guard is unchanged and
+still fires if a model ignores this too.
+
 ## Related
 
 - ADR 0023 (encrypted secrets store): the mechanism `OPENROUTER_API_KEY`

@@ -19,6 +19,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
 
+### Fixed
+
+- Mate no longer gives up with "did not produce an answer" on a question
+  that takes many lookups to answer (for example, tracing when several
+  instrument feeds went quiet). Once it runs out of lookups it now answers
+  from what it already found, and says plainly what it wasn't able to check.
+
 ## [0.32.0] - 2026-09-25
 
 ### Added
