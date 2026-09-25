@@ -436,14 +436,19 @@ export function useEquipmentItem(id: string | null) {
     await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
   }, [id])
 
-  // Replaces the WHOLE link set (ADR 0123: "Links edited from the equipment
-  // side this cycle... replace wholesale"). Re-fetches afterward rather than
-  // trusting a locally-merged guess at the response shape - the join back to
-  // each document's title/filename/kind/note_type only the server can do,
-  // and this is the one place that already knows how to ask for it.
-  const setLinkedDocuments = useCallback(async (documentIds: string[]) => {
-    if (id === null) throw new Error('useEquipmentItem: no id to set documents on')
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}/documents`, 'PUT', { document_ids: documentIds })
+  // Applies a DIFF to the link set (backend PATCH /documents: {add, remove}
+  // - replaces the old whole-set PUT, ADR 0123's "Links edited from the
+  // equipment side this cycle" is still true, only the wire shape changed).
+  // The caller only ever has to say what changed, not restate the ids it
+  // isn't touching - a link this call doesn't name (a just-uploaded photo,
+  // say) is never at risk of being silently unlinked. Re-fetches afterward
+  // rather than trusting a locally-merged guess at the response shape - the
+  // join back to each document's title/filename/kind/note_type only the
+  // server can do, and this is the one place that already knows how to ask
+  // for it.
+  const patchLinkedDocuments = useCallback(async (add: string[], remove: string[]) => {
+    if (id === null) throw new Error('useEquipmentItem: no id to patch documents on')
+    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}/documents`, 'PATCH', { add, remove })
     await refresh()
   }, [id, refresh])
 
@@ -510,7 +515,7 @@ export function useEquipmentItem(id: string | null) {
     setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
   }, [])
 
-  return { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem, pruneDocument }
+  return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, pruneDocument }
 }
 
 /** Creates a brand new equipment record - standalone (not tied to any

@@ -167,7 +167,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   { id, onBack, onCreated, onDeleted, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
-  const { item, documents, loading, error, refresh, update, remove, setLinkedDocuments, setItem, pruneDocument } = useEquipmentItem(id)
+  const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, pruneDocument } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
@@ -277,8 +277,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // documents, photos included - the earlier photo-tagged exclusion here is
   // gone along with the tag itself. docEntries is now seeded straight from
   // `documents` (every link EquipmentDocuments returns), and a photo shown
-  // there and removed there is an ordinary unlink through
-  // SetEquipmentDocuments, the same as any other document.
+  // there and removed there is an ordinary unlink through the PATCH-based
+  // patchLinkedDocuments (backend's PatchEquipmentDocuments), the same as
+  // any other document.
   useEffect(() => {
     if (id === null) {
       setDocEntries([])
@@ -680,17 +681,24 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // save's own record), so `dirty` correctly stays true instead of
       // dropping with no warning that the newer edit was never sent.
       setDraft((current) => (sameDraft(current, sentDraft) ? draftFromItem(updated) : current))
-      // Trap: only sent when the link SET actually changed - comparing ids
-      // as sets, not array order, so re-saving an untouched Documents list
-      // never issues a no-op PUT.
-      if (!sameIdSet(docEntries.map((d) => d.document_id), baselineDocIds)) {
-        await setLinkedDocuments(docEntries.map((d) => d.document_id))
+      // PATCH-based diff (backend replaced the whole-set PUT): only the ids
+      // that actually changed since baselineDocIds are sent, never a
+      // restatement of the ones that didn't. A link this tab doesn't know
+      // about (a just-uploaded photo the Documents tab hasn't seen yet) is
+      // never named in either list, so it can never be silently unlinked -
+      // the fragile part of the old whole-set replace (extraBaselineDocIds
+      // above exists only to patch over that gap) no longer matters here.
+      const currentIds = docEntries.map((d) => d.document_id)
+      const add = currentIds.filter((docId) => !baselineDocIds.includes(docId))
+      const remove = baselineDocIds.filter((docId) => !currentIds.includes(docId))
+      if (add.length > 0 || remove.length > 0) {
+        await patchLinkedDocuments(add, remove)
       }
     } catch (err) {
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, setLinkedDocuments, onCreated])
+  }, [id, draft, docEntries, baselineDocIds, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 

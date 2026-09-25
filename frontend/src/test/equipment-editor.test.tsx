@@ -123,18 +123,19 @@ function stubFetch() {
         json: async () => ({ paths: [{ path: 'electrical.generator.0.runTime' }, { path: 'navigation.speedOverGround' }] }),
       })
     }
-    if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PUT') {
-      const body = JSON.parse(String(init?.body)) as { document_ids: string[] }
-      // 2026-09-25 amendment: a true whole-set replace, photos included -
-      // any id not already known (e.g. 'picked-doc' from the picker mock
-      // above) becomes a new ordinary link; anything left out is dropped.
+    if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as { add: string[]; remove: string[] }
+      // Diff-based PATCH (replaces the old whole-set PUT): add links every
+      // id not already known (e.g. 'picked-doc' from the picker mock
+      // above), remove unlinks only the ids named - anything not named in
+      // either list is left exactly as it was.
       currentDocuments = [
-        ...currentDocuments.filter((d) => body.document_ids.includes(d.document_id)),
-        ...body.document_ids
+        ...currentDocuments.filter((d) => !body.remove.includes(d.document_id)),
+        ...body.add
           .filter((docId) => !currentDocuments.some((d) => d.document_id === docId))
           .map((docId) => ({ document_id: docId, title: '', filename: 'engine.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 })),
       ]
-      currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((id) => body.document_ids.includes(id)) }
+      currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((id) => !body.remove.includes(id)) }
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
     // Generic, not just eq-1: once a draft's create POST assigns 'eq-new'
@@ -407,7 +408,7 @@ describe('EquipmentEditor', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
-  it('does not PUT the documents link set when it was not touched', async () => {
+  it('does not PATCH the documents link set when it was not touched', async () => {
     currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
@@ -422,7 +423,7 @@ describe('EquipmentEditor', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/documents'))).toBe(false)
   })
 
-  it('PUTs the reduced documents link set once a linked document is removed', async () => {
+  it('PATCHes remove with the dropped id once a linked document is removed', async () => {
     currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
@@ -433,16 +434,17 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
       const body = JSON.parse(String((call?.[1] as RequestInit).body))
-      expect(body.document_ids).toEqual([])
+      expect(body.add).toEqual([])
+      expect(body.remove).toEqual(['d1'])
     })
   })
 
-  // 2026-09-25 amendment: SetEquipmentDocuments is a true whole-set
-  // replace again - a picked document (whatever its own MIME type) is
-  // linked as an ordinary document through the picker, with no refusal.
+  // 2026-09-25 amendment (still true under the PATCH-based diff): a picked
+  // document (whatever its own MIME type) is linked as an ordinary document
+  // through the picker, with no refusal.
   it('links a document picked through the picker on Save', async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
     await waitForLoaded()
@@ -453,10 +455,11 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
-      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
-      expect(body.document_ids).toEqual(['picked-doc'])
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual(['picked-doc'])
+      expect(body.remove).toEqual([])
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -535,16 +538,18 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByText('cover.jpg')).not.toBeInTheDocument()
 
     // Touch the link set (remove the genuinely-linked Manual) and save - the
-    // PUT must not resurrect the removed photo alongside it.
+    // PATCH must name only Manual in remove, never the already-unlinked
+    // photo (which this diff-based call never has to mention at all).
     fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
-      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
-      expect(body.document_ids).toEqual([])
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual([])
+      expect(body.remove).toEqual(['d1'])
     })
   })
 
@@ -1034,11 +1039,15 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByText('Remove and delete')).not.toBeInTheDocument()
   })
 
-  // Finding 1 (review): a photo uploaded earlier in the session updated
-  // item.photo_ids but not the Documents tab's own docEntries/baseline - the
-  // next Documents-tab save PUT the whole link set, and that set lacked the
-  // new photo, so its link was deleted even though the upload itself had
-  // already succeeded server-side.
+  // Finding 1 (review, originally against the whole-set PUT): a photo
+  // uploaded earlier in the session updated item.photo_ids but not the
+  // Documents tab's own docEntries/baseline - the next Documents-tab save
+  // PUT the whole link set, and that set lacked the new photo, so its link
+  // was deleted even though the upload itself had already succeeded
+  // server-side. The PATCH-based diff removes the failure mode outright:
+  // the earlier-uploaded photo is never named in add at all, since it's
+  // already linked and untouched by this save - only the genuinely new
+  // picked document is.
   it('keeps an earlier-uploaded photo linked when the Documents tab is saved afterward', async () => {
     currentItem = makeItem({ photo_ids: [] })
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
@@ -1055,10 +1064,11 @@ describe('EquipmentEditor', () => {
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
-        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PUT')
+        String(url).endsWith('/api/inventory/equipment/eq-1/documents') && (init as RequestInit | undefined)?.method === 'PATCH')
       expect(call).toBeDefined()
-      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { document_ids: string[] }
-      expect(body.document_ids).toEqual(expect.arrayContaining(['photo-1', 'picked-doc']))
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as { add: string[]; remove: string[] }
+      expect(body.add).toEqual(['picked-doc'])
+      expect(body.remove).toEqual([])
     })
     // Still on the strip after the save.
     await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
