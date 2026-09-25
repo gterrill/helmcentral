@@ -461,14 +461,14 @@ describe('AnchorWatchTile', () => {
         />,
       )
 
-      expect(screen.getByText(/anchor watch tile/i)).toBeInTheDocument()
+      expect(screen.getByText(/saved anchor watch unreadable/i)).toBeInTheDocument()
       expect(screen.getByText(/data\/anchor_watch\.json/)).toBeInTheDocument()
     })
 
     it('does not show the load-error banner once the watch loads normally', () => {
       render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none', error: null }) })} />)
 
-      expect(screen.queryByText(/anchor watch tile/i)).toBeNull()
+      expect(screen.queryByText(/saved anchor watch unreadable/i)).toBeNull()
     })
   })
 

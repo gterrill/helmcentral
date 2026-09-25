@@ -89,19 +89,19 @@ describe('AnchorWatchDrawer load-error banner', () => {
       />,
     )
 
-    expect(screen.getByText(/anchor watch tile/i)).toBeInTheDocument()
+    expect(screen.getByText(/saved anchor watch unreadable/i)).toBeInTheDocument()
     expect(screen.getByText(/data\/anchor_watch\.json/)).toBeInTheDocument()
   })
 
   it('shows nothing extra once the watch loads normally', () => {
     render(<AnchorWatchDrawer {...baseProps} error={null} />)
 
-    expect(screen.queryByText(/anchor watch tile/i)).toBeNull()
+    expect(screen.queryByText(/saved anchor watch unreadable/i)).toBeNull()
   })
 
   it('omitting error entirely (every other existing caller) shows nothing extra', () => {
     render(<AnchorWatchDrawer {...baseProps} />)
 
-    expect(screen.queryByText(/anchor watch tile/i)).toBeNull()
+    expect(screen.queryByText(/saved anchor watch unreadable/i)).toBeNull()
   })
 })
