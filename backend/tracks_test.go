@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -1088,5 +1089,45 @@ func TestRecordNearbyVesselContacts_LogsOncePerVesselIDWithNoMMSI(t *testing.T) 
 
 	if got := strings.Count(buf.String(), "NO MMSI BOAT"); got != 1 {
 		t.Fatalf("expected exactly 1 log line for a vessel with no MMSI across 3 poll ticks, got %d:\n%s", got, buf.String())
+	}
+}
+
+// TestRecordNearbyVesselContacts_RecordsEveryVesselInRangeNotJustTheNearestTen
+// is the direct regression test for a code-review finding (2026-09-25):
+// recordNearbyVesselContacts used to fetch through fetchSignalKNearbyVessels,
+// which caps at the map tile's own display limit of 10 - so an 11th or 12th
+// vessel in a crowded anchorage never got a sighting-log row at all, even
+// though get_nearby_vessels (ADR 0128) lists up to 25. 12 distinct vessels,
+// all within nearbyMaxRangeMeters, confirm none of them are silently
+// dropped once recordNearbyVesselContacts fetches with nearbyVesselsUnlimited
+// instead.
+func TestRecordNearbyVesselContacts_RecordsEveryVesselInRangeNotJustTheNearestTen(t *testing.T) {
+	store := newTestNearbyContactStore(t) // dwell=0: confirms on the first tick
+	original := globalNearbyContactStore
+	globalNearbyContactStore = store
+	t.Cleanup(func() { globalNearbyContactStore = original })
+
+	selfLat, selfLon := -21.595297, 149.796444
+
+	trees := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("urn:mrn:imo:mmsi:%09d", i)
+		trees = append(trees, fmt.Sprintf(
+			`%q: {"name": "V%d", "mmsi": "%09d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`,
+			id, i, i, -21.592000-float64(i)*0.0005,
+		))
+	}
+	body := "{" + strings.Join(trees, ",") + "}"
+	seedVesselTrees(t, body)
+
+	state := vesselStateData{Latitude: selfLat, Longitude: selfLon, Status: "anchored"}
+	recordNearbyVesselContacts("", "", "", state, "")
+
+	latest, err := store.latestContactsByName("", 100)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(latest) != 12 {
+		t.Fatalf("expected all 12 in-range vessels to have a sighting-log row, got %d: %+v", len(latest), latest)
 	}
 }

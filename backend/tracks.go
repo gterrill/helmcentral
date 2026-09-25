@@ -294,6 +294,23 @@ func sampleTracks(settingsPath string) {
 // since resolution now runs live on every tick (docs/adr/0056), a second
 // independent lookup would be redundant and the caller already knows the
 // answer.
+//
+// Fetches with nearbyVesselsUnlimited, not fetchSignalKNearbyVessels' own
+// default 10 (the map tile's own display cap) - a code-review finding,
+// 2026-09-25: get_nearby_vessels (ADR 0128) lists up to
+// assistantNearbyVesselsMaxMaxResults (25), so a vessel ranked 11th-25th
+// nearest never got a sighting-log row at all, leaving in_range_since
+// missing or wrong for exactly the vessels a crowded anchorage most needs
+// it for. The sighting log is the authoritative record of "who has been in
+// range," independent of any one caller's own display cap, so it must not
+// inherit a limit that belongs to the map tile. Performance/storage: this
+// still runs once per 5s poll tick, not per HTTP request; recordContactIfNew
+// is one indexed SQLite read plus, only on a genuinely new encounter, one
+// insert (WAL mode, ADR-documented in nearby_contacts.go) - going from 10 to
+// however many vessels nearbyMaxRangeMeters actually admits (a crowded
+// anchorage might see a few dozen) adds a few dozen more indexed reads every
+// 5s, negligible next to what this poll tick already does (self track,
+// weather-trend buffers, place-name resolution).
 func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, state vesselStateData, geoname string) {
 	if globalNearbyContactStore == nil {
 		return
@@ -303,7 +320,7 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 	excludedNames := []string{signalkSelfName}
 
 	now := time.Now().UTC()
-	nearby, err := fetchSignalKNearbyVessels(state.Latitude, state.Longitude, now, excludedNames)
+	nearby, err := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, excludedNames, nearbyVesselsUnlimited)
 	if err != nil {
 		return
 	}

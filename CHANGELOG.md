@@ -54,6 +54,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   an on/off state (a mode, an alarm), not only a number.
 - Mate now says when a requested history search was longer than it can run
   in one go, and what range it used instead of quietly shortening it.
+- Mate no longer reports a vessel under way as sitting at anchor or on a
+  mooring; a "how long has it been there" answer now only comes once a
+  vessel has actually settled somewhere.
+- Mate keeps a vessel's full sighting history once its name arrives after
+  the first encounter, instead of treating the later, real name as a
+  different boat.
+- Mate now says when the nearby-vessel list has been cut short, and how many
+  boats are actually in range.
+- Mate can now say how long any vessel in a crowded anchorage has been
+  nearby, not only the closest ten.
 
 ## [0.31.0] - 2026-09-25
 
