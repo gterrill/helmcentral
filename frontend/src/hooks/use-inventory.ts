@@ -372,6 +372,11 @@ export function useEquipmentItem(id: string | null) {
   // landed since; documents/error/loading are never gated by it, so a GET's
   // own results outside the item race still land normally.
   const itemSeqRef = useRef(0)
+  // Orders `documents` updates: refreshDocuments' own background reloads
+  // bump it, and so does refresh() below, so a slow background reload
+  // started by a photo write can't land after a later full reload (the
+  // one after a Save) and put an older list back (Documents-save review).
+  const documentsSeqRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (id === null) {
@@ -383,6 +388,7 @@ export function useEquipmentItem(id: string | null) {
       return
     }
     const seq = (seqRef.current += 1)
+    documentsSeqRef.current += 1
     const itemSeqAtStart = itemSeqRef.current
     setLoading(true)
     try {
@@ -503,7 +509,6 @@ export function useEquipmentItem(id: string | null) {
   // counter - a documents-only refetch (below) is fired off the back of a
   // photo write and never touches itemSeqRef/seqRef, so it needs a race
   // guard that doesn't accidentally interact with either of those.
-  const documentsSeqRef = useRef(0)
 
   // 2026-09-25 refactor: replaces pruneDocument. A photo write (upload,
   // retry, remove) already updates `item` directly via the response's own
@@ -527,21 +532,18 @@ export function useEquipmentItem(id: string | null) {
   // open by the time this resolves); (b) a slower, OLDER refreshDocuments
   // call for the SAME id landing after a newer one already has - guarded by
   // documentsSeqRef, the same idiom seqRef/itemSeqRef use above.
+  //
+  // Throws the server's own message on failure (AGENTS.md fallback policy):
+  // the photo write already succeeded, but a list that silently stays stale
+  // shows a removed photo as still linked, so the caller reports it.
   const refreshDocuments = useCallback(async (targetId: string) => {
     const seq = (documentsSeqRef.current += 1)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(targetId)}`)
-      if (!res.ok) return
-      const data = (await res.json()) as { documents?: EquipmentDocument[] }
-      if (idRef.current !== targetId) return
-      if (seq !== documentsSeqRef.current) return
-      setDocuments(data.documents ?? [])
-    } catch {
-      // Best effort: the photo write itself already succeeded server-side
-      // (this only ever runs after one has) - a failed background refetch
-      // here just leaves the Documents tab stale until the next explicit
-      // refresh(), not a lost write, so there is nothing to surface.
-    }
+    const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(targetId)}`)
+    if (!res.ok) throw new Error(await readErrorMessage(res))
+    const data = (await res.json()) as { documents?: EquipmentDocument[] }
+    if (idRef.current !== targetId) return
+    if (seq !== documentsSeqRef.current) return
+    setDocuments(data.documents ?? [])
   }, [])
 
   return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments }

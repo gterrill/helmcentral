@@ -82,6 +82,8 @@ const profiles = [
 
 let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
+// When set, every item GET fails with this server message.
+let failItemGetsWith: string | null
 let uploadedPhotoOrder: string[]
 let failingPhotoUploadNames: Set<string>
 /** Whether the last DELETE /api/inventory/equipment/eq-1 carried
@@ -142,6 +144,7 @@ function stubFetch() {
     // (below), the useEquipmentItem hook immediately GETs that new id -
     // currentItem is the single record these fixtures track either way.
     if (u.match(/\/api\/inventory\/equipment\/[^/]+$/) && method === 'GET') {
+      if (failItemGetsWith) return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: failItemGetsWith }) })
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
     }
     // Generic, not just eq-1 (same reasoning as the GET matcher just below):
@@ -229,6 +232,7 @@ beforeEach(() => {
   fetchMock.mockReset()
   currentItem = makeItem()
   currentDocuments = []
+  failItemGetsWith = null
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
   deletedWithPhotos = false
@@ -1059,6 +1063,37 @@ describe('EquipmentEditor', () => {
   })
 
   // ── photo strip: unlink vs. "Remove and delete" (2026-09-25 amendment) ──
+
+  // Documents-save review: a photo staged for removal in the Documents tab
+  // and then removed from the photo strip stayed counted as a pending
+  // change, so the editor read unsaved with nothing left to save.
+  it('is not left unsaved when a photo staged for removal is then removed from the strip', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    const onDirtyChange = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    await waitForLoaded()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove document Pump label' }))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+
+    fireEvent.click(screen.getByText('Remove'))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  // Documents-save review: the documents reload after a photo write
+  // swallowed its failures, leaving a removed photo listed with no error.
+  it('shows an error when the documents list cannot be reloaded after a photo write', async () => {
+    currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+    await screen.findByText('Remove')
+
+    failItemGetsWith = 'database is locked'
+    fireEvent.click(screen.getByText('Remove'))
+
+    await screen.findByText(/database is locked/)
+  })
 
   it('offers only a plain Remove for a photo that is not exclusive', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })

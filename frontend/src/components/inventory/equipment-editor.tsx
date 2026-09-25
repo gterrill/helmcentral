@@ -170,6 +170,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // current truth, including a link some other code path - a photo upload -
   // just added, which this tab never has to know or care about).
   const [pendingAdds, setPendingAdds] = useState<DocEntry[]>([])
+  // After a photo write, reloads the Documents list for the item it touched.
+  // A failure is shown, not swallowed: the write itself succeeded, but a
+  // stale list would still show a removed photo as linked.
+  const reloadDocuments = useCallback((targetId: string) => {
+    refreshDocuments(targetId).catch((err: unknown) => {
+      setSaveError(`The documents list could not be reloaded: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, [refreshDocuments])
   const [pendingRemoves, setPendingRemoves] = useState<string[]>([])
   // Resets pendingAdds/pendingRemoves the moment `id` itself changes - in
   // the SAME render as the change, via React's own "adjust state while
@@ -281,17 +289,28 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // some other code path (an upload) shows up here the instant `documents`
   // itself picks it up (refreshDocuments, below) - this tab never has to be
   // told about it separately.
+  //
+  // Pending changes are read against `documents` as it is now, not as it was
+  // when they were staged (Documents-save review): a removal whose document
+  // has since been unlinked another way (the photo strip's Remove) is no
+  // longer a change, and an addition that has since been linked another way
+  // (the same image uploaded as a photo) is already there. Counting either
+  // would leave the editor reading unsaved with nothing to save, or list the
+  // document twice.
+  const linkedIds = useMemo(() => new Set(documents.map((d) => d.document_id)), [documents])
+  const effectiveRemoves = useMemo(() => pendingRemoves.filter((docId) => linkedIds.has(docId)), [pendingRemoves, linkedIds])
+  const effectiveAdds = useMemo(() => pendingAdds.filter((d) => !linkedIds.has(d.document_id)), [pendingAdds, linkedIds])
   const displayedDocuments = useMemo(
     () => [
-      ...documents.filter((d) => !pendingRemoves.includes(d.document_id)).map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
-      ...pendingAdds,
+      ...documents.filter((d) => !effectiveRemoves.includes(d.document_id)).map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
+      ...effectiveAdds,
     ],
-    [documents, pendingRemoves, pendingAdds],
+    [documents, effectiveRemoves, effectiveAdds],
   )
   const draftDirty = baseline !== null && !sameDraft(draft, baseline)
   // Any pending change at all means dirty - no comparison against a moving
   // baseline needed, unlike the whole-set mirror this replaces.
-  const linksDirty = pendingAdds.length > 0 || pendingRemoves.length > 0
+  const linksDirty = effectiveAdds.length > 0 || effectiveRemoves.length > 0
   const dirty = draftDirty || linksDirty
 
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
@@ -404,7 +423,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // Otherwise it's one of `documents` (the server's current set), staged
   // for removal on the next Save.
   const removeDocument = (documentId: string) => {
-    if (pendingAdds.some((d) => d.document_id === documentId)) {
+    if (pendingAdds.some((d) => d.document_id === documentId) && !linkedIds.has(documentId)) {
       setPendingAdds((prev) => prev.filter((d) => d.document_id !== documentId))
       return
     }
@@ -478,7 +497,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     // Documents tab's own pendingAdds/pendingRemoves are untouched - they're
     // only for what THIS tab has staged, orthogonal to what `documents`
     // itself contains.
-    void refreshDocuments(targetId)
+    reloadDocuments(targetId)
   }
 
   const makeCoverSaved = async (photoId: string) => {
@@ -507,7 +526,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // `documents` up to the removal - the Documents tab is a view over
       // `documents` now, not a stored mirror this write has to patch
       // directly.
-      void refreshDocuments(id)
+      reloadDocuments(id)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setSaveError(message)
@@ -555,7 +574,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     const { failures: stillFailingUpload } = await uploadPhotosInOrder(targetId, readyToUpload)
     // 2026-09-25 refactor: same documents-only refetch as a fresh upload -
     // a retry that lands a photo links it server-side immediately too.
-    void refreshDocuments(targetId)
+    reloadDocuments(targetId)
     const stillFailing = [...stillNeedsDownscale, ...stillFailingUpload]
     setPhotoStatus((prev) => {
       const next = { ...prev }
@@ -622,7 +641,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           // 2026-09-25 refactor: catches `documents` up to the newly created
           // item's own just-uploaded photos, the same documents-only
           // refetch every other photo write site now does.
-          void refreshDocuments(created.id)
+          reloadDocuments(created.id)
         }
         return
       }
@@ -657,8 +676,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       // refresh() afterward catches `documents` up; pendingAdds/pendingRemoves
       // are cleared here rather than left for the id-change reset, since
       // nothing about id changed - this Save just succeeded.
-      if (pendingAdds.length > 0 || pendingRemoves.length > 0) {
-        await patchLinkedDocuments(pendingAdds.map((d) => d.document_id), pendingRemoves)
+      if (effectiveAdds.length > 0 || effectiveRemoves.length > 0) {
+        await patchLinkedDocuments(effectiveAdds.map((d) => d.document_id), effectiveRemoves)
         setPendingAdds([])
         setPendingRemoves([])
       }
@@ -666,7 +685,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, pendingAdds, pendingRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, refreshDocuments, onCreated])
+  }, [id, draft, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
