@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AnchorRodePlanner, type AnchorRodePlannerProps } from '@/components/anchor-rode-planner'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { TideToday } from '@/hooks/use-tide-today'
+import { AnchorRequestError } from '@/lib/anchor-request'
 import { catenaryMethod, planningFigureM, ratioMethod, rawDepthFromPlanningFigureM, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 const tide: TideToday = {
   datetime: new Date(0).toISOString(),
@@ -30,7 +34,7 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
     // so every pre-existing expected figure in this file survives unchanged.
     planningDepthM: 5,
     planningTideHeightFt: 2,
-    onPlanningDepthChange: vi.fn(),
+    onPlanningDepthChange: vi.fn().mockResolvedValue(undefined),
     windSpeedApparentKts: 12,
     maxGustKts: { '10m': null, '30m': null, '1h': 20, '24h': null },
     tide,
@@ -267,6 +271,86 @@ describe('AnchorRodePlanner — sea-state persistence guard (no masking fallback
 
     expect(onUpdateRodeAndConditions).toHaveBeenCalledTimes(1)
     expect(onUpdateRodeAndConditions.mock.calls[0][1]).toBe('storm')
+  })
+})
+
+// code-review finding: a failed PATCH used to leave the rejected sea
+// state/seabed/rode (or, for the Depth field below, the rejected typed
+// figure) on screen looking saved, since the toast fired but nothing put the
+// input back to what the server actually holds.
+describe('AnchorRodePlanner — reverts local state on a failed save', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(toast.error).mockClear()
+  })
+
+  it('reverts sea state to the server value and shows the failure, with Retry for a retryable error', async () => {
+    const onUpdateRodeAndConditions = vi.fn().mockRejectedValue(new Error('Connection lost'))
+    renderPlanner({ anchorState: 'set', seaState: 'calm', onUpdateRodeAndConditions })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.change(screen.getByLabelText(/sea state/i), { target: { value: 'storm' } })
+    expect(screen.getByLabelText(/sea state/i)).toHaveValue('storm')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+
+    expect(screen.getByLabelText(/sea state/i)).toHaveValue('calm')
+    expect(toast.error).toHaveBeenCalledWith('Could not save rode and conditions', {
+      description: 'Connection lost',
+      action: { label: 'Retry', onClick: expect.any(Function) },
+    })
+  })
+
+  it('reverts seabed to the server value and offers no Retry for a non-retryable (4xx) error', async () => {
+    const onUpdateRodeAndConditions = vi.fn().mockRejectedValue(new AnchorRequestError('no active anchor watch', 404))
+    renderPlanner({ anchorState: 'set', seabedType: 'sand', onUpdateRodeAndConditions })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.change(screen.getByLabelText(/seabed/i), { target: { value: 'rock' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+
+    expect(screen.getByLabelText(/seabed/i)).toHaveValue('sand')
+    expect(toast.error).toHaveBeenCalledWith('Could not save rode and conditions', {
+      description: 'no active anchor watch',
+      action: undefined,
+    })
+  })
+
+  it('Retry re-sends the same rejected values immediately, without waiting out another debounce', async () => {
+    const onUpdateRodeAndConditions = vi.fn()
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce(undefined)
+    renderPlanner({ anchorState: 'set', seaState: 'calm', onUpdateRodeAndConditions })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.change(screen.getByLabelText(/sea state/i), { target: { value: 'storm' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    expect(onUpdateRodeAndConditions).toHaveBeenCalledTimes(1)
+
+    const [, options] = vi.mocked(toast.error).mock.calls[0]
+    const action = (options as unknown as { action: { onClick: () => void } }).action
+    action.onClick()
+
+    expect(onUpdateRodeAndConditions).toHaveBeenCalledTimes(2)
+    expect(onUpdateRodeAndConditions.mock.calls[1][1]).toBe('storm')
+  })
+
+  it('reverts the Depth input to the server-resolved figure on a failed PATCH, with Retry', async () => {
+    const onPlanningDepthChange = vi.fn().mockRejectedValue(new Error('Connection lost'))
+    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTideHeightFt: 2, onPlanningDepthChange })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const before = screen.getByLabelText(/depth/i).getAttribute('value')
+    fireEvent.change(screen.getByLabelText(/depth/i), { target: { value: '9.9' } })
+    expect(screen.getByLabelText(/depth/i)).toHaveValue(9.9)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+
+    expect(screen.getByLabelText(/depth/i)).toHaveValue(Number(before))
+    expect(toast.error).toHaveBeenCalledWith('Could not save planning depth', {
+      description: 'Connection lost',
+      action: { label: 'Retry', onClick: expect.any(Function) },
+    })
   })
 })
 
@@ -724,7 +808,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('debounces the change to metres, 800ms, when a watch is anchored, persisting the raw depth the typed figure implies', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ onPlanningDepthChange })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -743,7 +827,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('converts a typed feet value to metres under imperial, then inverts to the raw depth before persisting', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ onPlanningDepthChange, isImperial: true })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -758,7 +842,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('fires immediately, with no debounce, when there is no active watch', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ anchorState: 'none', onPlanningDepthChange })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -771,7 +855,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('clears both the sea-state and depth debounce timers on unmount, so a stray PATCH cannot fire after Raise', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       const onUpdateRodeAndConditions = vi.fn().mockResolvedValue(undefined)
       const { unmount } = renderPlanner({ onPlanningDepthChange, onUpdateRodeAndConditions })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
@@ -790,7 +874,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     // sensible reading — it must not be persisted, and the caption must say
     // why instead of silently keeping the last good value's caption.
     it('does not persist and shows a caption when the typed figure is below bow height plus tide rise', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ onPlanningDepthChange })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -803,7 +887,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('shows the refusal caption when anchored with nothing recorded', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ onPlanningDepthChange, depthM: 42, planningDepthM: null, planningTideHeightFt: null })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -815,7 +899,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
 
     it('shows the refusal caption for zero rather than silently ignoring it', () => {
-      const onPlanningDepthChange = vi.fn()
+      const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
       renderPlanner({ onPlanningDepthChange })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 

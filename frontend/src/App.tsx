@@ -1570,18 +1570,16 @@ export function App() {
   const handlePlanningDepthChange = useCallback((depthM: number, tideHeightFt: number | null) => {
     if (hasActiveAnchorWatch) {
       // updatePlanningDepth now throws on a failed PATCH rather than
-      // silently no-op'ing (use-anchor-watch.ts) — this is the one caller
-      // with no retry UI of its own, so it reports the failure and leaves
-      // the operator to just try the field again rather than an unhandled
-      // rejection with nothing on screen to show for it.
-      anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1).catch((error: unknown) => {
-        toast.error('Could not save planning depth', {
-          description: error instanceof Error ? error.message : 'Request failed',
-        })
-      })
-    } else {
-      setSessionPlanningDepth({ depthM, tideHeightFt })
+      // silently no-op'ing (use-anchor-watch.ts). The rejection is left to
+      // propagate rather than caught here — AnchorRodePlanner's
+      // commitPlanningDepth is what shows the toast (with the server's own
+      // message and a Retry it can act on) and reverts the depth input to
+      // the last-known-good server value, the same pattern the radius
+      // stepper and the rode/conditions fields already use.
+      return anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1)
     }
+    setSessionPlanningDepth({ depthM, tideHeightFt })
+    return Promise.resolve()
   }, [hasActiveAnchorWatch, anchorWatch])
 
   // One poller for the whole app: the tile and the fullscreen drawer both

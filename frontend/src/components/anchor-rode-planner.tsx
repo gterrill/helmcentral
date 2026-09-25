@@ -23,6 +23,7 @@ import {
   type RodePlanInput,
   type ScopeStatus,
 } from '@/lib/rode-plan'
+import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -56,8 +57,11 @@ export interface AnchorRodePlannerProps {
   planningDepthM: number | null
   planningTideHeightFt: number | null
   // Routes to a PATCH when anchored, to React state when not (App.tsx
-  // decides which).
-  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => void
+  // decides which). Returns a promise so persistPlanningDepth below can
+  // revert the local depth input on a failed PATCH, the same way handlePersist
+  // does for rode/sea state/seabed — the non-anchored, React-state path can't
+  // actually reject, but the contract is uniform either way.
+  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
   windSpeedApparentKts: number | null
   maxGustKts: Record<GustWindow, number | null>
   tide: TideToday | null
@@ -151,6 +155,15 @@ export function AnchorRodePlanner({
   useEffect(() => { setPendingSeaState(seaState) }, [seaState])
   useEffect(() => { setPendingSeabedType(seabedType) }, [seabedType])
   useEffect(() => { setPendingRode(Math.max(0, toDisplayDistance(rodeDeployedM, isImperial))) }, [rodeDeployedM, isImperial])
+
+  // Kept current every render (no effect needed) so handlePersist's catch
+  // can revert to the actual last-known-good server values even when the
+  // failure lands well after the render that fired the request — reading
+  // the closed-over seaState/seabedType/rodeDeployedM/isImperial directly
+  // would revert to whatever they were AT THE TIME OF THE PRESS, not
+  // necessarily the latest server truth if another update landed meanwhile.
+  const serverValuesRef = useRef({ seaState, seabedType, rodeDeployedM, isImperial })
+  serverValuesRef.current = { seaState, seabedType, rodeDeployedM, isImperial }
 
   // debounceRef never had unmount cleanup before this change, and adding a
   // second timer doubles the exposure: a stray PATCH firing after Raise
@@ -255,6 +268,36 @@ export function AnchorRodePlanner({
     ? configuredMethodResult.recommendedRodeM + bowOffsetM + resolvedLoaM
     : null
 
+  // The actual write, shared by the debounced call below and by a Retry
+  // action's immediate re-attempt of the same input — a Retry press
+  // shouldn't have to wait out another 800ms debounce window.
+  const commitRodeAndConditions = useCallback((
+    rodeMeters: number,
+    nextSeaState: SeaState,
+    nextSeabedType: SeabedType,
+  ) => {
+    // onUpdateRodeAndConditions (useAnchorWatch's updateRodeAndConditions)
+    // throws on a failed PATCH rather than silently no-op'ing — this input
+    // has no retry affordance of its own, so report the failure rather
+    // than an unhandled rejection with nothing on screen to show for it.
+    onUpdateRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType).catch((error: unknown) => {
+      // Revert to the server's actual values rather than leaving the
+      // rejected input on screen looking saved (code-review finding) — the
+      // server never stored the rejected rode/sea-state/seabed, so showing
+      // them after a failure misrepresents what's actually set.
+      const server = serverValuesRef.current
+      setPendingRode(Math.max(0, toDisplayDistance(server.rodeDeployedM, server.isImperial)))
+      setPendingSeaState(server.seaState)
+      setPendingSeabedType(server.seabedType)
+      toast.error('Could not save rode and conditions', {
+        description: error instanceof Error ? error.message : 'Request failed',
+        action: isRetryableAnchorError(error)
+          ? { label: 'Retry', onClick: () => commitRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType) }
+          : undefined,
+      })
+    })
+  }, [onUpdateRodeAndConditions])
+
   const handlePersist = useCallback((rodeDisplay: number, nextSeaState: SeaState, nextSeabedType: SeabedType) => {
     // No masking fallback: PATCH /api/anchor-watch 404s with no active watch
     // (backend/anchor.go), so the call site is guarded rather than firing and
@@ -264,17 +307,9 @@ export function AnchorRodePlanner({
     debounceRef.current = setTimeout(() => {
       const normalizedDisplay = Number.isFinite(rodeDisplay) ? Math.max(0, rodeDisplay) : 0
       const rodeMeters = isImperial ? normalizedDisplay / METERS_TO_FEET : normalizedDisplay
-      // onUpdateRodeAndConditions (useAnchorWatch's updateRodeAndConditions)
-      // throws on a failed PATCH rather than silently no-op'ing — this input
-      // has no retry affordance of its own, so report the failure rather
-      // than an unhandled rejection with nothing on screen to show for it.
-      onUpdateRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType).catch((error: unknown) => {
-        toast.error('Could not save rode and conditions', {
-          description: error instanceof Error ? error.message : 'Request failed',
-        })
-      })
+      commitRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType)
     }, 800)
-  }, [isImperial, isInactive, onUpdateRodeAndConditions])
+  }, [isImperial, isInactive, commitRodeAndConditions])
 
   const handleRodeChange = useCallback((raw: string) => {
     const parsed = Number(raw)
@@ -315,6 +350,13 @@ export function AnchorRodePlanner({
   // it and the value is not persisted (fail visibly, no fallback).
   const [depthOverrideBelowMinimum, setDepthOverrideBelowMinimum] = useState(false)
 
+  // The same string the reseed effect below would write — kept current every
+  // render (no effect needed) so a failed PATCH can revert the input to it
+  // immediately, rather than leaving the operator's rejected keystroke on
+  // screen looking saved (code-review finding).
+  const seedDisplayRef = useRef('')
+  seedDisplayRef.current = seedFigureM !== null ? toDisplayDistance(seedFigureM, isImperial).toFixed(1) : ''
+
   // Re-seeds from the figure's VALUE, not the datum/tide objects — both are
   // fresh objects every render (an unchanged 10s poll still builds new
   // ones), so keying this off seedFigureM (a primitive) is what lets a poll
@@ -325,6 +367,24 @@ export function AnchorRodePlanner({
     setDepthOverrideBelowMinimum(false)
   }, [seedFigureM, isImperial])
 
+  // The actual write, shared by the debounced call below and by a Retry
+  // action's immediate re-attempt — mirrors commitRodeAndConditions above.
+  const commitPlanningDepth = useCallback((nextDepthM: number, tideHeightFt: number | null) => {
+    onPlanningDepthChange(nextDepthM, tideHeightFt).catch((error: unknown) => {
+      // Revert to the server's actual figure rather than leaving the
+      // rejected keystroke on screen looking saved — the server never
+      // stored nextDepthM (code-review finding).
+      setDepthInputValue(seedDisplayRef.current)
+      setDepthOverrideBelowMinimum(false)
+      toast.error('Could not save planning depth', {
+        description: error instanceof Error ? error.message : 'Request failed',
+        action: isRetryableAnchorError(error)
+          ? { label: 'Retry', onClick: () => commitPlanningDepth(nextDepthM, tideHeightFt) }
+          : undefined,
+      })
+    })
+  }, [onPlanningDepthChange])
+
   const persistPlanningDepth = useCallback((nextDepthM: number) => {
     // Stamped with the tide right now, at the moment it was entered —
     // useTideToday never returns null, so tideHeightFtOrNull is the one
@@ -334,15 +394,17 @@ export function AnchorRodePlanner({
       // No PATCH target when inactive — the planning depth lives in
       // App.tsx's React state (a pre-drop what-if), a valid destination
       // rather than a dead end, so it fires immediately instead of
-      // debouncing a write that has nothing to 404 against.
-      onPlanningDepthChange(nextDepthM, tideHeightFt)
+      // debouncing a write that has nothing to 404 against. It cannot
+      // reject (a plain setState), but commitPlanningDepth's contract is
+      // uniform either way.
+      commitPlanningDepth(nextDepthM, tideHeightFt)
       return
     }
     if (depthDebounceRef.current) clearTimeout(depthDebounceRef.current)
     depthDebounceRef.current = setTimeout(() => {
-      onPlanningDepthChange(nextDepthM, tideHeightFt)
+      commitPlanningDepth(nextDepthM, tideHeightFt)
     }, 800)
-  }, [isInactive, onPlanningDepthChange, tide])
+  }, [isInactive, commitPlanningDepth, tide])
 
   const handleDepthInputChange = useCallback((raw: string) => {
     setDepthInputValue(raw)

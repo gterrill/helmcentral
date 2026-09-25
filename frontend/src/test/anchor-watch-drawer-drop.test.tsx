@@ -133,7 +133,6 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     planningTideHeightFt: null,
     lastAutoRaise: lastAutoRaiseMock,
     setAnchorHere: setAnchorHereMock,
-    updatePosition: vi.fn(),
     updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(),
     updatePlanningDepth: vi.fn(),

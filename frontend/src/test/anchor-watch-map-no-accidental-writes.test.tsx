@@ -135,6 +135,40 @@ describe('AnchorWatchMap: no accidental writes (Phase 1, impeccable P0s)', () =>
     expect(screen.queryByTestId('pin-candidate')).not.toBeInTheDocument()
   })
 
+  // code-review finding: handleAnchorMarkerClick (and every other marker's
+  // click handler) sets suppressNextMapClickRef so its own click doesn't
+  // fall through to handleMapClick — but maplibre never actually sees a
+  // marker tap as a map click in the first place (the marker's DOM element
+  // is a descendant of the same canvasContainer maplibre's own 'click'
+  // listener is bound to, per maplibre-gl's Marker.addTo; React's
+  // stopPropagation() on the portaled click halts the underlying native
+  // event during React's own dispatch, before the browser's bubble phase
+  // ever reaches that ancestor listener — confirmed by an isolated
+  // portal+native-listener harness, since jsdom can't run real maplibre-gl).
+  // A flag set but never consumed by the map click it was meant to guard
+  // against would instead sit there and swallow the *next*, unrelated,
+  // genuine tap on open water.
+  it('does not swallow a later, unrelated map click after tapping the anchor marker', () => {
+    vi.useFakeTimers()
+    try {
+      render(<AnchorWatchMap {...baseProps} />)
+
+      fireEvent.click(screen.getByLabelText('Anchor position'))
+
+      // Well past the suppression window — nothing here was ever going to
+      // consume the flag naturally, since maplibre never saw the marker tap.
+      vi.advanceTimersByTime(301)
+
+      act(() => {
+        mapState.props!.onClick({ lngLat: { lat: -25.30, lng: 152.92 } })
+      })
+
+      expect(screen.getByTestId('pin-candidate')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('Enter and Escape on window do nothing — there is no keydown listener left to catch them', () => {
     render(<AnchorWatchMap {...baseProps} />)
 

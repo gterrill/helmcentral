@@ -71,7 +71,7 @@ const baseProps = {
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null,
   planningTideHeightFt: null,
-  onPlanningDepthChange: () => undefined,
+  onPlanningDepthChange: () => Promise.resolve(),
 }
 
 // Test 9: the drawer shows the corrected-by-d readout when the backend

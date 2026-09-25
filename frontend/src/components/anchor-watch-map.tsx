@@ -127,9 +127,21 @@ interface StoredZoom {
   sessionId: string | null
 }
 
-function readStoredZoom(): StoredZoom | null {
+// Keyed per host (code-review finding): the dashboard tile and the
+// fullscreen drawer are very different sizes, so a zoom fit for one is wrong
+// for the other. Sharing one key meant whichever host fit first "poisoned"
+// the stored zoom for the other, which then read it back as already
+// belonging to the session and skipped its own fit entirely. viewKey is an
+// opaque host id the caller chooses (anchor-watch-tile.tsx passes "tile",
+// anchor-watch-drawer.tsx passes "drawer"); the empty string keeps today's
+// unscoped key for any caller/test that doesn't pass one.
+function zoomStorageKey(viewKey: string): string {
+  return viewKey ? `${ANCHOR_WATCH_ZOOM_STORAGE_KEY}.${viewKey}` : ANCHOR_WATCH_ZOOM_STORAGE_KEY
+}
+
+function readStoredZoom(viewKey: string): StoredZoom | null {
   if (typeof window === 'undefined') return null
-  const raw = window.localStorage.getItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY)
+  const raw = window.localStorage.getItem(zoomStorageKey(viewKey))
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as { zoom?: unknown; sessionId?: unknown }
@@ -145,9 +157,9 @@ function readStoredZoom(): StoredZoom | null {
   return null
 }
 
-function writeStoredZoom(zoom: number, sessionId: string | null): void {
+function writeStoredZoom(zoom: number, sessionId: string | null, viewKey: string): void {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, JSON.stringify({ zoom, sessionId }))
+  window.localStorage.setItem(zoomStorageKey(viewKey), JSON.stringify({ zoom, sessionId }))
 }
 
 // The centre the operator last left the map at, tagged with the anchor
@@ -291,8 +303,11 @@ export interface AnchorWatchMapProps {
   // a past anchorage must only be discarded once "no watch" is actually
   // confirmed — discarding it on the ambiguous case would flash the vessel
   // position and then jump back to the stored centre the moment the poll
-  // resolves active. Defaults to true so every existing caller/test that
-  // never considered this ambiguity keeps mounting exactly as before.
+  // resolves active. Defaults to false (not known) per the repo's fail-fast
+  // policy: a caller that forgets to wire this up gets the safe "still
+  // waiting to hear back" behaviour (trust a stored centre, don't discard it
+  // yet) rather than the default silently asserting a confirmed "no anchor"
+  // it has no basis for (code-review finding, PR #30).
   anchorStateKnown?: boolean
   radiusMeters: number
   depthMeters: number | null
@@ -359,6 +374,14 @@ export interface AnchorWatchMapProps {
   // disables. Defaults to true so every existing host keeps today's
   // behaviour.
   interactive?: boolean
+  // An opaque id for the surface this instance renders into — namespaces the
+  // persisted fitted-zoom key (see zoomStorageKey above) so the dashboard
+  // tile and the fullscreen drawer, very different sizes, each keep their
+  // own fit instead of clobbering each other's. Defaults to '' (today's
+  // unscoped key) for any caller/test that doesn't pass one; the pan centre
+  // is intentionally still shared across hosts (ADR 0064) — only the zoom is
+  // size-dependent.
+  viewKey?: string
 }
 
 export function AnchorWatchMap({
@@ -368,7 +391,7 @@ export function AnchorWatchMap({
   anchorLat,
   anchorLon,
   anchorSetAt = null,
-  anchorStateKnown = true,
+  anchorStateKnown = false,
   radiusMeters,
   depthMeters,
   currentDriftKts,
@@ -397,6 +420,7 @@ export function AnchorWatchMap({
   onPlacemarkRemove,
   className,
   interactive = true,
+  viewKey = '',
 }: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
   // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
@@ -410,6 +434,54 @@ export function AnchorWatchMap({
   const metricsPanelRef = useRef<HTMLDivElement | null>(null)
   const mapControlsRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapRef | null>(null)
+
+  // Resolved once, at mount. A stored centre is the operator's pan, but only
+  // for the anchorage it was made in: against a different session it is a
+  // view of water the boat has left, so the anchor wins. `hasAnchor` false
+  // is ambiguous until anchorStateKnown is true — it means either "no watch
+  // is running" or "we haven't heard back from the first poll yet", and only
+  // the former should discard a stored centre. Once anchorStateKnown
+  // confirms there is genuinely no anchor, a stored centre from any session
+  // must not win, or the operator opens on last night's bay instead of the
+  // boat while about to drop a new anchor. While it's still unknown, trust
+  // the stored centre for now and let the effects below correct it the
+  // moment a session id lands, or the moment "no watch" is confirmed. Keyed
+  // on hasAnchor rather than anchorSetAt: a legacy watch record with no
+  // recorded set_at can still have an anchor, and that anchor must win over
+  // a stale stored centre exactly as it always has.
+  const [mountView] = useState(() => {
+    const stored = readStoredCenter()
+    if (anchorStateKnown && !hasAnchor) {
+      return { center: null, sessionId: null }
+    }
+    const belongsToCurrentSession =
+      stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
+    return {
+      center: belongsToCurrentSession ? stored : null,
+      sessionId: belongsToCurrentSession ? stored.sessionId : anchorSetAt,
+    }
+  })
+  // The anchor session the view on screen is currently following. Declared
+  // early (ahead of the fit-to-anchor effect below, which reads it) rather
+  // than beside handleMoveEnd/handleRecenter further down, where it used to
+  // sit before the fit effect needed to see it too.
+  const viewSessionRef = useRef<string | null>(mountView.sessionId)
+  // Whether the view on screen at mount came from a stored centre rather
+  // than the live vessel/anchor fallback — the one case the effect below
+  // (confirming "no watch" while already mounted) has anything to correct.
+  const mountedFromStoredCenterRef = useRef(mountView.center !== null)
+  // Whether the operator has panned or zoomed since mount — set from
+  // onDragStart/onZoomStart below (user gestures only; programmatic
+  // easeTo/jumpTo never fire them). The unknown-anchor-state-resolves
+  // transition effect checks this before snapping the view back to the
+  // vessel: a pan made while the first poll was still in flight is a
+  // deliberate look at the chart, not a mistake to undo the moment the poll
+  // answers (code-review finding).
+  const hasUserPannedRef = useRef(false)
+  const handleUserGestureStart = useCallback(() => {
+    hasUserPannedRef.current = true
+  }, [])
+
   // Forward reference to the AIS-label suppression recompute (declared
   // further down, after the state it closes over) so handleMoveEnd below
   // can trigger it on pan/zoom without needing to be redeclared every time
@@ -423,7 +495,41 @@ export function AnchorWatchMap({
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pinCandidate, setPinCandidate] = useState<PinCandidate | null>(null)
   const [selectedPlacemarkId, setSelectedPlacemarkId] = useState<string | null>(null)
+  // Every marker on this map (self vessel, AIS, placemarks, the anchor, the
+  // pin-candidate tooltip buttons) sets this so its own click doesn't fall
+  // through to handleMapClick's "place a pin here" handling below. Each of
+  // those markers' React onClick already calls e.stopPropagation() too, and
+  // — confirmed against both maplibre-gl's own source (Marker.addTo appends
+  // the marker's element into map.getCanvasContainer(), the exact element
+  // HandlerManager binds its native 'click' listener to) and React's event
+  // system (a portaled child's stopPropagation() halts the underlying native
+  // event during React's root-level dispatch, before the browser's own
+  // bubble phase ever reaches canvasContainer) — that alone already keeps
+  // maplibre from ever seeing a marker tap as a map click in the first
+  // place. This ref exists for the input types or embedding quirks where
+  // that isn't reliable (code-review finding: a flag set but never consumed
+  // by a map click that never arrives just sits there and swallows the
+  // *next*, unrelated, genuine tap instead). suppressNextMapClick below is
+  // the only way it's ever set, so it can never outlive a stray tick.
   const suppressNextMapClickRef = useRef(false)
+  const suppressNextMapClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressNextMapClick = useCallback(() => {
+    suppressNextMapClickRef.current = true
+    if (suppressNextMapClickTimerRef.current !== null) {
+      clearTimeout(suppressNextMapClickTimerRef.current)
+    }
+    // A genuine map click for the same tap, if maplibre ever does see one,
+    // fires synchronously within the same event — well inside this window.
+    // Anything arriving after it is a separate, later tap that deserves to
+    // be treated normally.
+    suppressNextMapClickTimerRef.current = setTimeout(() => {
+      suppressNextMapClickRef.current = false
+      suppressNextMapClickTimerRef.current = null
+    }, 300)
+  }, [])
+  useEffect(() => () => {
+    if (suppressNextMapClickTimerRef.current !== null) clearTimeout(suppressNextMapClickTimerRef.current)
+  }, [])
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   // Track zoom for marker scaling. No onZoom handler: that used to fire
   // setCurrentZoom on every animation frame of a zoom gesture, and a
@@ -434,7 +540,7 @@ export function AnchorWatchMap({
   // once per gesture (moveend also fires at the end of a zoom, not just a
   // pan) rather than once per frame.
   const [currentZoom, setCurrentZoom] = useState(() => {
-    const stored = readStoredZoom()
+    const stored = readStoredZoom(viewKey)
     const zoomBelongsToCurrentSession = stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
     return zoomBelongsToCurrentSession ? stored.zoom : DEFAULT_ZOOM_BEFORE_FIT
   })
@@ -442,62 +548,120 @@ export function AnchorWatchMap({
   const markerScale = markerScaleForZoom(currentZoom)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
-  // Fits the swing circle to the map exactly once per session with no
-  // matching stored zoom (impeccable P0: the old zoomForRadius capped at 14,
-  // hiding a 40m circle under the 32px anchor marker). Runs regardless of
-  // `interactive` — a kiosk display benefits from this even more than an
-  // interactive client, since nobody there can zoom to fix it by hand.
-  // Skipped, not deferred, when the container can't be measured at all
-  // (e.g. no real layout under jsdom in tests) rather than fitting to a
-  // bogus 0×0 size.
+  // ── Fitting and following the anchor (session change, fresh mount with no
+  // matching stored zoom, or a container that couldn't be measured yet) —
+  // all funnelled through one fitToAnchor so a single event (e.g. a drop
+  // while mounted with no prior anchor) only ever moves the camera once
+  // (code-review finding: the old separate mount-time fit effect and
+  // session-change effect could both fire for that same drop, one jumping
+  // the zoom and the other immediately easing center+zoom on top of it).
   //
   // react-map-gl constructs the underlying maplibre.Map instance
-  // asynchronously, so mapRef.current can still be null the first time this
-  // effect runs, right at mount — jumpTo would silently no-op against a map
-  // that doesn't exist yet. The computed target zoom is held in
-  // pendingFitZoomRef until it can actually reach a live map (checked again
-  // in handleMapLoad below, which fires once the map genuinely exists);
-  // marking the fit "done" and writing it to storage only happens once
-  // jumpTo has actually been called, never merely once the zoom was
-  // computed. Getting this wrong previously meant the map opened at
-  // DEFAULT_ZOOM_BEFORE_FIT (14, circle hidden) for the rest of the
-  // session, "fixed" only by a reload — because the reload would then read
-  // back the prematurely-written stored zoom as if it had landed.
+  // asynchronously (mapRef.current can still be null the first time this
+  // runs, right at mount) and the wrapper can measure 0×0 (a hidden page,
+  // kiosk rotation, or the drawer opening) — either way jumpTo/easeTo would
+  // silently no-op or fit against a bogus size. Whatever a fit couldn't
+  // finish is kept in pendingFitRef and retried from handleMapLoad (the map
+  // becoming ready) and from the ResizeObserver further down (the container
+  // getting a real size), rather than giving up on it for good. Marking the
+  // fit "done" (didFitInitialZoomRef) only happens once the zoom half has
+  // actually landed on a real map at a real size — never merely once it was
+  // computed — so a premature reload can't read back a fit that never
+  // actually applied.
   const didFitInitialZoomRef = useRef(false)
-  const pendingFitZoomRef = useRef<{ zoom: number; sessionId: string | null } | null>(null)
 
-  const applyPendingFitZoom = useCallback(() => {
-    const pending = pendingFitZoomRef.current
-    if (!pending) return
-    const map = mapRef.current
-    if (!map) return
-    pendingFitZoomRef.current = null
-    didFitInitialZoomRef.current = true
-    setCurrentZoom(pending.zoom)
-    map.jumpTo({ zoom: pending.zoom })
-    writeStoredZoom(pending.zoom, pending.sessionId)
+  interface PendingFit {
+    lat: number
+    lon: number
+    radiusM: number
+    sessionId: string | null
+    // Whether this fit still owes the map an easeTo to a new centre (a
+    // session change) or is a zoom-only catch-up for the session this
+    // component has already been following (a fresh mount/host with no
+    // matching stored zoom yet). Flips to false once the centre half lands,
+    // so an unmeasurable retry doesn't re-ease a centre that already moved.
+    animateCenter: boolean
+  }
+  const pendingFitRef = useRef<PendingFit | null>(null)
+
+  const measureShortSidePx = useCallback(() => {
+    const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
+    const rect = container?.getBoundingClientRect()
+    return rect ? Math.min(rect.width, rect.height) : 0
   }, [])
 
+  // Applies as much of `pending` as the map/container currently allow, and
+  // returns what's left to retry (null once fully applied).
+  const attemptFit = useCallback((pending: PendingFit): PendingFit | null => {
+    const map = mapRef.current
+    if (!map) return pending // nothing done yet — retry once handleMapLoad fires
+
+    const shortSidePx = measureShortSidePx()
+    if (shortSidePx > 0) {
+      const zoom = fitRadiusZoom(pending.radiusM, pending.lat, shortSidePx)
+      didFitInitialZoomRef.current = true
+      setCurrentZoom(zoom)
+      writeStoredZoom(zoom, pending.sessionId, viewKey)
+      if (pending.animateCenter) {
+        writeStoredCenter(pending.lat, pending.lon, pending.sessionId)
+        map.easeTo({ center: [pending.lon, pending.lat], zoom, duration: 600 })
+      } else {
+        map.jumpTo({ zoom })
+      }
+      return null
+    }
+
+    // Unmeasurable: a session change still moves the centre now (today's
+    // shipped fallback — nothing truthful to fit a zoom against, but the
+    // anchorage itself is known), and only the zoom half is left pending,
+    // retried once the container reports a real size.
+    if (pending.animateCenter) {
+      writeStoredCenter(pending.lat, pending.lon, pending.sessionId)
+      map.easeTo({ center: [pending.lon, pending.lat], duration: 600 })
+    }
+    return { ...pending, animateCenter: false }
+  }, [viewKey, measureShortSidePx])
+
+  const fitToAnchor = useCallback((
+    lat: number,
+    lon: number,
+    radiusM: number,
+    sessionId: string | null,
+    animateCenter: boolean,
+  ) => {
+    pendingFitRef.current = attemptFit({ lat, lon, radiusM, sessionId, animateCenter })
+  }, [attemptFit])
+
+  const retryPendingFit = useCallback(() => {
+    if (!pendingFitRef.current) return
+    pendingFitRef.current = attemptFit(pendingFitRef.current)
+  }, [attemptFit])
+
   useEffect(() => {
-    if (didFitInitialZoomRef.current || pendingFitZoomRef.current || !hasAnchor || anchorLat === null) return
-    const stored = readStoredZoom()
+    if (!hasAnchor || anchorLat === null || anchorLon === null) return
+    const sessionChanged = viewSessionRef.current !== anchorSetAt
+    if (sessionChanged) {
+      // A new anchorage pulls every client's view to it — the alternative is
+      // a chart still centred on last night's bay, boat and swing circle
+      // off-screen. A reposition drag keeps the same set_at (the backend
+      // carries it forward), so nobody's view is yanked while the hook is
+      // being nudged around.
+      viewSessionRef.current = anchorSetAt
+      fitToAnchor(anchorLat, anchorLon, radiusMeters, anchorSetAt, true)
+      return
+    }
+    // Same session this component has already been following (including
+    // "always has, since mount") — only a catch-up fit is owed, and only if
+    // this host has no matching persisted zoom of its own yet.
+    if (didFitInitialZoomRef.current || pendingFitRef.current) return
+    const stored = readStoredZoom(viewKey)
     const zoomBelongsToCurrentSession = stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
     if (zoomBelongsToCurrentSession) {
       didFitInitialZoomRef.current = true
       return
     }
-    const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
-    const rect = container?.getBoundingClientRect()
-    const shortSidePx = rect ? Math.min(rect.width, rect.height) : 0
-    if (!(shortSidePx > 0)) return
-    const zoom = fitRadiusZoom(radiusMeters, anchorLat, shortSidePx)
-    pendingFitZoomRef.current = { zoom, sessionId: anchorSetAt }
-    // In case the map instance already exists by the time this runs (e.g.
-    // a later render, or a test/environment where construction happens
-    // synchronously) — handleMapLoad is the fallback for when it doesn't
-    // yet, not the only path.
-    applyPendingFitZoom()
-  }, [hasAnchor, anchorLat, radiusMeters, anchorSetAt, applyPendingFitZoom])
+    fitToAnchor(anchorLat, anchorLon, radiusMeters, anchorSetAt, false)
+  }, [hasAnchor, anchorLat, anchorLon, radiusMeters, anchorSetAt, viewKey, fitToAnchor])
 
   // Fail-fast per the repo fallback policy: MapPlaceLabels' <Layer>
   // elements (mounted below, after the alarm-circle Source) attach to a
@@ -572,11 +736,11 @@ export function AnchorWatchMap({
   const handleMapLoad = useCallback(() => {
     handleRadarEchoMapLoad()
     // The map instance is guaranteed to exist by the time 'load' fires —
-    // this is the fallback path for the mount-time fit-zoom effect above,
-    // for the common case where it ran before react-map-gl had finished
-    // constructing the underlying map.
-    applyPendingFitZoom()
-  }, [handleRadarEchoMapLoad, applyPendingFitZoom])
+    // this is the fallback path for fitToAnchor above, for the common case
+    // where it ran before react-map-gl had finished constructing the
+    // underlying map (or session change followed by a not-yet-ready map).
+    retryPendingFit()
+  }, [handleRadarEchoMapLoad, retryPendingFit])
 
   const handleMapStyleData = useCallback(() => {
     handleStyleData()
@@ -693,47 +857,47 @@ export function AnchorWatchMap({
   // way the AIS and placemark markers do.
   const handleConfirmPin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     if (!pinCandidate) return
     onPlacemarkCreate?.(pinCandidate.lat, pinCandidate.lon)
     setPinCandidate(null)
-  }, [pinCandidate, onPlacemarkCreate])
+  }, [pinCandidate, onPlacemarkCreate, suppressNextMapClick])
 
   const handleDismissPin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     setPinCandidate(null)
-  }, [])
+  }, [suppressNextMapClick])
 
   const handleSelfVesselClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
-  }, [])
+    suppressNextMapClick()
+  }, [suppressNextMapClick])
 
   const handlePlacemarkClick = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     setPinCandidate(null)
     setSelectedPlacemarkId((current) => (current === id ? null : id))
-  }, [])
+  }, [suppressNextMapClick])
 
   const handleRemovePlacemark = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
+    suppressNextMapClick()
     onPlacemarkRemove?.(id)
     setSelectedPlacemarkId(null)
-  }, [onPlacemarkRemove])
+  }, [onPlacemarkRemove, suppressNextMapClick])
 
   // ── AIS vessel click ─────────────────────────────────────────────────────
   const handleAisClick = useCallback(
     (e: React.MouseEvent, vessel: NearbyVessel) => {
       e.stopPropagation()
-      suppressNextMapClickRef.current = true
+      suppressNextMapClick()
       setPinCandidate(null)
       setSelectedPlacemarkId(null)
       selectVessel(vessel.id)
     },
-    [selectVessel],
+    [selectVessel, suppressNextMapClick],
   )
 
   // ── Anchor marker click ──────────────────────────────────────────────────
@@ -743,8 +907,8 @@ export function AnchorWatchMap({
   // other marker on this map (self vessel, AIS, placemarks).
   const handleAnchorMarkerClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    suppressNextMapClickRef.current = true
-  }, [])
+    suppressNextMapClick()
+  }, [suppressNextMapClick])
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
   const handleZoomIn = useCallback(() => {
@@ -756,46 +920,14 @@ export function AnchorWatchMap({
   }, [])
 
   const handleRecenter = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
-    }
+    // No removeItem here (code-review finding): the easeTo below fires its
+    // own moveend the instant it settles, and handleMoveEnd unconditionally
+    // rewrites the stored centre to the new position anyway — a preceding
+    // removeItem was dead code, immediately undone.
     // Nothing to swing around without an anchor — recentre on the vessel.
     const center: [number, number] = hasAnchor ? [anchorLon, anchorLat] : [vesselLon, vesselLat]
     mapRef.current?.easeTo({ center, duration: 600 })
   }, [hasAnchor, anchorLat, anchorLon, vesselLat, vesselLon])
-
-  // Resolved once, at mount. A stored centre is the operator's pan, but only
-  // for the anchorage it was made in: against a different session it is a
-  // view of water the boat has left, so the anchor wins. `hasAnchor` false
-  // is ambiguous until anchorStateKnown is true — it means either "no watch
-  // is running" or "we haven't heard back from the first poll yet", and only
-  // the former should discard a stored centre. Once anchorStateKnown
-  // confirms there is genuinely no anchor, a stored centre from any session
-  // must not win, or the operator opens on last night's bay instead of the
-  // boat while about to drop a new anchor. While it's still unknown, trust
-  // the stored centre for now and let the effects below correct it the
-  // moment a session id lands, or the moment "no watch" is confirmed. Keyed
-  // on hasAnchor rather than anchorSetAt: a legacy watch record with no
-  // recorded set_at can still have an anchor, and that anchor must win over
-  // a stale stored centre exactly as it always has.
-  const [mountView] = useState(() => {
-    const stored = readStoredCenter()
-    if (anchorStateKnown && !hasAnchor) {
-      return { center: null, sessionId: null }
-    }
-    const belongsToCurrentSession =
-      stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
-    return {
-      center: belongsToCurrentSession ? stored : null,
-      sessionId: belongsToCurrentSession ? stored.sessionId : anchorSetAt,
-    }
-  })
-  // The anchor session the view on screen is currently following.
-  const viewSessionRef = useRef<string | null>(mountView.sessionId)
-  // Whether the view on screen at mount came from a stored centre rather
-  // than the live vessel/anchor fallback — the one case the effect below
-  // (confirming "no watch" while already mounted) has anything to correct.
-  const mountedFromStoredCenterRef = useRef(mountView.center !== null)
 
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
@@ -810,12 +942,12 @@ export function AnchorWatchMap({
     // there's nothing to track — see the currentZoom state's own comment.
     if (interactive && Number.isFinite(zoom)) {
       setCurrentZoom(zoom)
-      writeStoredZoom(zoom, viewSessionRef.current)
+      writeStoredZoom(zoom, viewSessionRef.current, viewKey)
     }
     // A pan/zoom changes every AIS vessel's projected screen position, so
     // the label-declutter result can change even with no new AIS poll.
     recomputeAisLabelSuppressionRef.current()
-  }, [interactive])
+  }, [interactive, viewKey])
 
   // ── Initial map view ─────────────────────────────────────────────────────
   // mountView, resolved above, has already decided whether the stored centre
@@ -836,42 +968,24 @@ export function AnchorWatchMap({
     [],
   )
 
-  // A new anchorage pulls every client's view to it. The alternative is a
-  // chart still centred on last night's bay: the boat and its swing circle
-  // are off-screen, and nothing on the map says so. Only a change of session
-  // does this — a reposition drag keeps the same set_at (the backend carries
-  // it forward), so nobody's view is yanked while the hook is being nudged
-  // around, and a pan made during this session survives a reload.
-  useEffect(() => {
-    if (anchorSetAt === null || anchorLat === null || anchorLon === null) return
-    if (viewSessionRef.current === anchorSetAt) return
-    viewSessionRef.current = anchorSetAt
-    writeStoredCenter(anchorLat, anchorLon, anchorSetAt)
-    // Also fits the swing circle to the new anchorage's own radius, same as
-    // the mount-time fit-zoom effect above — a new session can carry a very
-    // different radius (a bigger or smaller swing) than whatever the map was
-    // last zoomed to. Skipped, not deferred, when the container can't be
-    // measured (e.g. no real layout under jsdom in tests): the plain
-    // center-only ease below is exactly today's shipped behaviour.
-    const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
-    const rect = container?.getBoundingClientRect()
-    const shortSidePx = rect ? Math.min(rect.width, rect.height) : 0
-    if (shortSidePx > 0) {
-      const zoom = fitRadiusZoom(radiusMeters, anchorLat, shortSidePx)
-      writeStoredZoom(zoom, anchorSetAt)
-      setCurrentZoom(zoom)
-      mapRef.current?.easeTo({ center: [anchorLon, anchorLat], zoom, duration: 600 })
-    } else {
-      mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
-    }
-  }, [anchorSetAt, anchorLat, anchorLon, radiusMeters])
-
   // Tracks the previous anchorStateKnown so the effect below fires on
   // exactly one transition: false -> true. Ordinary Raise (an already-known
   // active watch going inactive) never touches this, since anchorStateKnown
   // was already true well before the Raise — this only fires the first time
   // ambiguity resolves.
   const anchorStateWasKnownRef = useRef(anchorStateKnown)
+
+  // Read fresh off a ref rather than closed over directly (same reasoning as
+  // recomputeAisLabelSuppression's own vesselPositionRef further down, which
+  // this ref now also backs): the transition below only cares about
+  // anchorStateKnown/hasAnchor, but vesselLat/vesselLon used to sit in its
+  // dependency array too, which meant this effect tore down and re-created
+  // on every GPS tick even though it returns immediately on all but the one
+  // render where the transition actually happens (code-review finding).
+  // Updated unconditionally every render, so it's always current by the time
+  // the transition effect reads it.
+  const vesselPositionRef = useRef({ lat: vesselLat, lon: vesselLon })
+  vesselPositionRef.current = { lat: vesselLat, lon: vesselLon }
 
   // The mount-time gate above only helps a fresh mount. A map that was
   // already on screen while the first poll was in flight — trusting a
@@ -881,19 +995,30 @@ export function AnchorWatchMap({
   // ref above), and only when there's actually a stored centre to override —
   // if the view was already tracking the vessel/anchor fallback, easing to
   // the vessel again is a no-op anyway, but there's nothing to correct.
+  //
+  // Skipped entirely if the operator has panned or zoomed since mount
+  // (hasUserPannedRef, set from onDragStart/onZoomStart below) — code-review
+  // finding: snapping back to the vessel the instant "no watch" is confirmed
+  // would otherwise throw away a deliberate look at the chart made while the
+  // first poll was still in flight. viewSessionRef still gets cleared either
+  // way, so a pan made from here on is correctly tagged "no session" rather
+  // than whatever stale session id mount happened to resolve.
   useEffect(() => {
     const wasKnown = anchorStateWasKnownRef.current
     anchorStateWasKnownRef.current = anchorStateKnown
     if (wasKnown || !anchorStateKnown) return
-    if (hasAnchor) return // resolved active - the effect above handles centring on the anchor
+    if (hasAnchor) return // resolved active - fitToAnchor above handles centring on the anchor
     if (!mountedFromStoredCenterRef.current) return
     mountedFromStoredCenterRef.current = false
     viewSessionRef.current = null
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
-    }
-    mapRef.current?.easeTo({ center: [vesselLon, vesselLat], duration: 600 })
-  }, [anchorStateKnown, hasAnchor, vesselLat, vesselLon])
+    // No removeItem here (code-review finding): same reasoning as
+    // handleRecenter above — whichever branch below runs, either the easeTo's
+    // own moveend or the operator's own prior pan has already left a correct,
+    // current entry in storage; there is nothing left to clear.
+    if (hasUserPannedRef.current) return
+    const { lat, lon } = vesselPositionRef.current
+    mapRef.current?.easeTo({ center: [lon, lat], duration: 600 })
+  }, [anchorStateKnown, hasAnchor])
 
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
@@ -921,10 +1046,8 @@ export function AnchorWatchMap({
   // between two colliding AIS labels), but only changes which of two
   // already-colliding vessels wins — it does not, on its own, justify
   // re-measuring the overlay panels or re-rendering on every tick, so it's
-  // read fresh off a ref (kept current every render, no effect needed)
-  // rather than triggering the recompute itself.
-  const vesselPositionRef = useRef({ lat: vesselLat, lon: vesselLon })
-  vesselPositionRef.current = { lat: vesselLat, lon: vesselLon }
+  // read fresh off vesselPositionRef (declared above, kept current every
+  // render, no effect needed) rather than triggering the recompute itself.
 
   const [suppressedAisLabelIds, setSuppressedAisLabelIds] = useState<Set<string>>(new Set())
 
@@ -990,18 +1113,23 @@ export function AnchorWatchMap({
     recomputeAisLabelSuppression()
   }, [hasAnchor, recomputeAvoidZones, recomputeAisLabelSuppression])
 
-  // Container resize (a tile being resized, the browser window changing):
-  // the only other thing that can actually move the overlay panels.
+  // Container resize (a tile being resized, the browser window changing, a
+  // hidden page becoming visible, kiosk rotation, the drawer opening): the
+  // other thing that can move the overlay panels, and — via retryPendingFit
+  // (code-review finding) — the only chance a zoom fit that had to be
+  // deferred for an unmeasurable 0×0 container ever gets to actually land,
+  // rather than being silently skipped for the rest of the session.
   useEffect(() => {
     const wrapper = mapWrapperRef.current
     if (!wrapper || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       recomputeAvoidZones()
       recomputeAisLabelSuppressionRef.current()
+      retryPendingFit()
     })
     observer.observe(wrapper)
     return () => observer.disconnect()
-  }, [recomputeAvoidZones])
+  }, [recomputeAvoidZones, retryPendingFit])
 
   return (
     <div ref={mapWrapperRef} className={cn('relative isolate overflow-hidden rounded-lg', className)}>
@@ -1023,6 +1151,11 @@ export function AnchorWatchMap({
         interactive={interactive}
         onLoad={handleMapLoad}
         onMoveEnd={handleMoveEnd}
+        // User-gesture-only events (maplibre never fires these for a
+        // programmatic easeTo/jumpTo) — the only signal hasUserPannedRef
+        // needs to tell "the operator moved the view" from "the code did".
+        onDragStart={handleUserGestureStart}
+        onZoomStart={handleUserGestureStart}
         onStyleData={handleMapStyleData}
         onClick={handleMapClick}
         // Carto and OpenStreetMap both require attribution, and since the

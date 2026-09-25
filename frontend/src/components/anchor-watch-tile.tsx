@@ -396,6 +396,10 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               onPlacemarkCreate={onPlacemarkCreate}
               onPlacemarkRemove={onPlacemarkRemove}
               interactive={interactive}
+              // Namespaces the persisted fitted-zoom key (code-review
+              // finding) so this tile's own fit for its own size never
+              // clobbers, or gets clobbered by, the fullscreen drawer's.
+              viewKey="tile"
               className="h-64 w-full rounded-lg lg:h-full"
             />
           </Suspense>

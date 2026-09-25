@@ -79,7 +79,6 @@ export interface AnchorWatchResult {
     lon: number,
     capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
   ) => Promise<void>
-  updatePosition: (lat: number, lon: number) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
@@ -145,8 +144,7 @@ export function useAnchorWatch(
   ) => {
     // Fed the live GPS fix, so the backend should apply the bow-offset
     // correction (projecting forward by gps_from_bow_m along heading) if
-    // it's configured. updatePosition below is a user-dragged map point
-    // that is already meant to be the anchor, so it deliberately omits this.
+    // it's configured.
     //
     // planning_depth_m/planning_tide_height_ft always ride along, using the
     // -1 sentinel when the caller had nothing to capture (ADR 0063) — the
@@ -177,6 +175,12 @@ export function useAnchorWatch(
         body: JSON.stringify(payload),
       })
       setServerState(await res.json() as AnchorWatchServerState)
+      // A successful mutation response is just as authoritative about "we
+      // have heard from the server" as a GET — see `loaded`'s own doc
+      // comment. Without this, dropping anchor before the first GET
+      // resolves would leave `loaded` false despite a real, current server
+      // state already sitting in hand.
+      setLoaded(true)
     } catch (error) {
       toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
@@ -199,6 +203,7 @@ export function useAnchorWatch(
       body: JSON.stringify({ radius_meters: radiusMeters }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
 
   const updateRodeAndConditions = useCallback(async (
@@ -216,6 +221,7 @@ export function useAnchorWatch(
       }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
 
   const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
@@ -231,30 +237,14 @@ export function useAnchorWatch(
       }),
     })
     setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
   }, [])
-
-  const updatePosition = useCallback(async (lat: number, lon: number) => {
-    const payload: { lat: number; lon: number; radius_meters?: number } = { lat, lon }
-    if (typeof serverState.radius_meters === 'number' && serverState.radius_meters > 0) {
-      payload.radius_meters = serverState.radius_meters
-    }
-
-    try {
-      const res = await anchorRequest({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      setServerState(await res.json() as AnchorWatchServerState)
-    } catch (error) {
-      toast.error('Could not reposition anchor', { description: error instanceof Error ? error.message : 'Request failed' })
-    }
-  }, [serverState.radius_meters])
 
   const clearAnchor = useCallback(async () => {
     try {
       await anchorRequest({ method: 'DELETE' })
       setServerState({ active: false })
+      setLoaded(true)
     } catch (error) {
       toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
@@ -353,7 +343,6 @@ export function useAnchorWatch(
     planningTideHeightFt,
     lastAutoRaise,
     setAnchorHere,
-    updatePosition,
     updateRadius,
     updateRodeAndConditions,
     updatePlanningDepth,
@@ -362,7 +351,7 @@ export function useAnchorWatch(
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
     seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, error, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
-    setAnchorHere, updatePosition, updateRadius, updateRodeAndConditions,
+    setAnchorHere, updateRadius, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,
   ])
 }

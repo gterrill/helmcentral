@@ -15,6 +15,7 @@ import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { computeScopeRecommendation } from '@/lib/rode-plan'
+import { isRetryableAnchorError } from '@/lib/anchor-request'
 
 /**
  * A distance in the host's chosen unit, rounded for display — same shape as
@@ -122,7 +123,7 @@ interface AnchorWatchDrawerProps {
   // two can't disagree.
   planningDepthM: number | null
   planningTideHeightFt: number | null
-  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => void
+  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
 }
 
 export function AnchorWatchDrawer({
@@ -190,15 +191,28 @@ export function AnchorWatchDrawer({
   // whether or not the server has confirmed it yet, so the next press steps
   // from where the operator left it, not from a value still in flight.
   //
-  // Cleared two ways: once the prop catches up to exactly this value (the
-  // effect below), or once a request for it fails (inside applyRadius) —
-  // either way there is nothing left "pending" to show or step from, and
-  // the readout falls back to the last confirmed server value.
+  // Cleared three ways: once the request that set it settles — success or
+  // failure, both handled directly in applyRadius below — or once the prop
+  // catches up to exactly this value regardless (the effect below, kept as a
+  // belt-and-suspenders backstop). Relying on the prop-catch-up effect alone
+  // (code-review finding) missed the case where the request's target already
+  // equalled the value showing — pressing - at the 5 m floor computes
+  // max(5, 5-5) = 5 again, so a successful settle never moves radiusMeters
+  // and that effect's dependency never fires, leaving pendingRadiusM stuck
+  // at 5 forever and hiding any later, genuinely different radius (e.g. the
+  // Rode Planner's "Apply as alarm radius") behind it.
   const [pendingRadiusM, setPendingRadiusM] = useState<number | null>(null)
 
   useEffect(() => {
     setPendingRadiusM((current) => (current !== null && current === radiusMeters ? null : current))
   }, [radiusMeters])
+
+  // Raise and re-drop both start a fresh radius conversation — any target
+  // still in flight (or stuck, per the settle bug above) from a previous
+  // anchor belongs to a session that no longer exists.
+  useEffect(() => {
+    setPendingRadiusM(null)
+  }, [anchorState])
 
   const displayedRadiusM = pendingRadiusM ?? radiusMeters
 
@@ -210,13 +224,22 @@ export function AnchorWatchDrawer({
   // not an unhandled rejection with nothing on screen to show for it.
   const applyRadius = useCallback((nextRadiusMeters: number) => {
     setPendingRadiusM(nextRadiusMeters)
-    return onRadiusChange(nextRadiusMeters).catch(() => {
-      // Only clear if nothing newer has since superseded this request — an
-      // older, now-irrelevant failure must not stomp a later press's still-
-      // pending target.
+    // Only clear if nothing newer has since superseded this request — an
+    // older, now-irrelevant settle must not stomp a later press's still-
+    // pending target. Cleared on both outcomes (not just failure): the
+    // radiusMeters-catch-up effect above only clears the pending value when
+    // the prop actually moves, which a request that lands on the value
+    // already showing never does.
+    return onRadiusChange(nextRadiusMeters).then(() => {
       setPendingRadiusM((current) => (current === nextRadiusMeters ? null : current))
+    }, (error: unknown) => {
+      setPendingRadiusM((current) => (current === nextRadiusMeters ? null : current))
+      const message = error instanceof Error ? error.message : 'Request failed'
       toast.error('Could not set alarm radius', {
-        action: { label: 'Retry', onClick: () => { void applyRadius(nextRadiusMeters) } },
+        description: message,
+        action: isRetryableAnchorError(error)
+          ? { label: 'Retry', onClick: () => { void applyRadius(nextRadiusMeters) } }
+          : undefined,
       })
     })
   }, [onRadiusChange])
@@ -390,6 +413,11 @@ export function AnchorWatchDrawer({
                 // view, so it gets satellite/radar/recentre back — every
                 // control stays reachable, just relocated.
                 expandedControls
+                // Namespaces the persisted fitted-zoom key (code-review
+                // finding) so this drawer's own fit for its own (much
+                // larger) size never clobbers, or gets clobbered by, the
+                // dashboard tile's.
+                viewKey="drawer"
                 placemarks={placemarks}
                 onPlacemarkCreate={onPlacemarkCreate}
                 onPlacemarkRemove={onPlacemarkRemove}

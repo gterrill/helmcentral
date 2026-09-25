@@ -203,3 +203,87 @@ still dragging or stepping the radius.
   only its callers (the map's removed gesture handlers) are gone.
 - [ADR 0089](0089-kiosk-feed-is-a-page-flag.md) — kiosk stays display-only;
   unaffected by this change.
+
+## Amendment 2026-09-26: a code review, thirteen more fixes
+
+A `/code-review high` pass over the Phase 1 branch found thirteen issues,
+mostly in the map's view-following/fit logic this ADR introduced, all fixed
+on `anchor-fixes` the same way: a test that fails against the pre-fix code
+(verified by hand, reverting just the source change) and passes against the
+fix.
+
+- The fitted zoom (`fitRadiusZoom`) was persisted under one localStorage key
+  shared by every host. The dashboard tile and the fullscreen drawer are very
+  different sizes, so whichever fit first wrote a zoom the other read back as
+  "already belongs to this session" and skipped its own fit entirely.
+  `AnchorWatchMap` now takes a `viewKey` prop (`"tile"` / `"drawer"`) that
+  namespaces the persisted key; the pan centre stays shared across hosts
+  (ADR 0064) — only the zoom is size-dependent.
+- The mount-time fit effect and the session-change effect could both fire for
+  the same event (a fresh drop while mounted with no prior anchor), moving
+  the camera twice: an instant `jumpTo` for the zoom, then an `easeTo`
+  animating centre+zoom on top of it. Both triggers now funnel through one
+  `fitToAnchor` helper making exactly one decision per render.
+- A session change landing before react-map-gl finished constructing the map
+  wrote the new centre/zoom to storage and called `setCurrentZoom`
+  immediately, then called `mapRef.current?.easeTo`, which silently no-ops
+  against a map that doesn't exist yet — the new anchorage was then never
+  actually applied once the map did load. The pending fit (centre and zoom
+  together) is now deferred and retried from `handleMapLoad`.
+- The fit effect gave up for good when the container measured 0×0 (a hidden
+  page, kiosk rotation, or the drawer opening). The existing container
+  `ResizeObserver` now retries a deferred fit once it reports a real size.
+- The unknown-anchor-state-resolves transition snapped the view back to the
+  vessel unconditionally, discarding a pan made deliberately while the first
+  GET was still in flight. It now checks a `hasUserPannedRef`, set from
+  `onDragStart`/`onZoomStart` (user gestures only — never fired by a
+  programmatic `easeTo`/`jumpTo`), before moving anything.
+- Two `localStorage.removeItem` calls (Recentre, and the transition above)
+  were dead code: a real `easeTo` always settles into its own `moveend`, and
+  `handleMoveEnd` unconditionally rewrites the stored centre from that
+  regardless of a preceding remove.
+- Every marker's click handler (self vessel, AIS, placemarks, the anchor, the
+  pin-candidate buttons) set `suppressNextMapClickRef` so its own click
+  wouldn't fall through to the map's own "place a pin here" handling. Traced
+  against maplibre-gl's own source (`Marker.addTo` appends into
+  `map.getCanvasContainer()`, the exact element its `HandlerManager` binds
+  `click` to) and confirmed with an isolated portal + native-listener DOM
+  harness: a marker's `stopPropagation()` already keeps maplibre from ever
+  treating the tap as a map click, so the flag was never actually consumed by
+  the click it was meant to guard — it just sat there and ate the next real,
+  unrelated map tap. `suppressNextMapClick` now clears itself after a short
+  window instead of relying on a map click that never arrives.
+- The radius stepper's `pendingRadiusM` was only cleared by an effect keyed
+  on the `radiusMeters` prop changing — a request whose target equalled the
+  value already showing (the 5 m floor, or the rode planner applying an
+  equal radius) settled without moving that prop, leaving the stepper stuck
+  and hiding any later, genuinely different change behind it. Cleared
+  directly once the request settles now (success or failure), and on
+  Raise/re-drop.
+- The radius stepper's and the rode planner's failed-save toasts discarded
+  the server's message and offered Retry unconditionally, even for a failure
+  retrying can never fix (a bad radius, no active watch — both 4xx).
+  `anchorRequest` now throws `AnchorRequestError` (message + HTTP status);
+  toasts show the real message and gate Retry to network/5xx failures via the
+  new `isRetryableAnchorError`. The rode planner's rode/sea-state/seabed and
+  Depth fields also now revert to the last-known-good server value on a
+  failed save, instead of leaving the rejected input on screen looking saved.
+- `anchorStateKnown` now defaults to `false` (not known) rather than `true`,
+  matching the repo's fail-fast policy: a caller that forgets to wire it up
+  gets "still waiting to hear back" rather than a silently assumed "confirmed
+  no anchor".
+- `useAnchorWatch`'s `loaded` now flips true on any successful mutation
+  (POST/PATCH/DELETE), not only the GET poll.
+- The unknown-anchor-state transition effect no longer lists
+  `vesselLat`/`vesselLon` in its dependencies (it reads them off an existing
+  ref instead), so it stops tearing down and recreating on every GPS tick.
+- `updatePosition` (the frontend hook) and `GET /api/tracks/motoring`
+  (backend) are deleted: both were dead since reposition-by-drag was removed
+  above, confirmed by a repo-wide grep of the frontend and backend. The
+  backend's `recordMotoringPoint`/`motoringTrail` write side is untouched —
+  Consequences above still expects it back once the Adjust sheet's
+  drag-to-fine-tune handle lands, so restoring the read endpoint then is a
+  small, self-contained change. The Related note below that
+  `updatePosition`'s SignalK publish-on-reposition contract is unchanged now
+  describes backend-only behaviour (`anchor.go`'s POST handler); the
+  frontend function of that name no longer exists.

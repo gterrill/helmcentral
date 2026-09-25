@@ -15,6 +15,7 @@ vi.mock('maplibre-gl', () => ({
 }))
 
 const jumpToMock = vi.fn()
+const easeToMock = vi.fn()
 const mapReady = vi.hoisted(() => ({ value: false }))
 const captured = vi.hoisted(() => ({ onLoad: null as (() => void) | null }))
 
@@ -31,7 +32,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           ? {
               getCanvas: () => ({ style: { cursor: 'grab' } }),
               getZoom: () => 14,
-              easeTo: () => undefined,
+              easeTo: easeToMock,
               jumpTo: jumpToMock,
             }
           : undefined
@@ -136,5 +137,134 @@ describe('AnchorWatchMap fit-zoom timing (map ref not yet available at mount)', 
       captured.onLoad?.()
     })
     expect(jumpToMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// code-review finding: the old fit effect gave up for good the moment the
+// container measured 0×0 (a hidden page, kiosk rotation, or the drawer
+// opening) — masked only by a reload, which starts a fresh mount and just
+// repeats the bug. The container's own ResizeObserver now retries a
+// deferred fit once it reports a real size.
+describe('AnchorWatchMap fit-zoom retries once the container gets a size (ResizeObserver)', () => {
+  let resizeCallback: (() => void) | null = null
+  let containerWidth = 0
+  let containerHeight = 0
+
+  beforeEach(() => {
+    mapReady.value = true
+    captured.onLoad = null
+    jumpToMock.mockClear()
+    localStorage.clear()
+    containerWidth = 0
+    containerHeight = 0
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: containerWidth,
+      height: containerHeight,
+      top: 0,
+      left: 0,
+      right: containerWidth,
+      bottom: containerHeight,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect))
+    resizeCallback = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: () => void) { resizeCallback = cb }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('never fits while the container stays unmeasurable', () => {
+    render(<AnchorWatchMap {...baseProps} />)
+
+    expect(jumpToMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem('anchor-watch-map-zoom')).toBeNull()
+  })
+
+  it('retries the deferred zoom fit once the container reports a real size', () => {
+    render(<AnchorWatchMap {...baseProps} />)
+    expect(jumpToMock).not.toHaveBeenCalled()
+
+    containerWidth = 390
+    containerHeight = 500
+    expect(resizeCallback).not.toBeNull()
+    act(() => {
+      resizeCallback!()
+    })
+
+    expect(jumpToMock).toHaveBeenCalledTimes(1)
+    expect(jumpToMock.mock.calls[0][0].zoom).toBeCloseTo(EXPECTED_FIT_ZOOM, 6)
+    const stored = JSON.parse(localStorage.getItem('anchor-watch-map-zoom')!) as { zoom: number; sessionId: string | null }
+    expect(stored.zoom).toBeCloseTo(EXPECTED_FIT_ZOOM, 6)
+  })
+})
+
+// code-review finding: a session change that lands before react-map-gl has
+// finished constructing the underlying map used to write the pending centre
+// and zoom to storage and call setCurrentZoom immediately, then try
+// mapRef.current?.easeTo — which quietly no-ops against a map that doesn't
+// exist yet. The new anchorage's centre was then never actually applied once
+// the map did load. Both halves are now deferred together and applied, in
+// one easeTo, from handleMapLoad.
+describe('AnchorWatchMap defers a session-change fit until the map loads', () => {
+  const SESSION = '2026-09-01T00:00:00Z'
+
+  beforeEach(() => {
+    mapReady.value = false
+    captured.onLoad = null
+    jumpToMock.mockClear()
+    easeToMock.mockClear()
+    localStorage.clear()
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 390, height: 500, top: 0, left: 0, right: 390, bottom: 500, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('applies neither the centre nor the zoom while the map has not yet loaded', () => {
+    const { rerender } = render(<AnchorWatchMap {...baseProps} anchorLat={null} anchorLon={null} anchorSetAt={null} />)
+
+    // A session starts while the map is still under construction.
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} />)
+
+    expect(easeToMock).not.toHaveBeenCalled()
+    expect(jumpToMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem('anchor-watch-map-center')).toBeNull()
+  })
+
+  it('applies both the pending centre and the fitted zoom, in one easeTo, once the map loads', () => {
+    const { rerender } = render(<AnchorWatchMap {...baseProps} anchorLat={null} anchorLon={null} anchorSetAt={null} />)
+
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} />)
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    mapReady.value = true
+    rerender(<AnchorWatchMap {...baseProps} anchorSetAt={SESSION} />)
+    act(() => {
+      captured.onLoad?.()
+    })
+
+    expect(easeToMock).toHaveBeenCalledTimes(1)
+    expect(jumpToMock).not.toHaveBeenCalled()
+    const [call] = easeToMock.mock.calls
+    expect(call[0]).toMatchObject({ center: [baseProps.anchorLon, baseProps.anchorLat], duration: 600 })
+    expect(call[0].zoom).toBeCloseTo(EXPECTED_FIT_ZOOM, 6)
+
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-center')!)).toEqual({
+      latitude: baseProps.anchorLat,
+      longitude: baseProps.anchorLon,
+      sessionId: SESSION,
+    })
   })
 })
