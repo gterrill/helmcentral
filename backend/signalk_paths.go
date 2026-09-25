@@ -118,6 +118,104 @@ func signalKPathsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"paths": paths})
 }
 
+// signalKPathSample is one leaf of the self tree as check_signalk_paths
+// (Mate diagnostics, ADR 0131) needs it: collectSignalKPaths' own walk,
+// extended to carry the fields it drops ($source, timestamp) plus an age
+// computed the same way pathAge computes one for a single known path.
+//
+// Value is the raw decoded JSON value (float64, string, bool, or a nested
+// map for an object leaf like navigation.position) rather than
+// collectSignalKPaths' float64-only *Value - a diagnostic tool has a use for
+// a non-numeric leaf's value where the widget picker never did.
+type signalKPathSample struct {
+	Path  string
+	Value any
+	Units string
+	// Source is the leaf's own declared "$source", "" when the node carries
+	// none (an object-value child like navigation.position.latitude, which
+	// inherits its parent's source rather than declaring its own).
+	Source string
+	// Timestamp is the leaf's own declared RFC3339 "timestamp", "" when the
+	// node carries none at all - see signalk_paths.go's own note (referenced
+	// from pathAge below) on why a dead path's last declared timestamp is
+	// worth keeping rather than discarding.
+	Timestamp string
+	// AgeSeconds is -1 when unknown (neither the node nor pathSeen has
+	// anything for this path - freshestTimestampAge's own "no evidence"
+	// contract), never a value that reads as freshly measured.
+	AgeSeconds float64
+}
+
+// collectSignalKPathSamples walks tree exactly like collectSignalKPaths, but
+// keeps $source/timestamp per leaf and computes each leaf's age via
+// signalKPathSampleAge, instead of discarding both the way the widget path
+// picker always has. tree may be nil (no self tree yet); the result is then
+// simply empty.
+func collectSignalKPathSamples(snapshot *signalKSnapshot, context string, tree map[string]any, now time.Time) []signalKPathSample {
+	out := make([]signalKPathSample, 0)
+	walkSignalKPathSamples(snapshot, context, tree, nil, 0, now, &out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func walkSignalKPathSamples(snapshot *signalKSnapshot, context string, node map[string]any, prefix []string, depth int, now time.Time, out *[]signalKPathSample) {
+	if depth > signalKPathMaxDepth {
+		return
+	}
+
+	if raw, ok := node["value"]; ok {
+		path := strings.Join(prefix, ".")
+		if path == "" {
+			return
+		}
+		source, _ := node["$source"].(string)
+		timestamp, _ := node["timestamp"].(string)
+		*out = append(*out, signalKPathSample{
+			Path:       path,
+			Value:      raw,
+			Units:      unitsFor(node),
+			Source:     source,
+			Timestamp:  timestamp,
+			AgeSeconds: signalKPathSampleAge(snapshot, context, path, node, now),
+		})
+		return
+	}
+
+	for key, child := range node {
+		if key == "meta" || key == "$source" || key == "timestamp" {
+			continue
+		}
+		asMap, ok := child.(map[string]any)
+		if !ok {
+			continue
+		}
+		walkSignalKPathSamples(snapshot, context, asMap, append(append([]string{}, prefix...), key), depth+1, now, out)
+	}
+}
+
+// signalKPathSampleAge mirrors pathAge's own preference below - a node's own
+// declared timestamp survives a SignalK reconnect replay and wins whenever
+// it exists; pathSeen (the snapshot's own arrival-time record) is consulted
+// only when the node carries none - but works from a node already in hand
+// from collectSignalKPathSamples' walk, rather than re-resolving it via
+// snapshot.nodeAt(path) the way pathAge itself does: the walk has already
+// found this node once, and re-walking the whole tree per leaf to find it
+// again would cost this diagnostic tool one full path resolution per match.
+func signalKPathSampleAge(snapshot *signalKSnapshot, context, path string, node map[string]any, now time.Time) float64 {
+	if nodeAge := freshestTimestampAge(node, now); nodeAge >= 0 {
+		return nodeAge
+	}
+	seen := snapshot.lastSeen(context, path)
+	if seen.IsZero() {
+		return -1
+	}
+	age := now.Sub(seen).Seconds()
+	if age < 0 {
+		return 0
+	}
+	return roundTo1(age)
+}
+
 // pathAge is the single computation of how stale a snapshot path is, shared
 // between buildGaugeValuesPayload and every derived path that reads through
 // the same alarmReader (ADR 0083), so a widget bound directly to a path and

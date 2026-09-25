@@ -16,6 +16,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Mate can now answer questions about nearby vessels: who is around, how
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.
+- Mate can now diagnose missing or stale vessel telemetry itself: ask "is the
+  depth reading working" or "when did the tank levels stop updating" and it
+  checks the live instrument connection and, with a history log configured
+  for the boat, finds the last recorded time for a reading and names the
+  specific feed that went quiet, instead of pointing you at the SignalK
+  admin console.
 - The Wind tile (previously "Apparent Wind") adds two toggles: switch the
   reading between apparent and true wind, and switch the compass between
   Course Up, which turns with your heading, and North Up, which holds true

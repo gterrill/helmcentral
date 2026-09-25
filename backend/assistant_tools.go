@@ -140,6 +140,24 @@ type assistantToolDeps struct {
 	// that lights up once the boat's InfluxDB writer records other vessels
 	// (today it records self only).
 	signalKPositionHistory func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error)
+	// signalKDiagnostics is check_signalk_paths' whole view of the live
+	// SignalK snapshot (Mate diagnostics, ADR 0131): connection status, last
+	// message time, and every leaf currently in the self tree with its
+	// value/source/declared timestamp. Production wires
+	// signalKDiagnosticsFromGlobalSnapshot (assistant_diagnostics.go); tests
+	// inject a fixed snapshot with no live SignalK connection at all.
+	signalKDiagnostics func(now time.Time) signalKDiagnosticsSnapshot
+	// influxLastRecorded is get_last_recorded's only I/O dependency: the most
+	// recent recorded point for every measurement/source pair matching a
+	// path-prefix and/or source filter, within a lookback window. Production
+	// wires queryInfluxLastRecorded (influx.go); tests supply a canned slice
+	// with no InfluxDB connection at all.
+	influxLastRecorded func(pathPrefix, source string, lookbackDays int) ([]influxLastRecordedRow, error)
+	// influxPathHistoryStat is get_path_history's only I/O dependency: one
+	// aggregate statistic (min/mean/max) of a path's history over an
+	// explicit range, aggregated to fixed-size buckets, optionally scoped to
+	// one source. Production wires queryInfluxPathStatRange (influx.go).
+	influxPathHistoryStat func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -178,6 +196,9 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		signalKPositionHistory: func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
 			return fetchSignalKPositionHistory(settingsPath, mmsi, from, to, resolutionSeconds)
 		},
+		signalKDiagnostics:    signalKDiagnosticsFromGlobalSnapshot,
+		influxLastRecorded:    queryInfluxLastRecorded,
+		influxPathHistoryStat: queryInfluxPathStatRange,
 	}
 }
 
@@ -450,6 +471,86 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "check_signalk_paths",
+				Description: "Check the live SignalK connection right now: whether it is connected, when it " +
+					"last received any data, a summary of every source ($source) feeding the tree with how long " +
+					"ago each last updated (so a source that has gone quiet stands out), and the current " +
+					"value/age of any path matching a filter. Use this FIRST for any \"is X still updating\", " +
+					"\"why is X missing\" or \"when did X stop\" question, before get_last_recorded or " +
+					"get_path_history - a path can be genuinely missing from this live view even though it " +
+					"still has InfluxDB history, which those two tools read instead.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"filter": {
+							"type": "string",
+							"description": "Case-insensitive substring to match against SignalK path names, e.g. \"tanks\" or \"exhaust\". Omit to see only the connection status and source summary."
+						},
+						"source": {
+							"type": "string",
+							"description": "Case-insensitive substring to match against a path's declared source label, e.g. \"YachtDevices\"."
+						}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "get_last_recorded",
+				Description: "From InfluxDB, find the last recorded time and value for every SignalK path and/or " +
+					"source matching a filter - this is what actually answers \"when did X stop\", including for " +
+					"a path no longer in the live SignalK tree at all (check_signalk_paths only sees what has " +
+					"arrived since this connection last started). Give path_prefix and/or source; at least one " +
+					"is required.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"path_prefix": {
+							"type": "string",
+							"description": "Match SignalK paths starting with this prefix, e.g. \"tanks\" or \"propulsion.0.exhaust\"."
+						},
+						"source": {
+							"type": "string",
+							"description": "Match source labels starting with this prefix, e.g. \"YachtDevices\" to cover every YachtDevices.N gateway instance at once."
+						},
+						"lookback_days": {
+							"type": "integer",
+							"description": "How many days back to look for the last point (default 30, maximum 180)."
+						}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "get_path_history",
+				Description: "From InfluxDB, fetch one exact SignalK path's history over a time range - " +
+					"min/mean/max per bucket, overall min/mean/max, first/last seen, and any gaps - to see what " +
+					"a value actually did (flat-lined, noisy, or simply absent) around when it stopped. Use " +
+					"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "The exact SignalK path, e.g. \"tanks.fuel.2.currentLevel\"."
+						},
+						"source": {
+							"type": "string",
+							"description": "Optional: restrict to this exact source label, when more than one source has published this path."
+						},
+						"start": {"type": "string", "description": "Range start, RFC3339 (e.g. \"2026-09-20T00:00:00Z\"). Give with end, or use hours_back instead."},
+						"end": {"type": "string", "description": "Range end, RFC3339. Give with start, or use hours_back instead."},
+						"hours_back": {"type": "number", "description": "Hours back from now, instead of start/end. Default 24 when none of start/end/hours_back is given."}
+					}
+				}`),
+			},
+		},
 	}
 }
 
@@ -486,6 +587,12 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeReadDocument(ctx, args)
 	case "get_nearby_vessels":
 		return d.executeGetNearbyVessels(ctx, args)
+	case "check_signalk_paths":
+		return d.executeCheckSignalKPaths(ctx, args)
+	case "get_last_recorded":
+		return d.executeGetLastRecorded(ctx, args)
+	case "get_path_history":
+		return d.executeGetPathHistory(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -565,6 +672,39 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return "Checking nearby vessels…"
 		}
 		return fmt.Sprintf("Looking up %s…", vesselName)
+	case "check_signalk_paths":
+		var a assistantCheckSignalKPathsArgs
+		filter := ""
+		if json.Unmarshal(args, &a) == nil {
+			filter = strings.TrimSpace(a.Filter)
+		}
+		if filter == "" {
+			return "Checking the SignalK connection…"
+		}
+		return fmt.Sprintf("Checking SignalK for %q…", filter)
+	case "get_last_recorded":
+		var a assistantGetLastRecordedArgs
+		label := ""
+		if json.Unmarshal(args, &a) == nil {
+			label = strings.TrimSpace(a.PathPrefix)
+			if label == "" {
+				label = strings.TrimSpace(a.Source)
+			}
+		}
+		if label == "" {
+			label = "the log"
+		}
+		return fmt.Sprintf("Checking InfluxDB for when %s last reported…", label)
+	case "get_path_history":
+		var a assistantGetPathHistoryArgs
+		path := ""
+		if json.Unmarshal(args, &a) == nil {
+			path = strings.TrimSpace(a.Path)
+		}
+		if path == "" {
+			path = "that path"
+		}
+		return fmt.Sprintf("Fetching history for %s…", path)
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

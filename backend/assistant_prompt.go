@@ -682,6 +682,22 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("The composable units of a Helmcentral dashboard page are called tiles, and tile is the word " +
 		"to use when talking to the operator about one. Widget is not a term this product uses.\n\n")
 
+	// 2c1. Diagnostics (ADR 0131) - fixed wording, identical for every turn.
+	// This is the fix for the exact failure the ADR opens with: asked when a
+	// feed stopped, Mate used to say it had no access to historical logs or
+	// per-path timestamps and pointed the operator at the SignalK admin
+	// console. It does now, and must use it rather than repeat that line.
+	b.WriteString("For any question about vessel telemetry being missing, stale, frozen or unavailable - " +
+		"\"why is X not showing\", \"when did X stop updating\", \"is the depth reading working\" - check live " +
+		"freshness and sources first with check_signalk_paths, then use get_last_recorded and get_path_history " +
+		"against InfluxDB (when configured) to find when a path or source actually stopped and what it did before " +
+		"then. Name the specific source that went quiet when you find one, e.g. \"every YachtDevices source " +
+		"stopped at 00:34 on the 21st and has not reported since\" is a better answer than \"tank data is " +
+		"missing\". Do not tell the operator to go check the SignalK admin console for something these tools can " +
+		"answer directly; only fall back to that if InfluxDB is not configured and the live snapshot has already " +
+		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
+		"check both before concluding there is nothing to find).\n\n")
+
 	// 2c. Nearby vessels (ADR 0128) - fixed wording, identical for every
 	// turn. in_range_since's lower-bound caveat has to be stated here, not
 	// left for the tool result alone to carry: a model reading a plain ISO
