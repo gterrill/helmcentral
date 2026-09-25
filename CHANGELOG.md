@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-25
+
 ### Added
 
 - Mate can now answer questions about nearby vessels: who is around, how
@@ -45,28 +47,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   adjusted", though the recommended rode already allowed for the tide.
   Typing over it still overrides the plan, and a figure with no water left
   once tide and bow height are backed out is refused rather than saved.
-- Mate's "when did it stop" answer now names the exact moment a reading was
-  last actually seen, not a rounded multi-day window.
-- Mate's history-gap listing now shows the most recent gaps - including one
-  still open right now - instead of only the oldest ones once there are more
-  than it can list at once.
-- Mate can now find the last recorded value for a reading that is a word or
-  an on/off state (a mode, an alarm), not only a number.
-- Mate now says when a requested history search was longer than it can run
-  in one go, and what range it used instead of quietly shortening it.
-- Mate no longer reports a vessel under way as sitting at anchor or on a
-  mooring; a "how long has it been there" answer now only comes once a
-  vessel has actually settled somewhere.
-- Mate keeps a vessel's full sighting history once its name arrives after
-  the first encounter, instead of treating the later, real name as a
-  different boat.
-- Mate now says when the nearby-vessel list has been cut short, and how many
-  boats are actually in range.
-- Mate can now say how long any vessel in a crowded anchorage has been
-  nearby, not only the closest ten.
-- Current Conditions and the Wind tile now always agree on the last hour's
-  true wind reading; before, the two could occasionally show different
-  figures for the same moment.
 
 ## [0.31.0] - 2026-09-25
 
@@ -208,7 +188,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/gterrill/helmcentral/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/gterrill/helmcentral/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/gterrill/helmcentral/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/gterrill/helmcentral/compare/v0.28.0...v0.29.0
