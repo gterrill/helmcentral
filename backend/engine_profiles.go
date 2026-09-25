@@ -643,7 +643,33 @@ func updateProfileHandler(c echo.Context, requiredKind string) error {
 	}
 
 	loadEngineProfiles()
+	if profile.Kind == profileKindBattery {
+		seedAnomalyRulesAfterProfileSave()
+	}
 	return c.JSON(http.StatusOK, map[string]any{"profile": profile})
+}
+
+// seedAnomalyRulesAfterProfileSave re-seeds whichever anomaly-v1 sub-sets
+// have just become configured after a battery profile save -- completing a
+// linked battery profile's full_soc/charge_warn slots is exactly what
+// vesselHouseBankReady checks, and that must take effect immediately rather
+// than waiting for the next vessel-settings save or server restart (code
+// review finding 1). Scoped to profileKindBattery, not every profile save:
+// no other kind can ever complete vesselHouseBankReady, and every existing
+// engine/alternator/generator profile test saves without also standing up
+// an isolated alarm-rules file, since until now a profile save never touched
+// alarm state at all. A failure here is logged, not returned as an error,
+// the same non-fatal treatment every other seed call in this codebase gets
+// -- the profile save itself already succeeded.
+func seedAnomalyRulesAfterProfileSave() {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+		return
+	}
+	if err := seedAnomalyRules(vessel); err != nil {
+		log.Printf("could not seed the anomaly alarm rules after a profile save: %v", err)
+	}
 }
 
 // POST /api/equipment-profiles

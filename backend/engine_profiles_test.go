@@ -320,6 +320,73 @@ func TestUpdateEngineProfileHandler(t *testing.T) {
 	}
 }
 
+// TestUpdateEquipmentProfileHandlerSeedsFullBankRuleOnceProfileCompletes
+// covers the other half of code review finding 1: a house bank already
+// linked to a battery profile whose full_soc/charge_warn slots were still
+// empty ("not set up yet") only got re-checked at the next vessel-settings
+// save or the next server restart -- saving the completed profile itself,
+// through Settings -> Vessel's own profile editor, took no immediate effect.
+// updateProfileHandler must re-seed on its own once the save completes it.
+func TestUpdateEquipmentProfileHandlerSeedsFullBankRuleOnceProfileCompletes(t *testing.T) {
+	withTempAlarmRules(t)
+	equipmentID := setupBatteryTestStore(t)
+
+	// A battery profile linked to the house bank, but its full_soc slot
+	// (vesselHouseBankReady's own gate) is still empty -- charge_high alone
+	// keeps the profile itself valid (a battery profile needs at least one
+	// threshold slot filled to load at all) while still "not configured yet"
+	// for the full-bank-charging detector.
+	setupEngineProfiles(t, map[string]string{"battery.json": `{
+		"schema_version": 1,
+		"kind": "battery",
+		"id": "test-battery-wiring",
+		"name": "Test LiFePO4",
+		"chemistry": "LiFePO4",
+		"charge_high": {"value": 3.6, "source": "test"}
+	}`})
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := saveVesselSettings(settingsPath, vesselSettings{
+		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
+	}); err != nil {
+		t.Fatalf("saveVesselSettings: %v", err)
+	}
+	if _, ok := findAlarmRule(t, anomalyFullBankWarnRuleID); ok {
+		t.Fatalf("did not expect the full-bank rule seeded before the profile's thresholds were filled in")
+	}
+
+	e := echo.New()
+	body := `{
+		"schema_version": 1,
+		"kind": "battery",
+		"id": "test-battery-wiring",
+		"name": "Test LiFePO4",
+		"chemistry": "LiFePO4",
+		"full_soc": {"value": 0.95, "source": "test"},
+		"charge_warn": {"value": 3.5, "source": "test"},
+		"charge_high": {"value": 3.6, "source": "test"}
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/api/equipment-profiles/test-battery-wiring", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/equipment-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-battery-wiring")
+
+	if err := updateEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, ok := findAlarmRule(t, anomalyFullBankWarnRuleID); !ok {
+		t.Fatalf("expected saving the completed battery profile to seed the full-bank rule immediately, not wait for the next vessel-settings save or restart")
+	}
+}
+
 func TestUpdateEngineProfileHandlerRejectsInvalidBody(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
 
