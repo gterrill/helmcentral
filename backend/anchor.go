@@ -169,12 +169,22 @@ func getSelfTrailSince(since time.Time) []*trailPoint {
 }
 
 // loadAnchorWatch restores the watch on startup. A missing file is the
-// ordinary "fresh install, nothing ever dropped" case and is not an error.
-// A file that exists but fails to parse is a different case entirely — the
-// operator's anchor alarm going silently absent because of it would be far
-// worse than a startup failure that says so — so that is surfaced to the
-// caller rather than swallowed, matching loadAlarmRules's shape for the
-// same class of file.
+// ordinary "fresh install, nothing ever dropped" case and is not an error, and
+// so is a zero-length one — the shape an interrupted atomic write (create/
+// truncate landed, the bytes didn't) leaves behind, matching loadAlarmRules'
+// own `if len(data) > 0` treatment of the same situation (alarm_rules.go).
+//
+// A file that exists, is non-empty, and either fails to parse or parses into
+// something that isn't a real watch — `{}`, a bare `null` (both decode to an
+// all-zero struct with no unmarshal error), a position sitting at exactly
+// 0,0, or a radius that is zero or negative and so can never trip — is a
+// different case entirely. The operator's anchor alarm going silently absent,
+// or silently installed at 0,0 with an alarm that can never fire, would both
+// be far worse than a startup failure that says so, so all of these are
+// surfaced to the caller rather than swallowed, matching loadAlarmRules's
+// shape for its own corrupt-file case. Every returned error names path, so
+// whatever reports it (main.go, GET /api/anchor-watch) doesn't have to guess
+// which file was the problem.
 func loadAnchorWatch() error {
 	path := anchorWatchFilePath()
 	data, err := os.ReadFile(path)
@@ -183,12 +193,19 @@ func loadAnchorWatch() error {
 			// No file yet — start with no watch active.
 			return nil
 		}
-		return fmt.Errorf("reading anchor watch: %w", err)
+		return fmt.Errorf("reading anchor watch state (%s): %w", path, err)
+	}
+	if len(data) == 0 {
+		// An interrupted write, not a watch that was ever dropped.
+		return nil
 	}
 
 	var loaded anchorWatchData
 	if err := json.Unmarshal(data, &loaded); err != nil {
-		return fmt.Errorf("parsing anchor watch: %w", err)
+		return fmt.Errorf("parsing anchor watch state (%s): %w", path, err)
+	}
+	if err := loaded.validateLoaded(); err != nil {
+		return fmt.Errorf("invalid anchor watch state (%s): %w", path, err)
 	}
 
 	anchorWatchMu.Lock()
@@ -197,6 +214,21 @@ func loadAnchorWatch() error {
 		lastAnchorWatchRadiusMeters = loaded.RadiusMeters
 	}
 	anchorWatchMu.Unlock()
+	return nil
+}
+
+// validateLoaded catches a file that parsed without error but isn't a
+// real watch. json.Unmarshal treats both `{}` and a bare `null` as "leave
+// the target at its zero value, no error" — so without this check either one
+// would silently become an active watch centred on 0,0 (Gulf of Guinea, "null
+// island") with whatever radius happened to be in the file.
+func (a anchorWatchData) validateLoaded() error {
+	if a.Lat == 0 && a.Lon == 0 {
+		return fmt.Errorf("no anchor position recorded (lat/lon both 0)")
+	}
+	if a.RadiusMeters <= 0 {
+		return fmt.Errorf("radius_meters must be positive, got %v", a.RadiusMeters)
+	}
 	return nil
 }
 
@@ -209,14 +241,25 @@ func saveAnchorWatch(aw *anchorWatchData) error {
 // Also carries last_auto_raise (anchor_auto_raise.go, ADR 0099) when the
 // server has ever auto-raised a watch: every client already polls this
 // endpoint, so it is the least invasive way for each of them to learn a
-// raise happened without them having decided it themselves.
+// raise happened without them having decided it happened.
+//
+// Also carries error when the persisted anchor_watch.json could not be
+// loaded at startup (recordAnchorWatchLoadFailure) — naming the file path and
+// the parse/validation error, never an invented or empty watch in its place.
+// state is always nil in that case (loadAnchorWatch never installs one on
+// failure), so active is always false alongside it.
 func getAnchorWatch(c echo.Context) error {
 	anchorWatchMu.RLock()
 	state := anchorWatchState
+	loadErr := anchorWatchLoadErr
 	anchorWatchMu.RUnlock()
 
 	if state == nil {
-		return c.JSON(http.StatusOK, withLastAutoRaise(map[string]any{"active": false}))
+		resp := map[string]any{"active": false}
+		if loadErr != "" {
+			resp["error"] = loadErr
+		}
+		return c.JSON(http.StatusOK, withLastAutoRaise(resp))
 	}
 
 	return c.JSON(http.StatusOK, withLastAutoRaise(map[string]any{
@@ -385,6 +428,13 @@ func setAnchorWatch(c echo.Context) error {
 	anchorWatchState = aw
 	lastAnchorWatchRadiusMeters = aw.RadiusMeters
 	anchorWatchMu.Unlock()
+
+	// saveAnchorWatch above just overwrote anchor_watch.json atomically,
+	// whatever it held before — a bad file from a previous corrupt-state
+	// error is the operator's recovery path, not something this drop needs to
+	// check for first. Retract that warning now that a good file and a good
+	// in-memory state both exist.
+	clearAnchorWatchLoadFailure()
 
 	// Reset post-anchor ring buffer.
 	trailMu.Lock()
