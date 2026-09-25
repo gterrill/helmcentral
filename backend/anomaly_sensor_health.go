@@ -197,6 +197,24 @@ const silentSourceCadenceMultiple = 10
 // goes quiet at once), not this one source going quiet on its own.
 const silentSourceStreamMaxAge = 10 * time.Second
 
+// silentSourceBurstSpread is the least First-to-Last spread a source's
+// observed history needs before its Count is trusted to represent a genuine
+// publishing cadence, rather than a single burst of retained/cached values
+// SignalK replays within milliseconds of a connection being established
+// (confirmed against the real capture
+// backend/testdata/anomaly/signalk-deltas-2026-09-25.ndjson, whose
+// venus.com.victronenergy.vebus.276 source lands more than 20 update blocks
+// inside 30ms at connect time). Without this, a burst-then-quiet source
+// reads First and Last as both the connection instant, so
+// (Last-First)/(Count-1) comes out near zero no matter how large Count is,
+// flooring the scaled threshold below back down to the flat
+// silentSourceQuietFor and reporting the source silent the moment
+// silentSourceWatchAfter elapses -- 5 minutes after every restart,
+// regardless of whether the source is actually healthy (code review finding
+// 7). 2s is comfortably above any realistic burst's own span and
+// comfortably below any cadence this codebase treats as meaningful.
+const silentSourceBurstSpread = 2 * time.Second
+
 // sourceHealth is one $source's publishing history as of "now" -- the same
 // fields sourceSeenEntry tracks, decoupled so silentSources can be
 // unit-tested without a live snapshot.
@@ -208,8 +226,8 @@ type sourceHealth struct {
 }
 
 // silentSources reports which of sources have gone silent: watched (per
-// silentSourceWatchAfter/-MinUpdates) and quiet for over this source's own
-// threshold, evaluated as of now. That threshold is silentSourceQuietFor's
+// silentSourceWatchAfter/-MinUpdates/-BurstSpread) and quiet for over this
+// source's own threshold, evaluated as of now. That threshold is silentSourceQuietFor's
 // 120s floor, scaled up to silentSourceCadenceMultiple times the source's
 // own observed average gap (First-to-Last spread divided by update count)
 // when that is slower -- a source watched long enough to judge at all has
@@ -233,7 +251,9 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 		if excluded[s.Source] {
 			continue
 		}
-		watched := s.Count >= silentSourceMinUpdates && now.Sub(s.First) >= silentSourceWatchAfter
+		watched := s.Count >= silentSourceMinUpdates &&
+			now.Sub(s.First) >= silentSourceWatchAfter &&
+			s.Last.Sub(s.First) >= silentSourceBurstSpread
 		if !watched {
 			continue
 		}

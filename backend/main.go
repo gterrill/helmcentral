@@ -493,17 +493,6 @@ func main() {
 	if err := seedLawOfStormsRules(); err != nil {
 		log.Printf("could not seed the law-of-storms alarm rules: %v", err)
 	}
-	// Offers the anomaly-detection set (sensor health always, the rest as
-	// vessel.engines/house_bank are completed): unlike the sets above, this
-	// one is several independent markers rather than one, seeded again on
-	// every vessel-settings save so a detector configured after this boot
-	// still gets its rules. A failure here is not fatal, for the same
-	// reason as above.
-	if vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
-		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
-	} else if err := seedAnomalyRules(vessel); err != nil {
-		log.Printf("could not seed the anomaly alarm rules: %v", err)
-	}
 	if err := loadAlarmTransports(); err != nil {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}
@@ -531,6 +520,22 @@ func main() {
 	loadRoutes()
 	loadDashboardPages()
 	loadEngineProfiles()
+	// Offers the anomaly-detection set (sensor health always, the rest as
+	// vessel.engines/house_bank are completed): unlike the sets above, this
+	// one is several independent markers rather than one, seeded again on
+	// every vessel-settings save so a detector configured after this boot
+	// still gets its rules. Must run after loadEngineProfiles just above --
+	// the battery sub-set's readiness check resolves the house bank's linked
+	// profile through engineProfilesState, which is empty until that call
+	// runs; seeding first meant the full-bank-charging rules could never be
+	// seeded at boot no matter how complete the vessel setup was (code
+	// review finding 1). A failure here is not fatal, for the same reason
+	// as the sets above.
+	if vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
+		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+	} else if err := seedAnomalyRules(vessel); err != nil {
+		log.Printf("could not seed the anomaly alarm rules: %v", err)
+	}
 	// Radar (ADR 0062, amended for the mayara SignalK plugin): a target store
 	// fed by radarPoller (radar_source.go), which polls the plugin's proxied
 	// REST endpoint through the already-configured SignalK connection —

@@ -346,27 +346,73 @@ type voltageHistorySample struct {
 // minute, fullBankChargingInputs.DVdtPerMinute's own input.
 type voltageHistoryTracker struct {
 	samples []voltageHistorySample
+	// bankPath is the house bank path the current run of samples belongs
+	// to. resetIfBankChanged drops the whole run the moment this changes,
+	// so a different bank chosen in Settings -> Vessel -> Power (or the
+	// same bank unset then reconfigured) never blends a trailing run of one
+	// pack's voltage into a completely different pack's dV/dt fit (code
+	// review finding 5).
+	bankPath string
 }
 
-// observe appends a new sample, prunes the window down to dVdtWindow (kept
-// anchored on the single newest sample at or before the cutoff, so the
-// window's effective span stays close to dVdtWindow rather than shrinking
-// every tick as samples inside it age past the cutoff too), and returns a
-// least-squares fit of the rate of change across every sample still in the
-// window -- not a two-point slope between the oldest and newest alone,
-// which a single noisy or quantized reading at either end could swing on
-// its own (code review finding 10). 0 -- not an error, and not treated as
-// "flat" by the caller -- until both dVdtMinSamples and dVdtMinSpan are
-// satisfied, matching fullBankChargingInputs.DVdtPerMinute's own "zero
-// means unknown, only ever promotes to level 2, never blocks it" contract.
-func (t *voltageHistoryTracker) observe(voltage float64, now time.Time) float64 {
-	t.samples = append(t.samples, voltageHistorySample{at: now, value: voltage})
+// resetIfBankChanged clears the tracker's samples when bankPath differs from
+// the path the current run belongs to -- called once per tick, before
+// observe, so a bank switch takes effect on the very next reading rather
+// than after dVdtWindow ages the old bank's samples out on its own.
+func (t *voltageHistoryTracker) resetIfBankChanged(bankPath string) {
+	if t.bankPath != bankPath {
+		t.samples = nil
+		t.bankPath = bankPath
+	}
+}
+
+// observe appends a new sample when valid is true, prunes the window down
+// to dVdtWindow, and returns a least-squares fit of the rate of change
+// across every sample still in the window -- not a two-point slope between
+// the oldest and newest alone, which a single noisy or quantized reading at
+// either end could swing on its own (code review finding 10). 0 -- not an
+// error, and not treated as "flat" by the caller -- until both
+// dVdtMinSamples and dVdtMinSpan are satisfied, matching
+// fullBankChargingInputs.DVdtPerMinute's own "zero means unknown, only ever
+// promotes to level 2, never blocks it" contract.
+//
+// valid false (a stale or glitched reading -- a 0 V dropout -- that the
+// caller's own validity check already rejected this tick) skips recording
+// the sample entirely, rather than letting it sit in the trailing window for
+// up to dVdtWindow the way every other sample does (code review finding 5):
+// the window is still pruned and re-fit from whatever genuine samples
+// remain, so a single bad tick does not also blank an already-established
+// rate to 0.
+func (t *voltageHistoryTracker) observe(voltage float64, now time.Time, valid bool) float64 {
+	if valid {
+		t.samples = append(t.samples, voltageHistorySample{at: now, value: voltage})
+	}
 
 	cutoff := now.Add(-dVdtWindow)
+	// anchorFloor is how far before cutoff the single retained anchor
+	// sample (see below) may be and still count as a genuine continuation
+	// of the window, rather than a stale point left over from a gap (the
+	// detector paused, or the house bank was briefly unconfigured). Without
+	// this floor, that anchor survives no matter how old it is, and a burst
+	// of fresh samples right after a gap can satisfy dVdtMinSamples and
+	// dVdtMinSpan from what is really just two points spanning the whole
+	// gap, not a genuine window's worth of history (code review finding 4).
+	// One tick's tolerance either side of the cutoff is enough for the
+	// anchor's own purpose -- keeping the window's effective span close to
+	// dVdtWindow across ordinary ticking -- without also trusting a gap.
+	anchorFloor := cutoff.Add(-anomalyDetectorInterval)
+
 	keepFrom := 0
 	for i, s := range t.samples {
 		if s.at.After(cutoff) {
 			break
+		}
+		if s.at.Before(anchorFloor) {
+			// Too old to serve as the window's anchor -- drop it, and
+			// everything before it, rather than keep stretching the
+			// window back across a gap.
+			keepFrom = i + 1
+			continue
 		}
 		keepFrom = i
 	}
@@ -414,6 +460,37 @@ type twinSteadinessTrackers struct {
 	rpmGroup conditionTracker
 	coolant  map[string]*conditionTracker
 	running  map[string]*conditionTracker
+	// invalidSince tracks, per engine instance, when that engine's own
+	// rpm/coolant inputs most recently became invalid -- absent while
+	// currently valid. See invalidTooLong.
+	invalidSince map[string]time.Time
+}
+
+// invalidTooLong folds one tick's validity for engine into invalidSince and
+// reports whether that engine's inputs have now been invalid for longer than
+// inputValidityMaxAge -- long enough that the gap is not just a momentary
+// blip (a dropped N2K frame, one bad tick) but plausibly covers the engine
+// actually stopping and restarting, which runningFor/coolantFor must not
+// silently ride through (code review finding 8): those trackers are only
+// ever observe()'d on a tick where the engine is currently valid, so without
+// this, an arbitrarily long invalid stretch left them frozen at whatever
+// duration they last saw, and the instant good data returned, that stale
+// duration satisfied the twin gate's own running/steadiness thresholds
+// immediately.
+func (t *twinSteadinessTrackers) invalidTooLong(engine string, validNow bool, now time.Time) bool {
+	if validNow {
+		delete(t.invalidSince, engine)
+		return false
+	}
+	if t.invalidSince == nil {
+		t.invalidSince = map[string]time.Time{}
+	}
+	since, seen := t.invalidSince[engine]
+	if !seen {
+		t.invalidSince[engine] = now
+		return false
+	}
+	return now.Sub(since) > inputValidityMaxAge
 }
 
 func (t *twinSteadinessTrackers) coolantFor(engine string) *conditionTracker {
@@ -597,12 +674,26 @@ func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, val
 		return
 	}
 
+	// A different bank than the one this tracker's samples belong to (a
+	// fresh choice in Settings -> Vessel -> Power, or the same bank unset
+	// then reconfigured) must not blend its trailing voltage into this
+	// bank's dV/dt fit (code review finding 5).
+	voltageHistory.resetIfBankChanged(hb.Path)
+
+	// Only record a voltage reading the caller's own validity check already
+	// trusts -- a stale or glitched reading (a 0 V dropout) must not sit in
+	// the trailing window for up to dVdtWindow corrupting the fit the whole
+	// time (code review finding 5). A nil valid trusts every input, the
+	// same "nil means trust everything" contract fullBankChargingLevel's
+	// own valid param already documents.
+	voltageValid := valid == nil || valid(hb.Path+".voltage")
+
 	inputs := fullBankChargingInputs{
 		SoC: soc, Voltage: voltage, Current: current,
 		// The rising-pack half of level 2's OR condition (+5 mV/min over
 		// 60s): a trailing voltage history the caller's own goroutine holds
 		// across ticks (voltageHistoryTracker), not recomputed here.
-		DVdtPerMinute: voltageHistory.observe(voltage, now),
+		DVdtPerMinute: voltageHistory.observe(voltage, now, voltageValid),
 		ChargeSources: discoverChargeSources(snapshot),
 	}
 
@@ -621,12 +712,20 @@ func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, val
 // formatEngineResidualEvidence renders the plan's evidence style: "At 2,400
 // rpm port 84.0 degC, peers 79.0 degC; usually 1.2 degC off (38m learned);
 // now 3.8 degC beyond that."
-func formatEngineResidualEvidence(engineName string, absoluteUnit string, ownValue, peerMedian, offset, residual float64, minutes int, rpmHz float64) string {
+//
+// ownValue and peerMedian are absolute readings and render through
+// absoluteUnit (e.g. "K", which subtracts 273.15); offset and residual are
+// DIFFERENCES between two readings and must render through deltaUnit (e.g.
+// "deltaK", scale only) instead -- formatting a difference through the
+// absolute unit's own offset turns a genuine 1 K learned offset into
+// "-272.2 degC" (code review finding 2). See alarm_units.go's deltaK/deltaPa
+// entries.
+func formatEngineResidualEvidence(engineName string, absoluteUnit, deltaUnit string, ownValue, peerMedian, offset, residual float64, minutes int, rpmHz float64) string {
 	rpm := int(math.Round(rpmHz * 60))
 	return fmt.Sprintf(
 		"At %d rpm %s %s, peers %s; usually %s off (%dm learned); now %s beyond that.",
 		rpm, engineName, formatAlarmReading(ownValue, absoluteUnit), formatAlarmReading(peerMedian, absoluteUnit),
-		formatAlarmReading(offset, absoluteUnit), minutes, formatAlarmReading(residual, absoluteUnit),
+		formatAlarmReading(offset, deltaUnit), minutes, formatAlarmReading(residual, deltaUnit),
 	)
 }
 
@@ -691,8 +790,18 @@ func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselS
 	states := make([]engineTwinState, 0, len(live))
 	for _, e := range live {
 		if !e.ok {
+			// Invalid for longer than a momentary blip: the engine's own
+			// running/coolant-steady trackers must not silently carry
+			// whatever duration they last saw across a gap that could just
+			// as well have covered the engine actually stopping (code
+			// review finding 8).
+			if steadiness.invalidTooLong(e.setting.Instance, false, now) {
+				steadiness.runningFor(e.setting.Instance).observe(false, now)
+				steadiness.coolantFor(e.setting.Instance).observe(false, now)
+			}
 			continue
 		}
+		steadiness.invalidTooLong(e.setting.Instance, true, now)
 		runFor := steadiness.runningFor(e.setting.Instance).observe(e.rpmHz > twinIdleRPMHz, now)
 		coolantSteadyDur := steadiness.coolantFor(e.setting.Instance).observe(e.coolant >= twinGateMinCoolantK, now)
 		states = append(states, engineTwinState{
@@ -771,7 +880,7 @@ func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselS
 			path := anomalyEngineResidualPath(e.Instance, q.Suffix)
 			reading.Values[path] = residual
 			reading.Evidence[path] = formatEngineResidualEvidence(
-				name, q.AbsoluteUnit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
+				name, q.AbsoluteUnit, q.Unit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
 			)
 		}
 	}
@@ -796,8 +905,6 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 		log.Printf("anomaly detector: vessel settings unavailable, skipping this tick: %v", err)
 		return reading
 	}
-
-	valid := func(path string) bool { return inputValidity(snapshot, path, now) }
 
 	// The operator's own exclusions from the frozen/impossible/silent-source
 	// alarm card's "Ignore this sensor" action (alarm_ignored_sensors.go) --
@@ -897,6 +1004,39 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	reading.Values[anomalySensorFrozenCountPath] = float64(frozenCount)
 	if len(frozenPaths) > 0 {
 		reading.Evidence[anomalySensorFrozenCountPath] = strings.Join(frozenPaths, ", ")
+	}
+
+	// The sensor-health verdicts above gate the battery and engine-
+	// differential detectors below, not just their own alarm counts: a
+	// stuck or silenced reading is exactly the kind of input those two
+	// detectors must not trust either (code review finding 3 -- the commit
+	// message and inputValidity's own doc comment both promised this
+	// gating; valid used to consult inputValidity alone). Built from
+	// frozenPaths/silent, the same currently-active, ignore-aware sets the
+	// counts just above published, not trackers.frozenPaths' raw internal
+	// state, so a sensor the operator has already ignored still gates
+	// nothing.
+	frozenNow := make(map[string]bool, len(frozenPaths))
+	for _, p := range frozenPaths {
+		frozenNow[p] = true
+	}
+	silentSourceNow := make(map[string]bool, len(silent))
+	for _, s := range silent {
+		silentSourceNow[s] = true
+	}
+	valid := func(path string) bool {
+		if !inputValidity(snapshot, path, now) {
+			return false
+		}
+		if frozenNow[path] {
+			return false
+		}
+		if node := snapshot.nodeAt(path); node != nil {
+			if source, ok := node["$source"].(string); ok && silentSourceNow[source] {
+				return false
+			}
+		}
+		return true
 	}
 
 	computeAnomalyBattery(snapshot, vessel, valid, &trackers.voltageHistory, now, &reading)

@@ -243,6 +243,34 @@ func TestSilentSourcesStillFiresOnceQuietPastItsOwnScaledCadence(t *testing.T) {
 	}
 }
 
+// TestSilentSourcesDoesNotFireForAConnectTimeBurstFollowedByQuiet is the
+// direct regression case for code review finding 7: the cadence estimate
+// was (Last-First)/(Count-1) across a source's ENTIRE observed history.
+// SignalK's on-connect replay of a source's retained/cached values delivers
+// its whole backlog within milliseconds -- confirmed against the real
+// capture backend/testdata/anomaly/signalk-deltas-2026-09-25.ndjson, whose
+// venus.com.victronenergy.vebus.276 source lands more than 20 separate
+// update blocks inside a 30ms span at connect time before settling into its
+// steady ~1Hz cadence. For a source that instead only reports on genuine
+// change, that burst alone reads as an almost-zero average gap, flooring
+// the scaled threshold right back down to the flat 120s -- so the source
+// reads as "silent" the moment silentSourceWatchAfter elapses, 5 minutes
+// after every single restart, regardless of whether it is actually healthy.
+func TestSilentSourcesDoesNotFireForAConnectTimeBurstFollowedByQuiet(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	burstAt := now.Add(-6 * time.Minute)
+	sources := []sourceHealth{
+		// The whole 40-update burst landed within 30ms of connecting, six
+		// minutes ago -- past silentSourceWatchAfter and silentSourceMinUpdates
+		// on the burst alone -- and the source (a switch or alarm state that
+		// only reports on change) has said nothing genuinely new since.
+		{Source: "n2k.switch.bilge-pump", First: burstAt, Last: burstAt.Add(30 * time.Millisecond), Count: 40},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a connect-time burst not to be mistaken for an established cadence, got %v", got)
+	}
+}
+
 func TestSilentSourcesExcludesEngineBoundSources(t *testing.T) {
 	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
 	sources := []sourceHealth{

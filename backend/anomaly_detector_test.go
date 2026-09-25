@@ -338,6 +338,114 @@ func TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale(t *test
 	}
 }
 
+// TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap
+// is the direct regression case for code review finding 8: the per-engine
+// runningFor/coolant conditionTrackers were only ever observe()'d on a tick
+// where that engine's own inputs were valid -- the "if !e.ok { continue }"
+// skip above -- so a long stretch of invalid data (an instrument dropout
+// outlasting a real engine stop/restart) never told the tracker the engine
+// had actually stopped. trueSince stayed frozen at whatever it was before
+// the gap, so the instant good data returned, now.Sub(trueSince) already
+// covered the whole gap and satisfied twinGateMinRunFor immediately,
+// however long -- or however thoroughly -- the engine had actually been off
+// in between.
+//
+// Runs steady for most of twinGateMinRunFor (short of it), an invalid gap
+// well past inputValidityMaxAge, then resumes: the residual must stay
+// absent until a genuinely fresh twinGateMinRunFor has elapsed since the
+// resume, not the moment rpmSteady/coolantSteady's own (already-correctly-
+// resetting) windows catch back up.
+func TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
+		},
+	})
+
+	snapshot := newAnomalyTestSnapshot()
+	trackers := newAnomalyTrackers()
+	steadiness := &twinSteadinessTrackers{}
+	path := anomalyEngineResidualPath("port", "oilPressure")
+
+	// Steady for most of the 10-minute requirement, but short of it.
+	preGap := int(twinGateMinRunFor.Seconds()) - 30
+	t0 := anomalyDetectorTestNow
+	for i := 0; i < preGap; i++ {
+		at := t0.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+
+	// A long dropout -- comfortably past inputValidityMaxAge -- with nothing
+	// updating at all, but the detector keeps ticking on real wall time.
+	gapStart := t0.Add(time.Duration(preGap) * time.Second)
+	gapTicks := int(inputValidityMaxAge.Seconds())*2 + 30
+	for i := 0; i < gapTicks; i++ {
+		computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, gapStart.Add(time.Duration(i)*time.Second))
+	}
+
+	// Good data resumes. If the pre-gap runtime survived, 400 more seconds
+	// (comfortably past rpmSteady's 60s and coolantSteady's 300s own fresh
+	// windows) would already total pre-gap(570s)+400s >> 600s and the gate
+	// would hold; it must not, since the genuine post-resume runtime is only
+	// 400s.
+	resumeStart := gapStart.Add(time.Duration(gapTicks) * time.Second)
+	var mid anomalyReading
+	for i := 0; i < 400; i++ {
+		at := resumeStart.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		mid = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+	if _, ok := mid.Values[path]; ok {
+		t.Fatalf("expected no residual 400s after the gap (runningFor must have restarted from zero, not carried the pre-gap 570s over), got %v", mid.Values[path])
+	}
+
+	// Continuing on to a genuinely fresh twinGateMinRunFor since the resume
+	// proves the reset did not simply break running-time tracking outright.
+	var last anomalyReading
+	for i := 400; i < int(twinGateMinRunFor.Seconds())+10; i++ {
+		at := resumeStart.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		last = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+	if _, ok := last.Values[path]; !ok {
+		t.Fatalf("expected a residual once a genuinely fresh twinGateMinRunFor elapsed after the resume, got none: %+v", last.Values)
+	}
+}
+
+// TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes is the direct
+// regression case for code review finding 2: formatEngineResidualEvidence
+// formatted the learned offset and the residual -- both DIFFERENCES between
+// two readings -- with the quantity's own ABSOLUTE unit ("K", "Pa"), which
+// for temperature subtracts 273.15 from a number that was never a Kelvin
+// reading in the first place. A genuine 1.0 K learned offset and a 3.0 K
+// residual then read as "-272.2 degC" and "-270.2 degC". Only ownValue and
+// peerMedian are absolute readings; offset and residual must render through
+// the quantity's own delta unit (deltaK/deltaPa), which converts by scale
+// only, matching alarm_units.go's deltaK/deltaPa entries added alongside
+// this cycle's engine-differential detector.
+func TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes(t *testing.T) {
+	// ownValue 357.15 K (84.0 degC), peerMedian 353.15 K (80.0 degC), a 1.0 K
+	// learned offset, residual (4.0 - 1.0) = 3.0 K.
+	got := formatEngineResidualEvidence("Port", "K", "deltaK", 357.15, 353.15, 1.0, 3.0, 38, 1800.0/60)
+
+	if strings.Contains(got, "-272") || strings.Contains(got, "-270") {
+		t.Fatalf("evidence formatted a difference through the absolute K->degC conversion: %q", got)
+	}
+	want := "At 1800 rpm Port 84.0 °C, peers 80.0 °C; usually 1.0 °C off (38m learned); now 3.0 °C beyond that."
+	if got != want {
+		t.Fatalf("evidence:\n got  %q\n want %q", got, want)
+	}
+}
+
 func TestComputeAnomalyReadingEngineDifferentialUsesLearnedBaseline(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
@@ -477,6 +585,82 @@ func TestComputeAnomalyReadingFrozenClearsOnceSensorIsIgnored(t *testing.T) {
 	}
 }
 
+// --- Frozen/silent verdicts gate the battery and engine-differential ------
+// detectors too (code review finding 3): inputValidity alone (present, not
+// stale, in range) is not the whole of "sensor health" -- a frozen sensor
+// keeps updating its timestamp with the same value, passing every check
+// inputValidity makes, and reading.Validity was filled by the impossible-
+// reading loop but never read by anything. The commit message and
+// inputValidity's own doc comment both promised the sensor-health verdict
+// gates the other two detectors; it did not.
+
+// TestComputeAnomalyReadingEngineDifferentialAbsentWhenAnInputIsFrozen
+// mirrors TestComputeAnomalyReadingFrozenClearsOnceEngineIsUnticked's own
+// "simulate a previously-completed window" pattern: port's coolant
+// (propulsion.port.temperature) is flagged frozen, the same tracker state a
+// real 15-minute window would leave behind, without waiting 15 real minutes
+// to get there. A frozen coolant reading must not feed a residual -- for any
+// quantity, since coolant validity gates whether the engine qualifies for
+// the twin gate at all.
+func TestComputeAnomalyReadingEngineDifferentialAbsentWhenAnInputIsFrozen(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+	trackers := newAnomalyTrackers()
+	trackers.frozenPaths["propulsion.port.temperature"] = true
+
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
+		},
+	})
+
+	snapshot := newAnomalyTestSnapshot()
+	steadiness := &twinSteadinessTrackers{}
+	ticks := int(twinGateMinRunFor.Seconds()) + 5
+	var last anomalyReading
+	for i := 0; i < ticks; i++ {
+		at := anomalyDetectorTestNow.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		last = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+
+	path := anomalyEngineResidualPath("port", "oilPressure")
+	if _, ok := last.Values[path]; ok {
+		t.Fatalf("expected no residual while port's coolant reading is flagged frozen, got %v", last.Values[path])
+	}
+}
+
+// A "frozen SoC/voltage" counterpart to the engine-differential test above
+// is not reachable through computeAnomalyReading as things stand: the
+// frozen check's own tracker (engineCorrelatedPaths) only ever watches
+// engine-correlated paths in this cycle, and computeAnomalyReading's
+// per-tick cleanup loop drops any trackers.frozenPaths entry that is not
+// one of those current engine paths -- so a battery path injected directly
+// into that map is discarded before the gate below ever sees it. The gate
+// itself (valid, below) is written generically on path, not restricted to
+// engine paths, so it is already correct the day the frozen check is
+// widened to cover the house bank too; that widening is a separate, larger
+// change this cycle's frozen tracker was never scoped to make. The battery
+// detector's own gating is exercised instead by
+// TestComputeAnomalyReadingBatteryWiringPublishesLevel and its neighbours
+// via inputValidity, which the same valid closure still calls first.
+//
+// The silent-source half of the same gate is real and wired the same way,
+// but is not independently testable either: silentSources never reports a
+// source before it has been quiet for at least silentSourceQuietFor (120s),
+// comfortably longer than inputValidityMaxAge (30s) -- by the time a
+// source is ever silent, every path it feeds has already failed the
+// pre-existing staleness check inputValidity makes on its own, the same
+// path TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale
+// already covers. It stays wired in for defence in depth and because the
+// commit message promised it, not because a scenario exists where it alone
+// makes the difference.
+
 // --- Sensor health evidence: which identifiers actually tripped -----------
 //
 // A count alarm ("2 out-of-range readings") gives the operator nothing to
@@ -547,14 +731,14 @@ func TestComputeAnomalyReadingSilentSourceEvidenceNamesTheSource(t *testing.T) {
 func tickVoltageHistory(tr *voltageHistoryTracker, start time.Time, n int, voltageAt func(i int) float64) float64 {
 	var got float64
 	for i := 0; i < n; i++ {
-		got = tr.observe(voltageAt(i), start.Add(time.Duration(i)*time.Second))
+		got = tr.observe(voltageAt(i), start.Add(time.Duration(i)*time.Second), true)
 	}
 	return got
 }
 
 func TestVoltageHistoryTrackerZeroWithFewerThanTwoSamples(t *testing.T) {
 	var tr voltageHistoryTracker
-	if got := tr.observe(28.0, anomalyDetectorTestNow); got != 0 {
+	if got := tr.observe(28.0, anomalyDetectorTestNow, true); got != 0 {
 		t.Fatalf("first sample: got %v, want 0 (nothing to compare against yet)", got)
 	}
 }
@@ -571,10 +755,49 @@ func TestVoltageHistoryTrackerZeroWithFewerThanTwoSamples(t *testing.T) {
 func TestVoltageHistoryTrackerTwoSamples60sApartNoLongerProducesARate(t *testing.T) {
 	var tr voltageHistoryTracker
 	start := anomalyDetectorTestNow
-	tr.observe(28.0, start)
-	got := tr.observe(28.01, start.Add(60*time.Second))
+	tr.observe(28.0, start, true)
+	got := tr.observe(28.01, start.Add(60*time.Second), true)
 	if got != 0 {
 		t.Fatalf("two samples 60s apart: got %v, want 0 (not enough samples to trust a fit)", got)
+	}
+}
+
+// TestVoltageHistoryTrackerGapDoesNotSurviveAsAStaleAnchor is the direct
+// regression case for code review finding 4: observe used to keep a single
+// anchor sample at or before the cutoff no matter how old it was, so the
+// window's effective span stayed close to dVdtWindow rather than shrinking
+// every tick. After a real gap (the detector paused, or the house bank was
+// briefly unconfigured), that anchor could be far older than one tick
+// before the cutoff -- combined with a burst of fresh samples right after
+// the gap, dVdtMinSamples/dVdtMinSpan were satisfied from what was really
+// just two points spanning the whole gap, not a genuine window's worth of
+// history. A stale anchor must be dropped along with everything before it,
+// the same as if it had never qualified as the anchor at all.
+func TestVoltageHistoryTrackerGapDoesNotSurviveAsAStaleAnchor(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+
+	// A full window of steady, flat voltage before the gap.
+	flatSeconds := int(dVdtWindow.Seconds())
+	for i := 0; i < flatSeconds; i++ {
+		tr.observe(28.0, start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// A 30-minute gap, then a single very different reading -- if the last
+	// pre-gap sample survives as the window's anchor, it alone (plus this
+	// one) would satisfy neither dVdtMinSamples nor dVdtMinSpan yet, so keep
+	// ticking fresh samples past the gap until dVdtMinSamples is reached.
+	// With the bug, that stale anchor still counts toward the total, so the
+	// span from it to "now" clears dVdtMinSpan long before dVdtMinSamples
+	// genuine post-gap samples do, and the resulting fit is dominated by the
+	// stale anchor rather than the actual recent behaviour.
+	gapEnd := start.Add(time.Duration(flatSeconds)*time.Second + 30*time.Minute)
+	var last float64
+	for i := 0; i < dVdtMinSamples-1; i++ {
+		last = tr.observe(30.0, gapEnd.Add(time.Duration(i)*time.Second), true)
+	}
+	if last != 0 {
+		t.Fatalf("expected 0 with only %d genuine post-gap samples spanning %ds (well under dVdtMinSpan), got %v -- the stale pre-gap anchor is still being counted", dVdtMinSamples-1, dVdtMinSamples-2, last)
 	}
 }
 
@@ -608,7 +831,7 @@ func TestVoltageHistoryTrackerWindowSlidesAndDropsOldSamples(t *testing.T) {
 	const risingRatePerMinute = 0.09
 
 	for i := 0; i < flatSeconds; i++ {
-		tr.observe(28.0, start.Add(time.Duration(i)*time.Second))
+		tr.observe(28.0, start.Add(time.Duration(i)*time.Second), true)
 	}
 	// Another full window's worth of ticks, now genuinely rising -- by the
 	// last one, the flat period has aged all the way out of the window.
@@ -617,6 +840,65 @@ func TestVoltageHistoryTrackerWindowSlidesAndDropsOldSamples(t *testing.T) {
 	})
 	if math.Abs(got-risingRatePerMinute) > 0.002 {
 		t.Fatalf("dV/dt after the window slid past the flat period: got %v, want close to %v", got, risingRatePerMinute)
+	}
+}
+
+// TestVoltageHistoryTrackerSkipsRecordingAnInvalidSample is the direct
+// regression case for code review finding 5: observe used to append every
+// sample regardless of whether the caller's own validity check trusted it,
+// so a single stale or glitched reading (a 0 V dropout) sat in the trailing
+// 5-minute window for as long as the window itself, skewing the fit the
+// whole time. A tick observed with valid=false must not be recorded at all
+// -- the fit afterwards should read as if that tick never happened.
+func TestVoltageHistoryTrackerSkipsRecordingAnInvalidSample(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+	const ratePerMinute = 0.06
+
+	n := int(dVdtWindow.Seconds())
+	for i := 0; i < n; i++ {
+		tr.observe(28.0+ratePerMinute*(float64(i)/60.0), start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// A single 0 V dropout, explicitly marked invalid -- must not join the
+	// window at all.
+	glitchAt := start.Add(time.Duration(n) * time.Second)
+	tr.observe(0, glitchAt, false)
+
+	// A few more genuine, on-trend samples.
+	var last float64
+	for i := 1; i <= 5; i++ {
+		last = tr.observe(28.0+ratePerMinute*(float64(n+i)/60.0), glitchAt.Add(time.Duration(i)*time.Second), true)
+	}
+
+	if math.Abs(last-ratePerMinute) > 0.002 {
+		t.Fatalf("dV/dt after an invalid 0V dropout: got %v, want close to %v (the dropout must not have been recorded)", last, ratePerMinute)
+	}
+}
+
+// TestVoltageHistoryTrackerResetsWhenBankPathChanges is the direct
+// regression case for the second half of code review finding 5: the tracker
+// used to hold onto its samples forever regardless of which house bank they
+// came from, so choosing a different bank in Settings -> Vessel -> Power (or
+// unsetting and reconfiguring one) blended a trailing run of the OLD pack's
+// voltage into the new one's dV/dt fit.
+func TestVoltageHistoryTrackerResetsWhenBankPathChanges(t *testing.T) {
+	var tr voltageHistoryTracker
+	start := anomalyDetectorTestNow
+
+	n := int(dVdtWindow.Seconds())
+	for i := 0; i < n; i++ {
+		tr.resetIfBankChanged("electrical.batteries.0")
+		tr.observe(28.0+0.2*(float64(i)/60.0), start.Add(time.Duration(i)*time.Second), true)
+	}
+
+	// The operator repoints the detector at a different bank -- a single
+	// fresh sample on the new path must not inherit the old one's history.
+	switchAt := start.Add(time.Duration(n) * time.Second)
+	tr.resetIfBankChanged("electrical.batteries.1")
+	got := tr.observe(12.0, switchAt, true)
+	if got != 0 {
+		t.Fatalf("expected 0 on the first sample of a newly-chosen bank, got %v -- the old bank's samples survived the switch", got)
 	}
 }
 
