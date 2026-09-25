@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -477,8 +479,8 @@ func TestExecuteGetPathHistory_DefaultsToLast24Hours(t *testing.T) {
 		if !c.stop.Equal(now) {
 			t.Errorf("expected stop == now, got %v", c.stop)
 		}
-		if c.every != "15m" {
-			t.Errorf("expected 15m bucket width for a 24h span, got %q", c.every)
+		if c.every != "30m" {
+			t.Errorf("expected 30m bucket width for a 24h span, got %q", c.every)
 		}
 	}
 }
@@ -498,8 +500,8 @@ func TestExecuteGetPathHistory_HoursBackOverridesDefault(t *testing.T) {
 	if !calls[0].start.Equal(now.Add(-2 * time.Hour)) {
 		t.Errorf("expected start 2h before now, got %v", calls[0].start)
 	}
-	if calls[0].every != "1m" {
-		t.Errorf("expected 1m bucket width for a 2h span, got %q", calls[0].every)
+	if calls[0].every != "5m" {
+		t.Errorf("expected 5m bucket width for a 2h span, got %q", calls[0].every)
 	}
 }
 
@@ -562,24 +564,192 @@ func TestAssistantPathHistoryBucketWidth_FixedAllowlist(t *testing.T) {
 		want string
 	}{
 		{time.Hour, "1m"},
-		{3 * time.Hour, "1m"},
-		{4 * time.Hour, "5m"},
-		{12 * time.Hour, "5m"},
-		{13 * time.Hour, "15m"},
-		{24 * time.Hour, "15m"},
-		{2 * 24 * time.Hour, "30m"},
-		{3 * 24 * time.Hour, "30m"},
-		{5 * 24 * time.Hour, "1h"},
-		{7 * 24 * time.Hour, "1h"},
-		{20 * 24 * time.Hour, "4h"},
-		{30 * 24 * time.Hour, "4h"},
-		{91 * 24 * time.Hour, "12h"},
+		{3 * time.Hour, "5m"},
+		{12 * time.Hour, "15m"},
+		{13 * time.Hour, "30m"},
+		{24 * time.Hour, "30m"},
+		{2 * 24 * time.Hour, "2h"},
+		{3 * 24 * time.Hour, "2h"},
+		{5 * 24 * time.Hour, "4h"},
+		{7 * 24 * time.Hour, "4h"},
+		{20 * 24 * time.Hour, "12h"},
+		{30 * 24 * time.Hour, "12h"},
+		{91 * 24 * time.Hour, "2d"},
 	}
 	for _, c := range cases {
 		got, _ := assistantPathHistoryBucketWidth(c.span)
 		if got != c.want {
 			t.Errorf("span %v: expected bucket %q, got %q", c.span, c.want, got)
 		}
+	}
+}
+
+// TestAssistantPathHistoryBucketWidth_NeverExceeds60BucketsAtTierUpperBound
+// is the direct regression test for the code-review finding (2026-09-25)
+// that the old allowlist could produce far more buckets than fit
+// assistantMaxToolResultChars (a 3h request alone produced 180 buckets,
+// ~25KB) - checked at every tier's own upper-bound span, the worst case for
+// that tier's chosen width.
+func TestAssistantPathHistoryBucketWidth_NeverExceeds60BucketsAtTierUpperBound(t *testing.T) {
+	const maxBuckets = 60
+	upperBounds := []time.Duration{
+		time.Hour, 3 * time.Hour, 12 * time.Hour, 24 * time.Hour,
+		3 * 24 * time.Hour, 7 * 24 * time.Hour, 30 * 24 * time.Hour, assistantPathHistoryMaxSpan,
+	}
+	for _, span := range upperBounds {
+		_, width := assistantPathHistoryBucketWidth(span)
+		count := int(span / width)
+		if count > maxBuckets {
+			t.Errorf("span %v: width %v produces %d buckets, over the %d-bucket target", span, width, count, maxBuckets)
+		}
+	}
+}
+
+// TestDropOldestPathHistoryBucket_DropsFromTheFrontNotTheBack is the direct
+// regression test for a code-review finding (2026-09-25): the original
+// get_path_history shrink dropped buckets from the END of the
+// chronologically-ascending list, discarding the MOST RECENT part of the
+// range first - exactly backwards for a tool whose whole point is "what did
+// this do right before it stopped".
+func TestDropOldestPathHistoryBucket_DropsFromTheFrontNotTheBack(t *testing.T) {
+	buckets := []assistantPathHistoryBucket{
+		{T: "2026-09-21T00:00:00Z"},
+		{T: "2026-09-21T01:00:00Z"},
+		{T: "2026-09-22T00:00:00Z"}, // the most recent - must survive a shrink
+	}
+	got := dropOldestPathHistoryBucket(buckets)
+	if len(got) != 2 {
+		t.Fatalf("expected exactly one bucket dropped, got %d remaining: %+v", len(got), got)
+	}
+	if got[len(got)-1].T != "2026-09-22T00:00:00Z" {
+		t.Errorf("expected the most recent bucket to survive, got %+v", got)
+	}
+	for _, b := range got {
+		if b.T == "2026-09-21T00:00:00Z" {
+			t.Errorf("expected the OLDEST bucket to be the one dropped, but it is still present: %+v", got)
+		}
+	}
+}
+
+// parseFluxEveryDurationForTest parses an "every" string the way Go's
+// time.ParseDuration would, except it also accepts Flux's own "d" (day)
+// suffix, which Go's parser does not -
+// assistantPathHistoryBucketWidth's longest tier uses "2d".
+func parseFluxEveryDurationForTest(t *testing.T, every string) time.Duration {
+	t.Helper()
+	if strings.HasSuffix(every, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(every, "d"))
+		if err != nil {
+			t.Fatalf("parse %q as a day count: %v", every, err)
+		}
+		return time.Duration(n) * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(every)
+	if err != nil {
+		t.Fatalf("parse %q as a Go duration: %v", every, err)
+	}
+	return d
+}
+
+// stubInfluxPathHistoryStatFullyPopulated returns an influxPathHistoryStat
+// dependency that generates one point at every bucket-start boundary across
+// whatever [start, stop) range and every width it is actually called with
+// (min/mean/max all identical), so a test can assert against a
+// fully-populated series without hardcoding the exact bucket width an
+// allowlist will choose ahead of time.
+func stubInfluxPathHistoryStatFullyPopulated(t *testing.T) func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+	return func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+		width := parseFluxEveryDurationForTest(t, every)
+		var pts []telemetryPoint
+		for at := start.Truncate(width); at.Before(stop); at = at.Add(width) {
+			pts = append(pts, telemetryPoint{Timestamp: at, Value: 1})
+		}
+		return pts, nil
+	}
+}
+
+// TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpans
+// is the direct regression test for the code-review finding (2026-09-25)
+// that the bucket allowlist could produce results far larger than
+// assistantMaxToolResultChars, and that when a shrink is needed it must not
+// discard the most recent (final) bucket.
+func TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpans(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	for _, hoursBack := range []float64{3, 24 * 7} {
+		deps := assistantToolDeps{
+			now:                   func() time.Time { return now },
+			vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+			influxPathHistoryStat: stubInfluxPathHistoryStatFullyPopulated(t),
+		}
+
+		args := fmt.Sprintf(`{"path":"tanks.fuel.2.currentLevel","hours_back":%v}`, hoursBack)
+		raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(args))
+		if err != nil {
+			t.Fatalf("hours_back=%v: execute: %v", hoursBack, err)
+		}
+		if len(raw) > assistantMaxToolResultChars {
+			t.Errorf("hours_back=%v: result is %d chars, over the %d-char cap", hoursBack, len(raw), assistantMaxToolResultChars)
+		}
+
+		var result assistantGetPathHistoryResult
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			t.Fatalf("hours_back=%v: unmarshal: %v", hoursBack, err)
+		}
+		if result.Truncated {
+			t.Errorf("hours_back=%v: expected no truncation, got %d buckets with truncated=true", hoursBack, len(result.Buckets))
+		}
+		if len(result.Buckets) == 0 {
+			t.Fatalf("hours_back=%v: expected at least one bucket", hoursBack)
+		}
+
+		// "include the final bucket": recompute the same boundary the stub's
+		// own generator loop would have produced last, and check it survived.
+		stop := now
+		start := now.Add(-time.Duration(hoursBack * float64(time.Hour)))
+		_, width := assistantPathHistoryBucketWidth(stop.Sub(start))
+		var wantLast time.Time
+		for at := start.Truncate(width); at.Before(stop); at = at.Add(width) {
+			wantLast = at
+		}
+		gotLast := result.Buckets[len(result.Buckets)-1].T
+		if gotLast != wantLast.UTC().Format(time.RFC3339) {
+			t.Errorf("hours_back=%v: expected the final bucket %s, got %s - was the tail dropped?",
+				hoursBack, wantLast.UTC().Format(time.RFC3339), gotLast)
+		}
+	}
+}
+
+// TestExecuteGetPathHistory_RoundsBucketValuesForCompactness guards the
+// other half of "keep bucket entries compact": InfluxDB's own float
+// precision (seen live against the boat, e.g. 0.30452000000000856) must not
+// ride straight through into the tool result once per bucket, per source
+// value, three times per bucket (min/mean/max).
+func TestExecuteGetPathHistory_RoundsBucketValuesForCompactness(t *testing.T) {
+	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	t0 := now.Add(-time.Hour)
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: t0, Value: 0.30452000000000856}},
+		"mean": {{Timestamp: t0, Value: 0.31017691464369324}},
+		"max":  {{Timestamp: t0, Value: 0.750686467065874}},
+	}
+	deps := assistantToolDeps{
+		now:                   func() time.Time { return now },
+		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat: stubInfluxPathHistoryStat(series, nil),
+	}
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":1}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(raw, "00000000856") || strings.Contains(raw, "1464369324") {
+		t.Errorf("expected bucket values rounded for compactness, got raw InfluxDB precision in: %s", raw)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(result.Buckets) != 1 || result.Buckets[0].Min == nil || *result.Buckets[0].Min != 0.3 {
+		t.Errorf("expected bucket min rounded to 0.3, got %+v", result.Buckets)
 	}
 }
 
@@ -740,22 +910,61 @@ func TestExecuteGetPathHistory_NoDataAddsExplicitNote(t *testing.T) {
 
 // ── Flux builders (unit-tested independently of a live InfluxDB) ────────
 
-func TestBuildInfluxLastRecordedFlux_IncludesHasPrefixForPathAndSource(t *testing.T) {
+// TestBuildInfluxLastRecordedFlux_UsesAnchoredRegexForPushdown is the direct
+// regression test for a code-review finding (2026-09-25): strings.hasPrefix
+// cannot be pushed down to InfluxDB's storage engine, so a source filter
+// like "YachtDevices" over a 30-180 day lookback would scan every point in
+// the bucket and risk the query's own timeout. An anchored regex (=~ /^.../)
+// against a tag DOES push down.
+func TestBuildInfluxLastRecordedFlux_UsesAnchoredRegexForPushdown(t *testing.T) {
 	flux, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", "tanks", "YachtDevices", 30)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	for _, want := range []string{
-		`import "strings"`,
-		`strings.hasPrefix(v: r._measurement, prefix: "tanks")`,
-		`strings.hasPrefix(v: r.source, prefix: "YachtDevices")`,
+		`r._measurement =~ /^tanks/`,
+		`r.source =~ /^YachtDevices/`,
 		`range(start: -30d)`,
 		`group(columns: ["_measurement", "source"])`,
-		`|> last()`,
+		`sort(columns: ["_time"])`,
 	} {
 		if !strings.Contains(flux, want) {
 			t.Errorf("expected flux to contain %q, got:\n%s", want, flux)
 		}
+	}
+	if strings.Contains(flux, "strings.hasPrefix") {
+		t.Errorf("expected no strings.hasPrefix (does not push down to storage), got:\n%s", flux)
+	}
+	if strings.Contains(flux, `import "strings"`) {
+		t.Errorf(`expected no import "strings" now that hasPrefix is gone, got:\n%s`, flux)
+	}
+}
+
+// TestBuildInfluxLastRecordedFlux_TakesLastPerSeriesBeforeRegroupingAndSorting
+// is the direct regression test for a code-review finding (2026-09-25):
+// group()ing by measurement+source and then calling last() with no sort in
+// between can return the end of whichever raw series (distinguished by a tag
+// this query does not group on, e.g. context) Flux happens to concatenate
+// last, not the actually-newest point across all of them. last() must run
+// once per raw series first (pushable), then again after group()+sort().
+func TestBuildInfluxLastRecordedFlux_TakesLastPerSeriesBeforeRegroupingAndSorting(t *testing.T) {
+	flux, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", "tanks", "", 30)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	firstLast := strings.Index(flux, "|> last()")
+	group := strings.Index(flux, "group(columns:")
+	sortIdx := strings.Index(flux, "sort(columns:")
+	secondLast := strings.LastIndex(flux, "|> last()")
+
+	if firstLast < 0 || group < 0 || sortIdx < 0 || secondLast < 0 {
+		t.Fatalf("expected last()/group()/sort()/last() all present, got:\n%s", flux)
+	}
+	if firstLast == secondLast {
+		t.Fatalf("expected two distinct last() calls (per raw series, then overall), got only one in:\n%s", flux)
+	}
+	if !(firstLast < group && group < sortIdx && sortIdx < secondLast) {
+		t.Errorf("expected order filter -> last() -> group() -> sort() -> last(), got:\n%s", flux)
 	}
 }
 
@@ -774,6 +983,52 @@ func TestBuildInfluxLastRecordedFlux_RejectsHostileInterpolationSyntax(t *testin
 		_, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", tc.prefix, tc.source, 30)
 		if err == nil {
 			t.Errorf("expected an error for hostile input %+v", tc)
+		}
+	}
+}
+
+// TestBuildInfluxLastRecordedFlux_RejectsInvalidCharactersInPathPrefixAndSource
+// is the direct regression test for a code-review finding (2026-09-25): a
+// Flux regex literal is delimited by '/', so a path_prefix/source containing
+// '/' would otherwise break out of the literal it is embedded in. Rejecting
+// outright at a strict character allowlist, rather than trying to escape '/'
+// into something inert, is what makes '/' - and everything else outside the
+// allowlist - impossible after validation.
+func TestBuildInfluxLastRecordedFlux_RejectsInvalidCharactersInPathPrefixAndSource(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		prefix, source string
+	}{
+		{"slash in prefix", "tanks/evil", ""},
+		{"slash in source", "", "Yacht/Devices"},
+		{"backslash in source", "", `Yacht\Devices`},
+		{"newline in prefix", "tanks\nevil", ""},
+		{"space in source", "", "Yacht Devices"},
+	} {
+		_, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", tc.prefix, tc.source, 30)
+		if err == nil {
+			t.Errorf("%s: expected an error, got none", tc.name)
+		}
+	}
+}
+
+// TestBuildInfluxLastRecordedFlux_AcceptsRealFleetSourceLabels checks the
+// validation allowlist against every $source label actually seen on the
+// boat (from live verification against the production box and its
+// signalk-to-influxdb2 plugin), so the fix does not accidentally reject a
+// legitimate source it was never tested against.
+func TestBuildInfluxLastRecordedFlux_AcceptsRealFleetSourceLabels(t *testing.T) {
+	for _, source := range []string{
+		"YachtDevices.6", "YachtDevices.7", "YachtDevices.128", "YachtDevices.129",
+		"venus.com.victronenergy.gps", "Vesper_Cortex", "WLN10.GP",
+	} {
+		if _, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", "", source, 30); err != nil {
+			t.Errorf("expected real source label %q to be accepted, got %v", source, err)
+		}
+	}
+	for _, prefix := range []string{"tanks", "tanks.fuel.2", "propulsion.0.exhaustTemperature"} {
+		if _, err := buildInfluxLastRecordedFlux("SignalK_Data", "value", prefix, "", 30); err != nil {
+			t.Errorf("expected real path prefix %q to be accepted, got %v", prefix, err)
 		}
 	}
 }

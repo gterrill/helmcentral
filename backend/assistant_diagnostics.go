@@ -373,6 +373,19 @@ func (d assistantToolDeps) executeGetLastRecorded(ctx context.Context, raw json.
 	if pathPrefix == "" && source == "" {
 		return "", fmt.Errorf("get_last_recorded: at least one of path_prefix or source is required")
 	}
+	// Validated here, at the tool boundary, before any Influx work at all -
+	// the same early-rejection shape executeFindPlaces already uses for its
+	// own query pattern (assistant_tools.go) - in addition to
+	// buildInfluxLastRecordedFlux's own identical check (influx.go), which is
+	// the mandatory chokepoint every caller of queryInfluxLastRecorded goes
+	// through regardless. Both filters become an anchored Flux regex literal
+	// there, which a '/' would otherwise break out of.
+	if err := validateAssistantDiagnosticsIdentifier("path_prefix", pathPrefix); err != nil {
+		return "", fmt.Errorf("get_last_recorded: %w", err)
+	}
+	if err := validateAssistantDiagnosticsIdentifier("source", source); err != nil {
+		return "", fmt.Errorf("get_last_recorded: %w", err)
+	}
 
 	lookbackDays := clampAssistantDays(args.LookbackDays, assistantLastRecordedDefaultLookbackDays, assistantLastRecordedMaxLookbackDays)
 
@@ -467,9 +480,17 @@ type assistantGetPathHistoryArgs struct {
 	HoursBack float64 `json:"hours_back"`
 }
 
+// assistantPathHistoryBucket is one bucket's row in the tool result. It
+// carries a single UTC timestamp (T, "t") rather than a local-formatted
+// string alongside it - the top-level result already states Start/End/
+// Timezone once, so a per-bucket local string would triple the redundant
+// bytes buckets already needed to be trimmed of (a code-review finding,
+// 2026-09-25: "keep bucket entries compact"). Min/Mean/Max are always
+// rounded (roundTo2) before they reach here, for the same reason - InfluxDB's
+// own float precision (e.g. 0.30452000000000856, seen live against the boat)
+// costs three times per bucket otherwise.
 type assistantPathHistoryBucket struct {
-	Time string   `json:"time"`
-	ISO  string   `json:"iso"`
+	T    string   `json:"t"`
 	Min  *float64 `json:"min,omitempty"`
 	Mean *float64 `json:"mean,omitempty"`
 	Max  *float64 `json:"max,omitempty"`
@@ -518,27 +539,58 @@ type assistantPathHistoryPoint struct {
 // requested span's length alone, out of a fixed allowlist - never from any
 // model-supplied text, per AGENTS.md's fallback policy and the same reason
 // telemetryHistoryWindows (telemetry_history_api.go) is itself an allowlist:
-// every is interpolated into the Flux query unquoted. Chosen so a bucket
-// count from 1h up to the 90-day cap stays in roughly the 100-250 range,
-// comfortably inside assistantMaxToolResultChars even before
-// capToolResultJSON's own shrink.
+// every is interpolated into the Flux query unquoted.
+//
+// Each tier's width is chosen so that span/width stays at or under 60 even
+// at that tier's own upper-bound span (TestAssistantPathHistoryBucketWidth_
+// NeverExceeds60BucketsAtTierUpperBound checks exactly this) - a fixed cap
+// on bucket COUNT, not a rough character estimate. The original allowlist
+// picked widths for even-looking resolution instead (a 3h request got
+// 1-minute buckets, 180 of them) and only worked out to "roughly the
+// 100-250 range" by coincidence of the spans this codebase happened to be
+// tested against; a 3h request alone produced ~25KB, over twice
+// assistantMaxToolResultChars on its own before the rest of the result even
+// counted (a code-review finding, 2026-09-25). At ~60 buckets and the
+// compact per-bucket shape assistantPathHistoryBucket now uses, every tier
+// comfortably fits assistantMaxToolResultChars without ever reaching
+// capToolResultJSON's shrink.
 func assistantPathHistoryBucketWidth(span time.Duration) (label string, width time.Duration) {
 	switch {
-	case span <= 3*time.Hour:
+	case span <= time.Hour:
 		return "1m", time.Minute
-	case span <= 12*time.Hour:
+	case span <= 3*time.Hour:
 		return "5m", 5 * time.Minute
-	case span <= 24*time.Hour:
+	case span <= 12*time.Hour:
 		return "15m", 15 * time.Minute
-	case span <= 3*24*time.Hour:
+	case span <= 24*time.Hour:
 		return "30m", 30 * time.Minute
+	case span <= 3*24*time.Hour:
+		return "2h", 2 * time.Hour
 	case span <= 7*24*time.Hour:
-		return "1h", time.Hour
-	case span <= 30*24*time.Hour:
 		return "4h", 4 * time.Hour
-	default:
+	case span <= 30*24*time.Hour:
 		return "12h", 12 * time.Hour
+	default:
+		return "2d", 2 * 24 * time.Hour
 	}
+}
+
+// dropOldestPathHistoryBucket removes the OLDEST bucket from buckets (a
+// chronologically-ascending list) - never the newest - for
+// executeGetPathHistory's shrink, on the rare call whose result still needs
+// to shrink to fit assistantMaxToolResultChars despite
+// assistantPathHistoryBucketWidth's own bucket-count cap (a long source
+// label, or an unusually large gaps list, could still push a result over
+// the cap). The most recent part of the range is what answers "what did X
+// do right before it stopped" - the reason this tool exists - so it must be
+// the last thing dropped, not the first. The original shrink dropped from
+// the end of the list instead, discarding the most diagnostically relevant
+// data first (a code-review finding, 2026-09-25).
+func dropOldestPathHistoryBucket(buckets []assistantPathHistoryBucket) []assistantPathHistoryBucket {
+	if len(buckets) == 0 {
+		return buckets
+	}
+	return buckets[1:]
 }
 
 // mergePathHistoryPoints joins the three same-range, same-bucket aggregate
@@ -704,21 +756,28 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	var meanSum float64
 	var meanCount int
 	for _, m := range merged {
+		// Rounded once here, not left at InfluxDB's own float precision (a
+		// per-bucket compactness fix, code-review finding 2026-09-25): three
+		// unrounded values per bucket (min/mean/max) were the single biggest
+		// contributor to a result overrunning assistantMaxToolResultChars.
+		// Overall min/max are derived from these SAME rounded values, so
+		// they never show more precision than any bucket the model can
+		// already see.
+		minV, meanV, maxV := roundTo2Ptr(m.Min), roundTo2Ptr(m.Mean), roundTo2Ptr(m.Max)
 		buckets = append(buckets, assistantPathHistoryBucket{
-			Time: m.T.In(loc).Format("Mon 2 Jan 15:04"),
-			ISO:  m.T.UTC().Format(time.RFC3339),
-			Min:  m.Min, Mean: m.Mean, Max: m.Max,
+			T:   m.T.UTC().Format(time.RFC3339),
+			Min: minV, Mean: meanV, Max: maxV,
 		})
-		if m.Min != nil && (overallMin == nil || *m.Min < *overallMin) {
-			v := *m.Min
+		if minV != nil && (overallMin == nil || *minV < *overallMin) {
+			v := *minV
 			overallMin = &v
 		}
-		if m.Max != nil && (overallMax == nil || *m.Max > *overallMax) {
-			v := *m.Max
+		if maxV != nil && (overallMax == nil || *maxV > *overallMax) {
+			v := *maxV
 			overallMax = &v
 		}
-		if m.Mean != nil {
-			meanSum += *m.Mean
+		if meanV != nil {
+			meanSum += *meanV
 			meanCount++
 		}
 	}
@@ -768,9 +827,22 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		if len(result.Buckets) == 0 {
 			return false
 		}
-		result.Buckets = result.Buckets[:len(result.Buckets)-1]
+		result.Buckets = dropOldestPathHistoryBucket(result.Buckets)
 		result.Truncated = true
 		return true
 	}
 	return capToolResultJSON(&result, shrink)
+}
+
+// roundTo2Ptr rounds *v to two decimal places (roundTo2), or returns nil
+// unchanged - the nil-safe wrapper executeGetPathHistory uses so a missing
+// bucket statistic (one aggregate query returned no point for a given
+// bucket, per mergePathHistoryPoints' own doc comment) stays missing rather
+// than becoming a spurious rounded zero.
+func roundTo2Ptr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	r := roundTo2(*v)
+	return &r
 }

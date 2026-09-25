@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -574,15 +575,66 @@ func queryInfluxLastRecorded(pathPrefix, source string, lookbackDays int) ([]inf
 	return rows, nil
 }
 
+// assistantDiagnosticsIdentifierPattern is the character allowlist
+// get_last_recorded's path_prefix/source must match before being turned
+// into an anchored Flux regex literal (^prefix) by buildInfluxLastRecordedFlux.
+// A Flux regex literal is delimited by '/', so a value containing '/' would
+// otherwise break out of it - rejecting outright, rather than trying to
+// escape '/' into something inert, matches this file's existing
+// fluxStringLiteral rule for Flux's OWN '${...}' interpolation syntax
+// (AGENTS.md's fallback policy): a caller that genuinely needs a value
+// outside this charset gets a clear error, not a silently mis-scoped query.
+//
+// Every $source label seen on this fleet (YachtDevices.6,
+// venus.com.victronenergy.gps, Vesper_Cortex, WLN10.GP) and every SignalK
+// path prefix fits this charset (letters, digits, and the handful of
+// separators - dot, underscore, colon, hyphen - that actually turn up in a
+// path or a source label); widen only once a real one does not.
+var assistantDiagnosticsIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+
+// validateAssistantDiagnosticsIdentifier checks value (a get_last_recorded
+// path_prefix or source argument) against
+// assistantDiagnosticsIdentifierPattern, naming which argument failed. An
+// empty value always passes - both arguments are optional; the "at least one
+// of the two" rule is enforced separately by buildInfluxLastRecordedFlux and
+// executeGetLastRecorded.
+func validateAssistantDiagnosticsIdentifier(label, value string) error {
+	if value == "" {
+		return nil
+	}
+	if !assistantDiagnosticsIdentifierPattern.MatchString(value) {
+		return fmt.Errorf("%s %q contains characters not valid in a SignalK path or source label", label, value)
+	}
+	return nil
+}
+
 // buildInfluxLastRecordedFlux builds queryInfluxLastRecorded's Flux query
 // text, pulled out as its own pure function for the same reason
 // buildInfluxPathStatFlux is: unit-testable string construction and escaping
 // with no live InfluxDB connection required. At least one of pathPrefix/
-// source must be non-empty; both go through fluxStringLiteral before being
-// wrapped in strings.hasPrefix, since both can carry model-chosen text.
+// source must be non-empty, and both must pass
+// assistantDiagnosticsIdentifierPattern before being turned into an anchored
+// regex literal (=~ /^.../), since both can carry model-chosen text.
+//
+// A regex, not strings.hasPrefix: hasPrefix cannot be pushed down to
+// InfluxDB's storage engine, so a broad filter like source "YachtDevices"
+// over a 30-180 day lookback would materialise and scan every point in the
+// bucket in Flux's own execution engine, risking this query's own timeout
+// (a code-review finding, 2026-09-25). An anchored regex comparison against
+// a tag (=~ /^prefix/) DOES push down. regexp.QuoteMeta on the
+// already-allowlisted value is still required even though the input is
+// already restricted to a safe charset: '.' is itself a regex metacharacter
+// (matches any character), so an unescaped "tanks.fuel" would match
+// "tanksXfuel" too, not just a genuine dotted prefix.
 func buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source string, lookbackDays int) (string, error) {
 	if pathPrefix == "" && source == "" {
 		return "", fmt.Errorf("path_prefix or source is required")
+	}
+	if err := validateAssistantDiagnosticsIdentifier("path_prefix", pathPrefix); err != nil {
+		return "", err
+	}
+	if err := validateAssistantDiagnosticsIdentifier("source", source); err != nil {
+		return "", err
 	}
 
 	bucketLiteral, err := fluxStringLiteral(bucket)
@@ -596,30 +648,32 @@ func buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source string, lookb
 
 	filters := []string{fmt.Sprintf("r._field == %s", fieldLiteral)}
 	if pathPrefix != "" {
-		prefixLiteral, err := fluxStringLiteral(pathPrefix)
-		if err != nil {
-			return "", fmt.Errorf("path_prefix: %w", err)
-		}
-		filters = append(filters, fmt.Sprintf("strings.hasPrefix(v: r._measurement, prefix: %s)", prefixLiteral))
+		filters = append(filters, fmt.Sprintf("r._measurement =~ /^%s/", regexp.QuoteMeta(pathPrefix)))
 	}
 	if source != "" {
-		sourceLiteral, err := fluxStringLiteral(source)
-		if err != nil {
-			return "", fmt.Errorf("source: %w", err)
-		}
-		filters = append(filters, fmt.Sprintf(`(exists r.source and strings.hasPrefix(v: r.source, prefix: %s))`, sourceLiteral))
+		filters = append(filters, fmt.Sprintf("(exists r.source and r.source =~ /^%s/)", regexp.QuoteMeta(source)))
 	}
 
-	// group(columns: ["_measurement", "source"]) regroups the filtered rows
-	// by measurement+source alone (ignoring any other tag, e.g. context), so
-	// last() returns exactly one row per measurement/source pair rather than
-	// one per full underlying tag set.
+	// last() runs twice, deliberately. The first, right after filter(), runs
+	// once per raw series (each series being one full underlying tag set,
+	// e.g. distinguished by a context tag this query does not group on) and
+	// pushes down to storage - InfluxDB can answer "the last point of each
+	// series" cheaply. group(columns: ["_measurement", "source"]) then
+	// regroups those already-reduced rows by measurement+source alone,
+	// combining rows from what may be several distinct raw series into one
+	// new table - in whatever order Flux happens to concatenate them, not
+	// necessarily chronological. Taking last() there without sorting first
+	// could return whichever series Flux processed last, not the
+	// actually-newest point (a code-review finding, 2026-09-25); sort(columns:
+	// ["_time"]) orders that combined table chronologically first, so the
+	// second last() is the genuine most-recent point.
 	return fmt.Sprintf(
-		"import \"strings\"\n"+
-			"from(bucket: %s)\n"+
+		"from(bucket: %s)\n"+
 			"  |> range(start: -%dd)\n"+
 			"  |> filter(fn: (r) => %s)\n"+
+			"  |> last()\n"+
 			"  |> group(columns: [\"_measurement\", \"source\"])\n"+
+			"  |> sort(columns: [\"_time\"])\n"+
 			"  |> last()\n"+
 			"  |> keep(columns: [\"_measurement\", \"source\", \"_time\", \"_value\"])",
 		bucketLiteral, lookbackDays, strings.Join(filters, " and "),
