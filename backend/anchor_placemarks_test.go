@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -272,5 +274,31 @@ func TestLoadPlacemarks_DiscardsFileWhenNoWatchActive(t *testing.T) {
 	}
 	if _, err := os.Stat(anchorPlacemarksFilePath()); !os.IsNotExist(err) {
 		t.Fatalf("expected the stale file removed, stat err = %v", err)
+	}
+}
+
+// A placemark file that exists but will not parse loses the pins, which is a
+// small loss next to the watch itself, so it does not stop startup. It must
+// still say so in the log rather than vanish silently.
+func TestLoadPlacemarks_CorruptFileLogsWarning(t *testing.T) {
+	placemarkTestEnv(t)
+	activateAnchorWatch(t)
+	if err := os.WriteFile(anchorPlacemarksFilePath(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(previous)
+
+	loadAnchorPlacemarks()
+
+	if !strings.Contains(buf.String(), "anchor placemarks") {
+		t.Fatalf("expected a warning naming the placemark file, got log %q", buf.String())
+	}
+	_, resp := listPlacemarks(t)
+	if n := len(placemarkList(t, resp)); n != 0 {
+		t.Fatalf("expected no placemarks from a corrupt file, got %d", n)
 	}
 }
