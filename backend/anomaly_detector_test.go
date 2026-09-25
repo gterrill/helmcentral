@@ -567,6 +567,56 @@ func TestComputeAnomalyReadingEngineDifferentialUsesLearnedBaseline(t *testing.T
 	}
 }
 
+// TestComputeAnomalyReadingEngineDifferentialPressureEvidenceUsesConsistentUnits
+// is code review finding 2 (the pressure half): the absolute readings
+// ("port 3881.0 mb") and the delta figures ("usually ... off", "now ...
+// beyond that") in one evidence sentence must share a unit. Temperature
+// already does (K and deltaK both render as "degC" via alarm_units.go's
+// operatorUnitTable), but pressure did not: the residual PATH's own unit is
+// deltaPa/kPa (a sensible standalone reading for a gauge bound to it), and
+// the evidence sentence used that same unit for the delta halves while the
+// absolute halves rendered through Pa/mb -- "port 3881.0 mb ... now 5.0 kPa
+// beyond that" in the same breath. Pa's own conversion (divide by 100) is a
+// pure scale with no offset, so it is exactly as valid for a difference as
+// for an absolute reading (unlike K's offset, which is why temperature's
+// delta unit cannot just be K) -- the evidence sentence now renders every
+// figure through Pa/mb, leaving the residual path's own advertised unit
+// (deltaPa/kPa, anomalyEngineResidualUnit) untouched.
+func TestComputeAnomalyReadingEngineDifferentialPressureEvidenceUsesConsistentUnits(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {"oilPressure": {{RPMBucket: 1800, Median: 2000, Minutes: 40}}},
+		},
+	})
+
+	ticks := int(twinGateMinRunFor.Seconds()) + 5
+	reading := tickTwinGateSteady(t, settingsPath, 388100, 385600, ticks, anomalyDetectorTestNow)
+
+	path := anomalyEngineResidualPath("port", "oilPressure")
+	evidence, ok := reading.Evidence[path]
+	if !ok {
+		t.Fatalf("expected evidence for %s, got none: %+v", path, reading.Evidence)
+	}
+	if strings.Contains(evidence, "kPa") {
+		t.Fatalf("evidence mixes mb (absolute) with kPa (delta): %q", evidence)
+	}
+	// 388100 Pa -> 3881.0 mb, peer 385600 Pa -> 3856.0 mb, learned offset
+	// 2000 Pa -> 20.0 mb, residual 500 Pa -> 5.0 mb -- all through Pa's own
+	// mb conversion, matching the absolute readings' own unit.
+	want := "At 1800 rpm Port 3881.0 mb, peers 3856.0 mb; usually 20.0 mb off (40m learned); now 5.0 mb beyond that."
+	if evidence != want {
+		t.Fatalf("evidence:\n got  %q\n want %q", evidence, want)
+	}
+}
+
 // TestComputeAnomalyReadingEngineResidualPathStaysStableAcrossRename covers
 // code review finding 6: the residual path used to be built from the
 // operator's own editable vessel.engines[].Name, not the stable Signal K
