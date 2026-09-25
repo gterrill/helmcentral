@@ -889,3 +889,68 @@ func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
 		t.Fatalf("re-seeding resurrected a deleted rule: got %d, want %d", got, remaining)
 	}
 }
+
+// TestSeedAnomalySet_ResumesAfterAPartialFailure covers code review finding
+// 6: seedAnomalySet used to create every rule in a set one at a time and
+// only record the set's marker once all of them succeeded. A failure
+// partway through (a disk-full write, a transient I/O error) left the rules
+// that DID save on disk with no marker recorded, so a retry -- the next
+// restart, or the next vessel-settings save -- called createSeededAlarmRule
+// again for the same fixed IDs and failed forever with "id already in use",
+// never finishing the set. Simulates the exact state a partial failure
+// leaves behind (rule A saved, rule B and the marker not) and checks the
+// retry finishes the set instead of repeating the same fatal error.
+func TestSeedAnomalySet_ResumesAfterAPartialFailure(t *testing.T) {
+	withTempAlarmRules(t)
+
+	rules := []alarmRule{
+		{ID: "test:seed-a", Label: "Seed A", Enabled: true, Path: "helmcentral.test.a", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn},
+		{ID: "test:seed-b", Label: "Seed B", Enabled: true, Path: "helmcentral.test.b", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn},
+	}
+
+	// Simulate the first attempt getting partway through the set before
+	// failing: rule A saved, rule B never created, the marker never
+	// recorded.
+	if _, err := createSeededAlarmRule(rules[0]); err != nil {
+		t.Fatalf("simulating the first partial attempt: %v", err)
+	}
+
+	if err := seedAnomalySet("test-marker", rules); err != nil {
+		t.Fatalf("seedAnomalySet on retry: %v", err)
+	}
+
+	if _, ok := getAlarmRule("test:seed-b"); !ok {
+		t.Fatalf("expected rule B to be created on the retry")
+	}
+	found := false
+	for _, m := range alarmRulesSeededSets {
+		if m == "test-marker" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the marker to be recorded once the retry finished the set, got %+v", alarmRulesSeededSets)
+	}
+}
+
+// TestSeedAnomalySet_RefusesAGenuineIDConflict is the flip side of the
+// resume behaviour above: an id collision against a rule with a genuinely
+// different definition (a different path -- not the same set resuming) must
+// stay a fatal error, not be silently treated as "already done".
+func TestSeedAnomalySet_RefusesAGenuineIDConflict(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if _, err := createSeededAlarmRule(alarmRule{
+		ID: "test:seed-conflict", Label: "Something else entirely", Enabled: true,
+		Path: "helmcentral.unrelated.path", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn,
+	}); err != nil {
+		t.Fatalf("seeding the pre-existing conflicting rule: %v", err)
+	}
+
+	rules := []alarmRule{
+		{ID: "test:seed-conflict", Label: "Seed Conflict", Enabled: true, Path: "helmcentral.test.conflict", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn},
+	}
+	if err := seedAnomalySet("test-marker-conflict", rules); err == nil {
+		t.Fatalf("expected a genuine id conflict (different path under the same id) to stay a fatal error")
+	}
+}

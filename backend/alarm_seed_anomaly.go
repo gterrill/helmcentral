@@ -227,6 +227,22 @@ func seedAnomalySet(marker string, rules []alarmRule) error {
 
 	for _, rule := range rules {
 		if _, err := createSeededAlarmRule(rule); err != nil {
+			// A previous seeding attempt for this same marker can fail
+			// partway through (a disk-full write, a transient I/O error),
+			// leaving some of its rules saved with the marker never
+			// recorded -- the next call (the next restart, or the next
+			// vessel-settings save) starts this loop over from rule zero
+			// and immediately hits createSeededAlarmRule's own "id already
+			// in use" fail-fast backstop against the rule(s) that DID save.
+			// Treat that specific case -- this rule's own fixed id already
+			// exists with exactly the definition seedAnomalySet would have
+			// created -- as this rule already being done, not a conflict,
+			// so the retry can finish the rest of the set (code review
+			// finding 6). An id collision against a genuinely different
+			// definition is left as the fatal error it already is.
+			if existing, ok := getAlarmRule(rule.ID); ok && seededRuleMatchesExisting(existing, rule) {
+				continue
+			}
 			return fmt.Errorf("seeding %s rule %q: %w", marker, rule.Label, err)
 		}
 	}
@@ -239,6 +255,19 @@ func seedAnomalySet(marker string, rules []alarmRule) error {
 		return fmt.Errorf("recording the %s seed marker: %w", marker, err)
 	}
 	return nil
+}
+
+// seededRuleMatchesExisting reports whether existing (already on disk, found
+// under want's own fixed id) is the same seed definition as want, so
+// seedAnomalySet can tell "this rule's own retry, already done" apart from
+// a genuine id collision with something else entirely. Path and State are
+// enough to identify a seeded rule -- the condition it watches and the
+// severity it raises are what make it the rule it is; Value/Enabled/
+// DwellSeconds are deliberately excluded, since an operator may have
+// already tuned a successfully-seeded rule by the time a later rule in the
+// same set is retried, and that is not a conflict either.
+func seededRuleMatchesExisting(existing, want alarmRule) bool {
+	return existing.Path == want.Path && existing.State == want.State
 }
 
 // seedAnomalyRules seeds whichever of the anomaly-v1 sub-sets vessel's
