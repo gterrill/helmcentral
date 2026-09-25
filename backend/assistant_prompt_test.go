@@ -218,6 +218,24 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 	}
 }
 
+// TestBuildAssistantSystemPrompt_NearbyVesselsToolGuidancePresent is ADR
+// 0128's prompt half: before get_nearby_vessels existed, Mate had no tool at
+// all for a question about other boats and would say so; the prompt must
+// now point it at the tool and warn it that in_range_since is a lower bound,
+// not an arrival time, so it never states one as the other.
+func TestBuildAssistantSystemPrompt_NearbyVesselsToolGuidancePresent(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"get_nearby_vessels",
+		"other boats",
+		"lower bound",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the nearby-vessels tool guidance to mention %q, got:\n%s", want, prompt)
+		}
+	}
+}
+
 // The operator asked "Can you cross Bass Strait in day hops? What anchorage
 // would you depart from?" while lying off Townsville, meaning a trip months
 // away. Mate opened with the boat's position, quoted today's wind warning,

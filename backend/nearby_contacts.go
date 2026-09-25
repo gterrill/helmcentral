@@ -144,12 +144,29 @@ type nearbyContactStore struct {
 	lastSeen map[string]lastContact
 	pending  map[string]pendingContact
 	dwell    time.Duration
+
+	// preConfirmInsertHook, when set, runs synchronously right before
+	// recordContactIfNew executes the INSERT that confirms a candidate
+	// encounter - a test-only seam (nil in production) for deterministically
+	// exercising the exact window between "confirmation decided" and "row
+	// committed" (TestRecordContactIfNew_PendingClearedOnlyAfterRowIsCommitted),
+	// rather than relying on real scheduler timing to hit it.
+	preConfirmInsertHook func()
 }
 
 // nearbyContactRecord is a single row read back from listSightings, backing
 // the sighting-history popup.
 type nearbyContactRecord struct {
-	SeenAt     time.Time
+	SeenAt time.Time
+	// Name is the name recordContactIfNew was given at the moment this row
+	// was inserted (encounter start) - not necessarily this vessel_key's
+	// current live name, which can differ if two live vessels ever end up
+	// sharing the same MMSI (a data-quality fault, not something this store
+	// can prevent). get_nearby_vessels' fillAssistantSightingHistory
+	// compares this against the live vessel's own name before trusting a
+	// row's history as this specific vessel's own (code-review finding,
+	// 2026-09-25).
+	Name       string
 	Lat        float64
 	Lon        float64
 	Geoname    string
@@ -321,8 +338,19 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 		s.mu.Unlock()
 		return nil
 	}
-	delete(s.pending, vesselKey)
+	// Deliberately NOT deleted from s.pending here (TOCTOU race,
+	// code-review finding 2026-09-25): a concurrent reader calling
+	// isPending() between this point and the INSERT actually committing
+	// below must still see the candidate as pending, not as a confirmed
+	// encounter whose row doesn't exist yet. Clearing pending happens only
+	// after the INSERT succeeds, below, in the same locked section as the
+	// lastSeen update - see isPending's own doc comment for why a reader
+	// (get_nearby_vessels' fillAssistantSightingHistory) relies on this.
 	s.mu.Unlock()
+
+	if s.preConfirmInsertHook != nil {
+		s.preConfirmInsertHook()
+	}
 
 	if _, err := s.db.Exec(
 		`INSERT INTO nearby_vessel_contacts (vessel_key, name, seen_at, lat, lon, geoname, nav_context) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -332,9 +360,112 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 	}
 
 	s.mu.Lock()
+	delete(s.pending, vesselKey)
 	s.lastSeen[vesselKey] = lastContact{seenAt: now, lat: lat, lon: lon}
 	s.mu.Unlock()
 	return nil
+}
+
+// isPending reports whether vesselKey currently has an unconfirmed candidate
+// encounter awaiting recordContactIfNew's confirmation dwell (contactConfirmDwell) -
+// i.e. it has looked like a new encounter for less time than the dwell requires,
+// or its AIS position has not yet been refreshed during that window. Mate's
+// get_nearby_vessels tool (ADR 0128) checks this before trusting
+// listSightings' newest row as the current, ongoing encounter: while a
+// candidate is pending it has no row of its own yet at all, so the newest
+// existing row (if any) still belongs to a previous, already-ended encounter
+// - reporting that as "in range since" would claim a continuous presence
+// that never happened. See summaries()' own "known transient undercount"
+// doc comment for the same gap, accepted there for the same reason: it is a
+// narrow, self-healing window (never wider than contactConfirmDwell) that
+// resolves itself the moment the candidate confirms.
+func (s *nearbyContactStore) isPending(vesselKey string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.pending[vesselKey]
+	return ok
+}
+
+// latestContactByVessel is one vessel_key's most recently recorded encounter
+// - its own start (seen_at/lat/lon/geoname) - together with the name it was
+// last recorded under. Returned by latestContactsByName for "when did we
+// last see X", where X is not currently in range and so has no live AIS
+// target to read a name from at all.
+type latestContactByVessel struct {
+	VesselKey string
+	Name      string
+	SeenAt    time.Time
+	Lat       float64
+	Lon       float64
+	Geoname   string
+}
+
+// latestContactsByName returns, newest first, the most recently recorded
+// encounter for every distinct vessel_key whose most recently recorded name
+// contains nameSubstring (case-insensitive), up to limit vessels. Backs
+// get_nearby_vessels' not_in_range fallback (ADR 0128): a vessel with no
+// currently-visible AIS target still answers "when did we last see it" from
+// this table alone.
+//
+// The match runs in Go over every vessel_key's latest row, the same
+// case-insensitive substring rule find_places already applies to route
+// waypoint names (assistant_tools.go), rather than a SQL LIKE - this table's
+// distinct-vessel cardinality is small (it grows one row per new encounter,
+// not per poll tick) and a Mate tool call is not the 5-second poller this
+// file otherwise optimises for, so there is no Tier-3-style query-count
+// concern here worth a second, harder-to-read code path.
+func (s *nearbyContactStore) latestContactsByName(nameSubstring string, limit int) ([]latestContactByVessel, error) {
+	query := `
+		WITH ranked AS (
+			SELECT vessel_key, name, seen_at, lat, lon, geoname,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY vessel_key ORDER BY seen_at DESC, id DESC
+			       ) AS rn
+			FROM nearby_vessel_contacts
+		)
+		SELECT vessel_key, name, seen_at, lat, lon, geoname
+		FROM ranked
+		WHERE rn = 1
+		ORDER BY seen_at DESC`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("read latest nearby vessel contacts: %w", err)
+	}
+	defer rows.Close()
+
+	// A caller may pass either a name substring or an exact MMSI
+	// (vessel_key) - get_nearby_vessels' own "name" argument accepts both
+	// (code-review finding, 2026-09-25: this previously matched on name
+	// only, so "when did we last see MMSI 234567890" for a vessel recorded
+	// under a name, not a bare number, never found it). assistantNameOrExactIDMatches
+	// (assistant_nearby_vessels.go) is the same shared rule
+	// matchAssistantNearbyVessels and find_places' waypoint search use: the
+	// MMSI half is an exact match, never a substring, since a substring
+	// match on a numeric id would too easily hit an unrelated vessel_key
+	// that merely contains the same digits.
+	trimmedQuery := strings.TrimSpace(nameSubstring)
+	out := make([]latestContactByVessel, 0)
+	for rows.Next() {
+		var rec latestContactByVessel
+		var seenAtUnix int64
+		if err := rows.Scan(&rec.VesselKey, &rec.Name, &seenAtUnix, &rec.Lat, &rec.Lon, &rec.Geoname); err != nil {
+			return nil, fmt.Errorf("scan latest nearby vessel contact: %w", err)
+		}
+		rec.SeenAt = time.Unix(seenAtUnix, 0).UTC()
+
+		if !assistantNameOrExactIDMatches(rec.Name, rec.VesselKey, trimmedQuery) {
+			continue
+		}
+		out = append(out, rec)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate latest nearby vessel contacts: %w", err)
+	}
+	return out, nil
 }
 
 // lastRecordedContact returns the most recently recorded seen_at and
@@ -550,7 +681,7 @@ func enrichNearbyVesselsWithContactHistory(store nearbyContactSummarizer, nearby
 // backing the sighting-history popup.
 func (s *nearbyContactStore) listSightings(vesselKey string) ([]nearbyContactRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT seen_at, lat, lon, geoname, nav_context FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC`,
+		`SELECT seen_at, name, lat, lon, geoname, nav_context FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC`,
 		vesselKey,
 	)
 	if err != nil {
@@ -562,7 +693,7 @@ func (s *nearbyContactStore) listSightings(vesselKey string) ([]nearbyContactRec
 	for rows.Next() {
 		var seenAtUnix int64
 		var rec nearbyContactRecord
-		if err := rows.Scan(&seenAtUnix, &rec.Lat, &rec.Lon, &rec.Geoname, &rec.NavContext); err != nil {
+		if err := rows.Scan(&seenAtUnix, &rec.Name, &rec.Lat, &rec.Lon, &rec.Geoname, &rec.NavContext); err != nil {
 			return nil, fmt.Errorf("scan nearby vessel sighting: %w", err)
 		}
 		rec.SeenAt = time.Unix(seenAtUnix, 0).UTC()

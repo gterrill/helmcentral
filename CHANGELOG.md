@@ -11,6 +11,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate can now answer questions about nearby vessels: who is around, how
+  close, and how long they have been in range - and when you last crossed
+  paths with a boat that has since moved on.
+
 ## [0.31.0] - 2026-09-25
 
 ### Added

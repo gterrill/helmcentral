@@ -899,3 +899,291 @@ func TestRecordContactIfNew_StalePositionNeverConfirms(t *testing.T) {
 		t.Fatalf("expected 0 rows: a position that never refreshes must never confirm, however long the dwell has elapsed, got %d", got)
 	}
 }
+
+// ── isPending (get_nearby_vessels' in_range_since gate, ADR 0128) ──────────
+
+// TestIsPending_TrueWhileCandidateAwaitsConfirmation is the reason
+// get_nearby_vessels checks isPending before trusting listSightings' newest
+// row as "the current encounter": a vessel that has just come into range,
+// and has not yet sat through contactConfirmDwell, has no row of its own yet
+// at all - listSightings' newest row (if any) still belongs to a *previous*,
+// already-ended encounter, and reporting it as in_range_since would claim a
+// continuous presence that never happened.
+func TestIsPending_TrueWhileCandidateAwaitsConfirmation(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", start, start); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	if !store.isPending(vesselKey) {
+		t.Fatalf("expected %s to be pending immediately after its first tick, well short of the confirmation dwell", vesselKey)
+	}
+}
+
+// TestIsPending_FalseOnceConfirmed confirms isPending flips back to false the
+// moment a candidate's row is actually inserted.
+func TestIsPending_FalseOnceConfirmed(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	posSeenB := start.Add(2 * time.Minute)
+
+	for elapsed := 0 * time.Second; elapsed <= contactConfirmDwell; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		posSeen := start
+		if elapsed >= 2*time.Minute {
+			posSeen = posSeenB
+		}
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", posSeen, tick); err != nil {
+			t.Fatalf("recordContactIfNew (tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if store.isPending(vesselKey) {
+		t.Fatalf("expected %s to no longer be pending once the dwell elapsed and its row confirmed", vesselKey)
+	}
+}
+
+// TestIsPending_FalseForUnknownVessel confirms a vessel_key isPending has
+// never seen at all - not currently pending, not currently confirmed -
+// reads as not-pending rather than panicking on a missing map entry.
+func TestIsPending_FalseForUnknownVessel(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	if store.isPending("999999999") {
+		t.Fatalf("expected a never-seen vessel_key to read as not pending")
+	}
+}
+
+// TestIsPending_FalseForConfirmedContinuingEncounter confirms that a vessel
+// which confirmed on its very first tick (the zero-dwell test store most of
+// this file uses) is never reported pending on the tick that inserted its
+// row, nor on a later tick that merely continues the same encounter.
+func TestIsPending_FalseForConfirmedContinuingEncounter(t *testing.T) {
+	store := newTestNearbyContactStore(t) // dwell 0: confirms on the first tick
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", start, start); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+	if store.isPending(vesselKey) {
+		t.Fatalf("expected a zero-dwell store to confirm immediately, not leave the vessel pending")
+	}
+
+	// A later tick well within contactSessionGap continues the same
+	// encounter without going pending again.
+	later := start.Add(10 * time.Minute)
+	if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", later, later); err != nil {
+		t.Fatalf("recordContactIfNew (continuation): %v", err)
+	}
+	if store.isPending(vesselKey) {
+		t.Fatalf("expected a continuing encounter to never be pending")
+	}
+}
+
+// TestRecordContactIfNew_PendingClearedOnlyAfterRowIsCommitted is a
+// code-review finding (TOCTOU race, 2026-09-25): recordContactIfNew used to
+// delete a confirming candidate from s.pending and unlock *before* running
+// the INSERT that actually commits its row. A concurrent reader (Mate's
+// get_nearby_vessels tool, isPending + listSightings) could observe that
+// window: isPending already false (candidate cleared) but listSightings
+// still lacking the new row - fillAssistantSightingHistory would then treat
+// a stale, already-ended prior encounter's row as if it were the current
+// one, exactly the false "continuous presence" isPending exists to prevent.
+//
+// This is deterministic, not a timing gamble: preConfirmInsertHook (a
+// test-only seam, nil in production) pauses the confirming call at the exact
+// point right before its INSERT runs - present in both the buggy and fixed
+// ordering, since only the position of the `delete(s.pending, ...)` line
+// relative to it moved - and the test samples isPending() while paused
+// there. Under the old ordering this would already read false; the fix
+// requires it to still read true until the row is actually committed.
+func TestRecordContactIfNew_PendingClearedOnlyAfterRowIsCommitted(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "234567890"
+	start := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	posA, posB := start, start.Add(2*time.Minute)
+
+	// Tick through every stretch except the very last, leaving the
+	// candidate pending right up to the confirming tick below.
+	for elapsed := 0 * time.Second; elapsed < contactConfirmDwell; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		pos := posA
+		if elapsed >= 2*time.Minute {
+			pos = posB
+		}
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", pos, tick); err != nil {
+			t.Fatalf("recordContactIfNew (tick +%s): %v", elapsed, err)
+		}
+	}
+	if !store.isPending(vesselKey) {
+		t.Fatalf("test setup: expected the candidate still pending before the confirming tick")
+	}
+
+	hookEntered := make(chan struct{})
+	releaseInsert := make(chan struct{})
+	store.preConfirmInsertHook = func() {
+		close(hookEntered)
+		<-releaseInsert
+	}
+
+	finalTick := start.Add(contactConfirmDwell)
+	done := make(chan error, 1)
+	go func() {
+		done <- store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", posB, finalTick)
+	}()
+
+	<-hookEntered // the confirming call is now paused right before its INSERT
+	pendingDuringInsert := store.isPending(vesselKey)
+	sightingsDuringInsert, err := store.listSightings(vesselKey)
+	if err != nil {
+		t.Fatalf("listSightings (during insert): %v", err)
+	}
+	close(releaseInsert)
+	if err := <-done; err != nil {
+		t.Fatalf("recordContactIfNew (confirming tick): %v", err)
+	}
+
+	if !pendingDuringInsert {
+		t.Fatalf("TOCTOU race: isPending() reported false while the confirming row's INSERT was still in flight (row present at that moment: %v)", len(sightingsDuringInsert) > 0)
+	}
+	if store.isPending(vesselKey) {
+		t.Fatalf("expected the candidate to no longer be pending once its row committed")
+	}
+	sightings, err := store.listSightings(vesselKey)
+	if err != nil {
+		t.Fatalf("listSightings: %v", err)
+	}
+	if len(sightings) != 1 {
+		t.Fatalf("expected exactly 1 committed row after confirmation, got %d", len(sightings))
+	}
+}
+
+// ── latestContactsByName (get_nearby_vessels' not_in_range fallback) ───────
+
+// TestLatestContactsByName_MatchesCaseInsensitiveSubstringAndReturnsLatestRow
+// exercises "when did we last see X" for a boat with more than one recorded
+// encounter: the match must be case-insensitive and substring, and the row
+// returned for a matching vessel_key must be its newest (most recent
+// encounter), not its first.
+func TestLatestContactsByName_MatchesCaseInsensitiveSubstringAndReturnsLatestRow(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+
+	// Two encounters for the same vessel, far enough apart to be distinct
+	// rows (gap exceeds contactSessionGap and the position moved).
+	if err := store.recordContactIfNew("234567890", "Hot Chilli", -20.1, 149.1, "Nara Inlet", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew (1st): %v", err)
+	}
+	second := base.Add(48 * time.Hour)
+	if err := store.recordContactIfNew("234567890", "Hot Chilli", -20.5, 149.5, "Airlie Beach", "anchored", second, second); err != nil {
+		t.Fatalf("recordContactIfNew (2nd): %v", err)
+	}
+
+	// A distinct vessel that must not match a "chilli" query.
+	if err := store.recordContactIfNew("111222333", "Solaris", -20.2, 149.2, "Cid Harbour", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew (Solaris): %v", err)
+	}
+
+	results, err := store.latestContactsByName("chilli", 10)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected exactly 1 match for a case-insensitive substring of \"Hot Chilli\", got %d: %+v", len(results), results)
+	}
+	got := results[0]
+	if got.VesselKey != "234567890" || got.Name != "Hot Chilli" {
+		t.Fatalf("expected Hot Chilli (234567890), got %+v", got)
+	}
+	if !got.SeenAt.Equal(second) {
+		t.Fatalf("expected the most recent encounter's start (%s), got %s", second, got.SeenAt)
+	}
+	if got.Geoname != "Airlie Beach" {
+		t.Fatalf("expected the most recent encounter's geoname (Airlie Beach), got %q", got.Geoname)
+	}
+}
+
+// TestLatestContactsByName_NoMatchReturnsEmpty confirms a query matching no
+// recorded vessel name returns an empty, non-nil-error slice rather than an
+// error - "no boat by that name has ever been recorded" is a normal, legible
+// outcome, not a failure.
+func TestLatestContactsByName_NoMatchReturnsEmpty(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.recordContactIfNew("234567890", "Hot Chilli", -20.1, 149.1, "Nara Inlet", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	results, err := store.latestContactsByName("Windward Spirit", 10)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no matches, got %+v", results)
+	}
+}
+
+// TestLatestContactsByName_MatchesExactVesselKey is a code-review finding:
+// get_nearby_vessels' own tool description and ADR 0128 both promise "when
+// did we last see MMSI 234567890" works for a boat no longer in range, but
+// latestContactsByName only ever matched against the recorded name, never
+// vessel_key (the MMSI) itself.
+func TestLatestContactsByName_MatchesExactVesselKey(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.recordContactIfNew("234567890", "Hot Chilli", -20.1, 149.1, "Nara Inlet", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	results, err := store.latestContactsByName("234567890", 10)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(results) != 1 || results[0].VesselKey != "234567890" {
+		t.Fatalf("expected an exact MMSI query to match by vessel_key, got %+v", results)
+	}
+}
+
+// TestLatestContactsByName_MMSIQueryDoesNotSubstringMatchAnotherVesselsKey
+// confirms the MMSI match is exact, not a substring - "234" must not match
+// vessel_key "1234567890" just because it appears inside it.
+func TestLatestContactsByName_MMSIQueryDoesNotSubstringMatchAnotherVesselsKey(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.recordContactIfNew("1234567890", "Hot Chilli", -20.1, 149.1, "Nara Inlet", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	results, err := store.latestContactsByName("234", 10)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected \"234\" not to substring-match vessel_key 1234567890 or name \"Hot Chilli\", got %+v", results)
+	}
+}
+
+// TestLatestContactsByName_RespectsLimit confirms the limit argument bounds
+// how many distinct vessels are returned even when more match.
+func TestLatestContactsByName_RespectsLimit(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+	for i, key := range []string{"111111111", "222222222", "333333333"} {
+		seenAt := base.Add(time.Duration(i) * time.Hour)
+		if err := store.recordContactIfNew(key, "Windward Spirit", -20.1, 149.1, "Nara Inlet", "anchored", seenAt, seenAt); err != nil {
+			t.Fatalf("recordContactIfNew (%s): %v", key, err)
+		}
+	}
+
+	results, err := store.latestContactsByName("windward", 2)
+	if err != nil {
+		t.Fatalf("latestContactsByName: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected the limit of 2 to be respected even though 3 vessels match, got %d", len(results))
+	}
+}
