@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-25
+
 ### Added
 
 - Every storage bin has its own URL. Write it to an NFC tag from the bin page,
@@ -149,7 +151,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/gterrill/helmcentral/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/gterrill/helmcentral/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/gterrill/helmcentral/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/gterrill/helmcentral/compare/v0.27.0...v0.28.0
