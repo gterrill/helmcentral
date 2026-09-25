@@ -12,17 +12,23 @@ steps for running it from the anchor watch map.
 3. Set the radius as below. There is no circle to adjust until the watch is
    dropped.
 
-## Resize or reposition after dropping
+## Set the alarm radius after dropping
 
-Do this on the anchor watch page. The Anchor Watch tile on a dashboard page
-shows the circle but does not change it.
+Do this on the Anchor Watch page. The map itself is for watching the swing,
+not for changing it — tapping, dragging or double-tapping the chart never
+touches the alarm radius or the anchor's saved position, on this page or on
+the Anchor Watch tile on a dashboard page.
 
-- **Resize the radius**: click or tap the edge of the circle, move to the new
-  distance, then click or tap again (or double-click) to set it. Nothing is
-  saved until that second click.
-- **Reposition the anchor**: click the anchor marker, drag to where the
-  anchor actually fetched up, then confirm. This republishes the corrected
-  position; it does not change the radius or your rode settings.
+- Use the **−** / **+** buttons next to the radius reading to step the alarm
+  radius up or down 5 m (15 ft) at a time. Each press saves immediately; if
+  it can't reach the boat's instrument network, a message says so and offers
+  **Retry**.
+- Or, in the rode planner sidebar, choose **Apply as alarm radius** to match
+  the radius to the swing your planned rode and boat length actually need.
+
+Moving the anchor's saved position has no control yet on this page — that is
+coming in a later release. If the drop landed somewhere wrong, raise the
+watch and drop again once you are lying properly to the new position.
 
 ## Raise the watch
 

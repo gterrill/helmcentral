@@ -165,8 +165,6 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       aisTrails={() => new Map()}
       radarTargets={[]}
       isDarkTheme={false}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       // This suite tests the radar-echo toggle's own availability logic,
       // not the in-tile vs. fullscreen control collapsing (design critique
       // item 3) — expandedControls just needs to be on so the button it's

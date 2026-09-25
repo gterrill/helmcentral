@@ -198,8 +198,6 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       isDarkTheme={false}
       showRadarEcho={false}
       onRadarEchoToggle={() => undefined}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       {...overrides}
     />
   )

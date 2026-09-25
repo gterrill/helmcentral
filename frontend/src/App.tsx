@@ -1569,7 +1569,16 @@ export function App() {
 
   const handlePlanningDepthChange = useCallback((depthM: number, tideHeightFt: number | null) => {
     if (hasActiveAnchorWatch) {
-      void anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1)
+      // updatePlanningDepth now throws on a failed PATCH rather than
+      // silently no-op'ing (use-anchor-watch.ts) — this is the one caller
+      // with no retry UI of its own, so it reports the failure and leaves
+      // the operator to just try the field again rather than an unhandled
+      // rejection with nothing on screen to show for it.
+      anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1).catch((error: unknown) => {
+        toast.error('Could not save planning depth', {
+          description: error instanceof Error ? error.message : 'Request failed',
+        })
+      })
     } else {
       setSessionPlanningDepth({ depthM, tideHeightFt })
     }
@@ -2915,7 +2924,6 @@ export function App() {
               onImageryToggle={setShowAnchorImagery}
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={setShowRadarEcho}
-              onAnchorReposition={anchorWatch.updatePosition}
               onRadiusChange={anchorWatch.updateRadius}
               onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}

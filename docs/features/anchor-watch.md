@@ -30,8 +30,10 @@ two different numbers.
 
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow
-offset when applied. Repositioning the anchor marker republishes the
-corrected coordinates; changing radius or rode settings does not.
+offset when applied. Repositioning the anchor's saved position republishes
+the corrected coordinates; changing the alarm radius or rode settings does
+not. There is no control for repositioning yet — see
+[Set an anchor watch](../how-to/set-an-anchor-watch.md).
 
 **Raise** publishes an explicit "no anchor" state, then removes the local
 watch, trail and session pins. This clears the boat's anchored navigation
@@ -103,4 +105,4 @@ including across updates. Anchoring somewhere else recentres every device on
 the new anchor.
 
 See [Set an anchor watch](../how-to/set-an-anchor-watch.md) for dropping,
-resizing, repositioning and raising the watch.
+setting the alarm radius and raising the watch.

@@ -104,8 +104,6 @@ function renderMap(radarTargets: RadarTarget[]) {
       showImageryLayer
       onImageryToggle={() => undefined}
       onFullscreen={() => undefined}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
     />,
   )
 }

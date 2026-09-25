@@ -136,8 +136,6 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       showImageryLayer
       onImageryToggle={() => undefined}
       onFullscreen={() => undefined}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       {...overrides}
     />
   )
@@ -303,7 +301,7 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 
   it('restores center and zoom positioning from localStorage on mount', () => {
     localStorage.setItem('anchor-watch-map-center', JSON.stringify({ latitude: -25.2900, longitude: 152.9200 }))
-    localStorage.setItem('anchor-watch-map-zoom', '16')
+    localStorage.setItem('anchor-watch-map-zoom', JSON.stringify({ zoom: 16, sessionId: null }))
 
     renderMap()
 
@@ -339,7 +337,7 @@ describe('AnchorWatchMap controls and AIS selection', () => {
       longitude: 152.9150,
       sessionId: null,
     })
-    expect(localStorage.getItem('anchor-watch-map-zoom')).toBe('15')
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-zoom')!)).toEqual({ zoom: 15, sessionId: null })
 
     localStorage.clear()
   })
@@ -447,9 +445,7 @@ describe('AnchorWatchMap with no anchor set', () => {
   it('renders no anchor marker', () => {
     renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
 
-    expect(
-      screen.queryByRole('button', { name: 'Anchor position — click to reposition' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Anchor position')).not.toBeInTheDocument()
   })
 
   it('keeps the alarm-circle layer mounted so the raster layers still have a beforeId target', () => {
@@ -599,17 +595,19 @@ describe('AnchorWatchMap metric overlay contrast and duplication', () => {
     expect(within(screen.getByTestId('anchor-watch-metrics')).queryByText('Distance')).not.toBeInTheDocument()
   })
 
-  it('uses a near-opaque scrim rather than the old translucent ground, in and out of edit mode', () => {
+  it('uses a near-opaque scrim rather than the old translucent ground', () => {
     renderMap()
     const metrics = screen.getByTestId('anchor-watch-metrics')
     expect(metrics.className).not.toMatch(/bg-black\/[0-8]?[0-9](?!\d)/)
     expect(metrics.className).toMatch(/bg-black\/9\d/)
 
-    // Editing (reposition here, radius drag is the same code path) used to
-    // drop the panel to bg-black/35 — even more transparent during exactly
-    // the state where the operator is reading the overlay most closely.
-    // Confirm entering an edit mode doesn't reintroduce a lighter ground.
-    fireEvent.click(screen.getByRole('button', { name: 'Anchor position — click to reposition' }))
+    // Editing (reposition, radius drag) used to drop the panel to
+    // bg-black/35 while active — even more transparent during exactly the
+    // state where the operator was reading the overlay most closely. That
+    // whole edit mode is gone now (impeccable P0s), and so is its lighter
+    // ground — tapping the anchor marker (now a non-interactive "Anchor
+    // position" div) does nothing at all, including to this panel.
+    fireEvent.click(screen.getByLabelText('Anchor position'))
     expect(screen.getByTestId('anchor-watch-metrics').className).toMatch(/bg-black\/9\d/)
   })
 })
