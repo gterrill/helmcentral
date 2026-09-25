@@ -679,6 +679,92 @@ func TestUpdateEquipmentHandler_ChangedProfileIDStillValidated(t *testing.T) {
 	}
 }
 
+// TestUpdateEquipmentHandlerSeedsFullBankRuleWhenProfileIDLinksHouseBank is
+// code review finding 3: vesselHouseBankReady (alarm_seed_anomaly.go)
+// resolves the house bank's linked profile through the Inventory item's own
+// profile_id (equipmentProfile, anomaly_detector.go) -- the OTHER half of
+// its dependency besides the profile's own full_soc/charge_warn slots
+// (engine_profiles.go's updateProfileHandler already re-seeds for that
+// half, seedAnomalyRulesAfterProfileSave). updateEquipmentHandler never
+// re-seeded, so linking an already-complete battery profile to the house
+// bank's Inventory record took no effect until the next vessel-settings
+// save or a server restart. Fixed at the source: updateEquipmentHandler
+// now re-seeds whenever the record it just saved is the vessel's own house
+// bank -- scoped that narrowly, the same way the profile-save half is
+// scoped to profileKindBattery only, so an unrelated equipment edit (a
+// spare impeller's quantity) does no needless work.
+func TestUpdateEquipmentHandlerSeedsFullBankRuleWhenProfileIDLinksHouseBank(t *testing.T) {
+	withTestDocumentStore(t)
+	withTempAlarmRules(t)
+	setupBatteryProfileFixture(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "House bank", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := saveVesselSettings(settingsPath, vesselSettings{
+		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: item.ID, CapacityAh: 400, Cells: 8},
+	}); err != nil {
+		t.Fatalf("saveVesselSettings: %v", err)
+	}
+
+	if _, ok := findAlarmRule(t, anomalyFullBankWarnRuleID); ok {
+		t.Fatalf("did not expect the full-bank rule seeded before the house bank's Inventory item had a linked profile")
+	}
+
+	body := `{"name":"House bank","category":"mechanical","profile_id":"test-battery-wiring"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID, body, item.ID)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatalf("updateEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, ok := findAlarmRule(t, anomalyFullBankWarnRuleID); !ok {
+		t.Fatalf("expected linking the house bank's Inventory item to a complete battery profile to seed the full-bank rule immediately, not wait for the next vessel-settings save or restart")
+	}
+}
+
+// TestUpdateEquipmentHandlerDoesNotReseedForUnrelatedEquipment guards the
+// scoping half of the fix above: an equipment record that is NOT the
+// vessel's own house bank must not trigger a reseed at all -- there is
+// nothing for it to complete, and doing this unconditionally on every save
+// would be needless work (loadVesselSettings plus a full seedAnomalyRules
+// pass) for no operator-visible effect.
+func TestUpdateEquipmentHandlerDoesNotReseedForUnrelatedEquipment(t *testing.T) {
+	withTestDocumentStore(t)
+	withTempAlarmRules(t)
+	setupBatteryProfileFixture(t)
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := saveVesselSettings(settingsPath, vesselSettings{}); err != nil {
+		t.Fatalf("saveVesselSettings: %v", err)
+	}
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Spare impeller", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	body := `{"name":"Spare impeller","category":"general","profile_id":"test-battery-wiring"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID, body, item.ID)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatalf("updateEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, ok := findAlarmRule(t, anomalyFullBankWarnRuleID); ok {
+		t.Fatalf("did not expect a reseed for equipment that is not the vessel's own house bank, even though its profile_id happens to be a complete battery profile")
+	}
+}
+
 // ── DELETE /api/inventory/equipment/:id ──────────────────────────────────
 
 func TestDeleteEquipmentHandler_RemovesAndReturns204(t *testing.T) {
