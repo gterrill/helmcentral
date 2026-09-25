@@ -201,9 +201,10 @@ tendency table, mostly enabled. See [Alarms](alarms.md).
 
 The forecast panel is the full picture; the dashboard carries condensed
 versions of the same data as ordinary tiles. **Current Conditions** shows
-apparent wind and outside temperature against today's forecast range, plus
-whether rain is likely in the next hour, when it starts and how heavy -
-minute by minute with Apple WeatherKit, in coarser fifteen-minute steps with
+true wind speed, with an arrow for its direction, and outside temperature
+against today's forecast range, plus whether rain is likely in the next
+hour, when it starts and how heavy - minute by minute with Apple
+WeatherKit, in coarser fifteen-minute steps with
 Open-Meteo over North America and central Europe. Elsewhere, Open-Meteo's
 near-term strip is built from the hourly outlook rather than a true
 short-range reading, and is labelled "hourly forecast" so it reads as what

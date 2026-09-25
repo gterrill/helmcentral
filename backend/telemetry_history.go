@@ -104,6 +104,34 @@ func inMemoryMaxWindGustKts(window string) float64 {
 	return math.Round(maxKts*10) / 10
 }
 
+// inMemoryMaxTrueWindKts is inMemoryMaxWindGustKts's counterpart for the
+// Current Conditions tile's "obs" marker (ADR 0129), over trueWindSpeedHistory
+// rather than windGustHistory. Unlike windGustHistory (already knots by the
+// time sampleTracks records it), trueWindSpeedHistory records the raw m/s
+// value straight off environment.wind.speedTrue (tracks.go), so this
+// function - not its caller - owns the metersPerSecondToKnots conversion.
+// -1 sentinel, matching inMemoryMaxWindGustKts, when the window is
+// unparsable or no samples fall inside it.
+func inMemoryMaxTrueWindKts(window string) float64 {
+	dur, err := time.ParseDuration(window)
+	if err != nil {
+		return -1
+	}
+
+	points := trueWindSpeedHistory.since(time.Now().UTC().Add(-dur))
+	if len(points) == 0 {
+		return -1
+	}
+
+	maxMS := points[0].Value
+	for _, p := range points[1:] {
+		if p.Value > maxMS {
+			maxMS = p.Value
+		}
+	}
+	return math.Round(maxMS*metersPerSecondToKnots*10) / 10
+}
+
 // inMemoryMaxWindGustKtsFor computes inMemoryMaxWindGustKts for every
 // requested window in a SINGLE backward walk of windGustHistory's ring
 // buffer, instead of one since()-scan-plus-allocation per window (since()

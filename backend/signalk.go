@@ -916,6 +916,7 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	state := vesselStateData{
 		Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1,
 		HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1,
+		WindSpeedTrueKts: -1, WindDirectionTrueDeg: -1,
 		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
 		// return before the payload is even parsed (signalKSelfPayload
 		// failing below) must never read as "just measured".
@@ -1067,6 +1068,49 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.WindAngleApparentDeg = 0
 		state.WindAngleRelativeDeg = 0
 		state.WindSide = "starboard"
+	}
+
+	// True wind (ADR 0129): the Current Conditions tile's readout, from the
+	// live server's own derived-data speedTrue/directionTrue rather than
+	// computed here from apparent + heading/SOG. Absent (-1), never the
+	// apparent figure, when unpublished or stale (AGENTS.md fallback
+	// policy) - unlike WindSpeedApparentKts above, which defaults to 0
+	// because "no apparent wind" is itself a real reading; "no true wind
+	// source" is not.
+	//
+	// Gated on each field's OWN timestamp, not windDataRecent: windDataRecent
+	// is apparent wind's freshness signal (keyed off speedApparent/
+	// angleApparent, falling back to state.Datetime - effectively always
+	// "recent" - when apparent carries no timestamp of its own either). The
+	// derived-data source computing speedTrue/directionTrue can stop
+	// updating while the anemometer keeps publishing a fresh apparent
+	// reading right next to it; gating true wind on apparent's freshness
+	// would then keep showing a frozen true-wind number as if it were
+	// current. No fallback to state.Datetime here either: a missing or
+	// unparseable timestamp on the field itself means absent, full stop.
+	windSpeedTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "speedTrue", "timestamp"), defaultWindMaxAge)
+	windSpeedTrue := lookupNumber(payload, "environment", "wind", "speedTrue", "value")
+	if windSpeedTrue == -1 {
+		windSpeedTrue = lookupNumber(payload, "environment", "wind", "speedTrue")
+	}
+	if windSpeedTrue >= 0 && windSpeedTrueRecent {
+		state.WindSpeedTrueKts = windSpeedTrue * metersPerSecondToKnots
+	} else {
+		state.WindSpeedTrueKts = -1
+	}
+
+	windDirectionTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "directionTrue", "timestamp"), defaultWindMaxAge)
+	windDirectionTrue := lookupNumber(payload, "environment", "wind", "directionTrue", "value")
+	if windDirectionTrue == -1 {
+		windDirectionTrue = lookupNumber(payload, "environment", "wind", "directionTrue")
+	}
+	if windDirectionTrue != -1 && windDirectionTrueRecent {
+		if windDirectionTrue >= -2*math.Pi && windDirectionTrue <= 2*math.Pi {
+			windDirectionTrue = windDirectionTrue * 180 / math.Pi
+		}
+		state.WindDirectionTrueDeg = normalizeDegrees(windDirectionTrue)
+	} else {
+		state.WindDirectionTrueDeg = -1
 	}
 
 	sog := lookupNumber(payload, "navigation", "speedOverGround", "value")

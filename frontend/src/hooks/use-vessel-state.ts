@@ -27,7 +27,10 @@ interface VesselState {
   wind_angle_apparent_deg: number
   wind_side: string
   wind_angle_relative_deg: number
+  wind_speed_true_kts: number
+  wind_direction_true_deg: number
   max_gust_kts: Record<string, number>
+  max_true_wind_kts_1h: number
   generator_state: string
   generator_manual_start: boolean
   generator_manual_start_timer: number
@@ -66,6 +69,13 @@ export function useVesselState() {
   const [windAngleApparentDeg, setWindAngleApparentDeg] = useState<number | null>(null)
   const [windSide, setWindSide] = useState<'port' | 'starboard' | null>(null)
   const [windAngleRelativeDeg, setWindAngleRelativeDeg] = useState<number | null>(null)
+  // True wind (ADR 0129): the Current Conditions tile's readout, kept
+  // separate from the apparent fields above rather than derived from them
+  // client-side - the backend already reports absence (-1 -> null) rather
+  // than falling back to apparent when the vessel has no true-wind source.
+  const [windSpeedTrueKts, setWindSpeedTrueKts] = useState<number | null>(null)
+  const [windDirectionTrueDeg, setWindDirectionTrueDeg] = useState<number | null>(null)
+  const [maxTrueWindKts1h, setMaxTrueWindKts1h] = useState<number | null>(null)
   const [speedOverGroundKts, setSpeedOverGroundKts] = useState<number | null>(null)
   const [maxGustKts, setMaxGustKts] = useState<Record<GustWindow, number | null>>(
     () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
@@ -120,6 +130,9 @@ export function useVesselState() {
       setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
       setWindSide(data.wind_side === 'port' || data.wind_side === 'starboard' ? data.wind_side : null)
       setWindAngleRelativeDeg(typeof data.wind_angle_relative_deg === 'number' && data.wind_angle_relative_deg >= 0 ? data.wind_angle_relative_deg : null)
+      setWindSpeedTrueKts(typeof data.wind_speed_true_kts === 'number' && data.wind_speed_true_kts >= 0 ? data.wind_speed_true_kts : null)
+      setWindDirectionTrueDeg(typeof data.wind_direction_true_deg === 'number' && data.wind_direction_true_deg >= 0 ? data.wind_direction_true_deg : null)
+      setMaxTrueWindKts1h(typeof data.max_true_wind_kts_1h === 'number' && data.max_true_wind_kts_1h >= 0 ? data.max_true_wind_kts_1h : null)
       // Keeps the previous object when every window's value is unchanged:
       // this arrives on the same 1Hz vessel-state tick as everything else in
       // this hook, and a fresh object literal every second defeats WindTile's
@@ -184,7 +197,10 @@ export function useVesselState() {
     windAngleApparentDeg,
     windSide,
     windAngleRelativeDeg,
+    windSpeedTrueKts,
+    windDirectionTrueDeg,
     maxGustKts,
+    maxTrueWindKts1h,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,

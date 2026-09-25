@@ -91,6 +91,17 @@ type vesselStateData struct {
 	WindAngleApparentDeg  float64
 	WindSide              string
 	WindAngleRelativeDeg  float64
+	// WindSpeedTrueKts and WindDirectionTrueDeg are the Current Conditions
+	// tile's true-wind readout (ADR 0129), read from
+	// environment.wind.speedTrue/directionTrue rather than derived from the
+	// apparent reading and the vessel's own heading/SOG - the live server
+	// already publishes both under a "derived-data" source. -1 (absent) when
+	// unpublished or stale; a boat with no true-wind source must show a
+	// dash, never the apparent figure relabelled (AGENTS.md fallback
+	// policy). WindDirectionTrueDeg is normalized 0-360, the direction the
+	// wind blows FROM.
+	WindSpeedTrueKts     float64
+	WindDirectionTrueDeg float64
 	// WindLastUpdateAge is the freshest last_update_age_s found anywhere
 	// under environment.wind (ADR 0068), scoped to that subtree only —
 	// environment.current is a different sensor with its own health and
@@ -1017,6 +1028,8 @@ func buildVesselStatePayload() map[string]any {
 		WindSpeedApparentKts: -1,
 		WindAngleApparentDeg: -1,
 		WindAngleRelativeDeg: -1,
+		WindSpeedTrueKts:     -1,
+		WindDirectionTrueDeg: -1,
 		Engine0RPM:           -1,
 		Engine1RPM:           -1,
 		// Unknown, not zero, when SignalK is unconfigured and this fallback
@@ -1072,6 +1085,14 @@ func buildVesselStatePayload() map[string]any {
 		previous = value
 	}
 
+	// The Current Conditions tile's own "obs" marker (ADR 0129), on the true
+	// wind scale rather than max_gust_kts' apparent one: the last hour's
+	// highest trueWindSpeedHistory sample, or the -1 sentinel with no
+	// samples - never clamped or defaulted to 0, unlike the gust ladder
+	// above, since this is a single figure with no shorter window to fall
+	// back on.
+	maxTrueWindKts1h := inMemoryMaxTrueWindKts("1h")
+
 	vesselPrefix := loadBoatVesselPrefix(settingsPath)
 	if vesselPrefix == "" {
 		vesselPrefix = "M/V"
@@ -1112,8 +1133,11 @@ func buildVesselStatePayload() map[string]any {
 		"wind_angle_apparent_deg":        state.WindAngleApparentDeg,
 		"wind_side":                      state.WindSide,
 		"wind_angle_relative_deg":        state.WindAngleRelativeDeg,
+		"wind_speed_true_kts":            state.WindSpeedTrueKts,
+		"wind_direction_true_deg":        state.WindDirectionTrueDeg,
 		"wind_last_update_age_s":         state.WindLastUpdateAge,
 		"max_gust_kts":                   maxGustKts,
+		"max_true_wind_kts_1h":           maxTrueWindKts1h,
 		"generator_state":                state.GeneratorState,
 		"generator_manual_start":         state.GeneratorManualStart,
 		"generator_manual_start_timer":   state.GeneratorManualStartTimer,

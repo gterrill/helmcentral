@@ -4,24 +4,56 @@ import { Tile } from '@/components/ui/tile'
 import { BulletGauge } from '@/components/ui/bullet-gauge'
 import type { WeatherToday } from '@/hooks/use-weather-today'
 import type { WeatherForecastDay, WeatherNextHour } from '@/hooks/use-weather-forecast'
-import type { GustWindow } from '@/lib/gust-windows'
 import type { DistanceUnits } from '@/config/app-config'
 import { next24hWindBand, todayTempBand } from '@/lib/forecast-bands'
 import { computeNowcastStatus, nowcastIntensityLabel, type NowcastBar } from '@/lib/nowcast'
 import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { compassPointFor } from '@/lib/format'
 
 export interface CurrentConditionsTileProps {
   depth: number | null
   /** Seconds since the depth feed last reported; null reads as unknown, not stale (see isStale). */
   depthLastUpdateAgeS: number | null
-  windSpeedApparentKts: number | null
-  maxGustKts: Record<GustWindow, number | null>
+  /** True wind speed, water-referenced (ADR 0129) - never a substitute for apparent, and vice versa. */
+  windSpeedTrueKts: number | null
+  /** True wind direction, normalized 0-360, the direction the wind blows FROM. Null draws no arrow. */
+  windDirectionTrueDeg: number | null
+  /** The last hour's highest recorded true wind speed, for the bullet gauge's "obs" marker - the true-wind counterpart of the Apparent Wind tile's max_gust_kts, not that same figure. */
+  maxTrueWindKts1h: number | null
   weather: WeatherToday
   forecast: WeatherForecastDay[]
   /** null/omitted means the configured provider supplied no next-hour nowcast for this position (ADR 0126) - the tile falls back to the hourly/daily rain line. */
   nextHour?: WeatherNextHour | null
   distanceUnits: DistanceUnits
+}
+
+/**
+ * Small inline arrow next to the true-wind readout, rotated to point the
+ * way the wind is blowing (downwind, weather-map convention) rather than
+ * the direction it's blowing from - degrees + 180. Kept inside the tile
+ * file rather than as a shared primitive (AGENTS.md: no new MetricTile-style
+ * components) since nothing else needs a bare direction arrow this small.
+ */
+function WindDirectionArrow({ degrees }: { degrees: number }) {
+  const rotation = (degrees + 180) % 360
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-5 w-5 shrink-0 text-gauge-secondary"
+      style={{ transform: `rotate(${rotation}deg)` }}
+      stroke="currentColor"
+      fill="none"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label={`Wind from ${compassPointFor(degrees)}, ${Math.round(degrees)}° true`}
+    >
+      <line x1="10" y1="16" x2="10" y2="4" />
+      <polyline points="5,9 10,4 15,9" />
+    </svg>
+  )
 }
 
 /** Fraction (0-1) of the strip's plot height a bar is drawn at. Height comes
@@ -183,8 +215,9 @@ function niceMax(...values: (number | null | undefined)[]): number {
 export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   depth,
   depthLastUpdateAgeS,
-  windSpeedApparentKts,
-  maxGustKts,
+  windSpeedTrueKts,
+  windDirectionTrueDeg,
+  maxTrueWindKts1h,
   weather,
   forecast,
   nextHour,
@@ -209,11 +242,10 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
     nowHour,
   })
 
-  const obsGust1h = maxGustKts['1h']
-  const windMax = niceMax(windBand?.max, windBand?.gustMax, obsGust1h, windSpeedApparentKts)
+  const windMax = niceMax(windBand?.max, windBand?.gustMax, maxTrueWindKts1h, windSpeedTrueKts)
   const windMarkers = [
     ...(windBand ? [{ value: windBand.gustMax, label: 'fcst gust' }] : []),
-    ...(obsGust1h !== null ? [{ value: obsGust1h, label: 'obs' }] : []),
+    ...(maxTrueWindKts1h !== null ? [{ value: maxTrueWindKts1h, label: 'obs' }] : []),
   ]
 
   const displayTemp = (tempF: number) => (isImperial ? tempF : fahrenheitToCelsius(tempF))
@@ -235,13 +267,25 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
         </div>
 
         <div className="flex min-w-0 flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Wind</span>
-          <span className="font-display text-4xl leading-none tabular-nums text-gauge-secondary">
-            {windSpeedApparentKts !== null ? Math.round(windSpeedApparentKts) : '—'}
-            <span className="ml-1 text-[11px] text-muted-foreground">kts</span>
-          </span>
+          <span className="truncate text-[10px] uppercase tracking-[0.1em] text-muted-foreground">True Wind</span>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="font-display text-4xl leading-none tabular-nums text-gauge-secondary">
+              {windSpeedTrueKts !== null ? Math.round(windSpeedTrueKts) : '—'}
+              <span className="ml-1 text-[11px] text-muted-foreground">kts</span>
+            </span>
+            {windDirectionTrueDeg !== null && (
+              <>
+                <WindDirectionArrow degrees={windDirectionTrueDeg} />
+                {/* Compass point only: degrees truncated to "SE 1…" on the
+                    1920x360 wall. The bearing is in the arrow's aria-label. */}
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {compassPointFor(windDirectionTrueDeg)}
+                </span>
+              </>
+            )}
+          </div>
           <BulletGauge
-            value={windSpeedApparentKts}
+            value={windSpeedTrueKts}
             min={0}
             max={windMax}
             bandLow={windBand?.min ?? null}

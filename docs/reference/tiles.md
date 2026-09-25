@@ -23,9 +23,9 @@ Nothing stops placing them on an ordinary page too.
 
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
-- **Current Conditions**: depth, apparent wind and outside temperature, each
-  read against today's forecast range, with a look at rain in the next hour
-  underneath.
+- **Current Conditions**: depth, true wind speed with a small arrow for its
+  direction, and outside temperature, each read against today's forecast
+  range, with a look at rain in the next hour underneath.
 - **Forecast Conditions**: the next five days' condition, high and low, above
   a wind-and-wave chart for the same five days, each day lined up under its
   own card.

@@ -784,6 +784,122 @@ func TestSampleTracks_SkipsSolarRecordingWhenCurrentWMissing(t *testing.T) {
 	}
 }
 
+// TestSampleTracks_RecordsTrueWindWhenPathIsFresh proves the happy path still
+// works once recording is gated on each path's own LastSeen: a speedTrue/
+// directionTrue delta that arrived moments ago is recorded.
+func TestSampleTracks_RecordsTrueWindWhenPathIsFresh(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() {
+		trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+		trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	})
+
+	now := time.Now().UTC()
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: now.Format(time.RFC3339),
+			Values: []signalKValue{
+				{Path: "environment.wind.speedTrue", Value: 6.71},
+				{Path: "environment.wind.directionTrue", Value: 2.233},
+			},
+		}},
+	}, now)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	sampleTracks(filepath.Join(t.TempDir(), "settings.yaml"))
+
+	speedPts := trueWindSpeedHistory.since(time.Time{})
+	if len(speedPts) != 1 || speedPts[0].Value != 6.71 {
+		t.Fatalf("expected one fresh true wind speed sample of 6.71, got %+v", speedPts)
+	}
+	directionPts := trueWindDirectionHistory.since(time.Time{})
+	if len(directionPts) != 1 || directionPts[0].Value != 2.233 {
+		t.Fatalf("expected one fresh true wind direction sample of 2.233, got %+v", directionPts)
+	}
+}
+
+// TestSampleTracks_SkipsTrueWindWhenPathHasGoneStale is the regression test
+// for the bug this gate fixes: derived-data can stop producing
+// speedTrue/directionTrue while the rest of the snapshot (and the anemometer's
+// own apparent-wind path) keeps updating. Before the LastSeen gate, the last
+// value read off a since-gone-quiet path was recorded on every tick forever,
+// pinning the Current Conditions tile's 1h "obs" marker (and feeding the
+// storm/squash-zone derived paths) on a frozen number. The delta here landed
+// well outside defaultWindMaxAge, so nothing should be recorded.
+func TestSampleTracks_SkipsTrueWindWhenPathHasGoneStale(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() {
+		trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+		trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	})
+
+	staleAt := time.Now().UTC().Add(-10 * time.Minute)
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: staleAt.Format(time.RFC3339),
+			Values: []signalKValue{
+				{Path: "environment.wind.speedTrue", Value: 6.71},
+				{Path: "environment.wind.directionTrue", Value: 2.233},
+			},
+		}},
+	}, staleAt)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	sampleTracks(filepath.Join(t.TempDir(), "settings.yaml"))
+
+	if pts := trueWindSpeedHistory.since(time.Time{}); len(pts) != 0 {
+		t.Fatalf("expected no true wind speed sample recorded from a stale path, got %+v", pts)
+	}
+	if pts := trueWindDirectionHistory.since(time.Time{}); len(pts) != 0 {
+		t.Fatalf("expected no true wind direction sample recorded from a stale path, got %+v", pts)
+	}
+}
+
+// TestSampleTracks_SkipsTrueWindWhenLastSeenIsUnknown covers the other half
+// of the gate: a tree seeded without ever going through applyDelta (as
+// seedSelfTree does for REST-shaped fixtures elsewhere in this package) has
+// no pathSeen entry at all, so LastSeen reads as the zero time.Time - "no
+// evidence of freshness" must not be treated as fresh.
+func TestSampleTracks_SkipsTrueWindWhenLastSeenIsUnknown(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() {
+		trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+		trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	})
+
+	seedSelfTree(t, `{
+		"navigation": {"datetime": {"value": "`+time.Now().UTC().Format(time.RFC3339)+`"}, "state": {"value": "anchored"}},
+		"environment": {"wind": {"speedTrue": {"value": 6.71}, "directionTrue": {"value": 2.233}}}
+	}`)
+
+	sampleTracks(filepath.Join(t.TempDir(), "settings.yaml"))
+
+	if pts := trueWindSpeedHistory.since(time.Time{}); len(pts) != 0 {
+		t.Fatalf("expected no true wind speed sample recorded with no known LastSeen, got %+v", pts)
+	}
+	if pts := trueWindDirectionHistory.since(time.Time{}); len(pts) != 0 {
+		t.Fatalf("expected no true wind direction sample recorded with no known LastSeen, got %+v", pts)
+	}
+}
+
 // TestRecordNearbyVesselContacts_LogsOncePerVesselIDWithNoMMSI is item 6's
 // other required test: recordNearbyVesselContacts runs on the server's own
 // 5s poll tick (unlike buildNearbyVesselsPayload, which only runs per
