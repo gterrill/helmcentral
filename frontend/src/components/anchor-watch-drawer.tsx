@@ -397,6 +397,11 @@ export function AnchorWatchDrawer({
                 // view, so it gets satellite/radar/recentre back — every
                 // control stays reachable, just relocated.
                 expandedControls
+                // Namespaces the persisted fitted-zoom key (code-review
+                // finding) so this drawer's own fit for its own (much
+                // larger) size never clobbers, or gets clobbered by, the
+                // dashboard tile's.
+                viewKey="drawer"
                 placemarks={placemarks}
                 onPlacemarkCreate={onPlacemarkCreate}
                 onPlacemarkRemove={onPlacemarkRemove}

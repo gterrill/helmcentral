@@ -342,7 +342,14 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     localStorage.clear()
   })
 
-  it('clears persisted center on re-centre button click so future loads center on anchor', () => {
+  // code-review finding: handleRecenter used to removeItem the stored centre
+  // before calling easeTo — dead code in production, since a real easeTo
+  // always settles into its own moveend, which handleMoveEnd unconditionally
+  // uses to rewrite the stored centre anyway. What future loads actually
+  // rely on is that rewrite landing on the *anchor's* position, not a
+  // vanished key — simulated here the same way the onMoveEnd test above
+  // does, since this mock's easeTo doesn't fire a real moveend itself.
+  it('re-centre button click eases to the anchor, whose settle then persists the anchor as the centre', () => {
     localStorage.setItem('anchor-watch-map-center', JSON.stringify({ latitude: -25.2900, longitude: 152.9200 }))
 
     renderMap(defaultAisVessels, { expandedControls: true })
@@ -350,7 +357,16 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     const recenterBtn = screen.getByRole('button', { name: 'Re-centre on anchor' })
     fireEvent.click(recenterBtn)
 
-    expect(localStorage.getItem('anchor-watch-map-center')).toBeNull()
+    expect(lastMoveEndHandler).not.toBeNull()
+    act(() => {
+      lastMoveEndHandler!({ viewState: { latitude: -25.2939, longitude: 152.9103, zoom: 15 } })
+    })
+
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-center')!)).toEqual({
+      latitude: -25.2939,
+      longitude: 152.9103,
+      sessionId: null,
+    })
 
     localStorage.clear()
   })

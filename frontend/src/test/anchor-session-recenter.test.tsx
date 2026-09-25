@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 
@@ -7,7 +7,10 @@ vi.mock('maplibre-gl', () => ({
 }))
 
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
+let lastMoveEndHandler: ((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void) | null = null
+let lastDragStartHandler: (() => void) | null = null
 const easeToMock = vi.fn()
+const jumpToMock = vi.fn()
 // Defaults to 0x0 (unmeasurable, matching jsdom's real getBoundingClientRect
 // with no layout) so every existing test below keeps exercising the
 // center-only easeTo fallback unchanged; only the "fits zoom to the
@@ -22,18 +25,24 @@ vi.mock('react-map-gl/maplibre', async () => {
         {
           children,
           initialViewState,
+          onMoveEnd,
+          onDragStart,
         }: {
           children?: React.ReactNode
           initialViewState?: { latitude: number; longitude: number; zoom: number }
+          onMoveEnd?: (e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void
+          onDragStart?: () => void
         },
         ref: React.Ref<unknown>,
       ) => {
         lastInitialViewState = initialViewState ?? null
+        lastMoveEndHandler = onMoveEnd ?? null
+        lastDragStartHandler = onDragStart ?? null
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => 14,
           easeTo: easeToMock,
-          jumpTo: vi.fn(),
+          jumpTo: jumpToMock,
           getMap: () => ({
             getContainer: () => ({
               getBoundingClientRect: () => ({ width: containerSize.width, height: containerSize.height }),
@@ -280,9 +289,74 @@ describe('AnchorWatchMap discards a stale stored centre once "no watch" is confi
       center: [CURRENT_VESSEL.lon, CURRENT_VESSEL.lat],
       duration: 600,
     })
-    // Nothing left to restore on a later reload — the stale centre is gone,
-    // not merely overridden for this session.
-    expect(storedCentre()).toBeNull()
+    // code-review finding: this used to removeItem the stale centre before
+    // easing — dead code against a real map, which always settles the ease
+    // into its own moveend, and handleMoveEnd unconditionally rewrites the
+    // stored centre from that regardless. What a later reload actually
+    // relies on is that rewrite landing on the vessel (untagged, session
+    // null), not a vanished key — simulated here since this mock's easeTo
+    // doesn't fire a real moveend itself.
+    expect(lastMoveEndHandler).not.toBeNull()
+    act(() => {
+      lastMoveEndHandler!({ viewState: { latitude: CURRENT_VESSEL.lat, longitude: CURRENT_VESSEL.lon, zoom: 14 } })
+    })
+    expect(storedCentre()).toEqual({
+      latitude: CURRENT_VESSEL.lat,
+      longitude: CURRENT_VESSEL.lon,
+      sessionId: null,
+    })
+  })
+
+  // code-review finding: the correction above used to run unconditionally,
+  // throwing away a deliberate look at the chart made while the first poll
+  // was still in flight. A pan the operator made before "no watch" resolves
+  // must survive it.
+  it('does not snap back to the vessel if the operator panned while the poll was still in flight', () => {
+    storeCentre(-20.2900, 148.9600, FIRST_SESSION)
+
+    const { rerender } = render(
+      mapElement({
+        anchorLat: null,
+        anchorLon: null,
+        anchorSetAt: null,
+        anchorStateKnown: false,
+        vesselLat: CURRENT_VESSEL.lat,
+        vesselLon: CURRENT_VESSEL.lon,
+      }),
+    )
+    expect(lastDragStartHandler).not.toBeNull()
+
+    // The operator deliberately pans off to look at something else on the
+    // chart while the poll is still ambiguous.
+    const PANNED_TO = { lat: -20.4000, lon: 149.1000 }
+    act(() => {
+      lastDragStartHandler!()
+      lastMoveEndHandler!({ viewState: { latitude: PANNED_TO.lat, longitude: PANNED_TO.lon, zoom: 14 } })
+    })
+    easeToMock.mockClear()
+
+    // The poll resolves: there is genuinely no watch running.
+    rerender(
+      mapElement({
+        anchorLat: null,
+        anchorLon: null,
+        anchorSetAt: null,
+        anchorStateKnown: true,
+        vesselLat: CURRENT_VESSEL.lat,
+        vesselLon: CURRENT_VESSEL.lon,
+      }),
+    )
+
+    // No corrective snap to the vessel — the operator's own pan wins. (Its
+    // own moveend tagged it with FIRST_SESSION, the session mount resolved
+    // before "no watch" was confirmed; viewSessionRef only clears to null
+    // for writes from here on.)
+    expect(easeToMock).not.toHaveBeenCalled()
+    expect(storedCentre()).toEqual({
+      latitude: PANNED_TO.lat,
+      longitude: PANNED_TO.lon,
+      sessionId: FIRST_SESSION,
+    })
   })
 
   it('keeps the stored centre once the same-session poll resolves active, then eases to the anchor on a genuinely new drop', () => {
@@ -341,6 +415,7 @@ describe('AnchorWatchMap fits zoom to the container on a new session', () => {
   beforeEach(() => {
     localStorage.clear()
     easeToMock.mockClear()
+    jumpToMock.mockClear()
     containerSize.width = 390
     containerSize.height = 500
   })
@@ -380,5 +455,83 @@ describe('AnchorWatchMap fits zoom to the container on a new session', () => {
       zoom: call[0].zoom,
       sessionId: SECOND_SESSION,
     })
+  })
+
+  // code-review finding: the old mount-time fit effect and the old
+  // session-change effect could both fire for the same drop — a genuinely
+  // new session (the session-change effect's trigger) that also happens to
+  // have no matching stored zoom yet (the fit effect's trigger, true of
+  // every brand new session) — moving the camera twice: an instant jumpTo
+  // for the zoom, then an easeTo animating center+zoom on top of it.
+  // fitToAnchor now funnels both triggers through one decision per render.
+  it('a drop while mounted with no prior anchor moves the camera exactly once', () => {
+    const { rerender } = render(mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null }))
+    expect(easeToMock).not.toHaveBeenCalled()
+    expect(jumpToMock).not.toHaveBeenCalled()
+
+    rerender(
+      mapElement({
+        anchorLat: SECOND_ANCHOR.lat,
+        anchorLon: SECOND_ANCHOR.lon,
+        anchorSetAt: SECOND_SESSION,
+        vesselLat: SECOND_ANCHOR.lat,
+        vesselLon: SECOND_ANCHOR.lon,
+      }),
+    )
+
+    expect(easeToMock).toHaveBeenCalledTimes(1)
+    expect(easeToMock).toHaveBeenCalledWith(expect.objectContaining({
+      center: [SECOND_ANCHOR.lon, SECOND_ANCHOR.lat],
+    }))
+    expect(jumpToMock).not.toHaveBeenCalled()
+  })
+})
+
+// code-review finding: the fitted zoom used to live under one localStorage
+// key shared by every host — the dashboard tile and the fullscreen drawer,
+// very different sizes. Whichever fit first wrote a zoom the other then read
+// back as "already belongs to this session" and skipped its own fit
+// entirely. viewKey namespaces the key per host.
+describe('AnchorWatchMap zoom fit is keyed per host (viewKey)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    easeToMock.mockClear()
+    jumpToMock.mockClear()
+    containerSize.width = 390
+    containerSize.height = 500
+  })
+
+  afterEach(() => {
+    containerSize.width = 0
+    containerSize.height = 0
+  })
+
+  it('stores the fitted zoom under a viewKey-namespaced key, not the shared one', () => {
+    render(mapElement({ viewKey: 'tile' }))
+
+    expect(localStorage.getItem('anchor-watch-map-zoom')).toBeNull()
+    const stored = JSON.parse(localStorage.getItem('anchor-watch-map-zoom.tile')!) as { zoom: number; sessionId: string | null }
+    expect(stored.sessionId).toBe(FIRST_SESSION)
+  })
+
+  it('gives the tile and the drawer independent fits, instead of one skipping because the other already wrote a zoom', () => {
+    const { unmount } = render(mapElement({ viewKey: 'tile' }))
+    expect(jumpToMock).toHaveBeenCalledTimes(1)
+    const tileZoom = jumpToMock.mock.calls[0][0].zoom as number
+    unmount()
+
+    // The drawer is a much bigger surface — a correct fit for it is a
+    // different zoom than the tile's.
+    containerSize.width = 900
+    containerSize.height = 700
+    jumpToMock.mockClear()
+    render(mapElement({ viewKey: 'drawer' }))
+
+    expect(jumpToMock).toHaveBeenCalledTimes(1)
+    const drawerZoom = jumpToMock.mock.calls[0][0].zoom as number
+    expect(drawerZoom).not.toBeCloseTo(tileZoom, 1)
+
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-zoom.tile')!).zoom).toBeCloseTo(tileZoom, 6)
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-zoom.drawer')!).zoom).toBeCloseTo(drawerZoom, 6)
   })
 })
