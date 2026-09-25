@@ -118,7 +118,7 @@ interface AnchorWatchDrawerProps {
   // two can't disagree.
   planningDepthM: number | null
   planningTideHeightFt: number | null
-  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => void
+  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
 }
 
 export function AnchorWatchDrawer({

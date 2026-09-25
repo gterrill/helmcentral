@@ -78,7 +78,7 @@ const baseProps = {
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null,
   planningTideHeightFt: null,
-  onPlanningDepthChange: () => undefined,
+  onPlanningDepthChange: () => Promise.resolve(),
 }
 
 describe('AnchorWatchDrawer promoted distance KPI', () => {
