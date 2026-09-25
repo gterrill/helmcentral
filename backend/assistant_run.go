@@ -182,8 +182,13 @@ func assistantExcessToolCallResult(name string) (string, error) {
 	return string(body), nil
 }
 
-// assistantForcedFinalInstruction is appended to the system message's live
-// suffix on the forced final round only (see assistantForcedFinalSystemMessage).
+// assistantForcedFinalInstruction is appended to systemLive, with a blank
+// line separating it from the prompt's own content, when run rebuilds the
+// system message for the forced final round (see run's own use of it,
+// alongside assistantSystemMessage). Rebuilding through assistantSystemMessage
+// itself - rather than a second function that knows the stable/live
+// content-blocks layout - means that layout is defined in exactly one
+// place regardless of which round is asking for it.
 //
 // An incident on v0.32.0 (google/gemini-3.8-flash) ran all
 // assistantMaxToolRounds rounds diagnosing a stale-telemetry question with
@@ -210,35 +215,6 @@ func assistantExcessToolCallResult(name string) (string, error) {
 // model as the operator speaking, which is not who is asking for a
 // wrap-up.
 const assistantForcedFinalInstruction = "There is no more time to check anything further before you reply. Give your best answer now, in plain prose, using only what you have already found. If there is something you were not able to check, say so plainly in the answer."
-
-// assistantForcedFinalSystemMessage returns a copy of base - run's own
-// system message, always messages[0] - with assistantForcedFinalInstruction
-// appended to its live suffix. base itself is never modified, so the copy
-// this returns can be substituted into the forced final round's own request
-// only, leaving run's messages (and the history the next turn is built
-// from) untouched.
-//
-// For an Anthropic model, base.contentBlocks holds exactly two blocks
-// (assistantSystemMessage): the stable prefix carrying the cache_control
-// breakpoint, and the live suffix. The instruction is appended to the
-// second (live) block only, so the first block's bytes - and therefore
-// OpenRouter's provider-side prompt cache match against it - are
-// unaffected by a round that, being forced-final, never repeats anyway.
-// Every other model carries the system prompt as a plain string in
-// Content, which the instruction is appended to directly.
-func assistantForcedFinalSystemMessage(base openRouterMessage) openRouterMessage {
-	msg := base
-	if len(base.contentBlocks) > 0 {
-		blocks := make([]openRouterContentBlock, len(base.contentBlocks))
-		copy(blocks, base.contentBlocks)
-		live := len(blocks) - 1
-		blocks[live].Text += "\n\n" + assistantForcedFinalInstruction
-		msg.contentBlocks = blocks
-		return msg
-	}
-	msg.Content = base.Content + openRouterContent("\n\n"+assistantForcedFinalInstruction)
-	return msg
-}
 
 // assistantEmitter pushes one named progress event to the SSE stream a
 // caller is writing (assistant_handlers.go). This file emits "status"
@@ -535,16 +511,16 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // run asks the model for a reply, answers any tool calls it makes, and
 // repeats until the model returns plain text or assistantMaxToolRounds is
 // reached, at which point tool_choice is set to "none" to force a final
-// answer - Tools stays populated on that request (assistantForcedFinalSystemMessage's
-// own doc comment covers why: an empty Tools list gives some providers
-// nothing to apply "none" to). The system message on that request also
-// carries assistantForcedFinalInstruction, appended by
-// assistantForcedFinalSystemMessage. A model that still calls a tool on
-// that forced round is a bug in the model's behaviour Helmcentral cannot
-// paper over, so that surfaces as an error rather than a fabricated reply
-// (AGENTS.md's fallback policy). The same is true of a model that swaps the
-// structured tool_calls field for its own text tool-call markup instead of
-// a real answer (see
+// answer - Tools stays populated on that request, unlike an earlier version
+// of this loop that also cleared it, because an empty Tools list gives some
+// providers nothing to apply "none" to. The system message on that request
+// is also rebuilt with assistantForcedFinalInstruction appended to its live
+// suffix (see that const's own doc comment). A model that still calls a
+// tool on that forced round is a bug in the model's behaviour Helmcentral
+// cannot paper over, so that surfaces as an error rather than a fabricated
+// reply (AGENTS.md's fallback policy). The same is true of a model that
+// swaps the structured tool_calls field for its own text tool-call markup
+// instead of a real answer (see
 // assistantTextToolCallMarker) - accepting that text as the reply would
 // show the operator raw model-internal syntax instead of an error, so it is
 // checked and rejected on every round, not only the forced one, since a
@@ -614,15 +590,19 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {
 			req.ToolChoice = "none"
-			// Substituted into a copy of messages built just for this
-			// request - messages itself, and the system message at its
-			// index 0, are never modified. See assistantForcedFinalSystemMessage's
-			// own doc comment for why the instruction goes here rather than
-			// a trailing message.
-			forced := make([]openRouterMessage, len(messages))
-			copy(forced, messages)
-			forced[0] = assistantForcedFinalSystemMessage(forced[0])
-			req.Messages = forced
+			// Rebuilt through assistantSystemMessage itself, the same
+			// builder messages[0] already came from, with
+			// assistantForcedFinalInstruction appended to the live suffix -
+			// so the stable/live content-blocks split for an Anthropic
+			// model (assistantSystemMessage's own doc comment) is defined
+			// in exactly one place, not duplicated here. The result
+			// replaces only index 0 of a new slice built for this request;
+			// messages itself (and the history the next turn is built
+			// from) is never modified. See assistantForcedFinalInstruction's
+			// own doc comment for why the instruction goes into the system
+			// message rather than a trailing one.
+			forcedSys := assistantSystemMessage(r.model, systemStable, systemLive+"\n\n"+assistantForcedFinalInstruction)
+			req.Messages = append([]openRouterMessage{forcedSys}, messages[1:]...)
 		}
 
 		// roundText mirrors, fragment by fragment, the content

@@ -990,8 +990,8 @@ func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *test
 
 	// The forced round's system message (always messages[0]) must carry the
 	// instruction telling the model plainly to answer now instead of
-	// calling another tool - see assistantForcedFinalSystemMessage's own
-	// doc comment for why it lives here rather than a trailing message.
+	// calling another tool - see assistantForcedFinalInstruction's own doc
+	// comment for why it lives here rather than a trailing message.
 	if len(forced.Messages) == 0 || forced.Messages[0].Role != "system" || !strings.Contains(string(forced.Messages[0].Content), assistantForcedFinalInstruction) {
 		t.Fatalf("expected the forced final round's system message to carry the instruction, got %+v", forced.Messages)
 	}
@@ -1038,11 +1038,12 @@ func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testin
 }
 
 // TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged checks
-// assistantForcedFinalSystemMessage's Anthropic path (assistant_run.go):
-// the instruction is appended to the live (second) content block only, so
-// the stable (first) block - the one OpenRouter's provider-side cache
-// matches against, per assistantSystemMessage's own doc comment - is
-// byte-for-byte the same on the forced round as on every earlier one.
+// run's forced-final rebuild of the system message (assistant_run.go), via
+// assistantSystemMessage, on its Anthropic path: the instruction ends up in
+// the live (second) content block only, so the stable (first) block - the
+// one OpenRouter's provider-side cache matches against, per
+// assistantSystemMessage's own doc comment - is byte-for-byte the same on
+// the forced round as on every earlier one.
 // openRouterMessage.Content's decode path collapses a content-blocks array
 // back into one joined string (openRouterContent.UnmarshalJSON), which
 // would hide a missing cache_control breakpoint, so this reads
