@@ -460,6 +460,37 @@ type twinSteadinessTrackers struct {
 	rpmGroup conditionTracker
 	coolant  map[string]*conditionTracker
 	running  map[string]*conditionTracker
+	// invalidSince tracks, per engine instance, when that engine's own
+	// rpm/coolant inputs most recently became invalid -- absent while
+	// currently valid. See invalidTooLong.
+	invalidSince map[string]time.Time
+}
+
+// invalidTooLong folds one tick's validity for engine into invalidSince and
+// reports whether that engine's inputs have now been invalid for longer than
+// inputValidityMaxAge -- long enough that the gap is not just a momentary
+// blip (a dropped N2K frame, one bad tick) but plausibly covers the engine
+// actually stopping and restarting, which runningFor/coolantFor must not
+// silently ride through (code review finding 8): those trackers are only
+// ever observe()'d on a tick where the engine is currently valid, so without
+// this, an arbitrarily long invalid stretch left them frozen at whatever
+// duration they last saw, and the instant good data returned, that stale
+// duration satisfied the twin gate's own running/steadiness thresholds
+// immediately.
+func (t *twinSteadinessTrackers) invalidTooLong(engine string, validNow bool, now time.Time) bool {
+	if validNow {
+		delete(t.invalidSince, engine)
+		return false
+	}
+	if t.invalidSince == nil {
+		t.invalidSince = map[string]time.Time{}
+	}
+	since, seen := t.invalidSince[engine]
+	if !seen {
+		t.invalidSince[engine] = now
+		return false
+	}
+	return now.Sub(since) > inputValidityMaxAge
 }
 
 func (t *twinSteadinessTrackers) coolantFor(engine string) *conditionTracker {
@@ -759,8 +790,18 @@ func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselS
 	states := make([]engineTwinState, 0, len(live))
 	for _, e := range live {
 		if !e.ok {
+			// Invalid for longer than a momentary blip: the engine's own
+			// running/coolant-steady trackers must not silently carry
+			// whatever duration they last saw across a gap that could just
+			// as well have covered the engine actually stopping (code
+			// review finding 8).
+			if steadiness.invalidTooLong(e.setting.Instance, false, now) {
+				steadiness.runningFor(e.setting.Instance).observe(false, now)
+				steadiness.coolantFor(e.setting.Instance).observe(false, now)
+			}
 			continue
 		}
+		steadiness.invalidTooLong(e.setting.Instance, true, now)
 		runFor := steadiness.runningFor(e.setting.Instance).observe(e.rpmHz > twinIdleRPMHz, now)
 		coolantSteadyDur := steadiness.coolantFor(e.setting.Instance).observe(e.coolant >= twinGateMinCoolantK, now)
 		states = append(states, engineTwinState{

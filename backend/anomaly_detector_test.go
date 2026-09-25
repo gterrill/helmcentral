@@ -338,6 +338,89 @@ func TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale(t *test
 	}
 }
 
+// TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap
+// is the direct regression case for code review finding 8: the per-engine
+// runningFor/coolant conditionTrackers were only ever observe()'d on a tick
+// where that engine's own inputs were valid -- the "if !e.ok { continue }"
+// skip above -- so a long stretch of invalid data (an instrument dropout
+// outlasting a real engine stop/restart) never told the tracker the engine
+// had actually stopped. trueSince stayed frozen at whatever it was before
+// the gap, so the instant good data returned, now.Sub(trueSince) already
+// covered the whole gap and satisfied twinGateMinRunFor immediately,
+// however long -- or however thoroughly -- the engine had actually been off
+// in between.
+//
+// Runs steady for most of twinGateMinRunFor (short of it), an invalid gap
+// well past inputValidityMaxAge, then resumes: the residual must stay
+// absent until a genuinely fresh twinGateMinRunFor has elapsed since the
+// resume, not the moment rpmSteady/coolantSteady's own (already-correctly-
+// resetting) windows catch back up.
+func TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
+		},
+	})
+
+	snapshot := newAnomalyTestSnapshot()
+	trackers := newAnomalyTrackers()
+	steadiness := &twinSteadinessTrackers{}
+	path := anomalyEngineResidualPath("port", "oilPressure")
+
+	// Steady for most of the 10-minute requirement, but short of it.
+	preGap := int(twinGateMinRunFor.Seconds()) - 30
+	t0 := anomalyDetectorTestNow
+	for i := 0; i < preGap; i++ {
+		at := t0.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+
+	// A long dropout -- comfortably past inputValidityMaxAge -- with nothing
+	// updating at all, but the detector keeps ticking on real wall time.
+	gapStart := t0.Add(time.Duration(preGap) * time.Second)
+	gapTicks := int(inputValidityMaxAge.Seconds())*2 + 30
+	for i := 0; i < gapTicks; i++ {
+		computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, gapStart.Add(time.Duration(i)*time.Second))
+	}
+
+	// Good data resumes. If the pre-gap runtime survived, 400 more seconds
+	// (comfortably past rpmSteady's 60s and coolantSteady's 300s own fresh
+	// windows) would already total pre-gap(570s)+400s >> 600s and the gate
+	// would hold; it must not, since the genuine post-resume runtime is only
+	// 400s.
+	resumeStart := gapStart.Add(time.Duration(gapTicks) * time.Second)
+	var mid anomalyReading
+	for i := 0; i < 400; i++ {
+		at := resumeStart.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		mid = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+	if _, ok := mid.Values[path]; ok {
+		t.Fatalf("expected no residual 400s after the gap (runningFor must have restarted from zero, not carried the pre-gap 570s over), got %v", mid.Values[path])
+	}
+
+	// Continuing on to a genuinely fresh twinGateMinRunFor since the resume
+	// proves the reset did not simply break running-time tracking outright.
+	var last anomalyReading
+	for i := 400; i < int(twinGateMinRunFor.Seconds())+10; i++ {
+		at := resumeStart.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		last = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+	if _, ok := last.Values[path]; !ok {
+		t.Fatalf("expected a residual once a genuinely fresh twinGateMinRunFor elapsed after the resume, got none: %+v", last.Values)
+	}
+}
+
 // TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes is the direct
 // regression case for code review finding 2: formatEngineResidualEvidence
 // formatted the learned offset and the residual -- both DIFFERENCES between
