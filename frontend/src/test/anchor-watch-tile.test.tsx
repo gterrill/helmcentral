@@ -26,11 +26,17 @@ vi.mock('@/components/anchor-watch-map', () => ({
     scopeRecommendation: RodeMethodResult | null
     aisCollisionAlarms?: ReadonlyMap<string, string>
     interactive?: boolean
+    anchorSetAt?: string | null
+    onAnchorReposition?: (lat: number, lon: number) => void
+    onRadiusChange?: (radiusMeters: number) => void
   }) => (
     <div
       data-testid="anchor-watch-map"
       data-collision-vessels={[...(props.aisCollisionAlarms?.keys() ?? [])].join(',')}
       data-interactive={String(props.interactive)}
+      data-anchor-set-at={props.anchorSetAt ?? ''}
+      data-has-reposition={String(props.onAnchorReposition !== undefined)}
+      data-has-radius-change={String(props.onRadiusChange !== undefined)}
     >
       {`${props.vesselLat},${props.vesselLon}`}
       <div
@@ -88,6 +94,7 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     distanceMeters: null,
     bearingDeg: null,
     setAt: null,
+    loaded: true,
     bowOffsetM: 0,
     bowOffsetApplied: false,
     bowOffsetReason: '',
@@ -190,6 +197,58 @@ describe('AnchorWatchTile', () => {
       render(<AnchorWatchTile {...baseProps({ interactive: false })} />)
 
       expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute('data-interactive', 'false')
+    })
+  })
+
+  // The tile is view-only: editing the anchor point and swing radius lives
+  // only on the full-page Anchor Watch view (anchor-watch-drawer.tsx). See
+  // anchor-watch-map-view-only.test.tsx for what AnchorWatchMap itself does
+  // once these callbacks are absent.
+  describe('anchor editing', () => {
+    it('does not pass onAnchorReposition or onRadiusChange to the map', async () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({ anchorState: 'set', anchorLat: -25.1, anchorLon: 152.9 }),
+          })}
+        />,
+      )
+
+      const map = await screen.findByTestId('anchor-watch-map')
+      expect(map).toHaveAttribute('data-has-reposition', 'false')
+      expect(map).toHaveAttribute('data-has-radius-change', 'false')
+    })
+  })
+
+  // A fresh drop mints a new set_at; AnchorWatchMap eases the camera to the
+  // anchor whenever this session id changes (anchor-session-recenter.test.tsx
+  // covers that behaviour at the map level) — this only has to prove the
+  // tile hands the session id down at all.
+  describe('anchorSetAt', () => {
+    it("passes the watch's set_at through to the map as anchorSetAt", async () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({
+              anchorState: 'set',
+              anchorLat: -25.1,
+              anchorLon: 152.9,
+              setAt: '2026-09-25T06:30:00Z',
+            }),
+          })}
+        />,
+      )
+
+      expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute(
+        'data-anchor-set-at',
+        '2026-09-25T06:30:00Z',
+      )
+    })
+
+    it('passes null through when no watch session is running', async () => {
+      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ setAt: null }) })} />)
+
+      expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute('data-anchor-set-at', '')
     })
   })
 
