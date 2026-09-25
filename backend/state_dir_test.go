@@ -35,10 +35,13 @@ func TestCacheFilePathStateDirCoversEveryStatePath(t *testing.T) {
 
 	// A representative sweep rather than an exhaustive list: the point is that
 	// callers get isolation for free, so a state path added later needs no
-	// change here or in the compose config.
+	// change here or in the compose config. The anchor watch and its
+	// placemarks are covered by their own dedicated tests below instead of
+	// here (TestAnchorWatchFilePathDefaultsToDataDir,
+	// TestAnchorPlacemarksFilePathDefaultsToDataDir), which pin the real
+	// anchorWatchFilePath()/anchorPlacemarksFilePath() functions rather than a
+	// literal fallback string handed to cacheFilePath.
 	for _, fallback := range []string{
-		"data/anchor_watch.json",
-		"data/anchor_placemarks.json",
 		"data/dashboard-pages.json",
 		"data/secrets.sqlite",
 		"data/secrets.key",

@@ -13,8 +13,8 @@ A native install (via `install.sh`) uses:
 | --- | --- |
 | `/usr/local/bin/helmcentral` | The binary. Self-contained: the web UI is embedded in it. |
 | `/var/lib/helmcentral/settings.yaml` | Operator settings, rewritten by the Settings UI on save. |
-| `/var/lib/helmcentral/data/` | SQLite stores, routes, dashboard pages, uploaded charts. |
-| `/var/lib/helmcentral/cache/` | Anchor-watch state and plugin forecast caches. |
+| `/var/lib/helmcentral/data/` | SQLite stores, routes, dashboard pages, uploaded charts, the anchor watch and its placemarks. |
+| `/var/lib/helmcentral/cache/` | Plugin forecast caches. |
 | `/var/lib/helmcentral/plugins/` | Provider plugins, by category (`tides/`, `weather/`, `waves/`, `forecast-warnings/`). |
 | `/etc/systemd/system/helmcentral.service` | The service unit. |
 
@@ -122,6 +122,7 @@ dir when one is set.
 | Variable | Default |
 | --- | --- |
 | `ANCHOR_WATCH_FILE` | `data/anchor_watch.json` |
+| `ANCHOR_PLACEMARKS_FILE` | `data/anchor_placemarks.json` |
 | `ROUTES_FILE` | `data/routes.json` |
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |

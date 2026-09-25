@@ -49,6 +49,12 @@ instrument network accepted Raise but removing the local watch failed, the
 error says so and Raise can be retried. Restarting Helmcentral does not
 republish or clear anchor state.
 
+If the saved watch itself can't be read back after a restart or an update —
+the file behind it is damaged — the tile and this page say so plainly rather
+than guessing at a position or showing a watch that isn't really there. Every
+other alarm on the boat keeps running. Drop the anchor again to start a fresh
+watch in its place.
+
 ## Automatic raise
 
 The server raises the watch for you when you motor away. It runs whether or

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -283,7 +284,8 @@ func TestLoadPlacemarks_DiscardsFileWhenNoWatchActive(t *testing.T) {
 func TestLoadPlacemarks_CorruptFileLogsWarning(t *testing.T) {
 	placemarkTestEnv(t)
 	activateAnchorWatch(t)
-	if err := os.WriteFile(anchorPlacemarksFilePath(), []byte("{not json"), 0o600); err != nil {
+	path := anchorPlacemarksFilePath()
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,8 +296,13 @@ func TestLoadPlacemarks_CorruptFileLogsWarning(t *testing.T) {
 
 	loadAnchorPlacemarks()
 
-	if !strings.Contains(buf.String(), "anchor placemarks") {
-		t.Fatalf("expected a warning naming the placemark file, got log %q", buf.String())
+	// The specific parse warning, not just any mention of "anchor
+	// placemarks" — a loose Contains here would pass just as well against
+	// the unrelated "reading" warning the missing-file/permission-error
+	// branch logs, which names a different failure entirely.
+	want := fmt.Sprintf("anchor placemarks not restored: parsing %s:", path)
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("expected the parse warning %q, got log %q", want, buf.String())
 	}
 	_, resp := listPlacemarks(t)
 	if n := len(placemarkList(t, resp)); n != 0 {
