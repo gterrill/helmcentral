@@ -291,8 +291,11 @@ export interface AnchorWatchMapProps {
   // a past anchorage must only be discarded once "no watch" is actually
   // confirmed — discarding it on the ambiguous case would flash the vessel
   // position and then jump back to the stored centre the moment the poll
-  // resolves active. Defaults to true so every existing caller/test that
-  // never considered this ambiguity keeps mounting exactly as before.
+  // resolves active. Defaults to false (not known) per the repo's fail-fast
+  // policy: a caller that forgets to wire this up gets the safe "still
+  // waiting to hear back" behaviour (trust a stored centre, don't discard it
+  // yet) rather than the default silently asserting a confirmed "no anchor"
+  // it has no basis for (code-review finding, PR #30).
   anchorStateKnown?: boolean
   radiusMeters: number
   depthMeters: number | null
@@ -368,7 +371,7 @@ export function AnchorWatchMap({
   anchorLat,
   anchorLon,
   anchorSetAt = null,
-  anchorStateKnown = true,
+  anchorStateKnown = false,
   radiusMeters,
   depthMeters,
   currentDriftKts,
@@ -873,6 +876,18 @@ export function AnchorWatchMap({
   // ambiguity resolves.
   const anchorStateWasKnownRef = useRef(anchorStateKnown)
 
+  // Read fresh off a ref rather than closed over directly (same reasoning as
+  // recomputeAisLabelSuppression's own vesselPositionRef further down, which
+  // this ref now also backs): the transition below only cares about
+  // anchorStateKnown/hasAnchor, but vesselLat/vesselLon used to sit in its
+  // dependency array too, which meant this effect tore down and re-created
+  // on every GPS tick even though it returns immediately on all but the one
+  // render where the transition actually happens (code-review finding).
+  // Updated unconditionally every render, so it's always current by the time
+  // the transition effect reads it.
+  const vesselPositionRef = useRef({ lat: vesselLat, lon: vesselLon })
+  vesselPositionRef.current = { lat: vesselLat, lon: vesselLon }
+
   // The mount-time gate above only helps a fresh mount. A map that was
   // already on screen while the first poll was in flight — trusting a
   // stored centre because the ambiguous null hadn't resolved yet — needs
@@ -892,8 +907,9 @@ export function AnchorWatchMap({
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
     }
-    mapRef.current?.easeTo({ center: [vesselLon, vesselLat], duration: 600 })
-  }, [anchorStateKnown, hasAnchor, vesselLat, vesselLon])
+    const { lat, lon } = vesselPositionRef.current
+    mapRef.current?.easeTo({ center: [lon, lat], duration: 600 })
+  }, [anchorStateKnown, hasAnchor])
 
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
@@ -921,10 +937,8 @@ export function AnchorWatchMap({
   // between two colliding AIS labels), but only changes which of two
   // already-colliding vessels wins — it does not, on its own, justify
   // re-measuring the overlay panels or re-rendering on every tick, so it's
-  // read fresh off a ref (kept current every render, no effect needed)
-  // rather than triggering the recompute itself.
-  const vesselPositionRef = useRef({ lat: vesselLat, lon: vesselLon })
-  vesselPositionRef.current = { lat: vesselLat, lon: vesselLon }
+  // read fresh off vesselPositionRef (declared above, kept current every
+  // render, no effect needed) rather than triggering the recompute itself.
 
   const [suppressedAisLabelIds, setSuppressedAisLabelIds] = useState<Set<string>>(new Set())
 

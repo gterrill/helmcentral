@@ -186,6 +186,31 @@ describe('AnchorWatchMap follows the anchor session', () => {
   })
 })
 
+// code-review finding (PR #30): anchorStateKnown used to default to true,
+// so a caller that forgot to wire up useAnchorWatch's `loaded` silently got
+// "confirmed no anchor" instead of the safe "still waiting to hear back".
+// Defaulting to false means the ambiguous case is the one a careless mount
+// gets, and a stored centre survives it exactly as if the caller had passed
+// anchorStateKnown={false} explicitly.
+describe('AnchorWatchMap: anchorStateKnown defaults to false (not known)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    easeToMock.mockClear()
+    lastInitialViewState = null
+  })
+
+  it('trusts a stored centre at mount when the caller omits anchorStateKnown entirely', () => {
+    storeCentre(-20.2900, 148.9600, FIRST_SESSION)
+
+    render(
+      mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null, anchorStateKnown: undefined }),
+    )
+
+    expect(lastInitialViewState).toMatchObject({ latitude: -20.2900, longitude: 148.9600 })
+    expect(easeToMock).not.toHaveBeenCalled()
+  })
+})
+
 // The operator's actual symptom: with no active anchor, a stored centre from
 // a past anchorage used to win regardless, so the map opened on last night's
 // bay instead of the boat — right when the operator is about to drop a fresh
