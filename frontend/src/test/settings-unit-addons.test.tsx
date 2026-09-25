@@ -53,10 +53,13 @@ describe('settings unit addons', () => {
       const windage = screen.getByLabelText('Windage area in square metres')
       expect(within(windage.closest('[data-slot="input-group"]') as HTMLElement).getByText('m²')).toBeInTheDocument()
 
-      // "m" appears four times on this section (bow roller, GPS-from-bow, LOA,
-      // chain onboard), hence scoping each lookup above rather than a single
-      // page-wide getByText.
-      expect(screen.getAllByText('m')).toHaveLength(4)
+      const minClearanceAtLow = screen.getByLabelText('Minimum clearance at low water in metres')
+      expect(within(minClearanceAtLow.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
+
+      // "m" appears five times on this section (bow roller, GPS-from-bow, LOA,
+      // chain onboard, clearance at low water), hence scoping each lookup
+      // above rather than a single page-wide getByText.
+      expect(screen.getAllByText('m')).toHaveLength(5)
     })
 
     it('still fires onChange with the raw string value when typing into an addon-wrapped input', () => {

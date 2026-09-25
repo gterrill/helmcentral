@@ -13,6 +13,7 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { AnchorConfig } from '@/config/app-config'
+import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
@@ -102,6 +103,12 @@ interface AnchorWatchTileProps {
   // three surfaces in agreement.
   planningDepthM: number | null
   planningTideHeightFt: number | null
+  // The vessel's maximum design draft (ADR 0135), read from SignalK. Feeds
+  // the low-water clearance warning below alongside anchorConfig's own
+  // minClearanceAtLowM margin - null when SignalK publishes none, which
+  // reads as the warning's own "No draft from the boat" state rather than a
+  // silent zero-draft substitution.
+  vesselDraftM: number | null
   /**
    * False on the wall kiosk (ADR: kiosk maps are display-only) - passed
    * straight through to AnchorWatchMap, which then hides its own on-map
@@ -155,6 +162,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   selectedWindBandId,
   planningDepthM,
   planningTideHeightFt,
+  vesselDraftM,
   interactive = true,
   lastUpdateAgeS,
 }: AnchorWatchTileProps) {
@@ -234,6 +242,22 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
       anchorConfig,
       selectedWindBandId,
     ],
+  )
+
+  // Anchor Watch's low-water clearance warning (ADR 0135): projects the
+  // depth at the boat's current position (the live sounder, not the
+  // resolved planning depth rodeResult above uses) forward to the next low
+  // tide and compares it against the operator's configured margin.
+  const lowWaterClearance = useMemo(
+    () =>
+      computeLowWaterClearance({
+        depthM: depthMeters,
+        tide,
+        draftM: vesselDraftM,
+        marginM: anchorConfig.minClearanceAtLowM,
+        now: new Date(),
+      }),
+    [depthMeters, tide, vesselDraftM, anchorConfig.minClearanceAtLowM],
   )
 
   return (
@@ -322,6 +346,32 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
             Unsilence
           </Button>
         </div>
+      )}
+
+      {/* Anchor Watch's low-water clearance warning (ADR 0135): the depth at
+          the boat's current position, projected to the next low tide,
+          against the operator's configured margin. A display warning, not
+          an alarm rule — quiet even when too_shallow, unlike the drag
+          strips above. */}
+      {lowWaterClearance.status === 'too_shallow' && (
+        <div
+          data-testid="low-water-clearance"
+          className="mt-2 truncate rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+        >
+          Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at{' '}
+          {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+        </div>
+      )}
+      {lowWaterClearance.status === 'ok' && (
+        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-[11px] text-muted-foreground">
+          {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
+          {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+        </p>
+      )}
+      {lowWaterClearance.status === 'unknown' && (
+        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-[11px] text-muted-foreground">
+          {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
+        </p>
       )}
 
       {/* Promoted out of the map (design critique item 4): the operator

@@ -36,6 +36,7 @@ describe('app-config', () => {
       windageAreaM2: 35,
       gpsFromBowM: 0,
       loaM: 0,
+      minClearanceAtLowM: 0.5,
     })
   })
 

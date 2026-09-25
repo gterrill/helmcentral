@@ -155,6 +155,43 @@ describe('useAppConfig', () => {
     await waitFor(() => expect(result.current.anchor.gpsFromBowM).toBe(8.2))
   })
 
+  // min_clearance_at_low_m (ADR 0135) feeds the Anchor Watch tile's
+  // low-water clearance warning. Same "0 is meaningful, not absent" rule as
+  // gps_from_bow_m above — a zero margin means "warn only once the keel
+  // would touch," not "unset."
+  it('defaults min_clearance_at_low_m to 0.5 when absent', async () => {
+    vi.stubGlobal('fetch', settingsResponse({ anchor: {} }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.anchor.minClearanceAtLowM).toBe(0.5)
+  })
+
+  it('preserves an explicit min_clearance_at_low_m of 0 rather than treating it as unset', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { min_clearance_at_low_m: 0, loa_m: 12 },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await waitFor(() => expect(result.current.anchor.loaM).toBe(12))
+
+    expect(result.current.anchor.minClearanceAtLowM).toBe(0)
+  })
+
+  it('applies a configured non-default min_clearance_at_low_m', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { min_clearance_at_low_m: 0.8 },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.anchor.minClearanceAtLowM).toBe(0.8))
+  })
+
   it('ignores malformed values rather than rendering nonsense', async () => {
     vi.stubGlobal('fetch', settingsResponse({
       units: 'furlongs',

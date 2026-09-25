@@ -1272,6 +1272,7 @@ export function App() {
   const {
     depth,
     vesselLengthOverallM,
+    vesselDraftM,
     currentDriftKts,
     currentSetDeg,
     currentDriftImpactKts,
@@ -2121,6 +2122,7 @@ export function App() {
             planningDepthM={resolvedPlanningDepthM}
             planningTideHeightFt={resolvedPlanningTideHeightFt}
             interactive={!isDisplay}
+            vesselDraftM={vesselDraftM}
           />
         )
       case 'tanks':
@@ -2937,6 +2939,7 @@ export function App() {
               tide={tide}
               anchorConfig={anchorConfig}
               vesselLengthOverallM={vesselLengthOverallM}
+              vesselDraftM={vesselDraftM}
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
               onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}

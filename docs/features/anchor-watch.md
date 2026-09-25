@@ -87,6 +87,42 @@ confirm it, the server logs it and won't try again until the conditions
 break and re-form. The watch is still up and the boat is outside the circle,
 so the drag alarm sounds. Raise by hand.
 
+## Low-water clearance warning
+
+Anchor Watch checks the depth under the keel against the next low tide, so a
+spot that looks comfortable right now does not turn into a grounding six
+hours later with nobody watching the sounder.
+
+It takes the live depth reading at the boat's current position, projects it
+forward to the next low tide, and compares what is left under the keel
+against your vessel's draft and the margin you set in Settings → Anchor
+Watch (**Clearance at Low Water**, 0.5 m by default). When the water left at
+that point would be less than your margin, the tile and the full-page anchor
+watch view show a shallow-water warning naming the shortfall and the time of
+the next low. When there is enough water, the same line quietly shows the
+clearance you can expect instead.
+
+The warning needs a live depth reading, a draft reported by your boat's
+instrument network, and a current tide reading. If any of those is missing
+it says so rather than guessing at a number, and it reads correctly through
+a spring low that drops below chart datum, not just down to zero. Depth
+readings used here run slightly shallow of the true figure, on the safe
+side, so this warning tends to sound before the boat actually finds bottom,
+not after.
+
+If the tide feed goes quiet, the warning does not keep computing against
+whatever it last heard. Once a tide reading is more than half an hour old,
+or the low it was pointing at has already come and gone, the tile and the
+full-page view show **Tide forecast out of date** instead of a number, until
+the next tide update lands.
+
+This is a running readout, not an alarm: it does not sound and needs no
+silencing, and it updates continuously as the boat swings and the tide
+moves. Because it reads the boat's position right now, it can flip between
+clear and too-shallow as you swing on the rode without the tide or the
+anchor itself changing at all, and it only looks as far ahead as the next
+low tide, not a lower one that might follow later in the day.
+
 ## The rode planner
 
 A sidebar on the anchor watch page for pay-out and swing-radius planning,

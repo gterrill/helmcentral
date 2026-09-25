@@ -38,6 +38,9 @@ export type SettingsPayload = {
     windage_area_m2?: number
     // ADR 0099: gates the server-side anchor auto-raise watcher.
     auto_raise_on_motoring?: boolean
+    // ADR 0135: water the operator wants under the keel at the next low
+    // tide before Anchor Watch's low-water clearance warning fires.
+    min_clearance_at_low_m?: number
   }
   influxdb?: {
     enabled?: boolean

@@ -14,6 +14,7 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { computeScopeRecommendation } from '@/lib/rode-plan'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
 
@@ -111,6 +112,12 @@ interface AnchorWatchDrawerProps {
   tide: TideToday | null
   anchorConfig: AnchorConfig
   vesselLengthOverallM: number | null
+  // The vessel's maximum design draft (ADR 0135), read from SignalK. Feeds
+  // the low-water clearance warning alongside anchorConfig's own
+  // minClearanceAtLowM margin - null when SignalK publishes none, which
+  // reads as the warning's own "No draft from the boat" state rather than a
+  // silent zero-draft substitution.
+  vesselDraftM: number | null
   // Shared with the tile and the Rode Planner (App.tsx owns the state) so
   // all three plan against the same forecast band. Null when there's no
   // explicit pick — computeScopeRecommendation falls back to the live seed.
@@ -174,6 +181,7 @@ export function AnchorWatchDrawer({
   tide,
   anchorConfig,
   vesselLengthOverallM,
+  vesselDraftM,
   windBandId,
   onWindBandChange,
   onUpdateRodeAndConditions,
@@ -293,6 +301,22 @@ export function AnchorWatchDrawer({
     ],
   )
 
+  // Anchor Watch's low-water clearance warning (ADR 0135): projects the
+  // depth at the boat's current position (the live sounder, not the
+  // resolved planning depth scopeRecommendation above uses) forward to the
+  // next low tide and compares it against the operator's configured margin.
+  const lowWaterClearance = useMemo(
+    () =>
+      computeLowWaterClearance({
+        depthM: depthMeters,
+        tide,
+        draftM: vesselDraftM,
+        marginM: anchorConfig.minClearanceAtLowM,
+        now: new Date(),
+      }),
+    [depthMeters, tide, vesselDraftM, anchorConfig.minClearanceAtLowM],
+  )
+
   return (
     <div className="flex h-full flex-col gap-3">
       {/* The backend puts a damaged anchor_watch.json into an explicit error
@@ -318,6 +342,31 @@ export function AnchorWatchDrawer({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {/* Anchor Watch's low-water clearance warning (ADR 0135): the depth
+              at the boat's current position, projected to the next low
+              tide, against the operator's configured margin. A display
+              warning, not an alarm rule. */}
+          {lowWaterClearance.status === 'too_shallow' && (
+            <div
+              data-testid="low-water-clearance"
+              className="truncate rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+            >
+              Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at{' '}
+              {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </div>
+          )}
+          {lowWaterClearance.status === 'ok' && (
+            <p data-testid="low-water-clearance" className="truncate px-1 text-[11px] text-muted-foreground">
+              {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
+              {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </p>
+          )}
+          {lowWaterClearance.status === 'unknown' && (
+            <p data-testid="low-water-clearance" className="truncate px-1 text-[11px] text-muted-foreground">
+              {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
+            </p>
+          )}
+
           {/* Same promotion as anchor-watch-tile.tsx's KPI stack, and for
               the same reason: the map's own metric overlay dropped its
               Distance row (design critique item 1, it duplicated this),

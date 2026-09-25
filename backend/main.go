@@ -66,7 +66,15 @@ type vesselStateData struct {
 	// branch (ADR 0047). It carries the lookupNumber -1 sentinel when
 	// unpublished; buildVesselStatePayload nils it out rather than letting
 	// -1 leak into the API response.
-	LengthOverallM        float64
+	LengthOverallM float64
+	// DraftM is the vessel's maximum draft read from SignalK's design.draft
+	// branch (ADR 0135), for the Anchor Watch low-water clearance warning.
+	// Only design.draft.maximum is read - current/minimum/canoe are never
+	// published on the live server this feature was verified against, and
+	// maximum is the only figure that is always the worst case. Carries the
+	// lookupNumber -1 sentinel when unpublished; buildVesselStatePayload
+	// nils it out rather than letting -1 leak into the API response.
+	DraftM                float64
 	CurrentDriftKts       float64
 	CurrentSetDeg         float64
 	CurrentDriftImpactKts *float64
@@ -1087,6 +1095,7 @@ func buildVesselStatePayload() map[string]any {
 		Datetime:             time.Now().UTC(),
 		Depth:                -1,
 		LengthOverallM:       -1,
+		DraftM:               -1,
 		CurrentDriftKts:      -1,
 		CurrentSetDeg:        -1,
 		Latitude:             -1,
@@ -1204,6 +1213,14 @@ func buildVesselStatePayload() map[string]any {
 		lengthOverallM = state.LengthOverallM
 	}
 
+	// Same no-masking-fallback treatment for draft (ADR 0135): an
+	// unpublished draft must reach the frontend as JSON null, not the
+	// internal -1 sentinel.
+	var draftM any
+	if state.DraftM > 0 {
+		draftM = state.DraftM
+	}
+
 	return map[string]any{
 		"name":                           state.Name,
 		"vessel_prefix":                  vesselPrefix,
@@ -1213,6 +1230,7 @@ func buildVesselStatePayload() map[string]any {
 		"depth":                          state.Depth,
 		"depth_last_update_age_s":        state.DepthLastUpdateAge,
 		"length_overall_m":               lengthOverallM,
+		"draft_m":                        draftM,
 		"current_drift_kts":              state.CurrentDriftKts,
 		"current_set_deg":                state.CurrentSetDeg,
 		"current_drift_impact_kts":       state.CurrentDriftImpactKts,

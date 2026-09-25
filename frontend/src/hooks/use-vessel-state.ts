@@ -10,6 +10,7 @@ interface VesselState {
   datetime: string
   depth: number
   length_overall_m: number | null
+  draft_m: number | null
   current_drift_kts: number
   current_set_deg: number
   current_drift_impact_kts: number | null
@@ -55,6 +56,10 @@ export function useVesselState() {
   // is unset (ADR 0047). Backend already nils this out when unpublished, so
   // no >= 0 guard is needed here, unlike the sentinel-bearing fields below.
   const [vesselLengthOverallM, setVesselLengthOverallM] = useState<number | null>(null)
+  // The Anchor Watch low-water clearance warning's draft input (ADR 0135).
+  // Backend already nils this out when unpublished, so no >= 0 guard is
+  // needed here, same as vesselLengthOverallM above.
+  const [vesselDraftM, setVesselDraftM] = useState<number | null>(null)
   const [currentDriftKts, setCurrentDriftKts] = useState<number | null>(null)
   const [currentSetDeg, setCurrentSetDeg] = useState<number | null>(null)
   const [currentDriftImpactKts, setCurrentDriftImpactKts] = useState<number | null>(null)
@@ -118,6 +123,7 @@ export function useVesselState() {
       }
 
       setVesselLengthOverallM(typeof data.length_overall_m === 'number' ? data.length_overall_m : null)
+      setVesselDraftM(typeof data.draft_m === 'number' ? data.draft_m : null)
 
       setCurrentDriftKts(typeof data.current_drift_kts === 'number' && data.current_drift_kts >= 0 ? data.current_drift_kts : null)
       setCurrentSetDeg(typeof data.current_set_deg === 'number' && data.current_set_deg >= 0 ? data.current_set_deg : null)
@@ -213,6 +219,7 @@ export function useVesselState() {
     positionLastUpdateAgeS,
     windLastUpdateAgeS,
     vesselLengthOverallM,
+    vesselDraftM,
     currentDriftKts,
     currentSetDeg,
     currentDriftImpactKts,

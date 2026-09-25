@@ -255,6 +255,16 @@ func respondJSONWithETag(c echo.Context, status int, etag string, payload any) e
 	return c.JSON(status, payload)
 }
 
+// noTideExtremeHeightFt is what tideToday reports for HighTideHeightFt or
+// LowTideHeightFt when no future extreme of that kind turns up in the
+// provider's list - the same -1 "not published" convention useTideToday
+// (frontend) and this file's other weather sentinels already use. A bare 0
+// used to stand in for this and was indistinguishable from a real 0.0 m
+// extreme, both to the code that filled it in (see the found-flags below)
+// and to a frontend reader that took height 0 as "there is a low, at chart
+// datum, right now" and warned about it.
+const noTideExtremeHeightFt = -1.0
+
 func tideToday(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	settings, err := readSettings(settingsPath)
@@ -293,24 +303,35 @@ func tideToday(c echo.Context) error {
 		CurrentTideHeightFt: result.CurrentHeightM * metersToFeet,
 		TideDirection:       result.Direction,
 		HighTideTime:        now,
+		HighTideHeightFt:    noTideExtremeHeightFt,
 		LowTideTime:         now.Add(24 * time.Hour),
+		LowTideHeightFt:     noTideExtremeHeightFt,
 		TidalPhase:          tidalPhase,
 		DoubleHighToday:     doubleHigh,
 		DoubleLowToday:      doubleLow,
 	}
 
+	// Explicit found flags, not a `== 0` check on the height: a real 0.0 m
+	// extreme (the tide sitting exactly at chart datum) is valid data, and
+	// treating it as "not found yet" let the *next* extreme in the list
+	// overwrite it. The frontend's -1 sentinel (useTideToday) fills
+	// HighTideHeightFt/LowTideHeightFt above for whichever one never turns up.
+	foundHigh := false
+	foundLow := false
 	for _, extreme := range result.Extremes {
 		if !extreme.Time.After(now) {
 			continue
 		}
-		if extreme.High && state.HighTideHeightFt == 0 {
+		if extreme.High && !foundHigh {
 			state.HighTideTime = extreme.Time
 			state.HighTideHeightFt = extreme.HeightM * metersToFeet
-		} else if !extreme.High && state.LowTideHeightFt == 0 {
+			foundHigh = true
+		} else if !extreme.High && !foundLow {
 			state.LowTideTime = extreme.Time
 			state.LowTideHeightFt = extreme.HeightM * metersToFeet
+			foundLow = true
 		}
-		if state.HighTideHeightFt != 0 && state.LowTideHeightFt != 0 {
+		if foundHigh && foundLow {
 			break
 		}
 	}

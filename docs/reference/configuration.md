@@ -113,6 +113,15 @@ to the plugin's own allowlist file; see
 [Provider plugins](plugins.md#plugin-declared-settings) and the developer
 documentation for how.
 
+### Anchor Watch
+
+`anchor.min_clearance_at_low_m` in `settings.yaml` (or **Clearance at Low
+Water** under Settings → Anchor Watch) is the water, in metres, Anchor
+Watch's low-water clearance warning wants left under the keel at the next
+low tide before it warns. There is no environment-variable override. It
+defaults to `0.5` and accepts zero (a deliberate "warn only once the keel
+would touch") but not a negative value.
+
 ### State paths
 
 Each of these overrides one file or directory and takes precedence over

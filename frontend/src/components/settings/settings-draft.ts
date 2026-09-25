@@ -49,6 +49,10 @@ export interface RegularSettingsDraft {
   // boolean, not a string, unlike the numeric anchor fields above - there is
   // no partial-typing UX to preserve for a switch.
   autoRaiseOnMotoring: boolean
+  // ADR 0135: water the operator wants under the keel at the next low tide
+  // before Anchor Watch's low-water clearance warning fires. Zero is a
+  // meaningful explicit value (same as gpsFromBowM below), not an absent one.
+  minClearanceAtLowM: string
   influxdbEnabled: boolean
   influxdbUrl: string
   influxdbOrg: string
@@ -88,6 +92,9 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   // Matches the server's own default (buildSettingsPayload, ADR 0099): the
   // feature ships on until the operator explicitly turns it off.
   autoRaiseOnMotoring: true,
+  // Matches the server's own default (buildSettingsPayload, ADR 0135): a
+  // generic 0.5m seamanship margin, not vessel-specific.
+  minClearanceAtLowM: '0.5',
   influxdbEnabled: false,
   authMode: 'none',
   influxdbUrl: '',
@@ -170,6 +177,12 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.anchor?.auto_raise_on_motoring === 'boolean') {
     draft.autoRaiseOnMotoring = settings.anchor.auto_raise_on_motoring
   }
+  // min_clearance_at_low_m: 0 is a meaningful explicit value ("warn only
+  // once the keel would touch"), not an absent one, same as gps_from_bow_m
+  // above - it must hydrate the same as any other number here.
+  if (typeof settings.anchor?.min_clearance_at_low_m === 'number') {
+    draft.minClearanceAtLowM = String(settings.anchor.min_clearance_at_low_m)
+  }
 
   if (typeof settings.influxdb?.enabled === 'boolean') draft.influxdbEnabled = settings.influxdb.enabled
   if (settings.auth?.mode === 'signalk' || settings.auth?.mode === 'none') draft.authMode = settings.auth.mode
@@ -239,6 +252,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.scopeMethod !== b.scopeMethod) return false
   if (a.windageAreaM2 !== b.windageAreaM2) return false
   if (a.autoRaiseOnMotoring !== b.autoRaiseOnMotoring) return false
+  if (a.minClearanceAtLowM !== b.minClearanceAtLowM) return false
   if (a.influxdbEnabled !== b.influxdbEnabled) return false
   if (a.authMode !== b.authMode) return false
   if (a.influxdbUrl !== b.influxdbUrl) return false
@@ -314,6 +328,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       scope_method: draft.scopeMethod,
       windage_area_m2: parseNumber(draft.windageAreaM2, 35),
       auto_raise_on_motoring: draft.autoRaiseOnMotoring,
+      min_clearance_at_low_m: parseNonNegativeNumber(draft.minClearanceAtLowM, 0.5),
     },
     influxdb: {
       enabled: draft.influxdbEnabled,

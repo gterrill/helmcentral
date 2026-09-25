@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -429,6 +430,84 @@ func TestUpdateSettings_RoundTripsAutoRaiseOnMotoring(t *testing.T) {
 	}
 	if got := buildSettingsPayload(saved).Anchor.AutoRaiseOnMotoring; !got {
 		t.Fatalf("expected anchor.auto_raise_on_motoring to round-trip as true, got %v", got)
+	}
+}
+
+// anchor.min_clearance_at_low_m (ADR 0135) is the water the operator wants
+// under the keel at the next low tide before Anchor Watch's low-water
+// clearance warning fires. Round-tripped THROUGH the handler, same reasoning
+// as TestUpdateSettings_RoundTripsAutoRaiseOnMotoring above: a key left out
+// of updateSettingsHandler's wholesale anchor-map rebuild is silently
+// dropped from every future save.
+func TestUpdateSettings_RoundTripsAnchorMinClearanceAtLowM(t *testing.T) {
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Anchor.MinClearanceAtLowM = 0.8
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Anchor.MinClearanceAtLowM; got != 0.8 {
+		t.Fatalf("expected anchor.min_clearance_at_low_m to round-trip as 0.8, got %v", got)
+	}
+
+	// Zero is a deliberate, valid choice (warn only once the keel is at the
+	// seabed), not the same as "unset" - it must round-trip too, not get
+	// silently replaced by the default the way an absent key would.
+	code, _ = postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Anchor.MinClearanceAtLowM = 0
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	saved, err = readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Anchor.MinClearanceAtLowM; got != 0 {
+		t.Fatalf("expected anchor.min_clearance_at_low_m to round-trip as 0, got %v", got)
+	}
+}
+
+// An install that has never set it reads as the generic 0.5m seamanship
+// margin, not zero.
+func TestSettingsPayload_DefaultsAnchorMinClearanceAtLowMToHalfMetre(t *testing.T) {
+	if got := buildSettingsPayload(map[string]any{}).Anchor.MinClearanceAtLowM; got != 0.5 {
+		t.Fatalf("missing anchor.min_clearance_at_low_m should default to 0.5, got %v", got)
+	}
+}
+
+func TestSettingsPayload_NormalizesNegativeMinClearanceAtLowMToDefault(t *testing.T) {
+	req := settingsPayload{}
+	req.Anchor.MinClearanceAtLowM = -0.2
+	if got := normalizeSettingsPayload(req).Anchor.MinClearanceAtLowM; got != 0.5 {
+		t.Fatalf("negative anchor.min_clearance_at_low_m should normalize to the 0.5 default, got %v", got)
+	}
+}
+
+func TestSettingsPayload_NormalizesNonFiniteMinClearanceAtLowMToDefault(t *testing.T) {
+	cases := map[string]float64{
+		"NaN":  math.NaN(),
+		"+Inf": math.Inf(1),
+		"-Inf": math.Inf(-1),
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := settingsPayload{}
+			req.Anchor.MinClearanceAtLowM = value
+			if got := normalizeSettingsPayload(req).Anchor.MinClearanceAtLowM; got != 0.5 {
+				t.Fatalf("non-finite (%s) anchor.min_clearance_at_low_m should normalize to the 0.5 default, got %v", name, got)
+			}
+		})
 	}
 }
 
