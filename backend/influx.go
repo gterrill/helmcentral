@@ -487,8 +487,20 @@ func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop tim
 		filter += fmt.Sprintf(" and r.source == %s", sourceLiteral)
 	}
 
+	// timeSrc: "_start" - unlike every other aggregateWindow call in this
+	// file, this one feeds computePathHistoryGaps (assistant_diagnostics.go),
+	// which checks presence by truncating each point's own timestamp down to
+	// a bucket boundary and comparing it against the SAME boundary the gap
+	// loop steps through starting at range.start. Flux's own default
+	// (timeSrc: "_stop") labels every bucket with its STOP time instead, one
+	// whole bucket width later than range.start's own boundary - so with the
+	// default, the gap loop's very first checked boundary would never have a
+	// matching point (the real first bucket lands one width later), reporting
+	// a false one-bucket gap at the start of every range regardless of actual
+	// data completeness. Requesting "_start" instead makes each bucket's
+	// reported time the boundary computePathHistoryGaps already assumes.
 	return fmt.Sprintf(
-		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> aggregateWindow(every: %s, fn: %s, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
 		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, every, aggFn,
 	), nil
 }

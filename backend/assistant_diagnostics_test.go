@@ -669,6 +669,52 @@ func TestExecuteGetPathHistory_ComputesOverallStatsAndFirstLastSeen(t *testing.T
 	}
 }
 
+// TestExecuteGetPathHistory_NoGapsWhenFullyPopulated is the regression test
+// for the timeSrc: "_start" fix in buildInfluxPathStatFlux (a code-review
+// finding, 2026-09-25): InfluxDB's aggregateWindow labels each bucket with
+// its STOP time by default, one whole bucket width later than
+// computePathHistoryGaps' own boundary convention (a point's timestamp
+// truncated down, starting from range.start) - without requesting
+// timeSrc: "_start" explicitly, this test would see a spurious gap_count of
+// 1 (a false gap covering the range's first bucket) even though every
+// bucket in [start, stop) has a point, because none of the stub's points
+// would land on the boundary the gap loop's first step checks.
+func TestExecuteGetPathHistory_NoGapsWhenFullyPopulated(t *testing.T) {
+	now := time.Date(2026, 9, 25, 3, 0, 0, 0, time.UTC)
+	start := now.Add(-time.Hour) // hours_back:1 -> "1m" bucket width
+	width := time.Minute
+
+	// One point at every bucket START boundary from start up to (but not
+	// including) stop - exactly what a fully-populated real InfluxDB series
+	// looks like once buildInfluxPathStatFlux's timeSrc: "_start" request is
+	// honoured.
+	var pts []telemetryPoint
+	for t := start; t.Before(now); t = t.Add(width) {
+		pts = append(pts, telemetryPoint{Timestamp: t, Value: 1})
+	}
+	series := map[string][]telemetryPoint{"min": pts, "mean": pts, "max": pts}
+
+	deps := assistantToolDeps{
+		now:                   func() time.Time { return now },
+		vesselState:           func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat: stubInfluxPathHistoryStat(series, nil),
+	}
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","hours_back":1}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.GapCount != 0 {
+		t.Errorf("expected gap_count 0 for a fully-populated range, got %d: %+v", result.GapCount, result.Gaps)
+	}
+	if len(result.Gaps) != 0 {
+		t.Errorf("expected no gaps reported, got %+v", result.Gaps)
+	}
+}
+
 func TestExecuteGetPathHistory_NoDataAddsExplicitNote(t *testing.T) {
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	deps := assistantToolDeps{
@@ -745,6 +791,16 @@ func TestBuildInfluxPathStatFlux_IncludesSourceFilterOnlyWhenGiven(t *testing.T)
 	}
 	if !strings.Contains(withSource, `fn: mean`) {
 		t.Errorf("expected fn: mean, got:\n%s", withSource)
+	}
+	// timeSrc: "_start" is load-bearing, not cosmetic: Flux's own default
+	// (timeSrc: "_stop") labels each bucket with its STOP time, one whole
+	// bucket width later than what computePathHistoryGaps assumes when it
+	// truncates a point's own timestamp down to a boundary - without this,
+	// every get_path_history call reports a false gap covering the first
+	// bucket of the range, regardless of actual data completeness (see
+	// TestExecuteGetPathHistory_NoGapsWhenFullyPopulated).
+	if !strings.Contains(withSource, `timeSrc: "_start"`) {
+		t.Errorf(`expected aggregateWindow to request timeSrc: "_start", got:\n%s`, withSource)
 	}
 
 	withoutSource, err := buildInfluxPathStatFlux("SignalK_Data", "value", "tanks.fuel.2.currentLevel", "", start, stop, "1m", "max")
