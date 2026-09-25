@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -243,31 +244,31 @@ func TestSilentSourcesStillFiresOnceQuietPastItsOwnScaledCadence(t *testing.T) {
 	}
 }
 
-// TestSilentSourcesDoesNotFireForAConnectTimeBurstFollowedByQuiet is the
-// direct regression case for code review finding 7: the cadence estimate
-// was (Last-First)/(Count-1) across a source's ENTIRE observed history.
-// SignalK's on-connect replay of a source's retained/cached values delivers
-// its whole backlog within milliseconds -- confirmed against the real
-// capture backend/testdata/anomaly/signalk-deltas-2026-09-25.ndjson, whose
-// venus.com.victronenergy.vebus.276 source lands more than 20 separate
-// update blocks inside a 30ms span at connect time before settling into its
-// steady ~1Hz cadence. For a source that instead only reports on genuine
-// change, that burst alone reads as an almost-zero average gap, flooring
-// the scaled threshold right back down to the flat 120s -- so the source
-// reads as "silent" the moment silentSourceWatchAfter elapses, 5 minutes
-// after every single restart, regardless of whether it is actually healthy.
-func TestSilentSourcesDoesNotFireForAConnectTimeBurstFollowedByQuiet(t *testing.T) {
+// TestSilentSourcesFiresForATightlyClusteredButStaleBurst used to be
+// TestSilentSourcesDoesNotFireForAConnectTimeBurstFollowedByQuiet, guarding
+// the opposite outcome under the old, now-removed silentSourceBurstSpread
+// gate (code review finding 8, prior cycle): a burst-then-quiet on-change
+// source's near-zero ARRIVAL-based average gap floored its threshold to the
+// flat 120s and fired 5 minutes after every restart regardless of health.
+// That defect is fixed at its root now -- First/Last come from the source's
+// own declared timestamps (signalk_snapshot.go's applyDelta), not arrival --
+// so a burst this tight is exactly what a source already dead before the
+// backend even started looks like (code review finding, the 2026-09-21
+// YachtDevices gateway outage): there is no other history it will ever get
+// to earn a wider spread from, and it must fire once watched, not hide
+// behind the very tightness of its own last gasp.
+func TestSilentSourcesFiresForATightlyClusteredButStaleBurst(t *testing.T) {
 	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
 	burstAt := now.Add(-6 * time.Minute)
 	sources := []sourceHealth{
-		// The whole 40-update burst landed within 30ms of connecting, six
-		// minutes ago -- past silentSourceWatchAfter and silentSourceMinUpdates
-		// on the burst alone -- and the source (a switch or alarm state that
-		// only reports on change) has said nothing genuinely new since.
+		// The whole 40-update burst carries declared timestamps within 30ms
+		// of each other, six minutes ago -- past silentSourceWatchAfter and
+		// silentSourceMinUpdates on the burst alone -- and nothing since.
 		{Source: "n2k.switch.bilge-pump", First: burstAt, Last: burstAt.Add(30 * time.Millisecond), Count: 40},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
-		t.Fatalf("expected a connect-time burst not to be mistaken for an established cadence, got %v", got)
+	got := silentSources(sources, now, 2*time.Second, nil)
+	if len(got) != 1 || got[0] != "n2k.switch.bilge-pump" {
+		t.Fatalf("expected a tightly-clustered but stale burst to fire once watched, got %v", got)
 	}
 }
 
@@ -304,6 +305,104 @@ func TestSilentSourcesAgainstCapturedFixture(t *testing.T) {
 	got := silentSources(health, lastDeltaAt, 0, nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no silent sources evaluated at the fixture's own last timestamp, got %v", got)
+	}
+}
+
+// TestApplyDeltaFlagsASourceDeadBeforeBackendStart is the integration
+// regression case for code review finding 1: the 2026-09-21 YachtDevices
+// gateway outage left a source dead well before this backend's next
+// restart. SignalK replays that dead source's whole retained state at
+// connect -- every path arrives "now", but each still carries its own
+// original (long-stale) declared timestamp (signalk_paths.go's pathAge
+// comment: the node's own timestamp survives a replay; arrival time does
+// not). Before this fix, applyDelta tracked sourceSeen's First/Last from
+// arrival alone, so a source whose ENTIRE history is that replay burst
+// never satisfied the old burst-spread gate and was never watched --
+// silent, forever, with nothing on screen to say so. This exercises the
+// real ingestion path (applyDelta -> sourcesFor), not just silentSources in
+// isolation.
+func TestApplyDeltaFlagsASourceDeadBeforeBackendStart(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+
+	const deadSource = "yachtdevices.6"
+	const deadTimestamp = "2026-09-21T10:34:00Z" // the real outage
+	restartAt := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+
+	// The gateway's whole retained tank state, replayed within
+	// milliseconds of this backend's restart, four days later -- 40
+	// distinct readings, each keeping its own long-dead declared timestamp.
+	for i := 0; i < 40; i++ {
+		arrival := restartAt.Add(time.Duration(i) * time.Millisecond)
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{
+				SourceRef: deadSource,
+				Timestamp: deadTimestamp,
+				Values:    []signalKValue{{Path: fmt.Sprintf("tanks.freshWater.%d.currentLevel", i), Value: 0.5}},
+			}},
+		}, arrival)
+	}
+
+	sources := snapshot.sourcesFor(snapshot.selfContext())
+	entry, ok := sources[deadSource]
+	if !ok {
+		t.Fatalf("expected the dead source to be tracked at all")
+	}
+	health := []sourceHealth{{Source: deadSource, First: entry.First, Last: entry.Last, Count: entry.Count}}
+
+	got := silentSources(health, restartAt.Add(45*time.Millisecond), 0, nil)
+	if len(got) != 1 || got[0] != deadSource {
+		t.Fatalf("expected the dead-before-start source flagged silent immediately, got %v (tracked entry=%+v)", got, entry)
+	}
+}
+
+// TestApplyDeltaDoesNotFlagAHealthyOnChangeSourceReplayedAtRestart is the
+// companion integration case: a switch/alarm-state gateway that last
+// genuinely changed a few minutes before an ordinary backend restart must
+// not read as freshly silent just because the restart's replay burst
+// delivered everything within milliseconds of "now" by arrival clock. Its
+// own declared timestamps say it was only quiet a few minutes, well inside
+// the scaled threshold its own on-change cadence earns it -- restarting the
+// backend must never, by itself, make a healthy source look worse than it
+// is.
+func TestApplyDeltaDoesNotFlagAHealthyOnChangeSourceReplayedAtRestart(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+
+	const source = "n2k.switch.panel"
+	restartAt := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+
+	// 31 distinct switch states, each replayed within milliseconds of the
+	// restart by arrival clock but keeping its own last-genuinely-changed
+	// declared timestamp: the oldest 70 minutes before the restart, the
+	// newest only 3 minutes before it -- the same on-change cadence
+	// TestSilentSourcesToleratesASourceThatOnlyReportsOnChange already
+	// accepts at the pure-function level.
+	for i := 0; i < 31; i++ {
+		arrival := restartAt.Add(time.Duration(i) * time.Millisecond)
+		changedAt := restartAt.Add(-70 * time.Minute).Add(time.Duration(i) * (67 * time.Minute / 30))
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{
+				SourceRef: source,
+				Timestamp: changedAt.UTC().Format(time.RFC3339),
+				Values:    []signalKValue{{Path: fmt.Sprintf("electrical.switches.panel.%d.state", i), Value: 1.0}},
+			}},
+		}, arrival)
+	}
+
+	sources := snapshot.sourcesFor(snapshot.selfContext())
+	entry, ok := sources[source]
+	if !ok {
+		t.Fatalf("expected the source to be tracked at all")
+	}
+
+	// Evaluated 6 minutes after the restart -- past silentSourceWatchAfter,
+	// exactly the window the old arrival-based design falsely fired in.
+	evalAt := restartAt.Add(6 * time.Minute)
+	health := []sourceHealth{{Source: source, First: entry.First, Last: entry.Last, Count: entry.Count}}
+	got := silentSources(health, evalAt, 0, nil)
+	if len(got) != 0 {
+		t.Fatalf("expected a healthy on-change source not to false-alarm 6 minutes after an ordinary restart, got %v (tracked entry=%+v)", got, entry)
 	}
 }
 

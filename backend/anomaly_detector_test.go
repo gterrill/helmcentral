@@ -338,6 +338,102 @@ func TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale(t *test
 	}
 }
 
+// TestComputeAnomalyReadingEngineDifferentialSuppressedBySilentSourceNotJustInputValidity
+// is code review finding 7, reopened by finding 1's fix: inputValidity
+// alone judges a path's own ARRIVAL time (snapshot.lastSeen/pathSeen)
+// fresh the instant any update for that exact path arrives -- including a
+// SignalK reconnect replaying a $source's whole retained state, which
+// resets every one of its paths' arrival times to "now" no matter how old
+// the values themselves are. Before finding 1's fix, silentSources judged
+// staleness from arrival time too, so a path could never be BOTH
+// inputValidity-fresh and silentSourceNow-silent at once, and the
+// silent-source half of valid()'s closure (computeAnomalyReading) never
+// actually changed the result -- dead code, per finding 7's own question.
+// Now that silentSources judges a source's own declared SignalK timestamp
+// instead (signalk_snapshot.go's applyDelta), a path whose $source has gone
+// properly silent -- old declared timestamps, replayed with a fresh arrival
+// time every tick -- is exactly this case: inputValidity alone reports it
+// fresh, and only the silentSourceNow check in valid() catches it. The
+// check is kept, not removed.
+func TestComputeAnomalyReadingEngineDifferentialSuppressedBySilentSourceNotJustInputValidity(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+	snapshot := newAnomalyTestSnapshot()
+	trackers := newAnomalyTrackers()
+	steadiness := &twinSteadinessTrackers{}
+
+	// A learned baseline is what makes ANY residual publish at all
+	// (residualQuantity requires learnedOk). Both quantities get one --
+	// oilPressure's is what proves its own absence below is really the
+	// silent-source gate at work, not merely "no baseline to publish
+	// against" (which would hide the residual regardless of validity and
+	// make that assertion pass for the wrong reason).
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {
+				"temperature": {{RPMBucket: 1800, Median: 0, Minutes: 40}},
+				"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}},
+			},
+		},
+	})
+
+	// The gateway that reports port's oilPressure died on 2026-09-21 -- its
+	// last retained value is replayed, carrying that same original
+	// timestamp, on every tick of this test's own simulated restart days
+	// later (the exact shape a SignalK reconnect replay takes).
+	const deadSource = "yachtdevices.dead"
+	const deadTimestamp = "2026-09-21T10:34:00Z"
+	const oilPressurePath = "propulsion.port.oilPressure"
+
+	ticks := int(twinGateMinRunFor.Seconds()) + 5
+	var last anomalyReading
+	var finalAt time.Time
+	for i := 0; i < ticks; i++ {
+		at := anomalyDetectorTestNow.Add(time.Duration(i) * time.Second)
+		finalAt = at
+		for _, engine := range []string{"port", "starboard"} {
+			applyNumeric(snapshot, "vessels.self", "propulsion."+engine+".revolutions", 1800.0/60, at)
+			applyNumeric(snapshot, "vessels.self", "propulsion."+engine+".temperature", 350, at)
+		}
+		applyNumeric(snapshot, "vessels.self", "propulsion.starboard.oilPressure", 385600, at)
+		// port's oilPressure comes only from the dead source: fresh arrival
+		// (at) every tick, but the same long-dead declared timestamp every
+		// single time -- exactly what a reconnect replay looks like.
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{
+				SourceRef: deadSource,
+				Timestamp: deadTimestamp,
+				Values:    []signalKValue{{Path: oilPressurePath, Value: 388100.0}},
+			}},
+		}, at)
+
+		last = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+
+	if !inputValidity(snapshot, oilPressurePath, finalAt) {
+		t.Fatalf("expected inputValidity ALONE to still read this path as fresh (arrival-based) -- that is exactly the gap valid() has to close")
+	}
+
+	oilPath := anomalyEngineResidualPath("port", "oilPressure")
+	if _, ok := last.Values[oilPath]; ok {
+		t.Fatalf("expected no oilPressure residual once its source is silent by declared timestamp, got %v", last.Values[oilPath])
+	}
+
+	// A quantity that does not depend on the dead source still publishes --
+	// the gate is scoped to the one path it actually invalidates, not a
+	// blanket "this tick is untrustworthy".
+	tempPath := anomalyEngineResidualPath("port", "temperature")
+	if _, ok := last.Values[tempPath]; !ok {
+		t.Fatalf("expected the temperature residual (unaffected by the dead source) to still publish, got %+v", last.Values)
+	}
+}
+
 // TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap
 // is the direct regression case for code review finding 8: the per-engine
 // runningFor/coolant conditionTrackers were only ever observe()'d on a tick
