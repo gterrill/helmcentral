@@ -1973,16 +1973,56 @@ func TestFetchSignalKVesselState_WindLastUpdateAgeUnknownWithoutTimestamp(t *tes
 	}
 }
 
+// TestFetchSignalKVesselState_ParsesTrueWindLikeApparent (ADR 0130) proves
+// true wind is parsed with the same shape as apparent wind: value/bare
+// fallback, radian-to-degree conversion, and side derived from the signed
+// angle - but into its own separate fields.
+func TestFetchSignalKVesselState_ParsesTrueWindLikeApparent(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedTrue": {"value": 9.5, "timestamp": %q},
+				"angleTrueWater": {"value": -1.0471975511965976, "timestamp": %q},
+				"directionTrue": {"value": 3.6651914291880923, "timestamp": %q}
+			}
+		}
+	}`, now, now, now, now))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	wantSpeedKts := 9.5 * metersPerSecondToKnots
+	if !approxEqual(state.WindSpeedTrueKts, wantSpeedKts, 0.01) {
+		t.Fatalf("expected true wind speed %.2f kts, got %v", wantSpeedKts, state.WindSpeedTrueKts)
+	}
+	// -1.0472 rad ~= -60°, negative → port, same convention as apparent.
+	if state.WindSideTrue != "port" {
+		t.Fatalf("expected true wind side port for a negative angle, got %q", state.WindSideTrue)
+	}
+	if !approxEqual(state.WindAngleTrueRelativeDeg, 60, 0.5) {
+		t.Fatalf("expected true wind relative angle ~60°, got %v", state.WindAngleTrueRelativeDeg)
+	}
+	if !approxEqual(state.WindAngleTrueDeg, 300, 0.5) {
+		t.Fatalf("expected true wind bow-relative angle ~300° (0-360 form of -60°), got %v", state.WindAngleTrueDeg)
+	}
+	// 3.6652 rad ~= 210°, the compass bearing the wind is blowing FROM.
+	if !approxEqual(state.WindDirectionTrueDeg, 210, 0.5) {
+		t.Fatalf("expected true wind compass direction ~210°, got %v", state.WindDirectionTrueDeg)
+	}
+}
+
 // TestFetchSignalKVesselState_ParsesWindSpeedTrueKts covers the Current
 // Conditions tile's true-wind readout (ADR 0129), mirroring
 // speedApparent's own value/timestamp shape but for
 // environment.wind.speedTrue - the field the live server actually
 // publishes it under, with $source "derived-data".
-//
-// windDataRecent has no speedApparent/angleApparent/wind.timestamp to key
-// off in this fixture, so it falls through to state.Datetime (the payload's
-// own top-level "timestamp"), which is why that field is stamped with a
-// real, current time rather than a fixed fixture date.
 func TestFetchSignalKVesselState_ParsesWindSpeedTrueKts(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
@@ -2013,9 +2053,9 @@ func TestFetchSignalKVesselState_ParsesWindSpeedTrueKts(t *testing.T) {
 // speedApparent's own bare-numeric fallback) and its freshness gate, which
 // is independent of value extraction: a bare numeric leaf carries no
 // sibling "timestamp" of its own (there is nowhere on a bare scalar to hang
-// one), and the true-wind gate takes no other path's timestamp as evidence
-// of freshness (unlike apparent's old state.Datetime fallback). So the
-// value is found, but with no timestamp to prove it current, it still
+// one), and the true-wind gate takes no other leaf's or path's timestamp as
+// evidence of freshness (unlike apparent's old state.Datetime fallback). So
+// the value is found, but with no timestamp to prove it current, it still
 // reports absent (-1) - "found a number" is not the same as "known to be
 // fresh."
 func TestFetchSignalKVesselState_WindSpeedTrueBareValueStillReadsAbsentWithoutItsOwnTimestamp(t *testing.T) {
@@ -2035,6 +2075,87 @@ func TestFetchSignalKVesselState_WindSpeedTrueBareValueStillReadsAbsentWithoutIt
 
 	if state.WindSpeedTrueKts != -1 {
 		t.Fatalf("expected a bare speedTrue value with no timestamp of its own to report absent (-1), got %v", state.WindSpeedTrueKts)
+	}
+}
+
+// TestFetchSignalKVesselState_TrueWindEntirelyBareHasNoRecencySignalStaysSentinel
+// widens TestFetchSignalKVesselState_WindSpeedTrueBareValueStillReadsAbsentWithoutItsOwnTimestamp
+// above to all three true-wind leaves: each is gated on its own timestamp
+// independently (ADR 0130), and a bare number has nowhere to carry one, so
+// a payload with every true-wind leaf bare must leave every field at its
+// sentinel - not be treated as "recent" via the GNSS fix time or the
+// generic environment.wind.timestamp, neither of which this parsing
+// consults.
+func TestFetchSignalKVesselState_TrueWindEntirelyBareHasNoRecencySignalStaysSentinel(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {"wind": {"speedTrue": 6.0, "angleTrueWater": 0.5, "directionTrue": 1.0}}
+	}`, now))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedTrueKts != -1 {
+		t.Fatalf("expected unknown true wind speed (-1) with no timestamp anywhere in the true-wind leaves, got %v", state.WindSpeedTrueKts)
+	}
+	if state.WindAngleTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind angle (-1), got %v", state.WindAngleTrueDeg)
+	}
+	if state.WindDirectionTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind direction (-1), got %v", state.WindDirectionTrueDeg)
+	}
+}
+
+// TestFetchSignalKVesselState_TrueWindAbsentStaysSentinelNotApparent is the
+// fallback-policy regression guard (ADR 0130 / AGENTS.md): a boat with
+// apparent wind but no true-wind source must show unknown true wind, never
+// apparent's numbers borrowed in its place.
+func TestFetchSignalKVesselState_TrueWindAbsentStaysSentinelNotApparent(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 8.0, "timestamp": %q},
+				"angleApparent": {"value": 0.5, "timestamp": %q}
+			}
+		}
+	}`, now, now, now))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedTrueKts != -1 {
+		t.Fatalf("expected unknown true wind speed (-1) when speedTrue is absent, got %v (must not fall back to apparent)", state.WindSpeedTrueKts)
+	}
+	if state.WindAngleTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind angle (-1) when angleTrueWater is absent, got %v", state.WindAngleTrueDeg)
+	}
+	if state.WindAngleTrueRelativeDeg != -1 {
+		t.Fatalf("expected unknown true wind relative angle (-1) when angleTrueWater is absent, got %v", state.WindAngleTrueRelativeDeg)
+	}
+	if state.WindSideTrue != "" {
+		t.Fatalf("expected no true wind side when angleTrueWater is absent, got %q", state.WindSideTrue)
+	}
+	if state.WindDirectionTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind direction (-1) when directionTrue is absent, got %v", state.WindDirectionTrueDeg)
+	}
+
+	// Apparent wind must still have parsed normally - the true-wind block
+	// being absent must not suppress it either.
+	if state.WindSpeedApparentKts <= 0 {
+		t.Fatalf("expected apparent wind speed to still parse normally, got %v", state.WindSpeedApparentKts)
 	}
 }
 
@@ -2066,6 +2187,38 @@ func TestFetchSignalKVesselState_WindSpeedTrueAbsentNeverFallsBackToApparent(t *
 	}
 }
 
+// TestFetchSignalKVesselState_TrueWindStaleTimestampStaysSentinel proves the
+// true-wind recency gate is independent of apparent's: a true-wind reading
+// older than defaultWindMaxAge must read as unknown, not as a frozen stale
+// number.
+func TestFetchSignalKVesselState_TrueWindStaleTimestampStaysSentinel(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	old := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedTrue": {"value": 9.5, "timestamp": %q},
+				"angleTrueWater": {"value": 0.5, "timestamp": %q}
+			}
+		}
+	}`, old, old, old))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedTrueKts != -1 {
+		t.Fatalf("expected unknown true wind speed (-1) for a stale reading, got %v", state.WindSpeedTrueKts)
+	}
+	if state.WindAngleTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind angle (-1) for a stale reading, got %v", state.WindAngleTrueDeg)
+	}
+}
+
 // TestFetchSignalKVesselState_WindSpeedTrueStaleDataReportsAbsent proves the
 // true-wind reading reports absent when nothing at all establishes its
 // freshness (no speedTrue timestamp, and a stale top-level payload
@@ -2086,6 +2239,55 @@ func TestFetchSignalKVesselState_WindSpeedTrueStaleDataReportsAbsent(t *testing.
 
 	if state.WindSpeedTrueKts != -1 {
 		t.Fatalf("expected stale true wind speed to report absent (-1), got %v", state.WindSpeedTrueKts)
+	}
+}
+
+// TestFetchSignalKVesselState_TrueWindStaleTimestampDoesNotFallBackToFreshGNSSDatetime
+// (code-review fix, 2026-09-25) is the regression guard for the bug
+// TestFetchSignalKVesselState_TrueWindStaleTimestampStaysSentinel above did
+// not actually catch: that test also made the top-level "timestamp" (GNSS
+// datetime) old, so the removed `state.Datetime.After(...)` fallback never
+// got a chance to kick in and paper over the stale reading. Here the
+// top-level timestamp is fresh (a live GPS fix) while speedTrue/
+// angleTrueWater/directionTrue's own timestamps are stale - the true-wind
+// fields must still read unknown, since a live GNSS fix says nothing about
+// whether the true-wind instrument itself is still reporting.
+func TestFetchSignalKVesselState_TrueWindStaleTimestampDoesNotFallBackToFreshGNSSDatetime(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	stale := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedTrue": {"value": 9.5, "timestamp": %q},
+				"angleTrueWater": {"value": 0.5, "timestamp": %q},
+				"directionTrue": {"value": 1.0, "timestamp": %q}
+			}
+		}
+	}`, fresh, stale, stale, stale))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedTrueKts != -1 {
+		t.Fatalf("expected unknown true wind speed (-1) despite a fresh GNSS datetime, since speedTrue's own timestamp is stale; got %v", state.WindSpeedTrueKts)
+	}
+	if state.WindAngleTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind angle (-1) despite a fresh GNSS datetime, got %v", state.WindAngleTrueDeg)
+	}
+	if state.WindAngleTrueRelativeDeg != -1 {
+		t.Fatalf("expected unknown true wind relative angle (-1) despite a fresh GNSS datetime, got %v", state.WindAngleTrueRelativeDeg)
+	}
+	if state.WindSideTrue != "" {
+		t.Fatalf("expected no true wind side despite a fresh GNSS datetime, got %q", state.WindSideTrue)
+	}
+	if state.WindDirectionTrueDeg != -1 {
+		t.Fatalf("expected unknown true wind direction (-1) despite a fresh GNSS datetime and a directionTrue value present, since directionTrue's own timestamp is stale too; got %v", state.WindDirectionTrueDeg)
 	}
 }
 
@@ -2129,6 +2331,44 @@ func TestFetchSignalKVesselState_TrueWindGoesStaleIndependentlyOfApparentWind(t 
 	}
 	if state.WindDirectionTrueDeg != -1 {
 		t.Fatalf("expected a 10-minute-stale directionTrue to report absent (-1) even though apparent wind is fresh, got %v", state.WindDirectionTrueDeg)
+	}
+}
+
+// TestFetchSignalKVesselState_FreshApparentStaleTrueGateIndependently proves
+// apparent and true wind are gated by entirely separate recency checks:
+// stale true-wind timestamps must not affect apparent wind parsing, and a
+// fresh top-level GNSS datetime must not revive the stale true reading.
+func TestFetchSignalKVesselState_FreshApparentStaleTrueGateIndependently(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	stale := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 8.0, "timestamp": %q},
+				"angleApparent": {"value": 0.4, "timestamp": %q},
+				"speedTrue": {"value": 9.5, "timestamp": %q},
+				"angleTrueWater": {"value": 0.5, "timestamp": %q}
+			}
+		}
+	}`, fresh, fresh, fresh, stale, stale))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedApparentKts <= 0 {
+		t.Fatalf("expected apparent wind speed to parse normally despite true wind being stale, got %v", state.WindSpeedApparentKts)
+	}
+	if state.WindSpeedTrueKts != -1 {
+		t.Fatalf("expected true wind speed to stay unknown (-1) while stale, independent of apparent being fresh, got %v", state.WindSpeedTrueKts)
+	}
+	if state.WindAngleTrueDeg != -1 {
+		t.Fatalf("expected true wind angle to stay unknown (-1), got %v", state.WindAngleTrueDeg)
 	}
 }
 

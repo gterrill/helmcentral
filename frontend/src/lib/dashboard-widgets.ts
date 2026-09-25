@@ -62,7 +62,7 @@ export type DashboardWidgetId =
 
 export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'vessel': 'Vessel',
-  'wind': 'Apparent Wind',
+  'wind': 'Wind',
   'depth-tide': 'Depth & Tide',
   'position': 'Position',
   'today-now': 'Today & Now',

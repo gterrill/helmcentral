@@ -25,7 +25,7 @@ describe('TileErrorBoundary', () => {
       </TileErrorBoundary>,
     )
 
-    expect(screen.getByText('Apparent Wind')).toBeInTheDocument()
+    expect(screen.getByText('Wind')).toBeInTheDocument()
     expect(screen.getByText('This tile failed to render')).toBeInTheDocument()
     expect(screen.getByText('kaboom')).toBeInTheDocument()
   })
@@ -54,7 +54,7 @@ describe('TileErrorBoundary', () => {
     // thrown error, so assert this boundary made its own call rather than
     // pinning an exact total count.
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Apparent Wind'),
+      expect.stringContaining('Wind'),
       expect.any(Error),
       expect.anything(),
     )

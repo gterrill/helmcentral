@@ -58,7 +58,7 @@ describe('duplicate affordance', () => {
 
   it('offers none for a builtin, which is one per page', () => {
     renderGrid(true)
-    expect(screen.queryByLabelText('Duplicate Apparent Wind tile')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Duplicate Wind tile')).not.toBeInTheDocument()
     expect(screen.getAllByLabelText(/^Duplicate /)).toHaveLength(3)
   })
 

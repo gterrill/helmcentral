@@ -34,7 +34,7 @@ simply cannot tell you what they are doing.
 ## Instrument tiles
 
 Twenty built-in tiles cover the boat's core systems, from Vessel and
-Apparent Wind through Battery & Power, Autopilot and Forecast Conditions. Six more
+Wind through Battery & Power, Autopilot and Forecast Conditions. Six more
 types you build yourself, among them a **gauge** for any single reading with
 no dedicated tile of its own, an **embed** for a URL such as a camera feed or
 a Grafana panel, and a **Nearby map** for the points of interest around the

@@ -98,7 +98,22 @@ parallel figure, not a rename of the first.
 - True wind is aged on its own timestamps, so a stalled true-wind
   calculation reads as dashes even while apparent wind keeps arriving.
 
+**Update (2026-09-25):** the "Apparent Wind tile is unchanged/untouched"
+claim above (Context and this Consequences list) no longer holds.
+[ADR 0130](0130-wind-tile-true-wind-and-north-up.md), merged the same day,
+renamed that tile to Wind and gave it its own Apparent/True toggle reading
+`speedTrue`/`directionTrue` directly (plus `angleTrueWater`, which this ADR
+never touched) - the wind compass no longer shows apparent wind
+exclusively. Everything else here stands as written: the
+`speedTrue`/`directionTrue` parsing and its per-leaf recency gate are now
+shared between the two tiles rather than duplicated (see ADR 0130's own
+Status section), and the Current Conditions tile's own readout, marker and
+arrow are unaffected.
+
 ## Related
 
 - [ADR 0092](0092-wall-display-tiles.md) for the tile's own wall-display
   sizing and forecast-band layout, unchanged here.
+- [ADR 0130](0130-wind-tile-true-wind-and-north-up.md) for the Wind tile's
+  own True/Apparent toggle, which supersedes this ADR's "Apparent Wind tile
+  is unchanged" claim above - see the note at the foot of Consequences.

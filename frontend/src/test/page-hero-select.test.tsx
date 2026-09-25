@@ -27,7 +27,7 @@ describe('PageHeroSelect', () => {
 
   test('lists every widget on the page by its display name', () => {
     render(<PageHeroSelect page={{ id: 'p1', name: 'Anchored', widgets }} onSetHero={vi.fn()} />)
-    expect(screen.getByRole('option', { name: 'Apparent Wind' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Wind' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Tanks' })).toBeInTheDocument()
   })
 

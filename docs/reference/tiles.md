@@ -8,7 +8,7 @@ you put one on a page.
 
 ## Built-in tiles
 
-Twenty: Vessel, Apparent Wind, Depth & Tide, Position, Today & Now,
+Twenty: Vessel, Wind, Depth & Tide, Position, Today & Now,
 Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets, Battery & Power,
 Solar, Alternator, Generator, Switches, Hot Water, Autopilot, Clock, Current
 Conditions and Forecast Conditions. Each is one per page.
@@ -66,6 +66,31 @@ once, unlike the built-ins above:
 | Indicators | A row of status lamps, either pinned as the vessel-wide ribbon or placed on one page. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
 | Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile; layout mode still draws the frame so an embed is never impossible to reconfigure. |
 | Nearby map | Points of interest around the vessel. See [Add a Nearby map](../how-to/add-a-nearby-map.md) and [POI categories](poi-categories.md). |
+
+## Wind fields
+
+Two toggles sit in the Wind tile's header, each remembered on this device:
+
+- **Apparent / True**: apparent wind is what you feel at the helm - the
+  true wind combined with the boat's own motion through it. True wind is
+  what's actually blowing over the water, independent of your speed and
+  heading, which is the number that matters for planning a passage or
+  checking the instruments against a forecast. Switching also swaps the
+  MAX GUST cards to that reading's own gust history, not a converted copy
+  of the other one.
+- **Course Up / North Up**: Course Up keeps the bow at the top of the
+  compass ring and turns the ring as you turn - the everyday view for
+  steering by. North Up holds true north at the top instead and swings a
+  small bow marker around the ring to show your heading, which is useful
+  for relating the wind to a chart or a compass bearing. North Up's bow
+  marker, and the wind arrow in Apparent mode, both need a heading to
+  place; without one they drop from the ring rather than guess, though
+  the centre speed and angle keep reading.
+
+A true-wind source is not fitted on every boat - it needs boat speed and
+heading feeding the wind instrument, not just wind alone. Where it is
+missing or has gone quiet, True mode reads `—` rather than falling back to
+the apparent figures.
 
 ## Battery & Power fields
 

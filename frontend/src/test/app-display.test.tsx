@@ -407,7 +407,7 @@ describe('App at /display/<slug>', () => {
     render(<App />)
 
     expect(screen.getByTestId('display-shell-outer')).toBeInTheDocument()
-    expect(screen.getByText('Apparent Wind - Course Up')).toBeInTheDocument()
+    expect(screen.getByText('Wind')).toBeInTheDocument()
   })
 
   it('shows the signal pill while telemetry is reconnecting', () => {
@@ -488,7 +488,7 @@ describe('App at /display/<slug>', () => {
     expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'ArrowRight' })
-    expect(screen.getByText('Apparent Wind - Course Up')).toBeInTheDocument()
+    expect(screen.getByText('Wind')).toBeInTheDocument()
     expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
 
     // Wraps back to the first page (a step landing on index 0 refetches
@@ -593,7 +593,7 @@ describe('App at / (dashboard authoring)', () => {
     window.history.replaceState({}, '', '/')
     render(<App />)
 
-    expect(screen.getByText('Apparent Wind - Course Up')).toBeInTheDocument()
+    expect(screen.getByText('Wind')).toBeInTheDocument()
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
   })
 

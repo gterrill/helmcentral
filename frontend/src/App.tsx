@@ -1290,8 +1290,12 @@ export function App() {
     windSide,
     windAngleRelativeDeg,
     windSpeedTrueKts,
+    windAngleTrueDeg,
+    windSideTrue,
+    windAngleTrueRelativeDeg,
     windDirectionTrueDeg,
     maxGustKts,
+    maxGustTrueKts,
     maxTrueWindKts1h,
     generatorState,
     generatorManualStart,
@@ -1990,10 +1994,16 @@ export function App() {
             windSide={windSide}
             windAngleRelativeDeg={windAngleRelativeDeg}
             windSpeedApparentKts={windSpeedApparentKts}
+            windSpeedTrueKts={windSpeedTrueKts}
+            windAngleTrueDeg={windAngleTrueDeg}
+            windSideTrue={windSideTrue}
+            windAngleTrueRelativeDeg={windAngleTrueRelativeDeg}
+            windDirectionTrueDeg={windDirectionTrueDeg}
             currentSetDeg={currentSetDeg}
             currentDriftKts={currentDriftKts}
             currentDriftImpactKts={currentDriftImpactKts}
             maxGustKts={maxGustKts}
+            maxGustTrueKts={maxGustTrueKts}
           />
         )
       case 'depth-tide':
