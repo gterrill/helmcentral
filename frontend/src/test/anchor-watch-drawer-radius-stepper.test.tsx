@@ -260,7 +260,10 @@ describe('AnchorWatchDrawer radius stepper', () => {
 
   // code-review finding: a request still in flight (or stuck pending, per
   // the settle bug above) when the anchor is raised belonged to a session
-  // that no longer exists — re-dropping must not resume from it.
+  // that no longer exists — re-dropping must not resume from it. Keyed on
+  // anchorSetAt (the session identity), not anchorState — Raise and a fresh
+  // Drop both carry a genuine anchorSetAt change (null, then a new
+  // timestamp), the same as the real useAnchorWatch hook.
   it('clears a pending target on Raise, so a re-drop starts from the new watch\'s own radius', () => {
     const onRadiusChange = vi.fn().mockReturnValue(new Promise<void>(() => {})) // never resolves
     const { rerender } = render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} onRadiusChange={onRadiusChange} />)
@@ -268,13 +271,39 @@ describe('AnchorWatchDrawer radius stepper', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
     expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
 
-    // Raise: anchorState goes to 'none', the stepper itself unmounts.
-    rerender(<AnchorWatchDrawer {...baseProps} anchorState="none" radiusMeters={20} onRadiusChange={onRadiusChange} />)
-    // Re-drop, at the new watch's own default radius — nothing left over
-    // from the raised session's in-flight request.
-    rerender(<AnchorWatchDrawer {...baseProps} anchorState="set" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+    // Raise: anchorState goes to 'none' and anchorSetAt clears — the
+    // stepper itself unmounts.
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="none" anchorSetAt={null} radiusMeters={20} onRadiusChange={onRadiusChange} />)
+    // Re-drop, a genuinely new session (a fresh anchorSetAt) at the new
+    // watch's own default radius — nothing left over from the raised
+    // session's in-flight request.
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="set" anchorSetAt="2026-08-21T00:00:00Z" radiusMeters={20} onRadiusChange={onRadiusChange} />)
 
     expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('20')
+  })
+
+  // TestSilentSources-style regression for code review finding 5:
+  // pendingRadiusM used to be cleared by an effect keyed on anchorState
+  // itself, but anchorState flips between 'set' and 'dragging' routinely
+  // WITHIN one anchor session (the drag alarm raising and clearing) while
+  // anchorSetAt (the session's own identity) stays put. A radius request
+  // still in flight when that flip happens must not lose its pending
+  // target, or the readout would flash back to the stale server value and
+  // a second press would compute its step from the wrong base.
+  it('keeps a pending target across a set/dragging flip within the same session (same anchorSetAt)', () => {
+    const onRadiusChange = vi.fn().mockReturnValue(new Promise<void>(() => {})) // never resolves
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} anchorState="set" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase alarm radius' }))
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
+
+    // The drag alarm fires, then clears, all within the same session
+    // (anchorSetAt unchanged) — the request above is still in flight.
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="dragging" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
+
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="set" radiusMeters={20} onRadiusChange={onRadiusChange} />)
+    expect(screen.getByTestId('anchor-radius-stepper')).toHaveTextContent('25')
   })
 
   it('resets the base to the server value once a pending request fails, rather than stepping from the failed target', async () => {

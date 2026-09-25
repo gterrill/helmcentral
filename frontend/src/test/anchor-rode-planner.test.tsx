@@ -335,6 +335,83 @@ describe('AnchorRodePlanner — reverts local state on a failed save', () => {
     expect(onUpdateRodeAndConditions.mock.calls[1][1]).toBe('storm')
   })
 
+  // code-review finding 4: Retry used to re-send the exact triple captured
+  // when the PATCH first failed, including the two fields this particular
+  // edit never meant to change (they were only carried along because the
+  // PATCH always writes rode/sea-state/seabed together). If one of those
+  // OTHER fields saved successfully elsewhere before Retry was clicked,
+  // resending the stale triple would silently undo that newer save. Retry
+  // must merge just the field(s) THIS edit changed onto the current server
+  // values at retry time.
+  it('Retry merges the field this edit changed onto the current server values, not a stale snapshot of the whole triple', async () => {
+    const onUpdateRodeAndConditions = vi.fn()
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce(undefined)
+    const props = baseProps({
+      anchorState: 'set', seaState: 'calm', seabedType: 'sand', rodeDeployedM: 20, onUpdateRodeAndConditions,
+    })
+    const { rerender } = render(
+      <SidebarProvider>
+        <AnchorRodePlanner {...props} />
+      </SidebarProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.change(screen.getByLabelText(/rode deployed/i), { target: { value: '25' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    expect(onUpdateRodeAndConditions).toHaveBeenCalledTimes(1)
+    expect(onUpdateRodeAndConditions.mock.calls[0]).toEqual([25, 'calm', 'sand'])
+
+    // A DIFFERENT field (seabed) saves successfully elsewhere in the
+    // meantime — App.tsx feeds the new server value back in as a prop,
+    // exactly as it would after that real PATCH resolves.
+    rerender(
+      <SidebarProvider>
+        <AnchorRodePlanner {...props} seabedType="rock" />
+      </SidebarProvider>,
+    )
+
+    const [, options] = vi.mocked(toast.error).mock.calls[0]
+    const action = (options as unknown as { action: { onClick: () => void } }).action
+    action.onClick()
+
+    expect(onUpdateRodeAndConditions).toHaveBeenCalledTimes(2)
+    // The originally-intended rode change survives, merged onto the NEWER
+    // seabed value — not the stale "sand" this Retry's own closure
+    // originally captured.
+    expect(onUpdateRodeAndConditions.mock.calls[1]).toEqual([25, 'calm', 'rock'])
+  })
+
+  // code-review finding 4 (the planning-depth half): a stale Retry offered
+  // after a rejected keystroke must not resend that rejected figure once a
+  // NEWER edit has already saved successfully — depth has no other field to
+  // merge in, so the fix is to invalidate the stale Retry outright rather
+  // than let it silently overwrite the newer save.
+  it('invalidates a stale planning-depth Retry once a newer save has already gone through', async () => {
+    const onPlanningDepthChange = vi.fn()
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValue(undefined)
+    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTideHeightFt: 2, onPlanningDepthChange })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.change(screen.getByLabelText(/depth/i), { target: { value: '8' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
+
+    const [, options] = vi.mocked(toast.error).mock.calls[0]
+    const staleRetry = (options as unknown as { action: { onClick: () => void } }).action
+
+    // A newer figure is typed and saves successfully before the stale
+    // Retry above is ever clicked.
+    fireEvent.change(screen.getByLabelText(/depth/i), { target: { value: '9' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    expect(onPlanningDepthChange).toHaveBeenCalledTimes(2)
+
+    staleRetry.onClick()
+
+    expect(onPlanningDepthChange).toHaveBeenCalledTimes(2)
+  })
+
   it('reverts the Depth input to the server-resolved figure on a failed PATCH, with Retry', async () => {
     const onPlanningDepthChange = vi.fn().mockRejectedValue(new Error('Connection lost'))
     renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTideHeightFt: 2, onPlanningDepthChange })

@@ -354,3 +354,44 @@ Consequences).
   `anomaly-v1` rule runs on unmodified.
 - [ADR 0083](0083-ages-ride-the-gauge-values-stream.md) for the staleness
   contract `anomalySlotMaxAge` and `inputValidity` both follow.
+
+## Amendment 2026-09-26: silent-source judges declared time, not arrival
+
+A `/code-review high` pass over the follow-up PRs found that
+`silentSources` could never actually catch the failure it was named for.
+The 2026-09-21 dead-ship incident (see Context) involved a house bank the
+detector *could* see; a separate, harder case went unnoticed at the time
+and only turned up here: the YachtDevices N2K gateway feed died outright on
+2026-09-21 at 10:34 local and stayed dead. Restarting this backend at any
+point after that replays the gateway's whole retained state at connect --
+every one of its paths arrives "now" -- but a prior fix for a different
+defect (a burst-then-quiet on-change source flooring its own threshold and
+false-alarming 5 minutes after every restart) had added a gate requiring a
+source's First-to-Last spread to be at least 2 seconds before it counted as
+"watched" at all. A source whose ENTIRE observed history is that one
+connect-time burst never earns that spread, no matter how long the backend
+then runs, so a source already dead before the backend even started was
+never reported silent -- exactly backwards from the point of the check.
+
+`sourceSeenEntry` (`signalk_snapshot.go`) now tracks each `$source`'s
+OLDEST and NEWEST *declared* SignalK timestamp, not wall-clock arrival --
+the same "the node's own timestamp survives a replay; arrival time does
+not" fact `pathAge` already relies on for a single path, generalised here
+to a source's whole history. A dead source's replayed values carry their
+own long-stale timestamps regardless of when they were replayed, so it is
+watched (and, immediately, judged silent) as soon as its declared history
+is old enough -- no longer gated on how tightly a burst happens to be
+clustered by arrival clock. A healthy on-change source's declared
+timestamps stay genuinely recent, so it is unaffected by an ordinary
+restart. The now-pointless `silentSourceBurstSpread` gate is removed
+entirely, since the arrival-compression problem it patched around cannot
+occur once the check reads declared time in the first place.
+
+This also resolves a question the same review raised about
+`computeAnomalyReading`'s `valid` closure: with silence judged by arrival
+time, a path could never be both `inputValidity`-fresh and
+`silentSourceNow`-silent at once, so that check's silent-source half could
+never actually change the result. It is live code now -- a replayed path
+looks fresh to `inputValidity` (arrival-based) while its source is
+correctly judged silent by declared time, and only the `valid` closure's
+own silent-source check catches that gap.

@@ -171,7 +171,13 @@ func frozenVerdict(path string, w frozenWindow, excluded map[string]bool) bool {
 // silentSourceWatchAfter and silentSourceMinUpdates are the plan's "a source
 // counts as watched after 5 min and 30 updates" -- both must hold before an
 // absence of updates from it means anything (a source that has never
-// established a cadence yet has nothing to go silent from).
+// established a cadence yet has nothing to go silent from). Measured
+// against sourceHealth.First, the source's own OLDEST declared SignalK
+// timestamp (applyDelta's job, signalk_snapshot.go) rather than when this
+// process first happened to receive it -- so a source that was already dead
+// before this backend ever started is watched immediately, its declared
+// history already being ancient, rather than only once 5 minutes of wall
+// clock have passed since the replay landed.
 const silentSourceWatchAfter = 5 * time.Minute
 const silentSourceMinUpdates = 30
 
@@ -197,27 +203,28 @@ const silentSourceCadenceMultiple = 10
 // goes quiet at once), not this one source going quiet on its own.
 const silentSourceStreamMaxAge = 10 * time.Second
 
-// silentSourceBurstSpread is the least First-to-Last spread a source's
-// observed history needs before its Count is trusted to represent a genuine
-// publishing cadence, rather than a single burst of retained/cached values
-// SignalK replays within milliseconds of a connection being established
-// (confirmed against the real capture
-// backend/testdata/anomaly/signalk-deltas-2026-09-25.ndjson, whose
-// venus.com.victronenergy.vebus.276 source lands more than 20 update blocks
-// inside 30ms at connect time). Without this, a burst-then-quiet source
-// reads First and Last as both the connection instant, so
-// (Last-First)/(Count-1) comes out near zero no matter how large Count is,
-// flooring the scaled threshold below back down to the flat
-// silentSourceQuietFor and reporting the source silent the moment
-// silentSourceWatchAfter elapses -- 5 minutes after every restart,
-// regardless of whether the source is actually healthy (code review finding
-// 7). 2s is comfortably above any realistic burst's own span and
-// comfortably below any cadence this codebase treats as meaningful.
-const silentSourceBurstSpread = 2 * time.Second
-
 // sourceHealth is one $source's publishing history as of "now" -- the same
 // fields sourceSeenEntry tracks, decoupled so silentSources can be
-// unit-tested without a live snapshot.
+// unit-tested without a live snapshot. First/Last are the source's own
+// OLDEST/NEWEST declared SignalK timestamps, not arrival time -- see
+// sourceSeenEntry's own doc comment (signalk_snapshot.go) for why.
+//
+// There used to be a third gate here, silentSourceBurstSpread: a source's
+// entire observed history is a single connect-time replay burst delivered
+// within milliseconds by arrival clock, and requiring First and Last to
+// differ by at least a couple of seconds was how an earlier fix (code
+// review finding 8, prior cycle) stopped that burst's near-zero average gap
+// from flooring an on-change source's threshold back down to the flat 120s
+// and firing 5 minutes after every restart. That gate is gone: once First/
+// Last come from the source's own declared timestamps rather than arrival,
+// a burst's own declared spread already tells the truth (a healthy source's
+// retained values carry recent timestamps; a dead one's carry old ones), so
+// there is nothing left for an arrival-shaped spread check to usefully add
+// -- and keeping it regressed the opposite way, permanently hiding a source
+// whose only history ever will be that same tight burst (code review
+// finding, the 2026-09-21 YachtDevices gateway outage: a source already
+// dead before this backend started has no OTHER history to ever earn a
+// spread from).
 type sourceHealth struct {
 	Source string
 	First  time.Time
@@ -226,8 +233,8 @@ type sourceHealth struct {
 }
 
 // silentSources reports which of sources have gone silent: watched (per
-// silentSourceWatchAfter/-MinUpdates/-BurstSpread) and quiet for over this
-// source's own threshold, evaluated as of now. That threshold is silentSourceQuietFor's
+// silentSourceWatchAfter/-MinUpdates) and quiet for over this source's own
+// threshold, evaluated as of now. That threshold is silentSourceQuietFor's
 // 120s floor, scaled up to silentSourceCadenceMultiple times the source's
 // own observed average gap (First-to-Last spread divided by update count)
 // when that is slower -- a source watched long enough to judge at all has
@@ -252,8 +259,7 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 			continue
 		}
 		watched := s.Count >= silentSourceMinUpdates &&
-			now.Sub(s.First) >= silentSourceWatchAfter &&
-			s.Last.Sub(s.First) >= silentSourceBurstSpread
+			now.Sub(s.First) >= silentSourceWatchAfter
 		if !watched {
 			continue
 		}

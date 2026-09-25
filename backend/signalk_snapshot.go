@@ -28,9 +28,16 @@ type signalKSnapshot struct {
 // sourceSeenEntry tracks one $source's publishing history within a context:
 // enough for the sensor-health "silent source" check (anomaly_sensor_health.go)
 // to tell a source that has gone quiet mid-stream from one that never
-// established a publishing cadence in the first place. First/Last are wall
-// times the update carrying that $source was received; Count is how many
+// established a publishing cadence in the first place. Count is how many
 // update blocks have carried it.
+//
+// First/Last are the OLDEST and NEWEST declared SignalK "timestamp" this
+// process has seen from that source, not wall-clock arrival time (code
+// review finding, the 2026-09-21 YachtDevices gateway outage) -- see
+// applyDelta's own comment on why. An update with no parseable timestamp of
+// its own falls back to arrival time, the same "arrival is all the evidence
+// there is" contract pathAge/signalKPathSampleAge already use
+// (signalk_paths.go).
 type sourceSeenEntry struct {
 	First time.Time
 	Last  time.Time
@@ -194,10 +201,31 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 		if update.SourceRef != "" && len(update.Values) > 0 {
 			key := d.Context + "|" + update.SourceRef
 			entry := s.sourceSeen[key]
-			if entry.Count == 0 {
-				entry.First = now
+
+			// First/Last must reflect the update's own declared timestamp,
+			// not now (arrival), or a SignalK reconnect replaying a dead
+			// source's whole retained state defeats the silent-source check
+			// entirely: every one of those replayed values arrives "now",
+			// so arrival-based bookkeeping can never tell a source that died
+			// days ago from one reporting normally this instant (code
+			// review finding, the 2026-09-21 YachtDevices gateway outage --
+			// that gateway's replayed values carried their own long-stale
+			// timestamps, exactly what this reads instead). Falls back to
+			// arrival only when the update itself carries no parseable
+			// timestamp, matching pathAge's own preference
+			// (signalk_paths.go).
+			eventAt := now
+			if update.Timestamp != "" {
+				if parsed, err := time.Parse(time.RFC3339, update.Timestamp); err == nil {
+					eventAt = parsed
+				}
 			}
-			entry.Last = now
+			if entry.Count == 0 || eventAt.Before(entry.First) {
+				entry.First = eventAt
+			}
+			if eventAt.After(entry.Last) {
+				entry.Last = eventAt
+			}
 			entry.Count++
 			s.sourceSeen[key] = entry
 		}

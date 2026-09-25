@@ -247,8 +247,28 @@ func seedAnomalySet(marker string, rules []alarmRule) error {
 		}
 	}
 
+	// Re-checked here, under the write lock this time: the RLock check above
+	// is released before the rules are created, so two callers racing the
+	// same not-yet-seeded marker (the startup call and a concurrent
+	// vessel-settings save, say) can both pass it and both reach here.
+	// createSeededAlarmRule's own "already exists, matches" fallback above
+	// already makes that harmless for the RULES themselves, but appending
+	// unconditionally would still leave marker recorded twice in
+	// alarmRulesSeededSets (code review finding 9) -- deduped here instead
+	// of holding this lock across the create loop above, which would
+	// deadlock against createSeededAlarmRule's own alarmRulesMu.Lock() per
+	// rule.
 	alarmRulesMu.Lock()
-	alarmRulesSeededSets = append(alarmRulesSeededSets, marker)
+	alreadyRecorded := false
+	for _, m := range alarmRulesSeededSets {
+		if m == marker {
+			alreadyRecorded = true
+			break
+		}
+	}
+	if !alreadyRecorded {
+		alarmRulesSeededSets = append(alarmRulesSeededSets, marker)
+	}
 	err := saveAlarmRulesLocked()
 	alarmRulesMu.Unlock()
 	if err != nil {

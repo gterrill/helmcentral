@@ -209,10 +209,15 @@ export function AnchorWatchDrawer({
 
   // Raise and re-drop both start a fresh radius conversation — any target
   // still in flight (or stuck, per the settle bug above) from a previous
-  // anchor belongs to a session that no longer exists.
+  // anchor belongs to a session that no longer exists. Keyed on anchorSetAt
+  // (the session's own identity, stable across a reposition — see its own
+  // prop doc), not anchorState: anchorState flips between 'set' and
+  // 'dragging' routinely WITHIN one session as the drag alarm raises and
+  // clears, and a request still in flight during that flip must not lose
+  // its pending target (code review finding 5).
   useEffect(() => {
     setPendingRadiusM(null)
-  }, [anchorState])
+  }, [anchorSetAt])
 
   const displayedRadiusM = pendingRadiusM ?? radiusMeters
 

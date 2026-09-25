@@ -395,6 +395,13 @@ func getEquipmentHandler(c echo.Context) error {
 // loads the stored record first so a value the request left unchanged is
 // never re-checked against engineProfiles() (validateEquipmentInput's own
 // doc comment explains why) - then UpdateEquipment's whole-record replace.
+//
+// reseedAnomalyRulesIfHouseBank runs afterward because vesselHouseBankReady
+// (alarm_seed_anomaly.go) resolves the house bank's linked profile through
+// THIS record's own profile_id (equipmentProfile, anomaly_detector.go) -
+// changing it here is the other half of that readiness gate besides the
+// profile's own full_soc/charge_warn slots, which engine_profiles.go's
+// updateProfileHandler already re-seeds for (code review finding 3).
 func updateEquipmentHandler(c echo.Context) error {
 	limitNoteRequestBody(c)
 	var req equipmentRequest
@@ -416,7 +423,37 @@ func updateEquipmentHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
+
+	reseedAnomalyRulesIfHouseBank(updated.ID)
+
 	return c.JSON(http.StatusOK, map[string]any{"item": updated})
+}
+
+// reseedAnomalyRulesIfHouseBank re-seeds the anomaly-v1 rule sets when
+// equipmentID is the vessel's own currently-linked house bank - the
+// Inventory-side half of vesselHouseBankReady's dependency on a linked
+// profile (equipmentProfile reads the item's own profile_id), alongside
+// seedAnomalyRulesAfterProfileSave's existing battery-profile-edit half
+// (code review finding 3). Scoped to the house bank specifically, the same
+// way that one is scoped to profileKindBattery saves only: no other
+// equipment update has any bearing on an anomaly-v1 readiness gate, and
+// loading vessel settings plus running a full seedAnomalyRules pass on
+// every inventory save would be needless work for no operator-visible
+// effect. A failure here is logged, not returned as an error, the same
+// non-fatal treatment every other seed call in this codebase gets - the
+// equipment save itself already succeeded.
+func reseedAnomalyRulesIfHouseBank(equipmentID string) {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+		return
+	}
+	if vessel.HouseBank == nil || vessel.HouseBank.EquipmentID != equipmentID {
+		return
+	}
+	if err := seedAnomalyRules(vessel); err != nil {
+		log.Printf("could not seed the anomaly alarm rules after an equipment save: %v", err)
+	}
 }
 
 // deleteEquipmentHandler is DELETE /api/inventory/equipment/:id[?delete_photos=true]:

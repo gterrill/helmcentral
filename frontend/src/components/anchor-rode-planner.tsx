@@ -271,10 +271,18 @@ export function AnchorRodePlanner({
   // The actual write, shared by the debounced call below and by a Retry
   // action's immediate re-attempt of the same input — a Retry press
   // shouldn't have to wait out another 800ms debounce window.
+  //
+  // baseline is the server truth just before THIS attempt was issued
+  // (serverValuesRef.current at the moment handlePersist's debounce fired),
+  // not necessarily the current one by the time a failure's Retry is
+  // actually clicked. It is what lets Retry tell "a field this edit meant
+  // to change" apart from "a field only carried along because the PATCH
+  // writes all three together" — see the Retry onClick below.
   const commitRodeAndConditions = useCallback((
     rodeMeters: number,
     nextSeaState: SeaState,
     nextSeabedType: SeabedType,
+    baseline: { rodeDeployedM: number; seaState: SeaState; seabedType: SeabedType },
   ) => {
     // onUpdateRodeAndConditions (useAnchorWatch's updateRodeAndConditions)
     // throws on a failed PATCH rather than silently no-op'ing — this input
@@ -292,7 +300,24 @@ export function AnchorRodePlanner({
       toast.error('Could not save rode and conditions', {
         description: error instanceof Error ? error.message : 'Request failed',
         action: isRetryableAnchorError(error)
-          ? { label: 'Retry', onClick: () => commitRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType) }
+          ? {
+              label: 'Retry',
+              onClick: () => {
+                // Re-sends only the field(s) this edit actually changed
+                // (differing from its own baseline), merged onto the
+                // CURRENT server values at retry time — not the stale
+                // triple captured when the PATCH first failed. Without
+                // this, retrying a failed rode edit could re-send a
+                // seabed/sea-state value that has since been superseded by
+                // a newer, already-successful save of THAT field,
+                // silently undoing it (code review finding 4).
+                const latest = serverValuesRef.current
+                const retryRodeMeters = rodeMeters !== baseline.rodeDeployedM ? rodeMeters : latest.rodeDeployedM
+                const retrySeaState = nextSeaState !== baseline.seaState ? nextSeaState : latest.seaState
+                const retrySeabedType = nextSeabedType !== baseline.seabedType ? nextSeabedType : latest.seabedType
+                commitRodeAndConditions(retryRodeMeters, retrySeaState, retrySeabedType, baseline)
+              },
+            }
           : undefined,
       })
     })
@@ -307,7 +332,11 @@ export function AnchorRodePlanner({
     debounceRef.current = setTimeout(() => {
       const normalizedDisplay = Number.isFinite(rodeDisplay) ? Math.max(0, rodeDisplay) : 0
       const rodeMeters = isImperial ? normalizedDisplay / METERS_TO_FEET : normalizedDisplay
-      commitRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType)
+      // The server truth right before this write is issued — this attempt's
+      // own baseline, fixed for the life of this edit (including any
+      // Retry of it) regardless of what else saves in the meantime.
+      const baseline = serverValuesRef.current
+      commitRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType, baseline)
     }, 800)
   }, [isImperial, isInactive, commitRodeAndConditions])
 
@@ -367,10 +396,27 @@ export function AnchorRodePlanner({
     setDepthOverrideBelowMinimum(false)
   }, [seedFigureM, isImperial])
 
+  // Bumped on every attempted planning-depth save (a fresh edit's debounced
+  // commit, or a Retry of one) — a failed attempt's own Retry closure
+  // captures its own token and checks it before firing, so a newer save
+  // (of a later typed figure) invalidates an older failed one's Retry
+  // instead of letting it silently resend a stale figure over a save that
+  // has since gone through (code review finding 4). Unlike
+  // commitRodeAndConditions' baseline-merge above, depth has no OTHER
+  // field to merge in — invalidating the stale attempt outright is the
+  // equivalent fix for a single-value write.
+  const depthAttemptRef = useRef(0)
+
   // The actual write, shared by the debounced call below and by a Retry
   // action's immediate re-attempt — mirrors commitRodeAndConditions above.
   const commitPlanningDepth = useCallback((nextDepthM: number, tideHeightFt: number | null) => {
+    const attempt = ++depthAttemptRef.current
     onPlanningDepthChange(nextDepthM, tideHeightFt).catch((error: unknown) => {
+      // A newer attempt has already started (whatever its own outcome) —
+      // the operator has typed over this rejected figure since, so it
+      // reverts nothing and offers no Retry of its own; the newer
+      // attempt's own toast (if it also fails) is the current one to act on.
+      if (attempt !== depthAttemptRef.current) return
       // Revert to the server's actual figure rather than leaving the
       // rejected keystroke on screen looking saved — the server never
       // stored nextDepthM (code-review finding).
@@ -379,7 +425,16 @@ export function AnchorRodePlanner({
       toast.error('Could not save planning depth', {
         description: error instanceof Error ? error.message : 'Request failed',
         action: isRetryableAnchorError(error)
-          ? { label: 'Retry', onClick: () => commitPlanningDepth(nextDepthM, tideHeightFt) }
+          ? {
+              label: 'Retry',
+              onClick: () => {
+                // Invalidated by the same check if a newer save has landed
+                // between this toast appearing and Retry actually being
+                // clicked.
+                if (attempt !== depthAttemptRef.current) return
+                commitPlanningDepth(nextDepthM, tideHeightFt)
+              },
+            }
           : undefined,
       })
     })

@@ -375,9 +375,13 @@ func setAnchorWatch(c echo.Context) error {
 	headingAtSetDeg := -1.0
 
 	// Only the live-GPS "set anchor here" path requests the correction; a
-	// user dragging the anchor marker on the map (updatePosition) sends a
-	// point that's already meant to be the anchor, and must never be shoved
-	// forward by the offset again.
+	// reposition (this same POST handler, called again with an active watch
+	// already set -- see current != nil above) sends a point that's already
+	// meant to be the anchor, and must never be shoved forward by the offset
+	// again. No frontend gesture currently drives that reposition path (ADR
+	// 0133 removed the map's own drag-to-reposition in Phase 1; its Adjust
+	// sheet, the planned Phase 3 replacement, has not landed), but the
+	// backend contract stays in place for it to resume against unchanged.
 	if body.ApplyBowOffset != nil && *body.ApplyBowOffset {
 		settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 		settings, err := readSettings(settingsPath)

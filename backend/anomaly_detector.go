@@ -64,19 +64,35 @@ var anomalyFixedPathUnits = map[string]string{
 var anomalyEngineResidualQuantities = []struct {
 	Suffix string
 	// Unit is the residual path's own unit -- a difference, never an
-	// absolute reading's unit (see alarm_units.go's deltaK/deltaPa).
+	// absolute reading's unit (see alarm_units.go's deltaK/deltaPa). Used
+	// only for the derived path itself (anomalyEngineResidualUnit), a
+	// standalone reading with no absolute figure alongside it to stay
+	// consistent with.
 	Unit string
-	// AbsoluteUnit is the raw quantity's own SI unit, used only for
-	// formatting an evidence sentence's "port 84 degC" half, never for the
-	// residual path itself.
+	// AbsoluteUnit is the raw quantity's own SI unit, used for formatting an
+	// evidence sentence's "port 84 degC" half.
 	AbsoluteUnit string
+	// EvidenceDeltaUnit is the unit formatEngineResidualEvidence renders the
+	// offset/residual halves through -- must share AbsoluteUnit's own
+	// DISPLAY LABEL (operatorUnitTable, alarm_units.go), or one evidence
+	// sentence ends up mixing two units for the same quantity (code review
+	// finding 2). Temperature's deltaK already renders through the same
+	// "degC" label K does (a temperature difference in kelvin equals the
+	// same difference in Celsius, so deltaK only scales, never offsets like
+	// K's own -273.15). Pressure's own Pa->mb conversion is likewise a pure
+	// scale with no offset, so it is exactly as valid for a difference as
+	// for an absolute reading -- EvidenceDeltaUnit is "Pa" here, not
+	// "deltaPa": deltaPa's own kPa label is for the residual PATH (Unit,
+	// above), read as a standalone gauge value with no absolute figure
+	// alongside it, where kPa is the more natural pressure-gap unit.
+	EvidenceDeltaUnit string
 }{
-	{"temperature", "deltaK", "K"},
-	{"oilPressure", "deltaPa", "Pa"},
-	{"boostPressure", "deltaPa", "Pa"},
-	{"engineLoad", "ratio", "ratio"},
-	{"transmission.oilPressure", "deltaPa", "Pa"},
-	{"transmission.oilTemperature", "deltaK", "K"},
+	{"temperature", "deltaK", "K", "deltaK"},
+	{"oilPressure", "deltaPa", "Pa", "Pa"},
+	{"boostPressure", "deltaPa", "Pa", "Pa"},
+	{"engineLoad", "ratio", "ratio", "ratio"},
+	{"transmission.oilPressure", "deltaPa", "Pa", "Pa"},
+	{"transmission.oilTemperature", "deltaK", "K", "deltaK"},
 }
 
 // anomalyEngineResidualPath builds helmcentral.anomaly.engines.<instance>.<quantity>Residual.
@@ -880,7 +896,7 @@ func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselS
 			path := anomalyEngineResidualPath(e.Instance, q.Suffix)
 			reading.Values[path] = residual
 			reading.Evidence[path] = formatEngineResidualEvidence(
-				name, q.AbsoluteUnit, q.Unit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
+				name, q.AbsoluteUnit, q.EvidenceDeltaUnit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
 			)
 		}
 	}
