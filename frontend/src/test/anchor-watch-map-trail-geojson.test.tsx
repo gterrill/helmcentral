@@ -73,8 +73,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       aisTrails={() => new Map()}
       radarTargets={[]}
       isDarkTheme={false}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       {...overrides}
     />,
   )

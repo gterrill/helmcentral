@@ -49,8 +49,6 @@ describe('AnchorWatchMap stacking', () => {
         aisTrails={() => new Map()}
         radarTargets={[]}
         isDarkTheme={false}
-        onAnchorReposition={() => undefined}
-        onRadiusChange={() => undefined}
       />,
     )
     const wrapper = screen.getByTestId('map-root').parentElement

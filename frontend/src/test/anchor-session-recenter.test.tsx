@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 
 vi.mock('maplibre-gl', () => ({
@@ -8,6 +8,11 @@ vi.mock('maplibre-gl', () => ({
 
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
 const easeToMock = vi.fn()
+// Defaults to 0x0 (unmeasurable, matching jsdom's real getBoundingClientRect
+// with no layout) so every existing test below keeps exercising the
+// center-only easeTo fallback unchanged; only the "fits zoom to the
+// container" suite at the foot of this file sets a real size.
+const containerSize = vi.hoisted(() => ({ width: 0, height: 0 }))
 
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
@@ -28,6 +33,12 @@ vi.mock('react-map-gl/maplibre', async () => {
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => 14,
           easeTo: easeToMock,
+          jumpTo: vi.fn(),
+          getMap: () => ({
+            getContainer: () => ({
+              getBoundingClientRect: () => ({ width: containerSize.width, height: containerSize.height }),
+            }),
+          }),
         }))
         return <div data-testid="map-root">{children}</div>
       },
@@ -70,8 +81,6 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       aisTrails={() => new Map()}
       radarTargets={[]}
       isDarkTheme={false}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       {...overrides}
     />
   )
@@ -293,5 +302,58 @@ describe('AnchorWatchMap discards a stale stored centre once "no watch" is confi
     rerender(mapElement({ anchorLat: null, anchorLon: null, anchorSetAt: null }))
 
     expect(easeToMock).not.toHaveBeenCalled()
+  })
+})
+
+// The session-change ease above also fits the swing circle to the new
+// anchorage (fitRadiusZoom, lib/anchor-view.ts) whenever the map's real
+// rendered size is available — every test above runs with an unmeasurable
+// 0x0 container (jsdom has no layout) and so never sees a zoom key at all,
+// proving the fallback is exactly today's center-only ease. This suite gives
+// the container a real size to prove the zoom half of "ease to centre+zoom"
+// actually fires too.
+describe('AnchorWatchMap fits zoom to the container on a new session', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    easeToMock.mockClear()
+    containerSize.width = 390
+    containerSize.height = 500
+  })
+
+  afterEach(() => {
+    containerSize.width = 0
+    containerSize.height = 0
+  })
+
+  it('includes a fitted zoom in the easeTo call when the container size is known', () => {
+    const { rerender } = render(mapElement())
+    expect(easeToMock).not.toHaveBeenCalled()
+
+    rerender(
+      mapElement({
+        anchorLat: SECOND_ANCHOR.lat,
+        anchorLon: SECOND_ANCHOR.lon,
+        anchorSetAt: SECOND_SESSION,
+        vesselLat: SECOND_ANCHOR.lat,
+        vesselLon: SECOND_ANCHOR.lon,
+      }),
+    )
+
+    expect(easeToMock).toHaveBeenCalledTimes(1)
+    const [call] = easeToMock.mock.calls
+    expect(call[0]).toMatchObject({
+      center: [SECOND_ANCHOR.lon, SECOND_ANCHOR.lat],
+      duration: 600,
+    })
+    // radiusMeters is 34 (mapElement's default) at SECOND_ANCHOR's latitude,
+    // fit to a 390x500 container — independently derived in anchor-view.test.ts.
+    expect(call[0].zoom).toBeCloseTo(17.9487841248938, 6)
+
+    // The fitted zoom is also stored tagged with the new session, same as
+    // the centre.
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-zoom')!)).toEqual({
+      zoom: call[0].zoom,
+      sessionId: SECOND_SESSION,
+    })
   })
 })

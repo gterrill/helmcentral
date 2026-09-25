@@ -77,8 +77,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       aisVessels={[]}
       aisTrails={() => new Map()}
       isDarkTheme={false}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       {...overrides}
     />,
   )
@@ -205,8 +203,6 @@ describe('anchor-watch placemarks', () => {
         aisTrails={() => new Map()}
         isDarkTheme={false}
         placemarks={placemarks}
-        onAnchorReposition={() => undefined}
-        onRadiusChange={() => undefined}
       />,
     )
 

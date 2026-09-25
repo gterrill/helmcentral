@@ -171,16 +171,23 @@ export function useAnchorWatch(
     }
   }, [])
 
+  // These three PATCH mutations used to swallow a failed response (silent
+  // no-op on !res.ok) — the P1 the impeccable critique of the anchor-watch
+  // map raised against updateRadius applies just as much to the other two.
+  // anchorRequest throws on a non-OK response or a network error, and
+  // there's no catch here: on a throw, setServerState below never runs, so
+  // state is left exactly as it was, and the rejection propagates to the
+  // caller — the drawer's radius stepper, the rode planner's Apply-as-
+  // alarm-radius path, and (for the other two) their own callers, all of
+  // which are what actually shows the toast (they know the retry value and
+  // want a Retry action, which this hook has no context to build).
   const updateRadius = useCallback(async (radiusMeters: number) => {
-    const res = await fetch('/api/anchor-watch', {
+    const res = await anchorRequest({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ radius_meters: radiusMeters }),
     })
-    if (res.ok) {
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
-    }
+    setServerState(await res.json() as AnchorWatchServerState)
   }, [])
 
   const updateRodeAndConditions = useCallback(async (
@@ -188,7 +195,7 @@ export function useAnchorWatch(
     seaState: SeaState,
     seabedType: SeabedType,
   ) => {
-    const res = await fetch('/api/anchor-watch', {
+    const res = await anchorRequest({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -197,17 +204,14 @@ export function useAnchorWatch(
         seabed_type: seabedType,
       }),
     })
-    if (res.ok) {
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
-    }
+    setServerState(await res.json() as AnchorWatchServerState)
   }, [])
 
   const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
     // The planning depth pair is PATCHable — this is how the operator edits
     // the depth seeded at drop. Follows updateRodeAndConditions exactly:
     // await, replace state with the server echo, no optimistic update.
-    const res = await fetch('/api/anchor-watch', {
+    const res = await anchorRequest({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -215,10 +219,7 @@ export function useAnchorWatch(
         planning_tide_height_ft: tideHeightFt,
       }),
     })
-    if (res.ok) {
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
-    }
+    setServerState(await res.json() as AnchorWatchServerState)
   }, [])
 
   const updatePosition = useCallback(async (lat: number, lon: number) => {

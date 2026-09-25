@@ -19,12 +19,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
 
+### Changed
+
+- The anchor alarm radius is now set with − / + buttons on the Anchor Watch
+  page, next to the radius reading, or by choosing Apply as alarm radius in
+  the rode planner. Dragging the swing circle's edge and dragging the anchor
+  marker are gone until a later release brings back moving the anchor.
+
 ### Fixed
 
 - When a question needs many lookups (for example, tracing when several
   instrument feeds went quiet), Mate now answers from what it found instead
   of stopping with "did not produce an answer," and says plainly what it
   wasn't able to check.
+- Tapping or panning the anchor watch map no longer changes the alarm radius
+  or moves the anchor.
+- The anchor watch map now opens with the whole swing circle in view, instead
+  of it being hidden under the anchor marker at some radii.
+- A failed alarm-radius change now says so and offers Retry, instead of
+  silently doing nothing.
 
 ## [0.32.0] - 2026-09-25
 

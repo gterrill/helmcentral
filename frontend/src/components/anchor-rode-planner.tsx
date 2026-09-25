@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Link } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { toast } from 'sonner'
 import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { TideToday } from '@/hooks/use-tide-today'
@@ -263,7 +264,15 @@ export function AnchorRodePlanner({
     debounceRef.current = setTimeout(() => {
       const normalizedDisplay = Number.isFinite(rodeDisplay) ? Math.max(0, rodeDisplay) : 0
       const rodeMeters = isImperial ? normalizedDisplay / METERS_TO_FEET : normalizedDisplay
-      void onUpdateRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType)
+      // onUpdateRodeAndConditions (useAnchorWatch's updateRodeAndConditions)
+      // throws on a failed PATCH rather than silently no-op'ing — this input
+      // has no retry affordance of its own, so report the failure rather
+      // than an unhandled rejection with nothing on screen to show for it.
+      onUpdateRodeAndConditions(rodeMeters, nextSeaState, nextSeabedType).catch((error: unknown) => {
+        toast.error('Could not save rode and conditions', {
+          description: error instanceof Error ? error.message : 'Request failed',
+        })
+      })
     }, 800)
   }, [isImperial, isInactive, onUpdateRodeAndConditions])
 

@@ -1,4 +1,6 @@
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Minus, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import type { AnchorConfig } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { AlarmState } from '@/hooks/use-alarms'
@@ -24,6 +26,18 @@ function formatDistanceValue(meters: number, isImperial: boolean): { value: stri
     ? { value: `${Math.round(meters * 3.28084)}`, unit: 'ft' }
     : { value: `${Math.round(meters)}`, unit: 'm' }
 }
+
+// Interim radius control (Phase 1 of the anchor-adjust-sheet plan): with the
+// map's own edge-drag editing gone (it fired a radius PATCH on an ordinary
+// tap — impeccable P0), this stepper is the operator's only way to change
+// the alarm radius on the Anchor Watch page this release. Metric steps by a
+// round 5 m; imperial steps by a round 15 ft, converted back to metres for
+// the write, so the number on the wire is never a repeating decimal by
+// accident of unit conversion the operator didn't ask for.
+const RADIUS_STEP_METERS = 5
+const RADIUS_STEP_FEET = 15
+const METERS_PER_FOOT = 0.3048
+const MIN_RADIUS_METERS = 5
 
 interface AnchorWatchDrawerProps {
   // Resolved by the caller (live fix, falling back to the anchor point), and
@@ -70,8 +84,11 @@ interface AnchorWatchDrawerProps {
   onImageryToggle: (enabled: boolean) => void
   showRadarEcho: boolean
   onRadarEchoToggle: (enabled: boolean) => void
-  onAnchorReposition: (lat: number, lon: number) => void
-  onRadiusChange: (radiusMeters: number) => void
+  // Repositioning the anchor has no UI in this phase (Phase 3 of the
+  // anchor-adjust-sheet plan brings back "Place from bow") — the map's own
+  // reposition-drag editing is gone, and there is nothing here to wire it
+  // to, so this drawer no longer takes an onAnchorReposition prop at all.
+  onRadiusChange: (radiusMeters: number) => Promise<void>
   onClearAnchor: () => Promise<void> | void
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
@@ -133,7 +150,6 @@ export function AnchorWatchDrawer({
   onImageryToggle,
   showRadarEcho,
   onRadarEchoToggle,
-  onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
   placemarks,
@@ -159,6 +175,55 @@ export function AnchorWatchDrawer({
   onPlanningDepthChange,
 }: AnchorWatchDrawerProps) {
   const isAnchored = anchorState !== 'none'
+
+  // radiusMeters (the prop) only moves once the server echoes a PATCH back
+  // — it does not move the instant a press is sent. Stepping from that prop
+  // alone meant three quick presses each computed "current server value +
+  // step" from the same stale base and all sent the same target (code-review
+  // finding). pendingRadiusM is the latest value actually *requested*,
+  // whether or not the server has confirmed it yet, so the next press steps
+  // from where the operator left it, not from a value still in flight.
+  //
+  // Cleared two ways: once the prop catches up to exactly this value (the
+  // effect below), or once a request for it fails (inside applyRadius) —
+  // either way there is nothing left "pending" to show or step from, and
+  // the readout falls back to the last confirmed server value.
+  const [pendingRadiusM, setPendingRadiusM] = useState<number | null>(null)
+
+  useEffect(() => {
+    setPendingRadiusM((current) => (current !== null && current === radiusMeters ? null : current))
+  }, [radiusMeters])
+
+  const displayedRadiusM = pendingRadiusM ?? radiusMeters
+
+  // Shared failure path for both surfaces that write the alarm radius: the
+  // stepper below, and the Rode Planner's "Apply as alarm radius" (which
+  // reaches this via onApplyAlarmRadius). useAnchorWatch's updateRadius now
+  // throws on a failed PATCH rather than silently no-op'ing (impeccable P1),
+  // so this is where that failure actually gets shown — a toast with Retry,
+  // not an unhandled rejection with nothing on screen to show for it.
+  const applyRadius = useCallback((nextRadiusMeters: number) => {
+    setPendingRadiusM(nextRadiusMeters)
+    return onRadiusChange(nextRadiusMeters).catch(() => {
+      // Only clear if nothing newer has since superseded this request — an
+      // older, now-irrelevant failure must not stomp a later press's still-
+      // pending target.
+      setPendingRadiusM((current) => (current === nextRadiusMeters ? null : current))
+      toast.error('Could not set alarm radius', {
+        action: { label: 'Retry', onClick: () => { void applyRadius(nextRadiusMeters) } },
+      })
+    })
+  }, [onRadiusChange])
+
+  const radiusStepMeters = isImperial ? RADIUS_STEP_FEET * METERS_PER_FOOT : RADIUS_STEP_METERS
+
+  const handleRadiusDecrease = useCallback(() => {
+    void applyRadius(Math.max(MIN_RADIUS_METERS, displayedRadiusM - radiusStepMeters))
+  }, [applyRadius, displayedRadiusM, radiusStepMeters])
+
+  const handleRadiusIncrease = useCallback(() => {
+    void applyRadius(displayedRadiusM + radiusStepMeters)
+  }, [applyRadius, displayedRadiusM, radiusStepMeters])
 
   // Rendered by the map's metric overlay as the Scope row, under Current
   // (ADR 0059 §3) — shared with the tile via computeScopeRecommendation, and
@@ -233,6 +298,46 @@ export function AnchorWatchDrawer({
               </p>
             </div>
           )}
+          {/* Interim radius control (Phase 1 of the anchor-adjust-sheet
+              plan): the map's own edge-drag radius editing is gone — it
+              fired a PATCH on an ordinary tap (impeccable P0) — so this
+              stepper is the operator's only way to change the alarm radius
+              on this page this release. Repositioning the anchor has no
+              equivalent yet; a later release adds "Place from bow" for that. */}
+          {isAnchored && (
+            <div
+              data-testid="anchor-radius-stepper"
+              className="flex items-center gap-3 rounded-md border bg-background/60 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Alarm radius</p>
+                <p className="font-display text-2xl leading-none tabular-nums text-gauge-primary">
+                  {formatDistanceValue(displayedRadiusM, isImperial).value}
+                  <span className="ml-1 text-sm text-muted-foreground">
+                    {formatDistanceValue(displayedRadiusM, isImperial).unit}
+                  </span>
+                </p>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Decrease alarm radius"
+                  onClick={handleRadiusDecrease}
+                  className="flex h-12 w-12 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted active:scale-95"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Increase alarm radius"
+                  onClick={handleRadiusIncrease}
+                  className="flex h-12 w-12 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted active:scale-95"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
           <div className="min-h-0 flex-1 rounded-xl border bg-background/70">
             {vesselLat !== null && vesselLon !== null ? (
               <AnchorWatchMap
@@ -264,8 +369,6 @@ export function AnchorWatchDrawer({
                 onImageryToggle={onImageryToggle}
                 showRadarEcho={showRadarEcho}
                 onRadarEchoToggle={onRadarEchoToggle}
-                onAnchorReposition={onAnchorReposition}
-                onRadiusChange={onRadiusChange}
                 // The tile trims its own in-map stack to fullscreen+zoom
                 // (design critique item 3); this drawer IS the fullscreen
                 // view, so it gets satellite/radar/recentre back — every
@@ -317,7 +420,7 @@ export function AnchorWatchDrawer({
           windBandId={windBandId}
           onWindBandChange={onWindBandChange}
           onUpdateRodeAndConditions={onUpdateRodeAndConditions}
-          onApplyAlarmRadius={async (radius) => onRadiusChange(radius)}
+          onApplyAlarmRadius={applyRadius}
         />
       </div>
     </div>

@@ -19,6 +19,7 @@ import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
 import type { RadarEchoStatus } from '@/hooks/use-radar-echo-stream'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { hasWebGL2 } from '@/lib/webgl'
+import { ANCHOR_VIEW_MAX_ZOOM, ANCHOR_VIEW_MIN_ZOOM, fitRadiusZoom } from '@/lib/anchor-view'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import {
   resolveMarkerLabelSuppression,
@@ -37,6 +38,14 @@ const ANCHOR_WATCH_CENTER_STORAGE_KEY = 'anchor-watch-map-center'
 const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 // Threshold above which the current is judged strong enough to visually call out.
 const HIGH_DRIFT_IMPACT_KTS = 1.5
+// Provisional zoom for the one frame before the fit-to-container effect can
+// measure the map's real rendered size (fitRadiusZoom needs it, and it isn't
+// known until after mount) — matches the zoom most existing anchor radii
+// already settled near under the old zoomForRadius, so a container that
+// can't be measured at all (e.g. no real layout under jsdom in tests) is no
+// worse off than before. A stored zoom that belongs to the current anchor
+// session overrides this outright.
+const DEFAULT_ZOOM_BEFORE_FIT = 14
 
 // World Imagery (Esri/Maxar aerial photography) fades in between zoom 9-10
 // rather than appearing abruptly, since its low-zoom tiles are lower quality.
@@ -109,14 +118,36 @@ export function resolveRadarEchoAvailability(params: {
 export { resolveMarkerLabelSuppression, LABEL_COLLISION_RADIUS_PX }
 export type { MarkerLabelPoint, ScreenRect }
 
-function readStoredZoom(): number | null {
+// The zoom the operator last left the map at, tagged with the anchor session
+// it was made in — same shape and the same reason as StoredCenter below: a
+// zoom left over from a different anchorage (a much bigger or smaller swing
+// circle) is not a pan worth restoring, it's a stale view of the wrong scale.
+interface StoredZoom {
+  zoom: number
+  sessionId: string | null
+}
+
+function readStoredZoom(): StoredZoom | null {
   if (typeof window === 'undefined') return null
   const raw = window.localStorage.getItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY)
   if (!raw) return null
-  const value = Number(raw)
-  if (!Number.isFinite(value)) return null
-  // Keep persisted values within map bounds.
-  return Math.max(10, Math.min(22, value))
+  try {
+    const parsed = JSON.parse(raw) as { zoom?: unknown; sessionId?: unknown }
+    if (typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom)) {
+      return {
+        zoom: Math.max(ANCHOR_VIEW_MIN_ZOOM, Math.min(ANCHOR_VIEW_MAX_ZOOM, parsed.zoom)),
+        sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null,
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors and return null
+  }
+  return null
+}
+
+function writeStoredZoom(zoom: number, sessionId: string | null): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, JSON.stringify({ zoom, sessionId }))
 }
 
 // The centre the operator last left the map at, tagged with the anchor
@@ -229,18 +260,6 @@ function suppressedIdsEqual(a: Set<string>, b: Set<string>): boolean {
   return true
 }
 
-// ── Zoom level from radius (show ~4× radius diameter in view) ───────────────
-function zoomForRadius(radiusM: number): number {
-  // Approximate: zoom 14 ≈ 300m radius nicely visible.
-  // Cap at 14 so nearby AIS vessels (~1-2km) remain visible even with small alarm radii.
-  return Math.max(10, Math.min(14, 14 - Math.log2(radiusM / 300)))
-}
-
-// ── Nudge distance for arrow keys (metres) ─────────────────────────────────
-const NUDGE_METERS = 1.0
-
-type EditMode = 'none' | 'reposition' | 'radius'
-
 // A map click that hasn't been committed to a placemark yet — the tooltip
 // offering range, bearing and a Pin button. Unlike the AIS selection
 // highlight it has no expiry: it must sit still long enough to be clicked.
@@ -317,13 +336,6 @@ export interface AnchorWatchMapProps {
   onImageryToggle?: (enabled: boolean) => void
   showRadarEcho?: boolean
   onRadarEchoToggle?: (enabled: boolean) => void
-  // Optional: editing the anchor point/swing radius is only offered when the
-  // host supplies both. The dashboard tile omits them (it is view-only —
-  // editing lives on the full-page Anchor Watch view instead), and the map
-  // never enters reposition/radius edit mode, shows the ew-resize edge
-  // cursor, or advertises "click to reposition" without one.
-  onAnchorReposition?: (lat: number, lon: number) => void
-  onRadiusChange?: (radiusMeters: number) => void
   onFullscreen?: () => void
   // Design critique item 3: six controls stacked in-tile clipped the bottom
   // two at tile height. Defaults to the collapsed three (fullscreen + zoom)
@@ -378,8 +390,6 @@ export function AnchorWatchMap({
   onImageryToggle,
   showRadarEcho = false,
   onRadarEchoToggle,
-  onAnchorReposition,
-  onRadiusChange,
   onFullscreen,
   expandedControls = false,
   placemarks = [],
@@ -407,10 +417,6 @@ export function AnchorWatchMap({
   // suppression logic itself.
   const recomputeAisLabelSuppressionRef = useRef<() => void>(() => {})
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
-  const [editMode, setEditMode] = useState<EditMode>('none')
-  const [ghostAnchor, setGhostAnchor] = useState<{ lat: number; lon: number } | null>(null)
-  const [liveRadius, setLiveRadius] = useState<number | null>(null)
-  const originalRadiusRef = useRef<number>(radiusMeters)
   // Which AIS marker is drawn enlarged. Selection is by id, not name: two
   // vessels sharing a name previously both lit up when either was clicked.
   const [selectedVesselId, setSelectedVesselId] = useState<string | null>(null)
@@ -419,28 +425,79 @@ export function AnchorWatchMap({
   const [selectedPlacemarkId, setSelectedPlacemarkId] = useState<string | null>(null)
   const suppressNextMapClickRef = useRef(false)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
-  const [motoringPoints, setMotoringPoints] = useState<TrailPoint[]>([])
   // Track zoom for marker scaling. No onZoom handler: that used to fire
-  // setCurrentZoom on every animation frame of a zoom gesture, and an effect
-  // below wrote it to localStorage on each of those renders too. Neither
-  // marker scale nor the satellite-imagery fade need that granularity - both
-  // only have to be right once the gesture settles - so currentZoom is
-  // updated from handleMoveEnd below instead, which fires once per gesture
-  // (moveend also fires at the end of a zoom, not just a pan) rather than
-  // once per frame.
-  const [currentZoom, setCurrentZoom] = useState(() => readStoredZoom() ?? zoomForRadius(radiusMeters))
+  // setCurrentZoom on every animation frame of a zoom gesture, and a
+  // persistence effect wrote it to localStorage on each of those renders
+  // too. Neither marker scale nor the satellite-imagery fade need that
+  // granularity - both only have to be right once the gesture settles - so
+  // currentZoom is updated from handleMoveEnd below instead, which fires
+  // once per gesture (moveend also fires at the end of a zoom, not just a
+  // pan) rather than once per frame.
+  const [currentZoom, setCurrentZoom] = useState(() => {
+    const stored = readStoredZoom()
+    const zoomBelongsToCurrentSession = stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
+    return zoomBelongsToCurrentSession ? stored.zoom : DEFAULT_ZOOM_BEFORE_FIT
+  })
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
   const markerScale = markerScaleForZoom(currentZoom)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
-  // Kiosk maps are display-only (`interactive` false): no user gesture can
-  // change the zoom, so there is nothing worth persisting, and this stays
-  // off entirely rather than writing the same figure on every render.
+  // Fits the swing circle to the map exactly once per session with no
+  // matching stored zoom (impeccable P0: the old zoomForRadius capped at 14,
+  // hiding a 40m circle under the 32px anchor marker). Runs regardless of
+  // `interactive` — a kiosk display benefits from this even more than an
+  // interactive client, since nobody there can zoom to fix it by hand.
+  // Skipped, not deferred, when the container can't be measured at all
+  // (e.g. no real layout under jsdom in tests) rather than fitting to a
+  // bogus 0×0 size.
+  //
+  // react-map-gl constructs the underlying maplibre.Map instance
+  // asynchronously, so mapRef.current can still be null the first time this
+  // effect runs, right at mount — jumpTo would silently no-op against a map
+  // that doesn't exist yet. The computed target zoom is held in
+  // pendingFitZoomRef until it can actually reach a live map (checked again
+  // in handleMapLoad below, which fires once the map genuinely exists);
+  // marking the fit "done" and writing it to storage only happens once
+  // jumpTo has actually been called, never merely once the zoom was
+  // computed. Getting this wrong previously meant the map opened at
+  // DEFAULT_ZOOM_BEFORE_FIT (14, circle hidden) for the rest of the
+  // session, "fixed" only by a reload — because the reload would then read
+  // back the prematurely-written stored zoom as if it had landed.
+  const didFitInitialZoomRef = useRef(false)
+  const pendingFitZoomRef = useRef<{ zoom: number; sessionId: string | null } | null>(null)
+
+  const applyPendingFitZoom = useCallback(() => {
+    const pending = pendingFitZoomRef.current
+    if (!pending) return
+    const map = mapRef.current
+    if (!map) return
+    pendingFitZoomRef.current = null
+    didFitInitialZoomRef.current = true
+    setCurrentZoom(pending.zoom)
+    map.jumpTo({ zoom: pending.zoom })
+    writeStoredZoom(pending.zoom, pending.sessionId)
+  }, [])
+
   useEffect(() => {
-    if (!interactive) return
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, String(currentZoom))
-  }, [interactive, currentZoom])
+    if (didFitInitialZoomRef.current || pendingFitZoomRef.current || !hasAnchor || anchorLat === null) return
+    const stored = readStoredZoom()
+    const zoomBelongsToCurrentSession = stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
+    if (zoomBelongsToCurrentSession) {
+      didFitInitialZoomRef.current = true
+      return
+    }
+    const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
+    const rect = container?.getBoundingClientRect()
+    const shortSidePx = rect ? Math.min(rect.width, rect.height) : 0
+    if (!(shortSidePx > 0)) return
+    const zoom = fitRadiusZoom(radiusMeters, anchorLat, shortSidePx)
+    pendingFitZoomRef.current = { zoom, sessionId: anchorSetAt }
+    // In case the map instance already exists by the time this runs (e.g.
+    // a later render, or a test/environment where construction happens
+    // synchronously) — handleMapLoad is the fallback for when it doesn't
+    // yet, not the only path.
+    applyPendingFitZoom()
+  }, [hasAnchor, anchorLat, radiusMeters, anchorSetAt, applyPendingFitZoom])
 
   // Fail-fast per the repo fallback policy: MapPlaceLabels' <Layer>
   // elements (mounted below, after the alarm-circle Source) attach to a
@@ -514,7 +571,12 @@ export function AnchorWatchMap({
 
   const handleMapLoad = useCallback(() => {
     handleRadarEchoMapLoad()
-  }, [handleRadarEchoMapLoad])
+    // The map instance is guaranteed to exist by the time 'load' fires —
+    // this is the fallback path for the mount-time fit-zoom effect above,
+    // for the common case where it ran before react-map-gl had finished
+    // constructing the underlying map.
+    applyPendingFitZoom()
+  }, [handleRadarEchoMapLoad, applyPendingFitZoom])
 
   const handleMapStyleData = useCallback(() => {
     handleStyleData()
@@ -549,12 +611,6 @@ export function AnchorWatchMap({
     selectionTimerRef.current = setTimeout(() => setSelectedVesselId(null), 3000)
   }, [])
 
-  // Derived display radius (live during resize, else stored)
-  const displayRadius = liveRadius ?? radiusMeters
-  const displayBearingDeg = editMode === 'reposition' && ghostAnchor
-    ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
-    : bearingDegProp
-  const showRepositionBreadcrumbs = editMode === 'reposition'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
   // Scope row (ADR 0059 §3): unavailable covers both a null prop (host has
   // nothing to say) and a RodeMethodResult carrying its own unavailableReason
@@ -582,41 +638,12 @@ export function AnchorWatchMap({
   const circleGeoJSON = useMemo<GeoJSON.Feature<GeoJSON.Polygon> | GeoJSON.FeatureCollection>(
     () =>
       hasAnchor
-        ? generateCircleGeoJSON(anchorLon, anchorLat, displayRadius)
+        ? generateCircleGeoJSON(anchorLon, anchorLat, radiusMeters)
         : { type: 'FeatureCollection', features: [] },
-    [hasAnchor, anchorLon, anchorLat, displayRadius],
+    [hasAnchor, anchorLon, anchorLat, radiusMeters],
   )
-
-  const ghostCircleGeoJSON = useMemo(
-    () =>
-      ghostAnchor
-        ? generateCircleGeoJSON(ghostAnchor.lon, ghostAnchor.lat, displayRadius)
-        : null,
-    [ghostAnchor, displayRadius],
-  )
-
-  // Fetch motoring track on-demand from /api/tracks/motoring when entering reposition mode
-  const fetchMotoringTrail = useCallback(async () => {
-    try {
-      const res = await fetch('/api/tracks/motoring')
-      if (!res.ok) return
-      const data = (await res.json()) as { points?: Array<{ lat: number; lon: number; timestamp: string }> }
-      if (!data.points) return
-      const pts: TrailPoint[] = data.points
-        .map(p => ({ lat: p.lat, lon: p.lon, timestampMs: Date.parse(p.timestamp) }))
-        .sort((a, b) => (a.timestampMs ?? 0) - (b.timestampMs ?? 0))
-      setMotoringPoints(pts)
-    } catch {
-      // silently ignore — trail simply won't render
-    }
-  }, [])
 
   // Trail data (re-derived each render triggered by renderKey bump)
-  const motoringTrailGeoJSON = useMemo(
-    () => trailToGeoJSON(motoringPoints),
-    [motoringPoints],
-  )
-
   const postAnchorTrailGeoJSON = useMemo(
     () => trailToGeoJSON(vesselTrail()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -637,108 +664,28 @@ export function AnchorWatchMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderKey, aisTrails, aisVessels])
 
-  // ── Cursor management ────────────────────────────────────────────────────
-  const setCursor = useCallback((cursor: string) => {
-    const canvas = mapRef.current?.getCanvas()
-    if (canvas) canvas.style.cursor = cursor
-  }, [])
-
-  const handleCancel = useCallback(() => {
-    if (editMode === 'radius') setLiveRadius(null)
-    setGhostAnchor(null)
-    setEditMode('none')
-    setCursor('grab')
-  }, [editMode, setCursor])
-
-  // ── Keyboard handler ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (editMode === 'none') return
-      if (e.key === 'Escape') {
-        handleCancel()
-        return
-      }
-      if (e.key === 'Enter') {
-        if (editMode === 'reposition' && ghostAnchor) {
-          onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
-          setGhostAnchor(null)
-          setEditMode('none')
-          setCursor('grab')
-        } else if (editMode === 'radius' && liveRadius !== null) {
-          onRadiusChange?.(liveRadius)
-          setLiveRadius(null)
-          setEditMode('none')
-          setCursor('grab')
-        }
-        return
-      }
-      if (editMode === 'reposition' && ghostAnchor) {
-        const pos = ghostAnchor
-        const nudgeMap: Record<string, [number, number]> = {
-          ArrowUp: [0, 0],
-          ArrowDown: [Math.PI, 0],
-          ArrowLeft: [(3 * Math.PI) / 2, 0],
-          ArrowRight: [Math.PI / 2, 0],
-        }
-        if (e.key in nudgeMap) {
-          e.preventDefault()
-          const bearings: Record<string, number> = {
-            ArrowUp: 0, ArrowDown: Math.PI, ArrowLeft: (3 * Math.PI) / 2, ArrowRight: Math.PI / 2,
-          }
-          const [newLat, newLon] = destinationPoint(pos.lat, pos.lon, bearings[e.key], NUDGE_METERS)
-          setGhostAnchor({ lat: newLat, lon: newLon })
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor, handleCancel])
-
   // ── Map click handler ────────────────────────────────────────────────────
+  // Editing (reposition, radius drag) is gone entirely — every branch that
+  // used to commit one of those on a map click went with it. What's left is
+  // exactly the placemark-pinning flow: unoccupied water raises a pin-it
+  // tooltip, and every marker (AIS, anchor, self vessel, placemarks) sets
+  // suppressNextMapClickRef so a click that reaches here always landed on
+  // open chart.
   const handleMapClick = useCallback(
     (e: maplibregl.MapMouseEvent) => {
       if (suppressNextMapClickRef.current) {
         suppressNextMapClickRef.current = false
         return
       }
-      if (editMode === 'reposition' && ghostAnchor) {
-        onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
-        setGhostAnchor(null)
-        setEditMode('none')
-        setCursor('grab')
-        return
-      }
-      if (editMode === 'radius' && liveRadius !== null) {
-        onRadiusChange?.(liveRadius)
-        setLiveRadius(null)
-        setEditMode('none')
-        setCursor('grab')
-        return
-      }
-      if (editMode !== 'none') return
       // No active watch: POST /api/anchor-watch/placemarks would 409 (see
       // backend/anchor_placemarks.go), so don't even raise the tooltip.
       if (!hasAnchor) return
-      // Unoccupied water: offer to pin it. Markers (AIS, anchor, self
-      // vessel, placemarks) all set suppressNextMapClickRef, so a click
-      // that reaches here landed on open chart.
       const { lat, lng } = e.lngLat
       setSelectedPlacemarkId(null)
       setPinCandidate({ lat, lon: lng })
     },
-    [editMode, ghostAnchor, hasAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor],
+    [hasAnchor],
   )
-
-  // ── Placemarks ───────────────────────────────────────────────────────────
-  // Entering an edit mode takes over the map click ("Tap map to place
-  // anchor"), so any open pin tooltip or selected pin would be stranded —
-  // and its Pin/Remove buttons unreachable behind the edit overlay.
-  useEffect(() => {
-    if (editMode !== 'none') {
-      setPinCandidate(null)
-      setSelectedPlacemarkId(null)
-    }
-  }, [editMode])
 
   // Both tooltip buttons sit inside the map, so their clicks also reach
   // maplibre's own handler — which would immediately reopen the tooltip
@@ -777,170 +724,6 @@ export function AnchorWatchMap({
     setSelectedPlacemarkId(null)
   }, [onPlacemarkRemove])
 
-  // ── Map mouse move handler (for radius drag) ─────────────────────────────
-  const handleMouseMove = useCallback(
-    (e: maplibregl.MapMouseEvent) => {
-      // Radius drag, reposition drag and edge-hover detection all project
-      // anchor coords — none of them are reachable without an anchor (radius
-      // and reposition mode both require one to enter), but bail explicitly
-      // rather than let a NaN projection slip through.
-      if (!hasAnchor) return
-      if (editMode === 'radius') {
-        const { lat, lng } = e.lngLat
-        const newRadius = haversineMeters(anchorLat, anchorLon, lat, lng)
-        setLiveRadius(Math.max(5, newRadius))
-      } else if (editMode === 'reposition') {
-        const { lat, lng } = e.lngLat
-        setGhostAnchor({ lat, lon: lng })
-      } else {
-        // No radius editing available (view-only hosts, e.g. the dashboard
-        // tile) — never hint at an edge drag that can't happen.
-        if (!onRadiusChange) return
-        // Detect hover over circle edge — within ±15px projected distance
-        const map = mapRef.current
-        if (!map) return
-        const circleEdgePoint = map.project([anchorLon, anchorLat])
-        const cursorPoint = e.point
-        const dx = cursorPoint.x - circleEdgePoint.x
-        const dy = cursorPoint.y - circleEdgePoint.y
-        const pixelDist = Math.sqrt(dx * dx + dy * dy)
-        // Project radius to pixels
-        const radiusEdge = map.project(
-          destinationPoint(anchorLat, anchorLon, 0, displayRadius).reverse() as [number, number],
-        )
-        const pixelRadius = Math.sqrt(
-          (radiusEdge.x - circleEdgePoint.x) ** 2 + (radiusEdge.y - circleEdgePoint.y) ** 2,
-        )
-        if (Math.abs(pixelDist - pixelRadius) < 15) {
-          setCursor('ew-resize')
-        } else {
-          setCursor('grab')
-        }
-      }
-    },
-    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, setCursor, onRadiusChange],
-  )
-
-  // ── Circle edge click detection ──────────────────────────────────────────
-  const handleCircleEdgeClick = useCallback(
-    (e: maplibregl.MapMouseEvent) => {
-      // No radius editing available (view-only hosts) — the circle edge is
-      // just a display line, not a drag handle.
-      if (!onRadiusChange) return
-      if (editMode === 'radius' && liveRadius !== null) {
-        e.preventDefault()
-        suppressNextMapClickRef.current = true
-        onRadiusChange(liveRadius)
-        setLiveRadius(null)
-        setEditMode('none')
-        setCursor('grab')
-        return
-      }
-      if (editMode !== 'none') return
-      // No anchor to project — bail before it produces NaN.
-      if (!hasAnchor) return
-      const map = mapRef.current
-      if (!map) return
-      const circleEdgePoint = map.project([anchorLon, anchorLat])
-      const cursorPoint = e.point
-      const dx = cursorPoint.x - circleEdgePoint.x
-      const dy = cursorPoint.y - circleEdgePoint.y
-      const pixelDist = Math.sqrt(dx * dx + dy * dy)
-      const radiusEdge = map.project(
-        destinationPoint(anchorLat, anchorLon, 0, displayRadius).reverse() as [number, number],
-      )
-      const pixelRadius = Math.sqrt(
-        (radiusEdge.x - circleEdgePoint.x) ** 2 + (radiusEdge.y - circleEdgePoint.y) ** 2,
-      )
-      if (Math.abs(pixelDist - pixelRadius) < 15) {
-        e.preventDefault()
-        suppressNextMapClickRef.current = true
-        originalRadiusRef.current = radiusMeters
-        setLiveRadius(radiusMeters)
-        setEditMode('radius')
-        setCursor('ew-resize')
-        // Imperatively disable drag pan so the ongoing touch/drag doesn't also pan the map
-        mapRef.current?.dragPan.disable()
-      }
-    },
-    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, liveRadius, onRadiusChange, radiusMeters, setCursor],
-  )
-
-  // ── Touch start: circle-edge detection for tablet radius adjustment ──────
-  const handleTouchStartEdge = useCallback(
-    (e: maplibregl.MapTouchEvent) => {
-      // No radius editing available (view-only hosts) — the circle edge is
-      // just a display line, not a drag handle.
-      if (!onRadiusChange) return
-      if (editMode === 'radius' && liveRadius !== null) {
-        suppressNextMapClickRef.current = true
-        onRadiusChange(liveRadius)
-        setLiveRadius(null)
-        setEditMode('none')
-        setCursor('grab')
-        return
-      }
-      if (editMode !== 'none') return
-      // No anchor to project — bail before it produces NaN.
-      if (!hasAnchor) return
-      const map = mapRef.current
-      if (!map) return
-      const circleEdgePoint = map.project([anchorLon, anchorLat])
-      const touchPoint = e.point
-      const dx = touchPoint.x - circleEdgePoint.x
-      const dy = touchPoint.y - circleEdgePoint.y
-      const pixelDist = Math.sqrt(dx * dx + dy * dy)
-      const radiusEdge = map.project(
-        destinationPoint(anchorLat, anchorLon, 0, displayRadius).reverse() as [number, number],
-      )
-      const pixelRadius = Math.sqrt(
-        (radiusEdge.x - circleEdgePoint.x) ** 2 + (radiusEdge.y - circleEdgePoint.y) ** 2,
-      )
-      // Larger hit target for touch (25px vs 15px for mouse)
-      if (Math.abs(pixelDist - pixelRadius) < 25) {
-        suppressNextMapClickRef.current = true
-        originalRadiusRef.current = radiusMeters
-        setLiveRadius(radiusMeters)
-        setEditMode('radius')
-        setCursor('ew-resize')
-        mapRef.current?.dragPan.disable()
-      }
-    },
-    [editMode, hasAnchor, liveRadius, anchorLat, anchorLon, displayRadius, radiusMeters, onRadiusChange, setCursor],
-  )
-
-  // ── Touch move: update ghost anchor or live radius on tablet ─────────────
-  const handleTouchMove = useCallback(
-    (e: maplibregl.MapTouchEvent) => {
-      // Mirrors handleMouseMove: neither branch is reachable without an
-      // anchor (both edit modes require one to enter), but bail explicitly.
-      if (!hasAnchor) return
-      if (editMode === 'radius') {
-        const { lat, lng } = e.lngLat
-        const newRadius = haversineMeters(anchorLat, anchorLon, lat, lng)
-        setLiveRadius(Math.max(5, newRadius))
-      } else if (editMode === 'reposition') {
-        const { lat, lng } = e.lngLat
-        setGhostAnchor({ lat, lon: lng })
-      }
-    },
-    [editMode, hasAnchor, anchorLat, anchorLon],
-  )
-
-  // ── Double-click on map confirms radius edit ─────────────────────────────
-  const handleDblClick = useCallback(
-    (e: maplibregl.MapMouseEvent) => {
-      if (editMode === 'radius' && liveRadius !== null) {
-        e.preventDefault()
-        onRadiusChange?.(liveRadius)
-        setLiveRadius(null)
-        setEditMode('none')
-        setCursor('grab')
-      }
-    },
-    [editMode, liveRadius, onRadiusChange, setCursor],
-  )
-
   // ── AIS vessel click ─────────────────────────────────────────────────────
   const handleAisClick = useCallback(
     (e: React.MouseEvent, vessel: NearbyVessel) => {
@@ -953,40 +736,15 @@ export function AnchorWatchMap({
     [selectVessel],
   )
 
-  const confirmAnchorReposition = useCallback(() => {
-    if (!ghostAnchor) return
-    suppressNextMapClickRef.current = true
-    onAnchorReposition?.(ghostAnchor.lat, ghostAnchor.lon)
-    setGhostAnchor(null)
-    setEditMode('none')
-    setCursor('grab')
-  }, [ghostAnchor, onAnchorReposition, setCursor])
-
   // ── Anchor marker click ──────────────────────────────────────────────────
-  const handleAnchorMarkerClick = useCallback(
-    (e: React.MouseEvent) => {
-      // Still swallowed even on a view-only host (no onAnchorReposition):
-      // without this, the click would fall through to the map's own
-      // "place a pin here" handler, same as every other marker on this map.
-      e.stopPropagation()
-      // Belt-and-braces: the marker itself only renders when hasAnchor, so
-      // this shouldn't be reachable without one.
-      if (!hasAnchor) return
-      // View-only host (the dashboard tile) — reposition editing lives on
-      // the full-page Anchor Watch view only.
-      if (!onAnchorReposition) return
-      if (editMode === 'reposition' && ghostAnchor) {
-        confirmAnchorReposition()
-        return
-      }
-      if (editMode !== 'none') return
-      setGhostAnchor({ lat: anchorLat, lon: anchorLon })
-      setEditMode('reposition')
-      setCursor('grabbing')
-      void fetchMotoringTrail()
-    },
-    [confirmAnchorReposition, editMode, hasAnchor, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail, onAnchorReposition],
-  )
+  // The marker itself is a non-interactive "Anchor position" div now (no
+  // edit mode exists to enter) — this only swallows the click so it doesn't
+  // fall through to the map's own "place a pin here" handler, same as every
+  // other marker on this map (self vessel, AIS, placemarks).
+  const handleAnchorMarkerClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+  }, [])
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
   const handleZoomIn = useCallback(() => {
@@ -1052,6 +810,7 @@ export function AnchorWatchMap({
     // there's nothing to track — see the currentZoom state's own comment.
     if (interactive && Number.isFinite(zoom)) {
       setCurrentZoom(zoom)
+      writeStoredZoom(zoom, viewSessionRef.current)
     }
     // A pan/zoom changes every AIS vessel's projected screen position, so
     // the label-declutter result can change even with no new AIS poll.
@@ -1088,8 +847,24 @@ export function AnchorWatchMap({
     if (viewSessionRef.current === anchorSetAt) return
     viewSessionRef.current = anchorSetAt
     writeStoredCenter(anchorLat, anchorLon, anchorSetAt)
-    mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
-  }, [anchorSetAt, anchorLat, anchorLon])
+    // Also fits the swing circle to the new anchorage's own radius, same as
+    // the mount-time fit-zoom effect above — a new session can carry a very
+    // different radius (a bigger or smaller swing) than whatever the map was
+    // last zoomed to. Skipped, not deferred, when the container can't be
+    // measured (e.g. no real layout under jsdom in tests): the plain
+    // center-only ease below is exactly today's shipped behaviour.
+    const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
+    const rect = container?.getBoundingClientRect()
+    const shortSidePx = rect ? Math.min(rect.width, rect.height) : 0
+    if (shortSidePx > 0) {
+      const zoom = fitRadiusZoom(radiusMeters, anchorLat, shortSidePx)
+      writeStoredZoom(zoom, anchorSetAt)
+      setCurrentZoom(zoom)
+      mapRef.current?.easeTo({ center: [anchorLon, anchorLat], zoom, duration: 600 })
+    } else {
+      mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
+    }
+  }, [anchorSetAt, anchorLat, anchorLon, radiusMeters])
 
   // Tracks the previous anchorStateKnown so the effect below fires on
   // exactly one transition: false -> true. Ordinary Raise (an already-known
@@ -1250,11 +1025,6 @@ export function AnchorWatchMap({
         onMoveEnd={handleMoveEnd}
         onStyleData={handleMapStyleData}
         onClick={handleMapClick}
-        onMouseMove={handleMouseMove}
-        onDblClick={handleDblClick}
-        onMouseDown={handleCircleEdgeClick}
-        onTouchStart={handleTouchStartEdge}
-        onTouchMove={handleTouchMove}
         // Carto and OpenStreetMap both require attribution, and since the
         // backend now proxies and caches their tiles (ADR 0067) rather than
         // the browser fetching them from CARTO directly, showing that credit
@@ -1268,7 +1038,10 @@ export function AnchorWatchMap({
         onIdle={collapseAttribution}
         dragRotate={false}
         touchPitch={false}
-        dragPan={editMode === 'none'}
+        // Always on — there is no edit mode left that ever needs to borrow
+        // this gesture for something else (radius/reposition editing used to
+        // disable it imperatively while a drag was in progress).
+        dragPan
       >
         {/* Alarm circle fill */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
@@ -1306,27 +1079,6 @@ export function AnchorWatchMap({
         */}
         <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={showImageryLayer} />
 
-        {/* Ghost circle during reposition mode */}
-        {ghostCircleGeoJSON && (
-          <Source id="ghost-circle" type="geojson" data={ghostCircleGeoJSON}>
-            <Layer
-              id="ghost-circle-fill"
-              type="fill"
-              paint={{ 'fill-color': '#a3a3a3', 'fill-opacity': 0.08 }}
-            />
-            <Layer
-              id="ghost-circle-stroke"
-              type="line"
-              paint={{
-                'line-color': '#a3a3a3',
-                'line-width': 1.5,
-                'line-dasharray': [3, 3],
-                'line-opacity': 0.6,
-              }}
-            />
-          </Source>
-        )}
-
         {/* AIS vessel trails */}
       {aisTrailsData.features.length > 0 && (
         <Source id="ais-trails" type="geojson" lineMetrics data={aisTrailsData}>
@@ -1349,23 +1101,6 @@ export function AnchorWatchMap({
           />
         </Source>
       )}
-
-        {/* Motoring breadcrumb trail (pre-anchor) */}
-        {showRepositionBreadcrumbs && motoringTrailGeoJSON.geometry.coordinates.length >= 2 && (
-          <Source id="vessel-trail-motoring" type="geojson" data={motoringTrailGeoJSON}>
-            <Layer
-              id="vessel-trail-motoring-layer"
-              type="line"
-              paint={{
-                'line-color': '#ef4444',
-                'line-width': 4,
-                'line-opacity': 0.95,
-                'line-blur': 0.2,
-              }}
-              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-            />
-          </Source>
-        )}
 
         {/* Post-anchor tracking trail (ring buffer) */}
         {postAnchorTrailGeoJSON.geometry.coordinates.length >= 2 && (
@@ -1602,38 +1337,17 @@ export function AnchorWatchMap({
           </div>
         </Marker>
 
-        {/* Ghost anchor (during reposition) */}
-        {ghostAnchor && (
-          <Marker latitude={ghostAnchor.lat} longitude={ghostAnchor.lon}>
-            <button
-              type="button"
-              onClick={confirmAnchorReposition}
-              className="flex items-center justify-center"
-              style={{ width: 40, height: 40, cursor: 'grab' }}
-              aria-label="Confirm anchor reposition"
-            >
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-500/80"
-                style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
-              >
-                <Anchor className="h-4 w-4 text-white opacity-60" />
-              </div>
-            </button>
-          </Marker>
-        )}
-
-        {/* Anchor marker */}
+        {/* Anchor marker — non-interactive: dragging/tapping it can no longer
+            move the anchor or change the radius (impeccable P0s). onClick
+            only swallows the event so it doesn't fall through to the map's
+            own "place a pin here" handler, same as every other marker here. */}
         {hasAnchor && (
           <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 1000 }}>
-            <button
+            <div
               onClick={handleAnchorMarkerClick}
               className="flex items-center justify-center"
-              style={{
-                width: 40,
-                height: 40,
-                cursor: onAnchorReposition && editMode === 'none' ? 'grab' : 'default',
-              }}
-              aria-label={onAnchorReposition ? 'Anchor position — click to reposition' : 'Anchor position'}
+              style={{ width: 40, height: 40 }}
+              aria-label="Anchor position"
             >
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
@@ -1641,7 +1355,7 @@ export function AnchorWatchMap({
               >
                 <Anchor className="h-4 w-4 text-white" />
               </div>
-            </button>
+            </div>
           </Marker>
         )}
 
@@ -1736,23 +1450,6 @@ export function AnchorWatchMap({
       </Map>
       )}
 
-      {editMode !== 'none' && (
-        <div className="pointer-events-auto absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="flex items-center gap-2 rounded-full bg-black/65 py-2 pl-4 pr-2 backdrop-blur-sm">
-            <span className="text-xs text-white/70">
-              {editMode === 'reposition' ? 'Tap map to place anchor' : 'Tap map to set radius'}
-            </span>
-            <button
-              onClick={handleCancel}
-              className="rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white hover:bg-white/25 active:scale-95"
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Metric overlay — top of map. Distance is gone from here entirely
           (design critique item 1): it's promoted to a hero KPI above the
           map on every host now (anchor-watch-tile.tsx; the drawer's own
@@ -1780,16 +1477,15 @@ export function AnchorWatchMap({
             ? [
                 {
                   label: 'Bearing',
-                  value: displayBearingDeg !== null ? `${displayBearingDeg}` : '—',
+                  value: bearingDegProp !== null ? `${bearingDegProp}` : '—',
                   unit: '°',
                 },
                 {
                   label: 'Radius',
                   value: isImperial
-                    ? `${Math.round(displayRadius * 3.28084)}`
-                    : `${Math.round(displayRadius)}`,
+                    ? `${Math.round(radiusMeters * 3.28084)}`
+                    : `${Math.round(radiusMeters)}`,
                   unit: isImperial ? 'ft' : 'm',
-                  live: editMode === 'radius',
                 },
               ]
             : []),
@@ -1827,17 +1523,16 @@ export function AnchorWatchMap({
             // there's a result to describe.
             rowTitle: scopeAvailable ? scopeRecommendation!.note : undefined,
           },
-        ].map(({ label, value, unit, setDeg, live, reason, rowTitle }, index) => (
+        ].map(({ label, value, unit, setDeg, reason, rowTitle }, index) => (
           <div
             key={label}
             title={rowTitle}
             className={cn(
               'flex items-center justify-between gap-4 px-3 py-1.5',
               index > 0 && 'border-t border-white/10',
-              live && 'bg-sky-500/10',
             )}
           >
-            <p className={cn('text-[9px] uppercase tracking-[0.16em] text-white/80', live && 'text-sky-200')}>
+            <p className="text-[9px] uppercase tracking-[0.16em] text-white/80">
               {label}
             </p>
             {label === 'Current' ? (
@@ -1898,7 +1593,7 @@ export function AnchorWatchMap({
           <button
             onClick={onFullscreen}
             aria-label="Full screen"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+            className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
             style={{ transition: 'background-color 150ms ease-out' }}
           >
             <Expand className="h-4 w-4" />
@@ -1907,7 +1602,7 @@ export function AnchorWatchMap({
         <button
           onClick={handleZoomIn}
           aria-label="Zoom in"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Plus className="h-4 w-4" />
@@ -1915,7 +1610,7 @@ export function AnchorWatchMap({
         <button
           onClick={handleZoomOut}
           aria-label="Zoom out"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Minus className="h-4 w-4" />
@@ -1926,7 +1621,7 @@ export function AnchorWatchMap({
               onClick={handleImageryToggle}
               aria-label="Toggle satellite imagery"
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
+                'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
                 showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
               )}
               style={{ transition: 'background-color 150ms ease-out' }}
@@ -1939,7 +1634,7 @@ export function AnchorWatchMap({
               disabled={!radarEchoAvailability.available}
               title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
+                'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
                 showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
                 !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
               )}
@@ -1950,7 +1645,7 @@ export function AnchorWatchMap({
             <button
               onClick={handleRecenter}
               aria-label="Re-centre on anchor"
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
               style={{ transition: 'background-color 150ms ease-out' }}
             >
               <Crosshair className="h-4 w-4" />

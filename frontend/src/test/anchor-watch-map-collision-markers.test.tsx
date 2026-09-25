@@ -81,8 +81,6 @@ function renderMap(aisCollisionAlarms?: ReadonlyMap<string, AlarmState>) {
       showImageryLayer
       onImageryToggle={() => undefined}
       onFullscreen={() => undefined}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
     />,
   )
 }

@@ -145,8 +145,6 @@ function renderMap(aisVessels: NearbyVessel[]) {
       aisVessels={aisVessels}
       aisTrails={() => new Map()}
       isDarkTheme={false}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
     />,
   )
 }
@@ -232,8 +230,6 @@ describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
         aisVessels={vessels}
         aisTrails={() => new Map()}
         isDarkTheme={false}
-        onAnchorReposition={() => undefined}
-        onRadiusChange={() => undefined}
       />
     )
 

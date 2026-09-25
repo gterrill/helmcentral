@@ -96,8 +96,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       showImageryLayer
       onImageryToggle={() => undefined}
       onFullscreen={() => undefined}
-      onAnchorReposition={() => undefined}
-      onRadiusChange={() => undefined}
       expandedControls
       {...overrides}
     />,
@@ -167,7 +165,9 @@ describe('AnchorWatchMap zoom tracking (per-tick cost)', () => {
       lastMoveEndHandler!({ viewState: { latitude: -25.2939, longitude: 152.9103, zoom: 16 } })
     })
 
-    expect(localStorage.getItem('anchor-watch-map-zoom')).toBe('16')
+    // Tagged with the session the view is following, same shape as the
+    // centre — this map is mounted with no anchorSetAt, so sessionId is null.
+    expect(JSON.parse(localStorage.getItem('anchor-watch-map-zoom')!)).toEqual({ zoom: 16, sessionId: null })
   })
 
   it('does not persist zoom to localStorage at all when not interactive', () => {

@@ -169,6 +169,74 @@ describe('useAnchorWatch planning-depth capture', () => {
   })
 })
 
+// P1 from the impeccable critique of the anchor-watch map (2026-09-25):
+// updateRadius silently no-op'd on a failed PATCH, so a rejected alarm-radius
+// change looked identical to a successful one. Fixed by routing all three
+// PATCH mutations through anchorRequest (same as updatePosition/setAnchorHere
+// already do), which throws on a non-OK response or a network error rather
+// than swallowing it — the caller (the drawer's radius stepper, the rode
+// planner's Apply-as-alarm-radius path) is what shows the toast, so the hook
+// itself just has to not eat the failure.
+describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDepth failures', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20, rode_deployed_m: 30, planning_depth_m: 5, planning_tide_height_ft: 1 }),
+    }))
+  })
+
+  const calls: Array<[string, (r: ReturnType<typeof useAnchorWatch>) => Promise<void>]> = [
+    ['updateRadius', (r) => r.updateRadius(40)],
+    ['updateRodeAndConditions', (r) => r.updateRodeAndConditions(30, 'calm', 'sand')],
+    ['updatePlanningDepth', (r) => r.updatePlanningDepth(5, 1)],
+  ]
+
+  it.each(calls)('%s throws on a non-OK response and leaves state unchanged', async (_name, call) => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    const before = result.current
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'bad request' }),
+    } as Response)
+
+    await expect(act(async () => { await call(result.current) })).rejects.toThrow('bad request')
+
+    expect(result.current.radiusMeters).toBe(before.radiusMeters)
+    expect(result.current.rodeDeployedM).toBe(before.rodeDeployedM)
+    expect(result.current.planningDepthM).toBe(before.planningDepthM)
+  })
+
+  it.each(calls)('%s throws on a network error and leaves state unchanged', async (_name, call) => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    const before = result.current
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('Connection lost'))
+
+    await expect(act(async () => { await call(result.current) })).rejects.toThrow('Connection lost')
+
+    expect(result.current.radiusMeters).toBe(before.radiusMeters)
+    expect(result.current.rodeDeployedM).toBe(before.rodeDeployedM)
+    expect(result.current.planningDepthM).toBe(before.planningDepthM)
+  })
+
+  it.each(calls)('%s throws on a 500 with a non-JSON body, surfacing the HTTP status', async (_name, call) => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => { throw new Error('Not JSON') },
+    } as unknown as Response)
+
+    await expect(act(async () => { await call(result.current) })).rejects.toThrow('HTTP 500')
+  })
+})
+
 // updatePlanningDepth PATCHes the planning-depth pair — mirrors
 // updateRodeAndConditions exactly (no optimistic update, replaces state with
 // the server echo).

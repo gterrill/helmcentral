@@ -40,8 +40,6 @@ describe('World imagery source config', () => {
         isDarkTheme={false}
         showImageryLayer
         onImageryToggle={() => {}}
-        onAnchorReposition={() => {}}
-        onRadiusChange={() => {}}
       />,
     )
 
