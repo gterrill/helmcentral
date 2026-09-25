@@ -916,6 +916,11 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	state := vesselStateData{
 		Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1,
 		HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1,
+		// True wind (ADR 0129) carries the same -1/"" absent sentinels as its
+		// apparent counterpart above, and is never derived from it — a boat
+		// with no true-wind source (no boat speed/heading input to the wind
+		// instrument) must show '—', not the apparent reading, in True mode.
+		WindSpeedTrueKts: -1, WindAngleTrueDeg: -1, WindAngleTrueRelativeDeg: -1, WindDirectionTrueDeg: -1,
 		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
 		// return before the payload is even parsed (signalKSelfPayload
 		// failing below) must never read as "just measured".
@@ -1067,6 +1072,80 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.WindAngleApparentDeg = 0
 		state.WindAngleRelativeDeg = 0
 		state.WindSide = "starboard"
+	}
+
+	// True wind (ADR 0129): parsed the same way as apparent above (value/bare
+	// fallbacks, radian conversion, side from sign) but kept entirely
+	// separate, including its own recency check — a stale or absent
+	// true-wind source must read as unknown (-1/"") rather than silently
+	// reusing apparent's numbers, which is a different sensor reading a
+	// different quantity.
+	//
+	// windTimestampTrue is built only from the true-wind leaves themselves
+	// (speedTrue/angleTrueWater/directionTrue), never the generic
+	// environment.wind.timestamp apparent's own gate also consults — that
+	// timestamp can be freshened by apparent alone updating, which would
+	// wrongly revive a true-wind reading whose own instrument has gone
+	// quiet. There is deliberately no state.Datetime (GNSS fix time)
+	// fallback either, unlike apparent's gate: a live GPS fix says nothing
+	// about whether the true-wind instrument itself is still reporting, so
+	// a stale or entirely absent true-wind timestamp must leave every true
+	// field at its sentinel rather than being read as "recent because the
+	// boat's clock is."
+	windSpeedTrue := lookupNumber(payload, "environment", "wind", "speedTrue", "value")
+	if windSpeedTrue == -1 {
+		windSpeedTrue = lookupNumber(payload, "environment", "wind", "speedTrue")
+	}
+	windTimestampTrue := firstNonEmptyString(
+		lookupString(payload, "environment", "wind", "speedTrue", "timestamp"),
+		lookupString(payload, "environment", "wind", "angleTrueWater", "timestamp"),
+		lookupString(payload, "environment", "wind", "directionTrue", "timestamp"),
+	)
+	windDataRecentTrue := isRecentTimestamp(windTimestampTrue, defaultWindMaxAge)
+
+	if windSpeedTrue >= 0 && windDataRecentTrue {
+		state.WindSpeedTrueKts = windSpeedTrue * metersPerSecondToKnots
+	}
+	// No else: unlike apparent above, an absent/stale true wind speed stays
+	// at its -1 sentinel rather than falling back to 0 - see the fallback
+	// policy note on vesselStateData's true-wind fields.
+
+	windAngleTrue := lookupNumber(payload, "environment", "wind", "angleTrueWater", "value")
+	if windAngleTrue == -1 {
+		windAngleTrue = lookupNumber(payload, "environment", "wind", "angleTrueWater")
+	}
+	if windAngleTrue != -1 && windDataRecentTrue {
+		if windAngleTrue >= -2*math.Pi && windAngleTrue <= 2*math.Pi {
+			windAngleTrue = windAngleTrue * 180 / math.Pi
+		}
+
+		signedAngleTrue := normalizeSignedDegrees(windAngleTrue)
+		state.WindAngleTrueDeg = normalizeDegrees(signedAngleTrue)
+		state.WindAngleTrueRelativeDeg = math.Abs(signedAngleTrue)
+		if signedAngleTrue < 0 {
+			state.WindSideTrue = "port"
+		} else {
+			state.WindSideTrue = "starboard"
+		}
+	}
+	// No else: WindAngleTrueDeg/WindAngleTrueRelativeDeg stay at their -1
+	// sentinel and WindSideTrue stays "" (absent), rather than apparent's
+	// arbitrary starboard/0 default - true wind angle needs boat speed and
+	// heading behind it, so "the instrument has nothing yet" is common and
+	// must read as unknown, not as "dead ahead."
+
+	// environment.wind.directionTrue is the compass bearing the wind comes
+	// FROM (0..2π already relative to true north, not bow-relative), so it
+	// normalizes straight to 0-360 with no signed/side step.
+	windDirectionTrue := lookupNumber(payload, "environment", "wind", "directionTrue", "value")
+	if windDirectionTrue == -1 {
+		windDirectionTrue = lookupNumber(payload, "environment", "wind", "directionTrue")
+	}
+	if windDirectionTrue != -1 && windDataRecentTrue {
+		if windDirectionTrue >= -2*math.Pi && windDirectionTrue <= 2*math.Pi {
+			windDirectionTrue = windDirectionTrue * 180 / math.Pi
+		}
+		state.WindDirectionTrueDeg = normalizeDegrees(windDirectionTrue)
 	}
 
 	sog := lookupNumber(payload, "navigation", "speedOverGround", "value")

@@ -481,6 +481,150 @@ func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *test
 	}
 }
 
+// TestSampleTracks_RecordsTrueWindGustHistoryAlongsideApparent (ADR 0129)
+// proves each poll tick that publishes true wind also records it into its
+// own trueWindGustHistory buffer, on the same tick as the apparent
+// recording above - not a converted copy of the apparent sample.
+func TestSampleTracks_RecordsTrueWindGustHistoryAlongsideApparent(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + fresh + `"},
+			"state": {"value": "anchored"}
+		},
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 5.0},
+				"speedTrue": {"value": 7.2, "timestamp": "` + fresh + `"}
+			}
+		}
+	}`)
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	windPts := windGustHistory.since(time.Time{})
+	if len(windPts) != 1 {
+		t.Fatalf("expected 1 apparent wind gust sample, got %d", len(windPts))
+	}
+
+	truePts := trueWindGustHistory.since(time.Time{})
+	if len(truePts) != 1 {
+		t.Fatalf("expected 1 true wind gust sample recorded on the same tick, got %d", len(truePts))
+	}
+	wantKts := 7.2 * metersPerSecondToKnots
+	if !approxEqual(truePts[0].Value, wantKts, 0.01) {
+		t.Fatalf("expected true wind gust sample of %.2f kts, got %v", wantKts, truePts[0].Value)
+	}
+}
+
+// TestSampleTracks_SkipsTrueWindGustRecordingWhenAbsent proves a tick with
+// apparent wind but no true wind records only the apparent sample - no
+// fallback value is invented for the true-wind buffer.
+func TestSampleTracks_SkipsTrueWindGustRecordingWhenAbsent(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		},
+		"environment": {
+			"wind": {"speedApparent": {"value": 5.0}}
+		}
+	}`)
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	truePts := trueWindGustHistory.since(time.Time{})
+	if len(truePts) != 0 {
+		t.Fatalf("expected no true wind gust sample recorded when speedTrue is absent, got %d", len(truePts))
+	}
+}
+
+// TestSampleTracks_SkipsTrueWindGustRecordingWhenTrueWindIsStale
+// (code-review fix, 2026-09-25) proves a stale true-wind reading - fresh
+// GPS/navigation.datetime, but speedTrue/angleTrueWater timestamps past
+// defaultWindMaxAge - records nothing into trueWindGustHistory. sampleTracks
+// itself gates purely on state.WindSpeedTrueKts >= 0
+// (fetchSignalKVesselState's own sentinel), so this is really confirming
+// signalk.go's recency fix (no GNSS-datetime fallback for true wind)
+// actually reaches this far downstream, not a second, independent gate.
+func TestSampleTracks_SkipsTrueWindGustRecordingWhenTrueWindIsStale(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	stale := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + fresh + `"},
+			"state": {"value": "anchored"}
+		},
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 5.0, "timestamp": "` + fresh + `"},
+				"speedTrue": {"value": 9.5, "timestamp": "` + stale + `"},
+				"angleTrueWater": {"value": 0.5, "timestamp": "` + stale + `"}
+			}
+		}
+	}`)
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	windPts := windGustHistory.since(time.Time{})
+	if len(windPts) != 1 {
+		t.Fatalf("expected the fresh apparent wind gust sample to still record, got %d", len(windPts))
+	}
+
+	truePts := trueWindGustHistory.since(time.Time{})
+	if len(truePts) != 0 {
+		t.Fatalf("expected no true wind gust sample recorded while true wind is stale (even with fresh apparent/GPS on the same tick), got %d", len(truePts))
+	}
+}
+
 // TestSampleTracks_DoesNotRefreshAISTrailsCache guards the removal of the
 // poller's direct tracksAISTrails.refresh call (backend perf audit #10):
 // getTracksHandler's own get() already refreshes on demand within the

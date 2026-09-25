@@ -74,9 +74,24 @@ var (
 	// 24-hour tendency, well past the 3-hour window the derived paths use.
 	//
 	// Variables rather than constants so tests can swap in a small buffer.
+	//
+	// trueWindSpeedHistory records raw m/s off the delta-stream snapshot for
+	// slope/tendency math only (see addWeatherTrendValues) - it is not the
+	// source for the Wind tile's true-wind MAX GUST cards. Those read
+	// trueWindGustHistory below, which - like windGustHistory - records
+	// already-converted knots on the same recency-gated poll tick as the
+	// apparent gust, so the two ladders stay directly comparable.
 	barometerHistory         = newTelemetryRingBuffer(windGustHistoryCapacity)
 	trueWindSpeedHistory     = newTelemetryRingBuffer(windGustHistoryCapacity)
 	trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	// trueWindGustHistory is the true-wind counterpart of windGustHistory
+	// (ADR 0129): the Wind tile's True mode reads its MAX GUST corners off
+	// this buffer instead. A separate buffer, not a re-read of
+	// trueWindSpeedHistory above, because that one is unconverted m/s on an
+	// unrelated recency contract - mixing the two would either double-convert
+	// units or silently drop the gust ladder's own recency gate.
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 )
 
 // inMemoryMaxWindGustKts returns the max recorded wind speed in the given
@@ -110,6 +125,25 @@ func inMemoryMaxWindGustKts(window string) float64 {
 // scans all windGustHistoryCapacity slots and allocates a result slice on
 // every call).
 //
+// A thin wrapper over maxGustKtsForBuffer, parameterized on windGustHistory
+// specifically — see that function for the actual algorithm.
+func inMemoryMaxWindGustKtsFor(windows []string) map[string]float64 {
+	return maxGustKtsForBuffer(windGustHistory, windows)
+}
+
+// inMemoryMaxTrueWindGustKtsFor is inMemoryMaxWindGustKtsFor's true-wind
+// counterpart (ADR 0129), walking trueWindGustHistory instead of
+// windGustHistory so the Wind tile's True mode gets its own MAX GUST ladder
+// rather than reusing (or silently substituting) the apparent one.
+func inMemoryMaxTrueWindGustKtsFor(windows []string) map[string]float64 {
+	return maxGustKtsForBuffer(trueWindGustHistory, windows)
+}
+
+// maxGustKtsForBuffer is the shared core inMemoryMaxWindGustKtsFor and
+// inMemoryMaxTrueWindGustKtsFor both call, parameterized on which ring
+// buffer to walk so the apparent- and true-wind gust ladders share one
+// algorithm instead of forking it.
+//
 // This is only correct because the gust ladder is NESTED: every longer
 // window's time range is a superset of every shorter window's (e.g. 10m ⊂
 // 30m ⊂ 1h ⊂ 24h). Walking the ring newest→oldest while keeping a running
@@ -125,7 +159,7 @@ func inMemoryMaxWindGustKts(window string) float64 {
 // something this function can detect; nesting-by-construction is the
 // documented precondition. Sorting only guards against *order*, not against
 // a genuinely non-nested set.)
-func inMemoryMaxWindGustKtsFor(windows []string) map[string]float64 {
+func maxGustKtsForBuffer(b *telemetryRingBuffer, windows []string) map[string]float64 {
 	out := make(map[string]float64, len(windows))
 
 	type parsedWindow struct {
@@ -154,10 +188,9 @@ func inMemoryMaxWindGustKtsFor(windows []string) map[string]float64 {
 		cutoffs[i] = now.Add(-pw.dur)
 	}
 
-	windGustHistory.mu.RLock()
-	defer windGustHistory.mu.RUnlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 
-	b := windGustHistory
 	n := len(b.points)
 	count := n
 	if !b.full {

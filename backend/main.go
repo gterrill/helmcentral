@@ -91,10 +91,26 @@ type vesselStateData struct {
 	WindAngleApparentDeg  float64
 	WindSide              string
 	WindAngleRelativeDeg  float64
+	// True wind (ADR 0129): environment.wind.speedTrue/angleTrueWater/
+	// directionTrue, parsed the same way as the Apparent fields above but
+	// never derived from them - see fetchSignalKVesselState's true-wind
+	// block. All four carry the lookupNumber -1 (WindSideTrue: "") sentinel
+	// when the boat publishes no true-wind source, or its last reading has
+	// gone stale, rather than falling back to 0/starboard the way the
+	// Apparent fields historically do.
+	WindSpeedTrueKts         float64
+	WindAngleTrueDeg         float64
+	WindSideTrue             string
+	WindAngleTrueRelativeDeg float64
+	// WindDirectionTrueDeg is the compass bearing (0-360, true north) the
+	// wind is blowing FROM - environment.wind.directionTrue, already
+	// absolute rather than bow-relative, so it carries no "side."
+	WindDirectionTrueDeg float64
 	// WindLastUpdateAge is the freshest last_update_age_s found anywhere
 	// under environment.wind (ADR 0068), scoped to that subtree only —
 	// environment.current is a different sensor with its own health and
 	// must not be folded in. -1 when environment.wind carries no timestamp.
+	// Shared by true and apparent wind: both live in the same subtree.
 	WindLastUpdateAge           float64
 	GeneratorState              string
 	GeneratorManualStart        bool
@@ -1000,6 +1016,16 @@ func computeMaxGustKtsFor(windows []string) map[string]float64 {
 	return inMemoryMaxWindGustKtsFor(windows)
 }
 
+// computeMaxGustTrueKtsFor is computeMaxGustKtsFor's true-wind counterpart
+// (ADR 0129). Unlike the apparent ladder, it has no Influx-backed path yet —
+// only the in-memory ring buffer (trueWindGustHistory, recorded alongside
+// the apparent one in sampleTracks) — so a true-wind gust history does not
+// survive a backend restart on an Influx-configured boat the way the
+// apparent one does. Revisit if that gap matters in practice.
+func computeMaxGustTrueKtsFor(windows []string) map[string]float64 {
+	return inMemoryMaxTrueWindGustKtsFor(windows)
+}
+
 // buildVesselStatePayload produces the /api/vessel-state body. It is separate
 // from the handler so the SSE stream can emit the identical shape without the
 // two drifting apart.
@@ -1017,8 +1043,15 @@ func buildVesselStatePayload() map[string]any {
 		WindSpeedApparentKts: -1,
 		WindAngleApparentDeg: -1,
 		WindAngleRelativeDeg: -1,
-		Engine0RPM:           -1,
-		Engine1RPM:           -1,
+		// True wind (ADR 0129) — see fetchSignalKVesselState's own comment
+		// on these fields for why they default to -1/"" rather than the
+		// apparent fields' 0/starboard fallback.
+		WindSpeedTrueKts:         -1,
+		WindAngleTrueDeg:         -1,
+		WindAngleTrueRelativeDeg: -1,
+		WindDirectionTrueDeg:     -1,
+		Engine0RPM:               -1,
+		Engine1RPM:               -1,
 		// Unknown, not zero, when SignalK is unconfigured and this fallback
 		// literal never gets overwritten below.
 		DepthLastUpdateAge:    -1,
@@ -1072,6 +1105,29 @@ func buildVesselStatePayload() map[string]any {
 		previous = value
 	}
 
+	// True wind's own MAX GUST ladder (ADR 0129), same window ladder as the
+	// apparent one above but NOT the same "no data clamps to 0" treatment:
+	// a boat with no true-wind source, or one that just restarted with an
+	// empty ring buffer, must read as unknown (-1, which the frontend maps
+	// to '—'), not as a confident 0kt dead calm. So a window that itself has
+	// no samples keeps its -1 sentinel untouched, and the monotonic
+	// (longer-window-never-less-than-shorter) clamp only starts applying
+	// once a shorter window has actually produced a real (>=0) value -
+	// previousTrue itself starts at -1 (nothing to enforce yet) and is only
+	// ever updated from a real value, never from an untouched sentinel.
+	maxGustTrueKts := computeMaxGustTrueKtsFor(gustWindowLadder)
+	previousTrue := -1.0
+	for _, window := range gustWindowLadder {
+		value := maxGustTrueKts[window]
+		if value >= 0 {
+			if value < previousTrue {
+				value = previousTrue
+			}
+			previousTrue = value
+		}
+		maxGustTrueKts[window] = value
+	}
+
 	vesselPrefix := loadBoatVesselPrefix(settingsPath)
 	if vesselPrefix == "" {
 		vesselPrefix = "M/V"
@@ -1112,8 +1168,14 @@ func buildVesselStatePayload() map[string]any {
 		"wind_angle_apparent_deg":        state.WindAngleApparentDeg,
 		"wind_side":                      state.WindSide,
 		"wind_angle_relative_deg":        state.WindAngleRelativeDeg,
+		"wind_speed_true_kts":            state.WindSpeedTrueKts,
+		"wind_angle_true_deg":            state.WindAngleTrueDeg,
+		"wind_side_true":                 state.WindSideTrue,
+		"wind_angle_true_relative_deg":   state.WindAngleTrueRelativeDeg,
+		"wind_direction_true_deg":        state.WindDirectionTrueDeg,
 		"wind_last_update_age_s":         state.WindLastUpdateAge,
 		"max_gust_kts":                   maxGustKts,
+		"max_gust_true_kts":              maxGustTrueKts,
 		"generator_state":                state.GeneratorState,
 		"generator_manual_start":         state.GeneratorManualStart,
 		"generator_manual_start_timer":   state.GeneratorManualStartTimer,

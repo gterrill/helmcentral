@@ -195,6 +195,13 @@ func sampleTracks(settingsPath string) {
 		if state.WindSpeedApparentKts >= 0 {
 			windGustHistory.record(state.WindSpeedApparentKts, now)
 		}
+		// True wind's own gust history (ADR 0129), recorded on the same tick
+		// alongside the apparent one above so the two MAX GUST ladders stay
+		// directly comparable. Gated on its own sentinel, independently of
+		// whether apparent wind is present this tick.
+		if state.WindSpeedTrueKts >= 0 {
+			trueWindGustHistory.record(state.WindSpeedTrueKts, now)
+		}
 		if state.Depth >= 0 {
 			depthHistory.record(state.Depth, now)
 		}

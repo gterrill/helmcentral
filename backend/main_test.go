@@ -379,6 +379,204 @@ func TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically(t *
 	}
 }
 
+// TestVesselStateHandler_MaxGustTrueKtsCoversFullLadderAndClampsMonotonically
+// (ADR 0129) is TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically's
+// true-wind counterpart: max_gust_true_kts is its own keyed object, walking
+// the same gustWindowLadder with the same non-decreasing clamp, sourced from
+// trueWindGustHistory rather than windGustHistory.
+func TestVesselStateHandler_MaxGustTrueKtsCoversFullLadderAndClampsMonotonically(t *testing.T) {
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	now := time.Now().UTC()
+	trueWindGustHistory.record(14.1, now.Add(-2*time.Minute))
+
+	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
+
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to parse server url: %v", err)
+	}
+	host, portRaw, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("failed to split host/port: %v", err)
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	settings := fmt.Sprintf("signalk:\n  address: %q\n  port: %d\n", host, port)
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/vessel-state", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := vesselState(c); err != nil {
+		t.Fatalf("vesselState returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse vessel-state response: %v", err)
+	}
+
+	maxGustTrueKts, ok := payload["max_gust_true_kts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected max_gust_true_kts to serialize as an object, got %T: %+v", payload["max_gust_true_kts"], payload["max_gust_true_kts"])
+	}
+
+	ladder := []string{"10m", "30m", "1h", "24h"}
+	var previous float64
+	for i, window := range ladder {
+		raw, exists := maxGustTrueKts[window]
+		if !exists {
+			t.Fatalf("expected max_gust_true_kts to contain window %q, got %+v", window, maxGustTrueKts)
+		}
+		value, ok := raw.(float64)
+		if !ok {
+			t.Fatalf("expected max_gust_true_kts[%q] to be a number, got %T", window, raw)
+		}
+		if value < 0 {
+			t.Fatalf("expected max_gust_true_kts[%q] to be clamped to >= 0, got %v", window, value)
+		}
+		if i > 0 && value < previous {
+			t.Fatalf("expected max_gust_true_kts to be non-decreasing walking the ladder in order; window %q (%v) is less than the previous window's %v", window, value, previous)
+		}
+		previous = value
+	}
+}
+
+// vesselStatePayloadFor seeds the self tree/a stub SignalK server with body
+// and returns the parsed /api/vessel-state JSON, factoring out the
+// httptest-server/settings-file wiring the true-wind gust-clamp tests below
+// share with TestVesselStateHandler_MaxGustTrueKtsCoversFullLadderAndClampsMonotonically
+// above (which predates this helper and still wires it out longhand).
+func vesselStatePayloadFor(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, srv.URL))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/vessel-state", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := vesselState(c); err != nil {
+		t.Fatalf("vesselState returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse vessel-state response: %v", err)
+	}
+	return payload
+}
+
+// TestVesselStateHandler_MaxGustTrueKtsStaysUnknownWhenNoSamplesRecorded
+// (code-review fix, 2026-09-25) proves a window with no true-wind gust
+// samples reports the -1 "unknown" sentinel, not 0. The apparent ladder's
+// clamp deliberately turns "no data" into "0 calm" (see the comment above
+// TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically),
+// but that is wrong for true wind: a boat with no true-wind source, or one
+// that has just restarted with an empty ring buffer, must never be shown as
+// dead calm.
+func TestVesselStateHandler_MaxGustTrueKtsStaysUnknownWhenNoSamplesRecorded(t *testing.T) {
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
+	payload := vesselStatePayloadFor(t, body)
+
+	maxGustTrueKts, ok := payload["max_gust_true_kts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected max_gust_true_kts to serialize as an object, got %T: %+v", payload["max_gust_true_kts"], payload["max_gust_true_kts"])
+	}
+
+	for _, window := range []string{"10m", "30m", "1h", "24h"} {
+		value, ok := maxGustTrueKts[window].(float64)
+		if !ok {
+			t.Fatalf("expected max_gust_true_kts[%q] to be a number, got %T", window, maxGustTrueKts[window])
+		}
+		if value != -1 {
+			t.Fatalf("expected max_gust_true_kts[%q] to stay at the -1 unknown sentinel with no samples recorded, got %v (a boat with no true-wind source must not read as dead calm)", window, value)
+		}
+	}
+}
+
+// TestVesselStateHandler_MaxGustTrueKtsClampsOnlyAfterAShorterWindowHasData
+// proves the monotonic (longer >= shorter) clamp only applies once a
+// shorter window has actually produced a real (>=0) value: a sample old
+// enough to fall outside the 10m/30m windows but still inside 1h/24h must
+// leave the shorter windows at -1 (unknown), not clamp them up to 0 or down
+// to the longer windows' real reading.
+func TestVesselStateHandler_MaxGustTrueKtsClampsOnlyAfterAShorterWindowHasData(t *testing.T) {
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	now := time.Now().UTC()
+	// 45 minutes old: inside the 1h/24h windows, outside 10m/30m.
+	trueWindGustHistory.record(9.4, now.Add(-45*time.Minute))
+
+	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
+	payload := vesselStatePayloadFor(t, body)
+
+	maxGustTrueKts, ok := payload["max_gust_true_kts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected max_gust_true_kts to serialize as an object, got %T: %+v", payload["max_gust_true_kts"], payload["max_gust_true_kts"])
+	}
+
+	tenMin, ok := maxGustTrueKts["10m"].(float64)
+	if !ok || tenMin != -1 {
+		t.Fatalf("expected max_gust_true_kts[10m] to stay unknown (-1) with no sample inside 10m, got %v (ok=%v)", maxGustTrueKts["10m"], ok)
+	}
+	thirtyMin, ok := maxGustTrueKts["30m"].(float64)
+	if !ok || thirtyMin != -1 {
+		t.Fatalf("expected max_gust_true_kts[30m] to stay unknown (-1) with no sample inside 30m, got %v (ok=%v)", maxGustTrueKts["30m"], ok)
+	}
+	oneHour, ok := maxGustTrueKts["1h"].(float64)
+	if !ok || oneHour < 0 {
+		t.Fatalf("expected max_gust_true_kts[1h] to report the real recorded value, got %v (ok=%v)", maxGustTrueKts["1h"], ok)
+	}
+	if !approxEqual(oneHour, 9.4, 0.01) {
+		t.Fatalf("expected max_gust_true_kts[1h] to be 9.4, got %v", oneHour)
+	}
+	twentyFourHour, ok := maxGustTrueKts["24h"].(float64)
+	if !ok || twentyFourHour < oneHour {
+		t.Fatalf("expected max_gust_true_kts[24h] (%v) to be >= 1h's value (%v)", maxGustTrueKts["24h"], oneHour)
+	}
+}
+
 // TestVesselStateHandler_LengthOverallMPresentSerializesAsNumber proves the
 // /api/vessel-state body carries the SignalK-published LOA (ADR 0047's
 // "Swing radius refuses to compute when LOA is unset" now resolves this from

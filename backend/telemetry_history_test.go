@@ -136,6 +136,49 @@ func TestInMemoryMaxWindGustKtsFor_NoSamplesReturnsSentinelPerWindow(t *testing.
 	}
 }
 
+// TestInMemoryMaxTrueWindGustKtsFor_ReturnsPerWindowMap (ADR 0129) is
+// TestInMemoryMaxWindGustKtsFor_ReturnsPerWindowMap's true-wind counterpart,
+// proving the true ladder walks trueWindGustHistory - a separate buffer from
+// windGustHistory - rather than sharing or falling back to the apparent one.
+func TestInMemoryMaxTrueWindGustKtsFor_ReturnsPerWindowMap(t *testing.T) {
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	now := time.Now().UTC()
+	trueWindGustHistory.record(11.2, now.Add(-5*time.Minute))
+	// A different value recorded in the apparent buffer at the same instant,
+	// so a bug that reads the wrong buffer is caught by the value differing,
+	// not just by silently returning zero entries.
+	windGustHistory.record(99.9, now.Add(-5*time.Minute))
+
+	got := inMemoryMaxTrueWindGustKtsFor([]string{"10m", "30m", "1h", "24h"})
+
+	if len(got) != 4 {
+		t.Fatalf("expected 4 entries, got %d: %+v", len(got), got)
+	}
+	for _, w := range []string{"10m", "30m", "1h", "24h"} {
+		if got[w] != 11.2 {
+			t.Fatalf("expected window %q to report the true-wind sample 11.2, got %v", w, got[w])
+		}
+	}
+}
+
+func TestInMemoryMaxTrueWindGustKtsFor_NoSamplesReturnsSentinelPerWindow(t *testing.T) {
+	original := trueWindGustHistory
+	t.Cleanup(func() { trueWindGustHistory = original })
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+
+	got := inMemoryMaxTrueWindGustKtsFor([]string{"10m", "30m", "1h", "24h"})
+
+	for _, w := range []string{"10m", "30m", "1h", "24h"} {
+		if got[w] != -1 {
+			t.Fatalf("expected sentinel -1 for window %q with no samples, got %v", w, got[w])
+		}
+	}
+}
+
 // TestInMemoryMaxWindGustKtsFor_MatchesPerWindowCalls_RandomValues proves the
 // single-pass ladder computation agrees with calling the single-window
 // inMemoryMaxWindGustKts once per window, for a random-valued input

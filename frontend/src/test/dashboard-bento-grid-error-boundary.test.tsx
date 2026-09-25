@@ -65,7 +65,7 @@ describe('DashboardBentoGrid tile error isolation', () => {
     renderGrid('wind')
 
     expect(screen.getByTestId('tile-error-fallback')).toBeInTheDocument()
-    expect(screen.getByText('Apparent Wind')).toBeInTheDocument()
+    expect(screen.getByText('Wind')).toBeInTheDocument()
     expect(screen.getByTestId('widget-vessel')).toBeInTheDocument()
     expect(screen.getByTestId('widget-solar')).toBeInTheDocument()
   })

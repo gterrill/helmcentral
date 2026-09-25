@@ -45,11 +45,34 @@ const arrowD = [
 ].join(' ')
 
 interface WindCompassProps {
-  headingTrue: number | null
-  windAngleApparentDeg: number | null // 0-360, 0=bow, positive=starboard
+  /**
+   * Degrees subtracted from every tick/label/cardinal's geographic bearing
+   * before it's placed on the ring — headingTrue in Course Up (the ring
+   * rotates under the fixed bow), 0 in North Up (the ring never rotates and
+   * true north always renders at 12 o'clock). WindTile computes this; the
+   * mode/orientation logic itself lives there, not here.
+   */
+  ringRotationDeg: number
+  /**
+   * Where the bow triangle sits, in the same "degrees clockwise from the
+   * ring's own 12 o'clock" frame as arrowAngleDeg below — always 0 in Course
+   * Up (the bow is fixed at the top by definition), headingTrue in North Up.
+   * null hides the bow marker entirely rather than guessing a heading North
+   * Up has no real value for.
+   */
+  bowRotationDeg: number | null
+  /**
+   * Where the wind arrow points, in the same frame as bowRotationDeg — the
+   * bow-relative wind angle in Course Up, the wind's absolute compass
+   * bearing in North Up. null hides the arrow (e.g. no reading for the
+   * active mode, or North Up with no heading to convert apparent wind by).
+   */
+  arrowAngleDeg: number | null
+  windSpeedKts: number | null
   windSide: 'port' | 'starboard' | null
   windAngleRelativeDeg: number | null // 0-180
-  windSpeedKts: number | null
+  /** Which reading is being shown, for the screen-reader summary's wording. */
+  kind: 'apparent' | 'true'
 }
 
 /**
@@ -58,43 +81,72 @@ interface WindCompassProps {
  * across screen readers — this is the one deterministic source, so the SVG
  * itself is `aria-hidden` rather than relied on.
  */
-function accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts }: Pick<WindCompassProps, 'windSide' | 'windAngleRelativeDeg' | 'windSpeedKts'>): string {
+function accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts, kind }: Pick<WindCompassProps, 'windSide' | 'windAngleRelativeDeg' | 'windSpeedKts' | 'kind'>): string {
   const speedText = windSpeedKts !== null ? `${Math.round(windSpeedKts)} knots` : 'unknown'
   const sideWord = windSide === 'starboard' ? 'starboard' : windSide === 'port' ? 'port' : null
   const angleText = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : null
   const relativeText = sideWord && angleText ? `${angleText} off the bow, ${sideWord} side` : 'relative angle unknown'
+  const kindLabel = kind === 'true' ? 'True' : 'Apparent'
 
-  return `Wind compass. Apparent wind speed ${speedText}. ${relativeText}.`
+  return `Wind compass. ${kindLabel} wind speed ${speedText}. ${relativeText}.`
+}
+
+/**
+ * Accumulates a rotation along the shortest path rather than the raw 0-360
+ * value, so a CSS transition doesn't spin the long way around when the angle
+ * crosses the 0°/360° wrap. Shared by the wind arrow and (North Up) the bow
+ * marker — both are `g` elements rotated the same way, so both need the same
+ * unwrap treatment; each call gets its own ref/accumulator.
+ */
+function useShortestPathRotation(angleDeg: number | null): number | null {
+  const unwrappedRef = useRef<number | null>(null)
+  let rotation: number | null = null
+  if (angleDeg !== null) {
+    const prev = unwrappedRef.current
+    if (prev === null) {
+      rotation = angleDeg
+    } else {
+      // True modulo, not JS's `%` (which is a truncating remainder and
+      // returns a negative result for a negative dividend). `prev`
+      // accumulates every step (it is `prev + delta`, not `angleDeg`
+      // itself), so after enough same-direction steps it can end up more
+      // than 540° ahead of the next raw angle, at which point
+      // `angleDeg - prev + 540` goes negative and a plain `% 360` no
+      // longer lands in [0, 360) - it stays negative, which used to send
+      // delta far outside [-180, 180] and spin the marker a full turn
+      // backwards. Reducing `angleDeg - prev` to [0, 360) first with an
+      // explicit `+ 360) % 360`-style double mod, then applying the same
+      // `+ 540) % 360) - 180` shift, keeps delta correct at any
+      // accumulated magnitude.
+      const delta = ((((angleDeg - prev) % 360) + 540) % 360) - 180
+      rotation = prev + delta
+    }
+  }
+  unwrappedRef.current = rotation
+  return rotation
 }
 
 export function WindCompass({
-  headingTrue,
-  windAngleApparentDeg,
+  ringRotationDeg,
+  bowRotationDeg,
+  arrowAngleDeg,
   windSide,
   windAngleRelativeDeg,
   windSpeedKts,
+  kind,
 }: WindCompassProps) {
   const arrowGradientId = useId()
 
-  const hdg = headingTrue ?? 0
   const sideLabel  = windSide === 'starboard' ? 'S' : windSide === 'port' ? 'P' : '—'
   const angleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
   const speedLabel = windSpeedKts !== null ? String(Math.round(windSpeedKts)) : '—'
 
-  // Accumulate the arrow's rotation along the shortest path rather than the
-  // raw 0-360 value, so the CSS transition doesn't spin the long way around
-  // when the angle crosses the 0°/360° wrap.
-  const unwrappedAngleRef = useRef<number | null>(null)
-  let arrowRotation: number | null = null
-  if (windAngleApparentDeg !== null) {
-    const prev = unwrappedAngleRef.current
-    arrowRotation = prev === null
-      ? windAngleApparentDeg
-      : prev + (((windAngleApparentDeg - prev + 540) % 360) - 180)
-  }
-  unwrappedAngleRef.current = arrowRotation
+  const arrowRotation = useShortestPathRotation(arrowAngleDeg)
+  const bowRotation = useShortestPathRotation(bowRotationDeg)
 
-  // Bow-indicator triangle — downward-pointing, fixed at 12 o'clock
+  // Bow-indicator triangle — downward-pointing, drawn fixed at 12 o'clock in
+  // its own local coordinates; bowRotation (above) carries it to wherever it
+  // actually belongs (always 0/unrotated in Course Up).
   const bowPts = [
     `${CX},${CY - RM + 1}`,
     `${CX - 7},${CY - RO + 3}`,
@@ -104,19 +156,19 @@ export function WindCompass({
   return (
     <>
       <span className="sr-only" data-testid="wind-compass-summary">
-        {accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts })}
+        {accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts, kind })}
       </span>
-      <svg viewBox={`0 0 ${V} ${V}`} width="100%" height="100%" aria-hidden="true">
+      <svg viewBox={`0 0 ${V} ${V}`} width="100%" height="100%" aria-hidden="true" data-testid="wind-compass-svg">
         {/* ── background ─────────────────────────────────────────────── */}
         <circle cx={CX} cy={CY} r={RO} fill="hsl(var(--card))" />
         <circle cx={CX} cy={CY} r={RO} fill="none" stroke="hsl(var(--border))" strokeWidth="1.5" />
         <circle cx={CX} cy={CY} r={RM - 2} fill="none" stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />
 
-        {/* ── tick marks — rotate with heading ───────────────────────── */}
+        {/* ── tick marks — rotate with ringRotationDeg ───────────────── */}
         {Array.from({ length: 36 }, (_, i) => {
           const geo     = i * 10
           const isMajor = geo % 30 === 0
-          const sa      = geo - hdg
+          const sa      = geo - ringRotationDeg
           const [x1, y1] = pt(sa, RO - 0.5)
           const [x2, y2] = pt(sa, isMajor ? RM : Rm)
           return (
@@ -129,9 +181,9 @@ export function WindCompass({
           )
         })}
 
-        {/* ── degree labels — rotate with heading, text stays upright ── */}
+        {/* ── degree labels — rotate with ringRotationDeg, text stays upright */}
         {NUM_LABELS.map(geo => {
-          const [x, y] = pt(geo - hdg, RL)
+          const [x, y] = pt(geo - ringRotationDeg, RL)
           return (
             <text
               key={geo}
@@ -145,9 +197,9 @@ export function WindCompass({
           )
         })}
 
-        {/* ── cardinal letters — rotate with heading, text stays upright */}
+        {/* ── cardinal letters — rotate with ringRotationDeg, text stays upright */}
         {CARDINALS.map(({ angle, label, color, size }) => {
-          const [x, y] = pt(angle - hdg, RL)
+          const [x, y] = pt(angle - ringRotationDeg, RL)
           return (
             <text
               key={angle}
@@ -166,8 +218,21 @@ export function WindCompass({
         <circle cx={CX} cy={CY} r={RI} fill="hsl(var(--card))" />
         <circle cx={CX} cy={CY} r={RI} fill="none" stroke="hsl(var(--border))" strokeWidth="0.75" />
 
-        {/* ── bow indicator — fixed Signal Blue triangle at 12 o'clock ─── */}
-        <polygon points={bowPts} fill="hsl(var(--primary))" />
+        {/* ── bow indicator — Signal Blue triangle, fixed at 12 o'clock in
+            Course Up (bowRotation is always 0 then) or swept around the ring
+            to the vessel's heading in North Up. Hidden (not drawn at 0) when
+            bowRotationDeg is null — North Up with no heading to place it by. */}
+        {bowRotation !== null && (
+          <g
+            style={{
+              transform: `rotate(${bowRotation}deg)`,
+              transformOrigin: `${CX}px ${CY}px`,
+              transition: 'transform 650ms ease-out',
+            }}
+          >
+            <polygon points={bowPts} fill="hsl(var(--primary))" />
+          </g>
+        )}
 
         {/* ── wind arrow — gradient defined inside the rotating group ───
             Rotation is driven by the CSS `transform` property (not the SVG

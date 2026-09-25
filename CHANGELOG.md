@@ -16,6 +16,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Mate can now answer questions about nearby vessels: who is around, how
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.
+- The Wind tile (previously "Apparent Wind") adds two toggles: switch the
+  reading between apparent and true wind, and switch the compass between
+  Course Up, which turns with your heading, and North Up, which holds true
+  north at the top. True wind needs boat speed and heading feeding the wind
+  instrument; where that isn't fitted, True mode reads a dash rather than
+  showing the apparent figures in its place.
 
 ## [0.31.0] - 2026-09-25
 
