@@ -338,6 +338,31 @@ func TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale(t *test
 	}
 }
 
+// TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes is the direct
+// regression case for code review finding 2: formatEngineResidualEvidence
+// formatted the learned offset and the residual -- both DIFFERENCES between
+// two readings -- with the quantity's own ABSOLUTE unit ("K", "Pa"), which
+// for temperature subtracts 273.15 from a number that was never a Kelvin
+// reading in the first place. A genuine 1.0 K learned offset and a 3.0 K
+// residual then read as "-272.2 degC" and "-270.2 degC". Only ownValue and
+// peerMedian are absolute readings; offset and residual must render through
+// the quantity's own delta unit (deltaK/deltaPa), which converts by scale
+// only, matching alarm_units.go's deltaK/deltaPa entries added alongside
+// this cycle's engine-differential detector.
+func TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes(t *testing.T) {
+	// ownValue 357.15 K (84.0 degC), peerMedian 353.15 K (80.0 degC), a 1.0 K
+	// learned offset, residual (4.0 - 1.0) = 3.0 K.
+	got := formatEngineResidualEvidence("Port", "K", "deltaK", 357.15, 353.15, 1.0, 3.0, 38, 1800.0/60)
+
+	if strings.Contains(got, "-272") || strings.Contains(got, "-270") {
+		t.Fatalf("evidence formatted a difference through the absolute K->degC conversion: %q", got)
+	}
+	want := "At 1800 rpm Port 84.0 °C, peers 80.0 °C; usually 1.0 °C off (38m learned); now 3.0 °C beyond that."
+	if got != want {
+		t.Fatalf("evidence:\n got  %q\n want %q", got, want)
+	}
+}
+
 func TestComputeAnomalyReadingEngineDifferentialUsesLearnedBaseline(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
@@ -476,6 +501,82 @@ func TestComputeAnomalyReadingFrozenClearsOnceSensorIsIgnored(t *testing.T) {
 			reading.Values[anomalySensorFrozenCountPath], reading.Evidence[anomalySensorFrozenCountPath])
 	}
 }
+
+// --- Frozen/silent verdicts gate the battery and engine-differential ------
+// detectors too (code review finding 3): inputValidity alone (present, not
+// stale, in range) is not the whole of "sensor health" -- a frozen sensor
+// keeps updating its timestamp with the same value, passing every check
+// inputValidity makes, and reading.Validity was filled by the impossible-
+// reading loop but never read by anything. The commit message and
+// inputValidity's own doc comment both promised the sensor-health verdict
+// gates the other two detectors; it did not.
+
+// TestComputeAnomalyReadingEngineDifferentialAbsentWhenAnInputIsFrozen
+// mirrors TestComputeAnomalyReadingFrozenClearsOnceEngineIsUnticked's own
+// "simulate a previously-completed window" pattern: port's coolant
+// (propulsion.port.temperature) is flagged frozen, the same tracker state a
+// real 15-minute window would leave behind, without waiting 15 real minutes
+// to get there. A frozen coolant reading must not feed a residual -- for any
+// quantity, since coolant validity gates whether the engine qualifies for
+// the twin gate at all.
+func TestComputeAnomalyReadingEngineDifferentialAbsentWhenAnInputIsFrozen(t *testing.T) {
+	settingsPath := setUpTwinEngineVessel(t)
+	trackers := newAnomalyTrackers()
+	trackers.frozenPaths["propulsion.port.temperature"] = true
+
+	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
+	t.Cleanup(func() {
+		if prevLoaded {
+			globalEngineBaselineCache.set(prevBaseline)
+		}
+	})
+	globalEngineBaselineCache.set(engineBaseline{
+		Engines: map[string]map[string][]engineBaselineBucket{
+			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
+		},
+	})
+
+	snapshot := newAnomalyTestSnapshot()
+	steadiness := &twinSteadinessTrackers{}
+	ticks := int(twinGateMinRunFor.Seconds()) + 5
+	var last anomalyReading
+	for i := 0; i < ticks; i++ {
+		at := anomalyDetectorTestNow.Add(time.Duration(i) * time.Second)
+		applyWarmedUpTwinEngines(snapshot, 388100, 385600, at)
+		last = computeAnomalyReading(snapshot, settingsPath, trackers, steadiness, at)
+	}
+
+	path := anomalyEngineResidualPath("port", "oilPressure")
+	if _, ok := last.Values[path]; ok {
+		t.Fatalf("expected no residual while port's coolant reading is flagged frozen, got %v", last.Values[path])
+	}
+}
+
+// A "frozen SoC/voltage" counterpart to the engine-differential test above
+// is not reachable through computeAnomalyReading as things stand: the
+// frozen check's own tracker (engineCorrelatedPaths) only ever watches
+// engine-correlated paths in this cycle, and computeAnomalyReading's
+// per-tick cleanup loop drops any trackers.frozenPaths entry that is not
+// one of those current engine paths -- so a battery path injected directly
+// into that map is discarded before the gate below ever sees it. The gate
+// itself (valid, below) is written generically on path, not restricted to
+// engine paths, so it is already correct the day the frozen check is
+// widened to cover the house bank too; that widening is a separate, larger
+// change this cycle's frozen tracker was never scoped to make. The battery
+// detector's own gating is exercised instead by
+// TestComputeAnomalyReadingBatteryWiringPublishesLevel and its neighbours
+// via inputValidity, which the same valid closure still calls first.
+//
+// The silent-source half of the same gate is real and wired the same way,
+// but is not independently testable either: silentSources never reports a
+// source before it has been quiet for at least silentSourceQuietFor (120s),
+// comfortably longer than inputValidityMaxAge (30s) -- by the time a
+// source is ever silent, every path it feeds has already failed the
+// pre-existing staleness check inputValidity makes on its own, the same
+// path TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale
+// already covers. It stays wired in for defence in depth and because the
+// commit message promised it, not because a scenario exists where it alone
+// makes the difference.
 
 // --- Sensor health evidence: which identifiers actually tripped -----------
 //

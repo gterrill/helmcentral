@@ -621,12 +621,20 @@ func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, val
 // formatEngineResidualEvidence renders the plan's evidence style: "At 2,400
 // rpm port 84.0 degC, peers 79.0 degC; usually 1.2 degC off (38m learned);
 // now 3.8 degC beyond that."
-func formatEngineResidualEvidence(engineName string, absoluteUnit string, ownValue, peerMedian, offset, residual float64, minutes int, rpmHz float64) string {
+//
+// ownValue and peerMedian are absolute readings and render through
+// absoluteUnit (e.g. "K", which subtracts 273.15); offset and residual are
+// DIFFERENCES between two readings and must render through deltaUnit (e.g.
+// "deltaK", scale only) instead -- formatting a difference through the
+// absolute unit's own offset turns a genuine 1 K learned offset into
+// "-272.2 degC" (code review finding 2). See alarm_units.go's deltaK/deltaPa
+// entries.
+func formatEngineResidualEvidence(engineName string, absoluteUnit, deltaUnit string, ownValue, peerMedian, offset, residual float64, minutes int, rpmHz float64) string {
 	rpm := int(math.Round(rpmHz * 60))
 	return fmt.Sprintf(
 		"At %d rpm %s %s, peers %s; usually %s off (%dm learned); now %s beyond that.",
 		rpm, engineName, formatAlarmReading(ownValue, absoluteUnit), formatAlarmReading(peerMedian, absoluteUnit),
-		formatAlarmReading(offset, absoluteUnit), minutes, formatAlarmReading(residual, absoluteUnit),
+		formatAlarmReading(offset, deltaUnit), minutes, formatAlarmReading(residual, deltaUnit),
 	)
 }
 
@@ -771,7 +779,7 @@ func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselS
 			path := anomalyEngineResidualPath(e.Instance, q.Suffix)
 			reading.Values[path] = residual
 			reading.Evidence[path] = formatEngineResidualEvidence(
-				name, q.AbsoluteUnit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
+				name, q.AbsoluteUnit, q.Unit, values[e.Instance], median(peers), offset, residual, minutes, rpmByEngine[e.Instance],
 			)
 		}
 	}
@@ -796,8 +804,6 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 		log.Printf("anomaly detector: vessel settings unavailable, skipping this tick: %v", err)
 		return reading
 	}
-
-	valid := func(path string) bool { return inputValidity(snapshot, path, now) }
 
 	// The operator's own exclusions from the frozen/impossible/silent-source
 	// alarm card's "Ignore this sensor" action (alarm_ignored_sensors.go) --
@@ -897,6 +903,39 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	reading.Values[anomalySensorFrozenCountPath] = float64(frozenCount)
 	if len(frozenPaths) > 0 {
 		reading.Evidence[anomalySensorFrozenCountPath] = strings.Join(frozenPaths, ", ")
+	}
+
+	// The sensor-health verdicts above gate the battery and engine-
+	// differential detectors below, not just their own alarm counts: a
+	// stuck or silenced reading is exactly the kind of input those two
+	// detectors must not trust either (code review finding 3 -- the commit
+	// message and inputValidity's own doc comment both promised this
+	// gating; valid used to consult inputValidity alone). Built from
+	// frozenPaths/silent, the same currently-active, ignore-aware sets the
+	// counts just above published, not trackers.frozenPaths' raw internal
+	// state, so a sensor the operator has already ignored still gates
+	// nothing.
+	frozenNow := make(map[string]bool, len(frozenPaths))
+	for _, p := range frozenPaths {
+		frozenNow[p] = true
+	}
+	silentSourceNow := make(map[string]bool, len(silent))
+	for _, s := range silent {
+		silentSourceNow[s] = true
+	}
+	valid := func(path string) bool {
+		if !inputValidity(snapshot, path, now) {
+			return false
+		}
+		if frozenNow[path] {
+			return false
+		}
+		if node := snapshot.nodeAt(path); node != nil {
+			if source, ok := node["$source"].(string); ok && silentSourceNow[source] {
+				return false
+			}
+		}
+		return true
 	}
 
 	computeAnomalyBattery(snapshot, vessel, valid, &trackers.voltageHistory, now, &reading)
