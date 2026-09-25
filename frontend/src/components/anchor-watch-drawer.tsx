@@ -65,6 +65,11 @@ interface AnchorWatchDrawerProps {
   // has actually resolved, passed straight through to the map so it can
   // tell "no watch" from "haven't heard back yet" (anchorSetAt alone can't).
   anchorStateKnown: boolean
+  // useAnchorWatch's own `error` — set when the persisted watch could not be
+  // read back (a damaged anchor_watch.json), naming the file path and the
+  // parse error. Optional/nullable so every existing caller that predates
+  // this field keeps compiling unchanged.
+  error?: string | null
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -138,6 +143,7 @@ export function AnchorWatchDrawer({
   bowOffsetReason = '',
   anchorSetAt,
   anchorStateKnown,
+  error = null,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -261,6 +267,16 @@ export function AnchorWatchDrawer({
 
   return (
     <div className="flex h-full flex-col gap-3">
+      {/* The backend puts a damaged anchor_watch.json into an explicit error
+          state rather than an invented or empty watch — never silently
+          shown as the ordinary "no watch set" page. Drop the anchor again to
+          recover: setAnchorHere always overwrites the file. */}
+      {error && (
+        <div role="alert" className="rounded-md border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          <p className="font-semibold">Saved anchor watch unreadable</p>
+          <p className="mt-1">{error} Drop anchor to start a new watch.</p>
+        </div>
+      )}
       {bowOffsetApplied && (
         <div className="rounded-md border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
           Anchor point corrected {Math.round(bowOffsetM)}m forward of GPS — radius should cover rode + {Math.round(bowOffsetM)}m.

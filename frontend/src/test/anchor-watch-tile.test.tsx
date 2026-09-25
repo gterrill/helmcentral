@@ -95,6 +95,7 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     bearingDeg: null,
     setAt: null,
     loaded: true,
+    error: null,
     bowOffsetM: 0,
     bowOffsetApplied: false,
     bowOffsetReason: '',
@@ -441,6 +442,33 @@ describe('AnchorWatchTile', () => {
         />,
       )
       expect(screen.getByText(/GPS signal degraded/)).toBeInTheDocument()
+    })
+
+    // The backend puts a damaged anchor_watch.json into an explicit error
+    // state rather than an invented or empty watch (GET /api/anchor-watch
+    // reports it as `error`, naming the file path and the parse error). The
+    // tile must show that plainly, using "tile" wording, not silently render
+    // the ordinary empty "no watch set" tile as if nothing were wrong.
+    it('shows the load-error banner naming the problem when the watch is unreadable', () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({
+              anchorState: 'none',
+              error: 'parsing anchor watch state (data/anchor_watch.json): unexpected end of JSON input',
+            }),
+          })}
+        />,
+      )
+
+      expect(screen.getByText(/saved anchor watch unreadable/i)).toBeInTheDocument()
+      expect(screen.getByText(/data\/anchor_watch\.json/)).toBeInTheDocument()
+    })
+
+    it('does not show the load-error banner once the watch loads normally', () => {
+      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none', error: null }) })} />)
+
+      expect(screen.queryByText(/saved anchor watch unreadable/i)).toBeNull()
     })
   })
 

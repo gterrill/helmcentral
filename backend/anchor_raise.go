@@ -66,6 +66,12 @@ func raiseAnchorWatch() error {
 	anchorWatchState = nil
 	anchorWatchMu.Unlock()
 
+	// The os.Remove above already took the bad file away if this Raise was
+	// the operator's recovery from a corrupt anchor_watch.json — retract the
+	// warning it raised, if any. A no-op on the ordinary raise-a-good-watch
+	// path, since there is nothing to clear there.
+	clearAnchorWatchLoadFailure()
+
 	trailMu.Lock()
 	selfTrail = nil
 	trailMu.Unlock()

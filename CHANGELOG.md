@@ -18,6 +18,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the house bank you pick under Settings → Vessel → Power. Re-enter your
   bank's capacity there after upgrading. Until you do, the overnight
   estimate reports capacity as not set rather than assuming a number.
+- **Anchor watch now survives an update.** On a Docker install, updating
+  cleared a running anchor watch and its marks without warning. The watch
+  now lives with the rest of your saved settings. On any install, Docker or
+  not, this upgrade drops a running anchor watch one last time: drop the
+  anchor again once you're on the new version. From here on, the watch and
+  its marks survive updates and restarts. If the saved watch is ever damaged
+  and can't be read back, the Anchor Watch tile and page now say so plainly
+  instead of guessing at a position — the rest of the boat's alarms are
+  unaffected, and dropping the anchor again starts a fresh watch.
 
 ### Changed
 

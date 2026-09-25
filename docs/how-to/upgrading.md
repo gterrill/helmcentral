@@ -87,3 +87,14 @@ substituting for a missing local station network gives tide times that appear
 authoritative but are inaccurate for local waters, so it was removed rather
 than left as a fallback. See
 [docs/reference/plugins.md](../reference/plugins.md).
+
+## Anchor watch state moved to data/
+
+The anchor watch and its map pins now save under `data/`, alongside the rest
+of your settings, instead of `cache/`. On a Docker install this is what makes
+the watch survive an update; on every install it drops a running watch one
+last time on this upgrade only — see this release's changelog entry.
+
+`cache/anchor_watch.json` and `cache/anchor_placemarks.json` are orphaned and
+can be deleted once you've confirmed the new watch and pins are saving
+correctly under `data/`.

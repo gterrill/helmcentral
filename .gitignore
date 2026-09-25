@@ -29,6 +29,8 @@ backend/data/documents.sqlite
 backend/data/documents/
 backend/data/webpush-subscriptions.sqlite
 backend/data/alarm-transports.json
+backend/data/anchor_watch.json
+backend/data/anchor_placemarks.json
 # WAL mode (tile-cache.sqlite, and nearby-contacts.sqlite as of the backend
 # perf audit) leaves a -wal and -shm file next to the main one between
 # checkpoints; cover every sqlite file in backend/data with one pattern pair

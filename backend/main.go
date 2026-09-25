@@ -515,7 +515,17 @@ func main() {
 
 	registerStaticHandler(e)
 
-	loadAnchorWatch()
+	// Unlike every other log.Fatalf above: a damaged anchor_watch.json must
+	// fail only the anchor watch, not the whole backend — every other alarm
+	// this process runs would go down with it otherwise. The anchor watch
+	// alone goes into an explicit error state instead (recordAnchorWatchLoadFailure):
+	// GET /api/anchor-watch reports it, a warning is raised through the usual
+	// alarm/notification path, and the file is left untouched. Dropping a new
+	// anchor or an explicit Raise are the operator's own ways to recover.
+	if err := loadAnchorWatch(); err != nil {
+		log.Printf("ERROR: anchor watch state unreadable, the anchor watch alone is disabled until a new drop or an explicit Raise: %v", err)
+		recordAnchorWatchLoadFailure(err)
+	}
 	loadAnchorPlacemarks()
 	loadRoutes()
 	loadDashboardPages()

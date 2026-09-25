@@ -165,6 +165,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     anchorLon,
     setAt,
     loaded,
+    error: watchError,
     radiusMeters,
     distanceMeters,
     bearingDeg,
@@ -248,6 +249,23 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           overflow the card. Below lg the persisted height is only a floor
           (dashboard-bento-grid.tsx) and the map keeps its fixed h-64. */}
       <div className="flex h-full min-h-0 flex-col">
+      {/* The backend puts a damaged anchor_watch.json into an explicit error
+          state rather than an invented or empty watch — never silently
+          rendered as the ordinary "no watch set" tile. title carries the
+          full message (including the file path) for a hover/long-press, the
+          line itself truncates so a long path never breaks the tile's
+          fixed-height layout. */}
+      {watchError && (
+        <div
+          role="alert"
+          data-testid="anchor-watch-error-banner"
+          title={watchError}
+          className="mb-3 rounded-md border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+        >
+          <p className="font-semibold">Saved anchor watch unreadable</p>
+          <p className="truncate">{watchError}</p>
+        </div>
+      )}
       {anchorState !== 'none' && gnssCritical && (
         <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
           GPS signal degraded — position may be inaccurate

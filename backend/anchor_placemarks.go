@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -43,7 +44,7 @@ var (
 )
 
 func anchorPlacemarksFilePath() string {
-	return cacheFilePath("ANCHOR_PLACEMARKS_FILE", "cache/anchor_placemarks.json")
+	return cacheFilePath("ANCHOR_PLACEMARKS_FILE", "data/anchor_placemarks.json")
 }
 
 func anchorWatchActive() bool {
@@ -66,6 +67,9 @@ func loadAnchorPlacemarks() {
 	path := anchorPlacemarksFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("WARNING: anchor placemarks not restored: reading %s: %v", path, err)
+		}
 		return
 	}
 
@@ -76,6 +80,9 @@ func loadAnchorPlacemarks() {
 
 	var loaded []*placemark
 	if err := json.Unmarshal(data, &loaded); err != nil {
+		// Losing the pins is not worth refusing to start over, unlike the
+		// watch itself, but it must not pass silently either.
+		log.Printf("WARNING: anchor placemarks not restored: parsing %s: %v", path, err)
 		return
 	}
 
