@@ -33,7 +33,25 @@ auth:
 boat:
   vessel_prefix: M/V
   model: My Boat
-  house_battery_capacity_ah: 600
+
+# Which propulsion engines and which house battery bank the anomaly
+# detectors (Settings -> Vessel) watch. Left out entirely on a fresh
+# install: every detector shows "not set up" and nothing is seeded until you
+# pick engines and a bank in the browser, the same way every other
+# vessel-specific setting on this page works.
+#
+# vessel:
+#   engines:
+#     - instance: port          # the propulsion.<id> SignalK carries it under
+#       name: Port               # your own display name
+#       equipment_id: ""         # linked inventory item, for its engine profile
+#   house_bank:
+#     path: electrical.batteries.0   # which electrical.batteries.<id> is "the" house bank
+#     equipment_id: ""               # linked inventory item, for its battery profile
+#     capacity_ah: 600                # your bank's rated capacity
+#     cells: 4                        # cell count; pack thresholds are per-cell x cells
+#     # warn_voltage / high_voltage override the battery profile's own
+#     # computed pack thresholds; leave them out to use the profile's numbers.
 
 # metric | imperial
 units: metric

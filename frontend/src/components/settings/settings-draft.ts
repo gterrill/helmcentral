@@ -32,7 +32,6 @@ export interface RegularSettingsDraft {
   signalkPort: string
   vesselPrefix: string
   boatModel: string
-  houseBatteryCapacityAh: string
   distanceUnits: 'metric' | 'imperial'
   tankLabels: Record<string, string>
   tideStationId: string
@@ -73,7 +72,6 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   signalkPort: '3000',
   vesselPrefix: '',
   boatModel: '',
-  houseBatteryCapacityAh: '1440',
   distanceUnits: 'metric',
   tankLabels: Object.fromEntries(defaultTankLabelIds.map((id) => [id, ''])),
   tideStationId: '',
@@ -135,9 +133,6 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
 
   if (typeof settings.boat?.vessel_prefix === 'string') draft.vesselPrefix = settings.boat.vessel_prefix
   if (typeof settings.boat?.model === 'string') draft.boatModel = settings.boat.model
-  if (typeof settings.boat?.house_battery_capacity_ah === 'number') {
-    draft.houseBatteryCapacityAh = String(settings.boat.house_battery_capacity_ah)
-  }
 
   if (settings.units === 'metric' || settings.units === 'imperial') draft.distanceUnits = settings.units
   if (settings.ui?.tank_labels && typeof settings.ui.tank_labels === 'object') {
@@ -231,7 +226,6 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.signalkPort !== b.signalkPort) return false
   if (a.vesselPrefix !== b.vesselPrefix) return false
   if (a.boatModel !== b.boatModel) return false
-  if (a.houseBatteryCapacityAh !== b.houseBatteryCapacityAh) return false
   if (a.distanceUnits !== b.distanceUnits) return false
   if (a.tideStationId !== b.tideStationId) return false
   if (a.tideStationName !== b.tideStationName) return false
@@ -302,7 +296,6 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     boat: {
       vessel_prefix: draft.vesselPrefix.trim(),
       model: draft.boatModel.trim(),
-      house_battery_capacity_ah: parseNumber(draft.houseBatteryCapacityAh, 1440),
     },
     units: draft.distanceUnits,
     ui: {

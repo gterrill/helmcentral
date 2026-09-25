@@ -102,6 +102,12 @@ view. The 30-second re-check described above is what catches it, rather than
 leaving that alarm on your board until the same reading happens to change
 again.
 
+## Anomaly detection
+
+A separate set of checks (frozen and impossible sensor readings, charging
+into a full house bank, and twin engines pulling apart from each other)
+gets its own page: [Anomaly detection](anomaly-detection.md).
+
 ## AIS collision alarms
 
 Collision warnings for AIS targets come from a separate AIS Target

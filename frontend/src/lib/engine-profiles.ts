@@ -41,9 +41,16 @@ export interface EngineProfileService {
   source?: string | null
 }
 
+/** A battery profile's per-cell/pack number (full_soc, charge_warn, charge_high). A null value is a slot the manufacturer's datasheet doesn't give - same idea as EngineProfileZone's null threshold. */
+export interface BatteryProfileThreshold {
+  value: number | null
+  source?: string
+  note?: string
+}
+
 export interface EngineProfile {
   schema_version?: number
-  kind?: 'engine' | 'alternator' | 'generator'
+  kind?: 'engine' | 'alternator' | 'generator' | 'battery'
   id: string
   name: string
   manufacturer?: string
@@ -51,8 +58,18 @@ export interface EngineProfile {
   rating_hp?: number
   source?: string
   notes?: string
-  gauges: EngineProfileGauge[]
+  // Absent for a battery profile (kind: 'battery'), which carries no gauges
+  // at all - every gauge-tile consumer of this type (EngineProfileDialog,
+  // EngineClusterConfigDialog) filters those out of its own profile picker
+  // before this field is ever read, per AGENTS.md: a battery profile is
+  // for Settings -> Vessel -> Power, never for a dashboard tile.
+  gauges?: EngineProfileGauge[]
   service?: EngineProfileService[]
+  // Battery-only fields (kind: 'battery').
+  chemistry?: string
+  full_soc?: BatteryProfileThreshold
+  charge_warn?: BatteryProfileThreshold
+  charge_high?: BatteryProfileThreshold
 }
 
 export interface EngineProfileProblem {
@@ -108,7 +125,7 @@ function joinPath(prefix: string, suffix: string): string {
 
 /** Builds a full gauge set for one engine instance, e.g. `propulsion.port`. */
 export function profileToGauges(profile: EngineProfile, instancePrefix: string): GaugeWidgetConfig[] {
-  return profile.gauges.map((gauge) => ({
+  return (profile.gauges ?? []).map((gauge) => ({
     path: joinPath(instancePrefix, gauge.path_suffix),
     label: gauge.label,
     ...gaugeSettingsFor(gauge),
@@ -117,7 +134,7 @@ export function profileToGauges(profile: EngineProfile, instancePrefix: string):
 
 /** The profile member marked as hero, if any. */
 export function profileHeroGaugeIndex(profile: EngineProfile): number | undefined {
-  const index = profile.gauges.findIndex((gauge) => gauge.hero === true)
+  const index = (profile.gauges ?? []).findIndex((gauge) => gauge.hero === true)
   return index === -1 ? undefined : index
 }
 
@@ -140,9 +157,10 @@ export function applyProfileToGauges(
   gauges: readonly GaugeWidgetConfig[],
   profile: EngineProfile,
 ): GaugeWidgetConfig[] {
+  const profileGauges = profile.gauges ?? []
   return gauges.map((gauge) => {
-    const suffix = matchBySuffix(gauge.path, profile.gauges.map((g) => g.path_suffix))
-    const match = suffix === null ? undefined : profile.gauges.find((c) => c.path_suffix === suffix)
+    const suffix = matchBySuffix(gauge.path, profileGauges.map((g) => g.path_suffix))
+    const match = suffix === null ? undefined : profileGauges.find((c) => c.path_suffix === suffix)
     if (!match) return gauge
     return { ...gauge, ...gaugeSettingsFor(match) }
   })
@@ -252,7 +270,7 @@ export function commonInstancePrefix(
  * setpoints and nothing shipped should alarm until an operator says so.
  */
 export function alarmZoneCount(profile: EngineProfile): number {
-  return profile.gauges.reduce(
+  return (profile.gauges ?? []).reduce(
     (total, gauge) =>
       total + (gauge.zones ?? []).filter((z) => z.state !== 'normal' && z.threshold !== null && z.threshold !== undefined).length,
     0,
@@ -270,7 +288,7 @@ export function instancePrefixCandidates(
   profile: EngineProfile,
   paths: readonly { path: string }[],
 ): string[] {
-  const suffixes = profile.gauges.map((g) => g.path_suffix)
+  const suffixes = (profile.gauges ?? []).map((g) => g.path_suffix)
   const hits = new Map<string, number>()
 
   for (const { path } of paths) {

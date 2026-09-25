@@ -618,6 +618,12 @@ func TestBundledThresholdsCiteTheirSource(t *testing.T) {
 				}
 			}
 		}
+
+		for _, threshold := range []*batteryProfileThreshold{profile.FullSOC, profile.ChargeWarn, profile.ChargeHigh} {
+			if threshold != nil && threshold.Value != nil && threshold.Source == "" {
+				t.Fatalf("%s: a bundled battery threshold (%v) has to say where it came from", profile.ID, *threshold.Value)
+			}
+		}
 	}
 }
 
@@ -731,5 +737,212 @@ func TestBundledProfileSuffixesResolveAgainstTheVessel(t *testing.T) {
 		if shared != nil && len(shared) == 0 {
 			t.Errorf("%s: no single instance publishes every one of its suffixes", profile.ID)
 		}
+	}
+}
+
+// --- Battery equipment-profile kind (anomaly-detection plan) ---------------
+
+const goodBatteryProfile = `{
+	"schema_version": 1,
+	"kind": "battery",
+	"id": "test-battery",
+	"name": "Test LiFePO4",
+	"chemistry": "LiFePO4",
+	"full_soc": {"value": 0.98, "source": "test datasheet"},
+	"charge_warn": {"value": 3.55, "source": "test datasheet"},
+	"charge_high": {"value": 3.65, "source": "test datasheet"}
+}`
+
+func TestValidateEngineProfileAcceptsBatteryKind(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"battery.json": goodBatteryProfile})
+
+	profiles, problems := engineProfiles()
+	if len(problems) != 0 {
+		t.Fatalf("expected the battery profile to load clean, got %+v", problems)
+	}
+	if len(profiles) != 1 || profiles[0].Kind != profileKindBattery {
+		t.Fatalf("expected one battery profile, got %+v", profiles)
+	}
+	p := profiles[0]
+	if p.Chemistry != "LiFePO4" {
+		t.Fatalf("chemistry: got %q, want LiFePO4", p.Chemistry)
+	}
+	if p.FullSOC == nil || p.FullSOC.Value == nil || *p.FullSOC.Value != 0.98 {
+		t.Fatalf("full_soc did not load: %+v", p.FullSOC)
+	}
+	if p.ChargeWarn == nil || p.ChargeWarn.Value == nil || *p.ChargeWarn.Value != 3.55 {
+		t.Fatalf("charge_warn did not load: %+v", p.ChargeWarn)
+	}
+	if p.ChargeHigh == nil || p.ChargeHigh.Value == nil || *p.ChargeHigh.Value != 3.65 {
+		t.Fatalf("charge_high did not load: %+v", p.ChargeHigh)
+	}
+}
+
+// TestValidateEngineProfileBatteryThresholdsAreSlots asserts a battery
+// profile may ship with every threshold a nil-value slot (chemistry known,
+// numbers not yet cited) -- the plan's "nil thresholds are slots the
+// operator must fill, exactly as engine zones do".
+func TestValidateEngineProfileBatteryThresholdsAreSlots(t *testing.T) {
+	body := `{
+		"schema_version": 1,
+		"kind": "battery",
+		"id": "test-battery-slots",
+		"name": "Test AGM",
+		"chemistry": "AGM lead-acid",
+		"full_soc": {"value": null, "note": "manufacturer does not publish a full-charge SoC"},
+		"charge_warn": {"value": null},
+		"charge_high": {"value": null}
+	}`
+	setupEngineProfiles(t, map[string]string{"battery.json": body})
+
+	profiles, problems := engineProfiles()
+	if len(problems) != 0 {
+		t.Fatalf("expected an all-slot battery profile to load clean, got %+v", problems)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("expected one profile, got %+v", profiles)
+	}
+	if profiles[0].FullSOC == nil || profiles[0].FullSOC.Value != nil {
+		t.Fatalf("expected full_soc to be a present-but-nil slot: %+v", profiles[0].FullSOC)
+	}
+}
+
+func TestValidateEngineProfileRejectsBatteryWithoutChemistry(t *testing.T) {
+	p := engineProfile{Kind: profileKindBattery, ID: "no-chem", Name: "No Chemistry",
+		FullSOC: &batteryProfileThreshold{}}
+	if err := validateEngineProfile(p); err == nil {
+		t.Fatalf("expected a battery profile with no chemistry to be rejected")
+	}
+}
+
+func TestValidateEngineProfileRejectsEmptyBatteryProfile(t *testing.T) {
+	p := engineProfile{Kind: profileKindBattery, ID: "empty", Name: "Empty", Chemistry: "LiFePO4"}
+	if err := validateEngineProfile(p); err == nil {
+		t.Fatalf("expected a battery profile with chemistry but no threshold slots at all to be rejected")
+	}
+}
+
+// TestValidateEngineProfileRejectsUncitedBatteryValue is the safety rule
+// behind "ship only profiles whose numbers can be cited from a public
+// datasheet; anything else is a slot": a filled Value with no Source is
+// indistinguishable from a guess.
+func TestValidateEngineProfileRejectsUncitedBatteryValue(t *testing.T) {
+	warnValue := 3.55
+	p := engineProfile{
+		Kind: profileKindBattery, ID: "uncited", Name: "Uncited", Chemistry: "LiFePO4",
+		ChargeWarn: &batteryProfileThreshold{Value: &warnValue}, // no Source
+	}
+	if err := validateEngineProfile(p); err == nil {
+		t.Fatalf("expected a filled battery threshold with no source to be rejected")
+	}
+}
+
+func TestValidateEngineProfileRejectsBatteryFullSOCOutOfRange(t *testing.T) {
+	tooHigh := 1.5
+	p := engineProfile{
+		Kind: profileKindBattery, ID: "bad-soc", Name: "Bad SoC", Chemistry: "LiFePO4",
+		FullSOC: &batteryProfileThreshold{Value: &tooHigh, Source: "test"},
+	}
+	if err := validateEngineProfile(p); err == nil {
+		t.Fatalf("expected full_soc above 1.05 to be rejected")
+	}
+}
+
+func TestValidateEngineProfileRejectsBatteryNonPositiveCellVoltage(t *testing.T) {
+	negative := -1.0
+	p := engineProfile{
+		Kind: profileKindBattery, ID: "bad-warn", Name: "Bad Warn", Chemistry: "LiFePO4",
+		ChargeWarn: &batteryProfileThreshold{Value: &negative, Source: "test"},
+	}
+	if err := validateEngineProfile(p); err == nil {
+		t.Fatalf("expected a non-positive per-cell charge_warn to be rejected")
+	}
+}
+
+// --- batteryPackThresholds: per-cell x cells, and overridable ---------------
+
+func TestBatteryPackThresholds(t *testing.T) {
+	warn, high := 3.55, 3.65
+	profile := engineProfile{
+		ChargeWarn: &batteryProfileThreshold{Value: &warn},
+		ChargeHigh: &batteryProfileThreshold{Value: &high},
+	}
+
+	gotWarn, gotHigh, ok := batteryPackThresholds(profile, 8)
+	if !ok {
+		t.Fatalf("expected ok=true for a profile with both thresholds and a positive cell count")
+	}
+	if gotWarn != 28.4 {
+		t.Fatalf("pack warn voltage: got %v, want 28.4 (3.55 x 8)", gotWarn)
+	}
+	if gotHigh != 29.2 {
+		t.Fatalf("pack high voltage: got %v, want 29.2 (3.65 x 8)", gotHigh)
+	}
+}
+
+func TestBatteryPackThresholdsRequiresPositiveCellCount(t *testing.T) {
+	warn := 3.55
+	profile := engineProfile{ChargeWarn: &batteryProfileThreshold{Value: &warn}}
+	if _, _, ok := batteryPackThresholds(profile, 0); ok {
+		t.Fatalf("expected ok=false for a zero cell count")
+	}
+}
+
+func TestBatteryPackThresholdsWarnOnlyStillOk(t *testing.T) {
+	// charge_high is optional (mirrors fullBankChargingSettings.HighVoltage):
+	// a profile can ship level 1 before its high-voltage slot is filled.
+	warn := 3.55
+	profile := engineProfile{ChargeWarn: &batteryProfileThreshold{Value: &warn}}
+	gotWarn, gotHigh, ok := batteryPackThresholds(profile, 8)
+	if !ok {
+		t.Fatalf("expected ok=true with only charge_warn filled")
+	}
+	if gotWarn != 28.4 {
+		t.Fatalf("pack warn voltage: got %v, want 28.4", gotWarn)
+	}
+	if gotHigh != 0 {
+		t.Fatalf("pack high voltage with no charge_high slot: got %v, want 0", gotHigh)
+	}
+}
+
+func TestBatteryPackThresholdsNoWarnIsNotOk(t *testing.T) {
+	// charge_warn is required (fullBankChargingSettings.WarnVoltage <= 0
+	// means "house bank not configured"), unlike charge_high.
+	profile := engineProfile{}
+	if _, _, ok := batteryPackThresholds(profile, 8); ok {
+		t.Fatalf("expected ok=false with no charge_warn slot filled")
+	}
+}
+
+// TestCreateEquipmentProfileHandlerAcceptsBatteryKind exercises the full
+// create path (JSON schema, then validateEngineProfile) with a battery
+// profile, the same way TestCreateEquipmentProfileHandlerAcceptsAlternatorKind
+// already does for alternator -- the schema and the Go validation have to
+// agree on what a battery profile looks like.
+func TestCreateEquipmentProfileHandlerAcceptsBatteryKind(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/equipment-profiles", bytes.NewBufferString(goodBatteryProfile))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := createEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for battery kind, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	profiles, _ := engineProfiles()
+	var found bool
+	for _, profile := range profiles {
+		if profile.Kind == profileKindBattery {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a battery profile after create, got %+v", profiles)
 	}
 }

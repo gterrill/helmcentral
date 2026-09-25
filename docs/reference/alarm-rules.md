@@ -27,6 +27,11 @@ rather than zero when there is not enough history to answer:
 | `helmcentral.fuel.rangeAtCurrentBurn` | m | Fuel aboard times the boat's current distance per unit fuel. Empty under the same conditions as fuel economy or fuel volume, whichever is absent. |
 | `helmcentral.environment.forecastWindWarningLevel` | none | The official wind warning in force for the vessel's zone, ranked: 0 none, 1 strong wind or small craft, 2 gale, 3 storm. Absent until the first fetch lands, and again after thirty minutes without one. |
 | `helmcentral.environment.forecastSurfWarning` | none | 1 when a hazardous surf warning is in force for the zone, 0 otherwise. Absent under the same conditions as the wind level. |
+| `helmcentral.anomaly.sensor.frozenCount` | none | How many engine-correlated readings are stuck while the engine is clearly working. 0 means the check ran and found nothing; needs at least one engine set up in Settings → Vessel. |
+| `helmcentral.anomaly.sensor.outOfRangeCount` | none | How many engine or battery readings are outside anything physically possible. Needs no setup. |
+| `helmcentral.anomaly.sensor.silentSourceCount` | none | How many previously steady sources on the instrument network have gone quiet. Needs no setup. |
+| `helmcentral.anomaly.battery.fullBankCharging` | none | 0, 1 or 2: whether the house bank is being charged past where it needs to be, and how far. Needs a house bank picked in Settings → Vessel. |
+| `helmcentral.anomaly.engines.<name>.<reading>Residual` | °C, kPa or none | One engine's gap from its peers for one reading (coolant temperature, oil pressure, boost pressure, engine load, or the transmission's own oil pressure/temperature), less the gap that engine normally runs. Absent until several weeks of history have taught Helmcentral what normal is for your boat. Needs at least two engines set up. |
 
 These need the boat to be publishing an outside barometer reading and, for
 the squash-zone index, true wind speed and direction. If these inputs are
@@ -75,6 +80,24 @@ one doesn't and why.
 | Storm signature | Barometer down 4 mb in three hours with pressure under 1009 mb | alert |
 | Severe thunderstorm signature | Barometer down 4 mb in three hours and 8 mb in twelve hours with pressure under 1005 mb | alarm |
 | Weather bomb | Twenty-four-hour tendency past -24 mb | emergency |
+
+## Anomaly detection rule set
+
+See [Anomaly detection](../features/anomaly-detection.md) for what each of
+these watches for and what setting it up needs. Impossible-reading and
+gone-quiet arrive switched on with no setup at all; the rest arrive as each
+one's own setup is completed, and the engine differential pairs arrive
+switched off until a steady run has taught Helmcentral your boat's own
+normal gap.
+
+| Rule | Fires when | Severity |
+| --- | --- | --- |
+| Frozen sensor reading | Any frozen-count above 0 | alert |
+| Impossible sensor reading | Any out-of-range count above 0 | alert |
+| Silent sensor source | Any silent-source count above 0 | warn |
+| Charging into a full house bank | Full-bank charging level 1 or higher | warn |
+| House bank overcharge risk | Full-bank charging level 2 (switched off until tuned) | alarm |
+| Engine running hotter/cooler, oil/boost pressure high/low, load high/low | That reading's residual past its learned band (switched off until a baseline is learned) | alert |
 
 ## Forecast warning rule set
 

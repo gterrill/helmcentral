@@ -2,11 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { useState } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
-import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 
 // These sections gained unit-of-measure addons (an InputGroup wrapping each
-// Input with a trailing "m" / "mm" / "m²" / "Ah" symbol) so the unit lives
+// Input with a trailing "m" / "mm" / "m²" symbol) so the unit lives
 // next to the value instead of only in the label text. These tests pin: the
 // new aria-labels, the addon symbol rendering as text, that typing still
 // reaches onChange/the draft (InputGroupInput must not swallow events), and
@@ -21,24 +20,6 @@ function renderAnchorSection(overrides: Partial<RegularSettingsDraft> = {}) {
     draftStates.push(draft)
     return (
       <AnchorWatchOptionsSection
-        draft={draft}
-        onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
-      />
-    )
-  }
-
-  render(<Harness />)
-  return { latestDraft: () => draftStates[draftStates.length - 1] }
-}
-
-function renderBoatUiSection(overrides: Partial<RegularSettingsDraft> = {}) {
-  const draftStates: RegularSettingsDraft[] = []
-
-  function Harness() {
-    const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, ...overrides })
-    draftStates.push(draft)
-    return (
-      <BoatUiSection
         draft={draft}
         onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
       />
@@ -95,34 +76,6 @@ describe('settings unit addons', () => {
       fireEvent.click(addon)
 
       expect(windage).toHaveFocus()
-    })
-  })
-
-  describe('BoatUiSection', () => {
-    it('exposes the battery capacity field by its new aria-label with its unit addon rendered as text', () => {
-      renderBoatUiSection()
-
-      const battery = screen.getByLabelText('House battery capacity in amp-hours')
-      expect(within(battery.closest('[data-slot="input-group"]') as HTMLElement).getByText('Ah')).toBeInTheDocument()
-    })
-
-    it('still fires onChange with the raw string value when typing into the battery input', () => {
-      const { latestDraft } = renderBoatUiSection()
-
-      const battery = screen.getByLabelText('House battery capacity in amp-hours')
-      fireEvent.change(battery, { target: { value: '2000' } })
-
-      expect(latestDraft().houseBatteryCapacityAh).toBe('2000')
-    })
-
-    it('focuses the battery input when its unit addon is clicked', () => {
-      renderBoatUiSection()
-
-      const battery = screen.getByLabelText('House battery capacity in amp-hours')
-      const addon = battery.closest('[data-slot="input-group"]')!.querySelector('[data-slot="input-group-addon"]') as HTMLElement
-      fireEvent.click(addon)
-
-      expect(battery).toHaveFocus()
     })
   })
 })

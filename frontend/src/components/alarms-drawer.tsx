@@ -1,11 +1,13 @@
 import { BellRing, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile } from '@/components/ui/tile'
-import { alarmConditionSentence, formatAlarmReading, formatAlarmTime } from '@/lib/alarm-display'
+import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensorIdentifiers } from '@/lib/alarm-display'
+import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { groupRulesByDomain } from '@/lib/alarm-rules-view'
 import { severityClass } from '@/lib/severity'
 import {
@@ -75,6 +77,20 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
 }: AlarmsDrawerProps) {
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
+  const { identifiers: ignoredSensors, ignore: ignoreSensor } = useIgnoredSensors()
+  const [ignoringSensor, setIgnoringSensor] = useState<string | null>(null)
+
+  const handleIgnoreSensor = useCallback(async (identifier: string) => {
+    setIgnoringSensor(identifier)
+    try {
+      await ignoreSensor(identifier)
+      toast.success(`Ignoring ${identifier}`, { description: 'This sensor no longer counts toward the frozen, impossible or silent-source check.' })
+    } catch (err) {
+      toast.error('Could not ignore this sensor', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setIgnoringSensor(null)
+    }
+  }, [ignoreSensor])
   const [draft, setDraft] = useState<AlarmRuleDraft | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -232,6 +248,43 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       */}
                       {alarm.encounter && (
                         <p className="mt-1.5 text-sm text-foreground/90">{alarm.encounter}</p>
+                      )}
+                      {/*
+                        The anomaly-detection "why" line (frozen at raise,
+                        anomaly_detector.go): what the reading actually was
+                        when the alarm fired, e.g. "House bank 96% SoC,
+                        28.90 V, charging 42 A". Anomaly-only, absent for
+                        every other alarm source, and secondary to the
+                        condition sentence above rather than another
+                        headline, so it renders muted.
+                      */}
+                      {alarm.evidence && (
+                        <p className="mt-1.5 text-[11px] text-muted-foreground">{alarm.evidence}</p>
+                      )}
+                      {/*
+                        "Ignore this sensor" (the frozen/impossible/silent-
+                        source count alarms only): each offending path or
+                        $source named in the evidence line above gets its
+                        own small action, so a sensor known to be dead (a
+                        broken exhaust sender) stops counting toward the
+                        check without touching a settings file.
+                      */}
+                      {ignorableSensorIdentifiers(alarm).filter((id) => !ignoredSensors.includes(id)).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {ignorableSensorIdentifiers(alarm).filter((id) => !ignoredSensors.includes(id)).map((identifier) => (
+                            <Button
+                              key={identifier}
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 gap-1 px-2 text-[10px] uppercase tracking-wider"
+                              disabled={ignoringSensor === identifier}
+                              onClick={() => void handleIgnoreSensor(identifier)}
+                            >
+                              Ignore {identifier}
+                            </Button>
+                          ))}
+                        </div>
                       )}
                       {hasMeta && (
                         <p className="mt-1 truncate text-[11px] text-muted-foreground">

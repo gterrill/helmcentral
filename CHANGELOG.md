@@ -11,8 +11,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **House bank capacity moved.** The Overnight electrical estimate no
+  longer falls back to a built-in default capacity; it now comes only from
+  the house bank you pick under Settings → Vessel → Power. Re-enter your
+  bank's capacity there after upgrading. Until you do, the overnight
+  estimate reports capacity as not set rather than assuming a number.
+
 ### Added
 
+- Anomaly detection: three new alarm checks. A frozen, impossible or newly
+  quiet sensor reading; a house bank still being charged by its alternators
+  or chargers after it has already finished; and, for two or more engines
+  running matched, one pulling away from the others on coolant temperature,
+  oil pressure, boost pressure, load or transmission readings. Set your
+  engines and house bank up under Settings → Vessel; a dead sensor can be
+  excluded from its own alarm card. See
+  [Anomaly detection](https://github.com/gterrill/helmcentral/blob/main/docs/features/anomaly-detection.md)
+  and
+  [Set up your vessel](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/set-up-your-vessel.md).
 - Mate can now answer questions about nearby vessels: who is around, how
   close, and how long they have been in range - and when you last crossed
   paths with a boat that has since moved on.

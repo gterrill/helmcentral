@@ -618,6 +618,91 @@ func TestConnectedStatusTracking(t *testing.T) {
 	}
 }
 
+// TestApplyDeltaTracksSourceSeen verifies applyDelta records a $source's
+// first-seen, last-seen and update count, and that a second update from the
+// same source advances Last and Count while leaving First alone -- the
+// history the sensor-health "silent source" check needs to tell a source
+// that has gone quiet from one that never established a cadence.
+func TestApplyDeltaTracksSourceSeen(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	first := time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)
+	second := first.Add(10 * time.Second)
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			SourceRef: "venus.battery.512",
+			Values:    []signalKValue{{Path: "electrical.batteries.512.voltage", Value: 27.2}},
+		}},
+	}, first)
+
+	sources := snapshot.sourcesFor("vessels.self")
+	entry, ok := sources["venus.battery.512"]
+	if !ok {
+		t.Fatalf("expected venus.battery.512 to be tracked after one delta")
+	}
+	if !entry.First.Equal(first) || !entry.Last.Equal(first) || entry.Count != 1 {
+		t.Fatalf("after one delta: got %+v, want First=Last=%v Count=1", entry, first)
+	}
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			SourceRef: "venus.battery.512",
+			Values:    []signalKValue{{Path: "electrical.batteries.512.voltage", Value: 27.3}},
+		}},
+	}, second)
+
+	entry = snapshot.sourcesFor("vessels.self")["venus.battery.512"]
+	if !entry.First.Equal(first) {
+		t.Fatalf("First should not move on a later update: got %v, want %v", entry.First, first)
+	}
+	if !entry.Last.Equal(second) {
+		t.Fatalf("Last: got %v, want %v", entry.Last, second)
+	}
+	if entry.Count != 2 {
+		t.Fatalf("Count: got %d, want 2", entry.Count)
+	}
+}
+
+// TestApplyDeltaSourceSeenIsPerContext verifies sourcesFor only returns
+// entries for the requested context, the same isolation pathSeen already
+// gives per-path.
+func TestApplyDeltaSourceSeenIsPerContext(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{SourceRef: "n2k.1", Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, testNow)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.urn:mrn:imo:mmsi:987654321",
+		Updates: []signalKUpdate{{SourceRef: "ais", Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 3.0}}}},
+	}, testNow)
+
+	self := snapshot.sourcesFor("vessels.self")
+	if _, ok := self["n2k.1"]; !ok {
+		t.Fatalf("expected n2k.1 under vessels.self")
+	}
+	if _, ok := self["ais"]; ok {
+		t.Fatalf("expected the other vessel's source not to leak into vessels.self")
+	}
+}
+
+// TestApplyDeltaSourceSeenIgnoresEmptySourceRef verifies a delta carrying no
+// $source (SourceRef == "") is not tracked, matching signalKUpdate's own
+// omitempty convention for a field a sender may simply not have set.
+func TestApplyDeltaSourceSeenIgnoresEmptySourceRef(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, testNow)
+
+	if sources := snapshot.sourcesFor("vessels.self"); len(sources) != 0 {
+		t.Fatalf("expected no tracked sources for a delta with no $source, got %v", sources)
+	}
+}
+
 // TestKnownContextsReturnsEmptySliceWhenNoneApplied verifies that knownContexts
 // returns an empty slice when no deltas have been applied.
 func TestKnownContextsReturnsEmptySliceWhenNoneApplied(t *testing.T) {
@@ -1367,6 +1452,74 @@ func TestEvictStaleVesselContextsNeverEvictsSelf(t *testing.T) {
 	}
 	if snapshot.treeFor("vessels.self") == nil {
 		t.Fatalf("self's tree must survive the sweep")
+	}
+}
+
+// TestEvictExcessSourcesCapsDistinctSourcesIncludingSelf mirrors
+// TestEvictExcessPathsCapsDistinctPathsIncludingSelf for sourceSeen: a
+// context (self included, since self is never a candidate for whole-context
+// eviction) that has accumulated more distinct $source strings than
+// signalKContextMaxDistinctSources must be brought back under the cap, the
+// same flood protection K-2 already gives pathSeen.
+func TestEvictExcessSourcesCapsDistinctSourcesIncludingSelf(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	for i := 0; i < signalKContextMaxDistinctSources+1; i++ {
+		source := "n2k." + strconv.Itoa(i)
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{SourceRef: source, Values: []signalKValue{{Path: "environment.depth.belowTransducer", Value: 5.0}}}},
+		}, testNow.Add(time.Duration(i)*time.Millisecond))
+	}
+
+	evicted := snapshot.evictExcessSources()
+	if got := evicted["vessels.self"]; got != 1 {
+		t.Fatalf("expected 1 source evicted over the cap, got %d (%v)", got, evicted)
+	}
+
+	count := 0
+	for key := range snapshot.sourceSeen {
+		if strings.HasPrefix(key, "vessels.self|") {
+			count++
+		}
+	}
+	if count != signalKContextMaxDistinctSources {
+		t.Fatalf("sourceSeen entries for vessels.self after eviction: got %d, want %d", count, signalKContextMaxDistinctSources)
+	}
+	if _, present := snapshot.sourceSeen["vessels.self|n2k.0"]; present {
+		t.Fatalf("expected the least-recently-seen source (n2k.0) evicted first, but it survived")
+	}
+	newest := "n2k." + strconv.Itoa(signalKContextMaxDistinctSources)
+	if _, present := snapshot.sourceSeen["vessels.self|"+newest]; !present {
+		t.Fatalf("expected the most recently seen source (%s) to survive eviction", newest)
+	}
+}
+
+// sourceSeen is keyed "<context>|<$source>", exactly parallel to pathSeen's
+// own "<context>|<path>" -- an evicted context must lose its sourceSeen
+// entries the same way it loses its pathSeen entries, or a contact heard
+// once, then gone for good, leaks one sourceSeen entry per $source it ever
+// used for as long as the process runs.
+func TestEvictStaleVesselContextsDropsSourceSeenEntriesToo(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	stale := "vessels.urn:mrn:imo:mmsi:503016440"
+	snapshot.applyDelta(depthDelta(stale, 5.0), testNow)
+
+	if _, present := snapshot.sourceSeen[stale+"|n2k.1"]; !present {
+		t.Fatalf("test setup: expected sourceSeen to hold an entry for the stale context before eviction")
+	}
+
+	now := testNow.Add(vesselContextStaleAfter + time.Minute)
+	evicted := snapshot.evictStaleVesselContexts(now)
+
+	if len(evicted) != 1 || evicted[0] != stale {
+		t.Fatalf("expected %q evicted, got %v", stale, evicted)
+	}
+	if _, present := snapshot.sourceSeen[stale+"|n2k.1"]; present {
+		t.Fatalf("evicted context's sourceSeen entries must be gone")
 	}
 }
 

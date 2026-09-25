@@ -28,11 +28,22 @@ var operatorUnitTable = map[string]operatorUnitEntry{
 	"m3":    {"L", func(v float64) float64 { return v * 1000 }, 0},
 	"m3/s":  {"L/h", func(v float64) float64 { return v * 3600000 }, 1},
 	"s":     {"h", func(v float64) float64 { return v / 3600 }, 0},
-	"V":     {"V", func(v float64) float64 { return v }, 1},
-	"A":     {"A", func(v float64) float64 { return v }, 1},
-	"m":     {"m", func(v float64) float64 { return v }, 1},
-	"W":     {"W", func(v float64) float64 { return v }, 0},
-	"m/m3":  {"nm/L", func(v float64) float64 { return v / 1852000 }, 2},
+	// deltaK and deltaPa are difference units, for a residual between two
+	// readings rather than an absolute one (the twin-engine differential
+	// detector). "K" above converts absolutely (subtracts 273.15), which is
+	// correct for a temperature but wrong for a temperature gap: a 4 K
+	// residual would print as -269.1 degC. A difference in kelvin equals the
+	// same difference in Celsius, so deltaK only scales, never offsets.
+	// deltaPa mirrors it in kPa rather than "Pa"'s mb, because that is the
+	// unit an operator reads an oil or boost pressure gap in, not a
+	// barometric one.
+	"deltaK":  {"°C", func(v float64) float64 { return v }, 1},
+	"deltaPa": {"kPa", func(v float64) float64 { return v / 1000 }, 1},
+	"V":       {"V", func(v float64) float64 { return v }, 1},
+	"A":       {"A", func(v float64) float64 { return v }, 1},
+	"m":       {"m", func(v float64) float64 { return v }, 1},
+	"W":       {"W", func(v float64) float64 { return v }, 0},
+	"m/m3":    {"nm/L", func(v float64) float64 { return v / 1852000 }, 2},
 }
 
 // operatorUnit looks up the display unit for an SI unit string. ok is false

@@ -110,7 +110,7 @@ function pinQuantity(slot: GaugeWidgetConfig, quantity: string): GaugeWidgetConf
 /** Builds a whole cluster from a profile and an instance prefix. */
 function clusterFromProfile(profile: EngineProfile, instance: string, title: string): EngineClusterConfig {
   const gauges = profileToGauges(profile, instance)
-  const bySuffix = new Map(profile.gauges.map((g, i) => [g.path_suffix, gauges[i]]))
+  const bySuffix = new Map((profile.gauges ?? []).map((g, i) => [g.path_suffix, gauges[i]]))
   const pick = (suffix: string, fallbackLabel: string) => bySuffix.get(suffix) ?? blankSlot(fallbackLabel)
 
   const ring = { ...pick(SLOT_SUFFIXES.ring, 'RPM') }
@@ -142,7 +142,11 @@ interface EngineClusterConfigDialogProps {
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
-  const { profiles, error: profilesError } = useEngineProfiles(widget !== null)
+  const { profiles: allProfiles, error: profilesError } = useEngineProfiles(widget !== null)
+  // A cluster's ring/centre/corner slots come from an engine profile's own
+  // gauges; a battery profile has none, so it is excluded from this picker
+  // the same way EngineProfileDialog excludes it from its own.
+  const profiles = useMemo(() => allProfiles.filter((p) => p.kind !== 'battery'), [allProfiles])
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [profileID, setProfileID] = useState('')
   const [instance, setInstance] = useState('')
@@ -166,7 +170,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
       ? [config.ring, config.centre, ...config.corners.flatMap((c) => c.rows), ...(config.telltales ?? [])]
       : []
     const own = profile
-      ? commonInstancePrefix(slots.filter((s) => s.path.trim() !== ''), profile.gauges.map((g) => g.path_suffix))
+      ? commonInstancePrefix(slots.filter((s) => s.path.trim() !== ''), (profile.gauges ?? []).map((g) => g.path_suffix))
       : null
     return own ?? candidates[0] ?? ''
   }, [config, candidates, profile])

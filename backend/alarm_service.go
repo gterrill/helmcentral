@@ -178,6 +178,7 @@ func activeAlarms() []alarmStatus {
 	// time.Now() at their own call site rather than accepting it from above,
 	// so this matches the existing pattern rather than inventing a new one.
 	combined = append(combined, signalKCollisionNotifications(globalSignalKSnapshot, time.Now().UTC())...)
+	combined = withLiveSensorEvidence(combined, time.Now().UTC())
 
 	sort.Slice(combined, func(i, j int) bool {
 		if alarmStateRank[combined[i].State] != alarmStateRank[combined[j].State] {

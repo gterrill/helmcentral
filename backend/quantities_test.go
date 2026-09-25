@@ -32,6 +32,12 @@ func TestConvertToSI(t *testing.T) {
 		{"rpm to hertz", "frequency", "rpm", 1800, 30},
 		{"hertz is already SI", "frequency", "Hz", 30, 30},
 		{"unitless passes through", "raw", "raw", 42, 42},
+		// Difference units scale only, with no K/Pa offset: a 4-degree
+		// residual is 4 in deltaC and 4 in deltaK, not shifted by 273.15.
+		{"celsius delta is already deltaK, no offset", "temperatureDelta", "deltaC", 4, 4},
+		{"deltaK is already SI", "temperatureDelta", "deltaK", 4, 4},
+		{"kPa delta to Pa delta", "pressureDelta", "deltaKPa", 50, 50000},
+		{"deltaPa is already SI", "pressureDelta", "deltaPa", 50000, 50000},
 	}
 
 	for _, tc := range cases {

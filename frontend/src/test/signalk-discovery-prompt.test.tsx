@@ -14,7 +14,7 @@ import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 
 const settingsResponse = {
   signalk: { address: 'localhost', port: 3000 },
-  boat: { vessel_prefix: 'M/V', model: '', house_battery_capacity_ah: 1440 },
+  boat: { vessel_prefix: 'M/V', model: '' },
   ui: {},
   anchor: {},
   influxdb: {},

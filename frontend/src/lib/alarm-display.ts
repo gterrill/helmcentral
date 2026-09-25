@@ -31,6 +31,41 @@ export const PRESSURE_CHANGE_24H_PATH = 'helmcentral.environment.pressureChange2
 export const STORM_INDEX_PATH = 'helmcentral.environment.stormIndex'
 export const SEVERE_THUNDERSTORM_INDEX_PATH = 'helmcentral.environment.severeThunderstormIndex'
 
+// The three sensor-health count paths (anomaly_detector.go): a count alarm
+// on its own gives the operator nothing to act on, so its evidence names
+// the offending SignalK paths or $source ids (comma-separated) - the alarm
+// card's "Ignore this sensor" action splits that list back out.
+export const ANOMALY_SENSOR_FROZEN_COUNT_PATH = 'helmcentral.anomaly.sensor.frozenCount'
+export const ANOMALY_SENSOR_OUT_OF_RANGE_COUNT_PATH = 'helmcentral.anomaly.sensor.outOfRangeCount'
+export const ANOMALY_SENSOR_SILENT_SOURCE_COUNT_PATH = 'helmcentral.anomaly.sensor.silentSourceCount'
+const IGNORABLE_SENSOR_PATHS: readonly string[] = [
+  ANOMALY_SENSOR_FROZEN_COUNT_PATH,
+  ANOMALY_SENSOR_OUT_OF_RANGE_COUNT_PATH,
+  ANOMALY_SENSOR_SILENT_SOURCE_COUNT_PATH,
+]
+
+/**
+ * The identifiers (SignalK paths or $source ids) an "Ignore this sensor"
+ * action could offer for this alarm, or [] when it isn't one of the three
+ * sensor-health count alarms, or when nothing is currently flagged
+ * (live_evidence absent - the count is 0 right now, so there's nothing to
+ * ignore).
+ *
+ * Reads `live_evidence`, not the alarm's own `evidence` -- `evidence` is
+ * frozen at the moment the alarm first raised, while a count alarm like
+ * this one can stay continuously active for a long time as its specific
+ * offenders drift (one sensor recovers, another starts failing, and the
+ * count itself never drops enough to clear and re-raise). Offering to
+ * ignore whatever tripped the alarm originally, rather than whatever is
+ * actually failing now, would be offering the wrong sensor.
+ */
+export function ignorableSensorIdentifiers(alarm: ActiveAlarm): string[] {
+  if (!IGNORABLE_SENSOR_PATHS.includes(alarm.path)) return []
+  const evidence = (alarm.live_evidence ?? '').trim()
+  if (evidence === '') return []
+  return evidence.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+}
+
 // The English word for each tendency path's window, used in the card
 // sentence rather than the path's own camelCase name.
 const TENDENCY_WINDOW_WORDS: Record<string, string> = {
@@ -48,6 +83,12 @@ const ALARM_UNIT_OVERRIDES: Record<string, string> = {
   Hz: 'rpm',
   m3: 'L',
   'm3/s': 'Lph',
+  // deltaK/deltaPa (the twin-engine differential detector's residual paths)
+  // route to their own difference quantities so a residual never gains an
+  // absolute unit's offset -- see quantities.ts's temperatureDelta/
+  // pressureDelta.
+  deltaK: 'deltaC',
+  deltaPa: 'deltaKPa',
 }
 
 /**

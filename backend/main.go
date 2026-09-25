@@ -15,12 +15,11 @@ import (
 )
 
 const (
-	defaultSignalKAddress         = "localhost"
-	defaultSignalKPort            = 3000
-	metersPerSecondToKnots        = 1.943844
-	defaultWindMaxAge             = 5 * time.Minute
-	defaultRPMMaxAge              = 30 * time.Second
-	defaultHouseBatteryCapacityAh = 1440
+	defaultSignalKAddress  = "localhost"
+	defaultSignalKPort     = 3000
+	metersPerSecondToKnots = 1.943844
+	defaultWindMaxAge      = 5 * time.Minute
+	defaultRPMMaxAge       = 30 * time.Second
 
 	// trackPollInterval is startTrackPoller's cadence, the same poll every
 	// ring buffer in telemetry_history.go is sized against (windGustHistoryCapacity
@@ -494,6 +493,17 @@ func main() {
 	if err := seedLawOfStormsRules(); err != nil {
 		log.Printf("could not seed the law-of-storms alarm rules: %v", err)
 	}
+	// Offers the anomaly-detection set (sensor health always, the rest as
+	// vessel.engines/house_bank are completed): unlike the sets above, this
+	// one is several independent markers rather than one, seeded again on
+	// every vessel-settings save so a detector configured after this boot
+	// still gets its rules. A failure here is not fatal, for the same
+	// reason as above.
+	if vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
+		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+	} else if err := seedAnomalyRules(vessel); err != nil {
+		log.Printf("could not seed the anomaly alarm rules: %v", err)
+	}
 	if err := loadAlarmTransports(); err != nil {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}
@@ -556,6 +566,18 @@ func main() {
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
 	go startAnchorAutoRaiseWatcher(streamCtx, autoRaiseCheckInterval)
 	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
+	// Anomaly detection (sensor health, full-bank charging, engine
+	// differentials): a failed baseline load is logged and leaves twin
+	// residuals absent rather than reporting zero offsets (see
+	// loadEngineBaseline's own doc comment); the refresher then keeps it
+	// current every 24h.
+	if b, err := loadEngineBaseline(anomalyTwinBaselinePath()); err != nil {
+		log.Printf("anomaly engine baseline: could not load at startup, twin residuals stay absent until the next refresh: %v", err)
+	} else if len(b.Engines) > 0 {
+		globalEngineBaselineCache.set(b)
+	}
+	go startAnomalyDetector(streamCtx, anomalyDetectorInterval)
+	go startTwinBaselineRefresher(streamCtx, anomalyBaselineRefreshInterval)
 	// Gust ladder + solar Influx queries (Tier 1 #1): buildVesselStatePayload
 	// and buildSolarStatePayload used to run these live on every call, up to
 	// several times a second per stream client. This refreshes them once on
@@ -619,6 +641,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/alarms", tierRead, alarmsHandler},
 		{http.MethodGet, "/api/alarms/log", tierRead, alarmLogHandler},
 		{http.MethodGet, "/api/alarm-rules", tierRead, listAlarmRulesHandler},
+		// The frozen/impossible/silent-source alarm card's own "Ignore this
+		// sensor" action (alarm_ignored_sensors.go) -- not a settings list.
+		{http.MethodGet, "/api/alarms/ignored-sensors", tierRead, listIgnoredSensorsHandler},
 		{http.MethodGet, "/api/electrical-state", tierRead, electricalState},
 		{http.MethodGet, "/api/electrical/overnight", tierRead, electricalOvernightHandler},
 		{http.MethodGet, "/api/solar-state", tierRead, solarState},
@@ -784,6 +809,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},
 		{http.MethodPut, "/api/alarm-rules/:id", tierWrite, updateAlarmRuleHandler},
 		{http.MethodDelete, "/api/alarm-rules/:id", tierWrite, deleteAlarmRuleHandler},
+		{http.MethodPost, "/api/alarms/ignored-sensors", tierWrite, ignoreSensorHandler},
+		{http.MethodDelete, "/api/alarms/ignored-sensors/:identifier", tierWrite, unignoreSensorHandler},
 		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
 		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
 		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},
@@ -891,6 +918,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
 		{http.MethodPost, "/api/settings", tierAdmin, updateSettingsHandler},
+		// Settings -> Vessel (anomaly detection): candidates is a pure read
+		// of live instances for the picker; GET/POST the vessel.* block
+		// itself, admin-tiered alongside settings since it is one.
+		{http.MethodGet, "/api/vessel/candidates", tierAdmin, getVesselCandidatesHandler},
+		{http.MethodGet, "/api/vessel", tierAdmin, getVesselSettingsHandler},
+		{http.MethodPost, "/api/vessel", tierAdmin, postVesselSettingsHandler},
 		{http.MethodGet, "/api/settings/signalk", tierAdmin, getSignalKSettingsHandler},
 		// Probe only — persisting the address is POST /api/settings' job
 		// alone (ADR 0028). There is deliberately no POST /api/settings/signalk.

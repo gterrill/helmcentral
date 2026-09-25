@@ -139,7 +139,13 @@ const (
 	forecastSurfWarningPath      = derivedPathPrefix + "environment.forecastSurfWarning"
 )
 
-var derivedPathIDs = []string{
+// derivedPathIDs is extended in its own var block below with the anomaly
+// detectors' fixed paths (anomaly_detector.go's anomalyFixedPathIDs) --
+// their per-configured-engine residual paths are dynamic (depend on
+// vessel.engines) and so cannot live in this static list at all; see
+// unitForAlarmPath's own fallback below for how a rule on one of those
+// still resolves a unit.
+var derivedPathIDs = append([]string{
 	vesselFuelEconomyPath,
 	pressureRatePath,
 	pressureChange3hPath,
@@ -153,7 +159,7 @@ var derivedPathIDs = []string{
 	fuelRangeAtCurrentBurnPath,
 	forecastWindWarningLevelPath,
 	forecastSurfWarningPath,
-}
+}, anomalyFixedPathIDs...)
 
 // Units each derived path reports in, so the path picker can preselect a
 // quantity the same way it does from SignalK's own meta.
@@ -176,9 +182,25 @@ var derivedPathUnits = map[string]string{
 	forecastSurfWarningPath:      "",
 }
 
+// init merges the anomaly detectors' fixed paths into derivedPathUnits --
+// done here rather than inline in the map literal above so
+// anomaly_detector.go stays the single source of truth for its own units.
+func init() {
+	for path, unit := range anomalyFixedPathUnits {
+		derivedPathUnits[path] = unit
+	}
+}
+
 func isDerivedPath(path string) bool {
 	return strings.HasPrefix(path, derivedPathPrefix)
 }
+
+// anomalyEngineResidualPathPrefix is every anomaly engine-residual path's
+// common prefix, "helmcentral.anomaly.engines.", used only to recognise one
+// of those dynamic (per-configured-engine) paths -- they cannot live in the
+// static derivedPathUnits map the way every other derived path does, since
+// their number depends on vessel.engines.
+const anomalyEngineResidualPathPrefix = derivedPathPrefix + "anomaly.engines."
 
 // unitForAlarmPath resolves the SI unit an alarm should report for a path,
 // derived-aware the same way derivedAwareAlarmReader is: a helmcentral.* path
@@ -189,7 +211,17 @@ func isDerivedPath(path string) bool {
 // as "omit", not "unitless".
 func unitForAlarmPath(snapshot *signalKSnapshot, path string) string {
 	if isDerivedPath(path) {
-		return derivedPathUnits[path]
+		if unit, ok := derivedPathUnits[path]; ok {
+			return unit
+		}
+		if strings.HasPrefix(path, anomalyEngineResidualPathPrefix) && strings.HasSuffix(path, "Residual") {
+			for _, q := range anomalyEngineResidualQuantities {
+				if strings.HasSuffix(path, "."+q.Suffix+"Residual") {
+					return q.Unit
+				}
+			}
+		}
+		return ""
 	}
 	return unitsFor(snapshot.nodeAt(path))
 }
@@ -494,6 +526,11 @@ func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree
 	// guard below.
 	addForecastWarningValues(values, ages, now)
 
+	// Anomaly detection (sensor health, full-bank charging, engine
+	// differentials) comes from its own 1Hz goroutine's slot
+	// (anomaly_detector.go), not the tree -- same reasoning again.
+	addAnomalyValues(values, ages, now)
+
 	if tree == nil {
 		return values, ages
 	}
@@ -679,6 +716,37 @@ func addForecastWarningValues(values map[string]*float64, ages map[string]float6
 		surf = 1.0
 	}
 	values[forecastSurfWarningPath] = &surf
+}
+
+// addAnomalyValues folds the anomaly detector's latest tick
+// (anomaly_detector.go's globalAnomalySlot) into values/ages: the sensor
+// health counts, the full-bank charging level, and every
+// currently-configured engine's residual paths. The residual paths are
+// dynamic -- there is no static list of them the way every other derived
+// path has one, since their number depends on vessel.engines -- so this is
+// the only add*Values function that can add keys values/ages did not
+// already carry.
+//
+// Absent entirely once the slot is more than anomalySlotMaxAge old, per the
+// plan's "Values are absent if the slot is more than 5s old": a single
+// shared age for the whole tick, unlike the fuel/forecast paths above,
+// since every value in one reading was computed at the same moment.
+func addAnomalyValues(values map[string]*float64, ages map[string]float64, now time.Time) {
+	reading, ok := globalAnomalySlot.get()
+	if !ok {
+		return
+	}
+
+	age := now.Sub(reading.ComputedAt).Seconds()
+	if age > anomalySlotMaxAge.Seconds() {
+		return
+	}
+
+	for path, v := range reading.Values {
+		value := v
+		values[path] = &value
+		ages[path] = age
+	}
 }
 
 /*

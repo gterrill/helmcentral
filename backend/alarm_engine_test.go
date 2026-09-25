@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -472,10 +473,30 @@ func TestAlarmMessageForCarriesLiveValueAndClearPoint(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := alarmMessageFor(tc.rule, tc.sample, tc.unit); got != tc.want {
+			if got := alarmMessageFor(tc.rule, tc.sample, tc.unit, ""); got != tc.want {
 				t.Fatalf("alarmMessageFor: got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAlarmMessageForAppendsEvidence asserts a non-empty evidence string is
+// appended as its own clause, and that an empty one (every non-anomaly
+// alarm) leaves the message exactly as before.
+func TestAlarmMessageForAppendsEvidence(t *testing.T) {
+	rule := alarmRule{Label: "Charging into a full house bank", Op: alarmOpAbove, Value: 0.5, Hysteresis: 0}
+	sample := alarmSample{Value: 1, Present: true}
+
+	withEvidence := alarmMessageFor(rule, sample, "", "House bank 96% SoC, 28.90 V, charging 42 A")
+	want := "Charging into a full house bank: 1, clears below 0.5 House bank 96% SoC, 28.90 V, charging 42 A"
+	if withEvidence != want {
+		t.Fatalf("alarmMessageFor with evidence:\n got  %q\n want %q", withEvidence, want)
+	}
+
+	noEvidence := alarmMessageFor(rule, sample, "", "")
+	wantNoEvidence := "Charging into a full house bank: 1, clears below 0.5"
+	if noEvidence != wantNoEvidence {
+		t.Fatalf("alarmMessageFor with no evidence:\n got  %q\n want %q", noEvidence, wantNoEvidence)
 	}
 }
 
@@ -634,5 +655,105 @@ func assertJSONNumberNear(t *testing.T, payload map[string]any, key string, want
 	}
 	if math.Abs(got-want) > 1e-9 {
 		t.Fatalf("%s: got %v, want %v", key, got, want)
+	}
+}
+
+// --- Evidence: frozen at raise from evidenceFor(path) -----------------------
+
+// withAnomalySlot sets globalAnomalySlot to a single-path reading and
+// restores whatever was there afterward, the "tests build their own,
+// production has no thread to pass one through" split every slot in this
+// codebase documents.
+func withAnomalySlot(t *testing.T, path, evidence string, computedAt time.Time) {
+	t.Helper()
+	prev := globalAnomalySlot
+	globalAnomalySlot = &anomalySlot{}
+	globalAnomalySlot.set(anomalyReading{
+		Evidence:   map[string]string{path: evidence},
+		ComputedAt: computedAt,
+	})
+	t.Cleanup(func() { globalAnomalySlot = prev })
+}
+
+func TestEvidenceForReadsTheAnomalySlot(t *testing.T) {
+	withAnomalySlot(t, anomalyBatteryFullBankChargingPath, "House bank 96% SoC, 28.90 V, charging 42 A", alarmNow)
+	if got := evidenceFor(anomalyBatteryFullBankChargingPath, alarmNow); got != "House bank 96% SoC, 28.90 V, charging 42 A" {
+		t.Fatalf("evidenceFor: got %q", got)
+	}
+}
+
+func TestEvidenceForEmptyForANonAnomalyPath(t *testing.T) {
+	withAnomalySlot(t, anomalyBatteryFullBankChargingPath, "House bank 96% SoC, 28.90 V, charging 42 A", alarmNow)
+	if got := evidenceFor("electrical.batteries.house.voltage", alarmNow); got != "" {
+		t.Fatalf("evidenceFor for a path the anomaly detector does not own: got %q, want empty", got)
+	}
+}
+
+func TestEvidenceForEmptyWhenSlotIsStale(t *testing.T) {
+	withAnomalySlot(t, anomalyBatteryFullBankChargingPath, "House bank 96% SoC, 28.90 V, charging 42 A", alarmNow.Add(-10*time.Second))
+	if got := evidenceFor(anomalyBatteryFullBankChargingPath, alarmNow); got != "" {
+		t.Fatalf("evidenceFor with a stale slot: got %q, want empty", got)
+	}
+}
+
+func TestEvidenceForEmptyWithNoSlotAtAll(t *testing.T) {
+	prev := globalAnomalySlot
+	globalAnomalySlot = &anomalySlot{}
+	t.Cleanup(func() { globalAnomalySlot = prev })
+	if got := evidenceFor(anomalyBatteryFullBankChargingPath, alarmNow); got != "" {
+		t.Fatalf("evidenceFor before any tick has ever landed: got %q, want empty", got)
+	}
+}
+
+// TestEngineFreezesEvidenceAtRaise asserts an anomaly-backed rule's Evidence
+// is captured once, at the moment it raises, and does not keep following
+// the slot afterward -- unlike Encounter, which is deliberately live.
+func TestEngineFreezesEvidenceAtRaise(t *testing.T) {
+	rule := alarmRule{ID: "anomaly-battery", Label: "Charging into a full house bank", Enabled: true,
+		Path: anomalyBatteryFullBankChargingPath, Op: alarmOpAbove, Value: 0.5, State: alarmStateWarn}
+
+	withAnomalySlot(t, anomalyBatteryFullBankChargingPath, "House bank 96% SoC, 28.90 V, charging 42 A", alarmNow)
+
+	engine := newAlarmEngine()
+	events := engine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow)
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected one raised event, got %+v", events)
+	}
+	if got := engine.statusFor("anomaly-battery").Evidence; got != "House bank 96% SoC, 28.90 V, charging 42 A" {
+		t.Fatalf("Evidence at raise: got %q", got)
+	}
+	if !strings.Contains(engine.statusFor("anomaly-battery").Message, "House bank 96% SoC") {
+		t.Fatalf("expected the raised message to carry the evidence clause, got %q", engine.statusFor("anomaly-battery").Message)
+	}
+
+	// The slot moves on; the already-raised status must not follow it.
+	globalAnomalySlot.set(anomalyReading{
+		Evidence:   map[string]string{anomalyBatteryFullBankChargingPath: "a completely different reading"},
+		ComputedAt: alarmNow.Add(1 * time.Second),
+	})
+	engine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow.Add(2*time.Second))
+	if got := engine.statusFor("anomaly-battery").Evidence; got != "House bank 96% SoC, 28.90 V, charging 42 A" {
+		t.Fatalf("Evidence must stay frozen while the alarm is active: got %q", got)
+	}
+}
+
+// TestEngineClearsEvidenceWhenTheAlarmClears asserts Evidence is reset once
+// the alarm returns to normal, so a later, unrelated raise on the same rule
+// never inherits stale evidence from a previous occurrence.
+func TestEngineClearsEvidenceWhenTheAlarmClears(t *testing.T) {
+	rule := alarmRule{ID: "anomaly-battery", Label: "Charging into a full house bank", Enabled: true,
+		Path: anomalyBatteryFullBankChargingPath, Op: alarmOpAbove, Value: 0.5, State: alarmStateWarn}
+
+	withAnomalySlot(t, anomalyBatteryFullBankChargingPath, "House bank 96% SoC, 28.90 V, charging 42 A", alarmNow)
+
+	engine := newAlarmEngine()
+	engine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow)
+	if engine.statusFor("anomaly-battery").Evidence == "" {
+		t.Fatalf("expected evidence to be set once raised")
+	}
+
+	engine.evaluate([]alarmRule{rule}, staticReader(0), alarmNow.Add(1*time.Second))
+	if got := engine.statusFor("anomaly-battery").Evidence; got != "" {
+		t.Fatalf("expected evidence cleared once the alarm returns to normal, got %q", got)
 	}
 }

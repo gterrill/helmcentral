@@ -39,7 +39,6 @@ func writeTestSettings(t *testing.T, address string, port int) string {
     hull_type: power_cat
     windage_area_m2: 35
 boat:
-    house_battery_capacity_ah: 1440
     model: Test Boat
     vessel_prefix: M/V
 signalk:
