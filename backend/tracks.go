@@ -108,6 +108,15 @@ func (c *tracksAISTrailsCache) finishRefresh(trails map[string][]trackPoint, err
 
 // motoringTrail is kept separately: only records motoring state fixes,
 // starting empty and filling purely from live sampling.
+//
+// Its own read side, GET /api/tracks/motoring, was deleted as dead code
+// once ADR 0133 removed the map's drag-to-reposition gesture that was its
+// only caller -- this write side was deliberately left in place, since that
+// ADR's planned Phase 3 Adjust sheet needs a recent motoring breadcrumb
+// again for its own drag-to-fine-tune handle. Restoring the read endpoint
+// then is a small, self-contained change; recording is cheap enough
+// (`recordMotoringPoint`, called from the track poller below) to keep
+// running with nothing currently reading it.
 var (
 	motoringTrailMu sync.RWMutex
 	motoringTrail   = newVesselTrail()
