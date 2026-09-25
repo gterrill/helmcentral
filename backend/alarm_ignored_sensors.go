@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -106,7 +107,17 @@ func ignoreSensorHandler(c echo.Context) error {
 
 // DELETE /api/alarms/ignored-sensors/:identifier
 func unignoreSensorHandler(c echo.Context) error {
-	identifier := c.Param("identifier")
+	// Echo prefers URL.RawPath, so a param arrives still percent-encoded --
+	// the same trap alarm_service.go's alarmActionHandler and
+	// engine_profiles.go's parseProfileID already unescape against. The
+	// client sends encodeURIComponent(identifier) (use-ignored-sensors.ts),
+	// and a $source id or SignalK path containing a colon left escaped
+	// matches nothing in the ignore list, so the identifier is never
+	// actually removed (code review finding 9).
+	identifier, err := url.PathUnescape(c.Param("identifier"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "malformed identifier"})
+	}
 	if err := unignoreSensor(identifier); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

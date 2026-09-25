@@ -150,6 +150,39 @@ func TestUnignoreSensorHandler(t *testing.T) {
 	}
 }
 
+// TestUnignoreSensorHandlerRouteDecodesAColonInTheIdentifier is a routing-
+// level regression for code review finding 9: Echo hands path params to the
+// handler still percent-encoded (it prefers URL.RawPath), the same trap
+// alarm_service.go:364's acknowledgeAlarmHandler and engine_profiles.go's
+// parseProfileID already guard against with url.PathUnescape.
+// unignoreSensorHandler did not, so a $source id containing a colon (a real
+// shape -- see anomaly_sensor_health_test.go's venus.battery.512-style
+// fixtures) -- sent by use-ignored-sensors.ts as
+// encodeURIComponent(identifier) -- arrived at unignoreSensor still escaped,
+// matched nothing in the ignore list, and silently did nothing (DELETE still
+// answers 204 either way, so only the list itself proves the bug).
+func TestUnignoreSensorHandlerRouteDecodesAColonInTheIdentifier(t *testing.T) {
+	withTempAlarmRules(t)
+	if err := ignoreSensor("venus.com.victronenergy.battery:512"); err != nil {
+		t.Fatalf("ignore: %v", err)
+	}
+
+	e := echo.New()
+	e.DELETE("/api/alarms/ignored-sensors/:identifier", unignoreSensorHandler)
+
+	rec := httptest.NewRecorder()
+	// Exactly what use-ignored-sensors.ts sends:
+	// encodeURIComponent("venus.com.victronenergy.battery:512").
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/alarms/ignored-sensors/venus.com.victronenergy.battery%3A512", nil))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d, want 204 (body %s)", rec.Code, rec.Body.String())
+	}
+	if got := listIgnoredSensors(); len(got) != 0 {
+		t.Fatalf("expected the colon-bearing identifier to be removed, got %+v", got)
+	}
+}
+
 func TestListIgnoredSensorsHandler(t *testing.T) {
 	withTempAlarmRules(t)
 	if err := ignoreSensor("propulsion.port.exhaustTemperature"); err != nil {
