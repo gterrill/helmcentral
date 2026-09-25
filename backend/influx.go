@@ -407,6 +407,213 @@ func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]t
 	return points, nil
 }
 
+// queryInfluxPathStatRange reads one aggregate statistic - mean, min or max -
+// of a SignalK path's history over an explicit [start, stop) range,
+// aggregated to every-sized buckets, optionally restricted to one $source tag
+// value. It generalises queryInfluxPathRange (which always mean-aggregates,
+// with no source filter) two ways for get_path_history's per-bucket
+// min/mean/max (Mate diagnostics, ADR 0131): aggFn picks which InfluxDB
+// aggregate function runs per bucket, and source, when given, narrows to one
+// $source rather than mixing every source that has ever published this path.
+//
+// aggFn is interpolated into the Flux query unquoted, same as every already
+// is in queryInfluxPathRange - safe here for the same reason: it is never
+// model-supplied text, only ever one of the three fixed literals ("min",
+// "mean", "max") assistant_diagnostics.go calls this with.
+func queryInfluxPathStatRange(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxPathStatFlux(bucket, field, path, source, start, stop, every, aggFn)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var points []telemetryPoint
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok {
+			continue
+		}
+		points = append(points, telemetryPoint{Timestamp: rec.Time(), Value: v})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return points, nil
+}
+
+// buildInfluxPathStatFlux builds queryInfluxPathStatRange's Flux query text,
+// pulled out as its own pure function so its string-escaping and clause
+// construction can be unit-tested without a live InfluxDB connection - the
+// same reasoning fluxStringLiteral's own tests already apply one layer down.
+// Every value that can carry attacker- or model-chosen text (path, source,
+// bucket, field) goes through fluxStringLiteral; every() and aggFn never do,
+// since callers only ever pass one of a fixed set of literals for both (see
+// queryInfluxPathStatRange's own doc comment).
+func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop time.Time, every, aggFn string) (string, error) {
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return "", fmt.Errorf("path: %w", err)
+	}
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filter := fmt.Sprintf("r._measurement == %s and r._field == %s", pathLiteral, fieldLiteral)
+	if source != "" {
+		sourceLiteral, err := fluxStringLiteral(source)
+		if err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		filter += fmt.Sprintf(" and r.source == %s", sourceLiteral)
+	}
+
+	return fmt.Sprintf(
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> aggregateWindow(every: %s, fn: %s, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, every, aggFn,
+	), nil
+}
+
+// influxLastRecordedRow is one measurement+source pair's most recent
+// recorded point, as get_last_recorded (Mate diagnostics, ADR 0131) reports
+// it. This answers "when did X stop" for a path that queryInfluxPathTrend/
+// queryInfluxPathRange cannot: both need the path named up front and a
+// window to look in, and return nothing once no point falls in that window -
+// indistinguishable from "never existed" without already knowing when to
+// stop looking.
+type influxLastRecordedRow struct {
+	Path   string
+	Source string
+	Time   time.Time
+	Value  float64
+}
+
+// queryInfluxLastRecorded finds, for every measurement (SignalK path) and
+// $source combination matching pathPrefix and/or source within the last
+// lookbackDays, that combination's most recent recorded point.
+//
+// At least one of pathPrefix/source must be non-empty - the caller
+// (assistant_diagnostics.go) enforces that before calling this, since neither
+// filter bounds the query's own cost the way a single named path does for
+// queryInfluxPathRange: an empty prefix would scan the bucket's entire
+// measurement set.
+func queryInfluxLastRecorded(pathPrefix, source string, lookbackDays int) ([]influxLastRecordedRow, error) {
+	if pathPrefix == "" && source == "" {
+		return nil, fmt.Errorf("path_prefix or source is required")
+	}
+
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	flux, err := buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var rows []influxLastRecordedRow
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok {
+			continue
+		}
+		source, _ := rec.ValueByKey("source").(string)
+		rows = append(rows, influxLastRecordedRow{
+			Path:   rec.Measurement(),
+			Source: source,
+			Time:   rec.Time(),
+			Value:  v,
+		})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return rows, nil
+}
+
+// buildInfluxLastRecordedFlux builds queryInfluxLastRecorded's Flux query
+// text, pulled out as its own pure function for the same reason
+// buildInfluxPathStatFlux is: unit-testable string construction and escaping
+// with no live InfluxDB connection required. At least one of pathPrefix/
+// source must be non-empty; both go through fluxStringLiteral before being
+// wrapped in strings.hasPrefix, since both can carry model-chosen text.
+func buildInfluxLastRecordedFlux(bucket, field, pathPrefix, source string, lookbackDays int) (string, error) {
+	if pathPrefix == "" && source == "" {
+		return "", fmt.Errorf("path_prefix or source is required")
+	}
+
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+
+	filters := []string{fmt.Sprintf("r._field == %s", fieldLiteral)}
+	if pathPrefix != "" {
+		prefixLiteral, err := fluxStringLiteral(pathPrefix)
+		if err != nil {
+			return "", fmt.Errorf("path_prefix: %w", err)
+		}
+		filters = append(filters, fmt.Sprintf("strings.hasPrefix(v: r._measurement, prefix: %s)", prefixLiteral))
+	}
+	if source != "" {
+		sourceLiteral, err := fluxStringLiteral(source)
+		if err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		filters = append(filters, fmt.Sprintf(`(exists r.source and strings.hasPrefix(v: r.source, prefix: %s))`, sourceLiteral))
+	}
+
+	// group(columns: ["_measurement", "source"]) regroups the filtered rows
+	// by measurement+source alone (ignoring any other tag, e.g. context), so
+	// last() returns exactly one row per measurement/source pair rather than
+	// one per full underlying tag set.
+	return fmt.Sprintf(
+		"import \"strings\"\n"+
+			"from(bucket: %s)\n"+
+			"  |> range(start: -%dd)\n"+
+			"  |> filter(fn: (r) => %s)\n"+
+			"  |> group(columns: [\"_measurement\", \"source\"])\n"+
+			"  |> last()\n"+
+			"  |> keep(columns: [\"_measurement\", \"source\", \"_time\", \"_value\"])",
+		bucketLiteral, lookbackDays, strings.Join(filters, " and "),
+	), nil
+}
+
 // influxTrendResolution keeps a long window from returning thousands of points
 // for a sparkline a few hundred pixels wide.
 func influxTrendResolution(window string) string {
