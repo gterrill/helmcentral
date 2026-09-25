@@ -64,6 +64,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   boats are actually in range.
 - Mate can now say how long any vessel in a crowded anchorage has been
   nearby, not only the closest ten.
+- Current Conditions and the Wind tile now always agree on the last hour's
+  true wind reading; before, the two could occasionally show different
+  figures for the same moment.
 
 ## [0.31.0] - 2026-09-25
 

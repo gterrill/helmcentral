@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -578,64 +577,49 @@ func TestVesselStateHandler_MaxGustTrueKtsClampsOnlyAfterAShorterWindowHasData(t
 	}
 }
 
-// TestBuildVesselStatePayload_MaxTrueWindKts1hFromHistory covers the Current
-// Conditions tile's "obs" marker on the true-wind scale (ADR 0129):
-// max_true_wind_kts_1h is the last hour's highest trueWindSpeedHistory
-// sample, converted from the raw m/s tracks.go records it in.
-func TestBuildVesselStatePayload_MaxTrueWindKts1hFromHistory(t *testing.T) {
-	resetGNSSPositionValidationState()
-	t.Cleanup(resetGNSSPositionValidationState)
-
+// TestBuildVesselStatePayload_NoSeparateMaxTrueWindKts1hField is the direct
+// regression test for a code-review finding (2026-09-25): the payload used
+// to carry a max_true_wind_kts_1h field - the Current Conditions tile's
+// "obs" marker (ADR 0129) - computed from trueWindSpeedHistory (raw m/s,
+// gated by the heavy-weather trend's own staleness check), a SEPARATE
+// buffer from the one max_gust_true_kts["1h"] (the Wind tile's True mode,
+// ADR 0130) already reads, trueWindGustHistory (already-knots, gated on
+// state.WindSpeedTrueKts >= 0). Two buffers behind two different freshness
+// gates holding "the same" quantity meant the two tiles could disagree.
+// This test seeds the two buffers with DIFFERENT values specifically so a
+// reintroduced max_true_wind_kts_1h field would show a value that disagrees
+// with max_gust_true_kts["1h"] - the exact bug this fix removes. See
+// docs/adr/0130's amendment.
+func TestBuildVesselStatePayload_NoSeparateMaxTrueWindKts1hField(t *testing.T) {
+	originalSpeed, originalGust := trueWindSpeedHistory, trueWindGustHistory
+	t.Cleanup(func() { trueWindSpeedHistory, trueWindGustHistory = originalSpeed, originalGust })
 	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
-	t.Cleanup(func() {
-		trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
-	})
+	trueWindGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 
 	now := time.Now().UTC()
-	trueWindSpeedHistory.record(9.5, now.Add(-30*time.Minute)) // m/s, raw
+	// Deliberately different quantities: 20.0 m/s (~38.9 kts) into the
+	// buffer the removed field used to read, 9.4 kts into the one
+	// max_gust_true_kts actually uses.
+	trueWindSpeedHistory.record(20.0, now.Add(-30*time.Minute))
+	trueWindGustHistory.record(9.4, now.Add(-30*time.Minute))
 
-	server := trustedSignalKPayloadServer(t, -21.1113, 148.9)
-	defer server.Close()
-	host, port := hostPort(t, server.URL)
-	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
+	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
+	payload := vesselStatePayloadFor(t, body)
 
-	payload := buildVesselStatePayload()
+	if _, present := payload["max_true_wind_kts_1h"]; present {
+		t.Fatalf("expected max_true_wind_kts_1h to be gone from the payload entirely, got %v", payload["max_true_wind_kts_1h"])
+	}
 
-	got, ok := payload["max_true_wind_kts_1h"].(float64)
+	maxGustTrueKts, ok := payload["max_gust_true_kts"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected max_true_wind_kts_1h to be a number, got %T: %v", payload["max_true_wind_kts_1h"], payload["max_true_wind_kts_1h"])
+		t.Fatalf("expected max_gust_true_kts to serialize as an object, got %T", payload["max_gust_true_kts"])
 	}
-	want := math.Round(9.5*metersPerSecondToKnots*10) / 10
-	if !approxEqual(got, want, 0.01) {
-		t.Fatalf("expected max_true_wind_kts_1h ~%v, got %v", want, got)
-	}
-}
-
-// TestBuildVesselStatePayload_MaxTrueWindKts1hSentinelWhenNoSamples proves
-// the field reports the same -1 sentinel as every other absent
-// last-hour/gust figure, not a fabricated zero.
-func TestBuildVesselStatePayload_MaxTrueWindKts1hSentinelWhenNoSamples(t *testing.T) {
-	resetGNSSPositionValidationState()
-	t.Cleanup(resetGNSSPositionValidationState)
-
-	trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
-	t.Cleanup(func() {
-		trueWindSpeedHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
-	})
-
-	server := trustedSignalKPayloadServer(t, -21.1113, 148.9)
-	defer server.Close()
-	host, port := hostPort(t, server.URL)
-	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
-
-	payload := buildVesselStatePayload()
-
-	got, ok := payload["max_true_wind_kts_1h"].(float64)
+	oneHour, ok := maxGustTrueKts["1h"].(float64)
 	if !ok {
-		t.Fatalf("expected max_true_wind_kts_1h to be a number, got %T", payload["max_true_wind_kts_1h"])
+		t.Fatalf("expected max_gust_true_kts[1h] to be a number, got %T", maxGustTrueKts["1h"])
 	}
-	if got != -1 {
-		t.Fatalf("expected sentinel -1 with no samples, got %v", got)
+	if !approxEqual(oneHour, 9.4, 0.01) {
+		t.Fatalf("expected max_gust_true_kts[1h]=9.4 (from trueWindGustHistory) - got %v, which would mean something is still reading trueWindSpeedHistory (~38.9)", oneHour)
 	}
 }
 
