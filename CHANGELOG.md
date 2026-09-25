@@ -45,6 +45,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   adjusted", though the recommended rode already allowed for the tide.
   Typing over it still overrides the plan, and a figure with no water left
   once tide and bow height are backed out is refused rather than saved.
+- Mate's "when did it stop" answer now names the exact moment a reading was
+  last actually seen, not a rounded multi-day window.
+- Mate's history-gap listing now shows the most recent gaps - including one
+  still open right now - instead of only the oldest ones once there are more
+  than it can list at once.
+- Mate can now find the last recorded value for a reading that is a word or
+  an on/off state (a mode, an alarm), not only a number.
+- Mate now says when a requested history search was longer than it can run
+  in one go, and what range it used instead of quietly shortening it.
 
 ## [0.31.0] - 2026-09-25
 

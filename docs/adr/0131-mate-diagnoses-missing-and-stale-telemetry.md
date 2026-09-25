@@ -279,3 +279,50 @@ data first, `strings.hasPrefix` not pushing down, and an unsorted
 `group()` `|> last()` risking the wrong series' endpoint. All three are
 covered by tests that fail against the pre-fix code (verified by hand,
 reverting each fix in turn) and pass against the fix.
+
+## Amendment 2026-09-25: a second code review, five more fixes
+
+A `/code-review high` pass over this branch after it merged found five more
+issues, all in the same three tools, all fixed on `review-fixes` in the same
+pattern as the three above - a test that fails against the pre-fix code
+(verified by hand) and passes against the fix:
+
+- `get_path_history`'s `first_seen`/`last_seen` came from the min/mean/max
+  aggregate series' own bucket-START boundary (the `timeSrc: "_start"` fix
+  above), not the actual first/last recorded sample - on a 90-day range
+  bucketed to 2-day buckets, up to two days off from when a source really
+  stopped. `queryInfluxPathFirstLast` (`influx.go`) now runs a dedicated
+  `first()`/`last()` query over the same range and filter for this. Gap
+  detection is unaffected - it is legitimately about which buckets have no
+  data, not the exact sample time within one.
+- Capping the reported gap list past `assistantPathHistoryMaxReportedGaps`
+  kept `gaps[:N]` - the OLDEST N ranges - so a path still down at the end of
+  the requested range had its own still-open gap, the actual answer to
+  "when did it die", silently dropped once `gap_count` exceeded the cap.
+  It now keeps the most recent N (`gaps[len(gaps)-N:]`), which - because the
+  list is chronological - always includes a still-open gap when there is one.
+- `queryInfluxLastRecorded` only accepted a `float64` record value, silently
+  dropping every string (a mode/state enum) or boolean (an alarm flag) path
+  from `get_last_recorded`'s results - they looked permanently unrecorded.
+  Checked against the upstream writer's own source
+  (`tkurki/signalk-to-influxdb2`, `src/influx.ts`, via `gh api
+  repos/tkurki/signalk-to-influxdb2/contents/src/influx.ts`): it always
+  writes to a field literally named `"value"` regardless of type
+  (`floatField`/`stringField`/`booleanField`), so the existing `_field ==
+  "value"` filter was already correct - the bug was entirely the Go-side
+  type assertion. `influxLastRecordedRow.Value` and
+  `assistantLastRecordedRow.LastValue` are now `any`, and
+  `influxRecordValueOK` accepts float64/string/bool (and int64/uint64
+  defensively, though nothing here writes those today).
+- A `get_path_history` range longer than `assistantPathHistoryMaxSpan` (90
+  days) was clamped silently. The result's `note` now says what start was
+  requested and what it was moved to.
+- `get_path_history`'s three stat queries (min/mean/max) each built their
+  own `context.Background()` timeout, ignoring the tool call's own `ctx`
+  entirely, and ran sequentially. They - and the new first/last query above
+  - now share the tool's own `ctx` (each still derives its own 8s cap FROM
+  it, via `queryInfluxPathStatRange`/`queryInfluxPathFirstLast`) and run
+  concurrently, so cancelling the tool call stops all four, and the worst
+  case is one shared timeout rather than the sum of several sequential ones.
+
+`go test -short -race ./...` and `go vet ./...` pass.

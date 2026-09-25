@@ -153,11 +153,23 @@ type assistantToolDeps struct {
 	// wires queryInfluxLastRecorded (influx.go); tests supply a canned slice
 	// with no InfluxDB connection at all.
 	influxLastRecorded func(pathPrefix, source string, lookbackDays int) ([]influxLastRecordedRow, error)
-	// influxPathHistoryStat is get_path_history's only I/O dependency: one
+	// influxPathHistoryStat is get_path_history's I/O dependency for one
 	// aggregate statistic (min/mean/max) of a path's history over an
 	// explicit range, aggregated to fixed-size buckets, optionally scoped to
-	// one source. Production wires queryInfluxPathStatRange (influx.go).
-	influxPathHistoryStat func(path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error)
+	// one source. Production wires queryInfluxPathStatRange (influx.go). It
+	// takes ctx - executeGetPathHistory's own tool ctx - rather than building
+	// its own context.Background() timeout internally, and is called
+	// concurrently (min/mean/max, alongside influxPathHistoryFirstLast
+	// below) so cancelling that ctx stops every one of them and the worst
+	// case is one shared timeout rather than the sum of four sequential ones
+	// (a code-review finding, 2026-09-25).
+	influxPathHistoryStat func(ctx context.Context, path, source string, start, stop time.Time, every, aggFn string) ([]telemetryPoint, error)
+	// influxPathHistoryFirstLast is get_path_history's other I/O dependency:
+	// the path's actual first/last recorded sample time over the same range,
+	// as opposed to influxPathHistoryStat's bucket-START-labelled series -
+	// see queryInfluxPathFirstLast's own doc comment (influx.go) for why the
+	// two are not the same timestamp. Production wires queryInfluxPathFirstLast.
+	influxPathHistoryFirstLast func(ctx context.Context, path, source string, start, stop time.Time) (first, last time.Time, found bool, err error)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -196,9 +208,10 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		signalKPositionHistory: func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error) {
 			return fetchSignalKPositionHistory(settingsPath, mmsi, from, to, resolutionSeconds)
 		},
-		signalKDiagnostics:    signalKDiagnosticsFromGlobalSnapshot,
-		influxLastRecorded:    queryInfluxLastRecorded,
-		influxPathHistoryStat: queryInfluxPathStatRange,
+		signalKDiagnostics:         signalKDiagnosticsFromGlobalSnapshot,
+		influxLastRecorded:         queryInfluxLastRecorded,
+		influxPathHistoryStat:      queryInfluxPathStatRange,
+		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
 	}
 }
 
