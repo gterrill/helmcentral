@@ -181,8 +181,11 @@ describe('Settings -> Vessel: Engines and Power', () => {
     const linkers = screen.getAllByLabelText('Linked equipment item')
     fireEvent.change(linkers[0], { target: { value: 'eq-1' } })
 
-    const profileSelect = await screen.findByLabelText('Equipment profile')
-    expect(within(profileSelect).getByText('Test Engine Profile')).toBeInTheDocument()
+    // The select renders before its profile options load, so wait for the
+    // options themselves rather than just the select (flaked on a loaded CI
+    // runner at 1030 ms).
+    const profileSelect = await screen.findByLabelText('Equipment profile', {}, { timeout: 5000 })
+    await waitFor(() => expect(within(profileSelect).getByText('Test Engine Profile')).toBeInTheDocument(), { timeout: 5000 })
     expect(within(profileSelect).queryByText('Test Battery Profile')).toBeNull()
   })
 
