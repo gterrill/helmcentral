@@ -45,6 +45,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   adjusted", though the recommended rode already allowed for the tide.
   Typing over it still overrides the plan, and a figure with no water left
   once tide and bow height are backed out is refused rather than saved.
+- The Anchor Watch tile on a dashboard page no longer moves the anchor or
+  resizes the swing radius when you touch its map. Adjust both from the
+  Anchor Watch page.
+- The anchor watch map now opens on the boat when no anchor is set, instead
+  of the last anchorage.
 
 ## [0.31.0] - 2026-09-25
 
