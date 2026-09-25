@@ -71,7 +71,7 @@ const baseProps = {
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null,
   planningTideHeightFt: null,
-  onPlanningDepthChange: () => undefined,
+  onPlanningDepthChange: () => Promise.resolve(),
 }
 
 // The backend puts a damaged anchor_watch.json into an explicit error state
