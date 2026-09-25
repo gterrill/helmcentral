@@ -33,6 +33,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - In Course Up, the Wind tile's set arrow now points relative to the bow,
   matching the compass beside it; before, it always pointed as if North Up.
+- The rode planner's Depth field now shows the figure the plan is actually
+  computed against: depth at this spot at the next high tide, plus bow
+  roller height. Before, it showed the bare sounder reading labelled "Tide
+  adjusted", though the recommended rode already allowed for the tide.
+  Typing over it still overrides the plan, and a figure with no water left
+  once tide and bow height are backed out is refused rather than saved.
 
 ## [0.31.0] - 2026-09-25
 

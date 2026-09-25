@@ -6,7 +6,9 @@ import {
   computeScopeRecommendation,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
+  planningFigureM,
   ratioMethod,
+  rawDepthFromPlanningFigureM,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -21,6 +23,11 @@ import {
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { AnchorConfig } from '@/config/app-config'
 import type { GustWindow } from '@/lib/gust-windows'
+
+// Mirrors the unexported constant of the same name in rode-plan.ts — used
+// only to build test fixtures in feet from a figure in metres, never to
+// duplicate the module's own arithmetic.
+const METERS_PER_FOOT = 3.28084
 
 function makeTide(overrides: Partial<TideToday> = {}): TideToday {
   return {
@@ -267,6 +274,127 @@ describe('maxExpectedDepthM', () => {
     const tide = makeTide({ current_tide_height_ft: 4, high_tide_height_ft: 5 })
     expect(maxExpectedDepthM(datum, tide)).toBeCloseTo(6 + 4 / 3.28084, 6)     // correct
     expect(maxExpectedDepthM(datum, tide)).not.toBeCloseTo(6 + 1 / 3.28084, 6) // the bug: short, unsafe
+  })
+})
+
+// ---------------------------------------------------------------------------
+// planningFigureM — the figure the Depth field displays: depth at the next
+// high tide plus bow roller height (depth-from-hawse at high water), not the
+// raw sounder/recorded reading maxExpectedDepthM/buildRodePlan plan against
+// internally. Deliberately thin: it's maxExpectedDepthM (falling back to the
+// raw datum depth on the same null conditions) plus bowRollerHeightM.
+// ---------------------------------------------------------------------------
+describe('planningFigureM', () => {
+  it('is null when the datum is null', () => {
+    expect(planningFigureM(null, makeTide(), 1.5)).toBeNull()
+  })
+
+  it('adds the rise to the next high, plus bow height, when tide-corrected', () => {
+    // datum's own tide-at-reading is 2ft, high 5ft -> rise 3ft -> 0.9144m
+    const datum = { depthM: 5, tideHeightFt: 2 }
+    const result = planningFigureM(datum, makeTide({ high_tide_height_ft: 5 }), 1.5)
+    expect(result).toBeCloseTo(5 + 3 / 3.28084 + 1.5, 6)
+  })
+
+  it('falls back to the raw datum depth plus bow height when uncorrected (no tide stamp on the datum)', () => {
+    const datum = { depthM: 5, tideHeightFt: null }
+    const result = planningFigureM(datum, makeTide(), 1.5)
+    expect(result).toBeCloseTo(5 + 1.5, 6)
+  })
+
+  // The worked example from the ADR: 1.0 m now at low tide, next high 3.0 m
+  // above the tide at the reading, 1.5 m bow -> 5.5 m in the Depth field.
+  it('the worked example: 1.0 m raw, 3.0 m rise to high, 1.5 m bow -> 5.5', () => {
+    // tideHeightFt in feet, so pick a rise that comes out to exactly 3.0 m:
+    // 3.0 m * 3.28084 ft/m = 9.84252 ft rise.
+    const datum = { depthM: 1.0, tideHeightFt: 0 }
+    const result = planningFigureM(datum, makeTide({ high_tide_height_ft: 3.0 * METERS_PER_FOOT }), 1.5)
+    expect(result).toBeCloseTo(5.5, 6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// rawDepthFromPlanningFigureM — the exact inverse of planningFigureM, so an
+// operator's typed figure (depth at high tide + bow height) can be converted
+// back to the raw reading that gets persisted (ADR 0063's pair rule), without
+// seeding the input with a corrected number and then storing the typed value
+// as raw — that would compound the rise on every render.
+// ---------------------------------------------------------------------------
+describe('rawDepthFromPlanningFigureM', () => {
+  it('the worked example inverted: figure 5.5, 3.0 m rise, 1.5 m bow -> raw 1.0', () => {
+    const tide = makeTide({ high_tide_height_ft: 3.0 * METERS_PER_FOOT })
+    const result = rawDepthFromPlanningFigureM(5.5, 0, tide, 1.5)
+    expect(result).toBeCloseTo(1.0, 6)
+  })
+
+  it('rise is 0 when tideNowFt is null, matching maxExpectedDepthM\'s null conditions', () => {
+    const tide = makeTide({ high_tide_height_ft: 5 })
+    const result = rawDepthFromPlanningFigureM(6.5, null, tide, 1.5)
+    expect(result).toBeCloseTo(6.5 - 1.5, 6)
+  })
+
+  it('rise is 0 when there is no tide forecast at all', () => {
+    const result = rawDepthFromPlanningFigureM(6.5, 2, null, 1.5)
+    expect(result).toBeCloseTo(6.5 - 1.5, 6)
+  })
+
+  it('clamps a falling tide to zero rise, same as maxExpectedDepthM', () => {
+    // tideNowFt (4) already above the next high (3) -> rise would be
+    // negative -> clamped to 0, not subtracted.
+    const tide = makeTide({ high_tide_height_ft: 3 })
+    const result = rawDepthFromPlanningFigureM(6.5, 4, tide, 1.5)
+    expect(result).toBeCloseTo(6.5 - 1.5, 6)
+  })
+
+  it('returns null when the typed figure does not clear bow height plus tide rise', () => {
+    // rise (3ft/3.28084m) + bow (1.5m) is the boundary; a figure comfortably
+    // below that implies a raw depth <= 0, which is not a sensible reading.
+    const tide = makeTide({ high_tide_height_ft: 5 })
+    const boundaryM = 1.5 + 3 / 3.28084
+    const result = rawDepthFromPlanningFigureM(boundaryM - 0.5, 2, tide, 1.5)
+    expect(result).toBeNull()
+  })
+
+  it('returns null (not zero or negative) exactly at the boundary', () => {
+    const tide = makeTide({ high_tide_height_ft: 5 })
+    const riseM = 3 / 3.28084
+    const result = rawDepthFromPlanningFigureM(1.5 + riseM, 2, tide, 1.5)
+    expect(result).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// planningFigureM / rawDepthFromPlanningFigureM round trip — persisting
+// rawDepthFromPlanningFigureM(x, tideNow, tide, bow) stamped with tideNow,
+// then reading planningFigureM back off that datum, must return x exactly:
+// this is the exact inversion ADR 0063's amendment relies on to avoid
+// compounding the tide correction on every render.
+// ---------------------------------------------------------------------------
+describe('planningFigureM / rawDepthFromPlanningFigureM round trip', () => {
+  function roundTrip(figureM: number, tideNowFt: number | null, tide: TideToday | null, bowRollerHeightM: number): number | null {
+    const rawDepthM = rawDepthFromPlanningFigureM(figureM, tideNowFt, tide, bowRollerHeightM)
+    if (rawDepthM === null) return null
+    const datum = { depthM: rawDepthM, tideHeightFt: tideNowFt }
+    return planningFigureM(datum, tide, bowRollerHeightM)
+  }
+
+  it('round-trips exactly with a rising tide', () => {
+    const tide = makeTide({ current_tide_height_ft: 2, high_tide_height_ft: 5 })
+    expect(roundTrip(6.9, 2, tide, 1)).toBeCloseTo(6.9, 6)
+  })
+
+  it('round-trips exactly with no tide station at all', () => {
+    expect(roundTrip(6.9, null, null, 1)).toBeCloseTo(6.9, 6)
+  })
+
+  it('round-trips exactly on a falling tide (rise clamped to 0)', () => {
+    const tide = makeTide({ current_tide_height_ft: 4, high_tide_height_ft: 3 })
+    expect(roundTrip(6.9, 4, tide, 1)).toBeCloseTo(6.9, 6)
+  })
+
+  it('round-trips the worked example: 5.5 m figure, 3.0 m rise, 1.5 m bow', () => {
+    const tide = makeTide({ high_tide_height_ft: 3.0 * METERS_PER_FOOT })
+    expect(roundTrip(5.5, 0, tide, 1.5)).toBeCloseTo(5.5, 6)
   })
 })
 
