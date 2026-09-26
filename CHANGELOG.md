@@ -33,10 +33,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - A failed document in Documents now tells you what to try next instead of
   showing a raw technical error. The original detail is still there if you
   want it, under Error details on the document's own page.
-- If Mate runs out of research steps on a hard question after checking
-  several documents or data sources, and its last attempt at an answer
-  comes back with nothing usable, the conversation now shows a clear
-  failure instead of an empty reply.
+- After a long search runs out of research steps, Mate now reliably answers
+  from what it already found instead of giving up - this previously could
+  still fail outright with no answer at all, depending on which model
+  answered the question.
 
 ## [0.33.0] - 2026-09-26
 
