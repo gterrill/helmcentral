@@ -2,6 +2,7 @@ import { createRef } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { AnchorWatchMap, type AnchorWatchMapHandle, type AnchorAdjustDraft } from '@/components/anchor-watch-map'
+import { zoomForRingRadius, ringRadiusPx } from '@/lib/anchor-adjust'
 
 // Adjust mode (ADR 0136) at the AnchorWatchMap level: Move icon gating, the
 // fixed crosshair/ring overlay, camera lock (setMinZoom/setMaxZoom,
@@ -23,15 +24,26 @@ const panByMock = vi.fn()
 const disableRotationMock = vi.fn()
 const enableRotationMock = vi.fn()
 
+// Captured so a test can fire a synthetic 'move' event directly — real
+// MapLibre calls this on every animation frame of a pan/pinch AND of a
+// programmatic easeTo/jumpTo transition, which this inert mock (unlike the
+// real Map) never does on its own.
+let latestOnMove: ((e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => void) | undefined
+
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
     Map: React.forwardRef(
       (
-        { children, onKeyDown }: { children?: React.ReactNode; onKeyDown?: (e: unknown) => void },
+        { children, onKeyDown, onMove }: {
+          children?: React.ReactNode
+          onKeyDown?: (e: unknown) => void
+          onMove?: (e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => void
+        },
         ref: React.Ref<unknown>,
       ) => {
         void onKeyDown
+        latestOnMove = onMove
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => 14,
@@ -154,6 +166,25 @@ describe('AnchorWatchMap Adjust mode — camera lock and overlays', () => {
     const onAdjustDraftChange = vi.fn()
     render(<AnchorWatchMap {...baseProps} adjustActive onAdjustDraftChange={onAdjustDraftChange} />)
     expect(onAdjustDraftChange).toHaveBeenCalledWith({ lat: -25.2938, lon: 152.9102, radiusM: 20 })
+  })
+
+  // Code-review finding: the entry effect reported the raw committed radius
+  // as the starting draft, overwriting the clamped draft the drawer's own
+  // openAdjust already produced (openAdjust's own clampRadiusM call) —
+  // saved 250 m against a 162 m chain+LOA ceiling showed a 162 m ring but
+  // reported (and so would Set/PATCH) 250 m.
+  it('clamps the draft radius to the adjust bounds ceiling on entry, not the raw committed radius', () => {
+    const onAdjustDraftChange = vi.fn()
+    render(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={250}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 162, maxReason: null }}
+        onAdjustDraftChange={onAdjustDraftChange}
+      />,
+    )
+    expect(onAdjustDraftChange).toHaveBeenCalledWith({ lat: -25.2938, lon: 152.9102, radiusM: 162 })
   })
 
   it('the 5s anchor-watch poll does not reset the camera or the draft while Adjust stays open', () => {
@@ -299,6 +330,221 @@ describe('AnchorWatchMap Adjust mode — container resize keeps the chosen radiu
     // Above all: the resize itself must not change the radius the operator
     // chose.
     expect(onAdjustDraftChange).toHaveBeenLastCalledWith({ lat: -25.2938, lon: 152.9102, radiusM: 20 })
+  })
+
+  // Code-review finding: the resize handler re-reported the existing draft
+  // radius unclamped, so if the bounds narrow while Adjust is open (a
+  // settings change to chain onboard/LOA landing mid-session) a resize would
+  // keep re-asserting an over-ceiling radius instead of pulling it back down
+  // to the new maximum, the same way entry now does.
+  it('clamps the reported draft radius to a narrower bounds on resize', () => {
+    const observerCallbacks: Array<() => void> = []
+    class FakeResizeObserver {
+      constructor(cb: () => void) { observerCallbacks.push(cb) }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+    let rectWidth = 400
+    let rectHeight = 300
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: rectWidth,
+      height: rectHeight,
+      top: 0,
+      left: 0,
+      right: rectWidth,
+      bottom: rectHeight,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }))
+
+    const onAdjustDraftChange = vi.fn()
+    const { rerender } = render(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={150}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 200, maxReason: null }}
+        onAdjustDraftChange={onAdjustDraftChange}
+      />,
+    )
+    expect(onAdjustDraftChange).toHaveBeenLastCalledWith({ lat: -25.2938, lon: 152.9102, radiusM: 150 })
+    onAdjustDraftChange.mockClear()
+
+    // Bounds narrow below the draft's own radius (e.g. chain onboard/LOA
+    // changed mid-session) — adjustActive itself doesn't change, so nothing
+    // re-fires the entry effect; the resize handler is what has to catch it.
+    rerender(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={150}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 90, maxReason: null }}
+        onAdjustDraftChange={onAdjustDraftChange}
+      />,
+    )
+    rectWidth = 800
+    rectHeight = 600
+    act(() => { observerCallbacks.forEach((cb) => cb()) })
+
+    expect(onAdjustDraftChange).toHaveBeenLastCalledWith({ lat: -25.2938, lon: 152.9102, radiusM: 90 })
+  })
+})
+
+// Code-review finding: applyAdjustRadius eases the zoom over 150ms, but
+// usePressRepeat (the bar's own +/- buttons) fires every 80ms and the map's
+// own keyboard +/- computes its next target from the CURRENT draft — which,
+// mid-ease, is whatever the last 'move' event reported, not necessarily the
+// last commanded target. A held +/- could therefore land off the exact step
+// grid (74/78/83 ft instead of 75/80/85). This mock's easeTo never fires a
+// synthetic 'move' event (matching a real ease still in flight when the next
+// tick arrives before the previous one settles), so two rapid steps with
+// nothing in between is exactly the scenario that used to drift.
+describe('AnchorWatchMap Adjust mode — repeated radius steps land on the exact step grid', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+  })
+
+  it('bases each keyboard step on the last commanded target, not the still-easing draft', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400,
+      height: 300,
+      top: 0,
+      left: 0,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }))
+    render(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={20}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 200, maxReason: null }}
+      />,
+    )
+    easeToMock.mockClear()
+
+    const wrapper = screen.getByTestId('anchor-watch-map-wrapper')
+    fireEvent.keyDown(wrapper, { key: '+' })
+    fireEvent.keyDown(wrapper, { key: '+' })
+
+    expect(easeToMock).toHaveBeenCalledTimes(2)
+    const ringPx = ringRadiusPx(300) // the short side of the 400x300 stubbed rect
+    const firstZoom = easeToMock.mock.calls[0][0].zoom
+    const secondZoom = easeToMock.mock.calls[1][0].zoom
+    expect(firstZoom).toBeCloseTo(zoomForRingRadius(21, -25.2938, ringPx), 5)
+    // Without the fix, this second step re-derives from the draft (still
+    // reporting 20 m, since no 'move' event landed in between) and lands
+    // back on 21 m again instead of advancing to 22 m.
+    expect(secondZoom).toBeCloseTo(zoomForRingRadius(22, -25.2938, ringPx), 5)
+  })
+})
+
+// Code-review finding (round 2): handleAdjustMove fires on EVERY animation
+// frame of the 150ms easeTo a step itself starts, not only on a genuine
+// pan/pinch — and it now writes the (still mid-flight, not-yet-settled)
+// snapped radius into pendingTargetRadiusMRef, undoing the fix above for a
+// real held +/- or keyboard auto-repeat: the next step, arriving before that
+// ease has reached its target, reads back a stale intermediate value instead
+// of the target the previous step actually commanded. MapLibre only ever
+// attaches `originalEvent` to a move event it fired FOR a genuine user
+// gesture (drag/wheel/touch) — a programmatic easeTo/jumpTo call like ours
+// (no eventData argument) fires 'move' with `originalEvent: undefined`. The
+// fix gates the pendingTargetRadiusMRef write on that.
+describe('AnchorWatchMap Adjust mode — a still-easing move event does not clobber the pending target', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    latestOnMove = undefined
+  })
+
+  it('ignores an intermediate move event with no originalEvent (a still-flight easeTo frame), so a second step still lands on the next grid value', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400,
+      height: 300,
+      top: 0,
+      left: 0,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }))
+    render(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={20}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 200, maxReason: null }}
+      />,
+    )
+    easeToMock.mockClear()
+    const ringPx = ringRadiusPx(300) // the short side of the 400x300 stubbed rect
+
+    const wrapper = screen.getByTestId('anchor-watch-map-wrapper')
+    fireEvent.keyDown(wrapper, { key: '+' }) // commands 21 m; pendingTargetRadiusMRef = 21
+
+    // An early, still-in-flight frame of that SAME ease (80ms repeat beats
+    // the 150ms ease) — the camera has barely moved off its starting zoom
+    // (20 m's own zoom), and this event carries no originalEvent, exactly
+    // like MapLibre's own easeTo/jumpTo (called with no eventData) does.
+    act(() => {
+      latestOnMove?.({
+        viewState: { latitude: -25.2938, longitude: 152.9102, zoom: zoomForRingRadius(20, -25.2938, ringPx) },
+        originalEvent: undefined,
+      })
+    })
+
+    fireEvent.keyDown(wrapper, { key: '+' }) // must still command 22 m, not 21 m again
+
+    expect(easeToMock).toHaveBeenCalledTimes(2)
+    expect(easeToMock.mock.calls[0][0].zoom).toBeCloseTo(zoomForRingRadius(21, -25.2938, ringPx), 5)
+    expect(easeToMock.mock.calls[1][0].zoom).toBeCloseTo(zoomForRingRadius(22, -25.2938, ringPx), 5)
+  })
+
+  it('still updates the pending target from a genuine gesture (a move event WITH originalEvent), so a step right after continues from the pinch, not a stale command', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400,
+      height: 300,
+      top: 0,
+      left: 0,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }))
+    render(
+      <AnchorWatchMap
+        {...baseProps}
+        radiusMeters={20}
+        adjustActive
+        adjustRadiusBounds={{ minM: 5, maxM: 200, maxReason: null }}
+      />,
+    )
+    easeToMock.mockClear()
+    const ringPx = ringRadiusPx(300)
+
+    // A real pinch to 50 m — carries a genuine originalEvent, the way an
+    // actual touch/wheel-driven MapLibre gesture would.
+    act(() => {
+      latestOnMove?.({
+        viewState: { latitude: -25.2938, longitude: 152.9102, zoom: zoomForRingRadius(50, -25.2938, ringPx) },
+        originalEvent: new WheelEvent('wheel'),
+      })
+    })
+
+    const wrapper = screen.getByTestId('anchor-watch-map-wrapper')
+    fireEvent.keyDown(wrapper, { key: '+' }) // must continue from the pinch's 50 m, landing on 51 m
+
+    expect(easeToMock).toHaveBeenCalledTimes(1)
+    expect(easeToMock.mock.calls[0][0].zoom).toBeCloseTo(zoomForRingRadius(51, -25.2938, ringPx), 5)
   })
 })
 

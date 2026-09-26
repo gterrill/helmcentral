@@ -481,6 +481,57 @@ func setAnchorWatch(c echo.Context) error {
 	})
 }
 
+// anchorRestoreStringFieldMaxLen bounds restore.bow_offset_reason and
+// restore.place_name — both are always either empty or one of a short,
+// known set of strings this server itself produced (a bow-offset reason
+// like "heading unavailable", a resolved place name), never free text an
+// operator types. This is generous enough for a real place name and tight
+// enough to reject anything that clearly isn't one.
+const anchorRestoreStringFieldMaxLen = 200
+
+// anchorWatchRestore is Undo's own escape hatch from patchAnchorWatch's
+// "placed by hand in Adjust" defaults (code-review finding): Undo re-sends
+// the pre-Adjust position as another position-changing PATCH, and without
+// this it would be stamped with those same hand-placed defaults even though
+// it is putting the anchor back exactly where Set found it — bow correction
+// and resolved place name included, not making a new hand-placed move. The
+// frontend's own commit hook (use-anchor-adjust-commit.ts) is the only
+// sender: it already keeps the watch's pre-Adjust facts for Undo's
+// lat/lon/radius, and now carries these five alongside them.
+//
+// Every field here is one this server itself produced on some earlier
+// response (a bow-offset reason, a resolved place name, a heading it once
+// read) — never operator-typed free text — which is what the validation
+// below leans on: these are sanity bounds against a malformed or forged
+// request, not an attempt to validate free-form input.
+type anchorWatchRestore struct {
+	BowOffsetM       float64 `json:"bow_offset_m"`
+	BowOffsetApplied bool    `json:"bow_offset_applied"`
+	BowOffsetReason  string  `json:"bow_offset_reason"`
+	HeadingAtSetDeg  float64 `json:"heading_at_set_deg"`
+	PlaceName        string  `json:"place_name"`
+}
+
+// validate reports the first thing wrong with r, or "" when it's fit to
+// apply. JSON numbers can't encode NaN/Inf at all (encoding/json rejects
+// that at parse time), so there's no separate finiteness check here — only
+// the bounds a genuine value from this server would always satisfy.
+func (r anchorWatchRestore) validate() string {
+	if r.BowOffsetM < 0 {
+		return "restore.bow_offset_m must be zero or positive"
+	}
+	if r.HeadingAtSetDeg != -1 && (r.HeadingAtSetDeg < 0 || r.HeadingAtSetDeg > 360) {
+		return "restore.heading_at_set_deg must be -1 or between 0 and 360"
+	}
+	if len(r.BowOffsetReason) > anchorRestoreStringFieldMaxLen {
+		return "restore.bow_offset_reason is too long"
+	}
+	if len(r.PlaceName) > anchorRestoreStringFieldMaxLen {
+		return "restore.place_name is too long"
+	}
+	return ""
+}
+
 // PATCH /api/anchor-watch — update radius, position, and other watch settings
 //
 // lat/lon are optional but must arrive together (both or neither): position
@@ -510,13 +561,24 @@ func setAnchorWatch(c echo.Context) error {
 // a field-only PATCH takes the identical release/re-acquire, just with
 // nothing running in the gap. That gap — real in both cases, just far
 // shorter in the field-only one — is exactly where the place-name resolver
-// can run and pin a freshly resolved name onto anchorWatchState before this
-// handler re-acquires the lock (code-review finding: this comment used to
-// claim no gap here was reachable by anything else, which holds for a
-// second PATCH/POST/DELETE but not for this resolver). The persist step
-// below re-reads the live anchorWatchState.PlaceName immediately before
-// writing `updated`, so a name pinned mid-gap survives instead of being
-// overwritten by the stale snapshot `updated` was built from.
+// can run and pin a name onto anchorWatchState before this handler
+// re-acquires the lock (code-review finding: this comment used to claim no
+// gap here was reachable by anything else, which holds for a second
+// PATCH/POST/DELETE but not for this resolver).
+//
+// For a FIELD-ONLY PATCH (the point hasn't moved), the persist step below
+// re-reads the live anchorWatchState.PlaceName immediately before writing
+// `updated`, so a name pinned mid-gap survives instead of being overwritten
+// by the stale snapshot `updated` was built from. For a POSITION-changing
+// PATCH this re-read is skipped on purpose (revised code-review finding): a
+// name pinned in that gap can only be a resolve that was already in flight
+// for the OLD point, and carrying it forward would show the wrong place for
+// wherever the operator just moved the anchor to. PlaceName (and the
+// bow-offset/heading fields, for the same reason) is instead cleared
+// unconditionally the moment positionChanged is known, well before the gap
+// even opens, and a fresh resolve for the NEW point starts once the move is
+// saved — the same "clear and re-resolve" setAnchorWatch's own reposition
+// path already does for a hand-placed position.
 //
 // The no-position-change path's own read-modify-write is otherwise unchanged
 // from before this comment: it rebuilds `updated` field-by-field from
@@ -552,6 +614,16 @@ func patchAnchorWatch(c echo.Context) error {
 		SeabedType           *string  `json:"seabed_type"`
 		PlanningDepthM       *float64 `json:"planning_depth_m"`
 		PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
+		// Restore is Undo's own escape hatch from the "placed by hand in
+		// Adjust" defaults below (code-review finding): Undo re-sends the
+		// pre-Adjust position as another position-changing PATCH, and without
+		// this it would be stamped with those same hand-placed defaults even
+		// though it is putting the anchor back exactly where Set found it,
+		// bow correction and resolved place name included - not making a new
+		// hand-placed move. Only the frontend's Undo action ever sends this;
+		// an ordinary Set never does. See anchorWatchRestore's own doc
+		// comment for the validation and apply rules.
+		Restore *anchorWatchRestore `json:"restore"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -591,6 +663,18 @@ func patchAnchorWatch(c echo.Context) error {
 	}
 	if body.PlanningTideHeightFt != nil && *body.PlanningTideHeightFt < -1 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft must be -1 or greater"})
+	}
+	if body.Restore != nil {
+		// restore only ever makes sense alongside the position it is
+		// restoring the per-point facts FOR — a radius-only PATCH (or any
+		// other field-only PATCH) never touches these fields at all, so
+		// there is nothing for it to override.
+		if body.Lat == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "restore is only valid together with a position change (lat/lon)"})
+		}
+		if msg := body.Restore.validate(); msg != "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
+		}
 	}
 	// The pair rule, enforced at the boundary: a planning depth is only
 	// meaningful with the tide height at the instant it was read, so a
@@ -674,6 +758,39 @@ func patchAnchorWatch(c echo.Context) error {
 	// case above too).
 
 	positionChanged := body.Lat != nil
+	if positionChanged {
+		if body.Restore != nil {
+			// Undo (the only sender — see anchorWatchRestore's own doc
+			// comment): this position change is putting the anchor back
+			// exactly where a Set found it, not making a new hand-placed
+			// move, so the per-point facts that Set replaced come back too
+			// instead of the hand-placed defaults below.
+			updated.BowOffsetM = body.Restore.BowOffsetM
+			updated.BowOffsetApplied = body.Restore.BowOffsetApplied
+			updated.BowOffsetReason = body.Restore.BowOffsetReason
+			updated.HeadingAtSetDeg = body.Restore.HeadingAtSetDeg
+			updated.PlaceName = body.Restore.PlaceName
+		} else {
+			// A position-changing PATCH is a hand-placed position (Adjust mode's
+			// crosshair/pan), not the live-GPS bow-corrected drop — mirrors
+			// setAnchorWatch's own reposition path (POST with an active watch),
+			// which starts every one of these fields over for the same reason: a
+			// reposition corrects where you believe the anchor lies, it says
+			// nothing about the boat's heading or GPS-to-bow offset at the
+			// moment of THIS move (code-review finding: this PATCH used to carry
+			// the old point's bow-offset fields forward unchanged). PlaceName is
+			// cleared here too — the old point's resolved name is wrong for
+			// wherever the operator just put the anchor — and a fresh resolve
+			// for the new point is kicked off once the move is actually saved
+			// (see below, gated on PlaceName still being empty), the same way
+			// setAnchorWatch starts one on every drop/reposition.
+			updated.BowOffsetM = 0
+			updated.BowOffsetApplied = false
+			updated.BowOffsetReason = "placed by hand in Adjust"
+			updated.HeadingAtSetDeg = -1
+			updated.PlaceName = ""
+		}
+	}
 	anchorWatchMu.Unlock()
 
 	// A position change publishes to SignalK outside anchorWatchMu, exactly
@@ -695,15 +812,25 @@ func patchAnchorWatch(c echo.Context) error {
 	}
 
 	anchorWatchMu.Lock()
-	// The place-name resolver (place_name.go's resolveAndPinAnchorWatchPlaceName)
-	// can run in the gap above (see this function's own doc comment,
-	// code-review finding) and pin a freshly resolved name onto
-	// anchorWatchState. `updated` was built from a `current` snapshot taken
-	// before that gap opened, so persisting it unmodified would silently
-	// stomp a name pinned in the meantime back to whatever `current.PlaceName`
-	// already was. Carry the live value forward instead of the stale one.
-	if live := anchorWatchState; live != nil {
-		updated.PlaceName = live.PlaceName
+	if !positionChanged {
+		// The place-name resolver (place_name.go's resolveAndPinAnchorWatchPlaceName)
+		// can run in the gap above (see this function's own doc comment,
+		// code-review finding) and pin a freshly resolved name onto
+		// anchorWatchState. `updated` was built from a `current` snapshot taken
+		// before that gap opened, so persisting it unmodified would silently
+		// stomp a name pinned in the meantime back to whatever `current.PlaceName`
+		// already was. Carry the live value forward instead of the stale one.
+		//
+		// Only for a field-only PATCH: a position change already cleared
+		// PlaceName above unconditionally (see that block's own comment) — a
+		// name pinned in this same gap would be for the OLD point (whatever
+		// resolve was already in flight before this PATCH started), and
+		// carrying it forward would show the wrong place for wherever the
+		// operator just moved the anchor to. That case gets its own fresh
+		// resolve below instead, once the move is actually saved.
+		if live := anchorWatchState; live != nil {
+			updated.PlaceName = live.PlaceName
+		}
 	}
 	if err := saveAnchorWatch(updated); err != nil {
 		anchorWatchMu.Unlock()
@@ -734,6 +861,25 @@ func patchAnchorWatch(c echo.Context) error {
 		trailMu.Lock()
 		selfTrail = newVesselTrail()
 		trailMu.Unlock()
+
+		// PlaceName was either cleared above (an ordinary hand-placed move)
+		// or restored to a known value (Undo, via body.Restore) — only the
+		// first case has anything left to resolve. Starting a resolve over a
+		// restored name would eventually overwrite it with whatever the
+		// provider returns for that point, the exact bug restore exists to
+		// avoid: Undo already knows the name, there is nothing to look up.
+		// Otherwise this resolves the new point's name once, in the
+		// background, exactly like setAnchorWatch's own drop/reposition path
+		// (docs/adr/0056) — the response above isn't held up by a
+		// place-names provider round trip, and resolveAndPinAnchorWatchPlaceName's
+		// own identity check (current == original) means this is a no-op if
+		// a later PATCH/POST/DELETE has already replaced `updated` by the
+		// time it completes.
+		if updated.PlaceName == "" {
+			startPlaceNameResolve(func() {
+				resolveAndPinAnchorWatchPlaceName(updated, updated.Lat, updated.Lon)
+			})
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

@@ -23,7 +23,7 @@ export interface PressRepeatHandlers {
   onPointerCancel: () => void
 }
 
-export function usePressRepeat(onStep: () => void): PressRepeatHandlers {
+export function usePressRepeat(onStep: () => void, disabled = false): PressRepeatHandlers {
   // Read fresh on every fire rather than closed over at onPointerDown time,
   // so a caller that re-renders with a new step size (e.g. imperial vs
   // metric) mid-hold uses the current callback, not the one captured when
@@ -59,6 +59,17 @@ export function usePressRepeat(onStep: () => void): PressRepeatHandlers {
   // Cleanup only — this effect starts nothing; it exists purely so a timer
   // left running by an unmount mid-hold doesn't fire into a gone component.
   useEffect(() => stop, [stop])
+
+  // Code-review finding: holding + until the caller's own atMin/atMax makes
+  // it disabled applies the `disabled` DOM attribute, which stops the
+  // button from ever receiving the pointerup that would otherwise call
+  // stop() — the repeat interval this hook started kept firing into a
+  // control the operator can no longer even see respond. Watching disabled
+  // directly cancels the repeat the instant the caller reports it, with no
+  // dependency on a pointer event a disabled element will never dispatch.
+  useEffect(() => {
+    if (disabled) stop()
+  }, [disabled, stop])
 
   return {
     onPointerDown: start,

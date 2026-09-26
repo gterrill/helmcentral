@@ -1,6 +1,5 @@
 import type { TideToday } from '@/hooks/use-tide-today'
-
-const METERS_PER_FOOT = 3.28084
+import { feetToMeters } from '@/lib/units'
 
 /**
  * How long a tide reading stays usable after its own timestamp.
@@ -42,14 +41,17 @@ export interface LowWaterClearanceInput {
 
 /**
  * Whether a tide height in feet is real data rather than the -1 sentinel
- * useTideToday substitutes for "not published" (or anything else it
- * coerced to -1, see use-tide-today.ts). Heights below chart datum are
- * real - spring lows commonly read negative - so unlike tideHeightFtOrNull
- * (rode-plan.ts, `>= 0`, which this module deliberately does not reuse) this
- * only rejects the sentinel itself, not negative numbers.
+ * useTideToday substitutes for "not published" (or a non-number it
+ * coerced to -1, see use-tide-today.ts). The sentinel is exactly -1, not
+ * "-1 or below" - heights below chart datum are real (spring lows commonly
+ * read negative, and can fall below -1 ft on some datums), so unlike
+ * tideHeightFtOrNull (rode-plan.ts, `>= 0`, which this module deliberately
+ * does not reuse) this only rejects the sentinel value itself, not negative
+ * numbers generally. A real reading of exactly -1.0 ft is indistinguishable
+ * from the sentinel (docs/adr/0135, accepted).
  */
 function isUsableTideHeightFt(value: number): boolean {
-  return Number.isFinite(value) && value > -1
+  return Number.isFinite(value) && value !== -1
 }
 
 /**
@@ -116,7 +118,7 @@ export function computeLowWaterClearance(input: LowWaterClearanceInput): LowWate
   // clamps to zero rather than going negative (which would raise the
   // projected depth, the wrong direction for a safety warning).
   const fallFt = Math.max(0, currentFt - nextLowFt)
-  const fallM = fallFt / METERS_PER_FOOT
+  const fallM = feetToMeters(fallFt)
 
   const depthAtLowM = input.depthM - fallM
   const clearanceM = depthAtLowM - input.draftM

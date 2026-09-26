@@ -1,7 +1,26 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, within, fireEvent } from '@testing-library/react'
+import { render, screen, within, fireEvent, act } from '@testing-library/react'
+import { toast } from 'sonner'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { TideToday } from '@/hooks/use-tide-today'
+import { zoomForRingRadius, ringRadiusPx } from '@/lib/anchor-adjust'
+
+// Only used by the Undo/restore describe block further down — every other
+// test in this file predates any toast-driven flow, so mocking this file-wide
+// (vi.mock is hoisted regardless of where it's written) has no effect on them.
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
+
+// sonner's own ExternalToast type allows `action` to be a plain ReactNode as
+// well as an {label, onClick} object; useAnchorAdjustCommit only ever passes
+// the object form (mirrors use-anchor-adjust-commit.test.ts's own helper),
+// so this narrows to it once rather than threading `as` casts through every
+// call site below.
+interface ToastActionOptions {
+  action: { label: string; onClick: () => void }
+}
+function actionOf(options: unknown): ToastActionOptions['action'] {
+  return (options as ToastActionOptions).action
+}
 
 // ADR 0133's amendment (the anchor-adjust-sheet plan, part 1): Depth
 // replaces Distance as the Anchor Watch page's hero KPI, with tide context
@@ -10,17 +29,45 @@ import type { TideToday } from '@/hooks/use-tide-today'
 // into the map's own metrics panel as its top row (see
 // anchor-watch-map-ui.test.tsx); the low-water clearance line (PR #39)
 // moved in here from below the map.
+const easeToMock = vi.fn()
+const jumpToMock = vi.fn()
+// Captured so a test can fire a synthetic 'move' event directly — a genuine
+// pan/pinch gesture, distinguished from a programmatic easeTo/jumpTo frame
+// by carrying a real originalEvent (see anchor-watch-map.tsx's own
+// handleAdjustMove).
+let latestOnMove: ((e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => void) | undefined
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
-    Map: React.forwardRef(({ children }: { children?: React.ReactNode }, ref) => {
-      React.useImperativeHandle(ref, () => ({
-        getCanvas: () => ({ style: { cursor: 'grab' } }),
-        getZoom: () => 14,
-        easeTo: () => undefined,
-      }))
-      return <div data-testid="map-root">{children}</div>
-    }),
+    Map: React.forwardRef(
+      (
+        { children, onMove }: {
+          children?: React.ReactNode
+          onMove?: (e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => void
+        },
+        ref: React.Ref<unknown>,
+      ) => {
+        latestOnMove = onMove
+        React.useImperativeHandle(ref, () => ({
+          getCanvas: () => ({ style: { cursor: 'grab' } }),
+          getZoom: () => 14,
+          easeTo: easeToMock,
+          jumpTo: jumpToMock,
+          getMap: () => ({
+            isStyleLoaded: () => true,
+            getSource: () => ({}),
+            setMinZoom: () => undefined,
+            setMaxZoom: () => undefined,
+            jumpTo: jumpToMock,
+            resize: () => undefined,
+            panBy: () => undefined,
+            getZoom: () => 14,
+            touchZoomRotate: { disableRotation: () => undefined, enableRotation: () => undefined },
+          }),
+        }))
+        return <div data-testid="map-root">{children}</div>
+      },
+    ),
     Marker: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
       <div data-testid={`source-${id}`}>{children}</div>
@@ -231,6 +278,41 @@ describe('AnchorWatchDrawer header — tide context', () => {
     const header = screen.getByTestId('anchor-watch-header')
     expect(header).toHaveTextContent('No tide station')
   })
+
+  // Code-review finding: tideToday sends the -1 height sentinel alongside an
+  // empty time for an extreme the provider has none of - the old behaviour
+  // (a fabricated "now" time) rendered here as a fake "High · <now>". A
+  // configured station with neither extreme left to report must fall back
+  // to the same quiet "No tide station" message as no station at all,
+  // rather than inventing a turn.
+  it('falls back to "No tide station" when the tide has neither a real high nor a real low', () => {
+    const tide = makeTide({ high_tide_time: '', high_tide_height_ft: -1, low_tide_time: '', low_tide_height_ft: -1 })
+    render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
+
+    const header = screen.getByTestId('anchor-watch-header')
+    expect(header).toHaveTextContent('No tide station')
+  })
+
+  it('still names the one real extreme when only the other is missing', () => {
+    const tide = makeTide({ low_tide_time: '', low_tide_height_ft: -1 })
+    render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
+
+    const header = screen.getByTestId('anchor-watch-header')
+    expect(header).toHaveTextContent('High')
+    expect(header).not.toHaveTextContent('Low')
+  })
+
+  it('shows a negative next-turn height rather than hiding it', () => {
+    // low_tide_time (+30min) sorts before high_tide_time (+90min), so the
+    // low is next - a real reading below chart datum must still show its
+    // figure, not just the word "Low" with nothing after it.
+    const tide = makeTide({ low_tide_height_ft: -0.4 })
+    render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
+
+    const header = screen.getByTestId('anchor-watch-header')
+    // -0.4 ft -> -0.12 m (metric, isImperial false in baseProps)
+    expect(header).toHaveTextContent('-0.1')
+  })
 })
 
 describe('AnchorWatchDrawer header — low-water clearance moved in', () => {
@@ -274,5 +356,169 @@ describe('AnchorWatchDrawer header — no-WebGL2 Adjust text button (ADR 0136)',
 
     expect(screen.getByTestId('anchor-adjust-bar')).toBeInTheDocument()
     expect(screen.getByTestId('anchor-adjust-bar')).toHaveTextContent('Moving the anchor needs the map')
+  })
+})
+
+// Code-review finding: the bar's own +/- drove the map's easeTo (150ms),
+// but a rapid second tap/hold — usePressRepeat's 80ms repeat interval — used
+// to recompute its next target from adjustDraft.radiusM, which only updates
+// once that ease reports back. Two steps with nothing landing in between
+// (this mock's easeTo never fires a synthetic 'move' event, exactly like a
+// real ease still in flight) is the scenario that used to drift off the
+// step grid; the bar now reads AnchorWatchMap's own pending-target handle
+// instead (getAdjustRadiusTarget) so it continues from where the previous
+// step was actually headed.
+describe('AnchorWatchDrawer Adjust bar — repeated steps land on the exact grid (with a map)', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+  })
+
+  it("bases the bar's second step on the last commanded target, not the still-easing draft", () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400,
+      height: 300,
+      top: 0,
+      left: 0,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }))
+    render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+
+    const increment = screen.getByRole('button', { name: 'Increase radius' })
+    fireEvent.pointerDown(increment)
+    fireEvent.pointerUp(increment)
+    fireEvent.pointerDown(increment)
+    fireEvent.pointerUp(increment)
+
+    expect(easeToMock).toHaveBeenCalledTimes(2)
+    const ringPx = ringRadiusPx(300) // the short side of the 400x300 stubbed rect
+    const firstZoom = easeToMock.mock.calls[0][0].zoom
+    const secondZoom = easeToMock.mock.calls[1][0].zoom
+    expect(firstZoom).toBeCloseTo(zoomForRingRadius(21, -25.2938, ringPx), 5)
+    // Without the fix, this second tap re-derives from the draft (still
+    // reporting 20 m) and lands back on 21 m again instead of 22 m.
+    expect(secondZoom).toBeCloseTo(zoomForRingRadius(22, -25.2938, ringPx), 5)
+  })
+})
+
+// Code-review finding (round 2): Undo re-sends the pre-Adjust position as
+// another position-changing PATCH, which the backend's own "placed by hand
+// in Adjust" defaults would otherwise stamp onto it - wrongly marking a
+// genuine bow-corrected drop as unapplied and losing its resolved place
+// name, even though Undo is putting the anchor back exactly where it was.
+// The drawer now captures the watch's own per-point facts the instant
+// Adjust opens (adjustOpenedFromRef) and threads them onto Undo's own
+// target as `restore` (buildAdjustCommitTargets), never Set's.
+describe('AnchorWatchDrawer Adjust — Undo carries the pre-Adjust per-point facts (restore)', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    latestOnMove = undefined
+  })
+
+  it("Undo of a move sends restore with the pre-Adjust bow-offset/heading/place-name facts, and Set itself never carries restore", async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400, height: 300, top: 0, left: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => {},
+    }))
+    const adjustAnchorMock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AnchorWatchDrawer
+        {...baseProps}
+        radiusMeters={20}
+        bowOffsetM={8}
+        bowOffsetApplied
+        bowOffsetReason=""
+        headingAtSetDeg={45}
+        placeName="Goldsmith Island"
+        adjustAnchor={adjustAnchorMock}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+
+    // A genuine gesture (a real originalEvent) that moves the draft position
+    // but keeps the same radius (20 m) — isolates the position-vs-facts
+    // behaviour from the warning/double-tap mechanic.
+    const ringPx = ringRadiusPx(300)
+    act(() => {
+      latestOnMove?.({
+        viewState: {
+          latitude: baseProps.anchorLat + 0.00002,
+          longitude: baseProps.anchorLon,
+          zoom: zoomForRingRadius(20, baseProps.anchorLat, ringPx),
+        },
+        originalEvent: new WheelEvent('wheel'),
+      })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Set/ }))
+    await act(async () => { await Promise.resolve() })
+
+    expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
+    const setTarget = adjustAnchorMock.mock.calls[0][0]
+    expect(setTarget.lat).toBeCloseTo(baseProps.anchorLat + 0.00002, 6)
+    expect(setTarget.restore).toBeUndefined() // Set itself never carries restore
+
+    adjustAnchorMock.mockClear()
+    const [, options] = vi.mocked(toast).mock.calls[0]
+    const undoAction = actionOf(options)
+    await act(async () => { undoAction.onClick() })
+
+    expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
+    const undoTarget = adjustAnchorMock.mock.calls[0][0]
+    expect(undoTarget.lat).toBe(baseProps.anchorLat)
+    expect(undoTarget.lon).toBe(baseProps.anchorLon)
+    expect(undoTarget.restore).toEqual({
+      bowOffsetM: 8,
+      bowOffsetApplied: true,
+      bowOffsetReason: '',
+      headingAtSetDeg: 45,
+      placeName: 'Goldsmith Island',
+    })
+  })
+
+  it('Undo of a radius-only Set sends no position and no restore', async () => {
+    const adjustAnchorMock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AnchorWatchDrawer
+        {...baseProps}
+        radiusMeters={20}
+        bowOffsetM={8}
+        bowOffsetApplied
+        bowOffsetReason=""
+        headingAtSetDeg={45}
+        placeName="Goldsmith Island"
+        adjustAnchor={adjustAnchorMock}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+    const increment = screen.getByRole('button', { name: 'Increase radius' })
+    fireEvent.pointerDown(increment)
+    fireEvent.pointerUp(increment)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Set/ }))
+    await act(async () => { await Promise.resolve() })
+
+    expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
+    const setTarget = adjustAnchorMock.mock.calls[0][0]
+    expect(setTarget.lat).toBeUndefined()
+    expect(setTarget.restore).toBeUndefined()
+
+    adjustAnchorMock.mockClear()
+    const [, options] = vi.mocked(toast).mock.calls[0]
+    const undoAction = actionOf(options)
+    await act(async () => { undoAction.onClick() })
+
+    expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
+    const undoTarget = adjustAnchorMock.mock.calls[0][0]
+    expect(undoTarget.lat).toBeUndefined()
+    expect(undoTarget.lon).toBeUndefined()
+    expect(undoTarget.restore).toBeUndefined()
   })
 })

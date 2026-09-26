@@ -154,6 +154,28 @@ describe('computeLowWaterClearance', () => {
     if (result.status === 'unknown') throw new Error('expected a resolved result')
     expect(result.depthAtLowM).toBeCloseTo(4 - 0.5 / METERS_PER_FOOT, 3)
   })
+
+  // Code-review finding: the sentinel is exactly -1, not "-1 or below" - a
+  // real spring low can read below -1 ft (about -0.3 m) on some datums, and
+  // that must not be mistaken for "not published" just because it happens
+  // to be more negative than -1.
+  it('computes a result for a next low forecast height below -1 ft, not just the -1 sentinel itself', () => {
+    // current = 3 ft, next low = -1.2 ft. Fall = 4.2 ft.
+    const tide = makeTide({ low_tide_height_ft: -1.2 })
+    const result = computeLowWaterClearance({ ...baseInput, tide })
+    expect(result.status).not.toBe('unknown')
+    if (result.status === 'unknown') throw new Error('expected a resolved result')
+    expect(result.depthAtLowM).toBeCloseTo(4 - 4.2 / METERS_PER_FOOT, 3)
+  })
+
+  it('computes a result for a current tide height below -1 ft, not just the -1 sentinel itself', () => {
+    // current = -1.5 ft, next low = -1.9 ft. Fall = 0.4 ft.
+    const tide = makeTide({ current_tide_height_ft: -1.5, low_tide_height_ft: -1.9 })
+    const result = computeLowWaterClearance({ ...baseInput, tide })
+    expect(result.status).not.toBe('unknown')
+    if (result.status === 'unknown') throw new Error('expected a resolved result')
+    expect(result.depthAtLowM).toBeCloseTo(4 - 0.4 / METERS_PER_FOOT, 3)
+  })
 })
 
 describe('computeLowWaterClearance — tide_stale', () => {

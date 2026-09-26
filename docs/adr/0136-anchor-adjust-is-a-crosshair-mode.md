@@ -183,6 +183,24 @@ already has. This is a known, accepted risk, not an oversight: a lock or a
 compare-and-swap across two independent browser tabs is more machinery than a
 10 second window on a single-operator boat justifies.
 
+**A position-changing PATCH carries none of the old point's per-point facts
+forward** (code-review finding, revised from this ADR's first cut of
+`patchAnchorWatch`, which carried all of them forward unchanged). A hand-placed
+Adjust position is not the live-GPS bow-corrected drop, so it sets
+`bow_offset_applied: false`, `bow_offset_m: 0`, `bow_offset_reason: "placed by
+hand in Adjust"` and `heading_at_set_deg: -1` — the same fields
+`setAnchorWatch`'s own reposition path (a POST against an already-active
+watch) already resets when no bow offset is requested. `place_name` is
+cleared too, and a fresh resolve for the new point starts once the move is
+saved, exactly like `setAnchorWatch`'s own drop/reposition path
+(`docs/adr/0056`). This matters even for a name pinned by the background
+resolver during the PATCH's own SignalK-publish gap (see the Locking note in
+`patchAnchorWatch`'s doc comment): that pin can only be a resolve that was
+already in flight for the OLD point, and keeping it would show the wrong
+place for wherever the operator just moved the anchor to. A radius-only PATCH
+(no position change) is unaffected — it keeps carrying every one of these
+fields forward exactly as before.
+
 ### Keyboard, scoped to the map container
 
 Arrows pan 1 m (5 m with Shift), +/− step the radius, Enter is Set, Escape is

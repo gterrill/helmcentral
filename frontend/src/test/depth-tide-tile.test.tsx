@@ -105,6 +105,43 @@ test('hides the estimate when depth or tide data is unavailable', () => {
   expect(screen.queryByText('Est. low')).not.toBeInTheDocument()
 })
 
+// Code-review finding: tideToday sends the -1 height sentinel alongside an
+// empty time for an extreme the station has none of - the old behaviour (a
+// fabricated "now"/"tomorrow" time) rendered a "Low <tomorrow>" row here as
+// if it were real data.
+test('shows no Low row when the tide station has no future low', () => {
+  const tide: TideToday = { ...baseTide, low_tide_time: '', low_tide_height_ft: -1 }
+  const { container } = render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={tide}
+      lastUpdateAgeS={null}
+    />,
+  )
+
+  expect(container.textContent).toContain('High')
+  expect(container.textContent).not.toContain('Low')
+})
+
+test('shows a negative next low height rather than hiding it', () => {
+  const tide: TideToday = { ...baseTide, low_tide_height_ft: -0.4 }
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={tide}
+      lastUpdateAgeS={null}
+    />,
+  )
+
+  expect(screen.getByText('(-0.4 ft)')).toBeInTheDocument()
+})
+
 // ── clickable-tile semantics ────────────────────────────────────────────
 // Previously a bare <div onClick> with cursor-pointer styling: no role, no
 // keyboard access, no focus ring. A touchscreen mouse-substitute is not a

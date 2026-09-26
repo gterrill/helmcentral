@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { AnchorAdjustBar, type AnchorAdjustBarProps } from '@/components/anchor-adjust-bar'
 
@@ -88,6 +88,38 @@ describe('AnchorAdjustBar above-maximum notice', () => {
 // No live boat position (no fix, or the GNSS gate holding one back): the
 // warning can't be evaluated, so this replaces it rather than a silently
 // skipped check (code-review finding).
+// Code-review finding: the +/- buttons only wired pointer events, so
+// keyboard activation (Enter/Space on a focused button, which the browser
+// turns into a synthetic click with detail 0) did nothing — a real gap on
+// the no-WebGL2 path, which has no pointer gesture at all to fall back on.
+// The fix adds onClick, gated to detail === 0 so a real pointer/touch press
+// (which already stepped via onPointerDown, and still fires its own click
+// afterward) doesn't step a second time.
+describe('AnchorAdjustBar keyboard activation of +/-', () => {
+  it('steps up once on a keyboard-originated click (detail 0)', () => {
+    const onStepRadius = vi.fn()
+    render(<AnchorAdjustBar {...baseProps} onStepRadius={onStepRadius} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Increase radius' }), { detail: 0 })
+    expect(onStepRadius).toHaveBeenCalledTimes(1)
+    expect(onStepRadius).toHaveBeenCalledWith(1)
+  })
+
+  it('steps down once on a keyboard-originated click (detail 0)', () => {
+    const onStepRadius = vi.fn()
+    render(<AnchorAdjustBar {...baseProps} onStepRadius={onStepRadius} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Decrease radius' }), { detail: 0 })
+    expect(onStepRadius).toHaveBeenCalledTimes(1)
+    expect(onStepRadius).toHaveBeenCalledWith(-1)
+  })
+
+  it('does not double-step on a pointer-originated click (detail >= 1) — onPointerDown already stepped', () => {
+    const onStepRadius = vi.fn()
+    render(<AnchorAdjustBar {...baseProps} onStepRadius={onStepRadius} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Increase radius' }), { detail: 1 })
+    expect(onStepRadius).not.toHaveBeenCalled()
+  })
+})
+
 describe('AnchorAdjustBar no-fix notice', () => {
   it('shows nothing by default', () => {
     render(<AnchorAdjustBar {...baseProps} />)

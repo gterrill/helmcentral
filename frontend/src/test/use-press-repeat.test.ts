@@ -106,4 +106,36 @@ describe('usePressRepeat', () => {
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledTimes(1)
   })
+
+  // Code-review finding: holding + until the button hits atMax disables it
+  // (pointer-events-none via the disabled attribute), so pointerup never
+  // reaches the DOM and the repeat interval this hook started kept firing
+  // forever. The hook itself now cancels the repeat the instant its caller
+  // reports disabled, rather than relying on a pointer event that a disabled
+  // button will never receive.
+  describe('disabled', () => {
+    it('stops an in-progress repeat the moment disabled flips true mid-hold', () => {
+      const onStep = vi.fn()
+      const { result, rerender } = renderHook(({ disabled }) => usePressRepeat(onStep, disabled), {
+        initialProps: { disabled: false },
+      })
+      result.current.onPointerDown()
+      vi.advanceTimersByTime(PRESS_REPEAT_INITIAL_DELAY_MS + PRESS_REPEAT_INTERVAL_MS)
+      expect(onStep).toHaveBeenCalledTimes(2)
+
+      rerender({ disabled: true })
+      vi.advanceTimersByTime(PRESS_REPEAT_INTERVAL_MS * 5)
+      expect(onStep).toHaveBeenCalledTimes(2)
+    })
+
+    it('a later pointerdown after re-enabling starts the repeat again', () => {
+      const onStep = vi.fn()
+      const { result, rerender } = renderHook(({ disabled }) => usePressRepeat(onStep, disabled), {
+        initialProps: { disabled: true },
+      })
+      rerender({ disabled: false })
+      result.current.onPointerDown()
+      expect(onStep).toHaveBeenCalledTimes(1)
+    })
+  })
 })

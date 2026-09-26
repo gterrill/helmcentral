@@ -83,7 +83,15 @@ export function useAnchorAdjustCommit({ adjustAnchor, isImperial = false }: UseA
           })
         }
 
-        toast('Anchor moved', {
+        // "Anchor moved" only when the committed draft actually carries a
+        // position (AnchorAdjustTarget's lat/lon are omitted entirely when
+        // the draft position wasn't moved - lib/anchor-adjust.ts's
+        // buildAdjustCommitTargets). A radius-only Set (the bar's own
+        // +/-/chips, or the whole no-WebGL2 path) never touches where the
+        // anchor is, so claiming it moved would be wrong (code-review
+        // finding).
+        const movedPosition = draft.lat !== undefined && draft.lon !== undefined
+        toast(movedPosition ? 'Anchor moved' : 'Alarm radius set', {
           description: `Radius ${formatRadiusDisplay(draft.radiusMeters, isImperial)}`,
           duration: 10000,
           action: { label: 'Undo', onClick: performUndo },

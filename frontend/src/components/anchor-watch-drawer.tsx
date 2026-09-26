@@ -17,7 +17,7 @@ import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap, type AnchorAdjustDraft, type AnchorWatchMapHandle } from '@/components/anchor-watch-map'
 import { Button } from '@/components/ui/button'
 import { useAnchorAdjustCommit, type AnchorAdjustTarget } from '@/hooks/use-anchor-adjust-commit'
-import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM } from '@/lib/anchor-adjust'
+import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM, type AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { haversineMeters } from '@/lib/geo'
 import { computeScopeRecommendation, computeSwingRadiusM, resolveLoaM } from '@/lib/rode-plan'
@@ -26,12 +26,11 @@ import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hasWebGL2 } from '@/lib/webgl'
 import { cn } from '@/lib/utils'
-
-const FEET_PER_METER = 3.28084
+import { feetToMeters, metersToFeet } from '@/lib/units'
 
 /** A tide height in feet, converted to the host's chosen unit — matches depth-tide-tile.tsx's own conversion. */
 function tideValueDisplay(heightFt: number, isImperial: boolean): string {
-  return isImperial ? heightFt.toFixed(1) : (heightFt / FEET_PER_METER).toFixed(2)
+  return isImperial ? heightFt.toFixed(1) : feetToMeters(heightFt).toFixed(2)
 }
 
 /**
@@ -40,7 +39,7 @@ function tideValueDisplay(heightFt: number, isImperial: boolean): string {
  * one decimal place either way.
  */
 function depthValueDisplay(meters: number, isImperial: boolean): string {
-  return (isImperial ? meters * FEET_PER_METER : meters).toFixed(1)
+  return (isImperial ? metersToFeet(meters) : meters).toFixed(1)
 }
 
 interface AnchorWatchDrawerProps {
@@ -75,6 +74,10 @@ interface AnchorWatchDrawerProps {
   bowOffsetM?: number
   bowOffsetApplied?: boolean
   bowOffsetReason?: string
+  /** -1 when not read. Adjust's own Undo restore payload needs this alongside the three bowOffset* props above (code-review finding, round 2). Optional/defaulted so every existing caller keeps compiling unchanged. */
+  headingAtSetDeg?: number
+  /** Empty until the background resolver pins one. Same Undo-restore use as headingAtSetDeg. */
+  placeName?: string
   // The watch's set_at, passed straight through to the map: it centres on
   // the anchor whenever the session changes.
   anchorSetAt: string | null
@@ -170,6 +173,8 @@ export function AnchorWatchDrawer({
   bowOffsetM = 0,
   bowOffsetApplied = false,
   bowOffsetReason = '',
+  headingAtSetDeg = -1,
+  placeName = '',
   anchorSetAt,
   anchorStateKnown,
   error = null,
@@ -313,7 +318,15 @@ export function AnchorWatchDrawer({
   // commit target) — openAdjust below only ever populates this once
   // anchorLat/anchorLon are known non-null, and buildAdjustCommitTargets
   // needs a real position to diff the draft against.
-  const adjustOpenedFromRef = useRef<{ lat: number; lon: number; radiusMeters: number } | null>(null)
+  //
+  // `facts` (code-review finding, round 2) is this same committed point's
+  // bow-offset/heading/place-name facts, captured at the same instant for
+  // the same reason — Undo re-sends this position as another
+  // position-changing PATCH, and without carrying these along too the
+  // backend would stamp its own "placed by hand in Adjust" defaults onto a
+  // position Undo is putting back exactly where it was, not making a new
+  // hand-placed move (buildAdjustCommitTargets' own `restore`).
+  const adjustOpenedFromRef = useRef<{ lat: number; lon: number; radiusMeters: number; facts: AnchorAdjustRestore } | null>(null)
 
   const { loaM: resolvedLoaM } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
   // The Adjust mode's own radius ceiling/floor (ADR 0133's amendment) — chain
@@ -345,7 +358,12 @@ export function AnchorWatchDrawer({
 
   const openAdjust = useCallback(() => {
     if (anchorLat === null || anchorLon === null) return
-    adjustOpenedFromRef.current = { lat: anchorLat, lon: anchorLon, radiusMeters }
+    adjustOpenedFromRef.current = {
+      lat: anchorLat,
+      lon: anchorLon,
+      radiusMeters,
+      facts: { bowOffsetM, bowOffsetApplied, bowOffsetReason, headingAtSetDeg, placeName },
+    }
     // Clamped, not the raw committed value: a radius above the current
     // ceiling (chain onboard + LOA) must never be the starting draft — the
     // no-map path has no camera/ring to clamp it for later, and this is also
@@ -358,7 +376,7 @@ export function AnchorWatchDrawer({
     setAboveMaxOriginalRadiusM(radiusMeters > adjustBounds.maxM ? radiusMeters : null)
     setConfirmingSet(false)
     setAdjustActive(true)
-  }, [anchorLat, anchorLon, radiusMeters, adjustBounds])
+  }, [anchorLat, anchorLon, radiusMeters, adjustBounds, bowOffsetM, bowOffsetApplied, bowOffsetReason, headingAtSetDeg, placeName])
 
   const closeAdjust = useCallback(() => {
     setAdjustActive(false)
@@ -430,8 +448,22 @@ export function AnchorWatchDrawer({
 
   const handleStepRadius = useCallback((deltaM: number) => {
     if (!adjustDraft) return
-    applyAdjustRadiusTarget(adjustDraft.radiusM + deltaM)
-  }, [adjustDraft, applyAdjustRadiusTarget])
+    // With a map, base the step on AnchorWatchMap's own pending-target
+    // handle, not adjustDraft.radiusM (code-review finding): the draft only
+    // updates once the camera's 150ms ease reports back through a
+    // moveend/move event, which a rapid second tap/hold (usePressRepeat's
+    // 80ms interval) can outrun — recomputing from adjustDraft.radiusM in
+    // that window bases the next step on a stale, mid-ease value instead of
+    // where the previous step was actually headed, landing off the exact
+    // step grid. See AnchorWatchMapHandle.getAdjustRadiusTarget's own doc
+    // comment. With no map there is no ease/lag at all (applyAdjustRadiusTarget
+    // writes the draft synchronously), so adjustDraft.radiusM is already
+    // exactly right there.
+    const baseRadiusM = canUseMapForAdjust
+      ? mapHandleRef.current?.getAdjustRadiusTarget() ?? adjustDraft.radiusM
+      : adjustDraft.radiusM
+    applyAdjustRadiusTarget(baseRadiusM + deltaM)
+  }, [adjustDraft, applyAdjustRadiusTarget, canUseMapForAdjust])
 
   const handleApplyChip = useCallback((valueM: number) => {
     applyAdjustRadiusTarget(valueM)
@@ -460,6 +492,7 @@ export function AnchorWatchDrawer({
     const { set, undo } = buildAdjustCommitTargets(
       previous,
       { lat: adjustDraft.lat, lon: adjustDraft.lon, radiusMeters: adjustDraft.radiusM },
+      previous.facts,
     )
     commitAdjust({ draft: set, previous: undo, onSuccess: closeAdjust })
   }, [adjustDraft, warningActive, confirmingSet, commitAdjust, closeAdjust])
@@ -586,9 +619,14 @@ export function AnchorWatchDrawer({
                       </p>
                       <p className="mt-1 truncate text-xs text-foreground">
                         {nextTurn.isHigh ? 'High' : 'Low'}
-                        {nextTurn.heightFt >= 0 && (
-                          <span className="text-muted-foreground"> {tideValueDisplay(nextTurn.heightFt, isImperial)} {isImperial ? 'ft' : 'm'}</span>
-                        )}
+                        {/* nextTurn only ever holds an extreme tideExtremesByTime
+                            already found usable (lib/tide-estimate.ts drops the
+                            -1-sentinel/no-time case before this reads it), so its
+                            height is always real here - including a genuine
+                            negative low, which must still show its figure rather
+                            than being read as "no data" the way the -1 sentinel
+                            once was. */}
+                        <span className="text-muted-foreground"> {tideValueDisplay(nextTurn.heightFt, isImperial)} {isImperial ? 'ft' : 'm'}</span>
                         {' · '}
                         {new Date(nextTurn.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                       </p>

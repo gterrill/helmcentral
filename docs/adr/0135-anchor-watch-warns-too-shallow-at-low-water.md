@@ -45,14 +45,22 @@ and the operator's configured margin, and returns one of three states:
   not an assumed draft, not a stale reading treated as current), matching the
   rest of this app's fallback policy. A missing or untrustworthy input is
   reported, not guessed around.
-  - A tide height counts as present when it is a finite number greater than
-    -1 - not `>= 0`. Heights below chart datum are real water, not an error:
-    a spring low commonly reads a small negative number, and that is exactly
-    the case this warning has to catch. Only `useTideToday`'s own -1 sentinel
-    (field not published this poll) means "no reading". This rule lives only
-    in `computeLowWaterClearance`; `rode-plan.ts`'s `tideHeightFtOrNull`
-    keeps its own `>= 0` rule for the Rode Planner's separate arithmetic and
-    is deliberately not touched by this change.
+  - A tide height counts as present when it is a finite number other than
+    exactly -1 - not `>= 0`, and not "-1 or below" either (a code-review
+    finding against the first version of this rule: it read `> -1`, which
+    misreads a real spring low that happens to fall below -1 ft, e.g. -1.2,
+    as the sentinel). Heights below chart datum are real water, not an
+    error: a spring low commonly reads a small negative number, and that is
+    exactly the case this warning has to catch. Only `useTideToday`'s own -1
+    sentinel (field not published this poll, or the backend not sending a
+    number at all) means "no reading" - a genuine reading of exactly -1.0 ft
+    is indistinguishable from that sentinel and reads as missing; this is a
+    known, accepted gap rather than something worth a second field just to
+    disambiguate. This rule lives only in `computeLowWaterClearance` (and
+    `lib/tide-estimate.ts`'s own `estimateDepthAtNextTurn`, which mirrors it
+    for the same reason); `rode-plan.ts`'s `tideHeightFtOrNull` keeps its own
+    `>= 0` rule for the Rode Planner's separate arithmetic and is
+    deliberately not touched by this change.
   - A tide reading counts as current, not `tide_stale`, only when both:
     its own timestamp is 30 minutes old or less (`TIDE_STALE_AFTER_MINUTES`),
     and its named "next low" is still ahead of `now`. Depth is read live on

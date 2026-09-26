@@ -305,6 +305,82 @@ describe('useAnchorWatch adjustAnchor', () => {
     const body = JSON.parse(init!.body as string)
     expect(body).toEqual({ radius_meters: 40 })
   })
+
+  // Code-review finding (round 2): Undo re-sends the pre-Adjust position as
+  // another position-changing PATCH, and without a way to carry the
+  // pre-Adjust bow-offset/heading/place-name facts along, the backend stamps
+  // it with the "placed by hand in Adjust" defaults even though Undo is
+  // putting the anchor back exactly where it was. adjustAnchor forwards
+  // whatever restore object the caller (buildAdjustCommitTargets, via
+  // useAnchorAdjustCommit's Undo action) built, unchanged.
+  it('forwards a restore object in the PATCH body when the caller provides one', async () => {
+    const fetchMock = vi.mocked(fetch)
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    fetchMock.mockClear()
+
+    const restore = { bowOffsetM: 8, bowOffsetApplied: true, bowOffsetReason: '', headingAtSetDeg: 45, placeName: 'Goldsmith Island' }
+    await act(async () => {
+      await result.current.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40, restore })
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init!.body as string)
+    expect(body).toEqual({
+      lat: -21.2, lon: 149.3, radius_meters: 40,
+      restore: {
+        bow_offset_m: 8, bow_offset_applied: true, bow_offset_reason: '',
+        heading_at_set_deg: 45, place_name: 'Goldsmith Island',
+      },
+    })
+  })
+
+  it('sends no restore field at all when the caller omits it (an ordinary Set)', async () => {
+    const fetchMock = vi.mocked(fetch)
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    fetchMock.mockClear()
+
+    await act(async () => {
+      await result.current.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init!.body as string)
+    expect(body).not.toHaveProperty('restore')
+  })
+})
+
+// heading_at_set_deg/place_name (code-review finding, round 2): read the
+// same way bow_offset_m/bow_offset_applied already are - present only while
+// active, defaulting to the "not captured"/"none yet" values otherwise.
+// These feed Adjust's own Undo restore payload (anchor-watch-drawer.tsx's
+// adjustOpenedFromRef), which needs the watch's own facts, not just the
+// three bow-offset fields already exposed here.
+describe('useAnchorWatch headingAtSetDeg / placeName', () => {
+  it('reads heading_at_set_deg and place_name from the server state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active: true, lat: -21.1, lon: 149.2, radius_meters: 20,
+        heading_at_set_deg: 45, place_name: 'Goldsmith Island',
+      }),
+    }))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.headingAtSetDeg).toBe(45)
+    expect(result.current.placeName).toBe('Goldsmith Island')
+  })
+
+  it('defaults to -1 / empty when inactive or the fields are absent', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ active: false }) }))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.headingAtSetDeg).toBe(-1)
+    expect(result.current.placeName).toBe('')
+  })
 })
 
 // Item A: /api/anchor-watch polls faster while a watch is set (place-name

@@ -121,9 +121,13 @@ export const DepthTideTile = memo(function DepthTideTile({
                   <ArrowDown className="h-3.5 w-3.5 text-amber-600" />
                 )}
                 {extreme.isHigh ? 'High' : 'Low'}
-                {extreme.heightFt >= 0 && (
-                  <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
-                )}
+                {/* tideExtremes only ever holds extremes tideExtremesByTime
+                    already found usable (the -1-sentinel/no-time case is
+                    dropped before this reads it), so heightFt is always real
+                    here - including a genuine negative low, which must still
+                    show its figure rather than being read as "no data" the
+                    way the -1 sentinel once was. */}
+                <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
                 {' '}{new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
               </p>
             ))}

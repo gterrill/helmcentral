@@ -313,18 +313,27 @@ func TestPatchAnchorWatch_PositionSaveFailureIsExplicitAndLoud(t *testing.T) {
 	}
 }
 
-// Test (code-review finding): the doc comment above patchAnchorWatch used to
-// claim that nothing could run in the gap it opens around the SignalK
-// publish while repositioning, because a second PATCH/POST/DELETE is ruled
-// out by anchorLifecycleMu. That's true for another lifecycle write, but the
-// background place-name resolver (place_name.go's
+// Test (code-review finding, revised): the doc comment above patchAnchorWatch
+// used to claim that nothing could run in the gap it opens around the
+// SignalK publish while repositioning, because a second PATCH/POST/DELETE is
+// ruled out by anchorLifecycleMu. That's true for another lifecycle write,
+// but the background place-name resolver (place_name.go's
 // resolveAndPinAnchorWatchPlaceName) isn't gated by anchorLifecycleMu at
-// all — it takes anchorWatchMu directly — and so it CAN pin a freshly
-// resolved name onto anchorWatchState during exactly that gap. Without the
-// fix, the PATCH's own `updated` (built from a snapshot taken before the
-// gap opened) overwrites that freshly pinned name with the empty one it
-// captured.
-func TestPatchAnchorWatch_PositionCarriesForwardPlaceNamePinnedDuringPublish(t *testing.T) {
+// all — it takes anchorWatchMu directly — and so it CAN pin a name onto
+// anchorWatchState during exactly that gap. A first version of this fix
+// carried whatever pinned name it found there forward into `updated`, on the
+// theory that it was "freshly resolved" and so worth keeping.
+//
+// That theory doesn't hold for a POSITION-changing PATCH: the racer below
+// simulates a resolve that was already in flight for the OLD point (kicked
+// off before this PATCH ever started) landing during the publish gap - it
+// is not a resolve for the NEW point the anchor is being moved to, and
+// carrying it forward would show the wrong place name for wherever the
+// operator just put the anchor. The corrected behaviour clears PlaceName on
+// any position change regardless of what raced in during the gap, and starts
+// its own fresh resolve for the new point instead (see
+// TestPatchAnchorWatch_PositionClearsPlaceNameAndResolvesFreshForTheNewPoint).
+func TestPatchAnchorWatch_PositionMoveDiscardsAPlaceNamePinnedForTheOldPointDuringPublish(t *testing.T) {
 	stub := anchorPublishEnv(t)
 	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
 		t.Fatalf("drop: %d %v", code, resp)
@@ -373,15 +382,15 @@ func TestPatchAnchorWatch_PositionCarriesForwardPlaceNamePinnedDuringPublish(t *
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %+v", code, resp)
 	}
-	if got, _ := resp["place_name"].(string); got != "Racername" {
-		t.Fatalf("expected the place name pinned during the publish gap to survive, got %q", got)
+	if got, _ := resp["place_name"].(string); got != "" {
+		t.Fatalf("expected the OLD point's name (even one pinned during the publish gap) to be discarded on a move, got %q", got)
 	}
 
 	anchorWatchMu.RLock()
 	live := anchorWatchState.PlaceName
 	anchorWatchMu.RUnlock()
-	if live != "Racername" {
-		t.Fatalf("expected the in-memory place name to survive, got %q", live)
+	if live != "" {
+		t.Fatalf("expected the in-memory place name to be cleared, got %q", live)
 	}
 
 	raw, err := os.ReadFile(anchorWatchFilePath())
@@ -392,7 +401,319 @@ func TestPatchAnchorWatch_PositionCarriesForwardPlaceNamePinnedDuringPublish(t *
 	if err := json.Unmarshal(raw, &onDisk); err != nil {
 		t.Fatalf("parse anchor_watch.json: %v", err)
 	}
-	if onDisk.PlaceName != "Racername" {
-		t.Fatalf("expected the persisted place name to survive, got %q", onDisk.PlaceName)
+	if onDisk.PlaceName != "" {
+		t.Fatalf("expected the persisted place name to be cleared, got %q", onDisk.PlaceName)
+	}
+}
+
+// Test (code-review finding): a position-changing PATCH is a hand-placed
+// position (Adjust mode's crosshair/pan), not the live-GPS bow-corrected
+// drop - it must not carry BowOffsetM/BowOffsetApplied/BowOffsetReason/
+// HeadingAtSetDeg forward from the old point the way it used to, unlike
+// setAnchorWatch's own reposition path (POST with an active watch), which
+// already clears these when no offset is applied.
+func TestPatchAnchorWatch_PositionClearsBowOffsetAndHeadingFields(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	// Drop with a bow offset actually applied, so there is something for the
+	// later hand-placed reposition to leave stale if it isn't cleared.
+	dropCode, dropResp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113, "lon": 149.2276, "apply_bow_offset": true,
+	})
+	if dropCode != http.StatusOK {
+		t.Fatalf("drop: %d %v", dropCode, dropResp)
+	}
+	if applied, _ := dropResp["bow_offset_applied"].(bool); !applied {
+		t.Fatalf("expected the drop itself to apply a bow offset (test setup), got %+v", dropResp)
+	}
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -21.12, "lon": 149.23})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if applied, _ := resp["bow_offset_applied"].(bool); applied {
+		t.Fatalf("expected bow_offset_applied false after a hand-placed reposition, got %+v", resp)
+	}
+	if got, _ := resp["bow_offset_m"].(float64); got != 0 {
+		t.Fatalf("expected bow_offset_m 0 after a hand-placed reposition, got %v", resp["bow_offset_m"])
+	}
+	if got, _ := resp["heading_at_set_deg"].(float64); got != -1 {
+		t.Fatalf("expected heading_at_set_deg -1 after a hand-placed reposition, got %v", resp["heading_at_set_deg"])
+	}
+	if reason, _ := resp["bow_offset_reason"].(string); reason != "placed by hand in Adjust" {
+		t.Fatalf("expected bow_offset_reason %q, got %q", "placed by hand in Adjust", reason)
+	}
+}
+
+// Test (code-review finding): the opposite of the above - a radius-only
+// PATCH (no position change) must keep carrying the bow-offset/heading
+// fields forward exactly like it always has. Only a position change resets
+// them.
+func TestPatchAnchorWatch_RadiusOnlyKeepsBowOffsetAndHeadingFields(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	dropCode, dropResp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113, "lon": 149.2276, "apply_bow_offset": true,
+	})
+	if dropCode != http.StatusOK {
+		t.Fatalf("drop: %d %v", dropCode, dropResp)
+	}
+	wantBowOffsetM, _ := dropResp["bow_offset_m"].(float64)
+	wantHeading, _ := dropResp["heading_at_set_deg"].(float64)
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{"radius_meters": 40.0})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if applied, _ := resp["bow_offset_applied"].(bool); !applied {
+		t.Fatalf("expected bow_offset_applied to survive a radius-only PATCH, got %+v", resp)
+	}
+	if got, _ := resp["bow_offset_m"].(float64); got != wantBowOffsetM {
+		t.Fatalf("expected bow_offset_m %v to survive a radius-only PATCH, got %v", wantBowOffsetM, got)
+	}
+	if got, _ := resp["heading_at_set_deg"].(float64); got != wantHeading {
+		t.Fatalf("expected heading_at_set_deg %v to survive a radius-only PATCH, got %v", wantHeading, got)
+	}
+}
+
+// Test (code-review finding): a position-changing PATCH must not carry the
+// OLD point's place name forward - the name is for wherever the anchor WAS,
+// not wherever the operator just put it. The immediate response reports an
+// empty place_name (a fresh resolve for the new point runs in the
+// background, exactly like setAnchorWatch's own drop/reposition path -
+// TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync), and that resolve does
+// land on the new point once it completes.
+func TestPatchAnchorWatch_PositionClearsPlaceNameAndResolvesFreshForTheNewPoint(t *testing.T) {
+	anchorPublishEnv(t)
+	resetPlaceNameCache(t)
+	resetPlaceNameTickState(t)
+
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Old Place"},
+	}}
+	withFakePlaceNameProviderResolver(t, provider)
+
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+	waitForCondition(t, 2*time.Second, func() bool {
+		anchorWatchMu.RLock()
+		defer anchorWatchMu.RUnlock()
+		return anchorWatchState != nil && anchorWatchState.PlaceName == "Old Place"
+	})
+
+	// Reconfigure the provider so a place name landing after the PATCH can
+	// only be the fresh resolve this fix is supposed to start, not a stale
+	// copy of the drop's own name.
+	provider.mu.Lock()
+	provider.results = map[int]placeNameResult{400: {Name: "New Place"}}
+	provider.mu.Unlock()
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -20.5, "lon": 149.5})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if got, _ := resp["place_name"].(string); got != "" {
+		t.Fatalf("expected an empty place_name in the immediate response (the old point's name must not carry forward), got %q", got)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		anchorWatchMu.RLock()
+		defer anchorWatchMu.RUnlock()
+		return anchorWatchState != nil && anchorWatchState.PlaceName == "New Place"
+	})
+}
+
+// Test (code-review finding, round 2): Undo re-sends the pre-Adjust position
+// as another position-changing PATCH, which the "placed by hand in Adjust"
+// defaults above would otherwise stamp onto the restored point too - wrongly
+// marking a genuine bow-corrected drop as unapplied and losing its resolved
+// place name, even though Undo is putting the anchor back exactly where it
+// was, not making a new hand-placed move. `restore` lets the caller (only
+// ever Undo) hand back the exact per-point facts the PATCH it's undoing had
+// replaced, applied instead of the hand-placed defaults.
+func TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts(t *testing.T) {
+	anchorPublishEnv(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Should Not Be Called"},
+	}}
+	withFakePlaceNameProviderResolver(t, provider)
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       8.0,
+			"bow_offset_applied": true,
+			"bow_offset_reason":  "",
+			"heading_at_set_deg": 45.0,
+			"place_name":         "Goldsmith Island",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if applied, _ := resp["bow_offset_applied"].(bool); !applied {
+		t.Fatalf("expected bow_offset_applied restored to true, got %+v", resp)
+	}
+	if got, _ := resp["bow_offset_m"].(float64); got != 8.0 {
+		t.Fatalf("expected bow_offset_m restored to 8, got %v", resp["bow_offset_m"])
+	}
+	if got, _ := resp["heading_at_set_deg"].(float64); got != 45.0 {
+		t.Fatalf("expected heading_at_set_deg restored to 45, got %v", resp["heading_at_set_deg"])
+	}
+	if got, _ := resp["place_name"].(string); got != "Goldsmith Island" {
+		t.Fatalf("expected place_name restored to %q, got %q", "Goldsmith Island", got)
+	}
+
+	// A restored, non-empty place name is already known - starting a fresh
+	// resolve over it (which would eventually overwrite it with whatever the
+	// provider returns) is exactly the bug this feature exists to avoid.
+	time.Sleep(100 * time.Millisecond)
+	if calls := provider.callCount(); calls != 0 {
+		t.Fatalf("expected no place-name resolve to start when restore.place_name is non-empty, got %d provider calls", calls)
+	}
+}
+
+// Test: restore with an EMPTY place_name (the pre-Adjust point had none
+// resolved yet) still starts a fresh resolve for the point Undo just
+// restored - the same as an ordinary hand-placed move, since there is
+// genuinely nothing to restore.
+func TestPatchAnchorWatch_RestoreWithEmptyPlaceNameStillResolvesFresh(t *testing.T) {
+	anchorPublishEnv(t)
+	resetPlaceNameCache(t)
+	resetPlaceNameTickState(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Resolved After Undo"},
+	}}
+	withFakePlaceNameProviderResolver(t, provider)
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       0.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  "heading unavailable",
+			"heading_at_set_deg": -1.0,
+			"place_name":         "",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if reason, _ := resp["bow_offset_reason"].(string); reason != "heading unavailable" {
+		t.Fatalf("expected bow_offset_reason restored to %q, got %q", "heading unavailable", reason)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		anchorWatchMu.RLock()
+		defer anchorWatchMu.RUnlock()
+		return anchorWatchState != nil && anchorWatchState.PlaceName == "Resolved After Undo"
+	})
+}
+
+// Test: restore is rejected outright without a position change - it exists
+// only to carry the facts a position-changing PATCH would otherwise
+// overwrite, and a radius-only PATCH never touches any of them.
+func TestPatchAnchorWatch_RestoreRejectedWithoutPositionChange(t *testing.T) {
+	anchorPublishEnv(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"radius_meters": 40.0,
+		"restore": map[string]any{
+			"bow_offset_m":       0.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  "",
+			"heading_at_set_deg": -1.0,
+			"place_name":         "",
+		},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for restore without a position change, got %d: %+v", code, resp)
+	}
+}
+
+// Test: restore's own fields are validated - an out-of-range heading is
+// rejected rather than silently stored and shown as a real corrected
+// heading.
+func TestPatchAnchorWatch_RestoreRejectsInvalidHeading(t *testing.T) {
+	anchorPublishEnv(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       0.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  "",
+			"heading_at_set_deg": 400.0,
+			"place_name":         "",
+		},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an out-of-range heading_at_set_deg, got %d: %+v", code, resp)
+	}
+}
+
+// Test: a negative bow_offset_m (not a real distance) is rejected too.
+func TestPatchAnchorWatch_RestoreRejectsNegativeBowOffset(t *testing.T) {
+	anchorPublishEnv(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       -1.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  "",
+			"heading_at_set_deg": -1.0,
+			"place_name":         "",
+		},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a negative bow_offset_m, got %d: %+v", code, resp)
+	}
+}
+
+// Test: restore's string fields are length-capped - an implausibly long
+// value (never something a real bow_offset_reason/place_name is) is
+// rejected rather than stored verbatim.
+func TestPatchAnchorWatch_RestoreRejectsOverlongStrings(t *testing.T) {
+	anchorPublishEnv(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	tooLong := strings.Repeat("x", 1000)
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       0.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  tooLong,
+			"heading_at_set_deg": -1.0,
+			"place_name":         "",
+		},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an overlong bow_offset_reason, got %d: %+v", code, resp)
 	}
 }

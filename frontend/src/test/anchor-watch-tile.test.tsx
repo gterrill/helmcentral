@@ -121,6 +121,8 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     bowOffsetM: 0,
     bowOffsetApplied: false,
     bowOffsetReason: '',
+    headingAtSetDeg: -1,
+    placeName: '',
     planningDepthM: null,
     planningTideHeightFt: null,
     lastAutoRaise: null,

@@ -298,13 +298,19 @@ func tideToday(c echo.Context) error {
 	now := time.Now().UTC()
 	tidalPhase := classifyTidalPhase(result.Extremes, now)
 	doubleHigh, doubleLow := hasDoubleTide(result.Extremes, result.Station, now)
+	// HighTideTime/LowTideTime start at the zero time.Time, not `now` or some
+	// other invented instant (code-review finding: the old `now`/`now+24h`
+	// defaults survived to the response whenever no future extreme of that
+	// kind existed, alongside the correct -1 height sentinel - an operator
+	// reads a time as real regardless of what the height next to it says, so
+	// the frontend showed a fabricated "Low <tomorrow>"/"High · <now>"). The
+	// zero value is never a real extreme time, and IsZero() below turns it
+	// into an empty string in the response rather than formatting it.
 	state := tideTodayData{
 		Datetime:            now,
 		CurrentTideHeightFt: result.CurrentHeightM * metersToFeet,
 		TideDirection:       result.Direction,
-		HighTideTime:        now,
 		HighTideHeightFt:    noTideExtremeHeightFt,
-		LowTideTime:         now.Add(24 * time.Hour),
 		LowTideHeightFt:     noTideExtremeHeightFt,
 		TidalPhase:          tidalPhase,
 		DoubleHighToday:     doubleHigh,
@@ -336,7 +342,18 @@ func tideToday(c echo.Context) error {
 		}
 	}
 
-	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
+	// A zero HighTideTime/LowTideTime (no future extreme of that kind was
+	// found above) reports as "" rather than the zero time's own formatted
+	// text ("0001-01-01T00:00:00Z") - see the state literal's own comment.
+	highTideTimeStr := ""
+	if !state.HighTideTime.IsZero() {
+		highTideTimeStr = state.HighTideTime.Format(time.RFC3339)
+	}
+	lowTideTimeStr := ""
+	if !state.LowTideTime.IsZero() {
+		lowTideTimeStr = state.LowTideTime.Format(time.RFC3339)
+	}
+	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: highTideTimeStr, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: lowTideTimeStr, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
 	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday})
 	if err != nil {
 		log.Printf("Failed to build tide ETag: %v", err)
