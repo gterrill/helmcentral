@@ -23,8 +23,9 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
   const [selectedText, setSelectedText] = useState<string>('')
   const [filter, setFilter] = useState<LogFilter>('all')
 
+  // The hook appends, so its buffer is oldest-first; the list shows newest first.
   const filteredLogs = useMemo(
-    () => logs.filter((entry) => matchesLogFilter(entry.message, filter)),
+    () => logs.filter((entry) => matchesLogFilter(entry.message, filter)).reverse(),
     [logs, filter],
   )
 

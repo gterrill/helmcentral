@@ -34,6 +34,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   behind. A reply already being written keeps arriving if you close and
   reopen the sheet mid-answer, rather than being cut off.
 
+### Fixed
+
+- Settings > Logs now lists the newest line at the top.
+
 ## [0.34.0] - 2026-09-26
 
 ### Added

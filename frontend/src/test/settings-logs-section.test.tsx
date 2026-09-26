@@ -29,6 +29,26 @@ describe('LogsSection', () => {
     expect(screen.getByText('ERROR: connection failed')).toBeInTheDocument()
   })
 
+  it('lists the most recent log line first', () => {
+    vi.mocked(useLogs).mockReturnValue({
+      logs: [
+        { id: 1, timestamp: '2026-09-13T10:00:00Z', message: 'first line' },
+        { id: 2, timestamp: '2026-09-13T10:00:01Z', message: 'second line' },
+        { id: 3, timestamp: '2026-09-13T10:00:02Z', message: 'third line' },
+      ],
+      isLive: true,
+      setIsLive: vi.fn(),
+      clearLogs: vi.fn(),
+      connected: true,
+      error: null,
+    })
+
+    render(<LogsSection onAskMate={vi.fn()} />)
+
+    const lines = screen.getAllByRole('button', { name: /line$/ }).map((button) => button.getAttribute('aria-label'))
+    expect(lines).toEqual(['third line', 'second line', 'first line'])
+  })
+
   it('toggles live updates when checkbox is clicked', () => {
     const setIsLive = vi.fn()
     vi.mocked(useLogs).mockReturnValue({
