@@ -550,14 +550,27 @@ describe('DocumentsPanel', () => {
     expect(within(rowCells[rowCells.length - 1]).getByRole('button', { name: /actions for manuals/i })).toBeInTheDocument()
   })
 
-  it('shows a failed document\'s own error', () => {
+  it('shows an operator-facing message for a failed document, keeping the raw error as a title attribute', () => {
+    // A raw stored error (an internal on-disk storage path, "panic: ...",
+    // a library's own error text) has no next step for the operator - the
+    // row shows documentFailureMessage's plain-English sentence instead,
+    // with the raw error still reachable as a title attribute rather than
+    // hidden outright (the full text also lives on the Details page).
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-      documents: [doc({ status: 'failed', error: 'could not read PDF' })],
+      documents: [doc({
+        status: 'failed',
+        stage: 'extract',
+        mime: 'application/pdf',
+        error: 'pdf page 1: panic: pred',
+      })],
     }))
 
     render(<DocumentsPanel />)
 
-    expect(screen.getByText('could not read PDF')).toBeInTheDocument()
+    const message = screen.getByText(/Couldn't read the text in this PDF/)
+    expect(message).toBeInTheDocument()
+    expect(message).toHaveAttribute('title', 'pdf page 1: panic: pred')
+    expect(screen.queryByText('pdf page 1: panic: pred')).not.toBeInTheDocument()
   })
 
   // ADR 0115 §1: the per-row indexing cost moves to the new Details

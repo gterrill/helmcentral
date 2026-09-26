@@ -80,7 +80,7 @@ import {
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
-import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
+import { documentDisplayName, documentFailureMessage, formatBytes, mimeLabel } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
 import type { NoteLink } from '@/lib/note-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
@@ -1237,11 +1237,22 @@ export function DocumentsPanel({
                         <button
                           type="button"
                           onClick={() => setViewerId(doc.id)}
-                          className="flex flex-col items-start gap-0.5 text-left"
+                          className="flex min-w-0 flex-col items-start gap-0.5 text-left"
                         >
                           <span className="font-medium hover:underline">{name}</span>
                           {doc.status === 'failed' && doc.error && (
-                            <span className="text-xs text-destructive">{doc.error}</span>
+                            // The operator-facing sentence, not the raw
+                            // stored error (an internal storage path, the
+                            // word "panic", a library's own error text) -
+                            // that stays available in the title attribute,
+                            // and in full on the Details page's "Error
+                            // details" disclosure.
+                            <span
+                              className="w-full truncate text-xs text-destructive"
+                              title={doc.error}
+                            >
+                              {documentFailureMessage(doc)}
+                            </span>
                           )}
                         </button>
                       </div>

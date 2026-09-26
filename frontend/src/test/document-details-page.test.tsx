@@ -88,6 +88,51 @@ describe('DocumentDetailsPage', () => {
     expect(screen.getByText('Not yet')).toBeInTheDocument()
   })
 
+  it('shows an operator-facing message for a failed document, not the raw stored error', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({
+      document: doc({
+        status: 'failed',
+        stage: 'extract',
+        mime: 'application/pdf',
+        error: 'pdf page 1: panic: pred',
+      }),
+    }))
+
+    render(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+
+    // Scoped to the Status row specifically: the raw error legitimately
+    // does still appear elsewhere on the page, collapsed under "Error
+    // details" (next test) - it just must not be what Status itself says.
+    const statusDd = screen.getByText('Status').nextElementSibling
+    expect(statusDd?.textContent).toContain("Couldn't read the text in this PDF")
+    expect(statusDd?.textContent).not.toContain('panic')
+  })
+
+  it('keeps the raw stored error available under a collapsed "Error details" disclosure', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({
+      document: doc({
+        status: 'failed',
+        stage: 'extract',
+        mime: 'application/pdf',
+        error: 'pdf page 1: panic: pred',
+      }),
+    }))
+
+    render(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+
+    const summary = screen.getByText('Error details')
+    expect(summary.closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('pdf page 1: panic: pred')).toBeInTheDocument()
+  })
+
+  it('has no "Error details" disclosure for a document that has not failed', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ status: 'indexed' }) }))
+
+    render(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+
+    expect(screen.queryByText('Error details')).not.toBeInTheDocument()
+  })
+
   it('labels the reader row "Read by" and translates indexed_with to operator wording', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ indexed_with: 'mate' }) }))
     const { rerender } = render(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)

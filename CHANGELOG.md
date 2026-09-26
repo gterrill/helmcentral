@@ -30,6 +30,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   index (their text couldn't be read) now index normally. Documents already
   showing as failed for this reason don't fix themselves - open them in
   Documents and choose Reindex.
+- A failed document in Documents now tells you what to try next instead of
+  showing a raw technical error. The original detail is still there if you
+  want it, under Error details on the document's own page.
 
 ## [0.33.0] - 2026-09-26
 
