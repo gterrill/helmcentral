@@ -44,6 +44,7 @@ function buildConversations(
     errorMessage: null,
     select: vi.fn(),
     create: vi.fn(),
+    startNew: vi.fn(),
     remove: vi.fn(),
     appendLocal: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),

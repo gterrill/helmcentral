@@ -163,20 +163,26 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   }, [])
 
   // Shared by the mount effect below and by `reload`: fetches the list, then
-  // opens `targetId` when it names a conversation that actually exists in
-  // the freshly fetched list, otherwise the most recently updated thread
-  // rather than an empty pane - the panel is usually reopened to reread a
-  // plan, and the list is already sorted newest first by the server.
-  // `isCancelled` lets the mount effect's cleanup skip state updates after
-  // an unmount without `reload` (which always runs to completion) having to
-  // carry that same plumbing.
+  // opens `targetId` only when it names a conversation that actually exists
+  // in the freshly fetched list. Mate UI cycle ("Mate opens on an empty
+  // chat"): this used to fall back to the most recently updated thread when
+  // `targetId` was absent or stale, so a plain open silently resumed
+  // whatever the server considered newest instead of starting blank, and a
+  // link naming a since-deleted conversation landed on an unrelated one with
+  // no indication anything was wrong. Neither happens any more - no match
+  // means no selection, the same "fresh empty chat" state a mount with no
+  // conversations at all has always shown. The operator (or an explicit
+  // `initialId`/`select()`/`create()`) is the only thing that ever opens a
+  // conversation now. `isCancelled` lets the mount effect's cleanup skip
+  // state updates after an unmount without `reload` (which always runs to
+  // completion) having to carry that same plumbing.
   const loadConversationsAndSelect = useCallback(async (targetId: string | null, isCancelled: () => boolean) => {
     try {
       const list = await fetchConversations()
       if (isCancelled()) return
       setConversations(list)
       setError(null)
-      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : list[0]?.id ?? null
+      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : null
       if (target !== null) await select(target)
     } catch (err) {
       if (!isCancelled()) setError(err instanceof Error ? err.message : String(err))
@@ -198,10 +204,12 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
 
   // Repeats the initial load on demand: a failed load otherwise has no way
   // out short of remounting the whole hook. Clears the stale error and
-  // shows `loading` while it runs, then re-selects `mountInitialId` when
-  // present or the newest thread otherwise - the same rule the mount effect
-  // uses, since a caller asking to reload wants the same starting point it
-  // would have gotten on a fresh mount.
+  // shows `loading` while it runs, then re-selects `mountInitialId` only
+  // when one was given and still exists - the same rule the mount effect
+  // uses (loadConversationsAndSelect's own doc comment), since a caller
+  // asking to reload wants the same starting point it would have gotten on
+  // a fresh mount. With no `mountInitialId` this only ever repopulates
+  // `conversations` - it never selects anything on its own.
   const reload = useCallback(async (): Promise<void> => {
     setError(null)
     setLoading(true)
@@ -276,6 +284,24 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setMessages((previous) => [...previous, message])
   }, [])
 
+  // Mate UI cycle ("Mate opens on an empty chat"): the sheet/panel's own
+  // "New conversation" button used to call `create()`, which POSTs and
+  // persists a brand new conversation row immediately - before the operator
+  // had typed a word. Closing the sheet right after left an empty,
+  // permanent row cluttering the list forever (the "empty persisted draft"
+  // this cycle removes). `startNew` is the local-only equivalent: it clears
+  // the active selection and the thread exactly the way a fresh mount
+  // already does, with no request at all. The conversation is only ever
+  // actually created, by `create()`, at the moment `chat.send()` posts the
+  // first real message (AssistantThread's handleSend already does this
+  // lazily) - so pressing "New conversation" and never sending anything now
+  // leaves the list exactly as it was.
+  const startNew = useCallback(() => {
+    setActiveId(null)
+    setMessages([])
+    setError(null)
+  }, [])
+
   const errorMessage = error !== null ? describeLoadError(error) : null
 
   return {
@@ -287,6 +313,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     errorMessage,
     select,
     create,
+    startNew,
     remove,
     appendLocal,
     refresh,

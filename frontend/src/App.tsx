@@ -593,9 +593,11 @@ export function App() {
   if (mateSheetOpen) mateSheetHasOpenedRef.current = true
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
-  // thread was active there. Null means "whatever the panel already had",
-  // not "start a fresh one" - the panel's own hook falls back to its usual
-  // newest-thread behaviour when this is null.
+  // thread was active there, and by the panel's own list/search selecting
+  // one (assistant-drawer.tsx's onActiveConversationChange). Null means a
+  // fresh empty chat (Mate UI cycle: "Mate opens on an empty chat") - the
+  // panel's own hook no longer falls back to the newest existing thread when
+  // this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
   // ADR 0106 F1: the Documents panel's current folder, mirrored into the URL
   // (?folder=) the same way matePanelConversationId mirrors Mate's active

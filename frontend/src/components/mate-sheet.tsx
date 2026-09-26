@@ -1,7 +1,8 @@
-import { ArrowUpRight, MessageSquarePlus, Square } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { ArrowUpRight, MessageSquarePlus, Search, Square } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AssistantThread } from '@/components/assistant-thread'
+import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAssistantChat, type AssistantScreenContext } from '@/hooks/use-assistant-chat'
@@ -71,6 +72,11 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Mate UI cycle: search the Mate sheet's conversations. The sheet has no
+  // list column of its own (that's the whole point of the sheet existing
+  // alongside the full panel) - this overlay is its only way to reach a
+  // conversation other than whichever one is already current.
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Same pattern as AssistantDrawer's own effect of the same name: waits on
   // `loading` so a transient null (before the mount fetch has resolved)
@@ -83,14 +89,17 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // "New conversation" (ADR 0094): the sheet is one thread plus the
   // composer, and it keeps appending to the current conversation - no
   // time-based expiry - until the operator explicitly asks for a fresh one
-  // here. create() both creates and selects the new conversation; focusing
-  // the composer straight after is what autoFocus alone can't do, since that
-  // only ever fires on mount.
+  // here. Mate UI cycle ("Mate opens on an empty chat"): startNew() is a
+  // local reset only, not a POST - conversations.startNew's own doc comment
+  // explains why persisting a conversation right here, before the operator
+  // has typed anything, was the "empty persisted draft" bug this cycle
+  // removes. The conversation is only ever actually created (by
+  // conversations.create(), inside AssistantThread's handleSend) at the
+  // moment the first message is sent. Focusing the composer straight after
+  // is what autoFocus alone can't do, since that only ever fires on mount.
   const handleNewConversation = useCallback(() => {
-    void (async () => {
-      await conversations.create()
-      composerRef.current?.focus()
-    })()
+    conversations.startNew()
+    composerRef.current?.focus()
   }, [conversations])
 
   // "Open the Mate page" (ADR 0094): hands the active conversation to the
@@ -112,11 +121,21 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
     onOpenChange(false)
   }, [onOpenPanel, onOpenChange])
 
+  // The search overlay hands back a plain conversation id - select() loads
+  // its thread into this same sheet, exactly as clicking a row in the /mate
+  // page's own list does.
+  const handleSelectFromSearch = useCallback((id: string) => {
+    void conversations.select(id)
+  }, [conversations])
+
   // Refetches every time the sheet opens, rather than once per app session
   // (impeccable critique 2026-09-12, P0): the sheet has no conversation
   // list of its own, so a load that failed while the sheet was last open
-  // otherwise had no way to recover short of reloading the whole page.
-  // Cheap to repeat - the sheet always opens onto the newest thread anyway.
+  // otherwise had no way to recover short of reloading the whole page. Cheap
+  // to repeat - reload() only ever refreshes the LIST behind the search
+  // overlay (conversations.reload's own doc comment); it never re-selects
+  // anything on its own, so this cannot disturb whatever thread (or blank
+  // state) is already showing.
   useEffect(() => {
     if (open) void conversations.reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,6 +240,15 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
             >
               <MessageSquarePlus className="h-4 w-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Search conversations"
+              title="Search conversations"
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
             {/* ArrowUpRight over PanelRightOpen: this navigates away to a
                 different page entirely (and closes the sheet behind it),
                 not a panel toggling open in place, so the "go to" arrow
@@ -276,6 +304,12 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
           )}
         </div>
       </SheetContent>
+      <ConversationSearchOverlay
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        conversations={conversations.conversations}
+        onSelect={handleSelectFromSearch}
+      />
     </Sheet>
   )
 }

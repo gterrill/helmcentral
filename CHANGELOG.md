@@ -18,6 +18,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   document, and hover or focus it to see its title. A citation to a
   document that's since been removed shows a muted, broken icon instead of
   silently disappearing.
+- The Mate sheet (the quick channel opened from any page's header) now has
+  its own conversation search: tap the search icon for a filterable list,
+  showing your 8 most recent conversations until you type something to
+  narrow it.
+
+### Changed
+
+- Opening Mate, from the sidebar panel or the header's quick sheet, now
+  always starts a fresh, empty conversation rather than resuming whichever
+  one was most recently updated. Pick an earlier conversation from the list
+  or search when you want to return to it. A conversation is only saved
+  once you send its first message, so starting fresh and changing your mind
+  leaves nothing behind.
 
 ## [0.34.0] - 2026-09-26
 

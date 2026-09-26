@@ -30,16 +30,17 @@ describe('useAssistantConversations', () => {
     vi.unstubAllGlobals()
   })
 
-  it('lists conversations on mount and opens the newest thread', async () => {
+  // Mate UI cycle: Mate opens on an empty chat. A plain mount (no explicit
+  // initialId - the ordinary "click Mate" case) lists whatever conversations
+  // exist, but auto-selects none of them: the operator gets a fresh, empty
+  // chat by default, not whichever conversation the server happens to think
+  // is newest. Only an explicit initialId (a URL naming a conversation, or
+  // "Open in Mate" handing over the sheet's own thread) - or the operator
+  // choosing one from the list/search - ever selects one.
+  it('lists conversations on mount but selects none of them', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
         return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
-      }
-      if (url === '/api/assistant/conversations/c1') {
-        return {
-          ok: true,
-          json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ content: 'hello' })] }),
-        }
       }
       throw new Error(`unexpected fetch ${url}`)
     })
@@ -52,8 +53,11 @@ describe('useAssistantConversations', () => {
     expect(result.current.conversations).toEqual([
       { id: 'c1', title: 'Hook Reef', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' },
     ])
-    await waitFor(() => expect(result.current.activeId).toBe('c1'))
-    await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['hello']))
+    expect(result.current.activeId).toBeNull()
+    expect(result.current.messages).toEqual([])
+    // No GET for c1's thread - a plain mount never loads any conversation's
+    // messages when nothing was explicitly asked for.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('leaves nothing selected when there are no conversations', async () => {
@@ -96,9 +100,8 @@ describe('useAssistantConversations', () => {
 
   it('select loads the conversation thread', async () => {
     const fetchMock = vi.fn()
-      // initial list: c1 first, which the mount opens on its own
+      // initial list: nothing is auto-selected on mount any more
       .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' }), conversationApi({ id: 'c2' })] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) })
       // the operator picks c2
       .mockResolvedValueOnce({
         ok: true,
@@ -108,7 +111,7 @@ describe('useAssistantConversations', () => {
 
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.activeId).toBe('c1')
+    expect(result.current.activeId).toBeNull()
 
     await act(async () => {
       await result.current.select('c2')
@@ -133,9 +136,9 @@ describe('useAssistantConversations', () => {
 
   it('remove deletes the active conversation and selects the next one', async () => {
     const fetchMock = vi.fn()
-      // initial list: two conversations, c1 first (opened by the mount)
+      // initial list: nothing is auto-selected on mount any more
       .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' }), conversationApi({ id: 'c2' })] }) })
-      // the mount opens c1
+      // the operator explicitly opens c1 first
       .mockResolvedValueOnce({ ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi()] }) })
       // DELETE c1
       .mockResolvedValueOnce({ ok: true, status: 204 })
@@ -147,6 +150,8 @@ describe('useAssistantConversations', () => {
 
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => { await result.current.select('c1') })
     expect(result.current.activeId).toBe('c1')
 
     await act(async () => {
@@ -169,6 +174,7 @@ describe('useAssistantConversations', () => {
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
+    await act(async () => { await result.current.select('c1') })
     expect(result.current.activeId).toBe('c1')
     await act(async () => { await result.current.remove('c1') })
 
@@ -221,7 +227,13 @@ describe('useAssistantConversations', () => {
     expect(result.current.messages.map((m) => m.content)).toEqual(['from c2'])
   })
 
-  it('falls back to the newest conversation when initialId is absent from the fetched list', async () => {
+  // Mate UI cycle: Mate opens on an empty chat. A URL naming a conversation
+  // that no longer exists (a deleted thread, a stale bookmark) now lands on
+  // the same fresh empty chat a plain open would - not a different,
+  // unrelated conversation silently substituted in its place, which would
+  // read as "my link opened someone else's thread" rather than "that thread
+  // is gone".
+  it('leaves nothing selected when initialId is absent from the fetched list', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
         return {
@@ -231,9 +243,6 @@ describe('useAssistantConversations', () => {
           }),
         }
       }
-      if (url === '/api/assistant/conversations/c1') {
-        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) }
-      }
       throw new Error(`unexpected fetch ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -241,16 +250,13 @@ describe('useAssistantConversations', () => {
     const { result } = renderHook(() => useAssistantConversations({ initialId: 'deleted-id' }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.activeId).toBe('c1')
+    expect(result.current.activeId).toBeNull()
   })
 
   it('re-selects when initialId changes to a new non-null value after mount', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
         return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' })] }) }
-      }
-      if (url === '/api/assistant/conversations/c1') {
-        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) }
       }
       if (url === '/api/assistant/conversations/c9') {
         return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c9' }), messages: [messageApi({ conversation_id: 'c9', content: 'from c9' })] }) }
@@ -265,7 +271,7 @@ describe('useAssistantConversations', () => {
     )
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.activeId).toBe('c1')
+    expect(result.current.activeId).toBeNull()
 
     rerender({ initialId: 'c9' })
 
@@ -301,18 +307,17 @@ describe('useAssistantConversations', () => {
   })
 
   // fix(frontend): make a failed Mate load recoverable - reload() repeats
-  // the initial load (list, then select the initial id if present else the
-  // newest) after clearing the stale error, so a dropped link doesn't
-  // strand the sheet/panel with no way out short of a full page reload.
-  it('reload clears the error and re-selects the newest conversation once the server recovers', async () => {
+  // the initial load (list, then select the initial id when one was given)
+  // after clearing the stale error, so a dropped link doesn't strand the
+  // sheet/panel with no way out short of a full page reload. Mate UI cycle:
+  // Mate opens on an empty chat - with no initialId, recovering from the
+  // error still selects nothing, the same as an ordinary successful mount.
+  it('reload clears the error and repopulates the list, without selecting anything', async () => {
     let serverIsUp = false
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
         if (!serverIsUp) return { ok: false, status: 502 }
         return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
-      }
-      if (url === '/api/assistant/conversations/c1') {
-        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ content: 'hello' })] }) }
       }
       throw new Error(`unexpected fetch ${url}`)
     })
@@ -332,8 +337,9 @@ describe('useAssistantConversations', () => {
 
     expect(result.current.error).toBeNull()
     expect(result.current.errorMessage).toBeNull()
-    expect(result.current.activeId).toBe('c1')
-    expect(result.current.messages.map((m) => m.content)).toEqual(['hello'])
+    expect(result.current.conversations.map((c) => c.id)).toEqual(['c1'])
+    expect(result.current.activeId).toBeNull()
+    expect(result.current.messages).toEqual([])
   })
 
   it('reload selects initialId again when the server recovers, same as the mount rule', async () => {

@@ -440,6 +440,7 @@ describe('MateSheet', () => {
     )
 
     expect(await screen.findByRole('button', { name: 'New conversation' })).toHaveAttribute('title', 'New conversation')
+    expect(screen.getByRole('button', { name: 'Search conversations' })).toHaveAttribute('title', 'Search conversations')
     expect(screen.getByRole('button', { name: 'Open the Mate page' })).toHaveAttribute('title', 'Open the Mate page')
 
     await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
@@ -479,8 +480,13 @@ describe('MateSheet', () => {
 
   // fix(frontend): say which thread the Mate sheet is in and what Mate can
   // do (impeccable critique 2026-09-12, weak scent) - "Mate" alone doesn't
-  // say which of several open conversations the sheet is showing.
-  it('names the active conversation under "Mate" in the header', async () => {
+  // say which of several open conversations the sheet is showing. Mate UI
+  // cycle ("Mate opens on an empty chat"): a plain open no longer
+  // auto-selects an existing conversation, so this now picks one through
+  // the search overlay - the sheet's only way to reach a conversation other
+  // than whichever one is already current - rather than relying on the
+  // sheet happening to already have one active.
+  it('names the active conversation under "Mate" in the header, once picked from search', async () => {
     vi.stubGlobal(
       'fetch',
       buildFetch(undefined, [
@@ -490,7 +496,13 @@ describe('MateSheet', () => {
 
     render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
 
-    expect(await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+    fireEvent.click(await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep'))
+
+    // The overlay's own row is gone once it closes, so this is now the
+    // sheet's header naming the picked conversation, not the search result.
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Search conversations' })).not.toBeInTheDocument())
+    expect(screen.getByText('Hamilton Island to Gloucester Island, 14 Sep')).toBeInTheDocument()
   })
 
   it('shows -- under "Mate" when there is no active thread', async () => {
@@ -502,11 +514,35 @@ describe('MateSheet', () => {
     expect(screen.getByText('--')).toBeInTheDocument()
   })
 
+  // Mate UI cycle ("Mate opens on an empty chat"): the header must read "--"
+  // even when OTHER conversations exist to pick from - the old behaviour
+  // silently auto-selected the newest of them, which is exactly the bug
+  // this cycle removes.
+  it('shows -- under "Mate" on a plain open even when other conversations exist', async () => {
+    vi.stubGlobal(
+      'fetch',
+      buildFetch(undefined, [
+        { id: 'c1', title: 'Hamilton Island to Gloucester Island', created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z' },
+        { id: 'c2', title: 'Hook Reef anchorages', created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z' },
+      ]),
+    )
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    await screen.findByRole('heading', { name: 'Mate' })
+    expect(screen.getByText('--')).toBeInTheDocument()
+    // The blank-thread hint (assistant-thread.tsx's EXAMPLE_QUESTION) shows -
+    // not either conversation's own content, confirming nothing loaded.
+    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+  })
+
   // mate-answer-toast plan: App.tsx needs to know which conversation the
   // sheet is currently showing, to keep the App-level answer watcher from
   // opening a background stream (and toasting) for a reply the sheet is
   // already displaying. Mirrors assistant-drawer.tsx's own prop of the same
-  // name and the same "wait on loading" guard.
+  // name and the same "wait on loading" guard. Mate UI cycle: reports null
+  // first (the new blank-by-default state), then the picked id once the
+  // operator chooses one through search.
   it('reports the active conversation as it settles, once loading is done', async () => {
     const onActiveConversationChange = vi.fn()
     vi.stubGlobal(
@@ -528,8 +564,60 @@ describe('MateSheet', () => {
       />,
     )
 
-    await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep')
+    await screen.findByRole('heading', { name: 'Mate' })
+    await waitFor(() => expect(onActiveConversationChange).toHaveBeenCalledWith(null))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search conversations' }))
+    fireEvent.click(await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep'))
+
     await waitFor(() => expect(onActiveConversationChange).toHaveBeenCalledWith('c1'))
+  })
+
+  // Mate UI cycle: search the Mate sheet's conversations. The sheet has no
+  // list column of its own (that's the whole reason for the sheet existing
+  // alongside the full panel) - Search is the sheet's only way to reach a
+  // conversation that isn't already its current one.
+  describe('search', () => {
+    it('opens the search overlay, and picking a conversation loads it into the sheet', async () => {
+      vi.stubGlobal(
+        'fetch',
+        buildFetch(undefined, [
+          { id: 'c1', title: 'Hamilton Island to Gloucester Island', created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z' },
+          { id: 'c2', title: 'Hook Reef anchorages', created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z' },
+        ]),
+      )
+
+      render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+      const searchBox = await screen.findByRole('textbox', { name: 'Search conversations' })
+      fireEvent.click(screen.getByText('Hook Reef anchorages'))
+
+      // The overlay closes (its own search box unmounts - the sheet's own
+      // dialog stays open behind it) and the sheet's header now names the
+      // picked conversation, so it actually loaded rather than just closing.
+      await waitFor(() => expect(searchBox).not.toBeInTheDocument())
+      expect(await screen.findByText('Hook Reef anchorages')).toBeInTheDocument()
+    })
+
+    it('Esc closes the search overlay without picking anything', async () => {
+      vi.stubGlobal(
+        'fetch',
+        buildFetch(undefined, [
+          { id: 'c1', title: 'Hamilton Island to Gloucester Island', created_at: '', updated_at: '' },
+        ]),
+      )
+
+      render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+      const searchBox = await screen.findByRole('textbox', { name: 'Search conversations' })
+      fireEvent.keyDown(searchBox, { key: 'Escape' })
+
+      await waitFor(() => expect(searchBox).not.toBeInTheDocument())
+      // The sheet itself is unaffected - only its search overlay closed.
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
   })
 })
 
@@ -836,7 +924,12 @@ describe('MateSheet read-aloud', () => {
   // still being written elsewhere (GET .../run, via chat.attach()) must
   // never trigger read-aloud, even with "Read replies aloud" switched on,
   // even though the reply still lands in the thread with its
-  // "## Spoken summary" section intact.
+  // "## Spoken summary" section intact. Mate UI cycle ("Mate opens on an
+  // empty chat"): a plain open no longer auto-selects c1, so this picks it
+  // through the search overlay first (the operator already had this
+  // conversation open earlier, resumed it here) to put the sheet into the
+  // "an existing conversation is active, and its run is being rejoined"
+  // state this test is actually about.
   it('does not speak a reply that arrives via attach (a rejoined run), only one from its own send', async () => {
     installFakeSpeechSynthesis()
     vi.stubGlobal('fetch', buildFetch(
@@ -866,6 +959,9 @@ describe('MateSheet read-aloud', () => {
         onOpenPanel={vi.fn()}
       />,
     )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+    fireEvent.click(await screen.findByText('Hook Reef anchorages'))
 
     // The rejoined reply lands in the thread exactly as a sent one would...
     expect(await screen.findByText(/Fine tomorrow, light winds\./)).toBeInTheDocument()

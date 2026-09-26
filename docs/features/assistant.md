@@ -39,6 +39,14 @@ you leave it and come back, until you press its "New conversation" button.
 Its "Open in Mate" button hands that same thread to the full panel and
 takes you there, for when a question turns into a longer working session.
 
+Both start on a fresh, blank conversation the first time you open them:
+neither one resumes an old conversation on its own, and nothing is saved
+until you actually send a question, so opening Mate and changing your mind
+leaves nothing behind. To pick up an earlier conversation instead, choose it
+from the panel's list, or from the sheet's own search - its header's search
+icon opens a quick list of your 8 most recent conversations, or type to
+filter by title.
+
 The panel lives at `/mate`. A specific conversation can be opened directly at
 `/mate/<thread-id>`, for example `/mate/12345`.
 

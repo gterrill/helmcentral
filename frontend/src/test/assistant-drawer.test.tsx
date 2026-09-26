@@ -170,6 +170,48 @@ describe('AssistantDrawer', () => {
     expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
   })
 
+  // Mate UI cycle ("Mate opens on an empty chat"): clicking Mate must not
+  // auto-select the newest existing conversation any more - the list row is
+  // there to pick FROM, not something the panel opens onto by itself.
+  it('does not auto-select an existing conversation on a plain open', async () => {
+    vi.stubGlobal('fetch', buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' }],
+    }))
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    const row = await screen.findByText('Hook Reef anchorages')
+    // Not the active-row highlight (assistant-drawer.tsx: bg-primary/10)
+    // that a genuinely selected conversation gets.
+    expect(row.closest('button')?.parentElement).not.toHaveClass('bg-primary/10')
+    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+  })
+
+  // Mate UI cycle ("Mate opens on an empty chat"): "New conversation" used to
+  // POST immediately, persisting an empty conversation before the operator
+  // had typed a word - the "empty persisted draft" this cycle removes.
+  it('New conversation resets to blank locally, without POSTing anything', async () => {
+    const fetchMock = buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' }],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+    // Selects the existing conversation first - New has something to reset FROM.
+    fireEvent.click(await screen.findByText('Hook Reef anchorages'))
+    await waitFor(() => expect(screen.getByText('Hook Reef anchorages').closest('button')?.parentElement).toHaveClass('bg-primary/10'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => (url as string).endsWith('/api/assistant/conversations') && (init as RequestInit | undefined)?.method === 'POST',
+    )
+    expect(postCalls).toHaveLength(0)
+    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+  })
+
   it('shows a search box above the list and filters conversations by query', async () => {
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },

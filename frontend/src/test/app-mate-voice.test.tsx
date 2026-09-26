@@ -387,15 +387,21 @@ describe('App-wide voice (ADR 0093)', () => {
   // ADR 0094: "Open the Mate page" (renamed from "Open in Mate" - impeccable
   // critique 2026-09-12 P2) hands the sheet's active conversation to the
   // full panel and navigates there, closing the sheet - without it, the
-  // sheet was the only way to see a thread at all.
+  // sheet was the only way to see a thread at all. Mate UI cycle ("Mate
+  // opens on an empty chat"): "New conversation" no longer creates anything
+  // by itself (conversations.startNew's own doc comment) - a real
+  // conversation only exists once the operator sends a first message, so
+  // that's what this test does to get one, the same way the "what about
+  // tomorrow" voice test above it does.
   it('Open the Mate page from the sheet lands on the Mate panel with that conversation requested', async () => {
     const fetchMock = stubFetch()
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
-    await screen.findByRole('heading', { name: 'Mate' })
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations', expect.objectContaining({ method: 'POST' })))
 
     fireEvent.click(screen.getByRole('button', { name: 'Open the Mate page' }))
