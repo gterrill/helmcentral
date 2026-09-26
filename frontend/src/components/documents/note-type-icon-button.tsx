@@ -37,7 +37,16 @@ export function NoteTypeIconButton({
             aria-label={`Change type: currently ${meta.label}`}
             className={cn(
               'flex shrink-0 items-center justify-center hover:bg-accent',
-              size === 'lg' ? 'h-11 w-11' : 'h-8 w-8 rounded',
+              // `sm` keeps the full h-8 w-8 (32px) hit target - shrinking it
+              // would fail the same tap-target minimum the `lg` variant
+              // exists to satisfy on the Unfiled notes view - but a bare
+              // h-4 w-4 MimeIcon on a file row has no such padding, so a
+              // note row's icon (and, following it, the title text beside
+              // it) sat ~8px further right than a file row's. -mx-2 (16px)
+              // cancels the 32px button back down to the same 16px layout
+              // footprint as the file row's icon, without touching the
+              // button's own size or the icon inside it.
+              size === 'lg' ? 'h-11 w-11' : 'h-8 w-8 -mx-2 rounded',
             )}
           >
             <Icon className={cn(size === 'lg' ? 'h-5 w-5' : 'h-4 w-4', meta.className)} aria-hidden="true" />
