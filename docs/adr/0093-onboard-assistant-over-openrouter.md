@@ -361,6 +361,24 @@ having the browser call OpenRouter directly would mean the OpenRouter key
 has to reach the browser at all, which defeats the entire point of keeping
 it server-side and out of `coreEnvSecretKeys` in the first place.
 
+**Exposing the tools as an MCP server.** Not weighed when this was built;
+recorded 2026-09-27 because the question came up. MCP exists so that hosts
+the project does not control (Claude Desktop, ChatGPT, an IDE) can discover
+and call its tools. Mate is its own host: the backend builds the prompt,
+calls OpenRouter and runs every tool in-process, so an MCP server would put
+a protocol hop between the backend and itself. OpenRouter takes
+OpenAI-style function schemas, not MCP, so each tool would still need that
+schema as well as an MCP definition. The loop's guarantees (the round and
+time caps in decision 2, tool errors handed back rather than swallowed, the
+forced final round) hold only because the same code owns the prompt and the
+tools; under a third-party host the tool is ours but the loop is not. A
+remote tool endpoint also needs its own authentication on the boat network,
+and with one operator and no outside client asking to connect, that cost
+buys nothing. The case would change if the operator wanted to question the
+boat from a general assistant away from Helmcentral. The tools are already
+plain functions in `assistant_tools.go`, so a read-only MCP adapter over
+them would be an addition, not a rewrite.
+
 ## Consequences
 
 - This is the first paid third-party API call in Helmcentral's request path.
