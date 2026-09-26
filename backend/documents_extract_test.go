@@ -118,6 +118,13 @@ func TestExtractDocumentText_TextFileOverCapIsAnErrorNotATruncation(t *testing.T
 	if err == nil {
 		t.Fatalf("expected an error for a text file over the cap, got none")
 	}
+	// The operator never sees this internal on-disk path (documents are
+	// stored at filepath.Join(documentsDirPath(), doc.SHA256), not under
+	// their own filename) - see the PDF-side leak test below for the fuller
+	// explanation of why this matters.
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("expected the error not to contain the storage path %q, got %q", path, err.Error())
+	}
 }
 
 func TestExtractDocumentText_TextFileAtCapSucceeds(t *testing.T) {
@@ -300,6 +307,9 @@ func TestExtractDocumentText_PDFPageCapExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error once the declared page count exceeds the cap")
 	}
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("expected the error not to contain the storage path %q, got %q", path, err.Error())
+	}
 }
 
 // TestExtractDocumentText_PDFSecondPageBrokenContentStreamIsVisibleNotSilent
@@ -337,6 +347,20 @@ func TestExtractDocumentText_PDFSecondPageBrokenContentStreamIsVisibleNotSilent(
 	}
 	if !strings.Contains(ex.FirstPageErr, "2") {
 		t.Fatalf("expected FirstPageErr to reference page 2, got %q", ex.FirstPageErr)
+	}
+	// FirstPageErr reaches the operator verbatim (documents_indexer.go's
+	// failDoc writes it to documents.error, and the Documents list/Details
+	// page render that field - see frontend/src/lib/document-display.ts's
+	// documentFailureMessage and the raw-detail disclosure next to it). The
+	// on-disk storage path (filepath.Join(documentsDirPath(), doc.SHA256),
+	// e.g. "data/documents/<sha256>") is an internal implementation detail
+	// with no meaning to an operator and isn't even the document's own
+	// filename - it must never appear in a stored error.
+	if strings.Contains(ex.FirstPageErr, path) {
+		t.Fatalf("expected FirstPageErr not to contain the storage path %q, got %q", path, ex.FirstPageErr)
+	}
+	if strings.Contains(ex.FirstPageErr, dir) {
+		t.Fatalf("expected FirstPageErr not to contain the storage directory %q, got %q", dir, ex.FirstPageErr)
 	}
 }
 
@@ -479,6 +503,9 @@ func TestExtractDocumentText_PDFNegativePageCountErrorsWithoutPanicking(t *testi
 	if err == nil {
 		t.Fatalf("expected an error for a PDF declaring a negative page count")
 	}
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("expected the error not to contain the storage path %q, got %q", path, err.Error())
+	}
 }
 
 // buildPDFWithBadRootOffset assembles a well-formed xref table (correct
@@ -546,6 +573,9 @@ func TestExtractDocumentText_PDFPanicsOnFirstLazyResolveErrorsWithoutPanicking(t
 	// (the gap this test targets), not some unrelated failure path.
 	if !strings.Contains(err.Error(), "panic") {
 		t.Fatalf("expected the error to say it recovered from a panic, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("expected the error not to contain the storage path %q, got %q", path, err.Error())
 	}
 }
 
@@ -641,5 +671,144 @@ func TestExtractDocumentText_PDFTextBudgetExceededFailsDocumentWithoutOOM(t *tes
 	}
 	if !strings.Contains(err.Error(), "budget") {
 		t.Fatalf("expected the error to name the text budget, got %q", err.Error())
+	}
+}
+
+// ── PDF panic safety: vendored github.com/ledongthuc/pdf patches ─────────
+//
+// The two tests below reproduce real panics hit indexing genuine builder-
+// drawing PDFs against github.com/ledongthuc/pdf@v0.0.0-20260907135840-
+// 6c8c28e0e8a0, fixed by patching a vendored copy of that library
+// (backend/third_party/ledongthuc-pdf - see its README.md for exactly what
+// was changed and why). Both are spec-legal content a real PDF writer
+// produced, not malformed input, so the fix is "stop panicking and extract
+// the text", not "fail cleanly instead of panicking".
+
+// buildPDFWithFlateDecodePredictorOne assembles a single-page PDF whose
+// /Contents is a FlateDecode stream carrying an explicit
+// /DecodeParms << /Predictor 1 >> - ISO 32000-2:2020 §7.4.4.4 (Table 8)
+// defines Predictor 1 as "no prediction": the decompressed stream is used
+// as-is. The unpatched vendored library only recognised an *absent*
+// /Predictor as "no prediction" and panicked ("panic: pred") on every
+// other value, including this explicit, well-formed one.
+func buildPDFWithFlateDecodePredictorOne(t *testing.T, token string) []byte {
+	t.Helper()
+	content := "BT /F1 12 Tf (" + token + ") Tj ET"
+
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write([]byte(content)); err != nil {
+		t.Fatalf("flate-compress fixture content stream: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close flate writer: %v", err)
+	}
+
+	var buf strings.Builder
+	offsets := make(map[int]int)
+
+	writeObj := func(num int, body string) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n")
+		buf.WriteString(body)
+		buf.WriteString("\nendobj\n")
+	}
+
+	buf.WriteString("%PDF-1.4\n")
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R] /Count 1 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+
+	offsets[5] = buf.Len()
+	buf.WriteString("5 0 obj\n<< /Length ")
+	buf.WriteString(strconv.Itoa(compressed.Len()))
+	buf.WriteString(" /Filter /FlateDecode /DecodeParms << /Predictor 1 >> >>\nstream\n")
+	buf.Write(compressed.Bytes())
+	buf.WriteString("\nendstream\nendobj\n")
+
+	xrefStart := buf.Len()
+	buf.WriteString("xref\n0 6\n")
+	buf.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= 5; i++ {
+		buf.WriteString(pad10(offsets[i]))
+		buf.WriteString(" 00000 n \n")
+	}
+	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+	buf.WriteString(strconv.Itoa(xrefStart))
+	buf.WriteString("\n%%EOF")
+
+	return []byte(buf.String())
+}
+
+func TestExtractDocumentText_PDFFlateDecodePredictorOneSucceeds(t *testing.T) {
+	body := buildPDFWithFlateDecodePredictorOne(t, "PREDICTORONETOKEN")
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "predictor-one.pdf", body)
+
+	ex, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err != nil {
+		t.Fatalf("extractDocumentText: unexpected error for an explicit /DecodeParms << /Predictor 1 >> stream: %v", err)
+	}
+	if len(ex.Pages) != 1 || !strings.Contains(ex.Pages[0].Text, "PREDICTORONETOKEN") {
+		t.Fatalf("expected page 1 to contain PREDICTORONETOKEN, got %+v", ex.Pages)
+	}
+}
+
+// buildPDFWithUnknownLiteralStringEscape assembles a single-page PDF whose
+// /Contents is an uncompressed stream containing a literal string with a
+// backslash escape the PDF spec does not define (here, "\q"). ISO
+// 32000-2:2020 §7.3.4.2: "If the character following the REVERSE SOLIDUS
+// is not one of those shown [in the escape table] ... the reverse solidus
+// shall be ignored" - so "(A\qB)" decodes to "AqB". The unpatched vendored
+// library instead panicked ("invalid escape sequence \q").
+func buildPDFWithUnknownLiteralStringEscape(t *testing.T) []byte {
+	t.Helper()
+	const content = `BT /F1 12 Tf (A\qB) Tj ET`
+
+	var buf strings.Builder
+	offsets := make(map[int]int)
+
+	writeObj := func(num int, body string) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n")
+		buf.WriteString(body)
+		buf.WriteString("\nendobj\n")
+	}
+
+	buf.WriteString("%PDF-1.4\n")
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R] /Count 1 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+	writeObj(5, "<< /Length "+strconv.Itoa(len(content))+" >>\nstream\n"+content+"\nendstream")
+
+	xrefStart := buf.Len()
+	buf.WriteString("xref\n0 6\n")
+	buf.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= 5; i++ {
+		buf.WriteString(pad10(offsets[i]))
+		buf.WriteString(" 00000 n \n")
+	}
+	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+	buf.WriteString(strconv.Itoa(xrefStart))
+	buf.WriteString("\n%%EOF")
+
+	return []byte(buf.String())
+}
+
+func TestExtractDocumentText_PDFUnknownLiteralStringEscapeSucceeds(t *testing.T) {
+	body := buildPDFWithUnknownLiteralStringEscape(t)
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "unknown-escape.pdf", body)
+
+	ex, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err != nil {
+		t.Fatalf("extractDocumentText: unexpected error for an unrecognised backslash escape: %v", err)
+	}
+	if len(ex.Pages) != 1 || !strings.Contains(ex.Pages[0].Text, "AqB") {
+		t.Fatalf("expected page 1 to contain AqB (backslash dropped, character kept), got %+v", ex.Pages)
 	}
 }

@@ -26,6 +26,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - The Depth & Tide tile no longer skips a low tide of exactly 0.0 in favour
   of the one after it, and no longer shows a made-up low a day ahead when
   the tide station has no low left in its forecast.
+- Some builder drawings and equipment manuals that previously failed to
+  index (their text couldn't be read) now index normally. Documents already
+  showing as failed for this reason don't fix themselves - open them in
+  Documents and choose Reindex.
 
 ## [0.33.0] - 2026-09-26
 

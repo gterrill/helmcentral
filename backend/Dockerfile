@@ -4,6 +4,11 @@ FROM golang:1.26-alpine AS builder
 WORKDIR /app
 
 COPY go.mod go.sum ./
+# third_party has to land before go mod download: go.mod's local replace
+# directive for github.com/ledongthuc/pdf points at
+# ./third_party/ledongthuc-pdf, and go mod download resolves replaces
+# against the filesystem, not the module proxy.
+COPY third_party ./third_party
 RUN go mod download
 
 COPY . .
