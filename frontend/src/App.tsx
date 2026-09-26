@@ -2924,6 +2924,8 @@ export function App() {
               bowOffsetM={anchorWatch.bowOffsetM}
               bowOffsetApplied={anchorWatch.bowOffsetApplied}
               bowOffsetReason={anchorWatch.bowOffsetReason}
+              headingAtSetDeg={anchorWatch.headingAtSetDeg}
+              placeName={anchorWatch.placeName}
               anchorSetAt={anchorWatch.setAt}
               anchorStateKnown={anchorWatch.loaded}
               error={anchorWatch.error}

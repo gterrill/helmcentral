@@ -1,13 +1,12 @@
 import { Minus, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { usePressRepeat } from '@/hooks/use-press-repeat'
-import { formatRadiusDisplay } from '@/lib/anchor-adjust'
+import { formatRadiusDisplay, radiusDisplayValue } from '@/lib/anchor-adjust'
 import { cn } from '@/lib/utils'
 
-const METERS_PER_FOOT = 3.28084
-
+/** The bare rounded number (no unit suffix) — radiusDisplayValue (lib/anchor-adjust.ts) is the one place that does the rounding, shared with formatRadiusDisplay's own "24 m"/"79 ft" string so the two can never disagree (code-review finding: this used to be a second, separate copy of the same rounding). */
 function radiusValueDisplay(radiusM: number, isImperial: boolean): string {
-  return String(Math.round(isImperial ? radiusM * METERS_PER_FOOT : radiusM))
+  return String(radiusDisplayValue(radiusM, isImperial))
 }
 
 /** One of the bar's two recommendation shortcuts ("Rode + LOA", "Planner swing") — tapping an enabled chip sets the draft radius straight to it. */
@@ -69,8 +68,26 @@ export function AnchorAdjustBar({
   aboveMaxOriginalRadiusM = null,
   noFixNotice = false,
 }: AnchorAdjustBarProps) {
-  const decrement = usePressRepeat(() => onStepRadius(-stepM))
-  const increment = usePressRepeat(() => onStepRadius(stepM))
+  // atMin/atMax passed through as `disabled` (code-review finding): holding
+  // + until the button hits atMax applies the disabled attribute, which
+  // stops pointerup from ever reaching the DOM — usePressRepeat's own
+  // disabled watch is what actually cancels the repeat in that case, not
+  // anything here.
+  const decrement = usePressRepeat(() => onStepRadius(-stepM), atMin)
+  const increment = usePressRepeat(() => onStepRadius(stepM), atMax)
+
+  // Keyboard activation (Enter/Space on a focused button) reaches onClick
+  // with a synthetic click whose `detail` is 0 - a real pointer/touch press
+  // also fires onClick after its own pointerup, but with detail >= 1, and
+  // that press already stepped via onPointerDown above. Gating on detail
+  // === 0 is what lets one onClick handler serve keyboard activation
+  // without double-stepping a pointer press (code-review finding: the
+  // buttons only ever wired pointer events, so Enter/Space did nothing at
+  // all — a real gap on the no-WebGL2 path, which has no pointer gesture to
+  // fall back on).
+  const handleKeyboardClick = (deltaM: number) => (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0) onStepRadius(deltaM)
+  }
 
   // Spelled out under the controls, not left in hover titles: on the helm
   // touchscreen a title never shows, and a disabled control with no visible
@@ -109,6 +126,7 @@ export function AnchorAdjustBar({
           onPointerUp={decrement.onPointerUp}
           onPointerLeave={decrement.onPointerLeave}
           onPointerCancel={decrement.onPointerCancel}
+          onClick={handleKeyboardClick(-stepM)}
         >
           <Minus className="h-5 w-5" />
         </Button>
@@ -135,6 +153,7 @@ export function AnchorAdjustBar({
           onPointerUp={increment.onPointerUp}
           onPointerLeave={increment.onPointerLeave}
           onPointerCancel={increment.onPointerCancel}
+          onClick={handleKeyboardClick(stepM)}
         >
           <Plus className="h-5 w-5" />
         </Button>

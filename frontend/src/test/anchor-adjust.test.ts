@@ -197,9 +197,13 @@ describe('formatRadiusDisplay', () => {
 // never touched.
 describe('buildAdjustCommitTargets', () => {
   const committed = { lat: -25.2938, lon: 152.9102, radiusMeters: 20 }
+  // Stands in for "nothing to restore" in tests that don't care about it -
+  // the same shape a legacy watch (no bow offset ever applied, no place
+  // name resolved yet) would carry.
+  const noFacts = { bowOffsetM: 0, bowOffsetApplied: false, bowOffsetReason: '', headingAtSetDeg: -1, placeName: '' }
 
   it('omits lat/lon on both Set and Undo when the draft position is unchanged (a radius-only Set)', () => {
-    const { set, undo } = buildAdjustCommitTargets(committed, { lat: committed.lat, lon: committed.lon, radiusMeters: 30 })
+    const { set, undo } = buildAdjustCommitTargets(committed, { lat: committed.lat, lon: committed.lon, radiusMeters: 30 }, noFacts)
     expect(set).toEqual({ radiusMeters: 30 })
     expect(undo).toEqual({ radiusMeters: 20 })
   })
@@ -207,14 +211,42 @@ describe('buildAdjustCommitTargets', () => {
   it(`omits lat/lon within the ${POSITION_UNCHANGED_TOLERANCE_M} m tolerance — GPS/render jitter, not a deliberate move`, () => {
     // ~0.1 m north of committed — inside tolerance.
     const jitteredLat = committed.lat + 0.1 / 111_320
-    const { set } = buildAdjustCommitTargets(committed, { lat: jitteredLat, lon: committed.lon, radiusMeters: 20 })
+    const { set } = buildAdjustCommitTargets(committed, { lat: jitteredLat, lon: committed.lon, radiusMeters: 20 }, noFacts)
     expect(set).toEqual({ radiusMeters: 20 })
   })
 
   it('includes lat/lon on both Set and Undo once the draft position genuinely moved', () => {
     const draft = { lat: -25.2943, lon: 152.9107, radiusMeters: 20 }
-    const { set, undo } = buildAdjustCommitTargets(committed, draft)
+    const { set, undo } = buildAdjustCommitTargets(committed, draft, noFacts)
     expect(set).toEqual({ lat: draft.lat, lon: draft.lon, radiusMeters: 20 })
-    expect(undo).toEqual({ lat: committed.lat, lon: committed.lon, radiusMeters: 20 })
+    expect(undo).toEqual({ lat: committed.lat, lon: committed.lon, radiusMeters: 20, restore: noFacts })
+  })
+
+  // Code-review finding (round 2): Undo re-sends the committed position as
+  // another position-changing PATCH, which the backend's own "placed by hand
+  // in Adjust" defaults would otherwise stamp onto it — wrongly marking a
+  // genuine bow-corrected drop as unapplied and losing its resolved place
+  // name, even though Undo is putting the anchor back exactly where it was.
+  // `restore` carries the committed point's own facts (from the moment
+  // Adjust opened) so the backend can put them back instead.
+  it("Undo's restore carries the committed point's own bow-offset/heading/place-name facts", () => {
+    const draft = { lat: -25.2943, lon: 152.9107, radiusMeters: 20 }
+    const facts = { bowOffsetM: 8, bowOffsetApplied: true, bowOffsetReason: '', headingAtSetDeg: 45, placeName: 'Goldsmith Island' }
+    const { undo } = buildAdjustCommitTargets(committed, draft, facts)
+    expect(undo.restore).toEqual(facts)
+  })
+
+  it('Set never carries restore, even when the position moved — only Undo puts a point back', () => {
+    const draft = { lat: -25.2943, lon: 152.9107, radiusMeters: 20 }
+    const facts = { bowOffsetM: 8, bowOffsetApplied: true, bowOffsetReason: '', headingAtSetDeg: 45, placeName: 'Goldsmith Island' }
+    const { set } = buildAdjustCommitTargets(committed, draft, facts)
+    expect(set).not.toHaveProperty('restore')
+  })
+
+  it('a radius-only Set/Undo carries no restore either — restore only ever accompanies a position change', () => {
+    const facts = { bowOffsetM: 8, bowOffsetApplied: true, bowOffsetReason: '', headingAtSetDeg: 45, placeName: 'Goldsmith Island' }
+    const { set, undo } = buildAdjustCommitTargets(committed, { lat: committed.lat, lon: committed.lon, radiusMeters: 30 }, facts)
+    expect(set).not.toHaveProperty('restore')
+    expect(undo).not.toHaveProperty('restore')
   })
 })

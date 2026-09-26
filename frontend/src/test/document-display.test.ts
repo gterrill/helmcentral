@@ -33,26 +33,67 @@ describe('formatDocumentTime', () => {
 // only ever supplies the headline sentence.
 describe('documentFailureMessage', () => {
   it('gives PDF-specific guidance with a fallback path when the PDF text layer could not be read', () => {
-    expect(documentFailureMessage({ stage: 'extract', mime: 'application/pdf' })).toBe(
+    expect(documentFailureMessage({ stage: 'extract', mime: 'application/pdf', error: 'panic: some internal detail' })).toBe(
       "Couldn't read the text in this PDF. Try Reindex; if it fails again, open it in a PDF viewer, save a copy and upload that.",
     )
   })
 
   it('gives image-specific guidance for a failed image extract', () => {
-    expect(documentFailureMessage({ stage: 'extract', mime: 'image/jpeg' })).toBe(
+    expect(documentFailureMessage({ stage: 'extract', mime: 'image/jpeg', error: 'panic: some internal detail' })).toBe(
       "Couldn't read this image. Try Reindex, or upload it again.",
     )
   })
 
   it('falls back to a generic extract message for any other mime', () => {
-    expect(documentFailureMessage({ stage: 'extract', mime: 'text/plain' })).toBe(
+    expect(documentFailureMessage({ stage: 'extract', mime: 'text/plain', error: 'panic: some internal detail' })).toBe(
       "Couldn't read this file. Try Reindex, or upload it again.",
     )
   })
 
-  it('gives a different message once the document failed past extraction (the enrich stage)', () => {
-    expect(documentFailureMessage({ stage: 'enrich', mime: 'application/pdf' })).toBe(
+  it('falls back to the generic Reindex line for an unrecognised enrich failure', () => {
+    expect(documentFailureMessage({ stage: 'enrich', mime: 'application/pdf', error: 'openrouter: upstream 503' })).toBe(
       "Mate couldn't finish indexing this document. Try Reindex.",
     )
+  })
+
+  // Code-review finding: every non-'extract' failure used to collapse to the
+  // same generic line, hiding two enrich-stage causes that already carry
+  // their own actionable text in the stored error (backend/documents_enrich.go's
+  // documentHEICRejectionMessage, backend/assistant_handlers.go's readiness
+  // Problem sentences) - these now keep their own operator message instead.
+  it('gives HEIC-specific guidance when the stored error is the HEIC rejection', () => {
+    expect(
+      documentFailureMessage({ stage: 'enrich', mime: 'image/heic', error: 'image/heic is not supported for reading; convert to JPEG' }),
+    ).toBe("This photo is HEIC, which Mate can't read. Convert it to JPEG, then Reindex.")
+  })
+
+  it('passes an assistant-off readiness problem through as-is - it already names the fix', () => {
+    expect(
+      documentFailureMessage({
+        stage: 'enrich',
+        mime: 'application/pdf',
+        error: 'The assistant is switched off. Enable it in Settings → Assistant.',
+      }),
+    ).toBe('The assistant is switched off. Enable it in Settings → Assistant.')
+  })
+
+  it('passes a no-API-key readiness problem through as-is', () => {
+    expect(
+      documentFailureMessage({
+        stage: 'enrich',
+        mime: 'application/pdf',
+        error: 'No OpenRouter API key is configured. Add one in Settings → Assistant.',
+      }),
+    ).toBe('No OpenRouter API key is configured. Add one in Settings → Assistant.')
+  })
+
+  it('passes a no-document-model readiness problem through as-is', () => {
+    expect(
+      documentFailureMessage({
+        stage: 'enrich',
+        mime: 'application/pdf',
+        error: 'No document model is configured. Set one in Settings → Assistant.',
+      }),
+    ).toBe('No document model is configured. Set one in Settings → Assistant.')
   })
 })

@@ -3,6 +3,7 @@ import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { anchorRequest } from '@/lib/anchor-request'
+import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
@@ -24,6 +25,15 @@ interface AnchorWatchServerState {
   bow_offset_m?: number
   bow_offset_applied?: boolean
   bow_offset_reason?: string
+  // -1 when not read, matching the backend's own "not captured" sentinel
+  // (backend/anchor.go's anchorWatchData.HeadingAtSetDeg) - feeds Adjust's
+  // own Undo restore payload (anchor-watch-drawer.tsx's adjustOpenedFromRef),
+  // which needs the watch's own facts, not just the three bow-offset fields
+  // above.
+  heading_at_set_deg?: number
+  // Empty until the background resolver pins one (place_name.go) - same
+  // Undo-restore use as heading_at_set_deg above.
+  place_name?: string
   planning_depth_m?: number
   planning_tide_height_ft?: number
   // ADR 0099: present whenever the server has ever auto-raised a watch
@@ -62,6 +72,10 @@ export interface AnchorWatchResult {
   bowOffsetM: number
   bowOffsetApplied: boolean
   bowOffsetReason: string
+  /** -1 when not read. Feeds Adjust's own Undo restore payload alongside the three bowOffset* fields above (code-review finding, round 2). */
+  headingAtSetDeg: number
+  /** Empty until the background resolver pins one. Same Undo-restore use as headingAtSetDeg. */
+  placeName: string
   /** The planning depth: seeded from the depth reading at the moment the
    * anchor was dropped, and editable by the operator from there — a
    * contemporaneous pair with the tide height, never re-derived from the
@@ -93,8 +107,15 @@ export interface AnchorWatchResult {
    * updateRadius exactly otherwise — awaits anchorRequest, replaces state
    * with the server echo, rethrows on failure rather than swallowing it, so
    * the caller (the Adjust mode's Set button) is what shows a Retry toast.
+   *
+   * `restore` (code-review finding, round 2): forwarded verbatim as the
+   * PATCH body's own `restore` object when the caller provides one - only
+   * ever Undo does (buildAdjustCommitTargets' own `undo` target), carrying
+   * the committed point's pre-Adjust bow-offset/heading/place-name facts so
+   * the backend puts them back instead of stamping "placed by hand in
+   * Adjust" over a position Undo is putting back exactly where it was.
    */
-  adjustAnchor: (params: { lat?: number; lon?: number; radiusMeters: number }) => Promise<void>
+  adjustAnchor: (params: { lat?: number; lon?: number; radiusMeters: number; restore?: AnchorAdjustRestore }) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
   clearAnchor: () => Promise<void>
@@ -225,14 +246,39 @@ export function useAnchorWatch(
     setLoaded(true)
   }, [])
 
-  const adjustAnchor = useCallback(async ({ lat, lon, radiusMeters }: { lat?: number; lon?: number; radiusMeters: number }) => {
+  const adjustAnchor = useCallback(async (
+    { lat, lon, radiusMeters, restore }: { lat?: number; lon?: number; radiusMeters: number; restore?: AnchorAdjustRestore },
+  ) => {
     // lat/lon travel together or not at all — the caller (buildAdjustCommitTargets)
     // already decides that; this just forwards whatever it built rather than
     // re-deciding, so a radius-only target really does PATCH radius_meters alone.
-    const body: { radius_meters: number; lat?: number; lon?: number } = { radius_meters: radiusMeters }
+    const body: {
+      radius_meters: number
+      lat?: number
+      lon?: number
+      restore?: {
+        bow_offset_m: number
+        bow_offset_applied: boolean
+        bow_offset_reason: string
+        heading_at_set_deg: number
+        place_name: string
+      }
+    } = { radius_meters: radiusMeters }
     if (lat !== undefined && lon !== undefined) {
       body.lat = lat
       body.lon = lon
+    }
+    // Only ever present alongside lat/lon (buildAdjustCommitTargets never
+    // sets it otherwise), matching the backend's own "restore requires a
+    // position change" rule.
+    if (restore !== undefined) {
+      body.restore = {
+        bow_offset_m: restore.bowOffsetM,
+        bow_offset_applied: restore.bowOffsetApplied,
+        bow_offset_reason: restore.bowOffsetReason,
+        heading_at_set_deg: restore.headingAtSetDeg,
+        place_name: restore.placeName,
+      }
     }
     const res = await anchorRequest({
       method: 'PATCH',
@@ -333,6 +379,12 @@ export function useAnchorWatch(
   const bowOffsetReason = serverState.active && typeof serverState.bow_offset_reason === 'string'
     ? serverState.bow_offset_reason
     : ''
+  const headingAtSetDeg = serverState.active && typeof serverState.heading_at_set_deg === 'number'
+    ? serverState.heading_at_set_deg
+    : -1
+  const placeName = serverState.active && typeof serverState.place_name === 'string'
+    ? serverState.place_name
+    : ''
 
   // Read predicate is `> 0` for depth and `>= 0` for tide, not `!== -1`
   // (ADR 0063) — a legacy anchor_watch.json with none of these fields decodes
@@ -376,6 +428,8 @@ export function useAnchorWatch(
     bowOffsetM,
     bowOffsetApplied,
     bowOffsetReason,
+    headingAtSetDeg,
+    placeName,
     planningDepthM,
     planningTideHeightFt,
     lastAutoRaise,
@@ -388,7 +442,7 @@ export function useAnchorWatch(
   }), [
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
     seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, error, bowOffsetM, lastAutoRaise,
-    bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
+    bowOffsetApplied, bowOffsetReason, headingAtSetDeg, placeName, planningDepthM, planningTideHeightFt,
     setAnchorHere, updateRadius, adjustAnchor, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,
   ])

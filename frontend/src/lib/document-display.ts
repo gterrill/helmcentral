@@ -20,8 +20,31 @@ export function documentDisplayName(doc: DocumentRecord): string {
   return doc.title.trim() !== '' ? doc.title : doc.filename
 }
 
+// Mirrors backend/documents_enrich.go's documentHEICRejectionMessage
+// exactly - the one stored error text that means "this specific file is a
+// HEIC/HEIF photo, which the enrich stage never even attempts to read."
+// Kept as a literal, not imported (there is no shared frontend/backend
+// string module), so this is the one place that has to be kept in sync if
+// that backend constant's text ever changes.
+const HEIC_REJECTION_ERROR = 'image/heic is not supported for reading; convert to JPEG'
+
+// Enrich-stage failures whose stored `error` text is already an operator
+// sentence naming the fix - the readiness problems checkAssistantReadiness
+// (backend/assistant_handlers.go) and documentEnrichReadinessProblem
+// (backend/documents_enrich.go) can fail a document with. This is exactly
+// the same text use-assistant-status.ts's AssistantStatus.problem carries
+// and assistant-drawer.tsx already shows verbatim, so passing it through
+// unchanged here matches that existing wording rather than inventing a
+// second copy of the same advice.
+const ENRICH_READINESS_PROBLEMS = new Set([
+  'The assistant is switched off. Enable it in Settings → Assistant.',
+  'No OpenRouter API key is configured. Add one in Settings → Assistant.',
+  'No assistant model is configured. Set one in Settings → Assistant.',
+  'No document model is configured. Set one in Settings → Assistant.',
+])
+
 /**
- * documentFailureMessage turns a failed document's stage and mime into an
+ * documentFailureMessage turns a failed document's stage/mime/error into an
  * operator-facing sentence with a next step, instead of the raw error
  * documents.error stores (an implementation detail - a "panic", an
  * internal on-disk storage path, a library's own error text - with no
@@ -35,9 +58,16 @@ export function documentDisplayName(doc: DocumentRecord): string {
  * backend/documents_store.go, leaves it alone) - "extract" means the local
  * text-reading step failed (a PDF's text layer, a text file over the size
  * cap, ...); anything else ("enrich") means extraction succeeded and a
- * later, Mate-assisted step (summarising, OCR) is what failed.
+ * later, Mate-assisted step (summarising, OCR) is what failed. Every extract
+ * failure gets the same generic-by-mime treatment as before (the local
+ * extractors don't produce an actionable, mime-independent error worth
+ * singling out) - only the enrich stage has known, actionable causes
+ * (HEIC, an unready assistant) worth their own message; anything else that
+ * fails there (an upstream error, a malformed reply, ...) still falls back
+ * to the generic Reindex line, since there's nothing more specific to tell
+ * the operator to do about it.
  */
-export function documentFailureMessage(doc: { stage: string; mime: string }): string {
+export function documentFailureMessage(doc: { stage: string; mime: string; error: string }): string {
   if (doc.stage === 'extract') {
     if (doc.mime === 'application/pdf') {
       return "Couldn't read the text in this PDF. Try Reindex; if it fails again, open it in a PDF viewer, save a copy and upload that."
@@ -46,6 +76,12 @@ export function documentFailureMessage(doc: { stage: string; mime: string }): st
       return "Couldn't read this image. Try Reindex, or upload it again."
     }
     return "Couldn't read this file. Try Reindex, or upload it again."
+  }
+  if (doc.error === HEIC_REJECTION_ERROR) {
+    return "This photo is HEIC, which Mate can't read. Convert it to JPEG, then Reindex."
+  }
+  if (ENRICH_READINESS_PROBLEMS.has(doc.error)) {
+    return doc.error
   }
   return "Mate couldn't finish indexing this document. Try Reindex."
 }

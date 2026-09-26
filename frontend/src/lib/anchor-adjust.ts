@@ -5,6 +5,7 @@
  */
 
 import { bearingDeg, haversineMeters } from '@/lib/geo'
+import { feetToMeters, metersToFeet } from '@/lib/units'
 
 /** No alarm radius may go below this, regardless of chain onboard or LOA. */
 export const MIN_ALARM_RADIUS_M = 5
@@ -142,12 +143,20 @@ export function adjustZoomBounds(bounds: AlarmRadiusBounds, latDeg: number, ring
   }
 }
 
-/** Matches rode-plan.ts's own METERS_PER_FOOT — kept local so this stays a standalone geometry module (see the MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 comment above). */
-const METERS_PER_FOOT = 3.28084
+/**
+ * The rounded whole-unit figure for a radius in the operator's display unit
+ * — shared by formatRadiusDisplay below (which appends the unit suffix) and
+ * the bottom bar's own bare-number readout (anchor-adjust-bar.tsx), so the
+ * two can never disagree about the rounding (code-review finding: the bar
+ * had grown its own copy of this exact rounding).
+ */
+export function radiusDisplayValue(radiusM: number, isImperial: boolean): number {
+  return Math.round(isImperial ? metersToFeet(radiusM) : radiusM)
+}
 
 /** "24 m" / "79 ft" — a whole-unit radius in the operator's display unit. Shared by the bottom bar and the Set/Undo toast (use-anchor-adjust-commit.ts) so both name a radius the same way. */
 export function formatRadiusDisplay(radiusM: number, isImperial: boolean): string {
-  return isImperial ? `${Math.round(radiusM * METERS_PER_FOOT)} ft` : `${Math.round(radiusM)} m`
+  return `${radiusDisplayValue(radiusM, isImperial)} ${isImperial ? 'ft' : 'm'}`
 }
 
 /**
@@ -160,7 +169,7 @@ export const RADIUS_STEP_M = 1
 export const RADIUS_STEP_FT = 5
 
 export function radiusStepM(isImperial: boolean): number {
-  return isImperial ? RADIUS_STEP_FT / METERS_PER_FOOT : RADIUS_STEP_M
+  return isImperial ? feetToMeters(RADIUS_STEP_FT) : RADIUS_STEP_M
 }
 
 /**
@@ -173,7 +182,7 @@ export function radiusStepM(isImperial: boolean): number {
  * derived number instead keeps it stable without touching the camera.
  */
 export function snapRadiusM(radiusM: number, isImperial: boolean): number {
-  if (isImperial) return Math.round(radiusM * METERS_PER_FOOT) / METERS_PER_FOOT
+  if (isImperial) return feetToMeters(Math.round(metersToFeet(radiusM)))
   return Math.round(radiusM)
 }
 
@@ -200,7 +209,7 @@ export function anchorMoveOffset(fromLat: number, fromLon: number, toLat: number
 export function formatMovedLabel(offset: AnchorMoveOffset, isImperial: boolean): string | null {
   if (offset.distanceM < 1) return null
   const distanceLabel = isImperial
-    ? `${Math.round(offset.distanceM * METERS_PER_FOOT)} ft`
+    ? `${Math.round(metersToFeet(offset.distanceM))} ft`
     : `${Math.round(offset.distanceM)} m`
   const bearingLabel = String(Math.round(offset.bearingDeg) % 360).padStart(3, '0')
   return `moved ${distanceLabel} · ${bearingLabel}°`
@@ -239,10 +248,32 @@ export function adjustWarningActive(distanceFromDraftM: number | null, draftRadi
  */
 export const POSITION_UNCHANGED_TOLERANCE_M = 0.5
 
+/**
+ * Undo's own escape hatch from the backend's "placed by hand in Adjust"
+ * defaults (code-review finding, round 2 — backend/anchor.go's
+ * anchorWatchRestore): Undo re-sends the committed position as another
+ * position-changing PATCH, and without this the backend would stamp it with
+ * those hand-placed defaults even though Undo is putting the anchor back
+ * exactly where Set found it — bow correction and resolved place name
+ * included, not making a new hand-placed move. Sourced from the watch's own
+ * committed facts at the moment Adjust opened (anchor-watch-drawer.tsx's
+ * adjustOpenedFromRef), never from the draft — the draft has no bow-offset
+ * or place-name facts of its own, it's just a position and a radius.
+ */
+export interface AnchorAdjustRestore {
+  bowOffsetM: number
+  bowOffsetApplied: boolean
+  bowOffsetReason: string
+  headingAtSetDeg: number
+  placeName: string
+}
+
 export interface AdjustCommitTarget {
   lat?: number
   lon?: number
   radiusMeters: number
+  /** Only ever present on Undo's own target, and only when the position actually moved — see AnchorAdjustRestore's own doc comment. */
+  restore?: AnchorAdjustRestore
 }
 
 interface AdjustCommitPoint {
@@ -258,10 +289,19 @@ interface AdjustCommitPoint {
  * position Set itself never touched — a radius-only Set is undone with a
  * radius-only PATCH too, not a position snap-back to wherever the crosshair
  * happened to sit.
+ *
+ * `committedFacts` (the committed point's bow-offset/heading/place-name
+ * facts, from the watch record the moment Adjust opened) rides along on
+ * Undo's own target as `restore`, but only when the position actually
+ * moved — a radius-only Undo never touches position at all, so there is
+ * nothing for restore to put back, matching the backend's own "restore
+ * only valid with lat/lon" rule. Set never carries it: only Undo is putting
+ * a point back to where it already was.
  */
 export function buildAdjustCommitTargets(
   committed: AdjustCommitPoint,
   draft: AdjustCommitPoint,
+  committedFacts: AnchorAdjustRestore,
 ): { set: AdjustCommitTarget; undo: AdjustCommitTarget } {
   const moved = haversineMeters(committed.lat, committed.lon, draft.lat, draft.lon) >= POSITION_UNCHANGED_TOLERANCE_M
   if (!moved) {
@@ -272,6 +312,6 @@ export function buildAdjustCommitTargets(
   }
   return {
     set: { lat: draft.lat, lon: draft.lon, radiusMeters: draft.radiusMeters },
-    undo: { lat: committed.lat, lon: committed.lon, radiusMeters: committed.radiusMeters },
+    undo: { lat: committed.lat, lon: committed.lon, radiusMeters: committed.radiusMeters, restore: committedFacts },
   }
 }

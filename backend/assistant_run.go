@@ -557,10 +557,12 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 
 // run asks the model for a reply, answers any tool calls it makes, and
 // repeats until the model returns plain text or assistantMaxToolRounds is
-// reached, at which point tool_choice is set to "none" to force a final
-// answer - Tools stays populated on that request, unlike an earlier version
-// of this loop that also cleared it, because an empty Tools list gives some
-// providers nothing to apply "none" to. The system message on that request
+// reached, at which point Tools and ToolChoice are both left unset entirely
+// to force a final answer with no tool machinery on the wire at all - an
+// earlier version of this loop set tool_choice "none" while leaving Tools
+// populated, which some models/providers still answered with a tool call
+// anyway (see assistantForcedFinalInstruction's own doc comment for the two
+// incidents this responds to). The system message on that request
 // is also rebuilt with assistantForcedFinalInstruction appended to its live
 // suffix (see that const's own doc comment). A model that still calls a
 // tool on that forced round is a bug in the model's behaviour Helmcentral

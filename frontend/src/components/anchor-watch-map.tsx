@@ -442,6 +442,16 @@ export interface AnchorAdjustDraft {
 /** Imperative surface Adjust mode's bottom bar (owned by the host) drives the camera through — setting an absolute target radius by easing zoom so the fixed-size ring keeps representing it. */
 export interface AnchorWatchMapHandle {
   setAdjustRadius: (targetRadiusM: number) => void
+  /**
+   * The last radius setAdjustRadius (or the map's own keyboard +/-) actually
+   * commanded, or null before Adjust has ever set one this session — the
+   * host's own +/- step handler bases its next target on this, not the
+   * draft it last received, for the same reason the map's own keyboard
+   * handler does (see pendingTargetRadiusMRef's doc comment): the reported
+   * draft only updates once the 150ms ease reports back, which can lag
+   * behind a rapid hold's 80ms repeat interval.
+   */
+  getAdjustRadiusTarget: () => number | null
 }
 
 export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapProps>(function AnchorWatchMap({
@@ -1061,6 +1071,17 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
   // adding adjustDraft itself to that effect's own dependency list, which
   // would tear down and re-subscribe its ResizeObserver on every pan/pinch.
   const adjustDraftRef = useRef<AnchorAdjustDraft | null>(null)
+  // The last radius applyAdjustRadius was actually asked to reach — distinct
+  // from adjustDraft.radiusM, which only updates once the camera's own
+  // moveend/move event reports back (code-review finding). easeTo's 150ms
+  // transition is slower than usePressRepeat's 80ms repeat interval, so a
+  // held +/- (or rapid native key-repeat on the keyboard's own +/-) can fire
+  // its next step before that report lands; deriving the next target from
+  // adjustDraft.radiusM in that window recomputes from a stale, mid-ease
+  // value instead of continuing from where the previous step was actually
+  // headed, landing off the exact step grid (74/78/83 ft instead of
+  // 75/80/85). Every step now bases itself on this instead.
+  const pendingTargetRadiusMRef = useRef<number | null>(null)
   // The container's short side in CSS pixels, remeasured on entry and on
   // resize — drives the fixed ring's own diameter and every zoom<->radius
   // conversion below, so a resized window or a rotated kiosk-sized drawer
@@ -1113,8 +1134,19 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
       const shortSidePx = measureShortSidePx()
       const ringPx = ringRadiusPx(shortSidePx)
       setAdjustRingPx(ringPx)
-      const initialZoom = zoomForRingRadius(radiusMeters, anchorLat, ringPx)
       const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: radiusMeters, maxReason: null }
+      // Clamped, not the raw committed radiusMeters (code-review finding):
+      // the drawer's own openAdjust already seeds ITS draft with
+      // clampRadiusM(radiusMeters, bounds) so a radius saved before the
+      // current chain+LOA ceiling existed starts inside it — this entry
+      // effect used to report the raw value right after, silently
+      // overwriting that clamped seed with one Set would PATCH straight
+      // back out to. MapLibre's own setMinZoom/setMaxZoom below already
+      // clamp the CAMERA to whatever the raw radius's zoom would have been,
+      // so the ring was already showing the clamped ground radius while this
+      // reported the wrong number as the draft.
+      const clampedRadiusM = clampRadiusM(radiusMeters, bounds)
+      const initialZoom = zoomForRingRadius(clampedRadiusM, anchorLat, ringPx)
       const zoomBounds = adjustZoomBounds(bounds, anchorLat, ringPx)
       if (map) {
         map.setMinZoom(zoomBounds.minZoom)
@@ -1130,7 +1162,8 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
         map.resize()
       }
       setCurrentZoom(initialZoom)
-      reportAdjustDraft({ lat: anchorLat, lon: anchorLon, radiusM: radiusMeters })
+      pendingTargetRadiusMRef.current = clampedRadiusM
+      reportAdjustDraft({ lat: anchorLat, lon: anchorLon, radiusM: clampedRadiusM })
       mapWrapperRef.current?.focus()
     } else if (everEnteredAdjustRef.current) {
       everEnteredAdjustRef.current = false
@@ -1140,6 +1173,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
         map.touchZoomRotate?.enableRotation?.()
       }
       adjustDraftRef.current = null
+      pendingTargetRadiusMRef.current = null
       setAdjustDraft(null)
       // "Return focus to the Move icon on exit" — a no-op (optional
       // chaining) if the icon isn't currently rendered, e.g. the anchor was
@@ -1157,7 +1191,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
   // at the limits) and snapped to a whole display unit — "snap the
   // displayed/committed value, not the zoom" avoids the readout jittering
   // by fractions of a metre as a gesture settles at an off zoom.
-  const handleAdjustMove = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
+  const handleAdjustMove = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => {
     if (!adjustActive) return
     const { latitude, longitude, zoom } = e.viewState
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(zoom)) return
@@ -1168,6 +1202,28 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
     // closure.
     const rawRadiusM = radiusForZoom(zoom, latitude, adjustRingPxRef.current)
     const snappedRadiusM = snapRadiusM(clampRadiusM(rawRadiusM, bounds), isImperial)
+    // A genuine pan/pinch gesture is just as authoritative as a commanded
+    // step for what the NEXT step should continue from (pendingTargetRadiusMRef's
+    // own doc comment) — without this, stepping once, then pinching by hand,
+    // then stepping again would resume from the first step's stale target
+    // instead of wherever the pinch actually left the ring.
+    //
+    // Gated on e.originalEvent (code-review finding, round 2): this handler
+    // fires on EVERY animation frame of applyAdjustRadius's own 150ms
+    // easeTo, not only on a genuine gesture — MapLibre only attaches
+    // originalEvent to a move event it fired for real user input
+    // (drag/wheel/touch); a programmatic easeTo/jumpTo call with no
+    // eventData argument (every call this file makes) fires 'move' with
+    // originalEvent undefined. Writing the ref unconditionally meant a
+    // still-in-flight frame of a step's own ease — not yet at the target,
+    // since the ease takes longer than usePressRepeat's 80ms repeat or a
+    // keyboard's own auto-repeat — would overwrite the correct target that
+    // same step had just recorded, so the NEXT step read back a stale,
+    // not-yet-settled value instead of continuing from where the previous
+    // one was actually headed.
+    if (e.originalEvent !== undefined) {
+      pendingTargetRadiusMRef.current = snappedRadiusM
+    }
     reportAdjustDraft({ lat: latitude, lon: longitude, radiusM: snappedRadiusM })
   }, [adjustActive, adjustRadiusBounds, radiusMeters, isImperial, reportAdjustDraft])
 
@@ -1184,6 +1240,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
     if (!adjustActive || !adjustDraft) return
     const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: adjustDraft.radiusM, maxReason: null }
     const targetRadiusM = clampRadiusM(targetRadiusMRaw, bounds)
+    pendingTargetRadiusMRef.current = targetRadiusM
     const zoom = zoomForRingRadius(targetRadiusM, adjustDraft.lat, adjustRingPxRef.current)
     mapRef.current?.easeTo({ zoom, duration: 150 })
   }, [adjustActive, adjustDraft, adjustRadiusBounds])
@@ -1215,10 +1272,14 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
       case 'ArrowDown': e.preventDefault(); panAdjustByMeters(0, -panStepM); break
       case 'ArrowLeft': e.preventDefault(); panAdjustByMeters(-panStepM, 0); break
       case 'ArrowRight': e.preventDefault(); panAdjustByMeters(panStepM, 0); break
+      // Steps from the last commanded target (pendingTargetRadiusMRef), not
+      // adjustDraft.radiusM directly — see that ref's own doc comment for
+      // why: a native key-repeat firing faster than the 150ms ease would
+      // otherwise recompute from a stale, mid-ease draft.
       case '+':
-      case '=': e.preventDefault(); if (adjustDraft) applyAdjustRadius(adjustDraft.radiusM + step); break
+      case '=': e.preventDefault(); if (adjustDraft) applyAdjustRadius((pendingTargetRadiusMRef.current ?? adjustDraft.radiusM) + step); break
       case '-':
-      case '_': e.preventDefault(); if (adjustDraft) applyAdjustRadius(adjustDraft.radiusM - step); break
+      case '_': e.preventDefault(); if (adjustDraft) applyAdjustRadius((pendingTargetRadiusMRef.current ?? adjustDraft.radiusM) - step); break
       case 'Enter': e.preventDefault(); onAdjustSetKey?.(); break
       case 'Escape': e.preventDefault(); onAdjustCancelKey?.(); break
       default: break
@@ -1229,7 +1290,10 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
   // camera's radius through this — its own +/- buttons and chip taps need to
   // ease the SAME zoom this component's keyboard handler above eases,
   // rather than a second copy of the conversion.
-  useImperativeHandle(ref, () => ({ setAdjustRadius: applyAdjustRadius }), [applyAdjustRadius])
+  useImperativeHandle(ref, () => ({
+    setAdjustRadius: applyAdjustRadius,
+    getAdjustRadiusTarget: () => pendingTargetRadiusMRef.current,
+  }), [applyAdjustRadius])
 
   // The reference line + faded original circle's label ("moved 8 m ·
   // 045°") — null (and so not rendered) under 1 m of movement, and null
@@ -1433,19 +1497,31 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
         const newRingPx = ringRadiusPx(measureShortSidePx())
         setAdjustRingPx(newRingPx)
         const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: draft.radiusM, maxReason: null }
+        // Clamped, not the existing draft.radiusM as-is (code-review
+        // finding, same reasoning as the entry effect above): if the bounds
+        // have narrowed since the draft was last set (a settings change to
+        // chain onboard/LOA landing mid-session), a resize must pull the
+        // reported radius back inside them like every other path already
+        // does, not just keep re-asserting whatever it already was.
+        const clampedRadiusM = clampRadiusM(draft.radiusM, bounds)
+        // Keeps the pending-target tracking (see its own doc comment) in
+        // sync with a resize too, so a keyboard/bar step immediately after
+        // one continues from the radius the resize just settled on, not a
+        // stale value from before it.
+        pendingTargetRadiusMRef.current = clampedRadiusM
         const zoomBounds = adjustZoomBounds(bounds, draft.lat, newRingPx)
         const map = mapRef.current?.getMap?.()
         if (map) {
           map.setMinZoom(zoomBounds.minZoom)
           map.setMaxZoom(zoomBounds.maxZoom)
-          map.jumpTo({ zoom: zoomForRingRadius(draft.radiusM, draft.lat, newRingPx) })
+          map.jumpTo({ zoom: zoomForRingRadius(clampedRadiusM, draft.lat, newRingPx) })
         }
         // Restated explicitly rather than left to jumpTo's own synchronous
         // 'move' event (which handleAdjustMove would otherwise re-derive
         // from the new ringPx/zoom pair): the radius has to read back as
         // exactly what it was, not a value that merely round-trips close to
         // it through a second floating-point conversion.
-        reportAdjustDraft(draft)
+        reportAdjustDraft({ ...draft, radiusM: clampedRadiusM })
       }
     })
     observer.observe(wrapper)

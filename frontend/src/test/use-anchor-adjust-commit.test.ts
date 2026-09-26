@@ -180,6 +180,40 @@ describe('useAnchorAdjustCommit', () => {
     expect(options).toMatchObject({ description: 'Radius 24 m' })
   })
 
+  // Code-review finding: the success toast always said "Anchor moved," even
+  // for a radius-only Set (no lat/lon on the draft at all - see
+  // AnchorAdjustTarget's own doc comment) - a purely cosmetic radius tweak
+  // has nothing to do with the anchor's position and must not claim it moved.
+  it('says "Anchor moved" when the committed draft carries a position', async () => {
+    const adjustAnchor = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAnchorAdjustCommit({ adjustAnchor }))
+
+    await act(async () => {
+      result.current.commit({ draft, previous, onSuccess: () => {} })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const [message] = vi.mocked(toast).mock.calls[0]
+    expect(message).toBe('Anchor moved')
+  })
+
+  it('says "Alarm radius set" for a radius-only commit (no lat/lon on the draft)', async () => {
+    const adjustAnchor = vi.fn().mockResolvedValue(undefined)
+    const radiusOnlyDraft = { radiusMeters: 24 }
+    const radiusOnlyPrevious = { radiusMeters: 20 }
+    const { result } = renderHook(() => useAnchorAdjustCommit({ adjustAnchor }))
+
+    await act(async () => {
+      result.current.commit({ draft: radiusOnlyDraft, previous: radiusOnlyPrevious, onSuccess: () => {} })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const [message] = vi.mocked(toast).mock.calls[0]
+    expect(message).toBe('Alarm radius set')
+  })
+
   it('Retry on a failed commit re-sends the same draft', async () => {
     const adjustAnchor = vi.fn().mockRejectedValueOnce(new Error('Request failed')).mockResolvedValueOnce(undefined)
     const onSuccess = vi.fn()

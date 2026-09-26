@@ -277,6 +277,62 @@ func TestTideToday_ReportsSentinelWhenNoFutureLowExists(t *testing.T) {
 	}
 }
 
+// TestTideToday_SendsEmptyTimeWhenNoFutureExtremeExists is the other half of
+// the code-review finding TestTideToday_ReportsSentinelWhenNoFutureLowExists
+// only partly covered: the height sentinel was fixed, but low_tide_time (and
+// high_tide_time, symmetrically) still fell back to a fabricated `now` /
+// `now+24h` rather than staying blank - a time an operator reads as real (a
+// fake "Low <tomorrow>" on the Depth & Tide tile, a fake "High · <now>" on
+// the Anchor Watch header). A missing extreme must report an empty time
+// string alongside its -1 height, not an invented one.
+func TestTideToday_SendsEmptyTimeWhenNoFutureExtremeExists(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+
+	station := tideStation{StationID: "TEST_STATION", Name: "Test Harbour"}
+	now := time.Now().UTC()
+	fakeResult := tideChartResult{
+		Station: station,
+		Extremes: []tideExtremePoint{
+			// Only a future high and a past low - no future low at all.
+			{Time: now.Add(-2 * time.Hour), HeightM: 1.0, High: false},
+			{Time: now.Add(4 * time.Hour), HeightM: 2.0, High: true},
+		},
+		CurrentHeightM: 1.5,
+		Direction:      "Rising",
+		CachedAt:       now,
+	}
+	registerTideProvider(&stubTideProvider{id: "bom", result: fakeResult})
+
+	settingsPath := writeTideTodaySettings(t, "bom", station.StationID)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var payload tideTodayResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload.LowTideTime != "" {
+		t.Fatalf("expected an empty low_tide_time when no future low exists, got %q", payload.LowTideTime)
+	}
+	// The future high in this fixture DOES exist, so it must still report a
+	// real time - this guards against a fix that blanks both fields
+	// unconditionally instead of tracking found/not-found per extreme.
+	if payload.HighTideTime == "" {
+		t.Fatalf("expected a real high_tide_time since a future high exists, got empty")
+	}
+}
+
 func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	settingsPath := writeTideTodaySettings(t, "not-a-real-provider", "ANY")
