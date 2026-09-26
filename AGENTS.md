@@ -46,6 +46,9 @@
   `make worktree NAME=<short-name>` creates one alongside this directory with
   `frontend/node_modules` symlinked, so tests run immediately. Only one
   checkout can run the dev stack; use the one that is already up.
+- Once a branch's PR is merged, `make prune-merged` lists the worktrees and
+  local and remote branches it would clear; `CONFIRM=1` deletes them. It
+  skips any worktree with uncommitted changes.
 
 ## Fallback Policy
 

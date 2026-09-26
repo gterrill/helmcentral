@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree prune-merged
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -44,6 +44,13 @@ worktree:
 	git worktree add -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)"
 	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
 	@echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"
+
+# Clears up after merged work: removes each worktree, local branch and remote
+# branch whose GitHub PR is merged. Lists what it would do by default;
+# `make prune-merged CONFIRM=1` deletes. Worktrees with uncommitted or
+# untracked changes are skipped. Rules in scripts/prune-merged.sh.
+prune-merged:
+	@CONFIRM="$(CONFIRM)" sh scripts/prune-merged.sh
 
 dev:
 	# --force-recreate: frontend-dev only runs `npm install` once at container
