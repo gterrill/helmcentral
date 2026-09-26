@@ -126,6 +126,13 @@ forecast or a tide station, with no attachment needed. See
 [Documents](documents.md#attaching-a-document-to-mate-and-mate-searching-on-its-own)
 for exactly how much of a document Mate reads and when.
 
+When an answer draws on something specific it found this way, it cites the
+source as a small icon next to the text instead of describing it in a
+sentence - tap or click it to open that manual, receipt, or note directly,
+and hover or press it to see its title. A citation to something that's
+since been removed from the library shows as a faded, broken icon rather
+than just vanishing.
+
 That one search covers everything in the library at once: uploaded manuals,
 your own captured notes, receipts, photos of a data plate. There's no
 separate search that only looks inside your authored manuals, even though a

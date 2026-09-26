@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate now cites documents it found in the library as small icon links
+  instead of describing them in a sentence. Tap or click one to open that
+  document, and hover or focus it to see its title. A citation to a
+  document that's since been removed shows a muted, broken icon instead of
+  silently disappearing.
+
 ## [0.34.0] - 2026-09-26
 
 ### Added

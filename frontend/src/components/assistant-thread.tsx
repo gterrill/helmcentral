@@ -21,7 +21,7 @@ import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import { useNotes } from '@/hooks/use-notes'
-import { formatAppLocation } from '@/lib/app-location'
+import { documentViewerHref } from '@/lib/document-citation'
 import { cn } from '@/lib/utils'
 
 const EXAMPLE_QUESTION =
@@ -83,12 +83,10 @@ function formatMessageFooterTitle(message: AssistantMessage): string {
 // App.tsx's panel state, and "keep it simple" (the plan's own words for
 // this wiring) means a real link the browser handles on its own, the same
 // as the collision-tuning link (lib/collision-tuning.ts) does for an
-// external URL. firstPageId is irrelevant to a 'documents' location
-// (formatAppLocation only reads it for the dashboard panel===null case), so
-// null is passed rather than threading the real one down through props.
-function documentViewerHref(documentId: string): string {
-  return formatAppLocation({ panel: 'documents', documentId }, { firstPageId: null })
-}
+// external URL. documentViewerHref itself now lives in
+// lib/document-citation.ts (Mate UI cycle: document sources as icons) so the
+// citation link renderer in assistant-markdown-impl.tsx can recognise this
+// exact same href shape rather than growing a second copy of it.
 
 function MessageAttachmentChips({ attachments }: { attachments: AssistantMessageAttachment[] }) {
   return (

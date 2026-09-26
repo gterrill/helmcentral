@@ -453,6 +453,26 @@ func TestBuildAssistantSystemPrompt_DocumentContentFramedAsDataNotInstructions(t
 	}
 }
 
+// TestBuildAssistantSystemPrompt_CitesDocumentsAsStructuredLinks is the
+// structured citation contract (Mate UI cycle: document sources as icons):
+// the frontend markdown renderer turns a `/documents?document=<id>` link
+// into a tappable icon with the link text as its tooltip, so Mate has to be
+// told the exact markdown link form to use instead of the old free-text
+// parenthetical mention - stable prefix, fixed wording, identical every
+// turn, the same as the rest of the document-library guidance just above it.
+func TestBuildAssistantSystemPrompt_CitesDocumentsAsStructuredLinks(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	if !strings.Contains(stable, "/documents?document=") {
+		t.Fatalf("expected the stable prefix to give the citation link form, got:\n%s", stable)
+	}
+	if !strings.Contains(stable, "document_id") {
+		t.Fatalf("expected the citation guidance to name document_id as the id to link with, got:\n%s", stable)
+	}
+	if strings.Contains(live, "/documents?document=") {
+		t.Fatalf("expected the citation guidance NOT to be duplicated in the live suffix, got:\n%s", live)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_DocumentLibraryLiveLineOmittedWhenNoDocuments(t *testing.T) {
 	pc := basePromptContext()
 	pc.DocumentCount = 0
