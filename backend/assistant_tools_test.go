@@ -2624,6 +2624,61 @@ func TestExecuteSearchDocuments_ReturnsShapeWithFolderPathAndCleanSnippet(t *tes
 	}
 }
 
+// TestExecuteSearchDocuments_TitleFallsBackToFilenameForCitations pins the
+// structured citation contract (Mate UI cycle: document sources as icons):
+// search_documents' Title field must never come back blank, since it is
+// exactly what a citation link's visible text is built from - a blank title
+// would render as an empty link. Most uploaded documents never get an
+// operator-set title, so the tool falls back to the filename itself, the
+// same fallback documentDisplayName (frontend/src/lib/document-display.ts)
+// already applies for the same reason on the Documents panel.
+func TestExecuteSearchDocuments_TitleFallsBackToFilenameForCitations(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	insertSearchableDocument(t, store, "sha-citation-1", "yanmar-4jh.pdf", nil, "Replace the raw water impeller every 200 hours.")
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %+v", len(result.Results), result.Results)
+	}
+	if result.Results[0].Title != "yanmar-4jh.pdf" {
+		t.Fatalf("expected title to fall back to the filename, got %q", result.Results[0].Title)
+	}
+}
+
+// TestExecuteSearchDocuments_TitleUsesStoredTitleWhenSet is the other half of
+// the fallback above: an operator-set title wins over the filename.
+func TestExecuteSearchDocuments_TitleUsesStoredTitleWhenSet(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	doc, err := store.Insert(document{SHA256: "sha-citation-2", Filename: "yanmar-4jh.pdf", Title: "Yanmar 4JH Service Manual", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Replace the raw water impeller every 200 hours."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if len(result.Results) != 1 || result.Results[0].Title != "Yanmar 4JH Service Manual" {
+		t.Fatalf("expected the stored title, got %+v", result.Results)
+	}
+}
+
 // TestExecuteSearchDocuments_SemanticallyConfiguredFindsVectorOnlyDocument
 // is search_documents' own coverage of E1d (documents_hybrid.go): once
 // documentSearchReadiness is wired (assistantProductionToolDeps' own wiring,
@@ -2886,6 +2941,36 @@ func TestExecuteReadDocument_DefaultStartsAfterMetaChunk(t *testing.T) {
 	}
 	if result.NextChunk != 0 {
 		t.Fatalf("expected no next_chunk when everything fit, got %d", result.NextChunk)
+	}
+}
+
+// TestExecuteReadDocument_ResultCarriesCitableTitle is read_document's half
+// of the structured citation contract (Mate UI cycle: document sources as
+// icons) - the same guaranteed-non-blank Title search_documents' own result
+// carries (see TestExecuteSearchDocuments_TitleFallsBackToFilenameForCitations),
+// so a citation built from either tool always has a real name to show.
+func TestExecuteReadDocument_ResultCarriesCitableTitle(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	doc, err := store.Insert(document{SHA256: "sha-read-title", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "chunk"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	if err != nil {
+		t.Fatalf("execute read_document: %v", err)
+	}
+	var result assistantReadDocumentResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if result.Title != "manual.pdf" {
+		t.Fatalf("expected title to fall back to the filename, got %q", result.Title)
 	}
 }
 

@@ -39,6 +39,17 @@ you leave it and come back, until you press its "New conversation" button.
 Its "Open in Mate" button hands that same thread to the full panel and
 takes you there, for when a question turns into a longer working session.
 
+Both always open on a fresh, blank conversation: neither one resumes
+whatever thread was last active, even if you were just looking at one a
+moment ago, and nothing is saved until you actually send a question, so
+opening Mate and changing your mind leaves nothing behind. The one
+exception is a reply already being written when you close and reopen the
+sheet mid-answer - that keeps arriving exactly as it was, rather than being
+cut off. To pick up an earlier conversation instead, choose it from the
+panel's list, or from the sheet's own search - its header's search icon
+opens a quick list of your 8 most recent conversations, or type to filter
+by title.
+
 The panel lives at `/mate`. A specific conversation can be opened directly at
 `/mate/<thread-id>`, for example `/mate/12345`.
 
@@ -125,6 +136,13 @@ Mate search the whole library on its own, the same way it looks up a
 forecast or a tide station, with no attachment needed. See
 [Documents](documents.md#attaching-a-document-to-mate-and-mate-searching-on-its-own)
 for exactly how much of a document Mate reads and when.
+
+When an answer draws on something specific it found this way, it cites the
+source as a small icon next to the text instead of describing it in a
+sentence - tap or click it to open that manual, receipt, or note directly,
+and hover or press it to see its title. A citation to something that's
+since been removed from the library shows as a faded, broken icon rather
+than just vanishing.
 
 That one search covers everything in the library at once: uploaded manuals,
 your own captured notes, receipts, photos of a data plate. There's no

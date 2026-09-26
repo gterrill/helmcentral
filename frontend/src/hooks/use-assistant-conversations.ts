@@ -86,9 +86,10 @@ function mapMessage(api: MessageApi): AssistantMessage {
 export interface UseAssistantConversationsOptions {
   /** Selects this conversation on mount, when it is present in the freshly
    * fetched list (ADR 0094: "Open in Mate" hands the panel a thread the
-   * sheet already has active). Falls back to the newest conversation the
-   * same as ever when absent, unset, or not found in the list - a stale or
-   * deleted id is never a reason to leave the panel on no thread at all. */
+   * sheet already has active). Mate UI cycle ("Mate opens on an empty
+   * chat"): absent, unset, or not found in the list now means a blank
+   * chat, not a fallback to the newest conversation - a stale or deleted id
+   * is never a reason to guess at a different, unrelated thread. */
   initialId?: string | null
 }
 
@@ -163,20 +164,26 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   }, [])
 
   // Shared by the mount effect below and by `reload`: fetches the list, then
-  // opens `targetId` when it names a conversation that actually exists in
-  // the freshly fetched list, otherwise the most recently updated thread
-  // rather than an empty pane - the panel is usually reopened to reread a
-  // plan, and the list is already sorted newest first by the server.
-  // `isCancelled` lets the mount effect's cleanup skip state updates after
-  // an unmount without `reload` (which always runs to completion) having to
-  // carry that same plumbing.
+  // opens `targetId` only when it names a conversation that actually exists
+  // in the freshly fetched list. Mate UI cycle ("Mate opens on an empty
+  // chat"): this used to fall back to the most recently updated thread when
+  // `targetId` was absent or stale, so a plain open silently resumed
+  // whatever the server considered newest instead of starting blank, and a
+  // link naming a since-deleted conversation landed on an unrelated one with
+  // no indication anything was wrong. Neither happens any more - no match
+  // means no selection, the same "fresh empty chat" state a mount with no
+  // conversations at all has always shown. The operator (or an explicit
+  // `initialId`/`select()`/`create()`) is the only thing that ever opens a
+  // conversation now. `isCancelled` lets the mount effect's cleanup skip
+  // state updates after an unmount without `reload` (which always runs to
+  // completion) having to carry that same plumbing.
   const loadConversationsAndSelect = useCallback(async (targetId: string | null, isCancelled: () => boolean) => {
     try {
       const list = await fetchConversations()
       if (isCancelled()) return
       setConversations(list)
       setError(null)
-      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : list[0]?.id ?? null
+      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : null
       if (target !== null) await select(target)
     } catch (err) {
       if (!isCancelled()) setError(err instanceof Error ? err.message : String(err))
@@ -198,15 +205,38 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
 
   // Repeats the initial load on demand: a failed load otherwise has no way
   // out short of remounting the whole hook. Clears the stale error and
-  // shows `loading` while it runs, then re-selects `mountInitialId` when
-  // present or the newest thread otherwise - the same rule the mount effect
-  // uses, since a caller asking to reload wants the same starting point it
-  // would have gotten on a fresh mount.
+  // shows `loading` while it runs, then re-selects `mountInitialId` only
+  // when one was given and still exists - the same rule the mount effect
+  // uses (loadConversationsAndSelect's own doc comment), since a caller
+  // asking to reload wants the same starting point it would have gotten on
+  // a fresh mount. With no `mountInitialId` this only ever repopulates
+  // `conversations` - it never selects anything on its own.
   const reload = useCallback(async (): Promise<void> => {
     setError(null)
     setLoading(true)
     await loadConversationsAndSelect(mountInitialId, () => false)
   }, [loadConversationsAndSelect, mountInitialId])
+
+  // Mate UI cycle ("Mate opens on an empty chat"): the sheet/panel's own
+  // "New conversation" button used to call `create()`, which POSTs and
+  // persists a brand new conversation row immediately - before the operator
+  // had typed a word. Closing the sheet right after left an empty,
+  // permanent row cluttering the list forever (the "empty persisted draft"
+  // this cycle removes). `startNew` is the local-only equivalent: it clears
+  // the active selection and the thread exactly the way a fresh mount
+  // already does, with no request at all. The conversation is only ever
+  // actually created, by `create()`, at the moment `chat.send()` posts the
+  // first real message (AssistantThread's handleSend already does this
+  // lazily) - so pressing "New conversation" and never sending anything now
+  // leaves the list exactly as it was.
+  //
+  // Defined here, ahead of the re-select effect below, so that effect can
+  // call it directly.
+  const startNew = useCallback(() => {
+    setActiveId(null)
+    setMessages([])
+    setError(null)
+  }, [])
 
   // Re-selects when `initialId` changes to a new non-null value after mount
   // (ADR 0094): "Open in Mate" can send an already-showing panel a different
@@ -215,14 +245,25 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // against firing on mount itself - the effect above already resolved the
   // initial selection - by comparing against the previous value rather than
   // running unconditionally whenever `initialId` is non-null.
+  //
+  // Code-review finding ("clicking Mate ALWAYS shows a fresh empty chat"):
+  // the same comparison also has to cover `initialId` going the OTHER way,
+  // back to null - App.tsx's sidebar Mate click clears its remembered
+  // conversation id rather than remounting the panel (AssistantDrawer stays
+  // mounted whenever the operator merely re-clicks the panel already
+  // showing), so without this branch a panel already showing some
+  // conversation kept showing it forever no matter how many times "Mate"
+  // was clicked again.
   const previousInitialIdRef = useRef(initialId)
   useEffect(() => {
     const previous = previousInitialIdRef.current
     previousInitialIdRef.current = initialId
     if (initialId !== null && initialId !== previous) {
       void select(initialId)
+    } else if (initialId === null && previous !== null) {
+      startNew()
     }
-  }, [initialId, select])
+  }, [initialId, select, startNew])
 
   const create = useCallback(async (): Promise<string | null> => {
     try {
@@ -287,6 +328,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     errorMessage,
     select,
     create,
+    startNew,
     remove,
     appendLocal,
     refresh,

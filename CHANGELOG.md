@@ -11,6 +11,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate now cites documents it found in the library as small icon links
+  instead of describing them in a sentence. Tap or click one to open that
+  document, and hover or focus it to see its title. A citation to a
+  document that's since been removed shows a muted, broken icon instead of
+  silently disappearing.
+- The Mate sheet (the quick channel opened from any page's header) now has
+  its own conversation search: tap the search icon for a filterable list,
+  showing your 8 most recent conversations until you type something to
+  narrow it.
+
+### Changed
+
+- Opening Mate, from the sidebar panel or the header's quick sheet, now
+  always starts a fresh, empty conversation rather than resuming whichever
+  one was most recently updated - even if you were just looking at one a
+  moment ago. Pick an earlier conversation from the list or search when you
+  want to return to it. A conversation is only saved once you send its
+  first message, so starting fresh and changing your mind leaves nothing
+  behind. A reply already being written keeps arriving if you close and
+  reopen the sheet mid-answer, rather than being cut off.
+
 ## [0.34.0] - 2026-09-26
 
 ### Added

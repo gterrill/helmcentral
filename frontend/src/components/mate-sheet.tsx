@@ -1,7 +1,8 @@
-import { ArrowUpRight, MessageSquarePlus, Square } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { ArrowUpRight, MessageSquarePlus, Search, Square } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AssistantThread } from '@/components/assistant-thread'
+import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAssistantChat, type AssistantScreenContext } from '@/hooks/use-assistant-chat'
@@ -33,8 +34,9 @@ interface MateSheetProps {
   onOpenChange: (open: boolean) => void
   /** Set only when the sheet is opened from a voice question (ADR 0093
    * voice phase) - sent once, with `spoken: true`, as soon as the active
-   * conversation is known. Absent for a plain "Ask Mate" open, which just
-   * shows whatever thread is already current. */
+   * conversation is known. Absent for a plain "Ask Mate" open, which always
+   * starts a fresh, blank chat (Mate UI cycle: "Mate opens on an empty
+   * chat") rather than resuming whatever thread was last active. */
   initialQuestion?: string
   newConversation?: boolean
   screen: AssistantScreenContext
@@ -62,15 +64,24 @@ interface MateSheetProps {
  * that hosts the same AssistantThread the full panel uses, over whatever
  * page is behind it, so a voice question doesn't have to leave the
  * Forecast panel (or any other) to get answered. Mounted once in the shell
- * with its own conversations/chat state - independent of the panel's - so
- * the sheet's thread survives being closed and reopened the same way the
- * panel's does.
+ * with its own conversations/chat state - independent of the panel's.
+ *
+ * Mate UI cycle ("Mate opens on an empty chat"): the sheet never actually
+ * unmounts once opened (App.tsx's mateSheetHasOpenedRef keeps it mounted;
+ * only `open` toggles), so without deliberate resetting it would otherwise
+ * keep whatever conversation was last active across every later close and
+ * reopen, for the rest of the session - see the reset-on-open effect below.
  */
 export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Mate UI cycle: search the Mate sheet's conversations. The sheet has no
+  // list column of its own (that's the whole point of the sheet existing
+  // alongside the full panel) - this overlay is its only way to reach a
+  // conversation other than whichever one is already current.
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Same pattern as AssistantDrawer's own effect of the same name: waits on
   // `loading` so a transient null (before the mount fetch has resolved)
@@ -83,14 +94,17 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // "New conversation" (ADR 0094): the sheet is one thread plus the
   // composer, and it keeps appending to the current conversation - no
   // time-based expiry - until the operator explicitly asks for a fresh one
-  // here. create() both creates and selects the new conversation; focusing
-  // the composer straight after is what autoFocus alone can't do, since that
-  // only ever fires on mount.
+  // here. Mate UI cycle ("Mate opens on an empty chat"): startNew() is a
+  // local reset only, not a POST - conversations.startNew's own doc comment
+  // explains why persisting a conversation right here, before the operator
+  // has typed anything, was the "empty persisted draft" bug this cycle
+  // removes. The conversation is only ever actually created (by
+  // conversations.create(), inside AssistantThread's handleSend) at the
+  // moment the first message is sent. Focusing the composer straight after
+  // is what autoFocus alone can't do, since that only ever fires on mount.
   const handleNewConversation = useCallback(() => {
-    void (async () => {
-      await conversations.create()
-      composerRef.current?.focus()
-    })()
+    conversations.startNew()
+    composerRef.current?.focus()
   }, [conversations])
 
   // "Open the Mate page" (ADR 0094): hands the active conversation to the
@@ -112,13 +126,52 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
     onOpenChange(false)
   }, [onOpenPanel, onOpenChange])
 
+  // The search overlay hands back a plain conversation id - select() loads
+  // its thread into this same sheet, exactly as clicking a row in the /mate
+  // page's own list does.
+  const handleSelectFromSearch = useCallback((id: string) => {
+    void conversations.select(id)
+  }, [conversations])
+
   // Refetches every time the sheet opens, rather than once per app session
   // (impeccable critique 2026-09-12, P0): the sheet has no conversation
   // list of its own, so a load that failed while the sheet was last open
-  // otherwise had no way to recover short of reloading the whole page.
-  // Cheap to repeat - the sheet always opens onto the newest thread anyway.
+  // otherwise had no way to recover short of reloading the whole page. Cheap
+  // to repeat - reload() only ever refreshes the LIST behind the search
+  // overlay (conversations.reload's own doc comment); it never re-selects
+  // anything on its own, so this cannot disturb whatever thread (or blank
+  // state) is already showing.
   useEffect(() => {
     if (open) void conversations.reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // Mate UI cycle ("Mate opens on an empty chat"): every plain open starts
+  // blank, the same as a fresh mount - see the doc comment on the component
+  // above for why this is needed at all. Scoped to a plain open only
+  // (`initialQuestion` absent): a voice question or Help's "Ask Mate" is
+  // handled entirely by the sentQuestionRef effect just below, which reads
+  // `conversations.activeId` itself to decide whether to continue the
+  // current conversation or start one - resetting here first, in a
+  // SEPARATE effect, would race that read within the same commit (a
+  // `startNew()` here would not yet be visible to that effect's own
+  // closure), so an initialQuestion open is left alone entirely rather than
+  // coordinated between two effects.
+  //
+  // Skipped when THIS sheet's own chat is still actively streaming a reply
+  // into the currently active conversation - closing and reopening
+  // mid-answer must rejoin what is still arriving (ADR 0105: "the answer
+  // outlives the page"), not wipe the question bubble and strand the
+  // in-flight draft with nothing left to explain it. The sheet never
+  // unmounts, so its chat instance keeps running its fetch/SSE reader in
+  // the background regardless of `open` - `isStreamingConversation` is
+  // exactly the check AssistantThread's own rejoin effect uses for the same
+  // "is this thread's answer still being written right now" question.
+  useEffect(() => {
+    if (!open || initialQuestion) return
+    const active = conversations.activeId
+    if (active !== null && chat.isStreamingConversation(active)) return
+    conversations.startNew()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -221,6 +274,15 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
             >
               <MessageSquarePlus className="h-4 w-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Search conversations"
+              title="Search conversations"
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
             {/* ArrowUpRight over PanelRightOpen: this navigates away to a
                 different page entirely (and closes the sheet behind it),
                 not a panel toggling open in place, so the "go to" arrow
@@ -276,6 +338,12 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
           )}
         </div>
       </SheetContent>
+      <ConversationSearchOverlay
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        conversations={conversations.conversations}
+        onSelect={handleSelectFromSearch}
+      />
     </Sheet>
   )
 }

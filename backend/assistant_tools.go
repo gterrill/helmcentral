@@ -1810,6 +1810,23 @@ type assistantSearchDocumentsArgs struct {
 	Limit  int    `json:"limit"`
 }
 
+// assistantCitationTitle returns doc/hit's citable display name for the
+// structured citation contract (Mate UI cycle: document sources as icons) -
+// the system prompt tells Mate to cite a document it found via
+// search_documents or read_document as a markdown link whose visible text is
+// exactly this string, e.g. `[Yanmar 4JH Service Manual](/documents?document=<id>)`.
+// Most uploaded documents never get an operator-set title, so this never
+// hands back a blank string - the same title-or-filename fallback
+// documentDisplayName (frontend/src/lib/document-display.ts) already applies
+// on the Documents panel for the same reason: a blank title would render as
+// an empty link.
+func assistantCitationTitle(title, filename string) string {
+	if t := strings.TrimSpace(title); t != "" {
+		return t
+	}
+	return filename
+}
+
 // assistantDocumentSearchHit is one row of search_documents' result: the
 // best-matching chunk of one document (documentStore.Search already
 // collapses several matching chunks of the same document down to its
@@ -1817,6 +1834,8 @@ type assistantSearchDocumentsArgs struct {
 // documentSearchResult (documents_store.go) has no folder_path field of its
 // own, since the B3 HTTP API this struct otherwise mirrors has no use for
 // it (a folder-scoped request already knows what folder it asked for).
+//
+// Title is never blank - see assistantCitationTitle.
 type assistantDocumentSearchHit struct {
 	DocumentID string `json:"document_id"`
 	Filename   string `json:"filename"`
@@ -1964,7 +1983,7 @@ func (d assistantToolDeps) executeSearchDocuments(ctx context.Context, raw json.
 			DocumentID: h.DocumentID,
 			Filename:   h.Filename,
 			FolderPath: path,
-			Title:      h.Title,
+			Title:      assistantCitationTitle(h.Title, h.Filename),
 			Page:       h.PageStart,
 			Snippet:    assistantDocumentSnippetMarkers.Replace(h.Snippet),
 			Status:     h.Status,
@@ -2022,9 +2041,14 @@ type assistantDocumentChunkOut struct {
 }
 
 type assistantReadDocumentResult struct {
-	DocumentID string                      `json:"document_id"`
-	Filename   string                      `json:"filename"`
-	Chunks     []assistantDocumentChunkOut `json:"chunks"`
+	DocumentID string `json:"document_id"`
+	Filename   string `json:"filename"`
+	// Title is the structured citation contract's other half
+	// (assistantCitationTitle's doc comment) - never blank, so a citation
+	// built from a read_document result always has a real name to show, the
+	// same guarantee search_documents' own Title field already carries.
+	Title  string                      `json:"title,omitempty"`
+	Chunks []assistantDocumentChunkOut `json:"chunks"`
 	// NextChunk is set only once capToolResultJSON's shrink has actually
 	// dropped chunks to fit the budget - 0 otherwise, safe as an "absent"
 	// sentinel because a real body chunk's seq is never 0 (seq 0 is always
@@ -2069,7 +2093,7 @@ func (d assistantToolDeps) executeReadDocument(ctx context.Context, raw json.Raw
 		return "", fmt.Errorf("read_document: %w", err)
 	}
 
-	result := assistantReadDocumentResult{DocumentID: doc.ID, Filename: doc.Filename}
+	result := assistantReadDocumentResult{DocumentID: doc.ID, Filename: doc.Filename, Title: assistantCitationTitle(doc.Title, doc.Filename)}
 	for _, c := range chunks {
 		result.Chunks = append(result.Chunks, assistantDocumentChunkOut{
 			Seq: c.Seq, PageStart: c.PageStart, Heading: c.Heading, Text: c.Text,

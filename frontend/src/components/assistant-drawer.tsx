@@ -4,6 +4,7 @@ import { Search, Trash2 } from 'lucide-react'
 import { AssistantThread } from '@/components/assistant-thread'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { filterConversationsByQuery, formatConversationRelativeTime } from '@/lib/assistant-conversation-search'
 import { cn } from '@/lib/utils'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -19,23 +20,6 @@ interface AssistantDrawerProps {
    * for the ordinary "Mate" nav click behaves exactly as before. */
   initialConversationId?: string | null
   onActiveConversationChange?: (id: string | null) => void
-}
-
-// A short, local formatter - not a shared primitive, just readable list
-// rows. Coarsens to the largest unit that stays a whole number, the same
-// call alarms-drawer.tsx's formatDwell makes for a duration read on a
-// phone screen.
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '--'
-  const diffSeconds = Math.round((Date.now() - then) / 1000)
-  if (diffSeconds < 45) return 'just now'
-  const diffMinutes = Math.round(diffSeconds / 60)
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  const diffHours = Math.round(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.round(diffHours / 24)
-  return `${diffDays}d ago`
 }
 
 /**
@@ -54,11 +38,10 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
   const chat = useAssistantChat()
   const [query, setQuery] = useState('')
 
-  const filteredConversations = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (needle === '') return conversations.conversations
-    return conversations.conversations.filter((conversation) => conversation.title.toLowerCase().includes(needle))
-  }, [conversations.conversations, query])
+  const filteredConversations = useMemo(
+    () => filterConversationsByQuery(conversations.conversations, query),
+    [conversations.conversations, query],
+  )
 
   useEffect(() => {
     if (conversations.loading) return
@@ -84,7 +67,13 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
     return (
       <div className="flex h-full min-h-0 w-full flex-col gap-4 lg:flex-row">
         <div className="flex min-w-0 shrink-0 gap-2 lg:w-64 lg:flex-col">
-          <Button variant="outline" onClick={() => void conversations.create()}>
+          {/* Mate UI cycle ("Mate opens on an empty chat"): a local reset,
+              not a POST - see conversations.startNew's own doc comment for
+              why persisting a conversation here, before the operator has
+              typed anything, was the "empty persisted draft" this cycle
+              removes. The conversation is only ever actually created when
+              the first message is sent. */}
+          <Button variant="outline" onClick={() => conversations.startNew()}>
             New conversation
           </Button>
           <div className="relative">
@@ -118,7 +107,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
                     onClick={() => void conversations.select(conversation.id)}
                   >
                     <div className="truncate text-sm">{conversation.title}</div>
-                    <div className="text-[11px] text-muted-foreground">{formatRelativeTime(conversation.updatedAt)}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</div>
                   </button>
                   <Button
                     variant="ghost"

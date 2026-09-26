@@ -593,9 +593,11 @@ export function App() {
   if (mateSheetOpen) mateSheetHasOpenedRef.current = true
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
-  // thread was active there. Null means "whatever the panel already had",
-  // not "start a fresh one" - the panel's own hook falls back to its usual
-  // newest-thread behaviour when this is null.
+  // thread was active there, and by the panel's own list/search selecting
+  // one (assistant-drawer.tsx's onActiveConversationChange). Null means a
+  // fresh empty chat (Mate UI cycle: "Mate opens on an empty chat") - the
+  // panel's own hook no longer falls back to the newest existing thread when
+  // this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
   // ADR 0106 F1: the Documents panel's current folder, mirrored into the URL
   // (?folder=) the same way matePanelConversationId mirrors Mate's active
@@ -3140,7 +3142,22 @@ export function App() {
             )}
             {visiblePanelNavItems.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
-                <SidebarMenuButton isActive={activePanel === id} onClick={() => requestNavigate(id, () => setActivePanel(id))} tooltip={label}>
+                <SidebarMenuButton
+                  isActive={activePanel === id}
+                  onClick={() => requestNavigate(id, () => {
+                    setActivePanel(id)
+                    // Code-review finding ("clicking Mate ALWAYS shows a
+                    // fresh empty chat"): without this, matePanelConversationId
+                    // keeps whatever the operator last picked forever, and
+                    // AssistantDrawer/useAssistantConversations' own re-select
+                    // effect (Mate UI cycle) reopens it on this exact prop
+                    // change - clearing it here is what actually makes the
+                    // sidebar's Mate entry always land on a blank chat,
+                    // whether the panel is remounting or already showing.
+                    if (id === 'assistant') setMatePanelConversationId(null)
+                  })}
+                  tooltip={label}
+                >
                   <Icon />
                   <span>{label}</span>
                   {id === 'forecast' && hasActiveWindBulletin && (
