@@ -619,6 +619,91 @@ describe('MateSheet', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })
+
+  // Code-review finding: "opening the Mate sheet ALWAYS shows a fresh empty
+  // chat". The sheet never truly unmounts once opened (App.tsx's
+  // mateSheetHasOpenedRef keeps it mounted, only `open` toggles) - without
+  // resetting on each open, whatever conversation the operator last picked
+  // (or sent a message into) stayed active across every later close/reopen,
+  // for the rest of the browser session.
+  describe('reopening', () => {
+    it('starts on a fresh, blank chat again, even though a conversation was active before closing', async () => {
+      vi.stubGlobal(
+        'fetch',
+        buildFetch(undefined, [
+          { id: 'c1', title: 'Hamilton Island to Gloucester Island', created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z' },
+        ]),
+      )
+
+      const { rerender } = render(
+        <MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
+      )
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+      fireEvent.click(await screen.findByText('Hamilton Island to Gloucester Island'))
+      // findByText alone would still match the (now-closed) search
+      // overlay's own row during its closing transition - wait for that to
+      // clear first, then confirm the header itself names the conversation.
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Search conversations' })).not.toBeInTheDocument())
+      expect(screen.getByText('Hamilton Island to Gloucester Island')).toBeInTheDocument()
+
+      rerender(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+      rerender(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+      await waitFor(() => expect(screen.getByText('--')).toBeInTheDocument())
+      expect(screen.queryByText('Hamilton Island to Gloucester Island')).not.toBeInTheDocument()
+      expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    })
+
+    // ADR 0105 ("the answer outlives the page") applied to the sheet's own
+    // close/reopen, not just a full remount: the sheet's chat instance keeps
+    // running its fetch/SSE reader in the background regardless of whether
+    // `open` is true, so a blind reset-on-every-open would wipe the
+    // optimistic question bubble and strand the in-flight draft with nothing
+    // to explain it, and - worse - the finished reply would never land in
+    // `messages` at all (AssistantThread's handleSend only appends it when
+    // the conversation it was sent to is still the active one).
+    it('does not reset a conversation whose reply is still streaming', async () => {
+      const stream = controllableStream()
+      vi.stubGlobal('fetch', buildFetch(() => ({ ok: true, body: stream.body })))
+
+      const { rerender } = render(
+        <MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
+      )
+
+      const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+
+      expect(await screen.findByText('What about tomorrow?')).toBeInTheDocument()
+
+      await act(async () => {
+        stream.push('event: delta\ndata: {"text":"Partial answer arriving..."}\n\n')
+        await flushMicrotasks()
+      })
+      expect(await screen.findByText(/Partial answer arriving/)).toBeInTheDocument()
+
+      rerender(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+      rerender(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+      // Both the question and the still-arriving draft survive the close/reopen.
+      expect(screen.getByText('What about tomorrow?')).toBeInTheDocument()
+      expect(screen.getByText(/Partial answer arriving/)).toBeInTheDocument()
+
+      await act(async () => {
+        stream.push(`data: ${JSON.stringify({
+          message: { id: 'm1', conversation_id: 'new-1', seq: 1, role: 'assistant', content: 'Fine tomorrow, settled.', created_at: '' },
+          conversation: { id: 'new-1', title: 'What about tomorrow?', created_at: '', updated_at: '' },
+        })}\n\n`)
+        stream.close()
+        await flushMicrotasks()
+      })
+
+      // The finished reply actually lands - it was not dropped because
+      // reopening had quietly changed which conversation is "active".
+      await waitFor(() => expect(screen.getByText('Fine tomorrow, settled.')).toBeInTheDocument())
+    })
+  })
 })
 
 // fix(frontend): make a failed Mate load recoverable - the sheet has no

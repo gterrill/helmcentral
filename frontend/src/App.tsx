@@ -3142,7 +3142,22 @@ export function App() {
             )}
             {visiblePanelNavItems.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
-                <SidebarMenuButton isActive={activePanel === id} onClick={() => requestNavigate(id, () => setActivePanel(id))} tooltip={label}>
+                <SidebarMenuButton
+                  isActive={activePanel === id}
+                  onClick={() => requestNavigate(id, () => {
+                    setActivePanel(id)
+                    // Code-review finding ("clicking Mate ALWAYS shows a
+                    // fresh empty chat"): without this, matePanelConversationId
+                    // keeps whatever the operator last picked forever, and
+                    // AssistantDrawer/useAssistantConversations' own re-select
+                    // effect (Mate UI cycle) reopens it on this exact prop
+                    // change - clearing it here is what actually makes the
+                    // sidebar's Mate entry always land on a blank chat,
+                    // whether the panel is remounting or already showing.
+                    if (id === 'assistant') setMatePanelConversationId(null)
+                  })}
+                  tooltip={label}
+                >
                   <Icon />
                   <span>{label}</span>
                   {id === 'forecast' && hasActiveWindBulletin && (

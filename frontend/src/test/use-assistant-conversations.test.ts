@@ -285,6 +285,42 @@ describe('useAssistantConversations', () => {
     })
   })
 
+  // Code-review finding: "clicking Mate ALWAYS shows a fresh empty chat".
+  // App.tsx's sidebar Mate click clears its remembered conversation id
+  // (matePanelConversationId -> null) rather than remounting the panel, so
+  // the hook itself has to notice initialId going back to null and reset -
+  // without this, a caller whose `initialId` prop drops back to null (the
+  // panel is already showing conversation c1, then the operator clicks
+  // "Mate" in the sidebar again) kept showing c1 forever, since only the
+  // non-null branch of this effect ever ran.
+  it('resets to blank when initialId changes from a real id back to null', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ content: 'hello' })] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result, rerender } = renderHook(
+      ({ initialId }: { initialId: string | null }) => useAssistantConversations({ initialId }),
+      { initialProps: { initialId: 'c1' as string | null } },
+    )
+
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+
+    rerender({ initialId: null })
+
+    await waitFor(() => expect(result.current.activeId).toBeNull())
+    expect(result.current.messages).toEqual([])
+    // The conversation list itself is untouched - only the selection reset.
+    expect(result.current.conversations.map((c) => c.id)).toEqual(['c1'])
+  })
+
   it('does not re-select on mount just because initialId happens to be non-null', async () => {
     // Guards against the re-select effect firing a second, redundant GET for
     // the same id the mount effect already selected.

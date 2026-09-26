@@ -86,9 +86,10 @@ function mapMessage(api: MessageApi): AssistantMessage {
 export interface UseAssistantConversationsOptions {
   /** Selects this conversation on mount, when it is present in the freshly
    * fetched list (ADR 0094: "Open in Mate" hands the panel a thread the
-   * sheet already has active). Falls back to the newest conversation the
-   * same as ever when absent, unset, or not found in the list - a stale or
-   * deleted id is never a reason to leave the panel on no thread at all. */
+   * sheet already has active). Mate UI cycle ("Mate opens on an empty
+   * chat"): absent, unset, or not found in the list now means a blank
+   * chat, not a fallback to the newest conversation - a stale or deleted id
+   * is never a reason to guess at a different, unrelated thread. */
   initialId?: string | null
 }
 
@@ -216,6 +217,27 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     await loadConversationsAndSelect(mountInitialId, () => false)
   }, [loadConversationsAndSelect, mountInitialId])
 
+  // Mate UI cycle ("Mate opens on an empty chat"): the sheet/panel's own
+  // "New conversation" button used to call `create()`, which POSTs and
+  // persists a brand new conversation row immediately - before the operator
+  // had typed a word. Closing the sheet right after left an empty,
+  // permanent row cluttering the list forever (the "empty persisted draft"
+  // this cycle removes). `startNew` is the local-only equivalent: it clears
+  // the active selection and the thread exactly the way a fresh mount
+  // already does, with no request at all. The conversation is only ever
+  // actually created, by `create()`, at the moment `chat.send()` posts the
+  // first real message (AssistantThread's handleSend already does this
+  // lazily) - so pressing "New conversation" and never sending anything now
+  // leaves the list exactly as it was.
+  //
+  // Defined here, ahead of the re-select effect below, so that effect can
+  // call it directly.
+  const startNew = useCallback(() => {
+    setActiveId(null)
+    setMessages([])
+    setError(null)
+  }, [])
+
   // Re-selects when `initialId` changes to a new non-null value after mount
   // (ADR 0094): "Open in Mate" can send an already-showing panel a different
   // conversation than the one it has open, and re-selecting in place is what
@@ -223,14 +245,25 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // against firing on mount itself - the effect above already resolved the
   // initial selection - by comparing against the previous value rather than
   // running unconditionally whenever `initialId` is non-null.
+  //
+  // Code-review finding ("clicking Mate ALWAYS shows a fresh empty chat"):
+  // the same comparison also has to cover `initialId` going the OTHER way,
+  // back to null - App.tsx's sidebar Mate click clears its remembered
+  // conversation id rather than remounting the panel (AssistantDrawer stays
+  // mounted whenever the operator merely re-clicks the panel already
+  // showing), so without this branch a panel already showing some
+  // conversation kept showing it forever no matter how many times "Mate"
+  // was clicked again.
   const previousInitialIdRef = useRef(initialId)
   useEffect(() => {
     const previous = previousInitialIdRef.current
     previousInitialIdRef.current = initialId
     if (initialId !== null && initialId !== previous) {
       void select(initialId)
+    } else if (initialId === null && previous !== null) {
+      startNew()
     }
-  }, [initialId, select])
+  }, [initialId, select, startNew])
 
   const create = useCallback(async (): Promise<string | null> => {
     try {
@@ -282,24 +315,6 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // message once it has. Never issues a request itself.
   const appendLocal = useCallback((message: AssistantMessage) => {
     setMessages((previous) => [...previous, message])
-  }, [])
-
-  // Mate UI cycle ("Mate opens on an empty chat"): the sheet/panel's own
-  // "New conversation" button used to call `create()`, which POSTs and
-  // persists a brand new conversation row immediately - before the operator
-  // had typed a word. Closing the sheet right after left an empty,
-  // permanent row cluttering the list forever (the "empty persisted draft"
-  // this cycle removes). `startNew` is the local-only equivalent: it clears
-  // the active selection and the thread exactly the way a fresh mount
-  // already does, with no request at all. The conversation is only ever
-  // actually created, by `create()`, at the moment `chat.send()` posts the
-  // first real message (AssistantThread's handleSend already does this
-  // lazily) - so pressing "New conversation" and never sending anything now
-  // leaves the list exactly as it was.
-  const startNew = useCallback(() => {
-    setActiveId(null)
-    setMessages([])
-    setError(null)
   }, [])
 
   const errorMessage = error !== null ? describeLoadError(error) : null

@@ -335,6 +335,34 @@ describe('AssistantDrawer', () => {
     await waitFor(() => expect(button?.parentElement).toHaveClass('bg-primary/10'))
   })
 
+  // Code-review finding: "clicking Mate ALWAYS shows a fresh empty chat".
+  // App.tsx's sidebar Mate click clears its remembered matePanelConversationId
+  // and hands the panel `initialConversationId={null}` - but re-clicking Mate
+  // while the panel is ALREADY showing (activePanel is already 'assistant')
+  // never remounts AssistantDrawer, so the panel itself has to notice the
+  // prop dropping back to null and reset, not just a fresh mount landing on
+  // one. This proves the same mechanism opens the requested id AND handles
+  // it clearing again in the panel's own already-mounted instance, matching
+  // App.tsx's actual usage (initialConversationId={matePanelConversationId}).
+  it('resets to a blank chat when initialConversationId drops back to null without remounting', async () => {
+    vi.stubGlobal('fetch', buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Hook Reef anchorages', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+      ],
+    }))
+
+    const { rerender } = render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} initialConversationId="c1" />)
+
+    const button = await screen.findByText('Hook Reef anchorages')
+    await waitFor(() => expect(button.closest('button')?.parentElement).toHaveClass('bg-primary/10'))
+
+    rerender(<AssistantDrawer canWrite onOpenSettings={vi.fn()} initialConversationId={null} />)
+
+    await waitFor(() => expect(screen.getByText('Hook Reef anchorages').closest('button')?.parentElement).not.toHaveClass('bg-primary/10'))
+    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+  })
+
   it('renders -- for every footer field the server did not report', async () => {
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },

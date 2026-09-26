@@ -27,10 +27,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Opening Mate, from the sidebar panel or the header's quick sheet, now
   always starts a fresh, empty conversation rather than resuming whichever
-  one was most recently updated. Pick an earlier conversation from the list
-  or search when you want to return to it. A conversation is only saved
-  once you send its first message, so starting fresh and changing your mind
-  leaves nothing behind.
+  one was most recently updated - even if you were just looking at one a
+  moment ago. Pick an earlier conversation from the list or search when you
+  want to return to it. A conversation is only saved once you send its
+  first message, so starting fresh and changing your mind leaves nothing
+  behind. A reply already being written keeps arriving if you close and
+  reopen the sheet mid-answer, rather than being cut off.
 
 ## [0.34.0] - 2026-09-26
 

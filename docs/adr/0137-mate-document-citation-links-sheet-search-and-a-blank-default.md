@@ -136,6 +136,48 @@ that has since been deleted now lands on the same blank state a plain open
 shows, rather than silently substituting an unrelated "newest" thread in its
 place.
 
+#### 3a. Closing the gap: neither surface remembers a picked conversation past its own visit
+
+The above was not, on its own, "always blank" - it only covered the very
+first mount. Two things kept a picked conversation alive past that:
+
+- `App.tsx`'s `matePanelConversationId` is app-level state, not panel state:
+  it survives `AssistantDrawer` unmounting and remounting as the operator
+  leaves the Mate panel and comes back to it (the sidebar's Mate entry
+  reused the SAME id, so a remount reopened the same thread), and it does
+  not change at all when the panel is already showing (re-clicking "Mate"
+  while already on it is a same-instance no-op).
+- The Mate sheet never unmounts once opened at all (`mateSheetHasOpenedRef`),
+  so its own `useAssistantConversations` instance simply kept whatever was
+  active in memory across any number of closes and reopens.
+
+Both are fixed at the point that actually decides what shows, not by adding
+special cases at each call site:
+
+- The sidebar's Mate entry now clears `matePanelConversationId` in the same
+  click that sets `activePanel`, and `useAssistantConversations`' re-select
+  effect (§3 above) was generalized to react to `initialId` moving to null,
+  not only to a new non-null value - so both "the panel remounts with
+  `initialConversationId={null}`" and "the panel is already showing and the
+  prop merely drops to null" now reset it the same way, via `startNew()`.
+- The sheet gained its own reset-on-open effect: every time `open` becomes
+  true with no `initialQuestion` (a plain "Ask Mate", not a voice question
+  or Help's "Ask Mate", both of which are left entirely alone - see the
+  effect's own comment in `mate-sheet.tsx` for why coordinating the two
+  would race), it calls `startNew()`, guarded by one exception (next).
+
+**The exception**: a reply the sheet's own chat is still streaming into the
+active conversation is never reset out from under itself. The sheet's chat
+instance keeps its fetch/SSE reader running in the background regardless of
+`open` (it never unmounts), so a blind reset-on-every-open would wipe the
+optimistic question bubble and the in-flight draft on a mid-answer
+close/reopen, and - the worse failure - the FINISHED reply would never land
+in `messages` at all, because `AssistantThread`'s own append-on-completion
+only fires when the conversation it was sent to is still the active one.
+`chat.isStreamingConversation(activeId)` (the same check `AssistantThread`'s
+own rejoin effect already used) is the guard: reopening mid-stream leaves
+everything exactly as it was, and the reply lands normally once it finishes.
+
 ## Consequences
 
 - A citation is now a real, tappable affordance instead of prose the
@@ -145,10 +187,13 @@ place.
 - The sheet's search reuses the panel's own filter rather than duplicating
   it; a future change to how conversations are matched (e.g. adding message
   text once a backend search exists for it) only has one place to change.
-- Mate now genuinely opens blank by default, matching what the feature was
-  always meant to feel like: a fresh page, not a resumed one, unless the
-  operator explicitly asks for an earlier thread. The list can no longer
-  accumulate empty rows from an idle "New conversation" press.
+- Mate now genuinely opens blank every time - the panel and the sheet both -
+  matching what the feature was always meant to feel like: a fresh page, not
+  a resumed one, unless the operator explicitly asks for an earlier thread.
+  The list can no longer accumulate empty rows from an idle "New
+  conversation" press. The one deliberate exception - a reply already
+  streaming survives a mid-answer close/reopen - means "always blank" is not
+  quite absolute; it is scoped to when there is nothing in flight to lose.
 - `useAssistantConversations`' hook tests and several component tests that
   relied on the old auto-select-newest behaviour as scaffolding (rather than
   as the thing under test) were rewritten to select explicitly first - see

@@ -34,8 +34,9 @@ interface MateSheetProps {
   onOpenChange: (open: boolean) => void
   /** Set only when the sheet is opened from a voice question (ADR 0093
    * voice phase) - sent once, with `spoken: true`, as soon as the active
-   * conversation is known. Absent for a plain "Ask Mate" open, which just
-   * shows whatever thread is already current. */
+   * conversation is known. Absent for a plain "Ask Mate" open, which always
+   * starts a fresh, blank chat (Mate UI cycle: "Mate opens on an empty
+   * chat") rather than resuming whatever thread was last active. */
   initialQuestion?: string
   newConversation?: boolean
   screen: AssistantScreenContext
@@ -63,9 +64,13 @@ interface MateSheetProps {
  * that hosts the same AssistantThread the full panel uses, over whatever
  * page is behind it, so a voice question doesn't have to leave the
  * Forecast panel (or any other) to get answered. Mounted once in the shell
- * with its own conversations/chat state - independent of the panel's - so
- * the sheet's thread survives being closed and reopened the same way the
- * panel's does.
+ * with its own conversations/chat state - independent of the panel's.
+ *
+ * Mate UI cycle ("Mate opens on an empty chat"): the sheet never actually
+ * unmounts once opened (App.tsx's mateSheetHasOpenedRef keeps it mounted;
+ * only `open` toggles), so without deliberate resetting it would otherwise
+ * keep whatever conversation was last active across every later close and
+ * reopen, for the rest of the session - see the reset-on-open effect below.
  */
 export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
@@ -138,6 +143,35 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // state) is already showing.
   useEffect(() => {
     if (open) void conversations.reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // Mate UI cycle ("Mate opens on an empty chat"): every plain open starts
+  // blank, the same as a fresh mount - see the doc comment on the component
+  // above for why this is needed at all. Scoped to a plain open only
+  // (`initialQuestion` absent): a voice question or Help's "Ask Mate" is
+  // handled entirely by the sentQuestionRef effect just below, which reads
+  // `conversations.activeId` itself to decide whether to continue the
+  // current conversation or start one - resetting here first, in a
+  // SEPARATE effect, would race that read within the same commit (a
+  // `startNew()` here would not yet be visible to that effect's own
+  // closure), so an initialQuestion open is left alone entirely rather than
+  // coordinated between two effects.
+  //
+  // Skipped when THIS sheet's own chat is still actively streaming a reply
+  // into the currently active conversation - closing and reopening
+  // mid-answer must rejoin what is still arriving (ADR 0105: "the answer
+  // outlives the page"), not wipe the question bubble and strand the
+  // in-flight draft with nothing left to explain it. The sheet never
+  // unmounts, so its chat instance keeps running its fetch/SSE reader in
+  // the background regardless of `open` - `isStreamingConversation` is
+  // exactly the check AssistantThread's own rejoin effect uses for the same
+  // "is this thread's answer still being written right now" question.
+  useEffect(() => {
+    if (!open || initialQuestion) return
+    const active = conversations.activeId
+    if (active !== null && chat.isStreamingConversation(active)) return
+    conversations.startNew()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
