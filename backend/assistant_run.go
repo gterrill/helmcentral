@@ -589,6 +589,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {
+			log.Printf("assistant: tool round cap (%d) reached, forcing a final answer with tools disabled", assistantMaxToolRounds)
 			req.ToolChoice = "none"
 			// Rebuilt through assistantSystemMessage itself, the same
 			// builder messages[0] already came from, with
@@ -659,6 +660,17 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			content := string(choice.Content)
 			if marker, found := assistantTextToolCallMarkerIsGenuine(content); found {
 				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
+			}
+			// The forced final round asked the model to answer now from
+			// whatever it already gathered - a blank reply here is not a
+			// legitimate (if terse) answer, it means the model produced
+			// nothing at all despite tools being off. Saving that as the
+			// assistant's reply would show the operator an empty message
+			// with no indication anything went wrong, so this fails the run
+			// explicitly instead (AGENTS.md's fallback policy: no fake
+			// answer).
+			if forcedFinal && strings.TrimSpace(content) == "" {
+				return assistantReply{}, fmt.Errorf("the assistant did not produce an answer within %d tool rounds (forced final round returned no text)", assistantMaxToolRounds)
 			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in

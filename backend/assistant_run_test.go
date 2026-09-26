@@ -1012,6 +1012,37 @@ func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *test
 	}
 }
 
+// TestAssistantRunner_ForcedFinalRoundWithNoTextErrors checks the other half
+// of the forced-final-round contract alongside
+// TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors: a forced
+// round that returns zero tool calls but also no text at all is not a real
+// (if terse) answer - it means the model produced nothing despite tools
+// being disabled - so it must fail the run explicitly rather than saving a
+// blank reply as if it were the assistant's answer.
+func TestAssistantRunner_ForcedFinalRoundWithNoTextErrors(t *testing.T) {
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "", "m", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	_, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil {
+		t.Fatal("expected an error when the forced final round returns no text at all")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
+		t.Fatalf("expected the error to name the round cap, got %q", err)
+	}
+}
+
 func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testing.T) {
 	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
 	errs := make([]error, 0, assistantMaxToolRounds+1)
