@@ -20,6 +20,36 @@ export function documentDisplayName(doc: DocumentRecord): string {
   return doc.title.trim() !== '' ? doc.title : doc.filename
 }
 
+/**
+ * documentFailureMessage turns a failed document's stage and mime into an
+ * operator-facing sentence with a next step, instead of the raw error
+ * documents.error stores (an implementation detail - a "panic", an
+ * internal on-disk storage path, a library's own error text - with no
+ * indication of what to do about it). Callers keep the raw stored error
+ * available alongside this (documents-panel.tsx's row puts it in a title
+ * attribute, document-details-page.tsx under an "Error details"
+ * disclosure) - this function only ever supplies the headline sentence,
+ * and never touches the stored error string itself.
+ *
+ * doc.stage stays whatever it was when the document failed (SetFailed,
+ * backend/documents_store.go, leaves it alone) - "extract" means the local
+ * text-reading step failed (a PDF's text layer, a text file over the size
+ * cap, ...); anything else ("enrich") means extraction succeeded and a
+ * later, Mate-assisted step (summarising, OCR) is what failed.
+ */
+export function documentFailureMessage(doc: { stage: string; mime: string }): string {
+  if (doc.stage === 'extract') {
+    if (doc.mime === 'application/pdf') {
+      return "Couldn't read the text in this PDF. Try Reindex; if it fails again, open it in a PDF viewer, save a copy and upload that."
+    }
+    if (doc.mime.startsWith('image/')) {
+      return "Couldn't read this image. Try Reindex, or upload it again."
+    }
+    return "Couldn't read this file. Try Reindex, or upload it again."
+  }
+  return "Mate couldn't finish indexing this document. Try Reindex."
+}
+
 export function mimeLabel(mime: string): string {
   if (mime === 'application/pdf') return 'PDF'
   if (mime.startsWith('image/')) return 'Image'

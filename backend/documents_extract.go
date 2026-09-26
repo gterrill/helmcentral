@@ -191,7 +191,12 @@ func extractTextFile(path, mimeType string) (extractedDocument, error) {
 		return extractedDocument{}, fmt.Errorf("stat text file: %w", err)
 	}
 	if info.Size() > maxTextExtractBytes {
-		return extractedDocument{}, fmt.Errorf("text file %s is %d bytes, over the %d byte cap", path, info.Size(), maxTextExtractBytes)
+		// No path here: this error is stored verbatim on documents.error and
+		// shown to the operator (Documents list / Details page) - the
+		// on-disk storage path (filepath.Join(documentsDirPath(),
+		// doc.SHA256)) means nothing to them and isn't even the document's
+		// own filename, which the UI already shows separately.
+		return extractedDocument{}, fmt.Errorf("text file is %d bytes, over the %d byte cap", info.Size(), maxTextExtractBytes)
 	}
 
 	raw, err := os.ReadFile(path)
@@ -250,12 +255,17 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 	}
 	defer f.Close()
 
-	numPages, err := readPDFPageCount(reader, path)
+	numPages, err := readPDFPageCount(reader)
 	if err != nil {
 		return extractedDocument{}, err
 	}
 	if numPages > maxPDFPages {
-		return extractedDocument{}, fmt.Errorf("pdf %s declares %d pages, over the %d page cap", path, numPages, maxPDFPages)
+		// No path in any of extractPDF's errors below (or openPDFReader's/
+		// readPDFPageCount's) - every one of them can end up stored verbatim
+		// on documents.error and shown to the operator; see extractTextFile's
+		// matching comment above for why the on-disk storage path has no
+		// place in that message.
+		return extractedDocument{}, fmt.Errorf("pdf declares %d pages, over the %d page cap", numPages, maxPDFPages)
 	}
 
 	fonts := make(map[string]*pdf.Font)
@@ -272,7 +282,7 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 
 	for i := 1; i <= numPages; i++ {
 		if err := ctx.Err(); err != nil {
-			return extractedDocument{}, fmt.Errorf("extract pdf %s: %w", path, err)
+			return extractedDocument{}, fmt.Errorf("extract pdf: %w", err)
 		}
 
 		text, pageErr := extractPDFPage(reader, i, fonts, &extractedTextBudget)
@@ -281,11 +291,11 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 				// Not an ordinary single-page failure: the document-wide
 				// budget is blown, so there's no point (and no safe way,
 				// memory-wise) to keep going into the remaining pages.
-				return extractedDocument{}, fmt.Errorf("pdf %s: %w (stopped at page %d of %d declared pages)", path, pageErr, i, numPages)
+				return extractedDocument{}, fmt.Errorf("%w (stopped at page %d of %d declared pages)", pageErr, i, numPages)
 			}
 			failedPages = append(failedPages, i)
 			if firstErr == nil {
-				firstErr = fmt.Errorf("pdf %s page %d: %w", path, i, pageErr)
+				firstErr = fmt.Errorf("pdf page %d: %w", i, pageErr)
 			}
 			continue
 		}
@@ -334,7 +344,7 @@ func openPDFReader(path string) (f *os.File, reader *pdf.Reader, err error) {
 				f.Close()
 			}
 			f, reader = nil, nil
-			err = fmt.Errorf("panic opening pdf %s: %v", path, r)
+			err = fmt.Errorf("panic opening pdf: %v", r)
 		}
 	}()
 	f, reader, err = pdf.Open(path)
@@ -363,16 +373,16 @@ func openPDFReader(path string) (f *os.File, reader *pdf.Reader, err error) {
 // treatment as everything else in this file (no clamping to zero: that
 // would silently index a document as if it had no pages, when what actually
 // happened is a corrupt or hostile page tree).
-func readPDFPageCount(reader *pdf.Reader, path string) (numPages int, err error) {
+func readPDFPageCount(reader *pdf.Reader) (numPages int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			numPages = 0
-			err = fmt.Errorf("panic reading page count of pdf %s: %v", path, r)
+			err = fmt.Errorf("panic reading page count of pdf: %v", r)
 		}
 	}()
 	numPages = reader.NumPage()
 	if numPages < 0 {
-		return 0, fmt.Errorf("pdf %s declares a negative page count (%d)", path, numPages)
+		return 0, fmt.Errorf("pdf declares a negative page count (%d)", numPages)
 	}
 	return numPages, nil
 }

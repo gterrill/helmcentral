@@ -15,7 +15,7 @@ import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/componen
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useDocument, type DocumentRecord } from '@/hooks/use-documents'
-import { documentDisplayName, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
+import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
 
 // ADR 0115: a full-panel page for one document's metadata,
 // mirroring ADR 0112's `/wall-displays/<slug>` editor (display-editor-panel.tsx) -
@@ -354,7 +354,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
           <dt className="text-muted-foreground">Status</dt>
           <dd>
             {statusLabel(document)}
-            {document.status === 'failed' && document.error && ` · ${document.error}`}
+            {document.status === 'failed' && ` · ${documentFailureMessage(document)}`}
           </dd>
 
           <dt className="text-muted-foreground">File</dt>
@@ -398,6 +398,18 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
             <span className="text-xs text-muted-foreground">Summary</span>
             <p className="text-sm">{document.summary}</p>
           </div>
+        )}
+
+        {document.status === 'failed' && document.error && (
+          // The raw stored error (an internal storage path, "panic: ...",
+          // a library's own error text) stays available here rather than
+          // disappearing once the Status row above switched to the plain-
+          // English message - collapsed by default so it doesn't compete
+          // with that sentence for attention.
+          <details className="border-t border-border pt-3">
+            <summary className="cursor-pointer text-xs text-muted-foreground">Error details</summary>
+            <p className="mt-1 text-xs break-words text-muted-foreground">{document.error}</p>
+          </details>
         )}
       </FieldSet>
     </div>

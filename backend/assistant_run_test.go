@@ -944,14 +944,25 @@ func TestAssistantRunner_ToolCallCapPerRoundRefusesCallsBeyondTheLimit(t *testin
 	}
 }
 
-// TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone checks
-// the forced final round still lists every tool (Tools is left populated)
-// and only sets ToolChoice to "none" - not, as an earlier version of this
-// fix tried, Tools: nil. An empty Tools list gives some providers nothing
-// to apply "none" to, which is the likely reason a tool-choice-none request
-// with no tools listed did not reliably stop google/gemini-3.8-flash from
-// calling one anyway.
-func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *testing.T) {
+// TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery checks the current
+// forced-final round shape. tool_choice "none" plus
+// assistantForcedFinalInstruction (an earlier fix, still in place) covered
+// the v0.32.0 Gemini incident, but a later incident (conversation a83e4282,
+// model routed by openrouter/auto) hit the identical "forcedFinal but still
+// got tool_calls" failure with both of those already in the request -
+// tool_choice is not a reliable signal across every provider behind an
+// auto-router. The fix removes the possibility outright: the forced round's
+// request carries no tools definition and no tool_choice at all, so no
+// provider has anything to call against - and this turn's own tool-call/
+// tool-role messages (which would otherwise still reference tool_calls no
+// longer legal on a request with no tools) are dropped from the
+// conversation and replayed instead as plain text appended to the system
+// message (assistantForcedFinalToolLogText).
+func TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery(t *testing.T) {
+	history := []openRouterMessage{
+		{Role: "user", Content: openRouterContent("Why did the depth reading stop updating?")},
+	}
+
 	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
 	errs := make([]error, 0, assistantMaxToolRounds+1)
 	for i := 0; i < assistantMaxToolRounds; i++ {
@@ -959,6 +970,83 @@ func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *test
 		errs = append(errs, nil)
 	}
 	responses = append(responses, finalResponse(t, "forced final answer", "m", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{results: map[string]string{"get_tides": `{"height":1.2}`}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system", "", history); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.requests) != assistantMaxToolRounds+1 {
+		t.Fatalf("expected %d requests, got %d", assistantMaxToolRounds+1, len(doer.requests))
+	}
+
+	forced := doer.requests[assistantMaxToolRounds]
+	if len(forced.Tools) != 0 {
+		t.Fatalf("expected the forced final round to carry no tools, got %d", len(forced.Tools))
+	}
+	if forced.ToolChoice != "" {
+		t.Fatalf("expected the forced final round to carry no tool_choice, got %q", forced.ToolChoice)
+	}
+	for _, msg := range forced.Messages {
+		if msg.Role == "tool" {
+			t.Fatalf("expected no tool-role messages on the forced final round, got %+v", msg)
+		}
+		if len(msg.ToolCalls) != 0 {
+			t.Fatalf("expected no assistant message with tool_calls on the forced final round, got %+v", msg)
+		}
+	}
+	// The forced round's request is exactly the system message plus the
+	// original history - none of this turn's own eight rounds of tool
+	// exchanges - so it ends on the operator's own question unchanged,
+	// which every provider accepts.
+	if len(forced.Messages) != 2 || forced.Messages[0].Role != "system" || forced.Messages[1].Role != "user" {
+		t.Fatalf("expected exactly [system, user] on the forced final round, got %+v", forced.Messages)
+	}
+	if forced.Messages[1].Content != history[0].Content {
+		t.Fatalf("expected the forced round to end on the original history's own user message unchanged, got %+v", forced.Messages[1])
+	}
+
+	sysText := string(forced.Messages[0].Content)
+	if !strings.Contains(sysText, assistantForcedFinalInstruction) {
+		t.Fatalf("expected the forced round's system message to still carry the instruction, got %q", sysText)
+	}
+	if !strings.Contains(sysText, "get_tides") || !strings.Contains(sysText, `{"lat":1,"lon":2}`) || !strings.Contains(sysText, `{"height":1.2}`) {
+		t.Fatalf("expected the forced round's system message to carry the earlier tool calls and their results, got %q", sysText)
+	}
+
+	// Every earlier round must still have offered tools normally, with no
+	// tool_choice forced and no instruction yet in its system message.
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		if len(doer.requests[i].Tools) == 0 {
+			t.Fatalf("expected round %d to offer tools", i)
+		}
+		if doer.requests[i].ToolChoice != "" {
+			t.Fatalf("round %d should not carry a tool_choice", i)
+		}
+		if strings.Contains(string(doer.requests[i].Messages[0].Content), assistantForcedFinalInstruction) {
+			t.Fatalf("round %d's system message should not yet carry the forced-final instruction", i)
+		}
+	}
+}
+
+// TestAssistantRunner_ForcedFinalRoundNormalAnswerIsSaved checks the other
+// half of the same contract: once the forced round's tool machinery is
+// stripped (previous test), a model that answers normally on that round -
+// no tool_calls, real text - still has its answer saved and returned like
+// any other round's, with ToolRounds correctly counting the rounds that
+// came before it.
+func TestAssistantRunner_ForcedFinalRoundNormalAnswerIsSaved(t *testing.T) {
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "here is what I found", "m", openRouterUsage{}))
 	errs = append(errs, nil)
 
 	doer := &queuedChatDoer{responses: responses, errs: errs}
@@ -970,45 +1058,42 @@ func TestAssistantRunner_ForcedFinalRoundKeepsToolsAndSetsToolChoiceNone(t *test
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if reply.Content != "forced final answer" {
-		t.Fatalf("unexpected content: %q", reply.Content)
+	if reply.Content != "here is what I found" {
+		t.Fatalf("expected the forced round's plain-text answer to be saved, got %q", reply.Content)
 	}
-	if len(doer.requests) != assistantMaxToolRounds+1 {
-		t.Fatalf("expected %d requests, got %d", assistantMaxToolRounds+1, len(doer.requests))
+	if reply.ToolRounds != assistantMaxToolRounds {
+		t.Fatalf("expected ToolRounds to count the %d earlier rounds, got %d", assistantMaxToolRounds, reply.ToolRounds)
 	}
+}
 
-	forced := doer.requests[assistantMaxToolRounds]
-	if len(forced.Tools) == 0 {
-		t.Fatalf("expected the forced final round to still list every tool, got none")
-	}
-	if len(forced.Tools) != len(doer.requests[0].Tools) {
-		t.Fatalf("expected the forced final round to list the same tools as round 0, got %d vs %d", len(forced.Tools), len(doer.requests[0].Tools))
-	}
-	if forced.ToolChoice != "none" {
-		t.Fatalf("expected the forced final round's tool_choice to be %q, got %q", "none", forced.ToolChoice)
-	}
-
-	// The forced round's system message (always messages[0]) must carry the
-	// instruction telling the model plainly to answer now instead of
-	// calling another tool - see assistantForcedFinalInstruction's own doc
-	// comment for why it lives here rather than a trailing message.
-	if len(forced.Messages) == 0 || forced.Messages[0].Role != "system" || !strings.Contains(string(forced.Messages[0].Content), assistantForcedFinalInstruction) {
-		t.Fatalf("expected the forced final round's system message to carry the instruction, got %+v", forced.Messages)
-	}
-
-	// Every earlier round must still have offered tools normally, without
-	// tool_choice forced, and without the instruction in its system
-	// message - it only applies once the round is actually forced.
+// TestAssistantRunner_ForcedFinalRoundWithNoTextErrors checks the other half
+// of the forced-final-round contract alongside
+// TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors: a forced
+// round that returns zero tool calls but also no text at all is not a real
+// (if terse) answer - it means the model produced nothing despite tools
+// being disabled - so it must fail the run explicitly rather than saving a
+// blank reply as if it were the assistant's answer.
+func TestAssistantRunner_ForcedFinalRoundWithNoTextErrors(t *testing.T) {
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
 	for i := 0; i < assistantMaxToolRounds; i++ {
-		if len(doer.requests[i].Tools) == 0 {
-			t.Fatalf("expected round %d to offer tools", i)
-		}
-		if doer.requests[i].ToolChoice == "none" {
-			t.Fatalf("round %d should not have forced tool_choice none", i)
-		}
-		if strings.Contains(string(doer.requests[i].Messages[0].Content), assistantForcedFinalInstruction) {
-			t.Fatalf("round %d's system message should not yet carry the forced-final instruction", i)
-		}
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "", "m", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	_, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil {
+		t.Fatal("expected an error when the forced final round returns no text at all")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
+		t.Fatalf("expected the error to name the round cap, got %q", err)
 	}
 }
 
@@ -1128,9 +1213,18 @@ func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testin
 	if forced[0].Text != round0[0].Text || forced[0].CacheControl == nil || round0[0].CacheControl == nil || forced[0].CacheControl.Type != round0[0].CacheControl.Type {
 		t.Fatalf("expected the forced round's cached stable block to be unchanged, got %+v, want %+v", forced[0], round0[0])
 	}
-	wantLive := "LIVE SUFFIX\n\n" + assistantForcedFinalInstruction
+	// Every one of the assistantMaxToolRounds earlier rounds called
+	// get_tides with the same arguments, and fakeToolExecutor{} (no results
+	// configured) answers every call with "{}" - see
+	// assistantForcedFinalToolLogText for the exact rendering this mirrors.
+	var toolLog strings.Builder
+	toolLog.WriteString("What you already looked up this turn, before running out of tool calls:")
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		toolLog.WriteString("\n- get_tides({\"lat\":1,\"lon\":2}) -> {}")
+	}
+	wantLive := "LIVE SUFFIX\n\n" + assistantForcedFinalInstruction + "\n\n" + toolLog.String()
 	if forced[1].Text != wantLive {
-		t.Fatalf("expected the forced round's live block to carry the instruction appended, got %q, want %q", forced[1].Text, wantLive)
+		t.Fatalf("expected the forced round's live block to carry the instruction and tool log appended, got %q, want %q", forced[1].Text, wantLive)
 	}
 	if forced[1].CacheControl != nil {
 		t.Fatalf("expected the forced round's live block to still carry no cache_control, got %+v", forced[1].CacheControl)

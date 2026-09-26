@@ -56,3 +56,10 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
+
+// Vendored, patched copy - see third_party/ledongthuc-pdf/README.md for the
+// upstream commit this is cut from and exactly what was patched and why
+// (two panics on well-formed PDFs: an explicit /Predictor 1 and an
+// unrecognised backslash escape in a literal string, both fixed to match
+// ISO 32000-2:2020 §7.4.4.4 and §7.3.4.2 respectively).
+replace github.com/ledongthuc/pdf => ./third_party/ledongthuc-pdf

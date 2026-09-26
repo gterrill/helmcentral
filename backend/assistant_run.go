@@ -197,7 +197,24 @@ func assistantExcessToolCallResult(name string) (string, error) {
 // got tool calls" error below with no answer at all - even though the
 // model plainly had everything it needed from the rounds already run.
 // tool_choice "none" alone was not a strong enough signal that this round
-// was different from every other one.
+// was different from every other one, so this instruction was added
+// alongside it as a second signal.
+//
+// A later incident (conversation a83e4282, model routed by openrouter/auto)
+// hit the identical failure with both of those already in place: tool_choice
+// "none" and this instruction are still only requests, and a model or
+// provider behind an auto-router can ignore either one. run no longer treats
+// either as sufficient on its own - the forced round's request omits Tools
+// and ToolChoice entirely (see run's own doc comment and its use of
+// forcedFinal below), which is not a stronger request but one no provider
+// can answer with a tool call at all, because there is no tool definition
+// left to call. A request with no tools also carries none of this run's own
+// tool-call/tool-role messages (some providers reject an assistant message
+// with tool_calls, or a tool-role message, on a request that offers no
+// tools), so this same live suffix now also carries
+// assistantForcedFinalToolLogText's plain-text rendering of whatever the
+// earlier rounds already found - see run's toolLog - or the forced round
+// would be answering with no memory of them at all.
 //
 // It is worded for the model, not the operator, but written on the
 // assumption it may end up quoted back verbatim anyway, so it avoids
@@ -206,15 +223,45 @@ func assistantExcessToolCallResult(name string) (string, error) {
 // named plainly rather than glossed over.
 //
 // It goes into the system message rather than a new trailing message for
-// two reasons. First, this round's messages end with the previous round's
-// tool-role results, and a "user" role immediately after "tool" is
-// rejected outright by some providers behind OpenRouter ("Unexpected role
-// 'user' after role 'tool'") - the system message is the one place in the
-// conversation this round is free to change without touching that
-// sequence. Second, a message shaped like a new user turn reads to the
-// model as the operator speaking, which is not who is asking for a
-// wrap-up.
+// one reason that still holds (a second - this round's messages otherwise
+// ending on a tool-role result, which some providers reject a "user"
+// message right after - no longer applies, now that this round's own
+// tool-call/tool-role messages are dropped from the request instead of left
+// in place): a message shaped like a new user turn reads to the model as
+// the operator speaking, which is not who is asking for a wrap-up. The
+// system message is also simply where the tool log above already has to
+// live, for the same reason.
 const assistantForcedFinalInstruction = "There is no more time to check anything further before you reply. Give your best answer now, in plain prose, using only what you have already found. If there is something you were not able to check, say so plainly in the answer."
+
+// assistantForcedFinalToolLogEntry records one tool call this run already
+// made and the result it got back, kept so the forced final round (see run)
+// can replay it as plain text once its own tool-call/tool-role messages are
+// dropped from the request.
+type assistantForcedFinalToolLogEntry struct {
+	Name   string
+	Args   string
+	Result string
+}
+
+// assistantForcedFinalToolLogText renders log as a "what you already looked
+// up" section for the forced final round's system message, appended after
+// assistantForcedFinalInstruction in the same live suffix - see that
+// const's own doc comment for why the forced round needs this at all.
+// Returns "" for an empty log (the forced round was somehow reached with no
+// completed tool call - not the ordinary way to get here, but not this
+// function's job to rule out) so run can skip the extra blank line entirely
+// rather than appending a section with nothing in it.
+func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry) string {
+	if len(log) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("What you already looked up this turn, before running out of tool calls:")
+	for _, entry := range log {
+		fmt.Fprintf(&b, "\n- %s(%s) -> %s", entry.Name, entry.Args, entry.Result)
+	}
+	return b.String()
+}
 
 // assistantEmitter pushes one named progress event to the SSE stream a
 // caller is writing (assistant_handlers.go). This file emits "status"
@@ -569,6 +616,14 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	// round), not just one round - see assistantToolFailures.
 	failures := &assistantToolFailures{counts: make(map[string]int)}
 
+	// toolLog accumulates every tool call and result this run has made so
+	// far, across every round - see assistantForcedFinalToolLogText's own
+	// doc comment for why: if the round cap is hit, the forced final
+	// round's request drops this turn's own tool-call/tool-role messages
+	// entirely, and toolLog is what lets that round still answer from the
+	// earlier rounds' findings instead of none at all.
+	var toolLog []assistantForcedFinalToolLogEntry
+
 	var reply assistantReply
 
 	for round := 0; ; round++ {
@@ -589,20 +644,37 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {
-			req.ToolChoice = "none"
-			// Rebuilt through assistantSystemMessage itself, the same
-			// builder messages[0] already came from, with
-			// assistantForcedFinalInstruction appended to the live suffix -
-			// so the stable/live content-blocks split for an Anthropic
-			// model (assistantSystemMessage's own doc comment) is defined
-			// in exactly one place, not duplicated here. The result
-			// replaces only index 0 of a new slice built for this request;
-			// messages itself (and the history the next turn is built
-			// from) is never modified. See assistantForcedFinalInstruction's
-			// own doc comment for why the instruction goes into the system
-			// message rather than a trailing one.
-			forcedSys := assistantSystemMessage(r.model, systemStable, systemLive+"\n\n"+assistantForcedFinalInstruction)
-			req.Messages = append([]openRouterMessage{forcedSys}, messages[1:]...)
+			log.Printf("assistant: tool round cap (%d) reached, forcing a final answer with no tool machinery on the wire", assistantMaxToolRounds)
+			// No Tools and no ToolChoice at all - tool_choice "none" plus
+			// assistantForcedFinalInstruction already covered the ordinary
+			// case, but a model or provider behind an auto-router can still
+			// return tool_calls right through both (see that const's own doc
+			// comment for the two incidents this responds to). Omitting the
+			// tool definitions outright is not a stronger request, it is one
+			// no provider can answer with a tool call at all: req above was
+			// built with Tools populated for every ordinary round, and this
+			// is the one round that unsets it.
+			req.Tools = nil
+			// This turn's own assistant/tool-call and tool-role messages -
+			// everything appended to messages after the initial system
+			// message and history - are dropped from the request entirely
+			// rather than left in place alongside now-illegal tool_calls (a
+			// provider can refuse a tool_calls-bearing assistant message, or
+			// a tool-role message, on a request that offers no tools).
+			// Rebuilt as [forcedSys, history...]: the conversation this round
+			// sends ends on the operator's own question, which every
+			// provider accepts, and whatever the earlier rounds already
+			// found travels instead as plain text in forcedSys's live suffix
+			// (toolLog, rendered by assistantForcedFinalToolLogText).
+			// messages itself (and the history the next turn is built from)
+			// is never modified - only this request's own Messages field is
+			// rebuilt from history, not from messages[1:].
+			forcedLive := systemLive + "\n\n" + assistantForcedFinalInstruction
+			if summary := assistantForcedFinalToolLogText(toolLog); summary != "" {
+				forcedLive += "\n\n" + summary
+			}
+			forcedSys := assistantSystemMessage(r.model, systemStable, forcedLive)
+			req.Messages = append([]openRouterMessage{forcedSys}, history...)
 		}
 
 		// roundText mirrors, fragment by fragment, the content
@@ -660,6 +732,17 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if marker, found := assistantTextToolCallMarkerIsGenuine(content); found {
 				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
 			}
+			// The forced final round asked the model to answer now from
+			// whatever it already gathered - a blank reply here is not a
+			// legitimate (if terse) answer, it means the model produced
+			// nothing at all despite tools being off. Saving that as the
+			// assistant's reply would show the operator an empty message
+			// with no indication anything went wrong, so this fails the run
+			// explicitly instead (AGENTS.md's fallback policy: no fake
+			// answer).
+			if forcedFinal && strings.TrimSpace(content) == "" {
+				return assistantReply{}, fmt.Errorf("the assistant did not produce an answer within %d tool rounds (forced final round returned no text)", assistantMaxToolRounds)
+			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in
 			// full rather than missing its last few bytes.
@@ -689,6 +772,24 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			return assistantReply{}, terr
 		}
 		messages = append(messages, toolMessages...)
+
+		// Recorded alongside messages, not instead of it, so a forced final
+		// round reached later can replay this round's calls as plain text
+		// (assistantForcedFinalToolLogText) once its own tool-call/tool-role
+		// messages are dropped from the request. runToolRound's own doc
+		// comment guarantees toolMessages comes back in the same order as
+		// choice.ToolCalls, so the two line up by index.
+		for i, call := range choice.ToolCalls {
+			result := ""
+			if i < len(toolMessages) {
+				result = string(toolMessages[i].Content)
+			}
+			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
+				Name:   call.Function.Name,
+				Args:   string(call.Function.Arguments),
+				Result: result,
+			})
+		}
 
 		reply.ToolRounds++
 	}
