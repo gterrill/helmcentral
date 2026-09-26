@@ -17,12 +17,14 @@ import { toggleList } from '@platejs/list'
 import { insertTable } from '@platejs/table'
 import {
   Bold,
+  Camera,
   Code,
   Code2,
   Heading1,
   Heading2,
   Heading3,
   Image as ImageIcon,
+  ImagePlus,
   Italic,
   Link as LinkIcon,
   List,
@@ -39,6 +41,8 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { apiBaseUrl } from '@/config/api'
+import { uploadDocument } from '@/lib/document-upload'
+import { downscaleAll, photoFilename } from '@/lib/image-downscale'
 import {
   LIST_STYLE_TYPE,
   NOTE_EDITOR_PLUGINS,
@@ -703,20 +707,68 @@ function LinkButton({ editor }: { editor: PlateEditor }) {
   )
 }
 
-// Inserts a REFERENCE to a document already in the library (plan §5's
-// `hc-doc:<uuid>` scheme) - it does not upload anything itself. The
-// operator still uploads the photo through Documents first and pastes its
-// id here, exactly as docs/how-to/write-the-boats-manual.md's §5 already
-// describes; this button removes the "type the Markdown by hand" step, not
-// the "upload it first" one, so that how-to page's fallback text stays
-// accurate rather than promising an upload flow this control doesn't do.
+// Inserts a photo at the cursor, one of two ways: a REFERENCE to a document
+// already in the library (plan §5's `hc-doc:<uuid>` scheme, pasted by id -
+// the button's original, and still fastest, path when the photo is already
+// uploaded), or a fresh Take photo/Add from library pick uploaded here and
+// then referenced the same way. docs/adr/0116's dated amendment covers why:
+// an operator standing over the job photographs it and gets it into the
+// note in one step, rather than a trip to Documents first to upload it and
+// copy its id back.
+//
+// Take photo/Add from library reuse lib/image-downscale.ts's downscaleAll -
+// the exact same client-side downscale (and HEIC-to-JPEG re-encode) the
+// equipment photo row (photo-strip-editor.tsx) runs before ANY picked photo
+// reaches the network - then upload through lib/document-upload.ts's
+// uploadDocument, the general document upload endpoint
+// (documents_handlers.go's uploadDocumentHandler), tagged `photo`. Not
+// uploadEquipmentPhoto (use-inventory.ts): that route also links the
+// upload to one equipment item, which a note has no equivalent of - see
+// document-upload.ts's own header comment.
 function ImageButton({ editor }: { editor: PlateEditor }) {
   const [open, setOpen] = useState(false)
   const [docId, setDocId] = useState('')
   const [alt, setAlt] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
-  const submit = () => {
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const libraryInputRef = useRef<HTMLInputElement>(null)
+
+  // The editor's selection at the moment the popover opened. Captured
+  // explicitly, rather than trusted to still equal `editor.selection` by
+  // the time an upload resolves - Take photo/Add from library hand off to
+  // the phone's OWN camera/photo-library UI, an interruption long enough
+  // (an actual photo capture, not just a popover click) that the editor's
+  // selection cannot be assumed to survive it the way it does across the
+  // synchronous doc-id submit below (which the pre-existing onMouseDown
+  // preventDefault on the trigger, further down, was already enough to
+  // protect).
+  const savedSelectionRef = useRef<typeof editor.selection>(null)
+
+  // Inserts one image node per id, in order, at the position the popover
+  // was opened at (or the end of the document, the same fallback lib/note-
+  // editor-dictation.ts's insertDictatedText uses for a genuinely untouched
+  // note with no selection at all) - a single insertNodes call rather than
+  // one per photo, so a multi-photo library pick lands as sibling nodes in
+  // pick order without threading selection state between calls by hand.
+  const insertPhotos = (ids: string[], caption: string) => {
+    if (ids.length === 0) return
+    const at = savedSelectionRef.current ?? editor.api.end([])
+    const trimmedCaption = caption.trim()
+    editor.tf.insertNodes(
+      ids.map((id) => ({
+        type: KEYS.img,
+        url: `hc-doc:${id}`,
+        caption: trimmedCaption === '' ? [] : [{ text: trimmedCaption }],
+        children: [{ text: '' }],
+      })),
+      { at, select: true },
+    )
+    editor.tf.focus()
+  }
+
+  const submitDocId = () => {
     const trimmed = docId.trim()
     const link = resolveNoteHref(`hc-doc:${trimmed}`)
     if (link.kind !== 'document') {
@@ -726,20 +778,93 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
       setError('Paste the document id from its Documents address bar (a UUID).')
       return
     }
-    editor.tf.insertNodes({
-      type: KEYS.img,
-      url: link.kind === 'document' ? `hc-doc:${link.id}` : '',
-      caption: alt.trim() === '' ? [] : [{ text: alt.trim() }],
-      children: [{ text: '' }],
-    })
+    insertPhotos([link.id], alt)
     setDocId('')
     setAlt('')
     setError(null)
     setOpen(false)
   }
 
+  // Shared by the camera input (always exactly one file) and the library
+  // input (any number, `multiple`) - both hand off to onFilesPicked's own
+  // shape (photo-strip-editor.tsx's own convention: "normalised to a plain
+  // array regardless of the input's own multiple-ness"). Every file is
+  // tried, in order, even after an earlier one fails (AGENTS.md fallback
+  // policy / the same "no silent rollback" the equipment photo row already
+  // follows - use-photo-staging.ts's uploadPhotosInOrder) - a successful
+  // pick out of a batch still gets inserted rather than being thrown away
+  // because a sibling failed. Only a batch with NO successes leaves the
+  // note untouched, which is what makes the single-photo (Take photo) case
+  // "on failure, insert nothing".
+  const handleFilesPicked = async (files: File[]) => {
+    if (files.length === 0) return
+    setUploading(true)
+    setError(null)
+    try {
+      const outcomes = await downscaleAll(files)
+      const ids: string[] = []
+      const failures: { name: string; message: string }[] = []
+
+      for (const { file, result } of outcomes) {
+        if (!result.ok) {
+          failures.push({ name: file.name, message: result.error })
+          continue
+        }
+        try {
+          const uploaded = await uploadDocument(result.blob, photoFilename(file.name), ['photo'])
+          ids.push(uploaded.id)
+        } catch (err) {
+          failures.push({ name: file.name, message: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
+      if (ids.length > 0) insertPhotos(ids, alt)
+
+      if (failures.length > 0) {
+        // Fail loud, not a silent partial success: a single-file pick
+        // (Take photo) shows the server's own reason verbatim; a multi-file
+        // library pick that partly failed says how many, matching the
+        // equipment editor's own wording for the identical situation.
+        setError(
+          files.length === 1
+            ? failures[0].message
+            : `${failures.length} of ${files.length} photos didn't upload: ${failures[0].message}`,
+        )
+        return
+      }
+
+      setDocId('')
+      setAlt('')
+      setOpen(false)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handlePickerChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    // Materialise into a plain array BEFORE resetting the input's value -
+    // same order photo-strip-editor.tsx's own handleInputChange uses, and
+    // for the same reason: clearing an <input type="file">'s value is what
+    // clears its `.files` FileList too (a live view onto the input's own
+    // selection, not an independent snapshot), so reading it after the
+    // reset risks reading it already emptied. The reset itself still
+    // happens, so picking the SAME file a second time in a row fires a
+    // change event again (a file input that still holds its previous value
+    // never fires 'change' for an identical pick).
+    if (files && files.length > 0) void handleFilesPicked(Array.from(files))
+    event.target.value = ''
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (uploading) return
+        if (next) savedSelectionRef.current = editor.selection
+        setOpen(next)
+      }}
+    >
       <PopoverTrigger
         render={
           <button
@@ -755,22 +880,71 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
       />
       <PopoverContent className="w-72 p-3">
         <div className="flex flex-col gap-2">
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            aria-label="Take photo"
+            className="hidden"
+            onChange={handlePickerChange}
+          />
+          <input
+            ref={libraryInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            aria-label="Add from library"
+            className="hidden"
+            onChange={handlePickerChange}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-w-0 flex-1 gap-1.5"
+              disabled={uploading}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => cameraInputRef.current?.click()}
+            >
+              <Camera className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Take photo</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-w-0 flex-1 gap-1.5"
+              disabled={uploading}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => libraryInputRef.current?.click()}
+            >
+              <ImagePlus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Add from library</span>
+            </Button>
+          </div>
+          {uploading && <p className="text-[11px] text-muted-foreground">Uploading…</p>}
+
+          <div className="h-px bg-border" aria-hidden="true" />
+
           <Input
-            autoFocus
             value={docId}
             onChange={(e) => setDocId(e.target.value)}
-            placeholder="Document id (from Documents)"
+            placeholder="Or paste a document id (from Documents)"
             aria-label="Document id"
+            disabled={uploading}
           />
           <Input
             value={alt}
             onChange={(e) => setAlt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            onKeyDown={(e) => { if (e.key === 'Enter') submitDocId() }}
             placeholder="Caption (e.g. Fuel manifold)"
             aria-label="Photo caption"
+            disabled={uploading}
           />
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" onClick={submit}>Insert photo</Button>
+          <Button type="button" size="sm" disabled={uploading} onClick={submitDocId}>Insert photo</Button>
         </div>
       </PopoverContent>
     </Popover>

@@ -54,6 +54,20 @@ export async function downscaleImage(file: Blob): Promise<Blob> {
   }
 }
 
+/** JPEG/PNG re-encoding always renames to .jpg (downscaleImage's own output
+ * format) - a camera capture's filename is often meaningless anyway
+ * ("image.heic", "blob"), and giving every upload a real extension that
+ * matches its actual bytes is one less thing to get wrong. Shared by every
+ * caller that uploads a downscaleImage/downscaleAll result: use-photo-
+ * staging.ts's own add/upload path (re-exported there for its existing
+ * import sites) and note-editor-impl.tsx's ImageButton (Take photo/Add from
+ * library), which has no equipment-photo concept to pull in just for this
+ * one pure rename. */
+export function photoFilename(original: string): string {
+  const base = original.replace(/\.[^.]+$/, '').trim()
+  return `${base || 'photo'}.jpg`
+}
+
 /** One outcome from downscaleAll, at the same index as its input file. */
 export interface DownscaleOutcome {
   file: File

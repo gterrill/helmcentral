@@ -13,6 +13,7 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
   downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
+  photoFilename: (original: string) => `${original.replace(/\.[^.]+$/, '').trim() || 'photo'}.jpg`,
 }))
 
 // A minimal stand-in for the real picker (its own search flow is a separate

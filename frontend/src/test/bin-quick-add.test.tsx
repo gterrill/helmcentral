@@ -9,6 +9,7 @@ import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 vi.mock('@/lib/image-downscale', () => ({
   downscaleImage: vi.fn(async (file: Blob) => file),
   downscaleAll: vi.fn(async (files: File[]) => files.map((file) => ({ file, result: { ok: true, blob: file } }))),
+  photoFilename: (original: string) => `${original.replace(/\.[^.]+$/, '').trim() || 'photo'}.jpg`,
 }))
 
 let uploadedPhotoOrder: string[]

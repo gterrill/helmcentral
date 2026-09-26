@@ -32,6 +32,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   page count and, if any selected document is a scan or a photo, the
   estimated OCR cost - the same information the single-document Reindex
   already shows, summed across the batch.
+- The note editor's image button can now take or add a photo directly:
+  **Take photo** shoots one on the spot and drops it into the note at the
+  cursor, and **Add from library** does the same for photos already on the
+  device, filing several in the order you pick them. Pasting a document id
+  from Documents still works exactly as before.
 - Alarms, Anchor Watch, Mate and Radar now have a settings button in the
   header (next to Help) that opens straight to that page's own section of
   Settings. It is left off on a phone, where the header has no room for
