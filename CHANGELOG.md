@@ -32,6 +32,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   page count and, if any selected document is a scan or a photo, the
   estimated OCR cost - the same information the single-document Reindex
   already shows, summed across the batch.
+- Alarms, Anchor Watch, Mate and Radar now have a settings button in the
+  header (next to Help) that opens straight to that page's own section of
+  Settings. It is left off on a phone, where the header has no room for
+  it.
 
 ### Changed
 
@@ -46,6 +50,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - A note's row in the document library now lines up exactly with a plain
   file's row - the type icon and title no longer sit slightly further
   right than a file's.
+- The Settings menu is now grouped into Boat & app, Connections, Features and
+  System, and both the Settings and Inventory menus read in plain sentence
+  case instead of all capitals. The header now shows the page and, where it
+  has one, the section you're on (for example Settings > Logs) instead of
+  always starting with Dashboard.
 
 ### Fixed
 

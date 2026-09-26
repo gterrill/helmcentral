@@ -41,8 +41,8 @@ import { prefetchNoteEditor } from '@/components/note-editor'
 import type { SettingsPageHandle } from '@/components/settings/settings-page'
 import type { DocumentDetailsPageHandle } from '@/components/document-details-page'
 import type { InventoryPanelHandle } from '@/components/inventory/inventory-panel'
-import type { SettingsSectionId } from '@/components/settings/settings-nav'
-import type { InventorySectionId } from '@/components/inventory/inventory-nav'
+import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
+import { INVENTORY_SECTIONS, type InventorySectionId } from '@/components/inventory/inventory-nav'
 
 const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
 const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
@@ -187,7 +187,6 @@ import { Separator } from '@/components/ui/separator'
 import {
   Breadcrumb,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
@@ -254,6 +253,33 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'wall-displays', label: 'Wall displays', icon: MonitorPlay },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
+
+// The header breadcrumb's second crumb, for the two panels that have their
+// own in-page SectionNav (Settings, Inventory) - every other panel is a
+// single crumb (see the breadcrumb JSX below). Panels are not children of
+// Dashboard, so the root crumb is always the panel's own name, never
+// "Dashboard"; this only ever supplies the section beneath it.
+function activePanelSectionLabel(
+  panel: PanelId,
+  settingsSection: SettingsSectionId,
+  inventorySection: InventorySectionId,
+): string | null {
+  if (panel === 'settings') return SETTINGS_SECTIONS.find((section) => section.id === settingsSection)?.label ?? null
+  if (panel === 'inventory') return INVENTORY_SECTIONS.find((section) => section.id === inventorySection)?.label ?? null
+  return null
+}
+
+// The header's "settings for this page" gear: which panels have a matching
+// Settings section, and which one. Only these four have anywhere for the
+// gear to point - Dashboard, Settings itself and every other panel have no
+// entry here, so the header hides the button rather than showing one that
+// goes nowhere useful.
+const PANEL_SETTINGS_SECTIONS: Partial<Record<PanelId, SettingsSectionId>> = {
+  alarms: 'alarms',
+  'anchor-watch': 'anchor-watch',
+  assistant: 'assistant',
+  radar: 'mayara',
+}
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
@@ -744,6 +770,19 @@ export function App() {
     navigate()
     return true
   }, [activePanel, settingsDirty, documentDetailsDirty, inventoryDirty, inventoryHasWork, inventoryPendingReason, stashPendingNavigation])
+
+  // Jumps to a specific Settings section through requestNavigate, so a
+  // dirty Settings/Documents/Inventory page still gets to veto it exactly
+  // as any other navigation would. One helper for every "take me to my
+  // settings" link: AssistantDrawer's own settings button, DocumentsPanel's
+  // Mate-failure line, and the header's per-panel settings gear below all
+  // used to repeat this same three-line requestNavigate call.
+  const openSettingsSection = useCallback((section: SettingsSectionId) => {
+    requestNavigate('settings', () => {
+      setSettingsSection(section)
+      setActivePanel('settings')
+    })
+  }, [requestNavigate])
 
   // The page's own breadcrumb Back (document-details-page.tsx's onBack) and
   // a Back/Forward that changes which Details page - or none - is open both
@@ -2632,10 +2671,7 @@ export function App() {
         return (
           <AssistantDrawer
             canWrite={canWrite}
-            onOpenSettings={() => requestNavigate('settings', () => {
-              setSettingsSection('assistant')
-              setActivePanel('settings')
-            })}
+            onOpenSettings={() => openSettingsSection('assistant')}
             initialConversationId={matePanelConversationId}
             onActiveConversationChange={setMatePanelConversationId}
           />
@@ -2748,12 +2784,9 @@ export function App() {
             onSectionChange={setDocumentsSectionId}
             onOpenHelp={openHelp}
             // ADR 0120: the toolbar's Mate failure line links straight to
-            // Settings → Assistant, the same requestNavigate wiring
-            // AssistantDrawer's own "Open Mate settings" button uses below.
-            onOpenAssistantSettings={() => requestNavigate('settings', () => {
-              setSettingsSection('assistant')
-              setActivePanel('settings')
-            })}
+            // Settings → Assistant, the same openSettingsSection helper
+            // AssistantDrawer's own "Open Mate settings" button uses above.
+            onOpenAssistantSettings={() => openSettingsSection('assistant')}
             // Ask Mate about a selection (ask-mate-selection.tsx): same
             // openMate the header's Sparkles button and SettingsPage's own
             // onAskMate already call, always starting a fresh conversation.
@@ -3210,23 +3243,38 @@ export function App() {
                   <BreadcrumbItem>
                     <BreadcrumbPage>Dashboard</BreadcrumbPage>
                   </BreadcrumbItem>
-                ) : (
-                  <>
-                    {/* Below `sm` only the leaf crumb survives — the parent link is
-                        redundant with the sidebar, which navigates to the same place. */}
-                    <BreadcrumbItem className="hidden sm:inline-flex">
-                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); requestNavigate(null, () => setActivePanel(null)) }}>
-                        Dashboard
-                      </BreadcrumbLink>
-                    </BreadcrumbItem>
-                    <BreadcrumbSeparator className="hidden sm:block" />
-                    <BreadcrumbItem className="min-w-0">
-                      <BreadcrumbPage className="truncate">
-                        {PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label}
-                      </BreadcrumbPage>
-                    </BreadcrumbItem>
-                  </>
-                )}
+                ) : (() => {
+                  // Panels are siblings of Dashboard in the sidebar, not its
+                  // children, so the root crumb is the panel's own name.
+                  // Settings and Inventory additionally carry their active
+                  // section as a second crumb, mirroring the SectionNav each
+                  // of them hosts; every other panel is a single crumb.
+                  const panelLabel = PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label
+                  const sectionLabel = activePanelSectionLabel(activePanel, settingsSection, inventorySection)
+                  if (sectionLabel === null) {
+                    return (
+                      <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbPage className="truncate">{panelLabel}</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    )
+                  }
+                  return (
+                    <>
+                      {/* Below `sm` only the leaf crumb survives — the parent
+                          is redundant with the sidebar, which is already on
+                          this panel. Plain text, not a link: there is no
+                          "top of Settings/Inventory" separate from a section
+                          to navigate to. */}
+                      <BreadcrumbItem className="hidden sm:inline-flex">
+                        <span className="truncate">{panelLabel}</span>
+                      </BreadcrumbItem>
+                      <BreadcrumbSeparator className="hidden sm:block" />
+                      <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbPage className="truncate">{sectionLabel}</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </>
+                  )
+                })()}
               </BreadcrumbList>
             </Breadcrumb>
           </div>
@@ -3263,6 +3311,32 @@ export function App() {
                 )}
               </>
             )}
+            {/* The "settings for this page" shortcut: only the panels in
+                PANEL_SETTINGS_SECTIONS have a matching Settings section for
+                it to open, so it's absent everywhere else - Dashboard,
+                Settings itself, and every panel with no section of its own
+                (Routes, Documents, Inventory, Forecast, Wall displays). Hidden
+                below `sm`: on a phone the right cluster is already full, and
+                the breadcrumb is the slack absorber, so this button squeezed
+                the page name down to one letter. Settings stays one sidebar
+                tap away there. */}
+            {(() => {
+              const sectionId = activePanel ? PANEL_SETTINGS_SECTIONS[activePanel] : undefined
+              if (!sectionId) return null
+              const sectionLabel = SETTINGS_SECTIONS.find((section) => section.id === sectionId)?.label ?? ''
+              return (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="hidden sm:inline-flex"
+                  aria-label={`${sectionLabel} settings`}
+                  title={`${sectionLabel} settings`}
+                  onClick={() => openSettingsSection(sectionId)}
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              )
+            })()}
             {/* ADR 0095: the contextual help - lands on the current
                 screen's page (and heading, for the three dashboard
                 sub-panels that share features/dashboard). `title` is how
