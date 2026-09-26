@@ -416,8 +416,11 @@ describe('App navigation guard on dirty Settings', () => {
 
     // Settings is a lazy chunk — wait for it to actually mount and report
     // dirty before simulating Back, or the popstate handler below would see
-    // settingsDirty still at its initial `false`.
-    await screen.findByText('General')
+    // settingsDirty still at its initial `false`. The header breadcrumb also
+    // says "General" (as its section crumb) the moment settingsSection's
+    // initial state resolves, well before the lazy chunk mounts, so this
+    // has to be the SectionNav's own button, not bare text.
+    await screen.findByRole('button', { name: 'General' })
 
     // Simulate the browser's Back button: it lands the document on the
     // previous URL and fires popstate, but does not itself re-run any React
@@ -430,9 +433,10 @@ describe('App navigation guard on dirty Settings', () => {
     expect(window.location.pathname).toBe('/settings')
     // Settings itself is still the panel on screen, not the dashboard — the
     // modal dialog marks the rest of the tree inert, so this reads it back
-    // with getByText (unfiltered) rather than getByRole (which excludes
-    // inert content).
-    expect(screen.getByText('General')).toBeInTheDocument()
+    // with getByLabelText (unfiltered) rather than getByRole (which excludes
+    // inert content). Distance units is General's own field, unlike
+    // "General" itself, which the breadcrumb's section crumb also says.
+    expect(screen.getByLabelText('Distance units')).toBeInTheDocument()
   })
 
   it('Cancel on that guarded Back closes the dialog and keeps the bar on /settings', async () => {
@@ -442,8 +446,11 @@ describe('App navigation guard on dirty Settings', () => {
 
     // Settings is a lazy chunk — wait for it to actually mount and report
     // dirty before simulating Back, or the popstate handler below would see
-    // settingsDirty still at its initial `false`.
-    await screen.findByText('General')
+    // settingsDirty still at its initial `false`. The SectionNav's own
+    // button, not bare text — the header breadcrumb also says "General"
+    // (its section crumb) as soon as settingsSection's initial state
+    // resolves, well before the lazy chunk mounts.
+    await screen.findByRole('button', { name: 'General' })
 
     window.history.replaceState({}, '', '/')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
@@ -462,8 +469,11 @@ describe('App navigation guard on dirty Settings', () => {
 
     // Settings is a lazy chunk — wait for it to actually mount and report
     // dirty before simulating Back, or the popstate handler below would see
-    // settingsDirty still at its initial `false`.
-    await screen.findByText('General')
+    // settingsDirty still at its initial `false`. The SectionNav's own
+    // button, not bare text — the header breadcrumb also says "General"
+    // (its section crumb) as soon as settingsSection's initial state
+    // resolves, well before the lazy chunk mounts.
+    await screen.findByRole('button', { name: 'General' })
 
     window.history.replaceState({}, '', '/')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })

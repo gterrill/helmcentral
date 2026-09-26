@@ -37,6 +37,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   cursor, and **Add from library** does the same for photos already on the
   device, filing several in the order you pick them. Pasting a document id
   from Documents still works exactly as before.
+- Alarms, Anchor Watch, Mate and Radar now have a settings button in the
+  header (next to Help) that opens straight to that page's own section of
+  Settings. It is left off on a phone, where the header has no room for
+  it.
 
 ### Changed
 
@@ -51,6 +55,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - A note's row in the document library now lines up exactly with a plain
   file's row - the type icon and title no longer sit slightly further
   right than a file's.
+- The Settings menu is now grouped into Boat & app, Connections, Features and
+  System, and both the Settings and Inventory menus read in plain sentence
+  case instead of all capitals. The header now shows the page and, where it
+  has one, the section you're on (for example Settings > Logs) instead of
+  always starting with Dashboard.
 
 ### Fixed
 

@@ -414,6 +414,31 @@ scaling by breakpoint. Supporting values sit beside or below in the same font at
 - **Internal padding:** `px-6 py-6` in settings and dialog contexts, tightened to
   `px-3`/`px-4` and `py-4` when used as a dashboard tile.
 
+### Navigation
+
+Two patterns, not one, because they answer different questions. The sidebar
+lists *places* the operator goes: every top-level panel, plus Dashboard's own
+operating-mode pages as a sub-list underneath it, because those pages are
+places too. A page that is one job with several *sections* of it (Settings,
+Inventory) does not get more sidebar rows for each section: it gets its own
+in-page nav, the shared `SectionNav` (`section-nav.tsx`), a narrow `Card`
+beside the section content, sentence-case items (`text-sm font-medium`, never
+the uppercase KPI-label look), with a micro-label group heading
+(`text-[10px]` uppercase tracked, muted) only where a page's sections fall
+into named groups. Below `md` it collapses to a flat horizontal scroll strip;
+grouping is a desktop affordance, not a second layout to maintain.
+
+The header breadcrumb names the page the operator is on, and the section
+beneath it when the page has one from SectionNav, never a false Dashboard
+parent. Panels are siblings of Dashboard in the sidebar, not its children, so
+"Dashboard" is not owed a crumb it did not host.
+
+A feature page that has its own Settings section (Alarms, Anchor Watch,
+Mate, Radar) also gets a plain-`Settings`-icon ghost button beside the
+header's help button, styled and sized the same, that jumps straight to that
+section instead of making the operator find it again from Settings' own
+SectionNav.
+
 ### Inputs / Fields
 
 - **Style:** 40px tall, `rounded-md`, hairline `--input` border, background

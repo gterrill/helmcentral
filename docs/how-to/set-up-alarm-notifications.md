@@ -4,7 +4,8 @@ See [Alarms: Getting told](../features/alarms.md#getting-told) for what each
 transport is and what it needs. These are the steps for turning one on and
 checking it works.
 
-1. Open **Settings → Alarms**.
+1. Open **Settings → Alarms**. If you're already on the Alarms page, the
+   gear icon in the header (tablet or larger) takes you straight there instead.
 2. Turn on the transport you want under **Notifications**:
    - **ntfy**: set **Server** (the public `https://ntfy.sh` or your own) and
      **Topic**, and paste in an **Access token** if your server needs one.
