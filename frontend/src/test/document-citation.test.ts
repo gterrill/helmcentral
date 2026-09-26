@@ -46,6 +46,36 @@ describe('parseDocumentCitationHref', () => {
   it('returns null for an unrelated in-app path', () => {
     expect(parseDocumentCitationHref('/mate/abc-123')).toBeNull()
   })
+
+  // Code-review finding: pathname-only matching treated ANY href whose
+  // pathname happened to be /documents as a citation, regardless of origin -
+  // an absolute other-origin URL got the in-app icon (and a local lookup for
+  // a document id that means nothing on this server) instead of rendering
+  // as the external link it actually is.
+  it('returns null for an absolute URL on a different origin, even with the right path/query', () => {
+    expect(parseDocumentCitationHref('https://example.com/documents?document=abc')).toBeNull()
+  })
+
+  // Same failure mode, protocol-relative: `new URL('//host/...', base)`
+  // resolves against the base's OWN scheme, silently adopting `host` as if
+  // it were this app.
+  it('returns null for a protocol-relative //host/... URL', () => {
+    expect(parseDocumentCitationHref('//example.com/documents?document=abc')).toBeNull()
+  })
+
+  // A relative path with no leading slash resolves against the CURRENT
+  // page's own directory in a real browser, not against the root - from
+  // /mate/<id>, "documents?document=abc" actually navigates to
+  // /mate/documents?document=abc, nothing like the Documents viewer. Parsing
+  // it against a rootless fake base silently "fixed" it into /documents,
+  // which is not where a click would actually go.
+  it('returns null for a relative path with no leading slash', () => {
+    expect(parseDocumentCitationHref('documents?document=abc')).toBeNull()
+  })
+
+  it('still extracts the id from the one valid root-relative form', () => {
+    expect(parseDocumentCitationHref('/documents?document=abc')).toBe('abc')
+  })
 })
 
 describe('citationIconKind', () => {
