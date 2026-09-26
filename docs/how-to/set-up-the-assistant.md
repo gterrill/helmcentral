@@ -17,7 +17,8 @@ your questions.
 
 ## 2. Configure it in Helmcentral
 
-With write access, open **Settings → Mate**:
+With write access, open **Settings → Mate**. While viewing the Mate page
+itself, the gear icon in the header (tablet or larger) opens the same section directly:
 
 1. Paste the key into the **OpenRouter API key** field.
 2. Choose your routing mode:
