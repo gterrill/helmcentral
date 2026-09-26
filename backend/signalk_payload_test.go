@@ -238,3 +238,60 @@ func TestFetchSignalKVesselState_LengthOverallAbsentStaysAtSentinel(t *testing.T
 		t.Fatalf("length overall: got %v, want sentinel -1 (not published)", state.LengthOverallM)
 	}
 }
+
+// The low-water clearance warning (ADR 0135) needs the boat's draft.
+// SignalK only ever publishes design.draft.value.maximum on the live
+// server verified for this feature - current/minimum/canoe are never
+// present, and maximum is the only figure that is always the worst case,
+// so it is the only one read. The REST full-tree shape nests it under a
+// "value" wrapper; some sources publish the bare path instead - same
+// two-step value-then-bare lookup already used for design.length.overall
+// above.
+func TestFetchSignalKVesselState_ReadsDraftFromDesignDraftValueMaximum(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"design": {"draft": {"value": {"maximum": 1.2}}}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.DraftM != 1.2 {
+		t.Fatalf("draft: got %v, want 1.2", state.DraftM)
+	}
+}
+
+func TestFetchSignalKVesselState_FallsBackToBareDesignDraftMaximum(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"design": {"draft": {"maximum": 1.4}}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.DraftM != 1.4 {
+		t.Fatalf("draft (bare shape fallback): got %v, want 1.4", state.DraftM)
+	}
+}
+
+// No masking fallback: when design.draft is absent entirely, DraftM must
+// stay at the lookupNumber sentinel (-1), not silently become 0 - and it
+// must never fall back to current/minimum/canoe, which are never published
+// on the live server this feature was verified against.
+func TestFetchSignalKVesselState_DraftAbsentStaysAtSentinel(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"navigation": {}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.DraftM != -1 {
+		t.Fatalf("draft: got %v, want sentinel -1 (not published)", state.DraftM)
+	}
+}

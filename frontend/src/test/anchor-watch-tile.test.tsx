@@ -3,7 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import type { TideToday } from '@/hooks/use-tide-today'
 import { catenaryMethod, type RodeMethodResult, type RodePlanInput } from '@/lib/rode-plan'
+
+// The tile computes `now` itself (`new Date()`, live at render time — see
+// ADR 0135), so datetime/low_tide_time below are built relative to the real
+// clock rather than a fixed calendar date: a hardcoded date would eventually
+// (or immediately, depending when the suite runs) fall foul of the 30-minute
+// staleness rule or the "low already passed" rule this same ADR adds.
+function makeTide(overrides: Partial<TideToday> = {}): TideToday {
+  const now = Date.now()
+  return {
+    datetime: new Date(now - 5 * 60 * 1000).toISOString(),
+    current_tide_height_ft: 3,
+    tide_direction: 'Falling',
+    high_tide_time: new Date(0).toISOString(),
+    high_tide_height_ft: 5,
+    low_tide_time: new Date(now + 60 * 60 * 1000).toISOString(),
+    low_tide_height_ft: 1,
+    station_name: 'Test Station',
+    provider: 'test',
+    ...overrides,
+  }
+}
 
 // Same shallow-mock approach as anchor-imagery-toggle.test.tsx (~lines 22-37):
 // the map itself is covered by its own dedicated tests, so here it's stubbed
@@ -145,10 +167,12 @@ function baseProps(overrides: Record<string, unknown> = {}) {
       windageAreaM2: 20,
       gpsFromBowM: 0,
       loaM: 0,
+      minClearanceAtLowM: 0.5,
     },
     selectedWindBandId: null,
     planningDepthM: null,
     planningTideHeightFt: null,
+    vesselDraftM: null,
     lastUpdateAgeS: null,
     ...overrides,
   }
@@ -615,6 +639,84 @@ describe('AnchorWatchTile', () => {
       render(<AnchorWatchTile {...baseProps({ lastUpdateAgeS: null })} />)
 
       expect(screen.queryByTestId('tile-stale-badge')).toBeNull()
+    })
+  })
+
+  // ADR 0135: the depth at the boat's current position, projected to the
+  // next low tide, against the operator's configured margin.
+  describe('low water clearance', () => {
+    it('names the missing input when draft is unavailable (the baseProps default)', () => {
+      // baseProps() ships vesselDraftM: null and tide: null; depth (5) is
+      // checked first and passes, so draft is the first thing found missing.
+      render(<AnchorWatchTile {...baseProps()} />)
+
+      const readout = screen.getByTestId('low-water-clearance')
+      expect(readout).toHaveTextContent('No draft from the boat')
+    })
+
+    it('names no_depth when there is no live depth reading', () => {
+      render(<AnchorWatchTile {...baseProps({ depthMeters: null, vesselDraftM: 1.2, tide: makeTide() })} />)
+
+      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No depth')
+    })
+
+    it('names no_tide when there is no tide station', () => {
+      render(<AnchorWatchTile {...baseProps({ depthMeters: 5, vesselDraftM: 1.2, tide: null })} />)
+
+      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No tide station')
+    })
+
+    it('shows a quiet clearance line when the depth at low water clears the margin', () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            depthMeters: 4,
+            vesselDraftM: 1.2,
+            tide: makeTide(),
+            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
+          })}
+        />,
+      )
+
+      const readout = screen.getByTestId('low-water-clearance')
+      expect(readout).toHaveTextContent('under keel at low water')
+      expect(readout).not.toHaveTextContent('Too shallow')
+    })
+
+    it('warns when the projected depth at low water is under the configured margin', () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            depthMeters: 2,
+            vesselDraftM: 1.2,
+            tide: makeTide(),
+            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
+          })}
+        />,
+      )
+
+      const readout = screen.getByTestId('low-water-clearance')
+      expect(readout).toHaveTextContent('Too shallow at low water')
+      // low_tide_time renders as a local clock time; asserting the whole
+      // sentence would be timezone-flaky, so this only pins the figure both
+      // the lib test and this warning must agree on.
+      expect(readout).toHaveTextContent('0.2 m under keel')
+    })
+
+    it('shows "Tide forecast out of date" when the tide reading is more than 30 minutes old', () => {
+      const staleTide = makeTide({ datetime: new Date(Date.now() - 40 * 60 * 1000).toISOString() })
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            depthMeters: 4,
+            vesselDraftM: 1.2,
+            tide: staleTide,
+            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
+          })}
+        />,
+      )
+
+      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('Tide forecast out of date')
     })
   })
 })

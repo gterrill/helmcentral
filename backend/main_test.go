@@ -734,6 +734,117 @@ func TestVesselStateHandler_LengthOverallMAbsentSerializesAsNullNotSentinel(t *t
 	}
 }
 
+// TestVesselStateHandler_DraftMPresentSerializesAsNumber proves the
+// /api/vessel-state body carries the SignalK-published draft (ADR 0135's
+// low-water clearance warning needs it), the same way length_overall_m
+// already does.
+func TestVesselStateHandler_DraftMPresentSerializesAsNumber(t *testing.T) {
+	body := []byte(`{"name": "Test Vessel", "design": {"draft": {"value": {"maximum": 1.2}}}}`)
+
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to parse server url: %v", err)
+	}
+	host, portRaw, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("failed to split host/port: %v", err)
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	settings := fmt.Sprintf("signalk:\n  address: %q\n  port: %d\n", host, port)
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/vessel-state", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := vesselState(c); err != nil {
+		t.Fatalf("vesselState returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse vessel-state response: %v", err)
+	}
+
+	got, ok := payload["draft_m"].(float64)
+	if !ok || got != 1.2 {
+		t.Fatalf("expected draft_m 1.2, got %v (%T)", payload["draft_m"], payload["draft_m"])
+	}
+}
+
+// TestVesselStateHandler_DraftMAbsentSerializesAsNullNotSentinel is the
+// no-masking-fallback half: an unpublished draft must reach the frontend as
+// JSON null, never as the internal lookupNumber -1 sentinel leaking out and
+// being mistaken for a real (negative) draft.
+func TestVesselStateHandler_DraftMAbsentSerializesAsNullNotSentinel(t *testing.T) {
+	body := []byte(`{"name": "Test Vessel"}`)
+
+	seedSelfTree(t, string(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to parse server url: %v", err)
+	}
+	host, portRaw, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("failed to split host/port: %v", err)
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	settings := fmt.Sprintf("signalk:\n  address: %q\n  port: %d\n", host, port)
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/vessel-state", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := vesselState(c); err != nil {
+		t.Fatalf("vesselState returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse vessel-state response: %v", err)
+	}
+
+	v, exists := payload["draft_m"]
+	if !exists {
+		t.Fatalf("expected draft_m key to be present in the response")
+	}
+	if v != nil {
+		t.Fatalf("expected draft_m to be null when unpublished, got %v (%T)", v, v)
+	}
+}
+
 // TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone proves the
 // vessel-state payload carries the vessel's local zone derived from
 // longitude (ADR 0035), not the browser's. The wall display's Ubuntu box is

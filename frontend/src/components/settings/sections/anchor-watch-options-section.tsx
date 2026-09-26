@@ -166,6 +166,26 @@ export function AnchorWatchOptionsSection({
               3+ knots SOG for 15 seconds)
             </FieldLabel>
           </Field>
+
+          <Field>
+            <FieldLabel htmlFor="min-clearance-at-low">Clearance at Low Water</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="min-clearance-at-low"
+                inputMode="decimal"
+                value={draft.minClearanceAtLowM}
+                onChange={(e) => onChange({ minClearanceAtLowM: e.target.value })}
+                aria-label="Minimum clearance at low water in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+            <FieldDescription>
+              Water to keep under the keel at the next low tide. Anchor Watch warns when the
+              depth here would leave less.
+            </FieldDescription>
+          </Field>
         </div>
       </FieldSet>
     </div>

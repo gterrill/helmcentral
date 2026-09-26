@@ -11,6 +11,9 @@ export type AnchorConfig = {
   windageAreaM2: number
   gpsFromBowM: number
   loaM: number
+  // ADR 0135: water the operator wants under the keel at the next low tide,
+  // feeding the Anchor Watch tile's low-water clearance warning.
+  minClearanceAtLowM: number
 }
 
 export type MayaraConfig = {
@@ -91,6 +94,7 @@ export const fallbackAnchorConfig: AnchorConfig = {
   windageAreaM2: 35,
   gpsFromBowM: 0,
   loaM: 0,
+  minClearanceAtLowM: 0.5,
 }
 
 // Blank address is the documented "not configured" state — see
@@ -119,6 +123,7 @@ export type AppConfigSettings = {
     windage_area_m2?: number
     gps_from_bow_m?: number
     loa_m?: number
+    min_clearance_at_low_m?: number
   }
   mayara?: {
     address?: string
@@ -197,6 +202,9 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
     windageAreaM2: positiveNumber(anchor?.windage_area_m2, fallbackAnchorConfig.windageAreaM2),
     gpsFromBowM: nonNegativeNumber(anchor?.gps_from_bow_m, fallbackAnchorConfig.gpsFromBowM),
     loaM: positiveNumber(anchor?.loa_m, fallbackAnchorConfig.loaM),
+    // Same "0 is meaningful, not absent" treatment as gpsFromBowM above: a
+    // zero margin is a deliberate "warn only once the keel would touch."
+    minClearanceAtLowM: nonNegativeNumber(anchor?.min_clearance_at_low_m, fallbackAnchorConfig.minClearanceAtLowM),
   }
 }
 

@@ -11,6 +11,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Anchor Watch now warns when the boat will be too shallow at the next low
+  tide: it projects the live depth reading forward to the next low and
+  compares what would be left under the keel against your vessel's draft
+  and a clearance margin you set in Settings → Anchor Watch (**Clearance at
+  Low Water**, 0.5 m by default). The tile and the full-page anchor watch
+  view show the shortfall and the time of the next low when it's too
+  shallow, or the expected clearance when it isn't.
+
+### Fixed
+
+- The Depth & Tide tile no longer skips a low tide of exactly 0.0 in favour
+  of the one after it, and no longer shows a made-up low a day ahead when
+  the tide station has no low left in its forecast.
+
 ## [0.33.0] - 2026-09-26
 
 ### Breaking

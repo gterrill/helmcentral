@@ -175,6 +175,108 @@ func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
 	}
 }
 
+// TestTideToday_ReportsAZeroMetreLowWithoutBeingOverwritten guards the fix
+// for the old `state.LowTideHeightFt == 0` "not found yet" sentinel: a real
+// 0.0 m low is indistinguishable from "not found" under that check, so the
+// *next* future extreme in the list (here a second, later low) would
+// overwrite it even though the first low was already found. Found state now
+// tracked with an explicit bool, so the first future low found wins and
+// keeps its own height and time regardless of what it's worth.
+func TestTideToday_ReportsAZeroMetreLowWithoutBeingOverwritten(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+
+	station := tideStation{StationID: "TEST_STATION", Name: "Test Harbour"}
+	now := time.Now().UTC()
+	firstLowTime := now.Add(1 * time.Hour)
+	secondLowTime := now.Add(3 * time.Hour)
+	fakeResult := tideChartResult{
+		Station: station,
+		Extremes: []tideExtremePoint{
+			{Time: firstLowTime, HeightM: 0.0, High: false},
+			{Time: secondLowTime, HeightM: 1.0, High: false},
+		},
+		CurrentHeightM: 1.5,
+		Direction:      "Falling",
+		CachedAt:       now,
+	}
+	registerTideProvider(&stubTideProvider{id: "bom", result: fakeResult})
+
+	settingsPath := writeTideTodaySettings(t, "bom", station.StationID)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var payload tideTodayResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload.LowTideHeightFt != 0 {
+		t.Fatalf("expected the real 0.0 m low to be reported as 0, got %v", payload.LowTideHeightFt)
+	}
+	// RFC3339 (the wire format) only carries second precision, so compare at
+	// that precision rather than against firstLowTime's raw nanoseconds.
+	if payload.LowTideTime != firstLowTime.Format(time.RFC3339) {
+		t.Fatalf("expected low_tide_time to stay the first future low (%s), got %s — the second low overwrote it", firstLowTime.Format(time.RFC3339), payload.LowTideTime)
+	}
+}
+
+// TestTideToday_ReportsSentinelWhenNoFutureLowExists guards the other half
+// of the same fix: when the extremes list has no future low at all, the
+// response must send the -1 sentinel useTideToday already treats as "not
+// published," not 0 at a made-up time 24h out — the old default a real 0.0 m
+// low was indistinguishable from.
+func TestTideToday_ReportsSentinelWhenNoFutureLowExists(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+
+	station := tideStation{StationID: "TEST_STATION", Name: "Test Harbour"}
+	now := time.Now().UTC()
+	fakeResult := tideChartResult{
+		Station: station,
+		Extremes: []tideExtremePoint{
+			// Only a future high and a past low - no future low at all.
+			{Time: now.Add(-2 * time.Hour), HeightM: 1.0, High: false},
+			{Time: now.Add(4 * time.Hour), HeightM: 2.0, High: true},
+		},
+		CurrentHeightM: 1.5,
+		Direction:      "Rising",
+		CachedAt:       now,
+	}
+	registerTideProvider(&stubTideProvider{id: "bom", result: fakeResult})
+
+	settingsPath := writeTideTodaySettings(t, "bom", station.StationID)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var payload tideTodayResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if payload.LowTideHeightFt != -1 {
+		t.Fatalf("expected the -1 sentinel when no future low exists, got %v", payload.LowTideHeightFt)
+	}
+}
+
 func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	settingsPath := writeTideTodaySettings(t, "not-a-real-provider", "ANY")

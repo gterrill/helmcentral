@@ -29,6 +29,10 @@ const (
 	defaultHullType         = "power_cat"
 	defaultScopeMethod      = "ratio"
 	defaultWindageAreaM2    = 35
+	// defaultMinClearanceAtLowM is the generic seamanship margin Anchor
+	// Watch's low-water clearance warning uses until the operator sets
+	// their own (ADR 0135) - not a vessel-specific value.
+	defaultMinClearanceAtLowM = 0.5
 	// defaultMayaraPort is mayara-server's own default REST/WebSocket port.
 	// Used only to clamp an out-of-range settings.mayara.port; unlike
 	// defaultSignalKAddress there is no equivalent default *address* — see
@@ -117,6 +121,20 @@ type settingsPayload struct {
 		// normalizeSettingsPayload's handling of it, both pass the
 		// submitted value straight through with no override.
 		AutoRaiseOnMotoring bool `json:"auto_raise_on_motoring"`
+		// MinClearanceAtLowM is the water the operator wants under the keel
+		// at the next low tide (ADR 0135) before Anchor Watch's low-water
+		// clearance warning fires. Defaults to a generic 0.5m seamanship
+		// margin, not a vessel-specific value. Zero is a valid, deliberate
+		// choice (warn only once the keel would touch), so - like
+		// AutoRaiseOnMotoring above - its zero value is NOT its default: a
+		// bare 0 can't tell "the operator saved zero" from "this
+		// settings.yaml predates the feature." The true default lives only
+		// in buildSettingsPayload (applied before the disk overlay); this
+		// field, and normalizeSettingsPayload's handling of it, only ever
+		// reject a negative or non-finite submission by replacing it with
+		// that same default - a genuine zero or positive value passes
+		// straight through.
+		MinClearanceAtLowM float64 `json:"min_clearance_at_low_m"`
 	} `json:"anchor"`
 	Influxdb struct {
 		Enabled bool   `json:"enabled"`
@@ -287,6 +305,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"gps_from_bow_m":         normalized.Anchor.GPSFromBowM,
 		"loa_m":                  normalized.Anchor.LOAM,
 		"auto_raise_on_motoring": normalized.Anchor.AutoRaiseOnMotoring,
+		"min_clearance_at_low_m": normalized.Anchor.MinClearanceAtLowM,
 	}
 	settings["auth"] = map[string]any{
 		"mode": normalized.Auth.Mode,
@@ -417,6 +436,11 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 	// overlay below, so an absent key on disk surfaces as true and only an
 	// explicit stored value (true or false) overrides it.
 	payload.Anchor.AutoRaiseOnMotoring = true
+	// Same split, same reason as AutoRaiseOnMotoring immediately above: the
+	// true default (a generic 0.5m margin) lives here, not in
+	// normalizeSettingsPayload, because a submitted zero is indistinguishable
+	// from an unset Go zero value once it reaches that function.
+	payload.Anchor.MinClearanceAtLowM = defaultMinClearanceAtLowM
 	// Same split, same reason (see normalizeSettingsPayload's own comment on
 	// EmbeddingModel): an absent embedding_model is a settings.yaml written
 	// before the key existed and defaults here, while a key present and blank
@@ -504,6 +528,15 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		// untouched, and only a present key (true or false) overrides it.
 		if v, ok := anchorMap["auto_raise_on_motoring"].(bool); ok {
 			payload.Anchor.AutoRaiseOnMotoring = v
+		}
+		// Presence, not value, distinguishes "the operator explicitly saved
+		// zero" from "this settings.yaml predates the feature" - coerceFloat
+		// returns -1 for a missing/unparseable key, so a non-negative,
+		// finite value is the presence gate (same >= 0 pattern gps_from_bow_m
+		// above uses, plus an explicit +Inf guard since coerceFloat can
+		// return it verbatim from a YAML .inf literal, and +Inf >= 0 is true).
+		if value := coerceFloat(anchorMap["min_clearance_at_low_m"]); value >= 0 && !math.IsInf(value, 0) {
+			payload.Anchor.MinClearanceAtLowM = value
 		}
 	}
 
@@ -681,6 +714,16 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	// field can't use the "default when invalid/absent" pattern every other
 	// field in this function does.
 	normalized.Anchor.AutoRaiseOnMotoring = req.Anchor.AutoRaiseOnMotoring
+	// MinClearanceAtLowM (ADR 0135): unlike BowRollerHeightM/ChainSizeMM/
+	// WindageAreaM2 above, zero is not floored away here - it is a valid,
+	// deliberate margin (warn only once the keel is at the seabed). Only a
+	// negative or non-finite submission gets replaced by the default;
+	// "absent" is handled separately, by buildSettingsPayload's disk-presence
+	// check, for the same reason AutoRaiseOnMotoring's default lives there.
+	normalized.Anchor.MinClearanceAtLowM = req.Anchor.MinClearanceAtLowM
+	if normalized.Anchor.MinClearanceAtLowM < 0 || math.IsNaN(normalized.Anchor.MinClearanceAtLowM) || math.IsInf(normalized.Anchor.MinClearanceAtLowM, 0) {
+		normalized.Anchor.MinClearanceAtLowM = defaultMinClearanceAtLowM
+	}
 
 	normalized.Influxdb.Enabled = req.Influxdb.Enabled
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
@@ -904,7 +947,7 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 
 func fetchSignalKVesselState() (vesselStateData, error) {
 	state := vesselStateData{
-		Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1,
+		Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, DraftM: -1, Latitude: -1, Longitude: -1,
 		HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1,
 		// True wind (ADR 0129 / ADR 0130) carries the same -1/"" absent
 		// sentinels as its apparent counterpart above, and is never derived
@@ -935,6 +978,17 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	state.LengthOverallM = lookupNumber(payload, "design", "length", "value", "overall")
 	if state.LengthOverallM == -1 {
 		state.LengthOverallM = lookupNumber(payload, "design", "length", "overall")
+	}
+
+	// ADR 0135: the Anchor Watch low-water clearance warning needs the
+	// boat's draft. Only design.draft.maximum is read - the live server
+	// this feature was verified against never publishes
+	// current/minimum/canoe, and maximum is the only figure that is always
+	// the worst case, so there is no fallback to those. Same two-step
+	// value-then-bare lookup as design.length.overall above.
+	state.DraftM = lookupNumber(payload, "design", "draft", "value", "maximum")
+	if state.DraftM == -1 {
+		state.DraftM = lookupNumber(payload, "design", "draft", "maximum")
 	}
 
 	state.Status = firstNonEmptyString(lookupString(payload, "navigation", "state", "value"), lookupString(payload, "navigation", "state"))

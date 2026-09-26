@@ -786,6 +786,7 @@ describe('computeScopeRecommendation', () => {
     windageAreaM2: 20,
     gpsFromBowM: 0,
     loaM: 0,
+    minClearanceAtLowM: 0.5,
   }
 
   const baseArgs = {

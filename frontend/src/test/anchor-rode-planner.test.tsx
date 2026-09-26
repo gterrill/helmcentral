@@ -48,6 +48,7 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
       windageAreaM2: 20,
       gpsFromBowM: 2,
       loaM: 12,
+      minClearanceAtLowM: 0.5,
     },
     bowOffsetM: 2,
     vesselLengthOverallM: null,
