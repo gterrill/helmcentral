@@ -38,13 +38,22 @@ interface DocumentApiShape {
 // (the citation contract's own spec) asks for: without it, a reply citing
 // the same manual three times, or a long conversation citing it across many
 // turns, would re-fetch it every single time an icon mounts.
+//
+// Only 'ok' and 'not-found' are worth keeping this way - both are real,
+// stable answers. An 'error' result (a dropped link, a 500) is evicted the
+// moment it resolves (below): caching it the same way used to mean one
+// transient blip left every citation of that document showing a broken icon
+// for the rest of the page's life, long after the document itself, and the
+// network, were fine again. Evicting lets the next mount - the operator
+// scrolling the reply back into view, or opening the conversation again -
+// retry instead of replaying the same stale failure from cache.
 const citationCache = new Map<string, Promise<CitationLookup>>()
 
 function fetchDocumentCitation(id: string): Promise<CitationLookup> {
-  let cached = citationCache.get(id)
-  if (cached) return cached
+  const existing = citationCache.get(id)
+  if (existing) return existing
 
-  cached = (async (): Promise<CitationLookup> => {
+  const promise = (async (): Promise<CitationLookup> => {
     try {
       const response = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(id)}`)
       if (response.status === 404) return { status: 'not-found' }
@@ -56,12 +65,24 @@ function fetchDocumentCitation(id: string): Promise<CitationLookup> {
       // AGENTS.md fallback policy: this is not "pretend the document is
       // fine" - the citation icon renders its own distinct broken state for
       // 'error' (see useDocumentCitation below), same as 'not-found'. It is
-      // simply not this hook's job to retry a dropped link on its own.
+      // simply not this hook's job to retry a dropped link on its own -
+      // eviction below is what lets a LATER mount retry instead.
       return { status: 'error' }
     }
   })()
-  citationCache.set(id, cached)
-  return cached
+  citationCache.set(id, promise)
+
+  void promise.then((lookup) => {
+    // The `=== promise` guard is belt-and-braces: nothing else in this
+    // module ever replaces a live entry out from under an in-flight lookup,
+    // but this keeps a stale eviction from ever clobbering a fresher entry
+    // if that ever changes.
+    if (lookup.status === 'error' && citationCache.get(id) === promise) {
+      citationCache.delete(id)
+    }
+  })
+
+  return promise
 }
 
 /** Test-only: clears the shared cache between test cases. */
