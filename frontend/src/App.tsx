@@ -2890,18 +2890,32 @@ export function App() {
                 point (e.g. GPS lost after the anchor was already set), and stay
                 null only when neither is available: the drawer renders an
                 explicit "No GPS fix" placeholder in the map slot for that case
-                rather than being handed a fabricated 0,0. */}
+                rather than being handed a fabricated 0,0.
+
+                hasGpsFix (code-review finding) tells the drawer whether that
+                substitution actually happened — its own Adjust-mode "Alarm
+                would sound now" check must not evaluate against the anchor
+                point (distance ~0, warning wrongly never fires) or the
+                backend's -1/-1 "no fix" sentinel (thousands of km away,
+                warning wrongly always fires; see gnss_critical_alert and
+                ~/papercuts.md's own entry on this exact sentinel). latitude/
+                longitude here are use-vessel-state.ts's raw values — a plain
+                range check away from being -1, not null, when the sentinel
+                fires, which is why the pair is checked explicitly rather than
+                trusting the substituted vesselLat/vesselLon below. */}
             <AnchorWatchDrawer
               placemarks={placemarks}
               onPlacemarkCreate={createPlacemark}
               onPlacemarkRemove={removePlacemark}
               vesselLat={latitude ?? anchorWatch.anchorLat}
               vesselLon={longitude ?? anchorWatch.anchorLon}
+              hasGpsFix={latitude !== null && longitude !== null && !gnssCriticalAlert && !(latitude === -1 && longitude === -1)}
               vesselHeadingDeg={headingTrue}
               anchorLat={anchorWatch.anchorLat}
               anchorLon={anchorWatch.anchorLon}
               radiusMeters={anchorWatch.radiusMeters}
               depthMeters={depth}
+              depthLastUpdateAgeS={depthLastUpdateAgeS}
               currentDriftKts={currentDriftKts}
               currentSetDeg={currentSetDeg}
               currentDriftImpactKts={currentDriftImpactKts}
@@ -2926,6 +2940,7 @@ export function App() {
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={setShowRadarEcho}
               onRadiusChange={anchorWatch.updateRadius}
+              adjustAnchor={anchorWatch.adjustAnchor}
               onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}
               onDropAnchor={handleDropAnchorHere}

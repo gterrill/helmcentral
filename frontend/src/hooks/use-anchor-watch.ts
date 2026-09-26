@@ -80,12 +80,31 @@ export interface AnchorWatchResult {
     capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
   ) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
+  /**
+   * The Adjust mode write: radius alone, or radius plus position, in one
+   * atomic PATCH, mirroring the backend's own lat+lon+radius_meters contract
+   * (backend/anchor.go's patchAnchorWatch — lat/lon optional but must arrive
+   * together). lat/lon are optional here too, both or neither: the caller
+   * (the drawer's handleAdjustSet, via lib/anchor-adjust.ts's
+   * buildAdjustCommitTargets) omits them entirely when the draft position
+   * wasn't actually moved, so a radius-only Set doesn't ask the backend to
+   * treat it as a reposition (self-trail reset, a fresh SignalK publish that
+   * 502s if SignalK happens to be down — code-review finding). Mirrors
+   * updateRadius exactly otherwise — awaits anchorRequest, replaces state
+   * with the server echo, rethrows on failure rather than swallowing it, so
+   * the caller (the Adjust mode's Set button) is what shows a Retry toast.
+   */
+  adjustAnchor: (params: { lat?: number; lon?: number; radiusMeters: number }) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
   clearAnchor: () => Promise<void>
 }
 
-const DRAG_BUFFER_METERS = 4.572 // 15 ft
+// Exported for the Adjust mode's own drag-alarm-preview warning ("Alarm
+// would sound now" when the draft radius would leave the boat outside it) —
+// part 2 of the anchor-adjust-sheet plan, which needs the exact same buffer
+// this hook's own anchorState computation below uses, not a second copy of it.
+export const DRAG_BUFFER_METERS = 4.572 // 15 ft
 const DEFAULT_RADIUS_METERS = 20
 const DEFAULT_SEA_STATE: SeaState = 'calm'
 const DEFAULT_SEABED_TYPE: SeabedType = 'sand'
@@ -201,6 +220,24 @@ export function useAnchorWatch(
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ radius_meters: radiusMeters }),
+    })
+    setServerState(await res.json() as AnchorWatchServerState)
+    setLoaded(true)
+  }, [])
+
+  const adjustAnchor = useCallback(async ({ lat, lon, radiusMeters }: { lat?: number; lon?: number; radiusMeters: number }) => {
+    // lat/lon travel together or not at all — the caller (buildAdjustCommitTargets)
+    // already decides that; this just forwards whatever it built rather than
+    // re-deciding, so a radius-only target really does PATCH radius_meters alone.
+    const body: { radius_meters: number; lat?: number; lon?: number } = { radius_meters: radiusMeters }
+    if (lat !== undefined && lon !== undefined) {
+      body.lat = lat
+      body.lon = lon
+    }
+    const res = await anchorRequest({
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
     setServerState(await res.json() as AnchorWatchServerState)
     setLoaded(true)
@@ -344,6 +381,7 @@ export function useAnchorWatch(
     lastAutoRaise,
     setAnchorHere,
     updateRadius,
+    adjustAnchor,
     updateRodeAndConditions,
     updatePlanningDepth,
     clearAnchor,
@@ -351,7 +389,7 @@ export function useAnchorWatch(
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
     seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, error, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
-    setAnchorHere, updateRadius, updateRodeAndConditions,
+    setAnchorHere, updateRadius, adjustAnchor, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,
   ])
 }

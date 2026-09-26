@@ -1,9 +1,9 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Plus, Radar, Satellite, Ship, X } from 'lucide-react'
+import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Satellite, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
@@ -21,6 +21,21 @@ import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { hasWebGL2 } from '@/lib/webgl'
 import { ANCHOR_VIEW_MAX_ZOOM, ANCHOR_VIEW_MIN_ZOOM, fitRadiusZoom } from '@/lib/anchor-view'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
+import {
+  ADJUST_MAX_ZOOM,
+  adjustZoomBounds,
+  anchorMoveOffset,
+  clampRadiusM,
+  formatMovedLabel,
+  MIN_ALARM_RADIUS_M,
+  metersPerPixel,
+  radiusForZoom,
+  radiusStepM,
+  ringRadiusPx,
+  snapRadiusM,
+  zoomForRingRadius,
+  type AlarmRadiusBounds,
+} from '@/lib/anchor-adjust'
 import {
   resolveMarkerLabelSuppression,
   markerScaleForZoom,
@@ -310,16 +325,20 @@ export interface AnchorWatchMapProps {
   // it has no basis for (code-review finding, PR #30).
   anchorStateKnown?: boolean
   radiusMeters: number
+  // No longer read inside this component — the map's own Depth row is gone
+  // (ADR 0133's amendment: Depth is the Anchor Watch page's own hero KPI
+  // now, in the header above the map). Kept in the prop contract since both
+  // existing hosts (anchor-watch-tile.tsx, anchor-watch-drawer.tsx) still
+  // pass it; dropping the field would be a breaking API change for no
+  // behavioural gain — the same treatment distanceMeters got when it made
+  // the opposite trip out of this panel.
   depthMeters: number | null
   currentDriftKts: number | null
   currentSetDeg: number | null
   currentDriftImpactKts?: number | null
-  // No longer read inside this component — the map's own Distance row is
-  // gone (design critique item 1: it duplicated the promoted KPI both
-  // hosts now render above the map). Kept in the prop contract since both
-  // existing hosts (anchor-watch-tile.tsx, anchor-watch-drawer.tsx) still
-  // pass it; dropping the field would be a breaking API change for no
-  // behavioural gain.
+  // The boat's live distance from the anchor — this panel's own top row
+  // (ADR 0133's amendment), same figure and formatting the old promoted
+  // Distance KPI showed before Depth took over as the page's hero.
   distanceMeters: number | null
   bearingDeg: number | null
   // Rendered as the Scope row in the metric overlay, under Current (ADR 0059
@@ -382,9 +401,50 @@ export interface AnchorWatchMapProps {
   // is intentionally still shared across hosts (ADR 0064) — only the zoom is
   // size-dependent.
   viewKey?: string
+  // The Adjust mode entry point (ADR 0133's amendment, ADR 0136) — an icon
+  // in the map's right-hand control stack, rendered only when the map is
+  // interactive, an anchor is down, and this prop is actually given.
+  // Undefined (not passed at all) is how the dashboard tile and the kiosk
+  // opt out: neither host passes it, so neither ever shows the icon,
+  // regardless of `interactive`.
+  onAdjust?: () => void
+  // Whether Adjust mode (ADR 0136) is open. Owned by the host
+  // (anchor-watch-drawer.tsx), not this component: the drawer decides entry/
+  // exit (the Move icon, Escape, Cancel, a successful Set, raising the
+  // anchor, the watch disappearing) and this component only reacts to the
+  // prop — camera lock, the fixed crosshair, the screen-space ring, the
+  // reference layers, and pan/zoom capture.
+  adjustActive?: boolean
+  // The radius ceiling/floor (lib/anchor-adjust.ts's alarmRadiusBounds) —
+  // required whenever adjustActive is true, so pinch/scroll-wheel zoom can
+  // be locked to the exact range the operator is allowed to set. Optional in
+  // the type only because every non-Adjust render omits it.
+  adjustRadiusBounds?: AlarmRadiusBounds
+  // Fires once on Adjust entry (with the committed position/radius as the
+  // starting draft) and again on every pan/zoom while it stays open — the
+  // host's only view into the live draft, since nothing is written until
+  // Set. Never fires while adjustActive is false.
+  onAdjustDraftChange?: (draft: AnchorAdjustDraft) => void
+  // Enter/Escape inside the map container (never window — the keyboard
+  // scoping the plan asks for) delegate to the host's own Set/Cancel
+  // handlers rather than this component owning any commit logic itself.
+  onAdjustSetKey?: () => void
+  onAdjustCancelKey?: () => void
 }
 
-export function AnchorWatchMap({
+/** The Adjust mode's live draft — nothing more than what Set would PATCH, reported up so the host's bottom bar and warning banner can read it. */
+export interface AnchorAdjustDraft {
+  lat: number
+  lon: number
+  radiusM: number
+}
+
+/** Imperative surface Adjust mode's bottom bar (owned by the host) drives the camera through — setting an absolute target radius by easing zoom so the fixed-size ring keeps representing it. */
+export interface AnchorWatchMapHandle {
+  setAdjustRadius: (targetRadiusM: number) => void
+}
+
+export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapProps>(function AnchorWatchMap({
   vesselLat,
   vesselLon,
   vesselHeadingDeg,
@@ -393,11 +453,11 @@ export function AnchorWatchMap({
   anchorSetAt = null,
   anchorStateKnown = false,
   radiusMeters,
-  depthMeters,
+  // depthMeters intentionally not destructured — see the prop doc above.
   currentDriftKts,
   currentSetDeg,
   currentDriftImpactKts = null,
-  // distanceMeters intentionally not destructured — see the prop doc above.
+  distanceMeters,
   bearingDeg: bearingDegProp,
   scopeRecommendation,
   isImperial,
@@ -421,7 +481,13 @@ export function AnchorWatchMap({
   className,
   interactive = true,
   viewKey = '',
-}: AnchorWatchMapProps) {
+  onAdjust,
+  adjustActive = false,
+  adjustRadiusBounds,
+  onAdjustDraftChange,
+  onAdjustSetKey,
+  onAdjustCancelKey,
+}: AnchorWatchMapProps, ref) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
   // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
   // MapLibre 5 throws synchronously when it can't get a context — mounting
@@ -861,11 +927,16 @@ export function AnchorWatchMap({
       // No active watch: POST /api/anchor-watch/placemarks would 409 (see
       // backend/anchor_placemarks.go), so don't even raise the tooltip.
       if (!hasAnchor) return
+      // Adjust mode owns every tap/drag on the map for positioning the
+      // draft anchor — a click landing here mid-pan (MapLibre can fire a
+      // synthetic click alongside a drag that started as one) must not also
+      // raise the unrelated "pin a hazard" tooltip on top of it.
+      if (adjustActive) return
       const { lat, lng } = e.lngLat
       setSelectedPlacemarkId(null)
       setPinCandidate({ lat, lon: lng })
     },
-    [hasAnchor],
+    [hasAnchor, adjustActive],
   )
 
   // Both tooltip buttons sit inside the map, so their clicks also reach
@@ -948,6 +1019,13 @@ export function AnchorWatchMap({
 
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
+    // Adjust mode's camera is following a DRAFT, not the operator's own pan
+    // of the ordinary chart — persisting it as the stored centre/zoom would
+    // leave every other view (and this one, after Cancel) reopening on
+    // wherever Adjust happened to leave the map, including a session that
+    // never actually got Set. handleAdjustMove (below) is the one place
+    // that reads the camera while Adjust is open.
+    if (adjustActive) return
     const { latitude, longitude, zoom } = e.viewState
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       // Tagged with the session the view is following (a ref, so this stays
@@ -964,7 +1042,202 @@ export function AnchorWatchMap({
     // A pan/zoom changes every AIS vessel's projected screen position, so
     // the label-declutter result can change even with no new AIS poll.
     recomputeAisLabelSuppressionRef.current()
-  }, [interactive, viewKey])
+  }, [adjustActive, interactive, viewKey])
+
+  // ── Adjust mode (ADR 0136) ───────────────────────────────────────────────
+  // Nothing below ever writes to the server — Adjust mode's only write is
+  // the host's own Set button (anchor-watch-drawer.tsx's
+  // useAnchorAdjustCommit), well after this component has reported a draft
+  // up. Everything here is camera control and screen-space rendering: the
+  // fixed crosshair, the screen-space swing ring, the faded reference
+  // layers, and pan/zoom/keyboard capture.
+
+  // Focus returns here on exit (the plan's own keyboard requirement).
+  const moveButtonRef = useRef<HTMLButtonElement | null>(null)
+
+  const [adjustDraft, setAdjustDraft] = useState<AnchorAdjustDraft | null>(null)
+  // Mirrors adjustDraft synchronously, same reasoning as adjustRingPxRef
+  // below: the resize handler further down needs the latest draft without
+  // adding adjustDraft itself to that effect's own dependency list, which
+  // would tear down and re-subscribe its ResizeObserver on every pan/pinch.
+  const adjustDraftRef = useRef<AnchorAdjustDraft | null>(null)
+  // The container's short side in CSS pixels, remeasured on entry and on
+  // resize — drives the fixed ring's own diameter and every zoom<->radius
+  // conversion below, so a resized window or a rotated kiosk-sized drawer
+  // keeps the ring's ground radius accurate rather than a stale measurement
+  // from whenever Adjust happened to open.
+  //
+  // Mirrored into a ref (updated synchronously, not just via the state
+  // setter) because map.jumpTo() below fires MapLibre's 'move' event
+  // *synchronously*, within the very same effect that just measured this
+  // value — well before React has re-rendered and handed handleAdjustMove a
+  // closure that actually sees the new state. A handler reading the state
+  // value here would process that first synchronous move against whatever
+  // adjustRingPx held on the PREVIOUS render (0, on entry), computing a
+  // radius of 0 and clamping straight to the floor. The ref is always
+  // current at the moment it's read, regardless of which render's closure
+  // is doing the reading.
+  const [adjustRingPx, setAdjustRingPxState] = useState(0)
+  const adjustRingPxRef = useRef(0)
+  const setAdjustRingPx = useCallback((px: number) => {
+    adjustRingPxRef.current = px
+    setAdjustRingPxState(px)
+  }, [])
+
+  const reportAdjustDraft = useCallback((draft: AnchorAdjustDraft) => {
+    adjustDraftRef.current = draft
+    setAdjustDraft(draft)
+    onAdjustDraftChange?.(draft)
+  }, [onAdjustDraftChange])
+
+  // Guards the exit branch below from running its restore/focus-return on
+  // the component's very first mount (adjustActive starts false, and the
+  // entry/exit effect fires once on mount regardless) — without this, every
+  // render of this map would steal focus onto the Move icon the instant it
+  // mounts, for no user action at all.
+  const everEnteredAdjustRef = useRef(false)
+
+  // Entry/exit transition — deliberately keyed on adjustActive alone (see
+  // the eslint-disable below): re-running this for every tick of
+  // anchorLat/anchorLon/radiusMeters while Adjust stays open would reset the
+  // camera and the draft on every 5s anchor-watch poll, which is exactly
+  // what the plan's "the poll must not reset the draft or the camera"
+  // requirement rules out. Safe by construction — nothing writes to the
+  // server (and so nothing changes these props) until Set, so they are
+  // frozen at their entry values for the life of one Adjust session.
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (adjustActive) {
+      everEnteredAdjustRef.current = true
+      if (anchorLat === null || anchorLon === null) return
+      const shortSidePx = measureShortSidePx()
+      const ringPx = ringRadiusPx(shortSidePx)
+      setAdjustRingPx(ringPx)
+      const initialZoom = zoomForRingRadius(radiusMeters, anchorLat, ringPx)
+      const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: radiusMeters, maxReason: null }
+      const zoomBounds = adjustZoomBounds(bounds, anchorLat, ringPx)
+      if (map) {
+        map.setMinZoom(zoomBounds.minZoom)
+        map.setMaxZoom(zoomBounds.maxZoom)
+        // Touch-pinch rotate is the one rotation gesture the Map's own
+        // dragRotate={false} prop (always on, not Adjust-specific) doesn't
+        // already cover.
+        map.touchZoomRotate?.disableRotation?.()
+        map.jumpTo({ center: [anchorLon, anchorLat], zoom: initialZoom })
+        // CSS alone (the full-screen phone layout) doesn't tell MapLibre its
+        // container resized — belt-and-suspenders alongside MapLibre's own
+        // trackResize default.
+        map.resize()
+      }
+      setCurrentZoom(initialZoom)
+      reportAdjustDraft({ lat: anchorLat, lon: anchorLon, radiusM: radiusMeters })
+      mapWrapperRef.current?.focus()
+    } else if (everEnteredAdjustRef.current) {
+      everEnteredAdjustRef.current = false
+      if (map) {
+        map.setMinZoom(ANCHOR_VIEW_MIN_ZOOM)
+        map.setMaxZoom(ADJUST_MAX_ZOOM)
+        map.touchZoomRotate?.enableRotation?.()
+      }
+      adjustDraftRef.current = null
+      setAdjustDraft(null)
+      // "Return focus to the Move icon on exit" — a no-op (optional
+      // chaining) if the icon isn't currently rendered, e.g. the anchor was
+      // raised as part of this same exit and hasAnchor has already gone
+      // false.
+      moveButtonRef.current?.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adjustActive])
+
+  // Fires on every pan/zoom while Adjust is open (react-map-gl's onMove,
+  // distinct from onMoveEnd — this needs the live value while a gesture is
+  // still in progress, not just once it settles). The draft radius is
+  // clamped to bounds as a safety net (minZoom/maxZoom already stop pinch
+  // at the limits) and snapped to a whole display unit — "snap the
+  // displayed/committed value, not the zoom" avoids the readout jittering
+  // by fractions of a metre as a gesture settles at an off zoom.
+  const handleAdjustMove = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
+    if (!adjustActive) return
+    const { latitude, longitude, zoom } = e.viewState
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(zoom)) return
+    const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: radiusMeters, maxReason: null }
+    // Reads the ref, not the closed-over adjustRingPx state — see its own
+    // doc comment above for why: map.jumpTo() on entry fires this
+    // synchronously, before this render's state update has reached a new
+    // closure.
+    const rawRadiusM = radiusForZoom(zoom, latitude, adjustRingPxRef.current)
+    const snappedRadiusM = snapRadiusM(clampRadiusM(rawRadiusM, bounds), isImperial)
+    reportAdjustDraft({ lat: latitude, lon: longitude, radiusM: snappedRadiusM })
+  }, [adjustActive, adjustRadiusBounds, radiusMeters, isImperial, reportAdjustDraft])
+
+  // Eases the camera's zoom to whatever represents `targetRadiusM` on the
+  // fixed-size ring — the ring's own screen size never changes, only the
+  // ground scale under it. The draft itself is updated by the moveend/move
+  // events this triggers, not written here directly, so there is exactly
+  // one place (handleAdjustMove) that derives it from the camera. Takes the
+  // absolute target, not a delta, so the same function serves the keyboard's
+  // relative +/- (which computes its own target first) and the host's chip
+  // taps (which already have an absolute value in hand) without either
+  // needing a second copy.
+  const applyAdjustRadius = useCallback((targetRadiusMRaw: number) => {
+    if (!adjustActive || !adjustDraft) return
+    const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: adjustDraft.radiusM, maxReason: null }
+    const targetRadiusM = clampRadiusM(targetRadiusMRaw, bounds)
+    const zoom = zoomForRingRadius(targetRadiusM, adjustDraft.lat, adjustRingPxRef.current)
+    mapRef.current?.easeTo({ zoom, duration: 150 })
+  }, [adjustActive, adjustDraft, adjustRadiusBounds])
+
+  // Keyboard pan (arrows) — converts a metre offset to a pixel offset at the
+  // current zoom/latitude and pans by it, same mechanism a drag gesture
+  // drives, just without one.
+  const panAdjustByMeters = useCallback((eastM: number, northM: number) => {
+    if (!adjustActive) return
+    const map = mapRef.current?.getMap?.()
+    const zoom = map?.getZoom() ?? currentZoom
+    const lat = adjustDraft?.lat ?? anchorLat
+    if (lat === null || lat === undefined) return
+    const mPerPx = metersPerPixel(lat, zoom)
+    if (!(mPerPx > 0)) return
+    // Screen y grows downward; north is -y.
+    map?.panBy([eastM / mPerPx, -northM / mPerPx], { duration: 0 })
+  }, [adjustActive, adjustDraft, anchorLat, currentZoom])
+
+  // Scoped to the map container's own onKeyDown, never window — a keydown
+  // anywhere else on the page (the bottom bar's own inputs, the rest of the
+  // drawer) must not pan or resize the ring.
+  const handleAdjustKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!adjustActive) return
+    const panStepM = e.shiftKey ? 5 : 1
+    const step = radiusStepM(isImperial)
+    switch (e.key) {
+      case 'ArrowUp': e.preventDefault(); panAdjustByMeters(0, panStepM); break
+      case 'ArrowDown': e.preventDefault(); panAdjustByMeters(0, -panStepM); break
+      case 'ArrowLeft': e.preventDefault(); panAdjustByMeters(-panStepM, 0); break
+      case 'ArrowRight': e.preventDefault(); panAdjustByMeters(panStepM, 0); break
+      case '+':
+      case '=': e.preventDefault(); if (adjustDraft) applyAdjustRadius(adjustDraft.radiusM + step); break
+      case '-':
+      case '_': e.preventDefault(); if (adjustDraft) applyAdjustRadius(adjustDraft.radiusM - step); break
+      case 'Enter': e.preventDefault(); onAdjustSetKey?.(); break
+      case 'Escape': e.preventDefault(); onAdjustCancelKey?.(); break
+      default: break
+    }
+  }, [adjustActive, isImperial, panAdjustByMeters, applyAdjustRadius, adjustDraft, onAdjustSetKey, onAdjustCancelKey])
+
+  // The bottom bar (owned by the host, anchor-watch-drawer.tsx) drives the
+  // camera's radius through this — its own +/- buttons and chip taps need to
+  // ease the SAME zoom this component's keyboard handler above eases,
+  // rather than a second copy of the conversion.
+  useImperativeHandle(ref, () => ({ setAdjustRadius: applyAdjustRadius }), [applyAdjustRadius])
+
+  // The reference line + faded original circle's label ("moved 8 m ·
+  // 045°") — null (and so not rendered) under 1 m of movement, and null
+  // outright with no draft yet (the one render before the entry effect
+  // above has run).
+  const adjustMovedLabel = adjustActive && adjustDraft && anchorLat !== null && anchorLon !== null
+    ? formatMovedLabel(anchorMoveOffset(anchorLat, anchorLon, adjustDraft.lat, adjustDraft.lon), isImperial)
+    : null
 
   // ── Initial map view ─────────────────────────────────────────────────────
   // mountView, resolved above, has already decided whether the stored centre
@@ -1143,13 +1416,55 @@ export function AnchorWatchMap({
       recomputeAvoidZones()
       recomputeAisLabelSuppressionRef.current()
       retryPendingFit()
+      // The full-screen phone layout (className flips to fixed inset-0 on
+      // Adjust entry) resizes this exact container, and so does an ordinary
+      // browser window resize or a kiosk rotation while Adjust is already
+      // open. The ring's pixel size has to track the new short side — but a
+      // resize is not a gesture, so the ground radius it represents (what
+      // the bar shows and Set would commit) must not drift just because the
+      // container changed shape (code-review finding: this used to update
+      // only adjustRingPx, leaving the zoom bounds and the reported draft
+      // radius stale until the next pan/pinch silently snapped them onto
+      // the new ring). Recompute the ring, recompute the zoom bounds
+      // against it, and re-aim the camera's zoom so the operator's own
+      // chosen radius stays exactly what it was.
+      const draft = adjustDraftRef.current
+      if (adjustActive && draft) {
+        const newRingPx = ringRadiusPx(measureShortSidePx())
+        setAdjustRingPx(newRingPx)
+        const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: draft.radiusM, maxReason: null }
+        const zoomBounds = adjustZoomBounds(bounds, draft.lat, newRingPx)
+        const map = mapRef.current?.getMap?.()
+        if (map) {
+          map.setMinZoom(zoomBounds.minZoom)
+          map.setMaxZoom(zoomBounds.maxZoom)
+          map.jumpTo({ zoom: zoomForRingRadius(draft.radiusM, draft.lat, newRingPx) })
+        }
+        // Restated explicitly rather than left to jumpTo's own synchronous
+        // 'move' event (which handleAdjustMove would otherwise re-derive
+        // from the new ringPx/zoom pair): the radius has to read back as
+        // exactly what it was, not a value that merely round-trips close to
+        // it through a second floating-point conversion.
+        reportAdjustDraft(draft)
+      }
     })
     observer.observe(wrapper)
     return () => observer.disconnect()
-  }, [recomputeAvoidZones, retryPendingFit])
+  }, [recomputeAvoidZones, retryPendingFit, adjustActive, measureShortSidePx, setAdjustRingPx, adjustRadiusBounds, reportAdjustDraft])
 
   return (
-    <div ref={mapWrapperRef} className={cn('relative isolate overflow-hidden rounded-lg', className)}>
+    <div
+      ref={mapWrapperRef}
+      data-testid="anchor-watch-map-wrapper"
+      className={cn('relative isolate overflow-hidden rounded-lg', className)}
+      // Keyboard scoping (the plan's own requirement): Adjust's arrows/+-/
+      // Enter/Escape only fire from a keydown on this container, never
+      // window — tabIndex makes it focusable so the entry effect above can
+      // actually put focus here. Not focusable outside Adjust: nothing else
+      // in this component wants keyboard capture.
+      tabIndex={adjustActive ? 0 : undefined}
+      onKeyDown={adjustActive ? handleAdjustKeyDown : undefined}
+    >
       {!canRenderMap ? (
         <div
           data-testid="anchor-watch-map-webgl2-fallback"
@@ -1167,6 +1482,7 @@ export function AnchorWatchMap({
         minZoom={10}
         interactive={interactive}
         onLoad={handleMapLoad}
+        onMove={handleAdjustMove}
         onMoveEnd={handleMoveEnd}
         // User-gesture-only events (maplibre never fires these for a
         // programmatic easeTo/jumpTo) — the only signal hasUserPannedRef
@@ -1193,14 +1509,19 @@ export function AnchorWatchMap({
         // disable it imperatively while a drag was in progress).
         dragPan
       >
-        {/* Alarm circle fill */}
+        {/* Alarm circle fill — during Adjust this is the ORIGINAL circle
+            (nothing is written until Set, so circleGeoJSON/radiusMeters
+            stay frozen at the committed watch for the whole session),
+            faded down so it reads as reference rather than as the live
+            alarm boundary — that role belongs to the screen-space ring
+            below, which tracks the draft. */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
           <Layer
             id="alarm-circle-fill"
             type="fill"
             paint={{
               'fill-color': isDarkTheme ? '#38bdf8' : '#0ea5e9',
-              'fill-opacity': 0.1,
+              'fill-opacity': adjustActive ? 0.04 : 0.1,
             }}
           />
           <Layer
@@ -1210,10 +1531,37 @@ export function AnchorWatchMap({
               'line-color': isDarkTheme ? '#38bdf8' : '#0284c7',
               'line-width': 2,
               'line-dasharray': [4, 3],
-              'line-opacity': 0.8,
+              'line-opacity': adjustActive ? 0.35 : 0.8,
             }}
           />
         </Source>
+
+        {/* Adjust mode's reference line: original anchor -> the draft
+            (the crosshair, always the map's own centre) — a real map layer
+            rather than a screen-space overlay, so it projects correctly
+            through every pan/zoom with no extra project() bookkeeping. */}
+        {adjustActive && adjustDraft && anchorLat !== null && anchorLon !== null && (
+          <Source
+            id="adjust-reference-line"
+            type="geojson"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: [[anchorLon, anchorLat], [adjustDraft.lon, adjustDraft.lat]] },
+            }}
+          >
+            <Layer
+              id="adjust-reference-line-layer"
+              type="line"
+              paint={{
+                'line-color': isDarkTheme ? '#38bdf8' : '#0284c7',
+                'line-width': 1.5,
+                'line-dasharray': [2, 2],
+                'line-opacity': 0.9,
+              }}
+            />
+          </Source>
+        )}
 
         {/*
           Place-name labels (bays, islands, marinas, peaks, town top-up -
@@ -1490,8 +1838,11 @@ export function AnchorWatchMap({
         {/* Anchor marker — non-interactive: dragging/tapping it can no longer
             move the anchor or change the radius (impeccable P0s). onClick
             only swallows the event so it doesn't fall through to the map's
-            own "place a pin here" handler, same as every other marker here. */}
-        {hasAnchor && (
+            own "place a pin here" handler, same as every other marker here.
+            Hidden during Adjust: the fixed centre crosshair (a screen-space
+            DOM overlay below, not a Marker) replaces it for the length of
+            the session. */}
+        {hasAnchor && !adjustActive && (
           <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 1000 }}>
             <div
               onClick={handleAnchorMarkerClick}
@@ -1504,6 +1855,25 @@ export function AnchorWatchMap({
                 style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
               >
                 <Anchor className="h-4 w-4 text-white" />
+              </div>
+            </div>
+          </Marker>
+        )}
+
+        {/* The ORIGINAL anchor position, faded — the reference line above
+            runs from here to the draft. Frozen for the session (see the
+            alarm-circle comment above: nothing writes to the server until
+            Set), so this is exactly anchorLat/anchorLon, not a separate
+            captured value. */}
+        {hasAnchor && adjustActive && (
+          <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 990 }}>
+            <div
+              className="flex items-center justify-center opacity-40"
+              style={{ width: 40, height: 40 }}
+              aria-label="Original anchor position"
+            >
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-600/90 shadow-sm">
+                <Anchor className="h-3 w-3 text-white" />
               </div>
             </div>
           </Marker>
@@ -1600,22 +1970,30 @@ export function AnchorWatchMap({
       </Map>
       )}
 
-      {/* Metric overlay — top of map. Distance is gone from here entirely
-          (design critique item 1): it's promoted to a hero KPI above the
-          map on every host now (anchor-watch-tile.tsx; the drawer's own
-          equivalent lives in anchor-watch-drawer.tsx), so this panel's job
-          is strictly the secondary context — bearing, radius, depth,
-          current, scope. Bearing and Radius are dropped from the row list
-          outright with no anchor set (item 2) rather than rendering a
-          dashed placeholder at full visual weight; Depth/Current/Scope can
-          all be genuinely absent for reasons that have nothing to do with
-          anchor state, so they keep rendering (and dashing) as before.
+      {/* Metric overlay — top of map. Depth is gone from here entirely (ADR
+          0133's amendment): it's the Anchor Watch page's own hero KPI now,
+          in the header above the map (anchor-watch-drawer.tsx), so this
+          panel doesn't repeat it at a second visual weight. Distance is
+          this panel's own top row instead — the boat's live distance from
+          the anchor, same figure and formatting the old promoted Distance
+          KPI showed. Distance, Bearing and Radius are dropped from the row
+          list outright with no anchor set (none of the three mean anything
+          without one) rather than rendering a dashed placeholder at full
+          visual weight; Current/Scope can be genuinely absent for reasons
+          that have nothing to do with anchor state, so they keep rendering
+          (and dashing) as before.
           The background is a flat, near-opaque scrim rather than the old
           bg-black/50 (bg-black/35 while editing): measured contrast against
           real satellite imagery came in at 4.1:1, short of the 4.5:1 floor
           AGENTS.md sets for text this small — a translucent ground can't
           promise 4.5:1 against arbitrary imagery underneath it, so the fix
           is a ground dark enough that it doesn't have to. */}
+      {/* Hidden during Adjust: Distance/Bearing/Radius here describe the
+          COMMITTED watch, and would read as live numbers contradicting the
+          draft the crosshair/ring and the bottom bar are actually showing.
+          The moved-distance/bearing label near the crosshair and the bar's
+          own RADIUS readout are Adjust's replacement for this panel. */}
+      {!adjustActive && (
       <div
         ref={metricsPanelRef}
         className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur-sm"
@@ -1625,6 +2003,15 @@ export function AnchorWatchMap({
         {[
           ...(hasAnchor
             ? [
+                {
+                  label: 'Distance',
+                  value: distanceMeters !== null
+                    ? isImperial
+                      ? `${Math.round(distanceMeters * 3.28084)}`
+                      : `${Math.round(distanceMeters)}`
+                    : '—',
+                  unit: isImperial ? 'ft' : 'm',
+                },
                 {
                   label: 'Bearing',
                   value: bearingDegProp !== null ? `${bearingDegProp}` : '—',
@@ -1639,15 +2026,6 @@ export function AnchorWatchMap({
                 },
               ]
             : []),
-          {
-            label: 'Depth',
-            value: depthMeters !== null
-              ? isImperial
-                ? `${(depthMeters * 3.28084).toFixed(1)}`
-                : `${depthMeters.toFixed(1)}`
-              : '—',
-            unit: isImperial ? 'ft' : 'm',
-          },
           {
             label: 'Current',
             value: currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—',
@@ -1720,6 +2098,7 @@ export function AnchorWatchMap({
           </div>
         ))}
       </div>
+      )}
 
       {/* Zoom + Recenter controls. Design critique item 3: six buttons
           stacked in-tile clipped the bottom two at tile height. The
@@ -1732,7 +2111,7 @@ export function AnchorWatchMap({
           control (zoom, fullscreen, satellite/radar-echo toggle, recentre) —
           nothing informational — so the whole stack is dropped rather than
           picked apart one button at a time when `interactive` is false. */}
-      {interactive && (
+      {interactive && !adjustActive && (
       <div
         ref={mapControlsRef}
         className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1"
@@ -1802,6 +2181,29 @@ export function AnchorWatchMap({
             </button>
           </>
         )}
+        {/* Adjust mode entry point (ADR 0133, ADR 0136): only when there is
+            a map to open it on (canRenderMap — no WebGL2 means no map, and
+            the header's own text Adjust button is that state's entry point
+            instead), an anchor to adjust, and a caller that actually wants
+            it (onAdjust) — the dashboard tile and the kiosk never pass this
+            prop, so they never get the icon regardless of `interactive`.
+            Not gated on expandedControls: it belongs in every interactive
+            host's stack, not only the fullscreen drawer's expanded set.
+            Move, not Crosshair — Crosshair is already this same stack's
+            recentre icon a few buttons up (expandedControls), and reusing
+            it here would give two different actions the same glyph. */}
+        {canRenderMap && hasAnchor && onAdjust && (
+          <button
+            ref={moveButtonRef}
+            onClick={onAdjust}
+            aria-label="Adjust anchor"
+            title="Adjust anchor"
+            className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+            style={{ transition: 'background-color 150ms ease-out' }}
+          >
+            <Move className="h-4 w-4" />
+          </button>
+        )}
         {/* No stop/clear control here — both hosts are gaining a labeled
             Raise button with its own confirm dialog (anchor-watch-tile.tsx,
             anchor-watch-drawer.tsx); a one-tap unlabeled destructive icon
@@ -1809,6 +2211,45 @@ export function AnchorWatchMap({
       </div>
       )}
 
+      {/* Adjust mode's fixed centre crosshair (replaces the anchor marker)
+          and its screen-space swing ring — DOM/SVG overlays, not map
+          layers, per the plan: the ring's own pixel size never changes as
+          the operator pinches/scrolls, only the ground scale under it does,
+          which is what makes stepping the radius read as "the ring stays
+          fixed" rather than visibly resizing. */}
+      {adjustActive && canRenderMap && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            style={{ zIndex: 1600 }}
+            data-testid="anchor-adjust-ring"
+          >
+            <div
+              className="rounded-full border-2 border-dashed border-primary/80"
+              style={{ width: adjustRingPx * 2, height: adjustRingPx * 2 }}
+            />
+          </div>
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            style={{ zIndex: 1650 }}
+          >
+            <div className="relative flex flex-col items-center" data-testid="anchor-adjust-crosshair">
+              <div className="absolute h-9 w-px bg-primary" />
+              <div className="absolute h-px w-9 bg-primary" />
+              <div className="h-4 w-4 rounded-full border-2 border-primary bg-primary/25" />
+              {adjustMovedLabel && (
+                <div
+                  data-testid="anchor-adjust-moved-label"
+                  className="absolute top-6 whitespace-nowrap rounded bg-black/85 px-2 py-0.5 text-[10px] font-medium tracking-wide text-white"
+                >
+                  {adjustMovedLabel}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
     </div>
   )
-}
+})

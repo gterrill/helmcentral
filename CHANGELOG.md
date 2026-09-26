@@ -20,6 +20,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Low Water**, 0.5 m by default). The tile and the full-page anchor watch
   view show the shortfall and the time of the next low when it's too
   shallow, or the expected clearance when it isn't.
+- The full-page Anchor Watch view now has an **Adjust** control (the Move
+  icon on the map, or a text button in the header when the display has no
+  map) for moving the anchor's saved position or changing the alarm radius.
+  Pan the chart to move the anchor, pinch or scroll to size the radius, or
+  tap a shortcut to match your deployed rode or the rode planner's
+  recommended swing. Nothing changes on the boat's instrument network until
+  you confirm, a warning appears first if the change would leave the boat
+  outside the alarm circle right now, and a short undo window follows every
+  save.
 
 ### Fixed
 
@@ -37,6 +46,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   from what it already found instead of giving up - this previously could
   still fail outright with no answer at all, depending on which model
   answered the question.
+
+### Changed
+
+- The full-page Anchor Watch view now opens with live depth and tide
+  context instead of distance from the anchor: a header above the map shows
+  depth, the tide's direction, the next high or low with its height and
+  time, and the low-water clearance warning together. Distance, bearing,
+  the alarm radius, current and recommended scope now read from the map's
+  own readout panel instead. The interim −/+ alarm-radius buttons from the
+  last release are gone; the new **Adjust** control above replaces them
+  with a proper radius stepper plus the ability to move the anchor, and the
+  rode planner's **Apply as alarm radius** still works alongside it.
 
 ## [0.33.0] - 2026-09-26
 

@@ -23,7 +23,14 @@ type publishStub struct {
 	model   string
 	modelSt int
 	ingest  bool // whether a published delta becomes visible in the model
-	server  *httptest.Server
+	// modelDelay, when non-zero, sleeps before answering a model GET (the
+	// confirmation read publishSignalKAnchorPosition polls) — a test-only
+	// hook that opens a deterministic window during which a handler that
+	// released its lock to wait on that confirmation is genuinely unlocked,
+	// for tests that need to race something against exactly that gap. Zero
+	// (the default) behaves exactly as before this field existed.
+	modelDelay time.Duration
+	server     *httptest.Server
 }
 
 // shortenSignalKConfirmWindow collapses the publish-confirmation poll to
@@ -83,8 +90,11 @@ func newPublishStub(t *testing.T) *publishStub {
 		}
 
 		stub.mu.Lock()
-		status, body := stub.modelSt, stub.model
+		status, body, delay := stub.modelSt, stub.model, stub.modelDelay
 		stub.mu.Unlock()
+		if delay > 0 {
+			time.Sleep(delay)
+		}
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))

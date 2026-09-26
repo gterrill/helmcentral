@@ -481,34 +481,71 @@ func setAnchorWatch(c echo.Context) error {
 	})
 }
 
-// PATCH /api/anchor-watch — update radius, depth, and other watch settings
+// PATCH /api/anchor-watch — update radius, position, and other watch settings
 //
-// This handler holds anchorWatchMu.Lock() for its entire body rather than
-// the more permissive read-then-write pattern, because it does a
-// read-modify-write: `updated` is rebuilt field-by-field from `current`
-// (see the comment on the PlanningDepthM copy below) and only afterward
-// assigned back. Reading under RLock and only re-taking the lock to write
-// leaves a gap in between where a second, concurrent PATCH can read the
-// same stale `current` and then overwrite the first PATCH's change with its
-// own full rebuild — a lost update. This is no longer just theoretical:
-// the Rode Planner debounces depth on its own timer alongside the existing
-// rode/sea-state/seabed timer, so changing sea state and depth inside the
-// same 800ms window fires two overlapping PATCHes. saveAnchorWatch does not
-// itself take anchorWatchMu (it only calls writeJSONFileAtomic), so holding
-// the lock across the save call below is not re-entrant and cannot
-// deadlock. Do not narrow this back to RLock+Lock.
+// lat/lon are optional but must arrive together (both or neither): position
+// is one atomic write alongside whatever else the body patches, never two
+// fields nudged independently by accident. When present, this follows
+// setAnchorWatch's own reposition path (ADR 0133) — publish
+// navigation.anchor.position to SignalK, reset the post-anchor self trail —
+// with one deliberate difference: a PATCH that changes position persists
+// NOTHING and reports 502 if the publish fails, rather than keeping the
+// local watch as a safety net the way POST/drop does. POST's "keep the local
+// watch anyway" exists for the emergency case (SignalK is down but the boat
+// still needs *some* local safety watch); a PATCH position change is the
+// deliberate Adjust surface, so there's no reason to accept a position
+// upstream never confirmed.
+//
+// Locking: this handler holds anchorLifecycleMu for its entire body, which
+// rules out a second concurrent PATCH/POST/DELETE (see that mutex's own doc
+// comment). It does NOT rule out the place-name resolver's background
+// goroutine (place_name.go's resolveAndPinAnchorWatchPlaceName): that is
+// gated only by its own single-flight guard, takes anchorWatchMu directly,
+// and holds no lifecycle lock at all. `updated` is read once, early, from a
+// `current` snapshot taken under an initial anchorWatchMu.Lock(); anchorWatchMu
+// is then always released before persisting `updated` and re-acquired only
+// to write it back — for a position change, specifically so the SignalK
+// publish's confirmation poll (which can run for seconds) never holds
+// anchorWatchMu and stalls every GET and trail-recording tick for that long;
+// a field-only PATCH takes the identical release/re-acquire, just with
+// nothing running in the gap. That gap — real in both cases, just far
+// shorter in the field-only one — is exactly where the place-name resolver
+// can run and pin a freshly resolved name onto anchorWatchState before this
+// handler re-acquires the lock (code-review finding: this comment used to
+// claim no gap here was reachable by anything else, which holds for a
+// second PATCH/POST/DELETE but not for this resolver). The persist step
+// below re-reads the live anchorWatchState.PlaceName immediately before
+// writing `updated`, so a name pinned mid-gap survives instead of being
+// overwritten by the stale snapshot `updated` was built from.
+//
+// The no-position-change path's own read-modify-write is otherwise unchanged
+// from before this comment: it rebuilds `updated` field-by-field from
+// `current` (see the comment on the PlanningDepthM copy below) and only
+// afterward assigns back, entirely under one anchorWatchMu.Lock(). Reading
+// under RLock and only re-taking the lock to write would leave a gap where a
+// second, concurrent PATCH could read the same stale `current` and overwrite
+// the first PATCH's change with its own full rebuild — a lost update. This
+// is no longer just theoretical: the Rode Planner debounces depth on its own
+// timer alongside the existing rode/sea-state/seabed timer, so changing sea
+// state and depth inside the same 800ms window fires two overlapping
+// PATCHes. saveAnchorWatch does not itself take anchorWatchMu (it only calls
+// writeJSONFileAtomic), so holding the lock across the save call is not
+// re-entrant and cannot deadlock. Do not narrow either path back to
+// RLock+Lock.
 func patchAnchorWatch(c echo.Context) error {
 	anchorLifecycleMu.Lock()
 	defer anchorLifecycleMu.Unlock()
-	anchorWatchMu.Lock()
-	defer anchorWatchMu.Unlock()
 
-	current := anchorWatchState
-	if current == nil {
+	anchorWatchMu.RLock()
+	noActiveWatch := anchorWatchState == nil
+	anchorWatchMu.RUnlock()
+	if noActiveWatch {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "no active anchor watch"})
 	}
 
 	var body struct {
+		Lat                  *float64 `json:"lat"`
+		Lon                  *float64 `json:"lon"`
 		RadiusMeters         *float64 `json:"radius_meters"`
 		RodeDeployedM        *float64 `json:"rode_deployed_m"`
 		SeaState             *string  `json:"sea_state"`
@@ -519,9 +556,15 @@ func patchAnchorWatch(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.RadiusMeters == nil && body.RodeDeployedM == nil && body.SeaState == nil && body.SeabedType == nil &&
+	if body.Lat == nil && body.Lon == nil && body.RadiusMeters == nil && body.RodeDeployedM == nil && body.SeaState == nil && body.SeabedType == nil &&
 		body.PlanningDepthM == nil && body.PlanningTideHeightFt == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
+	}
+	if (body.Lat == nil) != (body.Lon == nil) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat and lon must be provided together"})
+	}
+	if body.Lat != nil && (*body.Lat < -90 || *body.Lat > 90 || *body.Lon < -180 || *body.Lon > 180) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	if body.RadiusMeters != nil && *body.RadiusMeters <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "radius_meters must be positive"})
@@ -567,6 +610,17 @@ func patchAnchorWatch(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m is required when setting planning_tide_height_ft"})
 	}
 
+	anchorWatchMu.Lock()
+	current := anchorWatchState
+	if current == nil {
+		// The watch was raised between the check above and here — still
+		// possible in principle (this handler serialises against every other
+		// lifecycle write via anchorLifecycleMu, but not against itself
+		// re-entering), so re-check rather than trust the earlier snapshot.
+		anchorWatchMu.Unlock()
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "no active anchor watch"})
+	}
+
 	updated := &anchorWatchData{
 		Lat:              current.Lat,
 		Lon:              current.Lon,
@@ -588,6 +642,10 @@ func patchAnchorWatch(c echo.Context) error {
 		PlaceName:            current.PlaceName,
 	}
 
+	if body.Lat != nil {
+		updated.Lat = *body.Lat
+		updated.Lon = *body.Lon
+	}
 	if body.RadiusMeters != nil {
 		updated.RadiusMeters = *body.RadiusMeters
 	}
@@ -615,13 +673,67 @@ func patchAnchorWatch(c echo.Context) error {
 	// "with its depth" (above) or "cleared alongside its depth" (the -1
 	// case above too).
 
+	positionChanged := body.Lat != nil
+	anchorWatchMu.Unlock()
+
+	// A position change publishes to SignalK outside anchorWatchMu, exactly
+	// like setAnchorWatch's own reposition path — the confirmation poll can
+	// run for several seconds, and holding the lock across it would stall
+	// every GET and every trail-recording tick for that long. See the
+	// locking note in this function's doc comment for why this cannot race a
+	// concurrent PATCH/POST/DELETE.
+	//
+	// Unlike setAnchorWatch, a failed publish here persists NOTHING: this
+	// PATCH is the deliberate Adjust write, not the "SignalK is down, keep
+	// the local safety watch anyway" case POST/drop exists for. `current`
+	// (and the file on disk) are simply never touched on this path.
+	if positionChanged {
+		if err := publishSignalKAnchorPosition(updated); err != nil {
+			c.Logger().Errorf("anchor position publish failed: %v", err)
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK did not confirm the new anchor position. The watch was not changed; retry Adjust."})
+		}
+	}
+
+	anchorWatchMu.Lock()
+	// The place-name resolver (place_name.go's resolveAndPinAnchorWatchPlaceName)
+	// can run in the gap above (see this function's own doc comment,
+	// code-review finding) and pin a freshly resolved name onto
+	// anchorWatchState. `updated` was built from a `current` snapshot taken
+	// before that gap opened, so persisting it unmodified would silently
+	// stomp a name pinned in the meantime back to whatever `current.PlaceName`
+	// already was. Carry the live value forward instead of the stale one.
+	if live := anchorWatchState; live != nil {
+		updated.PlaceName = live.PlaceName
+	}
 	if err := saveAnchorWatch(updated); err != nil {
+		anchorWatchMu.Unlock()
+		if positionChanged {
+			// SignalK already has the new position at this point (the publish
+			// above succeeded) — the operator must be told the two now
+			// disagree, not given the same generic message a field-only PATCH
+			// failure gets. Fail-fast, no silent retry: the caller (the
+			// frontend's own commit hook) keeps Adjust open with its draft
+			// intact and the operator explicitly retries.
+			c.Logger().Errorf("anchor watch: SignalK confirmed a position change to %v,%v but the local save failed: %v", updated.Lat, updated.Lon, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK was updated with the new anchor position, but the local anchor watch could not be saved. Retry Adjust."})
+		}
+		c.Logger().Errorf("anchor watch: local save failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
 	}
 
 	anchorWatchState = updated
 	if updated.RadiusMeters > 0 {
 		lastAnchorWatchRadiusMeters = updated.RadiusMeters
+	}
+	anchorWatchMu.Unlock()
+
+	if positionChanged {
+		// Reset the post-anchor ring buffer, the same way a POST reposition
+		// does: the trail is the boat's movement relative to THIS anchor
+		// position, and stops meaning anything the instant the anchor moves.
+		trailMu.Lock()
+		selfTrail = newVesselTrail()
+		trailMu.Unlock()
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

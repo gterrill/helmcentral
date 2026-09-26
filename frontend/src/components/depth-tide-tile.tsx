@@ -5,6 +5,7 @@ import type { TideToday } from '@/hooks/use-tide-today'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { estimateDepthAtNextTurn, tideExtremesByTime } from '@/lib/tide-estimate'
 
 export interface DepthTideTileProps {
   depth: number | null
@@ -43,18 +44,9 @@ export const DepthTideTile = memo(function DepthTideTile({
   const depthUnitLabel = isImperialDistance ? 'feet' : 'm'
   const tideUnit = isImperialDistance ? 'ft' : 'm'
   const tideFtToDisplay = (ft: number) => (isImperialDistance ? ft : ft / 3.28084)
-  const tideExtremes = [
-    { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
-    { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
-  ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+  const tideExtremes = tideExtremesByTime(tide)
   const isRising = tide.tide_direction === 'Rising'
-  const estimatedExtremeDepth = isRising
-    ? depth !== null && tide.current_tide_height_ft >= 0 && tide.high_tide_height_ft >= 0
-      ? depth + (tide.high_tide_height_ft - tide.current_tide_height_ft) / 3.28084
-      : null
-    : depth !== null && tide.current_tide_height_ft >= 0 && tide.low_tide_height_ft >= 0
-      ? depth - (tide.current_tide_height_ft - tide.low_tide_height_ft) / 3.28084
-      : null
+  const estimatedExtremeDepth = estimateDepthAtNextTurn(depth, tide)
   const estimatedExtremeLabel = isRising ? 'Est. high' : 'Est. low'
 
   // A bare clickable div has no keyboard access and no focus ring — real
