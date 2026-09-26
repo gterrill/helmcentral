@@ -1781,6 +1781,12 @@ func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) err
 // DocumentStillLinkedToEquipment): deletable only when NO equipment_documents
 // row anywhere still references it AND documentDeletableAsOrphanPhotoClause's
 // own two conditions hold - not filed in Documents/a manual, not a note.
+//
+// ADR 0138 amendment: also checks maintenance_log_photos - a photo can be
+// shared (by sha256 dedupe) between an equipment item's own strip and a
+// service log entry, so an equipment-side unlink must not delete a document
+// a log entry still shows. MaintenanceLogPhotoDeletableAsOrphan
+// (maintenance_store.go) is this same check from the log-entry side.
 func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1788,5 +1794,6 @@ func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool,
 		SELECT 1 FROM documents d
 		WHERE d.id = ?
 		AND `+documentDeletableAsOrphanPhotoClause+`
-		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)`, documentID)
+		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)
+		AND NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)`, documentID)
 }

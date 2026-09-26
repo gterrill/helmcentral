@@ -620,6 +620,129 @@ var documentStoreSchema = []string{
 		PRIMARY KEY (equipment_id, document_id)
 	)`,
 	`CREATE INDEX IF NOT EXISTS equipment_documents_document_id ON equipment_documents (document_id)`,
+
+	// Maintenance (ADR 0138): service rules and the log they're completed
+	// into, plus a small hour-meter-replacement history. All new tables -
+	// CREATE TABLE IF NOT EXISTS is the correct idiom, the same reasoning
+	// the inventory tables above give.
+	//
+	// equipment_id is nullable (unlike equipment_documents' own, which is
+	// always set): a rule can belong to no item at all - a calendar-only
+	// certificate/expiry rule (flares, EPIRB battery, insurance) that has
+	// nothing to hang an hour meter or a zone off. ON DELETE CASCADE: a
+	// rule's whole reason to exist is the item it services, so deleting the
+	// item takes its rules with it (ADR 0138's own consequences section -
+	// this is NOT the equipment_documents convention of unlinking a shared,
+	// independently-meaningful resource; a rule has no meaning detached
+	// from the item it was written for).
+	//
+	// interval_hours/interval_months/due_soon_hours/due_soon_months are all
+	// nullable: "at least one of interval_hours/interval_months" is a
+	// cross-field rule SQLite can't express as a CHECK (same reasoning
+	// equipment.zone_id/bin_id's pairing invariant gives, inventory_store.go),
+	// enforced in Go instead (validateMaintenanceRuleInput,
+	// maintenance_handlers.go) - except for the one case that's
+	// deliberately allowed straight through: a profile schedule entry with
+	// both intervals null (spec's own "interval not set" rules), which is
+	// exactly why this can't be a NOT NULL CHECK either.
+	//
+	// fixed_due_date is the calendar-only alternative to interval_months
+	// (spec §7) - a hard expiry with no recurring baseline.
+	// procedure_note_id -> documents(id) ON DELETE SET NULL: deleting the
+	// linked note un-links it from the rule rather than taking the rule
+	// down with it - the note is an independent document like any other
+	// link in this codebase, matching equipment_documents' own "a link
+	// never blocks the thing it points at from being deleted" convention.
+	// ack_at is NULL for an unacknowledged rule; its own timestamp doubles
+	// as the "is this rule acknowledged" flag, so a boolean column carrying
+	// the same information twice was not worth adding.
+	`CREATE TABLE IF NOT EXISTS maintenance_rules (
+		id                 TEXT PRIMARY KEY,
+		equipment_id       TEXT REFERENCES equipment(id) ON DELETE CASCADE,
+		description        TEXT NOT NULL,
+		interval_hours     REAL,
+		interval_months    INTEGER,
+		due_soon_hours     REAL,
+		due_soon_months    INTEGER,
+		fixed_due_date     TEXT NOT NULL DEFAULT '',
+		last_done_at       TEXT NOT NULL DEFAULT '',
+		last_done_hours    REAL,
+		profile_service_id TEXT NOT NULL DEFAULT '',
+		procedure_note_id  TEXT REFERENCES documents(id) ON DELETE SET NULL,
+		ack_reason         TEXT NOT NULL DEFAULT '',
+		ack_at             INTEGER,
+		created_at         INTEGER NOT NULL,
+		updated_at         INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS maintenance_rules_equipment_id ON maintenance_rules (equipment_id)`,
+
+	// maintenance_log_entries is the service log: one row per completed
+	// task or standalone repair/improvement. equipment_id follows the same
+	// CASCADE reasoning as maintenance_rules.equipment_id just above - a log
+	// entry's own data (what was done, to what, for how much) has no
+	// meaning detached from the item it was performed on, which is exactly
+	// why this differs from a document link. rule_id is ON DELETE SET NULL,
+	// not CASCADE: deleting a rule must never erase the history of it
+	// actually being done (spec's own "log entries keep history if a rule
+	// is deleted") - the entry survives as a standalone log row.
+	`CREATE TABLE IF NOT EXISTS maintenance_log_entries (
+		id           TEXT PRIMARY KEY,
+		equipment_id TEXT REFERENCES equipment(id) ON DELETE CASCADE,
+		rule_id      TEXT REFERENCES maintenance_rules(id) ON DELETE SET NULL,
+		performed_at TEXT NOT NULL,
+		hours        REAL,
+		kind         TEXT NOT NULL CHECK (kind IN ('maintenance','repair','improvement')),
+		description  TEXT NOT NULL DEFAULT '',
+		who          TEXT NOT NULL DEFAULT '',
+		cost         REAL,
+		currency     TEXT NOT NULL DEFAULT '',
+		created_at   INTEGER NOT NULL,
+		updated_at   INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS maintenance_log_entries_equipment_id ON maintenance_log_entries (equipment_id, performed_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS maintenance_log_entries_rule_id ON maintenance_log_entries (rule_id)`,
+
+	// maintenance_log_parts: which existing equipment (spares/parts) were
+	// used on a log entry, and how many - no stock decrement this cycle
+	// (spec's own "out of scope"), just a record. Both sides CASCADE: a
+	// part-used row has no meaning once either the log entry or the part
+	// item itself is gone, and nothing else ever references one of these
+	// rows the way a document link can be shared.
+	`CREATE TABLE IF NOT EXISTS maintenance_log_parts (
+		log_entry_id TEXT NOT NULL REFERENCES maintenance_log_entries(id) ON DELETE CASCADE,
+		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+		quantity     REAL NOT NULL DEFAULT 1,
+		PRIMARY KEY (log_entry_id, equipment_id)
+	)`,
+
+	// maintenance_log_photos mirrors equipment_documents' own shape for a
+	// log entry's photos (spec §6: "reuse the shared upload intake; photos
+	// are ordinary documents tagged photo") - sort_index for strip order,
+	// CASCADE on both sides for the same "a link is metadata, not a thing
+	// either side must protect the other's existence for" reasoning
+	// equipment_documents itself already gives.
+	`CREATE TABLE IF NOT EXISTS maintenance_log_photos (
+		log_entry_id TEXT NOT NULL REFERENCES maintenance_log_entries(id) ON DELETE CASCADE,
+		document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		sort_index   INTEGER NOT NULL DEFAULT 0,
+		created_at   INTEGER NOT NULL,
+		PRIMARY KEY (log_entry_id, document_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS maintenance_log_photos_document_id ON maintenance_log_photos (document_id)`,
+
+	// hour_meter_resets: one row per meter replacement an operator records
+	// (spec §2 - old reading, new reading, date), CASCADE with the item
+	// since an offset history has no meaning once the item it corrects for
+	// is gone.
+	`CREATE TABLE IF NOT EXISTS hour_meter_resets (
+		id           TEXT PRIMARY KEY,
+		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+		old_reading  REAL NOT NULL,
+		new_reading  REAL NOT NULL,
+		changed_at   TEXT NOT NULL,
+		created_at   INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS hour_meter_resets_equipment_id ON hour_meter_resets (equipment_id, created_at DESC)`,
 }
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's
