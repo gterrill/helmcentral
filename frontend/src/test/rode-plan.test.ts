@@ -4,11 +4,13 @@ import {
   buildRodePlan,
   catenaryMethod,
   computeScopeRecommendation,
+  computeSwingRadiusM,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
   planningFigureM,
   ratioMethod,
   rawDepthFromPlanningFigureM,
+  resolveLoaM,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -1023,5 +1025,44 @@ describe('resolvePlanningWindBand', () => {
 
   it('returns null when there is no selection and no live seed', () => {
     expect(resolvePlanningWindBand(noGust, null, null)).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// resolveLoaM — LOA precedence (ADR 0047), extracted from
+// anchor-rode-planner.tsx so the Adjust mode's radius ceiling
+// (lib/anchor-adjust.ts) resolves the operator's boat length the same way.
+// ─────────────────────────────────────────────────────────────
+describe('resolveLoaM', () => {
+  it('prefers an explicit settings.anchor.loa_m over SignalK', () => {
+    expect(resolveLoaM(15, 12)).toEqual({ loaM: 15, source: 'settings' })
+  })
+
+  it('falls back to SignalK design.length.overall when settings has none', () => {
+    expect(resolveLoaM(0, 12)).toEqual({ loaM: 12, source: 'signalk' })
+  })
+
+  it('a zero or negative SignalK length does not count as configured', () => {
+    expect(resolveLoaM(0, 0)).toEqual({ loaM: null, source: null })
+    expect(resolveLoaM(0, -1)).toEqual({ loaM: null, source: null })
+  })
+
+  it('returns null with neither source present, not a silent zero', () => {
+    expect(resolveLoaM(0, null)).toEqual({ loaM: null, source: null })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// computeSwingRadiusM — rode + bow offset + LOA, the swing circle a method's
+// recommended rode implies. Extracted from anchor-rode-planner.tsx; the
+// Adjust mode's "Planner swing" chip needs the identical figure.
+// ─────────────────────────────────────────────────────────────
+describe('computeSwingRadiusM', () => {
+  it('sums recommended rode, bow offset and LOA', () => {
+    expect(computeSwingRadiusM(30, 2, 12)).toBe(44)
+  })
+
+  it('returns null when LOA is unresolved, rather than a circle smaller than the boat', () => {
+    expect(computeSwingRadiusM(30, 2, null)).toBeNull()
   })
 })

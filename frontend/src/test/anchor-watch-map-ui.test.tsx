@@ -485,31 +485,32 @@ describe('AnchorWatchMap with no anchor set', () => {
 
   // Design critique item 2: Bearing/Radius previously rendered "— °"/"— m"
   // at the same visual weight as a live reading whenever no anchor was
-  // down. Both rows are dropped entirely in that state now, rather than
-  // dashed — there's nothing to promote to a placeholder yet.
-  it('drops the Bearing and Radius rows entirely rather than showing a dash', () => {
+  // down. All three rows that only mean anything with an anchor down —
+  // Distance, Bearing, Radius — are dropped entirely in that state now,
+  // rather than dashed — there's nothing to promote to a placeholder yet.
+  it('drops the Distance, Bearing and Radius rows entirely rather than showing a dash', () => {
     renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
 
     const metrics = screen.getByTestId('anchor-watch-metrics')
+    expect(within(metrics).queryByText('Distance')).not.toBeInTheDocument()
     expect(within(metrics).queryByText('Bearing')).not.toBeInTheDocument()
     expect(within(metrics).queryByText('Radius')).not.toBeInTheDocument()
   })
 
-  // Depth/Current/Scope can be genuinely unavailable for reasons that have
-  // nothing to do with anchor state (no sounder, no scope recommendation
-  // yet) — those rows must keep rendering, dash and all, rather than being
-  // swept up by the no-anchor suppression above.
-  it('keeps Depth, Current and Scope rendering with no anchor set', () => {
+  // Current/Scope can be genuinely unavailable for reasons that have nothing
+  // to do with anchor state (no scope recommendation yet) — those rows must
+  // keep rendering, dash and all, rather than being swept up by the
+  // no-anchor suppression above. Depth is no longer one of them — see the
+  // "drops the Depth row entirely" test below.
+  it('keeps Current and Scope rendering with no anchor set', () => {
     renderMap(defaultAisVessels, {
       anchorLat: null,
       anchorLon: null,
-      depthMeters: null,
       currentDriftKts: null,
       scopeRecommendation: null,
     })
 
     const metrics = screen.getByTestId('anchor-watch-metrics')
-    expect(within(metrics).getByText('Depth')).toBeInTheDocument()
     expect(within(metrics).getByText('Current')).toBeInTheDocument()
     expect(within(metrics).getByText('Scope')).toBeInTheDocument()
   })
@@ -597,18 +598,49 @@ describe('AnchorWatchMap Scope row', () => {
   })
 })
 
-// Design critique item 1: the panel's translucent ground (bg-black/50, or
-// bg-black/35 while editing) measured 4.1:1 against real satellite imagery,
-// short of the 4.5:1 AGENTS.md requires for text this small. It's also
-// where Distance used to live — dropped now that both hosts promote a
-// distance KPI above the map (anchor-watch-tile.tsx, anchor-watch-drawer.tsx),
-// so the map's own overlay isn't repeating the headline number it no longer
-// owns.
+// Design critique item 1 (2026-09-25 impeccable critique): the panel's
+// translucent ground (bg-black/50, or bg-black/35 while editing) measured
+// 4.1:1 against real satellite imagery, short of the 4.5:1 AGENTS.md
+// requires for text this small.
+//
+// The Adjust mode plan (2026-09-26) reverses an earlier decision here:
+// Distance had moved out of this panel and into a promoted KPI above the
+// map (anchor-watch-tile.tsx, anchor-watch-drawer.tsx). It moves back in as
+// this panel's own top row now that the drawer's promoted KPI is gone too —
+// Depth is the page's hero instead, so this panel's own Depth row is what
+// drops out, to avoid showing the same reading twice at two different
+// visual weights.
 describe('AnchorWatchMap metric overlay contrast and duplication', () => {
-  it('drops the Distance row entirely — that reading is promoted above the map on every host now', () => {
+  it('shows Distance as the top row, in the same units as Radius', () => {
+    renderMap(defaultAisVessels, { distanceMeters: 12 })
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    const rows = within(metrics).getAllByText(/^(Distance|Bearing|Radius|Depth|Current|Scope)$/)
+    expect(rows[0]).toHaveTextContent('Distance')
+    const distanceRow = rows[0].parentElement as HTMLElement
+    expect(distanceRow).toHaveTextContent('12')
+    expect(distanceRow).toHaveTextContent('m')
+  })
+
+  it('converts Distance to feet under imperial units, matching the old hero KPI', () => {
+    renderMap(defaultAisVessels, { distanceMeters: 38, isImperial: true })
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    const distanceRow = within(metrics).getByText('Distance').parentElement as HTMLElement
+    // 38 m * 3.28084 = 124.7 ft, rounded to 125 — same rounding as the old
+    // drawer/tile hero KPI's formatDistanceValue.
+    expect(distanceRow).toHaveTextContent('125')
+    expect(distanceRow).toHaveTextContent('ft')
+  })
+
+  // Depth is the Anchor Watch page's own hero KPI now (the header above the
+  // map), so the map's own overlay no longer repeats it — this row is gone
+  // entirely, not merely hidden with no anchor, since depth means something
+  // whether or not an anchor is down.
+  it('drops the Depth row entirely — depth is the page header hero now', () => {
     renderMap()
 
-    expect(within(screen.getByTestId('anchor-watch-metrics')).queryByText('Distance')).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('anchor-watch-metrics')).queryByText('Depth')).not.toBeInTheDocument()
   })
 
   it('uses a near-opaque scrim rather than the old translucent ground', () => {
@@ -636,14 +668,62 @@ describe('AnchorWatchMap without WebGL2', () => {
   it('shows the one-line fallback panel instead of mounting a map, and keeps the metric overlay live', () => {
     mockHasWebGL2 = false
 
-    renderMap()
+    renderMap(defaultAisVessels, { distanceMeters: 12 })
 
     expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
     expect(screen.getByTestId('anchor-watch-map-webgl2-fallback')).toHaveTextContent(
       'Map needs WebGL2, which this browser does not provide',
     )
-    // The overlay reads straight off props (depth, current, scope), not off
-    // any map state, so it keeps reporting real numbers with no map mounted.
-    expect(within(screen.getByTestId('anchor-watch-metrics')).getByText('3.2')).toBeInTheDocument()
+    // The overlay reads straight off props (distance, current, scope), not
+    // off any map state, so it keeps reporting real numbers with no map
+    // mounted.
+    expect(within(screen.getByTestId('anchor-watch-metrics')).getByText('Distance')).toBeInTheDocument()
+    expect(within(screen.getByTestId('anchor-watch-metrics')).getByText('12')).toBeInTheDocument()
+  })
+
+  // No map, no map icon: with no WebGL2 there is nothing for the Adjust
+  // icon to open, so it must not render even when every other gating
+  // condition (interactive, an anchor down, onAdjust supplied) is met — the
+  // header's own text Adjust button is this state's entry point instead.
+  it('does not render the Adjust icon — there is no map for it to open', () => {
+    mockHasWebGL2 = false
+
+    renderMap(defaultAisVessels, { expandedControls: true, onAdjust: () => undefined })
+
+    expect(screen.queryByRole('button', { name: 'Adjust anchor' })).not.toBeInTheDocument()
+  })
+})
+
+// The Adjust map icon (map's right-hand control stack, ADR 0133's
+// amendment): a seam for part 2 of the anchor-adjust-sheet plan, which
+// implements what it opens. Part 1's job is just the gating — visible only
+// when there is something for it to do.
+describe('AnchorWatchMap Adjust icon', () => {
+  it('renders when interactive, an anchor is down, and onAdjust is given', () => {
+    const onAdjust = vi.fn()
+    renderMap(defaultAisVessels, { onAdjust })
+
+    const button = screen.getByRole('button', { name: 'Adjust anchor' })
+    expect(button).toBeInTheDocument()
+    fireEvent.click(button)
+    expect(onAdjust).toHaveBeenCalledTimes(1)
+  })
+
+  it('is absent with no onAdjust prop — the dashboard tile and the kiosk never pass one', () => {
+    renderMap()
+
+    expect(screen.queryByRole('button', { name: 'Adjust anchor' })).not.toBeInTheDocument()
+  })
+
+  it('is absent with no anchor down, even with onAdjust given', () => {
+    renderMap(defaultAisVessels, { onAdjust: () => undefined, anchorLat: null, anchorLon: null })
+
+    expect(screen.queryByRole('button', { name: 'Adjust anchor' })).not.toBeInTheDocument()
+  })
+
+  it('is absent when the map is not interactive (kiosk)', () => {
+    renderMap(defaultAisVessels, { onAdjust: () => undefined, interactive: false })
+
+    expect(screen.queryByRole('button', { name: 'Adjust anchor' })).not.toBeInTheDocument()
   })
 })

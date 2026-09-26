@@ -148,6 +148,7 @@ describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDept
 
   const calls: Array<[string, (r: ReturnType<typeof useAnchorWatch>) => Promise<void>]> = [
     ['updateRadius', (r) => r.updateRadius(40)],
+    ['adjustAnchor', (r) => r.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })],
     ['updateRodeAndConditions', (r) => r.updateRodeAndConditions(30, 'calm', 'sand')],
     ['updatePlanningDepth', (r) => r.updatePlanningDepth(5, 1)],
   ]
@@ -235,6 +236,74 @@ describe('useAnchorWatch updatePlanningDepth', () => {
 
     expect(result.current.planningDepthM).toBe(8)
     expect(result.current.planningTideHeightFt).toBe(2.1)
+  })
+})
+
+// adjustAnchor (the Adjust mode's Set write, ADR 0133's amendment): one
+// atomic PATCH carrying lat, lon and radius_meters together — mirrors
+// updatePlanningDepth exactly (no optimistic update, replaces state with the
+// server echo).
+describe('useAnchorWatch adjustAnchor', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: true, lat: -21.2, lon: 149.3, radius_meters: 40 }),
+    }))
+  })
+
+  it('PATCHes lat, lon and radius_meters together', async () => {
+    const fetchMock = vi.mocked(fetch)
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    fetchMock.mockClear()
+
+    await act(async () => {
+      await result.current.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({ method: 'PATCH' }))
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init!.body as string)
+    expect(body).toEqual({ lat: -21.2, lon: 149.3, radius_meters: 40 })
+  })
+
+  it('replaces state with the server echo rather than updating optimistically', async () => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => {
+      await result.current.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })
+    })
+
+    expect(result.current.anchorLat).toBe(-21.2)
+    expect(result.current.anchorLon).toBe(149.3)
+    expect(result.current.radiusMeters).toBe(40)
+  })
+
+  // Code-review finding: Set (and Undo) used to send lat/lon unconditionally,
+  // even for a radius-only change — the backend treats any lat/lon as a
+  // genuine reposition (resets the self trail, requires a fresh SignalK
+  // publish, 502s if SignalK is down). adjustAnchor must accept lat/lon as
+  // optional (both or neither) and PATCH only radius_meters when they're
+  // omitted.
+  it('PATCHes radius_meters alone when lat/lon are omitted (a radius-only Adjust Set)', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 40 }),
+    } as Response)
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    await act(async () => { await Promise.resolve() })
+    fetchMock.mockClear()
+
+    await act(async () => {
+      await result.current.adjustAnchor({ radiusMeters: 40 })
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({ method: 'PATCH' }))
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init!.body as string)
+    expect(body).toEqual({ radius_meters: 40 })
   })
 })
 
@@ -430,6 +499,7 @@ describe('useAnchorWatch loaded', () => {
 
   it.each([
     ['updateRadius', (r: ReturnType<typeof useAnchorWatch>) => r.updateRadius(25)],
+    ['adjustAnchor', (r: ReturnType<typeof useAnchorWatch>) => r.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })],
     ['updateRodeAndConditions', (r: ReturnType<typeof useAnchorWatch>) => r.updateRodeAndConditions(30, 'calm', 'sand')],
     ['updatePlanningDepth', (r: ReturnType<typeof useAnchorWatch>) => r.updatePlanningDepth(5, 1)],
     ['clearAnchor', (r: ReturnType<typeof useAnchorWatch>) => r.clearAnchor()],

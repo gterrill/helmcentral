@@ -393,6 +393,43 @@ export const ratioMethod: RodeMethod = (input) => {
 /** The array the planner component maps over, one SidebarGroup per result (ADR 0047 §2a). */
 export const rodeMethods: RodeMethod[] = [catenaryMethod, ratioMethod]
 
+export type LoaSource = 'settings' | 'signalk'
+
+export interface ResolvedLoa {
+  /** null when neither source has a usable figure — never a silent zero. */
+  loaM: number | null
+  source: LoaSource | null
+}
+
+/**
+ * LOA precedence (ADR 0047), extracted from anchor-rode-planner.tsx so the
+ * Adjust mode's radius ceiling (lib/anchor-adjust.ts's alarmRadiusBounds) and
+ * the planner's own swing circle resolve the operator's boat length exactly
+ * the same way: an explicit `settings.anchor.loa_m` override always wins when
+ * set (> 0); otherwise SignalK's `design.length.overall`, which — unlike
+ * `gps_from_bow_m` — carries no per-sensor offset trap, so it's safe to adopt
+ * directly. Neither present: null, not a silent zero — a caller computing a
+ * swing circle or a radius ceiling from a zero LOA would report a circle
+ * smaller than the boat.
+ */
+export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number | null): ResolvedLoa {
+  if (settingsLoaM > 0) return { loaM: settingsLoaM, source: 'settings' }
+  if (vesselLengthOverallM !== null && vesselLengthOverallM > 0) return { loaM: vesselLengthOverallM, source: 'signalk' }
+  return { loaM: null, source: null }
+}
+
+/**
+ * The swing circle a method's own recommended rode implies: rode + bow
+ * offset + the hull's own length. Extracted from anchor-rode-planner.tsx —
+ * the Adjust mode's "Planner swing" chip needs the identical figure, not a
+ * second copy of the arithmetic. `loaM` null (unresolved — see resolveLoaM
+ * above) returns null rather than silently computing a circle smaller than
+ * the boat.
+ */
+export function computeSwingRadiusM(recommendedRodeM: number, bowOffsetM: number, loaM: number | null): number | null {
+  return loaM !== null ? recommendedRodeM + bowOffsetM + loaM : null
+}
+
 /**
  * Planning-wind seed rule (ADR 0047): prefer the 1h max gust — plan for the
  * forecast gust, not the breeze at the moment the hook goes down — falling

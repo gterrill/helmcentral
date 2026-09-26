@@ -15,6 +15,24 @@ during an outage rather than wandering, and the watchdog for a lost instrument
 connection reports the outage separately, as its own alarm. A drag alert and a
 lost GPS fix require different responses.
 
+## The header: depth and tide at a glance
+
+The full-page anchor watch view opens with live depth under the keel as its
+headline reading, because that is what you actually care about while
+sitting on the hook, not how far off the anchor you've swung. Beside it,
+tide context keeps you from being surprised by the water changing under
+you: which way the tide is moving, the next high or low with its height and
+time, and the depth you should expect once it turns. The low-water
+clearance warning sits right there too, so everything about the water
+you're anchored in reads from one place. If depth hasn't updated recently,
+the reading is marked stale rather than left looking current.
+
+Distance from the anchor, bearing to it, the alarm radius, current set and
+drift, and the rode planner's recommended scope all live in the compact
+readout panel on the map itself instead. That is where you check how far
+you've swung and how much room is left before the alarm sounds, while the
+header above keeps its attention on the water.
+
 ## AIS targets on the map
 
 Nearby AIS targets draw on the anchor-watch map as amber circles carrying the
@@ -26,14 +44,34 @@ map and turn red on their own closing figures, independently of AIS, so a
 boat your radar and your AIS both see can show two red markers at once with
 two different numbers.
 
+## Adjust: moving the anchor or changing the radius
+
+A dropped anchor rarely wants moving far, but wind shifts, a bad set or a
+neighbour swinging closer than expected sometimes call for it. **Adjust**
+opens a focused view of the chart: the anchor sits fixed at the centre of the
+screen, and panning the chart underneath it moves the anchor to wherever the
+centre lands, with a faded copy of the original position and circle left on
+screen for reference. Pinching or zooming resizes the alarm circle's ground
+radius while its size on screen stays put, and a control bar at the bottom
+shows the radius plainly, with shortcuts to match it to your deployed rode or
+to whatever the rode planner currently recommends.
+
+Nothing changes on the boat's instrument network until you confirm the
+change: you can back out at any point and the watch stays exactly as it was.
+If the new position or radius would leave the boat outside the alarm circle
+right now, Adjust says so and asks you to confirm before saving. A short undo
+window follows every save, in case you change your mind again straight away.
+
+See [Set an anchor watch](../how-to/set-an-anchor-watch.md) for the steps.
+
 ## Drop, Raise, and the instrument network
 
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow
-offset when applied. Repositioning the anchor's saved position republishes
-the corrected coordinates; changing the alarm radius or rode settings does
-not. There is no control for repositioning yet — see
-[Set an anchor watch](../how-to/set-an-anchor-watch.md).
+offset when applied. Moving the anchor's saved position in Adjust
+republishes the corrected coordinates; changing the alarm radius or rode
+settings does not. See [Set an anchor watch](../how-to/set-an-anchor-watch.md)
+for how to open Adjust and move the anchor or change the radius.
 
 **Raise** publishes an explicit "no anchor" state, then removes the local
 watch, trail and session pins. This clears the boat's anchored navigation

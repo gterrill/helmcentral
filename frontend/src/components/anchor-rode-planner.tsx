@@ -8,9 +8,11 @@ import type { GustWindow } from '@/lib/gust-windows'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import {
   buildRodePlan,
+  computeSwingRadiusM,
   maxExpectedDepthM,
   planningFigureM,
   rawDepthFromPlanningFigureM,
+  resolveLoaM,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -240,20 +242,9 @@ export function AnchorRodePlanner({
   // report a circle smaller than the boat and let "Apply as alarm radius" shrink
   // a correct alarm circle. Surface the missing input instead of computing with it.
   //
-  // LOA precedence (ADR 0047): an explicit settings.anchor.loa_m override always
-  // wins when set; otherwise fall back to SignalK's design.length.overall, which
-  // is unaffected by which sensor/antenna published it — unlike gps_from_bow_m,
-  // there is no equivalent trap here, so this source is safe to adopt.
-  const loaSource: 'settings' | 'signalk' | null = anchorConfig.loaM > 0
-    ? 'settings'
-    : vesselLengthOverallM !== null && vesselLengthOverallM > 0
-      ? 'signalk'
-      : null
-  const resolvedLoaM = loaSource === 'settings'
-    ? anchorConfig.loaM
-    : loaSource === 'signalk'
-      ? vesselLengthOverallM!
-      : null
+  // LOA precedence (ADR 0047), extracted to lib/rode-plan.ts's resolveLoaM —
+  // the Adjust mode's radius ceiling needs the exact same resolution rule.
+  const { loaM: resolvedLoaM, source: loaSource } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
   const loaConfigured = resolvedLoaM !== null
 
   // Apply as alarm radius must use the swing of whichever method the operator
@@ -264,8 +255,8 @@ export function AnchorRodePlanner({
   // 'catenary' and one for 'ratio' (see rodeMethods above), and scopeMethod is
   // typed to exactly those two ids, so this always finds a match.
   const configuredMethodResult = methodResults.find((result) => result !== null && result.id === anchorConfig.scopeMethod)!
-  const configuredSwingRadiusM = !configuredMethodResult.unavailableReason && resolvedLoaM !== null
-    ? configuredMethodResult.recommendedRodeM + bowOffsetM + resolvedLoaM
+  const configuredSwingRadiusM = !configuredMethodResult.unavailableReason
+    ? computeSwingRadiusM(configuredMethodResult.recommendedRodeM, bowOffsetM, resolvedLoaM)
     : null
 
   // The actual write, shared by the debounced call below and by a Retry
@@ -672,8 +663,8 @@ export function AnchorRodePlanner({
                   // describe the single shared LOA input, not anything specific to
                   // a method, so they render once in SidebarFooter instead,
                   // directly above Apply, where they gate it (ADR 0059 §4).
-                  const methodSwingRadiusM = !result.unavailableReason && resolvedLoaM !== null
-                    ? result.recommendedRodeM + bowOffsetM + resolvedLoaM
+                  const methodSwingRadiusM = !result.unavailableReason
+                    ? computeSwingRadiusM(result.recommendedRodeM, bowOffsetM, resolvedLoaM)
                     : null
                   return (
                     <TabsContent key={result.id} value={result.id}>
