@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-26
+
 ### Added
 
 - Anchor Watch now warns when the boat will be too shallow at the next low
@@ -30,26 +32,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   outside the alarm circle right now, and a short undo window follows every
   save.
 
-### Fixed
-
-- The Depth & Tide tile and the Anchor Watch header no longer skip a low
-  tide of exactly 0.0 in favour of the one after it, and no longer show a
-  made-up high or low - at "now" or a day ahead - when the tide station has
-  none left in its forecast; that reading now sits quietly blank instead.
-- Some builder drawings and equipment manuals that previously failed to
-  index (their text couldn't be read) now index normally. Documents already
-  showing as failed for this reason don't fix themselves - open them in
-  Documents and choose Reindex.
-- A failed document in Documents now tells you what to try next instead of
-  showing a raw technical error - a HEIC photo says to convert it to JPEG,
-  and Mate being off or unconfigured says so directly, so you know which
-  setting to fix. The original detail is still there if you want it, under
-  Error details on the document's own page.
-- After a long search runs out of research steps, Mate now reliably answers
-  from what it already found instead of giving up - this previously could
-  still fail outright with no answer at all, depending on which model
-  answered the question.
-
 ### Changed
 
 - The full-page Anchor Watch view now opens with live depth and tide
@@ -61,6 +43,27 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   last release are gone; the new **Adjust** control above replaces them
   with a proper radius stepper plus the ability to move the anchor, and the
   rode planner's **Apply as alarm radius** still works alongside it.
+
+### Fixed
+
+- The Depth & Tide tile no longer skips a low tide of exactly 0.0 in favour
+  of the one after it, and no longer shows a made-up high or low (at "now"
+  or a day ahead) when the tide station has none left in its forecast; that
+  reading now stays blank instead. Tides that fall below chart datum now
+  show their real height.
+- Some builder drawings and equipment manuals that previously failed to
+  index (their text couldn't be read) now index normally. Documents already
+  showing as failed for this reason don't fix themselves: open them in
+  Documents and choose Reindex.
+- A failed document in Documents now tells you what to try next instead of
+  showing a raw technical error. A HEIC photo says to convert it to JPEG,
+  and Mate being off or unconfigured says so directly, so you know which
+  setting to fix. The original detail is still there if you want it, under
+  Error details on the document's own page.
+- After a long search runs out of research steps, Mate now reliably answers
+  from what it already found instead of giving up. This previously could
+  still fail outright with no answer at all, depending on which model
+  answered the question.
 
 ## [0.33.0] - 2026-09-26
 
@@ -294,7 +297,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/gterrill/helmcentral/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/gterrill/helmcentral/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/gterrill/helmcentral/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/gterrill/helmcentral/compare/v0.30.0...v0.31.0
