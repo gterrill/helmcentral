@@ -36,6 +36,16 @@ internet connection. If the connection is down the button says so rather
 than appearing to do nothing. On a browser with no speech support at all the
 button is simply absent.
 
+## Adding a photograph
+
+A note can carry a photograph of the actual thing it describes - the valve,
+the switch, the leak - not just a paragraph naming it. Open the note editor
+and press **Take photo** to shoot it right there and have it drop into the
+note at the cursor immediately, with no separate trip through the document
+library first. **Add from library** does the same for a photo already on
+the device, and picking several at once files them into the note in the
+order you picked them.
+
 ## What kind of note it is
 
 Every note is given a type, shown as an icon and a colour at the start of its

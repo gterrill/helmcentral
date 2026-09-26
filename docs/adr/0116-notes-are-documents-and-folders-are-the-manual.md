@@ -464,6 +464,25 @@ rather than narrowing it. The type is worth **seeing** on a row and is not
 a useful way to slice a mixed library; the Unfiled notes view already
 covers the one case that genuinely wanted a notes-only listing.
 
+## Addendum (2026-09-27): the editor uploads photos itself
+
+Not a reversal either. `hc-doc:<uuid>` stays the only shape a note's `img`
+node carries, resolved through `resolveNoteHref` exactly as this ADR
+specified. What changed is how that id gets there: the editor's Image
+popover now offers Take photo and Add from library alongside the original
+paste-an-id field, uploading through the same general document intake
+([ADR 0127](0127-bins-open-from-a-tag-items-carry-photos.md)'s `receiveUploadedFile`/
+`storeUploadedFile`) and the same phone-side downscale/HEIC-to-JPEG
+re-encode the equipment photo row already runs, tagged `photo`. A duplicate
+upload (identical bytes already in the library) links the existing document
+rather than refusing, the same amendment ADR 0127 made for that route.
+
+The reason is where the operator is standing. Paste-an-id assumes a detour
+through Documents to upload first and copy an id back - fine at a desk,
+awkward with a phone and a torch in an engine bay. The photo is worth taking
+at the job, not remembered for later, so the editor now does the upload
+itself instead of asking for a trip elsewhere first.
+
 ## Related
 
 - [ADR 0106](0106-documents-in-the-binary.md) is the store this builds on.

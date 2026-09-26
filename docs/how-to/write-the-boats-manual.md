@@ -79,16 +79,20 @@ describing which one it is.
 Open the note and press **Edit**. This opens the note editor - a normal
 formatting toolbar, not a box of Markdown syntax to remember.
 
-Upload the photo through Documents first, then open it and copy its id
-from the address bar. Back in the note editor, press the **image** button in
-the toolbar, paste the id and give it a caption. The editor inserts the
-reference and shows the photograph in place, exactly as it will read once
-saved.
+Press the **image** button in the toolbar, then **Take photo**. Shoot the
+valve on the spot and it uploads and drops straight into the note at the
+cursor - no trip to Documents first. Picking several photos at once with
+**Add from library** files each one in, in the order you picked them. Type
+a caption first if you want one; it applies to whatever you take or pick
+next.
 
-The upload step doesn't go away - the editor's button saves you writing the
-Markdown by hand, not the trip through Documents. If you are editing the raw
-Markdown directly (the `</>` button in the toolbar switches to it), the form
-is:
+Already uploaded the photo through Documents? Paste its id from the address
+bar into the same popover instead, and give it a caption. Either way the
+editor inserts the reference and shows the photograph in place, exactly as
+it will read once saved.
+
+If you are editing the raw Markdown directly (the `</>` button in the
+toolbar switches to it), a photograph is:
 
 ```
 ![Fuel return valve](hc-doc:PASTE-THE-ID-HERE)

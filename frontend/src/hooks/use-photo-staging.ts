@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { uploadEquipmentPhoto, type EquipmentItem } from '@/hooks/use-inventory'
-import { downscaleAll } from '@/lib/image-downscale'
+import { downscaleAll, photoFilename } from '@/lib/image-downscale'
+
+// photoFilename now lives in lib/image-downscale.ts (note-editor-impl.tsx's
+// ImageButton needs the exact same JPEG-rename rule and has no reason to
+// import an equipment-shaped hook module just for it) - re-exported here so
+// equipment-editor.tsx's existing `import { photoFilename } from
+// '@/hooks/use-photo-staging'` keeps working unchanged.
+export { photoFilename }
 
 // ADR 0127: the "pick photos before the record exists yet" staging area -
 // shared by bin-quick-add.tsx's own quick-add draft and equipment-editor.tsx's
@@ -40,15 +47,6 @@ export interface FailedPhotoUpload {
   filename: string
   error: string
   needsDownscale?: boolean
-}
-
-/** ADR 0127: JPEG/PNG re-encoding always renames to .jpg (downscaleImage's
- * own output format) - a camera capture's filename is often meaningless
- * anyway ("image.heic", "blob"), and giving every upload a real extension
- * that matches its actual bytes is one less thing to get wrong. */
-export function photoFilename(original: string): string {
-  const base = original.replace(/\.[^.]+$/, '').trim()
-  return `${base || 'photo'}.jpg`
 }
 
 export interface UsePhotoStagingOptions {
