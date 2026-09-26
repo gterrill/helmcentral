@@ -28,10 +28,10 @@ const maintenanceHoursStaleAfter = derivedInputMaxAge
 // (typically 0, but not assumed to be - a replacement with a used meter is
 // a real case).
 type hourMeterReset struct {
-	OldReading float64
-	NewReading float64
-	ChangedAt  string
-	CreatedAt  time.Time
+	OldReading float64   `json:"old_reading"`
+	NewReading float64   `json:"new_reading"`
+	ChangedAt  string    `json:"changed_at"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // latestMeterOffsetHours is the figure added to the live meter's own raw
