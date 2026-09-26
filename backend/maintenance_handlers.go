@@ -72,6 +72,11 @@ type maintenanceRuleView struct {
 	RemainingDays    *int     `json:"remaining_days"`
 	HoursUnknown     bool     `json:"hours_unknown"`
 	HasHourMeterPath bool     `json:"has_hour_meter_path"`
+	// CurrentHours is the item's own live true-hours reading right now
+	// (nil unless Hours.Known) - a convenience for the frontend's Complete
+	// dialog, which prefills its hours field from this rather than
+	// re-deriving it from RemainingHours/LastDoneHours arithmetic.
+	CurrentHours *float64 `json:"current_hours"`
 	// HoursStaleSince (RFC3339) is set only when the item's hour meter path
 	// IS bound but its value is older than the staleness threshold - spec's
 	// own "unknown/stale since X". Blank/null both when the hours axis
@@ -145,6 +150,10 @@ func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours mai
 	if hours.StaleSince != nil {
 		s := hours.StaleSince.UTC().Format(time.RFC3339)
 		view.HoursStaleSince = &s
+	}
+	if hours.Known {
+		h := hours.Hours
+		view.CurrentHours = &h
 	}
 	return view
 }
