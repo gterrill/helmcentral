@@ -87,8 +87,12 @@ func currentEquipmentHours(reader alarmReader, snapshot *signalKSnapshot, path s
 	}
 
 	age := pathAge(snapshot, sample, trimmed, now)
-	if age < 0 || age > maintenanceHoursStaleAfter.Seconds() {
+	if age < 0 {
 		return maintenanceHourReading{}
+	}
+	if age > maintenanceHoursStaleAfter.Seconds() {
+		lastGood := now.Add(-time.Duration(age * float64(time.Second)))
+		return maintenanceHourReading{StaleSince: &lastGood}
 	}
 
 	hours := sample.Value/3600.0 + offsetHours

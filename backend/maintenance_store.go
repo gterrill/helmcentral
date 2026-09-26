@@ -95,10 +95,20 @@ var validMaintenanceLogKinds = map[string]bool{"maintenance": true, "repair": tr
 // maintenanceRuleInput/maintenanceLogEntryInput are the editable-field
 // shapes CreateMaintenanceRule/UpdateMaintenanceRule and
 // CreateMaintenanceLogEntry/UpdateMaintenanceLogEntry accept - a PUT-style
-// whole-record replace, matching equipmentItem's own CreateEquipment/
-// UpdateEquipment contract exactly. Server-side field validation
+// whole-record replace of a rule's own CORE fields, matching equipmentItem's
+// own CreateEquipment/UpdateEquipment contract. Server-side field validation
 // (validateMaintenanceRuleInput/validateMaintenanceLogEntryInput,
 // maintenance_handlers.go) runs before either of these ever sees a value.
+//
+// Deliberately excluded, the same way equipment's own PUT excludes photos/
+// documents (each has its own dedicated, separately-validated endpoint):
+// LastDoneAt/LastDoneHours (SetMaintenanceRuleLastDone/
+// CompleteMaintenanceRule only), ProcedureNoteID
+// (SetMaintenanceRuleProcedureNote only), and ack_reason/ack_at
+// (AcknowledgeMaintenanceRule only). An ordinary rule edit - fixing a typo
+// in the description, widening an interval - must never accidentally reset
+// a baseline, a linked note, or an acknowledgement as a side effect of
+// saving the form.
 type maintenanceRuleInput struct {
 	EquipmentID      *string
 	Description      string
@@ -107,10 +117,7 @@ type maintenanceRuleInput struct {
 	DueSoonHours     *float64
 	DueSoonMonths    *int
 	FixedDueDate     string
-	LastDoneAt       string
-	LastDoneHours    *float64
 	ProfileServiceID string
-	ProcedureNoteID  string
 }
 
 type maintenanceLogPartInput struct {
@@ -221,10 +228,10 @@ func (s *documentStore) CreateMaintenanceRule(in maintenanceRuleInput) (maintena
 			id, equipment_id, description, interval_hours, interval_months,
 			due_soon_hours, due_soon_months, fixed_due_date, last_done_at, last_done_hours,
 			profile_service_id, procedure_note_id, ack_reason, ack_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, '', NULL, ?, ?)`,
 		id, nullableString(in.EquipmentID), strings.TrimSpace(in.Description), in.IntervalHours, in.IntervalMonths,
-		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate, in.LastDoneAt, in.LastDoneHours,
-		in.ProfileServiceID, nullableString(nilIfEmpty(in.ProcedureNoteID)), now.Unix(), now.Unix(),
+		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate,
+		in.ProfileServiceID, now.Unix(), now.Unix(),
 	); err != nil {
 		return maintenanceRule{}, fmt.Errorf("create maintenance rule: %w", err)
 	}
@@ -275,12 +282,12 @@ func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput
 	if _, err := tx.Exec(`
 		UPDATE maintenance_rules SET
 			equipment_id = ?, description = ?, interval_hours = ?, interval_months = ?,
-			due_soon_hours = ?, due_soon_months = ?, fixed_due_date = ?, last_done_at = ?, last_done_hours = ?,
-			profile_service_id = ?, procedure_note_id = ?, updated_at = ?
+			due_soon_hours = ?, due_soon_months = ?, fixed_due_date = ?,
+			profile_service_id = ?, updated_at = ?
 		WHERE id = ?`,
 		nullableString(in.EquipmentID), strings.TrimSpace(in.Description), in.IntervalHours, in.IntervalMonths,
-		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate, in.LastDoneAt, in.LastDoneHours,
-		in.ProfileServiceID, nullableString(nilIfEmpty(in.ProcedureNoteID)), now.Unix(),
+		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate,
+		in.ProfileServiceID, now.Unix(),
 		id,
 	); err != nil {
 		return maintenanceRule{}, fmt.Errorf("update maintenance rule: %w", err)

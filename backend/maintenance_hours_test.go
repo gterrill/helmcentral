@@ -82,7 +82,7 @@ func TestCurrentEquipmentHours(t *testing.T) {
 		}
 	})
 
-	t.Run("stale value is unknown, never guessed at", func(t *testing.T) {
+	t.Run("stale value is unknown, never guessed at, and reports when it was last good", func(t *testing.T) {
 		snapshot := newSignalKSnapshot()
 		staleTime := now.Add(-maintenanceHoursStaleAfter - time.Minute)
 		reader := func(path string) alarmSample {
@@ -91,6 +91,20 @@ func TestCurrentEquipmentHours(t *testing.T) {
 		got := currentEquipmentHours(reader, snapshot, "propulsion.main.runTime", 0, now)
 		if got.Known {
 			t.Fatalf("expected Known=false for a stale sample, got %+v", got)
+		}
+		if got.StaleSince == nil || !got.StaleSince.Equal(staleTime) {
+			t.Fatalf("expected StaleSince = %v, got %v", staleTime, got.StaleSince)
+		}
+	})
+
+	t.Run("no path bound reports no StaleSince at all", func(t *testing.T) {
+		reader := func(path string) alarmSample {
+			t.Fatalf("reader should not be called with no path")
+			return alarmSample{}
+		}
+		got := currentEquipmentHours(reader, nil, "", 0, now)
+		if got.StaleSince != nil {
+			t.Fatalf("expected no StaleSince with no path bound, got %v", got.StaleSince)
 		}
 	})
 }

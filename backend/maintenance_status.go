@@ -70,6 +70,12 @@ func maintenanceStatusRank(s maintenanceStatus) int {
 type maintenanceHourReading struct {
 	Known bool
 	Hours float64
+	// StaleSince is set only when the bound path HAS a value but it is
+	// older than maintenanceHoursStaleAfter - never set when there is no
+	// path bound at all, or the path has no value whatsoever, since
+	// neither case has a "since" to report (maintenance_hours.go's own
+	// currentEquipmentHours doc comment).
+	StaleSince *time.Time
 }
 
 // maintenanceRuleStatusInput is computeMaintenanceRuleStatus's whole
