@@ -253,8 +253,19 @@ function docNode(overrides: Partial<ManualTreeNode> = {}): ManualTreeNode {
   }
 }
 
+/** Search now lives behind a trigger + overlay (shadcn.io
+ * "navbar-search-overlay"), not an always-on input in the filter row - every
+ * test that drives a search has to open it first. */
+function openSearchOverlay() {
+  fireEvent.click(screen.getByRole('button', { name: /search documents/i }))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
+  // Recent searches (below) persist in real localStorage across tests in
+  // this file otherwise - a query run by an earlier test would still be
+  // offered as a "recent" in a later, unrelated one.
+  try { localStorage.clear() } catch { /* not available in this env */ }
   mockedUseDocuments.mockReturnValue(makeDocumentsMock())
   mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
   mockedUseManuals.mockReturnValue(makeManualsMock())
@@ -278,12 +289,32 @@ afterEach(() => {
 })
 
 describe('DocumentsPanel', () => {
+  // Search lives behind a trigger + full-page overlay now (shadcn.io
+  // "navbar-search-overlay"). The overlay's results list sits in a
+  // ScrollArea (@base-ui/react/scroll-area), which - like FolderPicker's own
+  // ScrollArea below - schedules an unguarded 0ms timeout on mount that
+  // unconditionally calls viewport.getAnimations() to recompute thumb
+  // geometry. src/test/setup.ts deletes Element.prototype.getAnimations
+  // globally so Base UI's Dialog/AlertDialog/Tabs close synchronously for
+  // this suite's fireEvent-driven assertions elsewhere, but ScrollArea's own
+  // mount effect has no such fallback: a local stub, scoped to just this
+  // describe block and removed again afterwards, satisfies it without
+  // weakening the global shim the rest of the suite depends on.
+  describe('search overlay', () => {
+    beforeEach(() => {
+      Element.prototype.getAnimations = () => []
+    })
+    afterEach(() => {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations
+    })
+
   it('sends the typed query, debounced, scoped to the current folder', () => {
     vi.useFakeTimers()
     const search = vi.fn()
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ search }))
 
     render(<DocumentsPanel initialFolderId="f1" />)
+    openSearchOverlay()
 
     fireEvent.change(screen.getByRole('searchbox', { name: /search documents/i }), { target: { value: 'impeller' } })
     expect(search).not.toHaveBeenCalled()
@@ -299,6 +330,7 @@ describe('DocumentsPanel', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ search }))
 
     render(<DocumentsPanel initialFolderId="f1" />)
+    openSearchOverlay()
 
     fireEvent.click(screen.getByRole('switch', { name: /all folders/i }))
     fireEvent.change(screen.getByRole('searchbox', { name: /search documents/i }), { target: { value: 'impeller' } })
@@ -319,13 +351,17 @@ describe('DocumentsPanel', () => {
     }]
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: results }))
 
-    const { container } = render(<DocumentsPanel />)
+    render(<DocumentsPanel />)
+    openSearchOverlay()
 
-    const mark = container.querySelector('mark')
+    // document.body, not the render container: the overlay is a Dialog,
+    // which portals its content to the end of <body> rather than rendering
+    // it inline where DocumentsPanel itself mounted.
+    const mark = document.body.querySelector('mark')
     expect(mark).not.toBeNull()
     expect(mark?.textContent).toBe('<img src=x onerror=alert(1)>')
     // Never actually parsed as markup - no <img> was created from the snippet.
-    expect(container.querySelector('img')).toBeNull()
+    expect(document.body.querySelector('img')).toBeNull()
   })
 
   it('shows each search hit\'s page and folder path', async () => {
@@ -352,6 +388,7 @@ describe('DocumentsPanel', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: results }))
 
     render(<DocumentsPanel />)
+    openSearchOverlay()
 
     expect(screen.getByText(/page 4/i)).toBeInTheDocument()
     expect(await screen.findByText(/manuals$/i)).toBeInTheDocument()
@@ -371,12 +408,218 @@ describe('DocumentsPanel', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: results }))
 
     render(<DocumentsPanel />)
+    openSearchOverlay()
 
     // Scoped to the results list - "Documents" is also the breadcrumb's own
     // root crumb, always on screen regardless of search state. Substring
     // match: the folder label shares one line with "Page N · ".
     const resultsList = screen.getByTestId('documents-search-results')
     expect(within(resultsList).getByText(/documents$/i)).toBeInTheDocument()
+  })
+
+  it('the Search trigger opens the overlay with an autofocused input', () => {
+    render(<DocumentsPanel />)
+
+    expect(screen.queryByRole('searchbox', { name: /search documents/i })).not.toBeInTheDocument()
+
+    openSearchOverlay()
+
+    const input = screen.getByRole('searchbox', { name: /search documents/i })
+    expect(input).toBeInTheDocument()
+    expect(input).toHaveFocus()
+  })
+
+  it('⌘K opens the overlay from anywhere in the panel', () => {
+    render(<DocumentsPanel />)
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+
+    expect(screen.getByRole('searchbox', { name: /search documents/i })).toBeInTheDocument()
+  })
+
+  it('Ctrl+K opens the overlay too, for non-Mac keyboards', () => {
+    render(<DocumentsPanel />)
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+
+    expect(screen.getByRole('searchbox', { name: /search documents/i })).toBeInTheDocument()
+  })
+
+  it('Enter on the active result opens the viewer and closes the overlay', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => doc({ id: 'doc-9', filename: 'manual.pdf', title: 'Impeller manual' }),
+    }))
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      searchResults: [{
+        document_id: 'doc-9',
+        filename: 'manual.pdf',
+        title: 'Impeller manual',
+        status: 'indexed',
+        page: 2,
+        snippet: 'the \x02impeller\x03 kit',
+        folder_id: null,
+      }],
+    }))
+
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('searchbox', { name: /search documents/i }), { key: 'Enter' })
+    })
+
+    // The overlay itself is gone...
+    expect(screen.queryByRole('searchbox', { name: /search documents/i })).not.toBeInTheDocument()
+    // ...and the viewer opened on that result's document (fetched directly,
+    // since it isn't in whatever folder useDocuments happens to report -
+    // the same path a Mate attachment chip's link already exercises).
+    expect(await screen.findByText('Impeller manual')).toBeInTheDocument()
+  })
+
+  it('clicking a result does the same as Enter: opens the viewer and closes the overlay', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => doc({ id: 'doc-9', filename: 'manual.pdf', title: 'Impeller manual' }),
+    }))
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      searchResults: [{
+        document_id: 'doc-9',
+        filename: 'manual.pdf',
+        title: 'Impeller manual',
+        status: 'indexed',
+        page: 2,
+        snippet: 'the \x02impeller\x03 kit',
+        folder_id: null,
+      }],
+    }))
+
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId('documents-search-results')).getByText(/impeller manual/i))
+    })
+
+    expect(screen.queryByRole('searchbox', { name: /search documents/i })).not.toBeInTheDocument()
+    expect(await screen.findByText('Impeller manual')).toBeInTheDocument()
+  })
+
+  it('⌘K does nothing while another dialog (the viewer, the note editor, Mate) is open', () => {
+    render(<><DocumentsPanel /><div role="dialog" aria-label="Note editor">editing</div></>)
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    expect(screen.queryByRole('searchbox', { name: /search documents/i })).not.toBeInTheDocument()
+  })
+
+  it('Enter does not open a result belonging to an earlier query while the newest one is still pending', () => {
+    vi.useFakeTimers()
+    const search = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      search,
+      searchResults: [{
+        document_id: 'doc-9',
+        filename: 'imp.pdf',
+        title: 'Imp result',
+        status: 'indexed',
+        page: 1,
+        snippet: 'imp',
+        folder_id: null,
+      }],
+    }))
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    const input = screen.getByRole('searchbox', { name: /search documents/i })
+    fireEvent.change(input, { target: { value: 'imp' } })
+    act(() => { vi.advanceTimersByTime(250) })
+    fireEvent.change(input, { target: { value: 'impeller' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    // Still open: the "imp" result was not opened in place of "impeller"'s.
+    expect(screen.getByRole('searchbox', { name: /search documents/i })).toBeInTheDocument()
+  })
+
+  it('shows Searching…, not "No matches.", before the typed query has been searched', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: [], searching: false }))
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    fireEvent.change(screen.getByRole('searchbox', { name: /search documents/i }), { target: { value: 'x' } })
+    expect(screen.queryByText('No matches.')).not.toBeInTheDocument()
+    expect(screen.getByText('Searching…')).toBeInTheDocument()
+  })
+
+  it('shows the active tag filter inside the overlay, with a way to clear it', () => {
+    const setSelectedTag = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ selectedTag: 'engine', setSelectedTag, tags: [{ tag: 'engine', count: 3 }] }))
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /clear tag filter engine/i }))
+    expect(setSelectedTag).toHaveBeenCalledWith(null)
+  })
+
+  it('shows Searching… rather than the empty-state suggestions while a typed query has no results yet', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      searching: true,
+      searchResults: null,
+      tags: [{ tag: 'Alternator', count: 2 }],
+    }))
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    fireEvent.change(screen.getByRole('searchbox', { name: /search documents/i }), { target: { value: 'alternator' } })
+    expect(screen.getByText('Searching…')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).queryByText('Tags')).not.toBeInTheDocument()
+  })
+
+  it("offers only the twelve most-used tags as the overlay's suggestions", () => {
+    const tags = Array.from({ length: 20 }, (_, i) => ({ tag: `Tag${i}`, count: i + 1 }))
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ tags }))
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Tag19 (20)' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Tag8 (9)' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Tag7 (8)' })).not.toBeInTheDocument()
+  })
+
+  it('records the search in force when the overlay closes as a recent, not each pause mid-typing; offers it on reopen to re-run, and Clear removes it', () => {
+    vi.useFakeTimers()
+    const search = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ search }))
+
+    const { unmount } = render(<DocumentsPanel />)
+    openSearchOverlay()
+    const input = screen.getByRole('searchbox', { name: /search documents/i })
+    // A pause mid-word lets the debounce settle on a partial query - that
+    // partial must not become a recent search.
+    fireEvent.change(input, { target: { value: 'impel' } })
+    act(() => { vi.advanceTimersByTime(250) })
+    fireEvent.change(input, { target: { value: 'impeller' } })
+    act(() => { vi.advanceTimersByTime(250) })
+    expect(search).toHaveBeenCalledWith('impeller', { allFolders: false })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    // The recent is persisted (localStorage), not merely in-memory - proven
+    // by unmounting the panel entirely (leaving, the way navigating to a
+    // different sidebar panel would) and mounting a fresh instance, rather
+    // than reusing this one's own React state.
+    unmount()
+    render(<DocumentsPanel />)
+    openSearchOverlay()
+    const recent = screen.getByRole('button', { name: 'impeller' })
+    expect(recent).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'impel' })).not.toBeInTheDocument()
+
+    // Clicking it re-runs the same query.
+    search.mockClear()
+    fireEvent.click(recent)
+    act(() => { vi.advanceTimersByTime(250) })
+    expect(search).toHaveBeenCalledWith('impeller', { allFolders: false })
+
+    // Clear removes it - a later reopen offers nothing. The re-run query
+    // holds the overlay in results mode, so empty the box first.
+    fireEvent.change(screen.getByRole('searchbox', { name: /search documents/i }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(screen.queryByRole('button', { name: 'impeller' })).not.toBeInTheDocument()
+  })
   })
 
   it('navigating into a folder calls onFolderChange with its id', () => {
@@ -957,6 +1200,16 @@ describe('DocumentsPanel', () => {
   // query - never when it's simply switched off - so it's a quiet notice
   // beside real, complete keyword results, not an error banner.
   describe('semantic_problem notice', () => {
+    // These now open the search overlay too - see the 'search overlay'
+    // describe block's own comment on this same ScrollArea/getAnimations
+    // stub.
+    beforeEach(() => {
+      Element.prototype.getAnimations = () => []
+    })
+    afterEach(() => {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations
+    })
+
     const oneResult: import('@/hooks/use-documents').DocumentSearchResult[] = [{
       document_id: 'doc-1',
       filename: 'manual.pdf',
@@ -974,6 +1227,7 @@ describe('DocumentsPanel', () => {
       }))
 
       render(<DocumentsPanel />)
+      openSearchOverlay()
 
       const notice = screen.getByText(/showing keyword results only/i)
       expect(notice).toHaveTextContent('embedding the query failed: rate limited')
@@ -989,6 +1243,7 @@ describe('DocumentsPanel', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: oneResult, semanticProblem: null }))
 
       render(<DocumentsPanel />)
+      openSearchOverlay()
 
       expect(screen.queryByText(/showing keyword results only/i)).not.toBeInTheDocument()
     })
@@ -1000,6 +1255,7 @@ describe('DocumentsPanel', () => {
       }))
 
       const { rerender } = render(<DocumentsPanel />)
+      openSearchOverlay()
       expect(screen.getByText(/showing keyword results only/i)).toBeInTheDocument()
 
       // use-documents.test.ts pins the hook's own clearing behaviour
@@ -1149,6 +1405,24 @@ describe('DocumentsPanel', () => {
     // One trigger, not six toggle buttons. Six icon+label buttons sat in
     // the same row as New and Upload and read as actions rather than as a
     // filter; this pins the collapse so it cannot quietly regress.
+
+    // A file row's icon is a bare h-4 w-4 MimeIcon with no padding, but a
+    // note row's own icon is a full h-8 w-8 NoteTypeIconButton (kept at
+    // that size everywhere else - it's still a real tap target) - the
+    // `sm` size variant it renders at here now carries -mx-2 so its 32px
+    // button collapses back to the same 16px layout footprint as the file
+    // row's bare icon, and the icon (and title beside it) line up exactly
+    // rather than sitting ~8px further right.
+    it("a note row's icon carries -mx-2 so it lines up with a file row's bare icon", () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', filename: 'Ring Dave.md', title: 'Ring Dave', mime: 'text/markdown', kind: 'note', note_type: 'contact' })],
+      }))
+
+      render(<DocumentsPanel />)
+
+      const button = screen.getByRole('button', { name: /change type: currently contact/i })
+      expect(button.className).toContain('-mx-2')
+    })
   })
 
   // "Unfiled notes" as a saved view (kind='note' AND folder_id IS NULL,
@@ -1188,6 +1462,22 @@ describe('DocumentsPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'File "Ring Dave"' }))
 
       expect(screen.getByRole('dialog')).toHaveTextContent('Move')
+    })
+
+    // Unfiled notes view renders NoteTypeIconButton at `lg` (an 11-unit/44px
+    // mobile tap target, unlike the dense table's `sm`) - the -mx-2 fix
+    // above only applies to `sm`, and must not shrink this one's footprint.
+    it("does not shrink the Unfiled notes view's own (lg) icon button", () => {
+      mockedUseNotes.mockReturnValue(makeNotesMock({
+        notes: [note({ id: 'note-1', title: 'Ring Dave', note_type: 'contact' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: /unfiled notes/i }))
+
+      const button = screen.getByRole('button', { name: /change type: currently contact/i })
+      expect(button.className).toContain('h-11 w-11')
+      expect(button.className).not.toContain('-mx-2')
     })
   })
 
@@ -1545,6 +1835,78 @@ describe('DocumentsPanel', () => {
 
       fireEvent.click(orphan)
       expect(setSelectedTag).toHaveBeenCalledWith(null)
+    })
+  })
+
+  // The selection bar's own "Reindex…", between Move to… and Delete -
+  // mirrors the single-document row menu's confirmation (AlertDialog below
+  // "Reindex "name"?"), but summed across every selected document: total
+  // pages (page_count, min 1 each) and, only for the PDFs/images among
+  // them, an OCR cost estimate.
+  describe('bulk reindex', () => {
+    it('confirms with the summed page count and OCR estimate, then reindexes every selected id in order', async () => {
+      const reindexDocument = vi.fn().mockResolvedValue(undefined)
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [
+          doc({ id: 'doc-1', filename: 'a.pdf', mime: 'application/pdf', page_count: 5 }),
+          doc({ id: 'doc-2', filename: 'b.txt', mime: 'text/plain', page_count: 0 }),
+        ],
+        reindexDocument,
+      }))
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select a.pdf' }))
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select b.txt' }))
+
+      fireEvent.click(screen.getByRole('button', { name: /reindex/i }))
+
+      expect(screen.getByRole('heading', { name: 'Reindex 2 documents?' })).toBeInTheDocument()
+      // a.pdf: 5 pages; b.txt: page_count 0 floors to 1. Total 6.
+      expect(screen.getByText(/This re-reads 6 page\(s\)/)).toBeInTheDocument()
+      // Only a.pdf (a PDF) counts toward OCR: 5 pages * $0.002.
+      expect(screen.getByText(/estimated cost: \$0\.010/)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Reindex' }))
+
+      await waitFor(() => expect(reindexDocument).toHaveBeenCalledTimes(2))
+      expect(reindexDocument).toHaveBeenNthCalledWith(1, 'doc-1')
+      expect(reindexDocument).toHaveBeenNthCalledWith(2, 'doc-2')
+    })
+
+    it('says nothing about OCR cost when none of the selected documents are PDFs or images', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'doc-1', filename: 'log.txt', mime: 'text/plain', page_count: 0 })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select log.txt' }))
+      fireEvent.click(screen.getByRole('button', { name: /reindex/i }))
+
+      expect(screen.getByRole('heading', { name: 'Reindex 1 documents?' })).toBeInTheDocument()
+      expect(screen.queryByText(/estimated cost/)).not.toBeInTheDocument()
+    })
+
+    it('a failure surfaces loudly through the panel\'s own error banner, not silently', async () => {
+      const reindexDocument = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('reindex failed: disk full'))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [
+          doc({ id: 'doc-1', filename: 'a.pdf' }),
+          doc({ id: 'doc-2', filename: 'b.pdf' }),
+        ],
+        reindexDocument,
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select a.pdf' }))
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select b.pdf' }))
+      fireEvent.click(screen.getByRole('button', { name: /reindex/i }))
+      fireEvent.click(screen.getByRole('button', { name: 'Reindex' }))
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('reindex failed: disk full'))
+      expect(reindexDocument).toHaveBeenCalledTimes(2)
     })
   })
 })

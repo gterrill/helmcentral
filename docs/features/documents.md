@@ -122,11 +122,25 @@ text in it to search and nothing for Mate to read.
 
 ## Searching: words, and meaning
 
+**Search**, in the toolbar, opens a full-page search box over whatever
+you're looking at - press **⌘K** (**Ctrl+K** on Windows or Linux) from
+anywhere on the page to open it just as fast. Open it with nothing typed
+yet and it offers your last five searches and your twelve most-used tags;
+click a tag to filter the library by it directly, or click a recent search
+to run it again. Type to search, use the arrow keys to move between the
+results shown below the box, and press Enter to open whichever one is
+highlighted - or just click it. **Esc**, or the close button, dismisses the
+overlay and clears the search.
+
 The search box always searches words. Type a part number, a boat name or an
 invoice number and it finds the documents containing it, instantly, with no
 connection and no account. Titles, filenames, folder paths, tags, summaries
 and notes are searched alongside the document's own text, so a receipt filed
 under `Receipts/2026` and tagged `engine` is findable by any of those.
+
+By default a search only looks in the folder you're currently browsing;
+the **All folders** switch inside the search box widens it to the whole
+library.
 
 With Mate on, search also works by meaning. Ask "how often should I service
 the engine's cooling system impeller" and the manual page that says "raw
@@ -180,6 +194,14 @@ Reindex is also how a scan longer than 200 pages gets past the automatic
 cost cap: a document that size is turned away the first time, with the
 page count and an estimated cost, and only proceeds once you've asked for
 it explicitly through Reindex.
+
+Select more than one document (the checkbox on each row) and the selection
+bar offers **Reindex…** alongside Move to… and Delete, reindexing every
+one you picked in one confirmation - useful after re-scanning a whole
+folder of receipts, or once Mate is finally switched on for a batch that
+was uploaded while it was off. The confirmation shows the combined page
+count across everything selected and, if any of it is a scan or a photo,
+the estimated OCR cost for just those.
 
 ## Attaching a document to Mate, and Mate searching on its own
 

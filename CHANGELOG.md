@@ -22,6 +22,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   its own conversation search: tap the search icon for a filterable list,
   showing your 8 most recent conversations until you type something to
   narrow it.
+- Documents has a full-page search overlay: a **Search** button in the
+  toolbar (or ⌘K / Ctrl+K from anywhere on the page) opens a large search
+  box with **Recent searches** and your most-used tags when it's empty, arrow
+  keys to move between results, and Enter to open the highlighted one. The
+  **All folders** scope switch moved into the overlay alongside it.
+- Selecting several documents in the library now offers **Reindex…**
+  alongside Move to… and Delete, with one confirmation showing the total
+  page count and, if any selected document is a scan or a photo, the
+  estimated OCR cost - the same information the single-document Reindex
+  already shows, summed across the batch.
 
 ### Changed
 
@@ -33,6 +43,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   first message, so starting fresh and changing your mind leaves nothing
   behind. A reply already being written keeps arriving if you close and
   reopen the sheet mid-answer, rather than being cut off.
+- A note's row in the document library now lines up exactly with a plain
+  file's row - the type icon and title no longer sit slightly further
+  right than a file's.
 
 ## [0.34.0] - 2026-09-26
 

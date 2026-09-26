@@ -16,11 +16,13 @@ import {
   PinOff,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Upload as UploadIcon,
+  X,
   Sparkles,
 } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import {
@@ -111,6 +113,54 @@ const NoteCaptureSheet = lazy(() => import('./documents/note-capture-sheet').the
 const SEARCH_DEBOUNCE_MS = 250
 const OCR_COST_PER_PAGE_USD = 0.002 // documentsOCRCostPerPageUSD, backend/documents_enrich.go
 
+// ── search overlay: recent searches (shadcn.io "navbar-search-overlay") ───
+// Persisted client-side only - there is no backend concept of a search
+// history - so every read and write is wrapped in try/catch and the panel
+// works fine (just with an empty "Recent searches" list) if localStorage
+// throws (private browsing, a full quota) or simply isn't there.
+const RECENT_SEARCHES_KEY = 'helmcentral.documents.recentSearches'
+const MAX_RECENT_SEARCHES = 5
+const MAX_OVERLAY_TAG_SUGGESTIONS = 12
+
+function loadRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is string => typeof item === 'string')
+  } catch {
+    return []
+  }
+}
+
+function saveRecentSearches(queries: string[]): void {
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(queries))
+  } catch {
+    // Best-effort only - see loadRecentSearches' own comment above.
+  }
+}
+
+/** Records the query in force when the search overlay closes. Most-recent
+ * first, deduplicated, capped at MAX_RECENT_SEARCHES. */
+function pushRecentSearch(query: string): string[] {
+  const next = [query, ...loadRecentSearches().filter((q) => q !== query)].slice(0, MAX_RECENT_SEARCHES)
+  saveRecentSearches(next)
+  return next
+}
+
+/** Mac gets the ⌘ glyph, everything else gets the spelled-out "Ctrl K" -
+ * matching how every other cross-platform shortcut hint in the OS itself
+ * (and every other app that bothers) tells the two apart. userAgent is
+ * checked alongside the older, more reliably-populated `platform` since the
+ * latter is deprecated and some browsers now leave it blank. */
+function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const signal = `${navigator.userAgent ?? ''} ${navigator.platform ?? ''}`
+  return /Mac|iPhone|iPad|iPod/i.test(signal)
+}
+
 // Same shape as assistant-thread.tsx's stagedDocumentStatusLabel (ADR 0106
 // F2's composer chip label) - duplicated locally rather than imported/shared,
 // since that file is already committed and out of scope for this finding.
@@ -176,12 +226,12 @@ type DeleteTarget =
   | { kind: 'document'; id: string; name: string }
   | { kind: 'bulk'; ids: string[] }
 
-interface ReindexTarget {
-  id: string
-  name: string
-  pageCount: number
-  mime: string
-}
+// A single document's own row menu, and the selection bar's bulk action,
+// both open the same confirmation AlertDialog below - this is what tells it
+// which copy to render and what to actually reindex on confirm.
+type ReindexTarget =
+  | { kind: 'single'; id: string; name: string; pageCount: number; mime: string }
+  | { kind: 'bulk'; ids: string[]; totalPages: number; ocrPages: number }
 
 interface MoveTarget {
   ids: string[]
@@ -472,17 +522,33 @@ export function DocumentsPanel({
   }, [folderId, setSectionId])
 
   // ── search ────────────────────────────────────────────────────────────
+  // Modelled on shadcn.io's "navbar-search-overlay" block: a small trigger
+  // in the toolbar (below) rather than an always-on input competing for
+  // space in the filter row, opening a full-page overlay (near this
+  // panel's other Dialogs, below) that holds the actual input, the "All
+  // folders" scope switch, recent searches/tag shortcuts when empty, and
+  // the results themselves. `query`/`allFolders` and the debounce effect
+  // are unchanged from the inline input this replaces - only where they're
+  // rendered moved.
   const [query, setQuery] = useState('')
   const [allFolders, setAllFolders] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [activeResultIndex, setActiveResultIndex] = useState(0)
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches())
   // Destructured so the effect below depends on these two functions
   // directly, not on `documents.search`/`documents.clearSearch` member
   // expressions - both stay useCallback-stable per folderId/selectedTag
   // (use-documents.ts), so re-running the effect when they change simply
   // re-issues the same query against the new scope.
   const { search: searchDocuments, clearSearch } = documents
+  // The query the debounce last handed to search. While the box holds
+  // anything else, the results on screen belong to an older query: Enter
+  // must not open one of them, and an empty list is not yet "No matches."
+  const [searchedQuery, setSearchedQuery] = useState('')
   useEffect(() => {
     const trimmed = query.trim()
     const id = setTimeout(() => {
+      setSearchedQuery(trimmed)
       if (trimmed === '') {
         clearSearch()
       } else {
@@ -493,6 +559,68 @@ export function DocumentsPanel({
   }, [query, allFolders, searchDocuments, clearSearch])
 
   const searching = documents.searchResults !== null
+  const searchPending = query.trim() !== searchedQuery
+
+  // Whichever result Enter/click opens - reset to the top result every time
+  // the result set changes (a fresh keystroke's results, or the debounce
+  // settling), so arrow keys always start from a sane position rather than
+  // an index that belonged to a longer, now-stale list.
+  useEffect(() => { setActiveResultIndex(0) }, [documents.searchResults])
+
+  // A recent search is the query in force when the operator leaves the
+  // overlay (opening a result, Escape, clicking away), not every query the
+  // debounce settled on - a pause mid-word would otherwise save "impel"
+  // alongside "impeller".
+  const closeSearchOverlay = useCallback(() => {
+    const trimmed = query.trim()
+    if (trimmed !== '') setRecentSearches(pushRecentSearch(trimmed))
+    setSearchOpen(false)
+    setQuery('') // leaving the overlay always leaves search mode too
+  }, [query])
+  const handleSearchOpenChange = useCallback((open: boolean) => {
+    if (open) setSearchOpen(true)
+    else closeSearchOverlay()
+  }, [closeSearchOverlay])
+  const openSearchResult = useCallback((id: string) => {
+    setViewerId(id)
+    closeSearchOverlay()
+  }, [closeSearchOverlay])
+  const handleClearRecentSearches = useCallback(() => {
+    saveRecentSearches([])
+    setRecentSearches([])
+  }, [])
+  const handleSearchInputKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    const results = documents.searchResults ?? []
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (results.length > 0) setActiveResultIndex((i) => Math.min(i + 1, results.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (results.length > 0) setActiveResultIndex((i) => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (searchPending) return
+      const active = results[activeResultIndex]
+      if (active) openSearchResult(active.document_id)
+    }
+  }, [documents.searchResults, activeResultIndex, openSearchResult, searchPending])
+
+  // ⌘K/Ctrl+K opens the overlay from anywhere while this panel is mounted -
+  // sidebar.tsx's own shortcut is Cmd/Ctrl+B (SIDEBAR_KEYBOARD_SHORTCUT), so
+  // there's no clash. Not while another dialog or sheet is up (the viewer,
+  // a note mid-edit, Mate): opening a result from there would swap the
+  // viewer's document out from under unsaved edits.
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) {
+        if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+  }, [])
 
   // The chip row's options: documents.tags plus, if the active filter has
   // fallen out of that list, the active filter itself. TagCounts
@@ -515,6 +643,14 @@ export function DocumentsPanel({
     const count = documents.documents.filter((d) => d.tags.some((t) => t.tag === selected)).length
     return [...tags, { tag: selected, count }]
   }, [documents.tags, documents.selectedTag, documents.documents])
+  // The search overlay's own suggestions: the most-used tags only. A
+  // library of any size carries dozens of tags, and listing them all
+  // buries the search box under a wall of chips; the full set stays in the
+  // filter row.
+  const overlayTagSuggestions = useMemo(
+    () => [...tagFilterOptions].sort((a, b) => b.count - a.count).slice(0, MAX_OVERLAY_TAG_SUGGESTIONS),
+    [tagFilterOptions],
+  )
 
   // A search result carries only folder_id (documentSearchResult,
   // backend/documents_search.go never adds a name or path to it), so a
@@ -655,7 +791,17 @@ export function DocumentsPanel({
   const submitReindex = async () => {
     if (!reindexTarget) return
     await runAction(async () => {
-      await documents.reindexDocument(reindexTarget.id)
+      if (reindexTarget.kind === 'single') {
+        await documents.reindexDocument(reindexTarget.id)
+      } else {
+        // Sequential, not Promise.all - stops at the first failure (fail
+        // loud, AGENTS.md) rather than firing every request regardless and
+        // reporting only the last rejection settled.
+        for (const id of reindexTarget.ids) {
+          await documents.reindexDocument(id)
+        }
+        setSelectedIds(new Set())
+      }
       setReindexTarget(null)
     })
   }
@@ -934,6 +1080,15 @@ export function DocumentsPanel({
               a note is a document, and this is where every other document
               this panel creates already starts, so this menu is now the
               only path in, not just the discoverable one. */}
+          {/* Search trigger, immediately left of New (shadcn.io
+              "navbar-search-overlay") - aria-label carries the accessible
+              name so it matches the overlay's own input regardless of the
+              "Search" + kbd hint shown on screen. */}
+          <Button type="button" variant="outline" size="sm" aria-label="Search documents" onClick={() => setSearchOpen(true)}>
+            <Search className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+            Search
+            <kbd className="ml-1 text-[10px] text-muted-foreground">{isApplePlatform() ? '⌘K' : 'Ctrl K'}</kbd>
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -1000,18 +1155,6 @@ export function DocumentsPanel({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Input
-          type="search"
-          aria-label="Search documents"
-          placeholder="Search this folder…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="max-w-xs"
-        />
-        <div className="flex items-center gap-2">
-          <Switch aria-label="All folders" checked={allFolders} onCheckedChange={setAllFolders} />
-          <Label className="text-xs text-muted-foreground">All folders</Label>
-        </div>
         {tagFilterOptions.length > 0 && (
           <ToggleGroup
             aria-label="Filter by tag"
@@ -1087,6 +1230,23 @@ export function DocumentsPanel({
           >
             Move to…
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const ids = Array.from(selectedIds)
+              const selectedDocs = documentRows.filter((d) => selectedIds.has(d.id))
+              const totalPages = selectedDocs.reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
+              const ocrPages = selectedDocs
+                .filter((d) => d.mime === 'application/pdf' || d.mime.startsWith('image/'))
+                .reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
+              setReindexTarget({ kind: 'bulk', ids, totalPages, ocrPages })
+            }}
+          >
+            <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+            Reindex…
+          </Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setDeleteTarget({ kind: 'bulk', ids: Array.from(selectedIds) })}>
             Delete
           </Button>
@@ -1100,22 +1260,7 @@ export function DocumentsPanel({
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
-        {searching ? (
-          <>
-            {documents.semanticProblem && (
-              <p className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
-                Showing keyword results only. {documents.semanticProblem}
-              </p>
-            )}
-            <SearchResultsTable
-              results={documents.searchResults ?? []}
-              searching={documents.searching}
-              searchError={documents.searchError}
-              onOpen={setViewerId}
-              folderLabelFor={folderLabelFor}
-            />
-          </>
-        ) : view === 'unfiled' ? (
+        {view === 'unfiled' ? (
           <UnfiledNotesView
             notes={unfiled.notes}
             loading={unfiled.loading}
@@ -1276,7 +1421,7 @@ export function DocumentsPanel({
                         onRename={() => { setRenameTarget({ kind: 'document', id: doc.id, name }); setRenameValue(name) }}
                         onDetails={() => onEditDocument?.(doc.id)}
                         onMove={() => setMoveTarget({ ids: [doc.id], label: name })}
-                        onReindex={() => setReindexTarget({ id: doc.id, name, pageCount: doc.page_count, mime: doc.mime })}
+                        onReindex={() => setReindexTarget({ kind: 'single', id: doc.id, name, pageCount: doc.page_count, mime: doc.mime })}
                         onDelete={() => setDeleteTarget({ kind: 'document', id: doc.id, name })}
                       />
                     </TableCell>
@@ -1287,6 +1432,133 @@ export function DocumentsPanel({
           </Table>
         )}
       </div>
+
+      {/* ── Search overlay (shadcn.io "navbar-search-overlay") ────────
+          Reuses the query/allFolders state and debounce effect above -
+          this Dialog is just where they're rendered, not a second source
+          of search state. Positioned toward the top of the viewport
+          (top-[15%], not vertically centred) and wide (max-w-2xl), the
+          way a command-palette-style search reads, rather than looking
+          like every other centred confirmation Dialog in this file. */}
+      <Dialog open={searchOpen} onOpenChange={handleSearchOpenChange}>
+        <DialogContent className="top-[15%] flex max-w-[calc(100%-2rem)] translate-y-0 sm:max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <DialogTitle className="sr-only">Search documents</DialogTitle>
+          <div className="relative shrink-0 border-b border-border">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              type="search"
+              aria-label="Search documents"
+              placeholder={allFolders ? 'Search every folder…' : 'Search this folder…'}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearchInputKeyDown}
+              autoFocus
+              className="h-12 border-0 pl-11 pr-10 text-base shadow-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+            />
+          </div>
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {allFolders ? 'Searching all folders' : 'Searching this folder'}
+            </span>
+            <div className="flex min-w-0 items-center gap-3">
+              {/* Searches stay narrowed by the library's tag filter, so the
+                  overlay says so rather than returning a short list with
+                  no explanation. */}
+              {documents.selectedTag && (
+                <button
+                  type="button"
+                  aria-label={`Clear tag filter ${documents.selectedTag}`}
+                  onClick={() => documents.setSelectedTag(null)}
+                  className="flex min-w-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
+                >
+                  <span className="truncate">Tag: {documents.selectedTag}</span>
+                  <X className="h-3 w-3 shrink-0" aria-hidden="true" />
+                </button>
+              )}
+              <Label htmlFor="documents-search-all-folders" className="text-[11px] text-muted-foreground">
+                All folders
+              </Label>
+              <Switch id="documents-search-all-folders" aria-label="All folders" checked={allFolders} onCheckedChange={setAllFolders} />
+            </div>
+          </div>
+          <ScrollArea className="max-h-[60vh]">
+            {searching || query.trim() !== '' ? (
+              <>
+                {documents.semanticProblem && (
+                  <p className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+                    Showing keyword results only. {documents.semanticProblem}
+                  </p>
+                )}
+                <SearchResultsTable
+                  results={documents.searchResults ?? []}
+                  searching={documents.searching || searchPending}
+                  searchError={documents.searchError}
+                  activeIndex={activeResultIndex}
+                  onOpen={openSearchResult}
+                  folderLabelFor={folderLabelFor}
+                />
+              </>
+            ) : (
+              <div className="flex flex-col gap-4 p-4">
+                {recentSearches.length === 0 && overlayTagSuggestions.length === 0 && (
+                  <p className="p-4 text-center text-sm text-muted-foreground">
+                    {allFolders ? "Type to search every folder's documents and notes." : "Type to search this folder's documents and notes."}
+                  </p>
+                )}
+                {recentSearches.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Recent searches
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleClearRecentSearches}
+                        className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <ul className="flex flex-col gap-0.5">
+                      {recentSearches.map((q) => (
+                        <li key={q}>
+                          <button
+                            type="button"
+                            onClick={() => setQuery(q)}
+                            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                          >
+                            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <span className="truncate">{q}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {overlayTagSuggestions.length > 0 && (
+                  <div>
+                    <span className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Tags
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {overlayTagSuggestions.map((t) => (
+                        <button
+                          key={t.tag}
+                          type="button"
+                          onClick={() => { documents.setSelectedTag(t.tag); closeSearchOverlay() }}
+                          className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-accent"
+                        >
+                          {t.tag} ({t.count})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       {/* ── New folder ─────────────────────────────────────────────── */}
       <Dialog open={newFolderOpen} onOpenChange={(open) => { setNewFolderOpen(open); if (!open) setNewFolderIsManual(false) }}>
@@ -1391,15 +1663,29 @@ export function DocumentsPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Reindex confirmation ───────────────────────────────────── */}
+      {/* ── Reindex confirmation (single row menu, or the bulk selection
+          bar's own "Reindex…") ────────────────────────────────────── */}
       <AlertDialog open={reindexTarget !== null} onOpenChange={(open) => { if (!open) setReindexTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reindex "{reindexTarget?.name}"?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {reindexTarget?.kind === 'bulk' ? `Reindex ${reindexTarget.ids.length} documents?` : `Reindex "${reindexTarget?.name}"?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This re-reads {reindexTarget?.pageCount ?? 1} page(s) from the beginning.
-              {reindexTarget && (reindexTarget.mime === 'application/pdf' || reindexTarget.mime.startsWith('image/')) && (
-                <> If Mate is on and OCR is needed, estimated cost: ${(Math.max(1, reindexTarget.pageCount) * OCR_COST_PER_PAGE_USD).toFixed(3)}.</>
+              {reindexTarget?.kind === 'bulk' ? (
+                <>
+                  This re-reads {reindexTarget.totalPages} page(s) from the beginning, across {reindexTarget.ids.length} document(s).
+                  {reindexTarget.ocrPages > 0 && (
+                    <> If Mate is on and OCR is needed, estimated cost: ${(reindexTarget.ocrPages * OCR_COST_PER_PAGE_USD).toFixed(3)}.</>
+                  )}
+                </>
+              ) : (
+                <>
+                  This re-reads {reindexTarget?.pageCount ?? 1} page(s) from the beginning.
+                  {reindexTarget && (reindexTarget.mime === 'application/pdf' || reindexTarget.mime.startsWith('image/')) && (
+                    <> If Mate is on and OCR is needed, estimated cost: ${(Math.max(1, reindexTarget.pageCount) * OCR_COST_PER_PAGE_USD).toFixed(3)}.</>
+                  )}
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1599,12 +1885,17 @@ function SearchResultsTable({
   results,
   searching,
   searchError,
+  activeIndex,
   onOpen,
   folderLabelFor,
 }: {
   results: DocumentSearchResult[]
   searching: boolean
   searchError: string | null
+  /** The overlay's keyboard-navigable row (ArrowUp/ArrowDown move it, Enter
+   * opens it) - highlighted the same way a hovered row is, so it's always
+   * visible which result Enter targets. */
+  activeIndex: number
   onOpen: (id: string) => void
   folderLabelFor: (folderId: string | null) => string
 }) {
@@ -1614,12 +1905,15 @@ function SearchResultsTable({
 
   return (
     <ul className="flex flex-col divide-y divide-border" data-testid="documents-search-results">
-      {results.map((r) => (
+      {results.map((r, index) => (
         <li key={`${r.document_id}-${r.page}`}>
           <button
             type="button"
             onClick={() => onOpen(r.document_id)}
-            className="flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-accent"
+            className={cn(
+              'flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-accent',
+              index === activeIndex && 'bg-accent',
+            )}
           >
             <span className="font-medium">{r.title || r.filename}</span>
             <span className="text-sm text-muted-foreground">{renderSnippet(r.snippet)}</span>
