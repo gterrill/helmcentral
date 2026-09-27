@@ -90,9 +90,9 @@ type telemetryInfluxFetcher struct {
 	slot *telemetryInfluxSlot
 
 	queryGust           func(windows []string) map[string]float64
-	querySolarToday     func(now time.Time) float64
-	querySolarYesterday func(now time.Time) float64
-	querySolarPeak      func(now time.Time) float64
+	querySolarToday     func(now time.Time, loc *time.Location) float64
+	querySolarYesterday func(now time.Time, loc *time.Location) float64
+	querySolarPeak      func(now time.Time, loc *time.Location) float64
 	querySolarTrend     func(now time.Time) []solarTrendPoint
 }
 
@@ -115,12 +115,20 @@ func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetche
 // result unless influxTelemetryConfigured() is also true (computeMaxGustKtsFor,
 // applyInfluxSolarOverride) -- so there is no configuration branch to
 // duplicate here.
+//
+// loc is read once per tick from solarStats' own locked getter
+// (solar_history.go) - the same vessel-local timezone tracks.go's
+// sampleTracks sets on solarStats.loc from vesselLocalLocation(state.
+// Longitude) - and passed to all three day-boundary solar queries so they
+// roll over at local midnight, matching the in-memory tier they otherwise
+// wholesale-override (applyInfluxSolarOverride's doc comment, main.go).
 func (f *telemetryInfluxFetcher) refresh(now time.Time) {
+	loc := solarStats.location()
 	f.slot.set(telemetryInfluxResult{
 		gustKts:           f.queryGust(gustWindowLadder),
-		solarTodayKWh:     f.querySolarToday(now),
-		solarYesterdayKWh: f.querySolarYesterday(now),
-		solarPeakTodayW:   f.querySolarPeak(now),
+		solarTodayKWh:     f.querySolarToday(now, loc),
+		solarYesterdayKWh: f.querySolarYesterday(now, loc),
+		solarPeakTodayW:   f.querySolarPeak(now, loc),
 		solarTrend24h:     f.querySolarTrend(now),
 		fetchedAt:         now,
 	})

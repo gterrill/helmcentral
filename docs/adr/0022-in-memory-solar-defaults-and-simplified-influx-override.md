@@ -31,7 +31,7 @@ Positive:
 - `source` reports live SignalK fetch status, consistent with the other state endpoints.
 
 Tradeoffs:
-- **No cross-midnight integration**: the sample interval spanning the UTC day boundary is dropped from both days rather than split at the boundary — an accepted simplification versus Influx's own boundary-aware query.
+- **No cross-midnight integration**: the sample interval spanning the local day boundary (see the amendment below — this read "UTC day boundary" until 2026-09-28) is dropped from both days rather than split at the boundary — an accepted simplification versus Influx's own boundary-aware query.
 - **`solarMaxSampleGap` (30s, ~6x the poll cadence)** caps Riemann-sum integration so a stale interval (server restart, missed ticks) isn't counted as continuous production; the single gapped interval is dropped, not the whole day.
 - In-memory solar history resets on every server restart and is capped at ~24h (`solarTrendHistoryCapacity`), same tradeoff ADR-0020 already accepted for wind/depth.
 - `sampleTracks()`'s per-tick SignalK HTTP calls double (1 → 2), since `fetchSignalKSolarState` performs its own independent full-payload GET rather than reusing the vessel-state fetch already made in the same tick — a pre-existing pattern (each handler already fetches the whole vessel tree independently), out of scope to fix here.
@@ -41,3 +41,22 @@ Tradeoffs:
 - ADR 0020: In-Memory Telemetry History, Optional InfluxDB
 - ADR 0021: Solar State Source Priority And Influx Fallback (superseded by this ADR)
 - `backend/solar_history.go`, `backend/main.go` (`solarState`, `applyInMemorySolarDefaults`, `applyInfluxSolarOverride`), `backend/tracks.go` (`sampleTracks`)
+
+## Amendment, 2026-09-28: the Influx tier also rolls over at local midnight
+
+The in-memory tier's day rollover was moved from UTC midnight to vessel-local
+midnight on 2026-09-15 (`backend/solar_history.go`'s `solarDayStats.record`,
+keyed on `vesselLocalLocation(longitude)`), but this ADR's Tradeoffs bullet
+above was never updated to match, and the Influx tier (`queryInfluxSolarTodayKWh`/
+`queryInfluxSolarYesterdayKWh`/`queryInfluxSolarPeakTodayW`, `backend/influx.go`)
+kept querying from UTC midnight the whole time. On a UTC+10 vessel that meant
+`today_kwh`/`yesterday_kwh`/`peak_today_w` held everything back to 10am local
+the previous day, not the actual local day — reported live 2026-09-28.
+
+The three Influx queries now take the same vessel-local `*time.Location`
+`solarDayStats` already carries (a new locked `solarStats.location()`
+getter, read once per tick by `telemetryInfluxFetcher.refresh` in
+`backend/telemetry_influx_cache.go`) and roll over at local midnight via a
+new `localDayStart` helper, matching the in-memory tier exactly. No fallback
+behavior changed: a vessel with no position fix yet still defaults to UTC,
+the same default `solarDayStats.record` already used.

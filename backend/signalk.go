@@ -1618,7 +1618,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		state.CurrentW = roundTo1(venusCurrent)
 	}
 
-	venusTodayKWh := normalizeYieldToKWh(lookupFirstNumber(payload,
+	venusTodayKWh := joulesToKWh(lookupFirstNumber(payload,
 		[]string{"electrical", "venus", "yieldToday", "value"},
 		[]string{"electrical", "venus", "yieldToday"},
 		[]string{"electrical", "venus", "dailyYield", "value"},
@@ -1628,7 +1628,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		state.TodayKWh = roundTo3(venusTodayKWh)
 	}
 
-	venusYesterdayKWh := normalizeYieldToKWh(lookupFirstNumber(payload,
+	venusYesterdayKWh := joulesToKWh(lookupFirstNumber(payload,
 		[]string{"electrical", "venus", "yieldYesterday", "value"},
 		[]string{"electrical", "venus", "yieldYesterday"},
 		[]string{"electrical", "venus", "dailyYieldYesterday", "value"},
@@ -1678,7 +1678,7 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 		controller.CurrentW = roundTo1(powerW)
 	}
 
-	todayKWh := normalizeYieldToKWh(lookupFirstNumber(entry,
+	todayKWh := joulesToKWh(lookupFirstNumber(entry,
 		[]string{"yieldToday", "value"},
 		[]string{"yieldToday"},
 		[]string{"dailyYield", "value"},
@@ -1688,7 +1688,7 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 		controller.TodayKWh = roundTo3(todayKWh)
 	}
 
-	yesterdayKWh := normalizeYieldToKWh(lookupFirstNumber(entry,
+	yesterdayKWh := joulesToKWh(lookupFirstNumber(entry,
 		[]string{"yieldYesterday", "value"},
 		[]string{"yieldYesterday"},
 		[]string{"dailyYieldYesterday", "value"},
@@ -1749,15 +1749,21 @@ func defaultSolarControllerLabel(index int, id string) string {
 	}
 }
 
-func normalizeYieldToKWh(raw float64) float64 {
+// joulesToKWh converts a raw electrical.solar.<id>.yieldToday/yieldYesterday
+// (and the equivalent electrical.venus.yieldToday/yieldYesterday) value from
+// joules to kWh (1 kWh = 3,600,000 J). Confirmed live against this fleet's
+// SignalK server, 2026-09-28: meta units "J", e.g. yieldToday 35999.99J and
+// yieldYesterday 9648000.24J.
+//
+// Replaces the old magnitude-guessing heuristic (raw > 200 meant Wh, so
+// divide by 1000), which was wrong for every value this fleet actually
+// reports: 35999.99J read as if it were 35999.99Wh (36 kWh, not the true
+// ~0.01 kWh), and 9648000.24J read as ~9648 kWh (not the true ~2.68 kWh).
+func joulesToKWh(raw float64) float64 {
 	if raw < 0 {
 		return -1
 	}
-	// Some integrations emit daily yield in Wh; convert to kWh heuristically.
-	if raw > 200 {
-		return raw / 1000
-	}
-	return raw
+	return raw / 3_600_000
 }
 
 func roundTo3(value float64) float64 {

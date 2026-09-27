@@ -900,18 +900,36 @@ func queryInfluxDepthTrend(window string) []depthTrendPoint {
 	return points
 }
 
-func queryInfluxSolarTodayKWh(now time.Time) float64 {
-	start := now.UTC().Truncate(24 * time.Hour)
+// localDayStart returns the UTC instant of local midnight for now, in loc -
+// the same local calendar day solarDayStats.record buckets samples into
+// (solar_history.go: day := ts.In(loc).Format("2006-01-02")), so the
+// Influx-backed "today"/"yesterday"/"peak today" queries below roll over at
+// the same moment the in-memory tier already does, rather than at UTC
+// midnight (the bug this replaces: a UTC+10 vessel's "today" figure used to
+// hold everything back to 10am local the previous day).
+//
+// loc == nil defaults to UTC, matching solarDayStats.record's own "no
+// location known yet" default rather than inventing a new one here.
+func localDayStart(now time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc).UTC()
+}
+
+func queryInfluxSolarTodayKWh(now time.Time, loc *time.Location) float64 {
+	start := localDayStart(now, loc)
 	return queryInfluxSolarEnergyKWhRange(start, now.UTC())
 }
 
-func queryInfluxSolarYesterdayKWh(now time.Time) float64 {
-	stop := now.UTC().Truncate(24 * time.Hour)
+func queryInfluxSolarYesterdayKWh(now time.Time, loc *time.Location) float64 {
+	stop := localDayStart(now, loc)
 	start := stop.Add(-24 * time.Hour)
 	return queryInfluxSolarEnergyKWhRange(start, stop)
 }
 
-func queryInfluxSolarPeakTodayW(now time.Time) float64 {
+func queryInfluxSolarPeakTodayW(now time.Time, loc *time.Location) float64 {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return -1
@@ -919,7 +937,7 @@ func queryInfluxSolarPeakTodayW(now time.Time) float64 {
 
 	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
-	start := now.UTC().Truncate(24 * time.Hour)
+	start := localDayStart(now, loc)
 
 	bucketLiteral, err := fluxStringLiteral(bucket)
 	if err != nil {

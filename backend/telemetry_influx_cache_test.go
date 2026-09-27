@@ -33,9 +33,9 @@ func TestTelemetryInfluxFetcherRefresh_UsesInjectedQueryFuncs(t *testing.T) {
 			gustCalled = true
 			return map[string]float64{"10m": 12.3, "30m": 14.1, "1h": 15.0, "24h": 20.2}
 		},
-		querySolarToday:     func(time.Time) float64 { todayCalled = true; return 4.5 },
-		querySolarYesterday: func(time.Time) float64 { yesterdayCalled = true; return 6.1 },
-		querySolarPeak:      func(time.Time) float64 { peakCalled = true; return 820 },
+		querySolarToday:     func(time.Time, *time.Location) float64 { todayCalled = true; return 4.5 },
+		querySolarYesterday: func(time.Time, *time.Location) float64 { yesterdayCalled = true; return 6.1 },
+		querySolarPeak:      func(time.Time, *time.Location) float64 { peakCalled = true; return 820 },
 		querySolarTrend: func(time.Time) []solarTrendPoint {
 			trendCalled = true
 			return []solarTrendPoint{{Time: time.Now(), TotalW: 500}}
@@ -56,6 +56,47 @@ func TestTelemetryInfluxFetcherRefresh_UsesInjectedQueryFuncs(t *testing.T) {
 	}
 	if !result.fetchedAt.Equal(now) {
 		t.Fatalf("expected fetchedAt %v, got %v", now, result.fetchedAt)
+	}
+}
+
+// TestTelemetryInfluxFetcherRefresh_PassesVesselLocalLocationToSolarQueries
+// pins the actual wiring fix for the local-day bug: refresh() must read
+// solarStats' own vessel-local *time.Location (set from tracks.go's
+// vesselLocalLocation(state.Longitude) on every sampleTracks tick) and pass
+// it to every one of the three day-boundary solar queries, not build the
+// queries against UTC.
+func TestTelemetryInfluxFetcherRefresh_PassesVesselLocalLocationToSolarQueries(t *testing.T) {
+	resetTelemetryInfluxSlot(t)
+
+	originalStats := solarStats
+	t.Cleanup(func() { solarStats = originalStats })
+	wantLoc := vesselLocalLocation(153.0)
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1, loc: wantLoc}
+
+	var gotTodayLoc, gotYesterdayLoc, gotPeakLoc *time.Location
+	fetcher := &telemetryInfluxFetcher{
+		slot:      globalTelemetryInfluxSlot,
+		queryGust: func([]string) map[string]float64 { return map[string]float64{} },
+		querySolarToday: func(now time.Time, loc *time.Location) float64 {
+			gotTodayLoc = loc
+			return 0
+		},
+		querySolarYesterday: func(now time.Time, loc *time.Location) float64 {
+			gotYesterdayLoc = loc
+			return 0
+		},
+		querySolarPeak: func(now time.Time, loc *time.Location) float64 {
+			gotPeakLoc = loc
+			return 0
+		},
+		querySolarTrend: func(time.Time) []solarTrendPoint { return nil },
+	}
+
+	fetcher.refresh(time.Now().UTC())
+
+	if gotTodayLoc != wantLoc || gotYesterdayLoc != wantLoc || gotPeakLoc != wantLoc {
+		t.Fatalf("expected refresh to pass solarStats' vessel-local location to every solar query, got today=%v yesterday=%v peak=%v want=%v",
+			gotTodayLoc, gotYesterdayLoc, gotPeakLoc, wantLoc)
 	}
 }
 

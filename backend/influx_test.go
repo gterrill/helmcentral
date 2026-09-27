@@ -120,6 +120,85 @@ func TestQueryInfluxMaxWindGustKtsFor_NotConfiguredReturnsSentinelForEveryWindow
 	}
 }
 
+// TestLocalDayStart_VesselLocalTimezoneNotUTC pins the exact scenario from
+// the live "today" bug: a UTC+10 vessel checking the solar tile at
+// 2026-09-28 06:32 local (2026-09-27T20:32:00Z) must roll its Influx-backed
+// "today" queries over at 2026-09-28's LOCAL midnight - 2026-09-27T14:00:00Z
+// - not at UTC midnight (2026-09-27T00:00:00Z, ten hours earlier, which is
+// what queryInfluxSolarTodayKWh/YesterdayKWh/PeakTodayW used before this
+// fix and is why "today" was reporting yesterday's afternoon onward).
+func TestLocalDayStart_VesselLocalTimezoneNotUTC(t *testing.T) {
+	loc := vesselLocalLocation(153.0) // UTC+10, same derivation solarStats.loc uses.
+	now := time.Date(2026, 9, 27, 20, 32, 0, 0, time.UTC)
+
+	got := localDayStart(now, loc)
+
+	want := time.Date(2026, 9, 27, 14, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("expected local midnight %v, got %v", want, got)
+	}
+}
+
+func TestLocalDayStart_UTCLocationTruncatesToUTCMidnight(t *testing.T) {
+	now := time.Date(2026, 9, 27, 20, 32, 0, 0, time.UTC)
+
+	got := localDayStart(now, time.UTC)
+
+	want := time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("expected UTC midnight %v, got %v", want, got)
+	}
+}
+
+// TestLocalDayStart_NilLocationDefaultsToUTC matches solarDayStats.record's
+// own "no location known yet" default (solar_history.go) - not a new
+// fallback invented here, the same UTC default the in-memory tier already
+// uses before the first usable vessel position arrives.
+func TestLocalDayStart_NilLocationDefaultsToUTC(t *testing.T) {
+	now := time.Date(2026, 9, 27, 20, 32, 0, 0, time.UTC)
+
+	got := localDayStart(now, nil)
+
+	want := time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("expected UTC midnight when loc is nil, got %v", got)
+	}
+}
+
+// TestQueryInfluxSolarTodayKWh_NotConfiguredReturnsSentinel and its
+// Yesterday/Peak siblings below pin the new (now, loc) signature compiles
+// and still returns the "not configured" sentinel without touching the
+// network, mirroring TestQueryInfluxMaxWindGustKtsFor_...'s own pattern.
+func TestQueryInfluxSolarTodayKWh_NotConfiguredReturnsSentinel(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: false\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
+
+	if got := queryInfluxSolarTodayKWh(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
+	}
+}
+
+func TestQueryInfluxSolarYesterdayKWh_NotConfiguredReturnsSentinel(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: false\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
+
+	if got := queryInfluxSolarYesterdayKWh(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
+	}
+}
+
+func TestQueryInfluxSolarPeakTodayW_NotConfiguredReturnsSentinel(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: false\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
+
+	if got := queryInfluxSolarPeakTodayW(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
+	}
+}
+
 func depthPoint(minutesAgo int, depthM float64) depthTrendPoint {
 	return depthTrendPoint{
 		Time:   time.Now().Add(-time.Duration(minutesAgo) * time.Minute),
