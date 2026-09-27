@@ -27,6 +27,7 @@ import {
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
 import { documentViewerHref } from '@/lib/document-citation'
+import { todayISO } from '@/lib/local-date'
 
 // ADR 0138: the service log's own two write dialogs - completing a rule
 // (spec §6, always kind='maintenance') and a standalone entry (repair,
@@ -41,10 +42,6 @@ import { documentViewerHref } from '@/lib/document-citation'
 // before a photo can link to it, so the strip only appears once Save has
 // produced one - "Save" first, then "Add photos" while the dialog stays
 // open, then "Done".
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 interface PartsEditorProps {
   parts: MaintenanceLogPartInput[]

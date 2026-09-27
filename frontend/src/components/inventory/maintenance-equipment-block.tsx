@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
+import { todayISO } from '@/lib/local-date'
 import { cn } from '@/lib/utils'
 import {
   copyMaintenanceProfileSchedule,
@@ -39,10 +40,6 @@ interface MaintenanceEquipmentBlockProps {
   profileId: string
   hourMeterPath: string
   canWrite?: boolean
-}
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
 }
 
 export function MaintenanceEquipmentBlock({ equipmentId, profileId, hourMeterPath, canWrite = true }: MaintenanceEquipmentBlockProps) {

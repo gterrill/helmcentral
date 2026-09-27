@@ -2,6 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { readErrorMessage } from '@/lib/api-error'
 import { InventoryValidationError, type InventoryFieldError } from '@/hooks/use-inventory'
+import { todayISO } from '@/lib/local-date'
+
+// ADR 0138's 2026-09-27 amendment: every endpoint below that returns a rule
+// view with a computed status requires the operator's own local calendar
+// date as a `today` query param (maintenance_handlers.go's
+// requireTodayParam) - never left for the server to guess at from its own
+// clock. todayFromClock() is the one place this file reads it, from
+// lib/local-date.ts's todayISO (the browser's own local date, never UTC).
+function todayFromClock(): string {
+  return todayISO()
+}
+
+// withToday appends `today=<local date>` to url, using `&` when url already
+// carries a query string and `?` otherwise - every write below that answers
+// with a freshly recomputed rule view needs this.
+function withToday(url: string): string {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}today=${encodeURIComponent(todayFromClock())}`
+}
 
 // ADR 0138: the Maintenance section's data layer - service rules and the
 // log they're completed into. Same idiom as use-inventory.ts throughout: no
@@ -129,6 +148,13 @@ export interface MaintenanceLogEntryInput {
   cost: number | null
   currency: string
   parts: MaintenanceLogPartInput[]
+  /** completeMaintenanceRule's own field, meaningless to the standalone
+   * create/update calls: the next fixed_due_date for a rule that has one
+   * and no interval_months to compute it from - required in that case
+   * (backend/maintenance_handlers.go's completeMaintenanceRuleHandler
+   * 400s without it), ignored when interval_months lets the server
+   * compute it instead. */
+  new_due_date?: string
 }
 
 export interface HourMeterReset {
@@ -202,6 +228,7 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
       if (filter.equipment) params.set('equipment', filter.equipment)
       if (filter.system) params.set('system', filter.system)
       if (filter.includeStored) params.set('include_stored', 'true')
+      params.set('today', todayFromClock())
       const qs = params.toString()
       const res = await fetch(`${apiBaseUrl}/api/inventory/maintenance/rules${qs ? `?${qs}` : ''}`)
       if (!res.ok) throw new Error(await readErrorMessage(res))
@@ -227,13 +254,13 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
 
 /** POST /api/inventory/maintenance/rules */
 export async function createMaintenanceRule(input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(`${apiBaseUrl}/api/inventory/maintenance/rules`, 'POST', input)
+  const data = await submitJSON<{ rule: MaintenanceRule }>(withToday(`${apiBaseUrl}/api/inventory/maintenance/rules`), 'POST', input)
   return data.rule
 }
 
 /** PUT /api/inventory/maintenance/rules/:id */
 export async function updateMaintenanceRule(id: string, input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}`, 'PUT', input)
+  const data = await submitJSON<{ rule: MaintenanceRule }>(withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}`), 'PUT', input)
   return data.rule
 }
 
@@ -246,7 +273,7 @@ export async function deleteMaintenanceRule(id: string): Promise<void> {
  * clears the acknowledgement. */
 export async function acknowledgeMaintenanceRule(id: string, reason: string): Promise<MaintenanceRule> {
   const data = await submitJSON<{ rule: MaintenanceRule }>(
-    `${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/acknowledge`, 'POST', { reason },
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/acknowledge`), 'POST', { reason },
   )
   return data.rule
 }
@@ -259,7 +286,7 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
   if (lastDoneAt !== undefined) body.last_done_at = lastDoneAt
   if (lastDoneHours !== undefined) body.last_done_hours = lastDoneHours
   const data = await submitJSON<{ rule: MaintenanceRule }>(
-    `${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/last-done`, 'POST', body,
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/last-done`), 'POST', body,
   )
   return data.rule
 }
@@ -269,7 +296,7 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
  * clears any acknowledgement. */
 export async function completeMaintenanceRule(id: string, input: Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'>): Promise<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }> {
   return submitJSON<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>(
-    `${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/complete`, 'POST', input,
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/complete`), 'POST', input,
   )
 }
 
@@ -277,7 +304,7 @@ export async function completeMaintenanceRule(id: string, input: Omit<Maintenanc
  * blank clears the link. */
 export async function setMaintenanceRuleProcedureNote(id: string, noteId: string): Promise<MaintenanceRule> {
   const data = await submitJSON<{ rule: MaintenanceRule }>(
-    `${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`, 'PUT', { note_id: noteId },
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`), 'PUT', { note_id: noteId },
   )
   return data.rule
 }
@@ -286,7 +313,7 @@ export async function setMaintenanceRuleProcedureNote(id: string, noteId: string
  * fresh Procedure note titled from the rule and links it. */
 export async function createMaintenanceProcedureNote(id: string): Promise<{ rule: MaintenanceRule; note: { id: string; title: string } }> {
   return submitJSON<{ rule: MaintenanceRule; note: { id: string; title: string } }>(
-    `${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`, 'POST',
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`), 'POST',
   )
 }
 
@@ -295,7 +322,7 @@ export async function createMaintenanceProcedureNote(id: string): Promise<{ rule
  * again returns an empty array rather than duplicating anything. */
 export async function copyMaintenanceProfileSchedule(equipmentId: string): Promise<MaintenanceRule[]> {
   const data = await submitJSON<{ rules: MaintenanceRule[] }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/copy-profile-schedule`, 'POST',
+    withToday(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/copy-profile-schedule`), 'POST',
   )
   return data.rules
 }
