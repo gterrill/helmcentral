@@ -332,3 +332,127 @@ local date instead would make a reading read stale or fresh at the wrong
 moment. Only the calendar axis - due dates, baselines, "today" - moved to
 the operator's own local date; the two clocks in this feature answer two
 different questions and are kept on the inputs suited to each.
+
+## Amendment, 2026-09-27: completing a rule never moves its baseline backward
+
+A `/code-review high` pass found that `CompleteMaintenanceRule`
+unconditionally overwrote `last_done_at`/`last_done_hours` (and, for a
+fixed-due-date rule, `fixed_due_date`, and always cleared any
+acknowledgement) with whatever the completion said, regardless of whether
+that completion was OLDER than the baseline already on file. Back-filling
+an old service - a real thing an operator does when catching Helmcentral
+up on history it missed - moved the baseline backward, and for a
+fixed-due-date rule with `interval_months` recomputed the next due date
+from that old date instead of the real most recent one, making an
+up-to-date rule read overdue again.
+
+**The log entry is always written; the baseline only ever moves forward.**
+`CompleteMaintenanceRule` now compares the completion's own `performed_at`
+against the rule's existing `last_done_at` as plain `YYYY-MM-DD` strings (a
+rule with no baseline yet, `last_done_at == ""`, always counts as older, so
+a rule's first completion still sets it). `last_done_at`, `last_done_hours`,
+`fixed_due_date` and the acknowledgement-clear are all gated behind the same
+comparison - a back-filled old completion adds its own line to the service
+log, exactly as it should, without disturbing what the rule currently
+believes is its most recent service.
+
+## Amendment, 2026-09-27: hour meter readings never go stale, and hours are always gauge readings
+
+Two related findings from the same `/code-review high` pass.
+
+**A hour meter reading was treated as "unknown" once it exceeded
+`derivedInputMaxAge` (120s) - the same staleness threshold every ordinary
+telemetry path uses.** That is the wrong model for a running-hours counter:
+an engine's runtime path is *expected* to stop publishing the instant the
+engine is switched off, because there is genuinely nothing left to count -
+the meter isn't malfunctioning or disconnected, it is correctly not moving.
+Treating that silence as "unknown" made every hours-based rule read
+**Hours unknown** at anchor and for the whole time an engine was down for
+its own service - exactly when an operator is most likely to be looking.
+The fix: an hour meter's last received value IS the current reading,
+however old - `currentEquipmentHours` (`maintenance_hours.go`) no longer
+discards a reading for its age. `maintenanceHourReading.AsOf` (exposed as
+`hours_as_of` in the API) carries how long ago it was received, so the
+Maintenance list and the Complete form can say "as of \<time\>" - purely
+informational, never a warning. **Hours unknown** now means only that
+nothing has ever been received for the bound path at all.
+
+**A hand-typed hours reading was stored as true hours verbatim, but the
+frontend told the operator to "enter the current hours from the gauge."**
+The gauge shows the RAW meter reading; every stored hours figure this
+engine compares (`last_done_hours`, and a log entry's own `hours`) is TRUE
+hours - the gauge figure plus whatever a meter replacement changed
+underneath (§3's own `hour_meter_resets`, `offsetInForceAt`). A hand-typed
+reading skipped that addition entirely, so after a meter replacement a
+completed rule's baseline was hours off center: reading overdue or wildly
+ahead of what the gauge actually showed.
+
+**The operator always works in gauge readings; the server is the only
+place gauge becomes true.** Every endpoint that accepts an operator-typed
+hours figure - `completeMaintenanceRuleHandler`,
+`setMaintenanceRuleLastDoneHandler`, and the standalone log-entry
+handlers - now converts gauge to true itself, using `offsetInForceAt`
+(`maintenance_hours.go`) resolved against the date the reading is actually
+FROM: the completion's own `performed_at`, `last_done_at` when a date is
+given, or today when it isn't (an hours-only Set-last-done, with no date,
+only ever means "this is the current reading"). A completion dated before
+the most recent meter replacement resolves against the offset that was
+*actually in force on that date*, not today's - a back-filled old service
+converts correctly rather than assuming a replacement that hadn't happened
+yet. `current_hours` in the API (the live prefill every hours field uses)
+now carries the GAUGE figure to match, not true hours as it did before;
+every "Hours" field in the frontend is labelled "gauge reading" and the
+service log CSV's own `hours` column is renamed `hours (true)` so a
+spreadsheet read back later is never ambiguous about which figure it holds.
+
+`offsetInForceAt` replaces `latestMeterOffsetHours`/`meterResetIsAfter`
+(§3): `ListHourMeterResets` already returns a rule's meter-reset history
+ordered most-recent-first, so resolving "the offset in force at date X" is
+a single forward scan trusting that order, never a second sort or pairwise
+comparison over a list the store already ordered correctly.
+
+## Amendment, 2026-09-27: a deleted spare part no longer erases its own history
+
+`maintenance_log_parts.equipment_id` (§10) originally CASCADEd like
+`maintenance_log_entries.equipment_id` does: a code-review finding pointed
+out that this is the wrong rule for it. A log entry's own `equipment_id` is
+the item the WORK was done ON - the entry has no meaning at all once that
+item is gone, which is exactly why it cascades. A part-used row is
+different: it is a fact about history ("this many of that spare were fitted
+that day"), not a live reference, and the part item itself (a filter, an
+impeller, a gasket) is routinely retired, consolidated into a different
+inventory row, or simply mis-entered and deleted long after the job it was
+used on. CASCADE meant deleting that spare's OWN equipment record silently
+rewrote every past service log entry and the CSV export to say nothing was
+used at all.
+
+**`equipment_id` is now nullable, `ON DELETE SET NULL`, and a new
+`part_name` column snapshots the item's name AT THE TIME IT WAS LOGGED.**
+`maintenancePartsForLogEntries` (`maintenance_store.go`) LEFT JOINs
+`equipment` instead of an inner JOIN (an inner join would silently drop the
+row the instant its link is gone, the same bug in a different shape) and
+shows `COALESCE(equipment.name, part_name)` - the item's own current name
+while still linked, the snapshot once it isn't. The primary key changes
+from the old `(log_entry_id, equipment_id)` composite to the row's own
+`id`, because two orphaned rows on the same entry (two different deleted
+parts) would otherwise collide as soon as both reached `(log_entry_id,
+NULL)`; the real invariant - the same LINKED part can't be listed twice on
+one entry - is now a partial `UNIQUE` index, `WHERE equipment_id IS NOT
+NULL`.
+
+**`insertMaintenanceLogPartsTx`'s own wholesale replace only ever clears
+LINKED rows.** A parts list from the frontend is only ever `{equipment_id,
+quantity}` pairs - it has no way to re-specify an orphaned row (there is no
+id left to name it with), so if the replace cleared every row for the log
+entry the way it used to, editing that entry's parts *at all*, for any
+reason, would quietly finish the job CASCADE started. The `DELETE` is now
+scoped to `equipment_id IS NOT NULL`; an orphaned row survives any later,
+unrelated edit to the same entry, not just the part's own deletion.
+
+This table has never been deployed (single operator, no installed base) -
+no migration was needed for it. `documentStoreSchema`'s statements are
+`CREATE TABLE IF NOT EXISTS`, though, which means a *dev* database that had
+already run once with the old shape keeps it forever; the fix for that one
+case is `DROP TABLE maintenance_log_parts;` against that dev `documents.db`
+before the next start, not migration code for a table nothing has ever
+shipped with.

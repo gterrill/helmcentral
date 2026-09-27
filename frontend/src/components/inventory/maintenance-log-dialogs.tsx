@@ -19,6 +19,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import {
   deleteMaintenanceLogPhoto,
+  hoursAsOfLabel,
   uploadMaintenanceLogPhoto,
   type MaintenanceLogEntry,
   type MaintenanceLogEntryInput,
@@ -148,8 +149,23 @@ function formFromEntry(entry: MaintenanceLogEntry): LogFormState {
     who: entry.who,
     cost: entry.cost != null ? String(entry.cost) : '',
     currency: entry.currency,
-    parts: entry.parts.map((p) => ({ equipment_id: p.equipment_id, quantity: p.quantity })),
+    // A part whose own equipment_id has gone to null (its item was
+    // deleted - backend 2026-09-27 amendment) survives as pure history but
+    // can never be re-specified here: PartsEditor only ever works with an
+    // equipment_id to add/remove by, and there is no id left to name it
+    // with. orphanedParts (below) is where it's actually shown.
+    parts: entry.parts
+      .filter((p): p is typeof p & { equipment_id: string } => p.equipment_id !== null)
+      .map((p) => ({ equipment_id: p.equipment_id, quantity: p.quantity })),
   }
+}
+
+/** Parts used on this entry whose own item has since been deleted -
+ * read-only history, shown separately from the editable PartsEditor list
+ * above (formFromEntry's own comment explains why they can't be merged
+ * into it). */
+function orphanedParts(entry: MaintenanceLogEntry | null): MaintenanceLogEntry['parts'] {
+  return entry ? entry.parts.filter((p) => p.equipment_id === null) : []
 }
 
 function toInput(form: LogFormState): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
@@ -278,7 +294,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="maintenance-complete-hours">
-                    Hours{rule && requiresHoursNow(rule) ? ' (required)' : ''}
+                    Hours (gauge reading){rule && requiresHoursNow(rule) ? ' (required)' : ''}
                   </FieldLabel>
                   <Input
                     id="maintenance-complete-hours"
@@ -287,12 +303,26 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                     value={form.hours}
                     onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))}
                   />
-                  {rule && requiresHoursNow(rule) && rule.current_hours == null && (
-                    <FieldDescription>
-                      {rule.has_hour_meter_path
-                        ? 'The live reading is unknown or stale - enter the current hours from the gauge.'
-                        : 'This item has no live hour meter - enter the current hours from the gauge.'}
-                    </FieldDescription>
+                  {/* Always the figure on the physical gauge, never true
+                      hours - the server adds whichever meter-reset offset
+                      applies when it stores this (2026-09-27 amendment,
+                      docs/adr/0138). A live reading never goes stale (an
+                      hour meter only has a reading while its engine runs),
+                      so a prefilled value just says how old it is; only a
+                      genuinely never-received reading asks the operator to
+                      read the gauge themselves. */}
+                  {rule && rule.current_hours != null ? (
+                    hoursAsOfLabel(rule.hours_as_of) && (
+                      <FieldDescription>Live reading, {hoursAsOfLabel(rule.hours_as_of)}.</FieldDescription>
+                    )
+                  ) : (
+                    rule && requiresHoursNow(rule) && (
+                      <FieldDescription>
+                        {rule.has_hour_meter_path
+                          ? 'The live reading has never been received - enter the current reading from the gauge.'
+                          : 'This item has no live hour meter - enter the current reading from the gauge.'}
+                      </FieldDescription>
+                    )
                   )}
                 </Field>
               </div>
@@ -381,7 +411,15 @@ interface MaintenanceLogEntryDialogProps {
   equipmentId: string
   open: boolean
   onCancel: () => void
-  onSave: (input: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>
+  // Code-review finding: the caller used to decide create-vs-update from
+  // its OWN `editingEntry` state, which never changed after a brand new
+  // entry's first save - creatingEntry stayed true, so a second Save on
+  // the still-open dialog called create again (a silent duplicate, with no
+  // photos and no Delete, since the caller's own state never learned this
+  // entry now has an id). existingId is this dialog's own savedEntry.id -
+  // the one place that actually knows whether there is now something to
+  // update - so the caller never has to guess.
+  onSave: (input: MaintenanceLogEntryInput, existingId: string | null) => Promise<MaintenanceLogEntry>
   onDelete?: (id: string) => Promise<void>
 }
 
@@ -436,7 +474,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     setSaving(true)
     setError(null)
     try {
-      const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind })
+      const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind }, savedEntry?.id ?? null)
       setSavedEntry(result)
       setDirty(false)
     } catch (err) {
@@ -452,12 +490,19 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   // nothing happened. Errors now surface the same way every other write
   // in this dialog already does (FieldError, role="alert"), and onCancel
   // only fires once the delete has actually succeeded.
+  //
+  // Keyed on savedEntry, not entry: entry only reflects what the dialog
+  // was OPENED with (undefined for a brand new standalone entry), while
+  // savedEntry is whatever actually exists on the server right now - true
+  // the instant a fresh entry's first Save returns, which is exactly when
+  // Delete has to start working too (the other half of the same
+  // code-review finding as onSave's existingId above).
   const handleDelete = async () => {
-    if (!entry || !onDelete) return
+    if (!savedEntry || !onDelete) return
     setSaving(true)
     setError(null)
     try {
-      await onDelete(entry.id)
+      await onDelete(savedEntry.id)
       onCancel()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -514,7 +559,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
             </Field>
           </div>
           <Field>
-            <FieldLabel htmlFor="maintenance-log-hours">Hours</FieldLabel>
+            <FieldLabel htmlFor="maintenance-log-hours">Hours (gauge reading)</FieldLabel>
             <Input id="maintenance-log-hours" type="number" inputMode="decimal" value={form.hours} onChange={(e) => updateForm((p) => ({ ...p, hours: e.target.value }))} />
           </Field>
           <Field>
@@ -537,6 +582,16 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
           </div>
           <PartsEditor parts={form.parts} onChange={(parts) => updateForm((p) => ({ ...p, parts }))} items={items} />
 
+          {/* Code-review finding: a part whose own item has since been
+              deleted survives as history (backend 2026-09-27 amendment) but
+              can't be edited here - shown read-only, with the name it had
+              when it was logged, so it isn't just silently missing. */}
+          {orphanedParts(savedEntry).length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Also used (no longer in inventory): {orphanedParts(savedEntry).map((p) => `${p.equipment_name} x${p.quantity}`).join(', ')}
+            </p>
+          )}
+
           {savedEntry && (
             <Field>
               <FieldLabel>Photos</FieldLabel>
@@ -553,7 +608,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
         {error && <FieldError errors={[{ message: error }]} />}
 
         <DialogFooter>
-          {isEditing && onDelete && (
+          {savedEntry && onDelete && (
             <Button type="button" variant="ghost" className="mr-auto text-destructive" disabled={saving} onClick={() => { void handleDelete() }}>
               Delete
             </Button>

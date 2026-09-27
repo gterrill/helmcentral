@@ -34,7 +34,7 @@ function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
     remaining_days: null,
     hours_unknown: false,
     has_hour_meter_path: true,
-    hours_stale_since: null,
+    hours_as_of: null,
     current_hours: 1234,
     ...overrides,
   }

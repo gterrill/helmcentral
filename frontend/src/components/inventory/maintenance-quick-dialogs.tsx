@@ -150,7 +150,7 @@ export function MaintenanceLastDoneDialog({ rule, onCancel, onConfirm }: Mainten
         </Field>
         {rule?.has_hour_meter_path && (
           <Field>
-            <FieldLabel htmlFor="maintenance-last-done-hours">Last done (hours)</FieldLabel>
+            <FieldLabel htmlFor="maintenance-last-done-hours">Last done (hours, gauge reading)</FieldLabel>
             <Input
               id="maintenance-last-done-hours"
               type="number"

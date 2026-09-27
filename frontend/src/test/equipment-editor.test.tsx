@@ -511,6 +511,46 @@ describe('EquipmentEditor', () => {
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true)
   })
 
+  // Code-review finding: the confirmation used to say only "This removes
+  // the equipment record," with no hint that deleting an item cascades
+  // away its maintenance rules and service log (ADR 0138 §10 - the cascade
+  // itself is by design and unchanged; the operator just deserves to see
+  // the size of it first).
+  it('states how many maintenance rules and log entries will be deleted with the item', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.includes('/api/inventory/maintenance/rules')) {
+        return Promise.resolve({ ok: true, json: async () => ({ rules: [{ id: 'r1' }, { id: 'r2' }] }) })
+      }
+      if (u.includes('/api/inventory/maintenance/log')) {
+        return Promise.resolve({ ok: true, json: async () => ({ entries: [{ id: 'e1' }] }) })
+      }
+      if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
+      }
+      if (u.includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.includes('/api/equipment-profiles')) return Promise.resolve({ ok: true, json: async () => ({ profiles, problems: [] }) })
+      if (u.includes('/api/signalk/paths')) return Promise.resolve({ ok: true, json: async () => ({ paths: [] }) })
+      if (u.includes('/maintenance/meter-resets')) return Promise.resolve({ ok: true, json: async () => ({ resets: [] }) })
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await screen.findByText(/2 maintenance rules and 1 service log entry/)
+  })
+
+  it('says nothing about a cascade when the item has no maintenance rules or log entries', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    expect(screen.getByText("This removes the equipment record. It can't be undone.")).toBeInTheDocument()
+  })
+
   // ── photos (ADR 0127) ────────────────────────────────────────────────
 
   // Review finding: baselineDocIds (the dirty check's own "what the server

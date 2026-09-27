@@ -43,7 +43,8 @@ against it. For a boat with existing history, record that history without
 inventing a service that never happened through Helmcentral:
 
 1. On a rule showing **Never recorded**, tap **Set last done**.
-2. Enter the date it was last done, the hours it was done at, or both.
+2. Enter the date it was last done, the hours off the gauge at the time
+   (not a hand-calculated running total), or both.
 3. Save. The rule now counts down from that baseline - no service log entry
    is written, since none actually happened through the app.
 
@@ -61,6 +62,10 @@ To attach the exact steps for a job on your own boat:
 
 A meter or gauge replacement doesn't reset an item's true running hours to
 zero in Helmcentral - record the change and hours keep counting correctly.
+Every hours figure typed in anywhere on this item (completing a rule,
+setting what's already done, a log entry) is always the number on
+whichever gauge is fitted at the time; Helmcentral keeps the combined
+running total behind the scenes.
 
 1. Open the item's own page.
 2. In the **Maintenance** block's hour meter section, tap **Record meter

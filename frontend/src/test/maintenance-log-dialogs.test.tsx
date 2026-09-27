@@ -31,7 +31,7 @@ function makeRule(overrides: Partial<MaintenanceRule> = {}): MaintenanceRule {
     last_done_hours: null, profile_service_id: '', procedure_note_id: '',
     ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
     status: 'due_soon', remaining_hours: null, remaining_days: null,
-    hours_unknown: false, has_hour_meter_path: true, hours_stale_since: null, current_hours: null,
+    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
     ...overrides,
   }
 }
@@ -86,6 +86,71 @@ describe('MaintenanceLogEntryDialog: editing an existing entry', () => {
   })
 })
 
+describe('MaintenanceLogEntryDialog: a part whose own item has been deleted', () => {
+  // Code-review finding 6: maintenance_log_parts.equipment_id going to
+  // null (its item was deleted) must not make the part disappear from the
+  // log entry - it shows read-only, by its snapshot name, separate from
+  // the editable parts list (which can't represent it - there's no id
+  // left to add or remove by).
+  it('shows an orphaned part read-only by its snapshot name, not in the editable list', () => {
+    const entry = makeEntry({
+      parts: [
+        { equipment_id: null, equipment_name: 'Impeller (spare)', quantity: 2 },
+        { equipment_id: 'eq-gasket', equipment_name: 'Gasket (spare)', quantity: 1 },
+      ],
+    })
+    render(
+      <MaintenanceLogEntryDialog entry={entry} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
+    )
+
+    expect(screen.getByText(/Also used \(no longer in inventory\): Impeller \(spare\) x2/)).toBeInTheDocument()
+    // The still-linked part is in the ordinary editable list (PartsEditor
+    // itself, not this finding) - only the orphaned one gets the read-only
+    // note, so it must appear exactly once.
+    expect(screen.getAllByText(/Impeller \(spare\)/)).toHaveLength(1)
+  })
+})
+
+describe('MaintenanceLogEntryDialog: creating a brand new standalone entry', () => {
+  // Code-review finding: the CALLER used to decide create-vs-update from
+  // its own editingEntry state, which stayed null/undefined for the whole
+  // life of a brand-new-entry dialog (creatingEntry never became
+  // editingEntry after the first save) - so a second Save on the still-open
+  // dialog called create AGAIN: a silent duplicate entry, with no photos
+  // (they were attached to the first one) and no Delete button (isEditing
+  // was keyed off the same stale prop). onSave's second argument -
+  // existingId, sourced from this dialog's OWN savedEntry, never the
+  // caller's - is what lets the caller update instead the second time.
+  it('passes the newly created entry\'s own id as existingId on a second Save, and offers Delete', async () => {
+    const onSave = vi.fn()
+      .mockResolvedValueOnce(makeEntry({ id: 'log-99', description: 'first' }))
+      .mockResolvedValueOnce(makeEntry({ id: 'log-99', description: 'second' }))
+    const onCancel = vi.fn()
+    const onDelete = vi.fn()
+
+    render(
+      <MaintenanceLogEntryDialog entry={undefined} equipmentId="eq-1" open onCancel={onCancel} onSave={onSave} onDelete={onDelete} />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'first' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][1]).toBeNull()
+
+    // The entry now exists on the server - Delete must appear, and photos
+    // (already covered elsewhere by the savedEntry-gated PhotoStripEditor)
+    // are keyed off the same state.
+    await screen.findByRole('button', { name: 'Delete' })
+
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'second' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave.mock.calls[1][1]).toBe('log-99')
+  })
+})
+
 describe('MaintenanceLogEntryDialog: delete', () => {
   it('surfaces a failed delete as an alert and keeps the dialog open', async () => {
     const entry = makeEntry()
@@ -113,7 +178,7 @@ describe('MaintenanceCompleteDialog: hours required', () => {
 
     render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={onComplete} />)
 
-    expect(screen.getByText(/unknown or stale/i)).toBeInTheDocument()
+    expect(screen.getByText(/never been received/i)).toBeInTheDocument()
     const completeButton = screen.getByRole('button', { name: 'Complete' })
     expect(completeButton).toBeDisabled()
 
@@ -127,6 +192,19 @@ describe('MaintenanceCompleteDialog: hours required', () => {
     const rule = makeRule({ interval_hours: 250, current_hours: 987.5 })
     render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Complete' })).not.toBeDisabled()
+  })
+
+  // Code-review finding 3: an old live reading is never a warning - it is
+  // shown as "as of <age>", never "unknown or stale". Finding 4: the value
+  // shown/prefilled here is explicitly labelled as the GAUGE reading, since
+  // that's what current_hours now carries.
+  it('shows the live reading\'s own age instead of a staleness warning', () => {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const rule = makeRule({ interval_hours: 250, current_hours: 987.5, hours_as_of: sixHoursAgo })
+    render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.getByLabelText(/Hours \(gauge reading\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Live reading, as of/)).toBeInTheDocument()
+    expect(screen.queryByText(/unknown or stale/i)).not.toBeInTheDocument()
   })
 })
 

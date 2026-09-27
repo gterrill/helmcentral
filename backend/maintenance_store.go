@@ -63,8 +63,15 @@ type maintenanceRule struct {
 // maintenanceLogPart is one row of maintenance_log_parts, joined against
 // equipment for its display name - a parts list that only carried ids would
 // make the CSV export and the log view useless without a second lookup.
+//
+// EquipmentID is nil once the part item itself has been deleted
+// (equipment_id ON DELETE SET NULL, documents_store.go's 2026-09-27
+// amendment) - the row survives as pure history. EquipmentName is always
+// populated either way: the equipment's own CURRENT name while still
+// linked, or the part_name snapshot taken at logging time once it isn't
+// (maintenancePartsForLogEntries' own COALESCE).
 type maintenanceLogPart struct {
-	EquipmentID   string  `json:"equipment_id"`
+	EquipmentID   *string `json:"equipment_id"`
 	EquipmentName string  `json:"equipment_name"`
 	Quantity      float64 `json:"quantity"`
 }
@@ -146,9 +153,18 @@ type maintenanceLogEntryInput struct {
 // status stored are excluded from the list"); the equipment editor's own
 // Maintenance block passes IncludeStored=true, since an operator editing a
 // stored item's own page obviously still wants to see and manage its rules.
+//
+// System (2026-09-27, code-review finding), blank by default, narrows to
+// one system's own gear - the Maintenance list's own filter dropdown. A
+// calendar-only rule has no system to match against and is excluded
+// whenever System is non-blank, the same as IncludeStored's own
+// equipment-status subquery excludes a stored item's rule: filtered in SQL,
+// not by the caller loading every rule's own equipment first and
+// discarding the ones that don't match.
 type maintenanceRuleFilter struct {
 	EquipmentID   string
 	IncludeStored bool
+	System        string
 }
 
 // ── maintenance rules ────────────────────────────────────────────────────
@@ -347,6 +363,14 @@ func (s *documentStore) ListMaintenanceRules(filter maintenanceRuleFilter) ([]ma
 		// be stored. Only a rule that DOES name an item is filtered by
 		// that item's status.
 		query += ` AND (equipment_id IS NULL OR equipment_id IN (SELECT id FROM equipment WHERE status != 'stored'))`
+	}
+	if filter.System != "" {
+		// Unlike IncludeStored above, a calendar-only rule (equipment_id
+		// NULL) IS excluded here - it has no system to match against, and
+		// `NULL IN (...)` is never true in SQL, so this needs no separate
+		// "OR equipment_id IS NULL" clause the way IncludeStored's does.
+		query += ` AND equipment_id IN (SELECT id FROM equipment WHERE system = ?)`
+		args = append(args, filter.System)
 	}
 	query += ` ORDER BY equipment_id IS NULL, equipment_id, lower(description)`
 
@@ -607,6 +631,14 @@ func scanMaintenanceLogEntry(row rowScanner) (maintenanceLogEntry, error) {
 // equipment for a display name - one aggregate query over the whole result
 // (equipmentColumns' own doc comment gives the identical "a handful of rows
 // aboard one boat" reasoning for why this is never N+1).
+//
+// LEFT JOIN, not JOIN: equipment_id is nullable once the part item has been
+// deleted (documents_store.go's 2026-09-27 amendment) - an inner join would
+// silently drop that row out of the result the instant its link is gone,
+// which is exactly the data loss this schema change exists to prevent.
+// COALESCE prefers the equipment's own CURRENT name while still linked,
+// falling back to the part_name snapshot taken at logging time once it
+// isn't.
 func maintenancePartsForLogEntries(q sqlQueryer, ids []string) (map[string][]maintenanceLogPart, error) {
 	out := map[string][]maintenanceLogPart{}
 	if len(ids) == 0 {
@@ -619,11 +651,11 @@ func maintenancePartsForLogEntries(q sqlQueryer, ids []string) (map[string][]mai
 		args[i] = id
 	}
 	rows, err := q.Query(`
-		SELECT lp.log_entry_id, lp.equipment_id, e.name, lp.quantity
+		SELECT lp.log_entry_id, lp.equipment_id, COALESCE(e.name, lp.part_name), lp.quantity
 		FROM maintenance_log_parts lp
-		JOIN equipment e ON e.id = lp.equipment_id
+		LEFT JOIN equipment e ON e.id = lp.equipment_id
 		WHERE lp.log_entry_id IN (`+strings.Join(placeholders, ",")+`)
-		ORDER BY lp.log_entry_id, lower(e.name)`, args...)
+		ORDER BY lp.log_entry_id, lower(COALESCE(e.name, lp.part_name))`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("parts for log entries: %w", err)
 	}
@@ -704,18 +736,36 @@ func maintenanceLogEntryByID(q sqlQueryer, id string) (maintenanceLogEntry, erro
 	return e, nil
 }
 
-// insertMaintenanceLogPartsTx replaces id's own parts wholesale - a
+// insertMaintenanceLogPartsTx replaces id's own LINKED parts wholesale - a
 // whole-set replace, not a diff, matching the log entry's own PUT-style
 // UpdateMaintenanceLogEntry contract (unlike equipment_documents' PATCH
 // diff, there is no separate "existing photos" concern to preserve here:
 // parts are pure data, not something a concurrent upload could race with).
+//
+// "Linked" is the operative word (2026-09-27 amendment): a row whose own
+// equipment_id has already gone to NULL (its part item was deleted -
+// documents_store.go's own comment) can never be re-specified by a fresh
+// parts list at all, since parts is only ever a list of {equipment_id,
+// quantity} and that id no longer exists to name - so only rows that are
+// STILL linked are cleared and replaced here. An orphaned history row
+// therefore survives an unrelated later edit to the same log entry, not
+// just the part's own deletion.
 func insertMaintenanceLogPartsTx(tx *sql.Tx, logEntryID string, parts []maintenanceLogPartInput) error {
-	if _, err := tx.Exec(`DELETE FROM maintenance_log_parts WHERE log_entry_id = ?`, logEntryID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM maintenance_log_parts WHERE log_entry_id = ? AND equipment_id IS NOT NULL`, logEntryID); err != nil {
 		return fmt.Errorf("replace parts: clear: %w", err)
 	}
 	for _, p := range parts {
-		if _, err := tx.Exec(`INSERT INTO maintenance_log_parts (log_entry_id, equipment_id, quantity) VALUES (?, ?, ?)`,
-			logEntryID, p.EquipmentID, p.Quantity); err != nil {
+		// part_name snapshots the item's name AT THE TIME IT WAS LOGGED -
+		// checkMaintenancePartsExist (maintenance_handlers.go) already
+		// confirmed p.EquipmentID exists before this transaction runs, so
+		// this lookup failing here would mean a real race with a concurrent
+		// delete, not an operator mistake - surfaced rather than guessed at.
+		var name string
+		if err := tx.QueryRow(`SELECT name FROM equipment WHERE id = ?`, p.EquipmentID).Scan(&name); err != nil {
+			return fmt.Errorf("replace parts: look up name for %s: %w", p.EquipmentID, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO maintenance_log_parts (id, log_entry_id, equipment_id, part_name, quantity) VALUES (?, ?, ?, ?, ?)`,
+			uuid.NewString(), logEntryID, p.EquipmentID, name, p.Quantity); err != nil {
 			return fmt.Errorf("replace parts: insert %s: %w", p.EquipmentID, err)
 		}
 	}
@@ -953,26 +1003,38 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 		return maintenanceRule{}, maintenanceLogEntry{}, err
 	}
 
-	// Blank hours must never wipe an hours baseline the rule already
-	// carries - completing a months-only rule with no hours given says
-	// nothing about hours at all, and validateMaintenanceLogEntryCore's own
-	// caller (completeMaintenanceRuleHandler) already refuses a blank hours
-	// value outright when the rule's own IntervalHours is set, so by the
-	// time this runs, in.Hours == nil only ever means "this completion had
-	// nothing to say about hours," never "clear it."
-	lastDoneHours := rule.LastDoneHours
-	if in.Hours != nil {
-		lastDoneHours = in.Hours
-	}
+	// The log entry above is written unconditionally - a back-filled old
+	// service still belongs in the history. The baseline itself only ever
+	// moves FORWARD, though: a completion dated before the rule's existing
+	// last_done_at is an old record being added after the fact, not a new
+	// most-recent service, so it must not move last_done_at/last_done_hours
+	// backward, re-derive fixed_due_date from an earlier date, or clear an
+	// acknowledgement that was made about the current, later baseline. A
+	// rule with no baseline yet (LastDoneAt == "") always counts as older,
+	// so its first completion still sets it.
+	if rule.LastDoneAt == "" || in.PerformedAt >= rule.LastDoneAt {
+		// Blank hours must never wipe an hours baseline the rule already
+		// carries - completing a months-only rule with no hours given says
+		// nothing about hours at all, and validateMaintenanceLogEntryCore's
+		// own caller (completeMaintenanceRuleHandler) already refuses a
+		// blank hours value outright when the rule's own IntervalHours is
+		// set, so by the time this runs, in.Hours == nil only ever means
+		// "this completion had nothing to say about hours," never "clear
+		// it."
+		lastDoneHours := rule.LastDoneHours
+		if in.Hours != nil {
+			lastDoneHours = in.Hours
+		}
 
-	fixedDueDate := rule.FixedDueDate
-	if rule.FixedDueDate != "" && newFixedDueDate != "" {
-		fixedDueDate = newFixedDueDate
-	}
+		fixedDueDate := rule.FixedDueDate
+		if rule.FixedDueDate != "" && newFixedDueDate != "" {
+			fixedDueDate = newFixedDueDate
+		}
 
-	if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, fixed_due_date = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
-		in.PerformedAt, lastDoneHours, fixedDueDate, now.Unix(), ruleID); err != nil {
-		return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
+		if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, fixed_due_date = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
+			in.PerformedAt, lastDoneHours, fixedDueDate, now.Unix(), ruleID); err != nil {
+			return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
+		}
 	}
 
 	updatedRule, err := maintenanceRuleByID(tx, ruleID)
@@ -1081,8 +1143,9 @@ func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) 
 
 // RecordHourMeterReset stores a meter-replacement history row (spec §2) -
 // old reading, new reading, the date it happened. This is pure history;
-// latestMeterOffsetHours (maintenance_hours.go) is what turns it into the
-// live offset the status engine actually uses.
+// offsetInForceAt (maintenance_hours.go) is what turns it into the offset a
+// live reading or an operator-typed gauge reading (gaugeToTrueHours) is
+// actually converted with.
 func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, newReading float64, changedAt string) (hourMeterReset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1118,10 +1181,11 @@ func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, new
 // tie-broken by id) - not by created_at, which only says when the row was
 // entered and can disagree with ChangedAt for a back-filled reset. The
 // equipment editor's own display of past replacements, and the input
-// latestMeterOffsetHours (maintenance_hours.go) resolves into a live
-// offset - both read this same order, so the editor's own "most recent
-// replacement" line can never disagree with which reset the status engine
-// is actually using.
+// offsetInForceAt (maintenance_hours.go) resolves into an offset - both
+// read this same order (offsetInForceAt trusts it, taking the first match
+// rather than re-sorting), so the editor's own "most recent replacement"
+// line can never disagree with which reset the status engine is actually
+// using.
 func (s *documentStore) ListHourMeterResets(equipmentID string) ([]hourMeterReset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

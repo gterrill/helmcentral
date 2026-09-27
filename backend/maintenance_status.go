@@ -61,21 +61,35 @@ func maintenanceStatusRank(s maintenanceStatus) int {
 // maintenance_hours.go), never once per rule, so two rules on the same
 // engine can never disagree about what "now" reads.
 //
-// Known is false whenever the figure cannot be trusted: no hour_meter_path
-// bound at all, or the bound path's value is missing or older than
-// maintenanceHoursStaleAfter. AGENTS.md's fallback policy: a rule with
-// Known=false must never have its hour-based due status guessed at from a
-// stale or absent reading - see computeMaintenanceRuleStatus's own hours
-// branch.
+// Known is false only when there is nothing to read at all: no
+// hour_meter_path bound, or the bound path has never carried a value in
+// this snapshot. Age plays no part in Known - see currentEquipmentHours'
+// own doc comment (maintenance_hours.go) for why an hour meter's last
+// received value is always the current reading, however old. AGENTS.md's
+// fallback policy still applies to the case Known IS false: a rule must
+// never have its hour-based due status guessed at when nothing has ever
+// been received for its path - see computeMaintenanceRuleStatus's own
+// hours branch.
 type maintenanceHourReading struct {
 	Known bool
+	// Hours is TRUE hours - Gauge plus whatever meter-reset offset is in
+	// force right now (maintenance_hours.go's offsetInForceAt) - and is
+	// what every status/remaining computation below actually compares
+	// against a rule's own last_done_hours.
 	Hours float64
-	// StaleSince is set only when the bound path HAS a value but it is
-	// older than maintenanceHoursStaleAfter - never set when there is no
-	// path bound at all, or the path has no value whatsoever, since
-	// neither case has a "since" to report (maintenance_hours.go's own
-	// currentEquipmentHours doc comment).
-	StaleSince *time.Time
+	// Gauge is the RAW meter reading the operator would see by physically
+	// looking at the gauge, with no offset applied - what the frontend
+	// prefills its own "Hours" field with (2026-09-27 amendment,
+	// gaugeToTrueHours): the operator always works in gauge readings, never
+	// true hours, so the one figure surfaced to them is this one.
+	Gauge float64
+	// AsOf is set whenever Known is true and the snapshot carries usable
+	// timestamp evidence for the reading (almost always - see
+	// currentEquipmentHours) - the wall-clock instant the value was last
+	// received, so the UI can show "as of <time>" rather than implying a
+	// live-second reading for a meter that stopped changing the moment its
+	// engine went quiet.
+	AsOf *time.Time
 }
 
 // maintenanceRuleStatusInput is computeMaintenanceRuleStatus's whole

@@ -90,7 +90,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			wantHours:  f(30),
 		},
 		{
-			name: "hours only: stale/missing hours is hours_unknown, never guessed",
+			name: "hours only: missing hours is hours_unknown, never guessed",
 			in: maintenanceRuleStatusInput{
 				IntervalHours: f(250),
 				LastDoneHours: f(1000),

@@ -187,6 +187,94 @@ func TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUncha
 
 func ptrString(s string) *string { return &s }
 
+// TestDocumentStore_CompleteMaintenanceRuleOlderThanBaselineWritesLogButKeepsBaseline
+// pins the code-review finding: a back-filled old service (performed_at
+// earlier than the rule's current last_done_at) must still be written to
+// the log, but must NOT move the baseline backward - the rule's own
+// last_done_at/last_done_hours, fixed_due_date and acknowledgement are only
+// ever moved forward by a completion that is on or after the existing
+// baseline.
+func TestDocumentStore_CompleteMaintenanceRuleOlderThanBaselineWritesLogButKeepsBaseline(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	hours := 250.0
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	priorHours := 1000.0
+	if _, err := store.SetMaintenanceRuleLastDone(rule.ID, ptrString("2026-06-01"), &priorHours); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+	if _, err := store.AcknowledgeMaintenanceRule(rule.ID, "waiting on parts"); err != nil {
+		t.Fatalf("AcknowledgeMaintenanceRule: %v", err)
+	}
+
+	updated, entry, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{
+		PerformedAt: "2026-01-01",
+		Hours:       ptrFloat(500),
+		Description: "Back-filled an old service",
+	}, "")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if entry.PerformedAt != "2026-01-01" {
+		t.Fatalf("expected the log entry to be written with the back-filled date, got %+v", entry)
+	}
+	if updated.LastDoneAt != "2026-06-01" {
+		t.Fatalf("expected the baseline date to stay at 2026-06-01, got %q", updated.LastDoneAt)
+	}
+	if updated.LastDoneHours == nil || *updated.LastDoneHours != priorHours {
+		t.Fatalf("expected the baseline hours to stay at %v, got %+v", priorHours, updated.LastDoneHours)
+	}
+	if !updated.Acknowledged || updated.AckReason != "waiting on parts" {
+		t.Fatalf("expected the acknowledgement to survive an older completion, got %+v", updated)
+	}
+
+	entries, err := store.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: item.ID})
+	if err != nil {
+		t.Fatalf("ListMaintenanceLogEntries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].PerformedAt != "2026-01-01" {
+		t.Fatalf("expected the back-filled entry in the log, got %+v", entries)
+	}
+}
+
+// TestDocumentStore_CompleteMaintenanceRuleOnOrAfterBaselineMovesBaseline
+// pins the other half: a completion dated on or after the rule's existing
+// baseline moves it forward as before, including clearing the
+// acknowledgement.
+func TestDocumentStore_CompleteMaintenanceRuleOnOrAfterBaselineMovesBaseline(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	hours := 250.0
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	priorHours := 1000.0
+	if _, err := store.SetMaintenanceRuleLastDone(rule.ID, ptrString("2026-06-01"), &priorHours); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+	if _, err := store.AcknowledgeMaintenanceRule(rule.ID, "waiting on parts"); err != nil {
+		t.Fatalf("AcknowledgeMaintenanceRule: %v", err)
+	}
+
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{
+		PerformedAt: "2026-06-01",
+		Hours:       ptrFloat(1050),
+	}, "")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if updated.LastDoneAt != "2026-06-01" || updated.LastDoneHours == nil || *updated.LastDoneHours != 1050 {
+		t.Fatalf("expected the baseline to move to the same-day completion, got %+v", updated)
+	}
+	if updated.Acknowledged || updated.AckReason != "" {
+		t.Fatalf("expected an on-or-after completion to clear the acknowledgement, got %+v", updated)
+	}
+}
+
 // TestDocumentStore_CompleteMaintenanceRuleAdvancesFixedDueDate pins the
 // code-review finding: completing a fixed-due-date rule (a certificate or
 // expiry with no interval_months to compute a next date from) used to
@@ -361,6 +449,60 @@ func TestDocumentStore_ListMaintenanceRulesExcludesStoredItemsByDefault(t *testi
 	}
 }
 
+// TestDocumentStore_ListMaintenanceRulesFiltersBySystem pins code-review
+// finding 9: the system filter is now applied IN SQL (a subquery against
+// equipment.system, the same idiom IncludeStored's own status subquery
+// already uses), not by the handler loading every rule's equipment first
+// and discarding the ones that don't match - a calendar-only rule (no
+// equipment_id at all) has no system to match against and is excluded
+// whenever a system filter is given, the same as the handler's own
+// pre-refactor behaviour.
+func TestDocumentStore_ListMaintenanceRulesFiltersBySystem(t *testing.T) {
+	store := newTestDocumentStore(t)
+	engine, err := store.CreateEquipment(equipmentItem{Name: "Main engine", Category: "mechanical", System: "propulsion"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	pump, err := store.CreateEquipment(equipmentItem{Name: "Fresh water pump", Category: "general", System: "water"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	months := 6
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Anode check", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (engine): %v", err)
+	}
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &pump.ID, Description: "Filter check", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (pump): %v", err)
+	}
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{Description: "Registration renewal", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (cert): %v", err)
+	}
+
+	propulsion, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "propulsion"})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(System=propulsion): %v", err)
+	}
+	if len(propulsion) != 1 || propulsion[0].Description != "Anode check" {
+		t.Fatalf("expected only the engine's own rule, got %+v", propulsion)
+	}
+
+	water, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "water"})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(System=water): %v", err)
+	}
+	if len(water) != 1 || water[0].Description != "Filter check" {
+		t.Fatalf("expected only the pump's own rule, got %+v", water)
+	}
+
+	all, err := store.ListMaintenanceRules(maintenanceRuleFilter{})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(no filter): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected all 3 rules with no system filter, got %d: %+v", len(all), all)
+	}
+}
+
 func toEquipmentInputForTest(item equipmentItem, status string) equipmentItem {
 	item.Status = status
 	return item
@@ -385,7 +527,7 @@ func TestDocumentStore_MaintenanceLogEntryCRUDWithParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
 	}
-	if len(entry.Parts) != 1 || entry.Parts[0].EquipmentID != spare.ID || entry.Parts[0].EquipmentName != "Impeller (spare)" {
+	if len(entry.Parts) != 1 || entry.Parts[0].EquipmentID == nil || *entry.Parts[0].EquipmentID != spare.ID || entry.Parts[0].EquipmentName != "Impeller (spare)" {
 		t.Fatalf("expected the part joined with its name, got %+v", entry.Parts)
 	}
 
@@ -408,6 +550,102 @@ func TestDocumentStore_MaintenanceLogEntryCRUDWithParts(t *testing.T) {
 	}
 	if _, err := store.GetMaintenanceLogEntry(entry.ID); !errors.Is(err, errMaintenanceLogEntryNotFound) {
 		t.Fatalf("expected errMaintenanceLogEntryNotFound after delete, got %v", err)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentUsedAsMaintenancePartKeepsLogHistoryWithSnapshotName
+// pins code-review finding 6: maintenance_log_parts.equipment_id used to
+// CASCADE, so deleting a spare-part item silently erased it from every past
+// log entry (and the CSV export). It is now ON DELETE SET NULL - the row
+// survives, with the part's own name as it was AT THE TIME IT WAS LOGGED
+// (part_name), never the equipment record that may since be gone.
+func TestDocumentStore_DeleteEquipmentUsedAsMaintenancePartKeepsLogHistoryWithSnapshotName(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	spare := mustCreateTestEquipment(t, store, "Impeller (spare)")
+
+	entry, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: spare.ID, Quantity: 2}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
+	}
+
+	if _, err := store.DeleteEquipment(spare.ID, false); err != nil {
+		t.Fatalf("DeleteEquipment(spare): %v", err)
+	}
+
+	got, err := store.GetMaintenanceLogEntry(entry.ID)
+	if err != nil {
+		t.Fatalf("expected the log entry to survive the part's own deletion, got err: %v", err)
+	}
+	if len(got.Parts) != 1 {
+		t.Fatalf("expected the part row to survive with its snapshot name, got %+v", got.Parts)
+	}
+	if got.Parts[0].EquipmentID != nil {
+		t.Fatalf("expected equipment_id to be cleared (SET NULL), got %+v", got.Parts[0].EquipmentID)
+	}
+	if got.Parts[0].EquipmentName != "Impeller (spare)" {
+		t.Fatalf("expected the snapshot name 'Impeller (spare)' to survive, got %q", got.Parts[0].EquipmentName)
+	}
+	if got.Parts[0].Quantity != 2 {
+		t.Fatalf("expected the quantity to survive, got %v", got.Parts[0].Quantity)
+	}
+}
+
+// TestDocumentStore_UpdateMaintenanceLogEntryKeepsOrphanedPartsAcrossAnEdit
+// pins the other half of finding 6: insertMaintenanceLogPartsTx's own
+// wholesale replace only ever clears LINKED parts (equipment_id NOT NULL) -
+// an orphaned row from an already-deleted part item can never be
+// re-specified by a fresh parts list (there is no id left to name it with),
+// so it must survive an unrelated later edit to the same log entry, not
+// just the part's own deletion.
+func TestDocumentStore_UpdateMaintenanceLogEntryKeepsOrphanedPartsAcrossAnEdit(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	spare := mustCreateTestEquipment(t, store, "Impeller (spare)")
+	other := mustCreateTestEquipment(t, store, "Gasket (spare)")
+
+	entry, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: spare.ID, Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
+	}
+	if _, err := store.DeleteEquipment(spare.ID, false); err != nil {
+		t.Fatalf("DeleteEquipment(spare): %v", err)
+	}
+
+	updated, err := store.UpdateMaintenanceLogEntry(entry.ID, maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Description: "Also fitted a new gasket",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: other.ID, Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMaintenanceLogEntry: %v", err)
+	}
+	if len(updated.Parts) != 2 {
+		t.Fatalf("expected both the orphaned snapshot and the newly linked part, got %+v", updated.Parts)
+	}
+	var sawOrphan, sawLinked bool
+	for _, p := range updated.Parts {
+		if p.EquipmentID == nil && p.EquipmentName == "Impeller (spare)" {
+			sawOrphan = true
+		}
+		if p.EquipmentID != nil && *p.EquipmentID == other.ID {
+			sawLinked = true
+		}
+	}
+	if !sawOrphan || !sawLinked {
+		t.Fatalf("expected one orphaned and one linked part, got %+v", updated.Parts)
 	}
 }
 
@@ -559,7 +797,7 @@ func TestDocumentStore_HourMeterResetHistoryRoundTrips(t *testing.T) {
 		t.Fatalf("expected the most recent reset first, got %+v", resets)
 	}
 
-	offset := latestMeterOffsetHours(resets)
+	offset := offsetInForceAt(resets, mustParseDate(t, "2026-06-01"))
 	if offset != 5190 {
 		t.Fatalf("expected offset 5190 (5200-10), got %v", offset)
 	}

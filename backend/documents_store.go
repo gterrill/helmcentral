@@ -704,16 +704,35 @@ var documentStoreSchema = []string{
 
 	// maintenance_log_parts: which existing equipment (spares/parts) were
 	// used on a log entry, and how many - no stock decrement this cycle
-	// (spec's own "out of scope"), just a record. Both sides CASCADE: a
-	// part-used row has no meaning once either the log entry or the part
-	// item itself is gone, and nothing else ever references one of these
-	// rows the way a document link can be shared.
+	// (spec's own "out of scope"), just a record.
+	//
+	// 2026-09-27 amendment (code-review finding): equipment_id used to
+	// CASCADE, same as the log entry side - but a part-used row is a fact
+	// about HISTORY ("this row's own name and quantity, logged that day"),
+	// not a live reference the way a document link is; deleting a spare
+	// part item (its own equipment record reaching end of life, being
+	// consolidated, or simply mis-entered) silently erased it from every
+	// past log entry and the CSV export. equipment_id is now nullable and
+	// ON DELETE SET NULL - the row survives, only its live link is cleared -
+	// and part_name snapshots the item's name AT THE TIME IT WAS LOGGED
+	// (insertMaintenanceLogPartsTx, maintenance_store.go), so the log view
+	// and the CSV always have something to show even once the equipment_id
+	// side is gone. The primary key is now the row's own id: the old
+	// (log_entry_id, equipment_id) composite key cannot represent two rows
+	// that have both since lost the same equipment_id (both would collide
+	// on (log_entry_id, NULL) if SQLite treated NULL as ordinary key data);
+	// the OWN uniqueness rule - the same part cannot be listed twice on one
+	// log entry - is instead a partial UNIQUE index below, in force only
+	// while equipment_id is still linked.
 	`CREATE TABLE IF NOT EXISTS maintenance_log_parts (
+		id           TEXT PRIMARY KEY,
 		log_entry_id TEXT NOT NULL REFERENCES maintenance_log_entries(id) ON DELETE CASCADE,
-		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
-		quantity     REAL NOT NULL DEFAULT 1,
-		PRIMARY KEY (log_entry_id, equipment_id)
+		equipment_id TEXT REFERENCES equipment(id) ON DELETE SET NULL,
+		part_name    TEXT NOT NULL DEFAULT '',
+		quantity     REAL NOT NULL DEFAULT 1
 	)`,
+	`CREATE INDEX IF NOT EXISTS maintenance_log_parts_log_entry_id ON maintenance_log_parts (log_entry_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS maintenance_log_parts_entry_equipment ON maintenance_log_parts (log_entry_id, equipment_id) WHERE equipment_id IS NOT NULL`,
 
 	// maintenance_log_photos mirrors equipment_documents' own shape for a
 	// log entry's photos (spec §6: "reuse the shared upload intake; photos
