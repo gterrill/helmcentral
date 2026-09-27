@@ -3424,20 +3424,24 @@ export function App() {
                 z-60 same as the page selector and every other top-level
                 header control. (impeccable critique 2026-09-12, P1)
 
-                Popovers and dropdown menus are z-60 too (components/ui/
-                popover.tsx, components/ui/dropdown-menu.tsx), so they draw
-                above this banner. That includes one opened inside the Mate
-                sheet: PopoverContent portals out of the sheet's own
-                stacking context rather than nesting inside it, so its z-60
-                is compared against the banner directly and clears it
-                regardless of the sheet (ADR 0107). The sheet's own panel
-                (components/ui/sheet.tsx) is z-70, above the banner and
-                ordinary popovers/menus alike — only its backdrop is z-50 —
-                and dialogs (components/ui/dialog.tsx, alert-dialog.tsx) sit
-                at z-70/z-80, that same layer again or higher. Tooltips
-                (components/ui/tooltip.tsx) sit at z-90, the topmost layer
-                above all dialogs, because a tooltip can be anchored to a
-                trigger inside any of them and must remain readable. */}
+                Dropdown menus are z-60 too (components/ui/dropdown-menu.tsx),
+                so they draw above this banner. Popovers (components/ui/
+                popover.tsx) sit at z-85, above the sheet and dialog layers
+                below, because a popover's trigger commonly lives inside one
+                of them (the note editor's Link/Image buttons in the
+                documents viewer sheet are the case that exposed this) and
+                the popup still needs to clear it (ADR 0139). Either way the
+                popup portals out of the sheet's own stacking context rather
+                than nesting inside it, so its z-index is compared against
+                the banner directly and clears it regardless of the sheet
+                (ADR 0107). The sheet's own panel (components/ui/sheet.tsx)
+                is z-70, above the banner and dropdown menus — only its
+                backdrop is z-50 — and dialogs (components/ui/dialog.tsx,
+                alert-dialog.tsx) sit at z-70/z-80, that same layer again or
+                higher. Tooltips (components/ui/tooltip.tsx) sit at z-90, the
+                topmost layer above all of these, because a tooltip can be
+                anchored to a trigger inside any of them and must remain
+                readable. */}
             <div className="relative z-55" data-testid="alarm-banner-stack">
               <AlarmBanner
                 alarms={alarms}

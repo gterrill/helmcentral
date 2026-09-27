@@ -22,8 +22,14 @@ const PopoverContent = React.forwardRef<
   }
 >(({ className, children, sideOffset = 4, align = "center", side, anchor, ...props }, ref) => (
   <PopoverPrimitive.Portal>
+    {/* z-85, not the usual z-60: a popover's trigger commonly lives inside a
+        sheet (z-70) or dialog (z-80) - the note editor's Link and Image
+        buttons in the documents viewer sheet are the case that exposed this
+        - and the popup still needs to draw on top of whichever one it's in.
+        Below tooltip (z-90), the one layer that must outrank everything.
+        ADR 0139, amending the z-60 this had under ADR 0107. */}
     <PopoverPrimitive.Positioner
-      className="isolate z-60"
+      className="isolate z-85"
       sideOffset={sideOffset}
       align={align}
       side={side}
@@ -32,7 +38,7 @@ const PopoverContent = React.forwardRef<
       <PopoverPrimitive.Popup
         ref={ref}
         className={cn(
-          "relative z-60 rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
+          "relative z-85 rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
           className
         )}
         {...props}
