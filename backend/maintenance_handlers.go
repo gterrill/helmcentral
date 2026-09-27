@@ -322,6 +322,7 @@ func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest) (maintenanc
 	}
 
 	parts := make([]maintenanceLogPartInput, 0, len(req.Parts))
+	seenParts := make(map[string]bool, len(req.Parts))
 	for _, p := range req.Parts {
 		id := strings.TrimSpace(p.EquipmentID)
 		if id == "" {
@@ -330,6 +331,18 @@ func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest) (maintenanc
 		if p.Quantity <= 0 {
 			return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "parts", Message: "a part's quantity must be greater than zero"}
 		}
+		// maintenance_log_parts' own PRIMARY KEY is (log_entry_id,
+		// equipment_id) - the same part named twice would otherwise reach
+		// insertMaintenanceLogPartsTx's second INSERT as a raw UNIQUE
+		// constraint violation (a 500 with no field to point the caller
+		// at), rather than the clean 400 a request-shape problem deserves.
+		// The frontend's own parts picker already merges a repeated pick
+		// into one row with a summed quantity; this is the same rule
+		// enforced server-side for any other caller.
+		if seenParts[id] {
+			return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "parts", Message: "a part can only be listed once - combine the quantity instead"}
+		}
+		seenParts[id] = true
 		parts = append(parts, maintenanceLogPartInput{EquipmentID: id, Quantity: p.Quantity})
 	}
 

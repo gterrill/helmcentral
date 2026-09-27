@@ -525,6 +525,30 @@ func TestCreateMaintenanceLogEntryHandler_RequiresEquipmentAndKind(t *testing.T)
 	}
 }
 
+// TestCreateMaintenanceLogEntryHandler_DuplicatePartReturns400 pins the
+// code-review finding: the same equipment_id listed twice in parts used to
+// reach maintenance_log_parts' own (log_entry_id, equipment_id) PRIMARY KEY
+// unvalidated, so the second INSERT inside CreateMaintenanceLogEntry's
+// transaction failed as a raw constraint violation and surfaced as an
+// opaque 500 instead of a clean, caller-fixable 400.
+func TestCreateMaintenanceLogEntryHandler_DuplicatePartReturns400(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	spare, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Impeller (spare)", Category: "general"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+
+	body := `{"equipment_id":"` + engine.ID + `","performed_at":"2026-06-01","kind":"repair","parts":[{"equipment_id":"` + spare.ID + `","quantity":1},{"equipment_id":"` + spare.ID + `","quantity":2}]}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/log", body, "")
+	if err := createMaintenanceLogEntryHandler(c); err != nil {
+		t.Fatalf("createMaintenanceLogEntryHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a duplicated part, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMaintenanceLogEntryHandlers_CRUD(t *testing.T) {
 	withTestDocumentStore(t)
 	engine := mustCreateHandlerTestEquipment(t, "Generator")
