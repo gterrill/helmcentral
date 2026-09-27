@@ -187,6 +187,94 @@ func TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUncha
 
 func ptrString(s string) *string { return &s }
 
+// TestDocumentStore_CompleteMaintenanceRuleOlderThanBaselineWritesLogButKeepsBaseline
+// pins the code-review finding: a back-filled old service (performed_at
+// earlier than the rule's current last_done_at) must still be written to
+// the log, but must NOT move the baseline backward - the rule's own
+// last_done_at/last_done_hours, fixed_due_date and acknowledgement are only
+// ever moved forward by a completion that is on or after the existing
+// baseline.
+func TestDocumentStore_CompleteMaintenanceRuleOlderThanBaselineWritesLogButKeepsBaseline(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	hours := 250.0
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	priorHours := 1000.0
+	if _, err := store.SetMaintenanceRuleLastDone(rule.ID, ptrString("2026-06-01"), &priorHours); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+	if _, err := store.AcknowledgeMaintenanceRule(rule.ID, "waiting on parts"); err != nil {
+		t.Fatalf("AcknowledgeMaintenanceRule: %v", err)
+	}
+
+	updated, entry, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{
+		PerformedAt: "2026-01-01",
+		Hours:       ptrFloat(500),
+		Description: "Back-filled an old service",
+	}, "")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if entry.PerformedAt != "2026-01-01" {
+		t.Fatalf("expected the log entry to be written with the back-filled date, got %+v", entry)
+	}
+	if updated.LastDoneAt != "2026-06-01" {
+		t.Fatalf("expected the baseline date to stay at 2026-06-01, got %q", updated.LastDoneAt)
+	}
+	if updated.LastDoneHours == nil || *updated.LastDoneHours != priorHours {
+		t.Fatalf("expected the baseline hours to stay at %v, got %+v", priorHours, updated.LastDoneHours)
+	}
+	if !updated.Acknowledged || updated.AckReason != "waiting on parts" {
+		t.Fatalf("expected the acknowledgement to survive an older completion, got %+v", updated)
+	}
+
+	entries, err := store.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: item.ID})
+	if err != nil {
+		t.Fatalf("ListMaintenanceLogEntries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].PerformedAt != "2026-01-01" {
+		t.Fatalf("expected the back-filled entry in the log, got %+v", entries)
+	}
+}
+
+// TestDocumentStore_CompleteMaintenanceRuleOnOrAfterBaselineMovesBaseline
+// pins the other half: a completion dated on or after the rule's existing
+// baseline moves it forward as before, including clearing the
+// acknowledgement.
+func TestDocumentStore_CompleteMaintenanceRuleOnOrAfterBaselineMovesBaseline(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	hours := 250.0
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	priorHours := 1000.0
+	if _, err := store.SetMaintenanceRuleLastDone(rule.ID, ptrString("2026-06-01"), &priorHours); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+	if _, err := store.AcknowledgeMaintenanceRule(rule.ID, "waiting on parts"); err != nil {
+		t.Fatalf("AcknowledgeMaintenanceRule: %v", err)
+	}
+
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{
+		PerformedAt: "2026-06-01",
+		Hours:       ptrFloat(1050),
+	}, "")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if updated.LastDoneAt != "2026-06-01" || updated.LastDoneHours == nil || *updated.LastDoneHours != 1050 {
+		t.Fatalf("expected the baseline to move to the same-day completion, got %+v", updated)
+	}
+	if updated.Acknowledged || updated.AckReason != "" {
+		t.Fatalf("expected an on-or-after completion to clear the acknowledgement, got %+v", updated)
+	}
+}
+
 // TestDocumentStore_CompleteMaintenanceRuleAdvancesFixedDueDate pins the
 // code-review finding: completing a fixed-due-date rule (a certificate or
 // expiry with no interval_months to compute a next date from) used to

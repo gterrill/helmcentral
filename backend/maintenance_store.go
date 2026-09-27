@@ -953,26 +953,38 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 		return maintenanceRule{}, maintenanceLogEntry{}, err
 	}
 
-	// Blank hours must never wipe an hours baseline the rule already
-	// carries - completing a months-only rule with no hours given says
-	// nothing about hours at all, and validateMaintenanceLogEntryCore's own
-	// caller (completeMaintenanceRuleHandler) already refuses a blank hours
-	// value outright when the rule's own IntervalHours is set, so by the
-	// time this runs, in.Hours == nil only ever means "this completion had
-	// nothing to say about hours," never "clear it."
-	lastDoneHours := rule.LastDoneHours
-	if in.Hours != nil {
-		lastDoneHours = in.Hours
-	}
+	// The log entry above is written unconditionally - a back-filled old
+	// service still belongs in the history. The baseline itself only ever
+	// moves FORWARD, though: a completion dated before the rule's existing
+	// last_done_at is an old record being added after the fact, not a new
+	// most-recent service, so it must not move last_done_at/last_done_hours
+	// backward, re-derive fixed_due_date from an earlier date, or clear an
+	// acknowledgement that was made about the current, later baseline. A
+	// rule with no baseline yet (LastDoneAt == "") always counts as older,
+	// so its first completion still sets it.
+	if rule.LastDoneAt == "" || in.PerformedAt >= rule.LastDoneAt {
+		// Blank hours must never wipe an hours baseline the rule already
+		// carries - completing a months-only rule with no hours given says
+		// nothing about hours at all, and validateMaintenanceLogEntryCore's
+		// own caller (completeMaintenanceRuleHandler) already refuses a
+		// blank hours value outright when the rule's own IntervalHours is
+		// set, so by the time this runs, in.Hours == nil only ever means
+		// "this completion had nothing to say about hours," never "clear
+		// it."
+		lastDoneHours := rule.LastDoneHours
+		if in.Hours != nil {
+			lastDoneHours = in.Hours
+		}
 
-	fixedDueDate := rule.FixedDueDate
-	if rule.FixedDueDate != "" && newFixedDueDate != "" {
-		fixedDueDate = newFixedDueDate
-	}
+		fixedDueDate := rule.FixedDueDate
+		if rule.FixedDueDate != "" && newFixedDueDate != "" {
+			fixedDueDate = newFixedDueDate
+		}
 
-	if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, fixed_due_date = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
-		in.PerformedAt, lastDoneHours, fixedDueDate, now.Unix(), ruleID); err != nil {
-		return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
+		if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, fixed_due_date = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
+			in.PerformedAt, lastDoneHours, fixedDueDate, now.Unix(), ruleID); err != nil {
+			return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
+		}
 	}
 
 	updatedRule, err := maintenanceRuleByID(tx, ruleID)
@@ -1081,8 +1093,9 @@ func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) 
 
 // RecordHourMeterReset stores a meter-replacement history row (spec §2) -
 // old reading, new reading, the date it happened. This is pure history;
-// latestMeterOffsetHours (maintenance_hours.go) is what turns it into the
-// live offset the status engine actually uses.
+// offsetInForceAt (maintenance_hours.go) is what turns it into the offset a
+// live reading or an operator-typed gauge reading (gaugeToTrueHours) is
+// actually converted with.
 func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, newReading float64, changedAt string) (hourMeterReset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1118,10 +1131,11 @@ func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, new
 // tie-broken by id) - not by created_at, which only says when the row was
 // entered and can disagree with ChangedAt for a back-filled reset. The
 // equipment editor's own display of past replacements, and the input
-// latestMeterOffsetHours (maintenance_hours.go) resolves into a live
-// offset - both read this same order, so the editor's own "most recent
-// replacement" line can never disagree with which reset the status engine
-// is actually using.
+// offsetInForceAt (maintenance_hours.go) resolves into an offset - both
+// read this same order (offsetInForceAt trusts it, taking the first match
+// rather than re-sorting), so the editor's own "most recent replacement"
+// line can never disagree with which reset the status engine is actually
+// using.
 func (s *documentStore) ListHourMeterResets(equipmentID string) ([]hourMeterReset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
