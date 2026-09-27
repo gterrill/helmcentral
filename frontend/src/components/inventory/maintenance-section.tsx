@@ -16,6 +16,7 @@ import {
   completeMaintenanceRule,
   createMaintenanceRule,
   deleteMaintenanceRule,
+  hoursAsOfLabel,
   maintenanceLogExportURL,
   setMaintenanceRuleLastDone,
   updateMaintenanceRule,
@@ -187,7 +188,20 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                           </button>
                           {rule.hours_unknown && (
                             <span className="truncate text-[10px] text-muted-foreground">
-                              {rule.has_hour_meter_path ? 'Hours unknown/stale' : 'No hour meter bound'}
+                              {rule.has_hour_meter_path ? 'Hours unknown' : 'No hour meter bound'}
+                            </span>
+                          )}
+                          {/* Only for a rule whose own status actually reads
+                              the hours axis - an hour meter's age is not
+                              interesting on a purely calendar-based rule
+                              just because its item happens to have one.
+                              2026-09-27 amendment: purely informational,
+                              never a staleness warning - a live reading
+                              never goes stale (an hour meter only has a
+                              reading while its engine runs). */}
+                          {!rule.hours_unknown && rule.interval_hours != null && hoursAsOfLabel(rule.hours_as_of) && (
+                            <span className="truncate text-[10px] text-muted-foreground">
+                              {hoursAsOfLabel(rule.hours_as_of)}
                             </span>
                           )}
                         </div>

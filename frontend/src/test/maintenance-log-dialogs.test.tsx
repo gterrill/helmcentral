@@ -31,7 +31,7 @@ function makeRule(overrides: Partial<MaintenanceRule> = {}): MaintenanceRule {
     last_done_hours: null, profile_service_id: '', procedure_note_id: '',
     ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
     status: 'due_soon', remaining_hours: null, remaining_days: null,
-    hours_unknown: false, has_hour_meter_path: true, hours_stale_since: null, current_hours: null,
+    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
     ...overrides,
   }
 }
@@ -153,7 +153,7 @@ describe('MaintenanceCompleteDialog: hours required', () => {
 
     render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={onComplete} />)
 
-    expect(screen.getByText(/unknown or stale/i)).toBeInTheDocument()
+    expect(screen.getByText(/never been received/i)).toBeInTheDocument()
     const completeButton = screen.getByRole('button', { name: 'Complete' })
     expect(completeButton).toBeDisabled()
 
@@ -167,6 +167,19 @@ describe('MaintenanceCompleteDialog: hours required', () => {
     const rule = makeRule({ interval_hours: 250, current_hours: 987.5 })
     render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Complete' })).not.toBeDisabled()
+  })
+
+  // Code-review finding 3: an old live reading is never a warning - it is
+  // shown as "as of <age>", never "unknown or stale". Finding 4: the value
+  // shown/prefilled here is explicitly labelled as the GAUGE reading, since
+  // that's what current_hours now carries.
+  it('shows the live reading\'s own age instead of a staleness warning', () => {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const rule = makeRule({ interval_hours: 250, current_hours: 987.5, hours_as_of: sixHoursAgo })
+    render(<MaintenanceCompleteDialog rule={rule} onCancel={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.getByLabelText(/Hours \(gauge reading\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Live reading, as of/)).toBeInTheDocument()
+    expect(screen.queryByText(/unknown or stale/i)).not.toBeInTheDocument()
   })
 })
 

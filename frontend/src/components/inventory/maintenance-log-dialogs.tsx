@@ -19,6 +19,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import {
   deleteMaintenanceLogPhoto,
+  hoursAsOfLabel,
   uploadMaintenanceLogPhoto,
   type MaintenanceLogEntry,
   type MaintenanceLogEntryInput,
@@ -278,7 +279,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="maintenance-complete-hours">
-                    Hours{rule && requiresHoursNow(rule) ? ' (required)' : ''}
+                    Hours (gauge reading){rule && requiresHoursNow(rule) ? ' (required)' : ''}
                   </FieldLabel>
                   <Input
                     id="maintenance-complete-hours"
@@ -287,12 +288,26 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                     value={form.hours}
                     onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))}
                   />
-                  {rule && requiresHoursNow(rule) && rule.current_hours == null && (
-                    <FieldDescription>
-                      {rule.has_hour_meter_path
-                        ? 'The live reading is unknown or stale - enter the current hours from the gauge.'
-                        : 'This item has no live hour meter - enter the current hours from the gauge.'}
-                    </FieldDescription>
+                  {/* Always the figure on the physical gauge, never true
+                      hours - the server adds whichever meter-reset offset
+                      applies when it stores this (2026-09-27 amendment,
+                      docs/adr/0138). A live reading never goes stale (an
+                      hour meter only has a reading while its engine runs),
+                      so a prefilled value just says how old it is; only a
+                      genuinely never-received reading asks the operator to
+                      read the gauge themselves. */}
+                  {rule && rule.current_hours != null ? (
+                    hoursAsOfLabel(rule.hours_as_of) && (
+                      <FieldDescription>Live reading, {hoursAsOfLabel(rule.hours_as_of)}.</FieldDescription>
+                    )
+                  ) : (
+                    rule && requiresHoursNow(rule) && (
+                      <FieldDescription>
+                        {rule.has_hour_meter_path
+                          ? 'The live reading has never been received - enter the current reading from the gauge.'
+                          : 'This item has no live hour meter - enter the current reading from the gauge.'}
+                      </FieldDescription>
+                    )
                   )}
                 </Field>
               </div>
@@ -529,7 +544,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
             </Field>
           </div>
           <Field>
-            <FieldLabel htmlFor="maintenance-log-hours">Hours</FieldLabel>
+            <FieldLabel htmlFor="maintenance-log-hours">Hours (gauge reading)</FieldLabel>
             <Input id="maintenance-log-hours" type="number" inputMode="decimal" value={form.hours} onChange={(e) => updateForm((p) => ({ ...p, hours: e.target.value }))} />
           </Field>
           <Field>

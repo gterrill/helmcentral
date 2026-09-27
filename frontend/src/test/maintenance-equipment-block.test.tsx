@@ -16,7 +16,7 @@ function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
     last_done_hours: null, profile_service_id: 'engine-oil', procedure_note_id: '',
     ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
     status: 'never_recorded', remaining_hours: null, remaining_days: null,
-    hours_unknown: false, has_hour_meter_path: true, hours_stale_since: null, current_hours: null,
+    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
     ...overrides,
   }
 }

@@ -3,6 +3,7 @@ import { apiBaseUrl } from '@/config/api'
 import { readErrorMessage } from '@/lib/api-error'
 import { InventoryValidationError, type InventoryFieldError } from '@/hooks/use-inventory'
 import { todayISO } from '@/lib/local-date'
+import { formatDataAge } from '@/lib/staleness'
 
 // ADR 0138's 2026-09-27 amendment: every endpoint below that returns a rule
 // view with a computed status requires the operator's own local calendar
@@ -71,7 +72,17 @@ export interface MaintenanceRule {
   remaining_days: number | null
   hours_unknown: boolean
   has_hour_meter_path: boolean
-  hours_stale_since: string | null
+  /** RFC3339, set whenever current_hours is - when this reading was last
+   * received (2026-09-27 amendment: an hour meter's last value is always
+   * current, however old, since it only changes while its engine runs - it
+   * never goes "stale" the way an ordinary telemetry path does). Show it as
+   * "as of <time>", never as a staleness warning - hoursAsOfLabel below. */
+  hours_as_of: string | null
+  /** The item's own live GAUGE (raw meter) reading right now, not true
+   * hours - what every "Hours" field below prefills itself with, since the
+   * operator always works in gauge readings (2026-09-27 amendment); the
+   * server adds whichever meter-reset offset applies when it stores
+   * whatever is actually submitted. */
   current_hours: number | null
 }
 
@@ -499,3 +510,24 @@ export const MAINTENANCE_STATUS_LABELS: Record<MaintenanceStatus, string> = {
 export const MAINTENANCE_STATUS_ORDER: MaintenanceStatus[] = [
   'overdue', 'due_soon', 'never_recorded', 'hours_unknown', 'interval_not_set', 'ok',
 ]
+
+/**
+ * "as of <age> ago" for a rule's own hours_as_of - null when there's
+ * nothing to show (no reading, or an unparseable timestamp). Reuses
+ * lib/staleness.ts's formatDataAge, the same compact age formatter every
+ * live-reading badge in the app already uses, so this can never disagree
+ * with what a tile bound to the same kind of reading already shows.
+ *
+ * 2026-09-27 amendment: an hour meter's last received value is always the
+ * current reading (maintenance_hours.go's own currentEquipmentHours) - this
+ * label exists to say how long ago that was, never to warn that the figure
+ * might be stale or untrustworthy.
+ */
+export function hoursAsOfLabel(hoursAsOf: string | null): string | null {
+  if (!hoursAsOf) return null
+  const ms = Date.parse(hoursAsOf)
+  if (Number.isNaN(ms)) return null
+  const ageSeconds = (Date.now() - ms) / 1000
+  if (ageSeconds < 0) return null
+  return `as of ${formatDataAge(ageSeconds)} ago`
+}
