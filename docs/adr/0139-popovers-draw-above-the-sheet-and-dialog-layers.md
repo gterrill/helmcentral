@@ -34,12 +34,11 @@ The ladder this leaves:
 | Layer | z |
 | --- | --- |
 | Sheet backdrop | 50 |
-| Select popup | 50 |
 | Live alarm banner | 55 |
 | Header, page selector, dropdown menus | 60 |
 | Sheet panel, dialog and alert-dialog backdrop | 70 |
 | Dialog and alert-dialog content | 80 |
-| Popover | 85 |
+| Popover, select popup | 85 |
 | Tooltip | 90 |
 
 The rule underneath it: a surface a trigger can live *inside* has to draw
@@ -66,6 +65,11 @@ a Select inside a `DialogContent`. It is the same defect and it needs the
 same treatment, but it is a different component with a different call site to
 verify, so it is its own change rather than a rider on this one.
 
+*Amended 2026-09-28:* that change followed immediately. `select.tsx` moves to
+`z-85` alongside the popover, with its own stacking test, so the Item picker
+opens over the dialog that holds it. The table above stands with Select read
+as `z-85`, and the rule underneath it now has two components obeying it.
+
 ## Consequences
 
 - A dialog or alert dialog opened from *inside* an open popover would now
@@ -80,6 +84,11 @@ verify, so it is its own change rather than a rider on this one.
   `tooltip-stacking.test.tsx` already pins tooltips: the popup and its
   positioner both above sheet and dialog, below tooltip. The ladder is now
   asserted in two places rather than described in comments alone.
+  `src/test/select-stacking.test.tsx` (the amendment above) pins the same
+  ordering for Select. Both read the sheet, dialog and tooltip figures off
+  the real rendered components through `src/test/helpers/z-ladder.tsx` rather
+  than a copied literal, so a future change to any one surface's z-index
+  fails the other two instead of leaving them green against a stale number.
 
 ## Related
 
