@@ -31,7 +31,7 @@ export function IgnoredSensorsList() {
   return (
     <FieldSet>
       <FieldLegend variant="label">Ignored sensors</FieldLegend>
-      <p className="mt-1 text-[11px] text-muted-foreground">
+      <p className="mt-1 text-xs text-muted-foreground">
         Sensors excluded from the frozen, impossible-reading and silent-source checks, added from each alarm
         card&apos;s own &quot;Ignore this sensor&quot; action.
       </p>
@@ -43,7 +43,7 @@ export function IgnoredSensorsList() {
         )}
         {identifiers.map((identifier) => (
           <div key={identifier} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5">
-            <span className="min-w-0 truncate font-mono text-[11px] text-foreground">{identifier}</span>
+            <span className="min-w-0 truncate font-mono text-xs text-foreground">{identifier}</span>
             <Button
               type="button"
               size="sm"

@@ -113,7 +113,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                 )}
               >
                 <span className="w-full truncate text-sm">{conversation.title}</span>
-                <span className="text-[11px] text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
+                <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
               </button>
             ))
           )}

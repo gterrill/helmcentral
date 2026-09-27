@@ -187,7 +187,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                             {rule.description}
                           </button>
                           {rule.hours_unknown && (
-                            <span className="truncate text-[10px] text-muted-foreground">
+                            <span className="truncate text-xs text-muted-foreground">
                               {rule.has_hour_meter_path ? 'Hours unknown' : 'No hour meter bound'}
                             </span>
                           )}
@@ -200,7 +200,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                               never goes stale (an hour meter only has a
                               reading while its engine runs). */}
                           {!rule.hours_unknown && rule.interval_hours != null && hoursAsOfLabel(rule.hours_as_of) && (
-                            <span className="truncate text-[10px] text-muted-foreground">
+                            <span className="truncate text-xs text-muted-foreground">
                               {hoursAsOfLabel(rule.hours_as_of)}
                             </span>
                           )}
@@ -211,7 +211,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           {rule.acknowledged && (
-                            <Badge variant="outline" className="gap-1 text-[10px]" title={rule.ack_reason}>
+                            <Badge variant="outline" className="gap-1 text-xs" title={rule.ack_reason}>
                               Ack
                             </Badge>
                           )}

@@ -538,7 +538,7 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
         <p role="alert" className="text-xs text-destructive">{saveError}</p>
       )}
       <div className="flex items-center justify-end gap-2">
-        {dirty && <span className="text-[11px] text-muted-foreground">Unsaved changes</span>}
+        {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
         <Button type="button" disabled={!dirty || saving} onClick={() => { void handleSave() }}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
@@ -940,7 +940,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
               <span className="truncate">Add from library</span>
             </Button>
           </div>
-          {uploading && <p className="text-[11px] text-muted-foreground">Uploading…</p>}
+          {uploading && <p className="text-xs text-muted-foreground">Uploading…</p>}
 
           <div className="h-px bg-border" aria-hidden="true" />
 
@@ -960,7 +960,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
             disabled={uploading}
           />
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-          {notice && <p role="status" className="text-[11px] text-muted-foreground">{notice}</p>}
+          {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
           <Button type="button" size="sm" disabled={uploading} onClick={submitDocId}>Insert photo</Button>
         </div>
       </PopoverContent>

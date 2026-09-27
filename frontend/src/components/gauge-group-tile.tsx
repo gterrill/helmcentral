@@ -90,7 +90,7 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
           // exhaustTemperature stayed small beside a sibling that matched.
           const labelTrackingClass = isHero ? 'tracking-[0.16em]' : 'tracking-[0.14em]'
           const readoutSizeClass = isHero ? 'text-4xl' : 'text-lg'
-          const unitSizeClass = isHero ? 'text-xs' : 'text-[10px]'
+          const unitSizeClass = 'text-xs'
           const readoutGapClass = isHero ? 'gap-1' : 'gap-0.5'
           const panelClass = isHero
             ? 'rounded-md border bg-background/60 px-3 py-3'
@@ -110,7 +110,7 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
                 <span className={`flex min-w-0 items-center gap-1 text-[10px] uppercase ${labelTrackingClass} text-muted-foreground`}>
                   <span className="truncate">{label}</span>
                   {r.stale && (
-                    <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                    <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400">
                       Stale {formatDataAge(r.age)}
                     </span>
                   )}

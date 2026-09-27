@@ -2001,7 +2001,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
                 {isSelected && (
                   <button
                     onClick={(e) => handleRemovePlacemark(e, pm.id)}
-                    className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm hover:bg-white/25 active:scale-95"
+                    className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm hover:bg-white/25 active:scale-95"
                     style={{ transition: 'background-color 150ms ease-out' }}
                   >
                     Remove
@@ -2019,14 +2019,14 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
             <div className="flex flex-col items-center" data-testid="pin-candidate">
               <MapPin className="h-6 w-6 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" />
               <div className="mt-1 flex items-center gap-1.5 rounded-full bg-black/80 py-1 pl-2.5 pr-1 backdrop-blur-sm">
-                <span className="whitespace-nowrap font-mono text-[11px] text-white">
+                <span className="whitespace-nowrap font-mono text-xs text-white">
                   {formatRange(Math.round(haversineMeters(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon)))}
                   {' · '}
                   {Math.round(bearingDeg(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon))}°
                 </span>
                 <button
                   onClick={handleConfirmPin}
-                  className="rounded-full bg-fuchsia-500/90 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-fuchsia-400 active:scale-95"
+                  className="rounded-full bg-fuchsia-500/90 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-fuchsia-400 active:scale-95"
                   style={{ transition: 'background-color 150ms ease-out' }}
                 >
                   Pin
@@ -2153,7 +2153,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
                 />
                 <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                   {value}
-                  <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
+                  <span className="ml-0.5 text-xs text-white/80">{unit}</span>
                 </p>
               </div>
             ) : (
@@ -2161,13 +2161,13 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
                 {value}
                 {reason ? (
                   <span
-                    className="ml-1 inline-block max-w-[9rem] truncate align-bottom text-[11px] text-white/80"
+                    className="ml-1 inline-block max-w-[9rem] truncate align-bottom text-xs text-white/80"
                     title={reason}
                   >
                     {reason}
                   </span>
                 ) : (
-                  <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
+                  <span className="ml-0.5 text-xs text-white/80">{unit}</span>
                 )}
               </p>
             )}
@@ -2316,7 +2316,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
               {adjustMovedLabel && (
                 <div
                   data-testid="anchor-adjust-moved-label"
-                  className="absolute top-6 whitespace-nowrap rounded bg-black/85 px-2 py-0.5 text-[10px] font-medium tracking-wide text-white"
+                  className="absolute top-6 whitespace-nowrap rounded bg-black/85 px-2 py-0.5 text-xs font-medium tracking-wide text-white"
                 >
                   {adjustMovedLabel}
                 </div>

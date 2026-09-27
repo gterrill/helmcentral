@@ -43,16 +43,17 @@ test('the % after the SoC numeral is a unit suffix, not the readout', () => {
   expect(percent).toHaveClass('text-muted-foreground')
 })
 
-test('no text-[11px] element is also a shouting uppercase label', () => {
-  // The micro-typography scale reserves text-[11px] for sub-readouts and
-  // text-[10px] for uppercase labels; the two must never mix on one element.
+test('no text-xs sub-readout element is also a shouting uppercase label', () => {
+  // The micro-typography scale reserves text-xs (tabular-nums, font-display)
+  // for sub-readouts and text-[10px] for uppercase labels; the two must
+  // never mix on one element. Scoped to the tabular-nums sub-readouts rather
+  // than every text-xs element, since the Tile header itself is a legitimate
+  // text-xs uppercase label unrelated to this tile's own readouts.
   const { container } = render(<BatteryPowerTile {...baseProps} />)
 
-  const elevenPx = Array.from(container.querySelectorAll('*')).filter((el) =>
-    el.classList.contains('text-[11px]'),
-  )
-  expect(elevenPx.length).toBeGreaterThan(0)
-  for (const el of elevenPx) {
+  const subReadouts = Array.from(container.querySelectorAll('.text-xs.tabular-nums'))
+  expect(subReadouts.length).toBeGreaterThan(0)
+  for (const el of subReadouts) {
     expect(el.classList.contains('uppercase')).toBe(false)
   }
 })

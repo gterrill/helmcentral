@@ -496,7 +496,7 @@ export function RoutePlannerMap({
 
         {legs.map((leg) => (
           <Marker key={leg.key} latitude={leg.midLat} longitude={leg.midLon}>
-            <div className="pointer-events-none whitespace-nowrap rounded-sm bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+            <div className="pointer-events-none whitespace-nowrap rounded-sm bg-black/60 px-1.5 py-0.5 text-xs text-white">
               {formatNm(leg.distanceM)} / {leg.bearing}°
             </div>
           </Marker>

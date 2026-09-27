@@ -53,14 +53,14 @@ function AlternatorColumn({ label, data }: { label?: string; data: AlternatorDat
           <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Amps</p>
           <div className="flex items-baseline gap-0.5">
             <span className="font-display text-lg tabular-nums leading-none text-foreground">{currentLabel}</span>
-            <span className="text-[10px] leading-none text-muted-foreground">A</span>
+            <span className="text-xs leading-none text-muted-foreground">A</span>
           </div>
         </div>
         <div className="rounded-md border bg-background/60 px-2 py-2">
           <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Volts</p>
           <div className="flex items-baseline gap-0.5">
             <span className="font-display text-lg tabular-nums leading-none text-foreground">{voltageLabel}</span>
-            <span className="text-[10px] leading-none text-muted-foreground">V</span>
+            <span className="text-xs leading-none text-muted-foreground">V</span>
           </div>
         </div>
       </div>
@@ -71,7 +71,7 @@ function AlternatorColumn({ label, data }: { label?: string; data: AlternatorDat
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Temp</p>
           <div className="flex items-baseline gap-0.5">
             <span className={`font-display text-xl tabular-nums leading-none ${tempClass(data.temperatureC)}`}>{tempLabel}</span>
-            <span className="text-[10px] leading-none text-muted-foreground">C</span>
+            <span className="text-xs leading-none text-muted-foreground">C</span>
           </div>
         </div>
       )}

@@ -66,7 +66,7 @@ export const DepthTideTile = memo(function DepthTideTile({
     >
       <Tile title="Depth & Tide" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
         <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
           <div className="mt-1 flex items-center gap-4">
             <div className="shrink-0">
               <p className="font-display text-4xl text-gauge-secondary">
@@ -95,7 +95,7 @@ export const DepthTideTile = memo(function DepthTideTile({
           </div>
         </div>
         <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
             Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
           </p>
           <div className="mt-1 flex items-baseline gap-2">

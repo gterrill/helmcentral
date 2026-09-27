@@ -136,7 +136,7 @@ export const ClockTile = memo(function ClockTile({
             room the layout fix needs. */}
         <div className="truncate rounded-md bg-gauge-secondary/10 px-3 py-1 leading-tight">
           <div className="truncate font-display text-lg text-gauge-secondary">{placeName ?? '—'}</div>
-          <p data-testid="clock-eta" className="truncate text-[11px] text-muted-foreground">
+          <p data-testid="clock-eta" className="truncate text-xs text-muted-foreground">
             {etaLabel}
           </p>
         </div>

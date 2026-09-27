@@ -161,7 +161,7 @@ export function EngineProfileDialog({
               {problems.length} profile{problems.length === 1 ? '' : 's'} failed to load
             </p>
             {problems.map((problem) => (
-              <p key={problem.file} className="truncate text-[11px] text-muted-foreground">
+              <p key={problem.file} className="truncate text-xs text-muted-foreground">
                 {problem.file}: {problem.error}
               </p>
             ))}
@@ -252,7 +252,7 @@ export function EngineProfileDialog({
                 </div>
 
                 {profile.notes && (
-                  <p className="mt-2 text-[11px] text-muted-foreground">{profile.notes}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{profile.notes}</p>
                 )}
               </div>
             )}
@@ -296,11 +296,11 @@ function GaugeRow({ gauge, instance }: { gauge: EngineProfileGauge; instance: st
           {gauge.min ?? 0}–{gauge.max ?? 100} {unit}
         </span>
       </div>
-      <span className="truncate text-[10px] text-muted-foreground">
+      <span className="truncate text-xs text-muted-foreground">
         {instance.trim().replace(/\.+$/, '') || '…'}.{gauge.path_suffix}
       </span>
       {(gauge.zones ?? []).map((zone, index) => (
-        <span key={index} className="truncate text-[11px] text-muted-foreground">
+        <span key={index} className="truncate text-xs text-muted-foreground">
           {zone.state === 'normal' ? 'Healthy' : zone.state} · {zone.direction}{' '}
           {zone.threshold === null || zone.threshold === undefined
             ? <span className="text-muted-foreground">not set{zone.note ? ` — ${zone.note}` : ''}</span>

@@ -56,8 +56,9 @@ test('sizes the stale badge at the sanctioned micro-label tier, not the map-anno
   )
 
   const badge = screen.getByTestId('tile-stale-badge')
-  expect(badge).toHaveClass('text-[10px]')
+  expect(badge).toHaveClass('text-xs')
   expect(badge).not.toHaveClass('text-[9px]')
+  expect(badge).not.toHaveClass('text-[10px]')
 })
 
 test('shows the update age inside the badge itself, not only behind a hover tooltip', () => {

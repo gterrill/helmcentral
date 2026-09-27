@@ -164,7 +164,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
                   placeholder="GEN"
                 />
               </Field>
-              <label className="flex h-9 items-center gap-1 text-[11px] text-muted-foreground">
+              <label className="flex h-9 items-center gap-1 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
                   aria-label={`Lamp ${index + 1} lights when off`}

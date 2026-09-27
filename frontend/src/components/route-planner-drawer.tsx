@@ -194,7 +194,7 @@ export function RoutePlannerDrawer({
           <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Saved Routes</h3>
           {activationStatus.state === 'unknown' && (
             <span
-              className="flex items-center gap-1 text-[10px] text-muted-foreground"
+              className="flex items-center gap-1 text-xs text-muted-foreground"
               title="Could not confirm the active route from SignalK"
             >
               <CircleAlert className="h-3 w-3" /> status unknown

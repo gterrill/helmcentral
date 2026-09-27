@@ -82,21 +82,21 @@ export const SolarTile = memo(function SolarTile({
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Today</p>
           <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
             <span>{kwh(todayKWh)}</span>
-            <span className="ml-1 text-[11px] text-muted-foreground">kWh</span>
+            <span className="ml-1 text-xs text-muted-foreground">kWh</span>
           </p>
         </div>
         <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Yesterday</p>
           <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
             <span>{kwh(yesterdayKWh)}</span>
-            <span className="ml-1 text-[11px] text-muted-foreground">kWh</span>
+            <span className="ml-1 text-xs text-muted-foreground">kWh</span>
           </p>
         </div>
       </div>
 
       <div className="mt-2 space-y-1.5">
         {controllers.length === 0 && (
-          <div className="rounded-md border bg-background/60 px-3 py-2 text-[11px] text-muted-foreground">No controller data</div>
+          <div className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">No controller data</div>
         )}
 
         {controllers.map((controller) => {
@@ -129,7 +129,7 @@ export const SolarTile = memo(function SolarTile({
                   </p>
                   <p className="mt-0.5 font-display text-xl leading-none text-gauge-secondary tabular-nums">
                     <span>{cw(controller.currentW)}</span>
-                    <span className="ml-1 text-[11px] text-muted-foreground">W</span>
+                    <span className="ml-1 text-xs text-muted-foreground">W</span>
                   </p>
                   <p className="mt-1 truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Mode: <span className="text-foreground">{controllerStale ? NO_VALUE : controller.mode ?? NO_VALUE}</span>
@@ -138,7 +138,7 @@ export const SolarTile = memo(function SolarTile({
                 <div className="text-right">
                   <p className="font-display text-lg leading-none text-gauge-primary tabular-nums">
                     <span>{ckwh(controller.todayKWh)}</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">kWh</span>
+                    <span className="ml-1 text-xs text-muted-foreground">kWh</span>
                   </p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Yday: <span className="text-foreground">{ckwh(controller.yesterdayKWh)}</span> kWh

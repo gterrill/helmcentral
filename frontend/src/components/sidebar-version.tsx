@@ -24,7 +24,7 @@ export function SidebarVersion() {
     <div
       data-testid="sidebar-version"
       title={title}
-      className="truncate px-2 pb-1 text-center font-mono text-[0.6875rem] leading-none text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden"
+      className="truncate px-2 pb-1 text-center font-mono text-xs leading-none text-muted-foreground group-data-[collapsible=icon]:hidden"
     >
       {label}
     </div>

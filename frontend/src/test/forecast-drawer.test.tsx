@@ -3541,7 +3541,7 @@ describe('ForecastDrawer gauge-primary-label contrast token', () => {
 })
 
 // DESIGN.md's No Faded Small Text Rule: no low-opacity modifier at or below
-// text-[11px] (text-2xs is the named 10px step).
+// text-xs (text-2xs is the named 10px step).
 describe('ForecastDrawer faded small text', () => {
   it('does not fade the Night micro-label with an opacity modifier', () => {
     render(

@@ -56,6 +56,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Small text on tiles, drawers and settings is easier to read at the helm.
+  Secondary readouts such as voltage, charge rate, time to dawn and unit
+  suffixes were a size too small to read at arm's length in glare, and are
+  now the same size as the rest of the small print. Uppercase labels and
+  status lines that sat at that size moved up with them.
+
 - Opening Mate, from the sidebar panel or the header's quick sheet, now
   always starts a fresh, empty conversation rather than resuming whichever
   one was most recently updated - even if you were just looking at one a

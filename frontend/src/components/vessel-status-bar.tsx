@@ -35,13 +35,13 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = n
 
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-[11px] ${noSignal ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : reconnecting ? 'border-amber-300/60 bg-amber-50/60 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
+      <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-xs ${noSignal ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : reconnecting ? 'border-amber-300/60 bg-amber-50/60 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
         <Circle className={`h-2.5 w-2.5 ${noSignal ? 'fill-red-500 text-red-500' : reconnecting ? 'fill-amber-500 text-amber-500' : 'fill-secondary text-secondary'}`} />
         <span className="hidden sm:inline">{label}</span>
       </div>
       <button
         onClick={onToggleDarkMode}
-        className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-[11px]"
+        className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-xs"
         aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
       >
         {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
@@ -50,7 +50,7 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = n
       {onLogout && (
         <button
           onClick={onLogout}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-[11px]"
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-xs"
           aria-label={username ? `Log out ${username}` : 'Log out'}
         >
           <LogOut className="h-3.5 w-3.5" />
@@ -65,7 +65,7 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = n
             see. The `ch` widths and `tabular-nums` stay: they stop the clock
             jittering as digits change. */}
         {showFullClock && (
-          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-xs">
             {currentDate}
           </span>
         )}

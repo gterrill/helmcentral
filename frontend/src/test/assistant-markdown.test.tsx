@@ -104,9 +104,9 @@ describe('assistant components design tokens', () => {
     ).toEqual([])
   })
 
-  it('uses only text-[11px]/[10px]/[9px] for arbitrary micro type - AGENTS.md scale', () => {
+  it('uses only text-[10px]/[9px] for arbitrary micro type - AGENTS.md scale', () => {
     const arbitraryTextSizePattern = /text-\[[^\]]*\]/g
-    const allowed = new Set(['text-[11px]', 'text-[10px]', 'text-[9px]'])
+    const allowed = new Set(['text-[10px]', 'text-[9px]'])
 
     const offenders: string[] = []
     for (const { label, lines } of readGuardSources()) {
@@ -120,7 +120,7 @@ describe('assistant components design tokens', () => {
 
     expect(
       offenders,
-      `Found an off-scale arbitrary text size - only text-[11px]/[10px]/[9px] are allowed:\n${offenders.join('\n')}`,
+      `Found an off-scale arbitrary text size - only text-[10px]/[9px] are allowed:\n${offenders.join('\n')}`,
     ).toEqual([])
   })
 })

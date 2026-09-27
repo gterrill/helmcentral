@@ -84,7 +84,7 @@ function SecretField({ field, value, isSet, isTouched, onChange, onClear }: Secr
             placeholder={isSet ? '-----BEGIN PRIVATE KEY----- (set)' : '-----BEGIN PRIVATE KEY----- (not set)'}
             aria-label={field.label}
             rows={6}
-            className="font-mono text-[11px]"
+            className="font-mono text-xs"
           />
           {showClear && (
             <Button
