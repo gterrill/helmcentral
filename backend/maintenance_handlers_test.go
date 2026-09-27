@@ -355,6 +355,79 @@ func TestCompleteMaintenanceRuleHandler_HoursRequiredWhenIntervalHoursSet(t *tes
 	}
 }
 
+// TestCompleteMaintenanceRuleHandler_FixedDueDateRequiresNewDueDate pins the
+// code-review finding: completing a fixed-due-date rule with no
+// interval_months has no formula to compute its next due date from, so the
+// operator must supply one - refused otherwise, rather than silently
+// leaving the rule's own due date exactly where it was (which is the bug
+// this whole fix addresses).
+func TestCompleteMaintenanceRuleHandler_FixedDueDateRequiresNewDueDate(t *testing.T) {
+	withTestDocumentStore(t)
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{Description: "Liferaft service", FixedDueDate: "2026-06-01"})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-05-20"}`, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no new_due_date given, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := `{"performed_at":"2026-05-20","new_due_date":"2027-06-01"}`
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", body, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with new_due_date given, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rule maintenanceRuleView `json:"rule"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Rule.FixedDueDate != "2027-06-01" {
+		t.Fatalf("expected fixed_due_date advanced to 2027-06-01, got %q", resp.Rule.FixedDueDate)
+	}
+	if resp.Rule.Status == string(maintenanceStatusOverdue) {
+		t.Fatalf("expected the rule to no longer read overdue right after completion, got %+v", resp.Rule)
+	}
+}
+
+// TestCompleteMaintenanceRuleHandler_FixedDueDateWithIntervalMonthsIsComputed
+// covers the other half: a fixed-due-date rule that ALSO carries
+// interval_months computes its own next due date from the completion date
+// server-side, ignoring any new_due_date the request might have sent.
+func TestCompleteMaintenanceRuleHandler_FixedDueDateWithIntervalMonthsIsComputed(t *testing.T) {
+	withTestDocumentStore(t)
+	months := 12
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{Description: "Registration renewal", FixedDueDate: "2026-06-01", IntervalMonths: &months})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-05-20"}`, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (computed, no new_due_date needed), got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rule maintenanceRuleView `json:"rule"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Rule.FixedDueDate != "2027-05-20" {
+		t.Fatalf("expected fixed_due_date computed as performed_at + 12 months (2027-05-20), got %q", resp.Rule.FixedDueDate)
+	}
+}
+
 // ── procedure note ───────────────────────────────────────────────────────
 
 func TestCreateMaintenanceProcedureNoteHandler_CreatesAndLinks(t *testing.T) {

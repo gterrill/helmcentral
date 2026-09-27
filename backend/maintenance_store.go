@@ -915,7 +915,17 @@ func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) (
 // hours and clear any acknowledgement. Returns both the updated rule and
 // the entry that was written, so the handler can answer with everything
 // the frontend's Complete dialog needs re-read in one response.
-func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLogEntryInput) (maintenanceRule, maintenanceLogEntry, error) {
+//
+// newFixedDueDate is the resolved next due date for a rule that carries a
+// fixed_due_date (spec §7/completeMaintenanceRuleHandler's own doc
+// comment): whatever the caller decided it should become (already computed
+// from interval_months, or already validated as required operator input,
+// by the time this runs) - never re-derived here. It is applied only when
+// the rule ALREADY has a fixed_due_date and the value given is non-blank;
+// a blank value, or a rule with no fixed_due_date to begin with, leaves
+// fixed_due_date exactly as it was, so an ordinary hours/months rule can
+// never accidentally gain one through this path.
+func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -955,8 +965,13 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 		lastDoneHours = in.Hours
 	}
 
-	if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
-		in.PerformedAt, lastDoneHours, now.Unix(), ruleID); err != nil {
+	fixedDueDate := rule.FixedDueDate
+	if rule.FixedDueDate != "" && newFixedDueDate != "" {
+		fixedDueDate = newFixedDueDate
+	}
+
+	if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, fixed_due_date = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
+		in.PerformedAt, lastDoneHours, fixedDueDate, now.Unix(), ruleID); err != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
 	}
 

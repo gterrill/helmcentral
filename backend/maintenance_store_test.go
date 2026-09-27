@@ -101,7 +101,7 @@ func TestDocumentStore_DeleteMaintenanceRuleKeepsLogHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
-	_, entry, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-05-01", Hours: ptrFloat(120)})
+	_, entry, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-05-01", Hours: ptrFloat(120)}, "")
 	if err != nil {
 		t.Fatalf("CompleteMaintenanceRule: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestDocumentStore_CompleteMaintenanceRuleResetsBaselineAndClearsAck(t *test
 		Hours:       ptrFloat(1234.5),
 		Description: "Changed oil and filter",
 		Who:         "Skipper",
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("CompleteMaintenanceRule: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUncha
 		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
 	}
 
-	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-06-01"})
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-06-01"}, "")
 	if err != nil {
 		t.Fatalf("CompleteMaintenanceRule: %v", err)
 	}
@@ -186,6 +186,53 @@ func TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUncha
 }
 
 func ptrString(s string) *string { return &s }
+
+// TestDocumentStore_CompleteMaintenanceRuleAdvancesFixedDueDate pins the
+// code-review finding: completing a fixed-due-date rule (a certificate or
+// expiry with no interval_months to compute a next date from) used to
+// leave fixed_due_date exactly where it was, so the rule read as overdue
+// again the instant the next status check ran, no matter how recently it
+// was actually completed. newFixedDueDate is the caller-resolved next
+// date - the operator's own input for a rule with no interval_months
+// (completeMaintenanceRuleHandler requires it in that case).
+func TestDocumentStore_CompleteMaintenanceRuleAdvancesFixedDueDate(t *testing.T) {
+	store := newTestDocumentStore(t)
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{Description: "Liferaft service", FixedDueDate: "2026-06-01"})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-05-20"}, "2027-06-01")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if updated.FixedDueDate != "2027-06-01" {
+		t.Fatalf("expected fixed_due_date to advance to 2027-06-01, got %q", updated.FixedDueDate)
+	}
+}
+
+// TestDocumentStore_CompleteMaintenanceRuleIgnoresNewFixedDueDateWhenRuleHasNone
+// pins the store's own guard: a caller passing a non-blank newFixedDueDate
+// for a rule that never had a fixed_due_date at all must not turn it into
+// one - only a rule that ALREADY carries a fixed_due_date can have it
+// advanced this way.
+func TestDocumentStore_CompleteMaintenanceRuleIgnoresNewFixedDueDateWhenRuleHasNone(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Generator")
+	hours := 250.0
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-06-01", Hours: ptrFloat(100)}, "2099-01-01")
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if updated.FixedDueDate != "" {
+		t.Fatalf("expected fixed_due_date to stay empty for a rule that never had one, got %q", updated.FixedDueDate)
+	}
+}
 
 func TestDocumentStore_AcknowledgeMaintenanceRuleSetsAndClears(t *testing.T) {
 	store := newTestDocumentStore(t)

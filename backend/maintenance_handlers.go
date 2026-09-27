@@ -303,6 +303,12 @@ type maintenanceLogEntryRequest struct {
 	Cost        *float64                    `json:"cost"`
 	Currency    string                      `json:"currency"`
 	Parts       []maintenanceLogPartRequest `json:"parts"`
+	// NewDueDate is completeMaintenanceRuleHandler's own field, meaningless
+	// to the standalone create/update handlers: the next fixed_due_date for
+	// a rule that has one and no interval_months to compute it from
+	// (completeMaintenanceRuleHandler's own doc comment explains why the
+	// two cases - computed vs operator-supplied - differ).
+	NewDueDate string `json:"new_due_date"`
 }
 
 // validateMaintenanceLogEntryCore validates the fields every log-entry
@@ -604,6 +610,43 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 		})
 	}
 
+	// A fixed-due-date rule (spec §7's certificates/expiries, or an
+	// ordinary item rule that happens to carry one) must not read overdue
+	// again the instant it's completed - its own due date has to advance.
+	// Two cases, mirroring maintenance_status.go's own "fixed date wins,
+	// interval_months is the fallback formula" shape:
+	//   - interval_months set: the next due date is computed here, from
+	//     THIS completion's own date, ignoring whatever new_due_date the
+	//     request happened to carry - a formula exists, so the operator
+	//     is never asked to do the arithmetic themselves.
+	//   - interval_months not set: there is no formula at all (a one-off
+	//     expiry), so the operator's own new_due_date is required - a
+	//     blank or malformed one is refused rather than silently leaving
+	//     the rule's due date exactly where it was.
+	newFixedDueDate := ""
+	if existingRule.FixedDueDate != "" {
+		if existingRule.IntervalMonths != nil {
+			completedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
+			if parseErr != nil {
+				// performed_at already passed installDatePattern in
+				// validateMaintenanceLogEntryCore; a failure here would be
+				// this code disagreeing with itself, not an operator
+				// mistake - surfaced rather than silently skipped.
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
+			}
+			newFixedDueDate = completedAt.AddDate(0, *existingRule.IntervalMonths, 0).Format("2006-01-02")
+		} else {
+			trimmed := strings.TrimSpace(req.NewDueDate)
+			if trimmed == "" || !installDatePattern.MatchString(trimmed) {
+				return writeInventoryValidationError(c, &inventoryValidationError{
+					Field:   "new_due_date",
+					Message: "new_due_date is required and must be YYYY-MM-DD to complete a fixed-date rule with no monthly interval",
+				})
+			}
+			newFixedDueDate = trimmed
+		}
+	}
+
 	if err := checkMaintenancePartsExist(in.Parts); err != nil {
 		if errors.Is(err, errEquipmentNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -611,7 +654,7 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 
-	rule, entry, err := globalDocumentStore.CompleteMaintenanceRule(c.Param("id"), in)
+	rule, entry, err := globalDocumentStore.CompleteMaintenanceRule(c.Param("id"), in, newFixedDueDate)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
