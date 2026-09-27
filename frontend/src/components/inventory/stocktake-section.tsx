@@ -334,7 +334,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
               {scanning ? 'Stop scanning' : 'Start scanning'}
             </Button>
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Scanning with a phone needs Chrome on Android. A keyboard-wedge reader works below either way.
             </p>
           )}
@@ -348,7 +348,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
           />
         </div>
         {!canWrite && (
-          <p className="text-[11px] text-muted-foreground">This session is read-only - scans are checked but nothing is written.</p>
+          <p className="text-xs text-muted-foreground">This session is read-only - scans are checked but nothing is written.</p>
         )}
         {scanError && (
           <p role="alert" className="text-sm text-destructive">{scanError}</p>
@@ -377,7 +377,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
               {event.kind === 'confirmed' && (
                 <>
                   <span className="min-w-0 flex-1 truncate">{event.item.name}</span>
-                  <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-primary">Confirmed</span>
+                  <span className="shrink-0 text-xs font-medium uppercase tracking-wider text-primary">Confirmed</span>
                 </>
               )}
               {event.kind === 'elsewhere' && (

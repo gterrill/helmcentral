@@ -604,7 +604,7 @@ export default function PoiMapTileImpl({
                 />
               ))
             )}
-            <div className="mt-auto border-t border-border/60 pt-1 text-[10px] text-muted-foreground">
+            <div className="mt-auto border-t border-border/60 pt-1 text-xs text-muted-foreground">
               {poi.provider ? <span className="capitalize">{poi.provider.replace(/-/g, ' ')}</span> : null}
               {poi.fetchedAt && (
                 <span> · {formatDataAge((Date.now() - Date.parse(poi.fetchedAt)) / 1000)} old</span>
@@ -641,8 +641,8 @@ function PoiListRow({
       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-1">
-          <span className="truncate text-[11px] font-semibold text-foreground">{feature.name || category?.label || feature.category}</span>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          <span className="truncate text-xs font-semibold text-foreground">{feature.name || category?.label || feature.category}</span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {formatPoiDistance(feature.distanceM, distanceUnits)} {formatBearing(feature.bearingDeg)}
           </span>
         </div>
@@ -651,7 +651,7 @@ function PoiListRow({
             single truncated line every row used to carry — see
             PoiMapTileImpl's cycling effects above. */}
         {expanded && (
-          <div data-testid="poi-list-row-summary" className="mt-0.5 line-clamp-3 text-[10px] text-muted-foreground">
+          <div data-testid="poi-list-row-summary" className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">
             {feature.detail}
           </div>
         )}

@@ -10,7 +10,7 @@ import { useAlarmTransportsFormContext } from '@/components/settings/alarm-trans
 
 function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean; label: string; onChange: (v: boolean) => void }) {
   return (
-    <label htmlFor={id} className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+    <label htmlFor={id} className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
       <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
@@ -33,7 +33,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
   if (loading) {
     return (
       <Tile title="Notifications" icon={<Send className="h-3.5 w-3.5 text-gauge-secondary" />}>
-        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
+        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
       </Tile>
     )
   }
@@ -48,12 +48,12 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         </Button>
       }
     >
-      {error && <p className="mb-2 text-[11px] text-destructive">{error}</p>}
+      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
 
       {testResults && (
         <div className="mb-3 rounded-md border bg-background/60 px-3 py-2">
           {Object.entries(testResults).map(([transport, result]) => (
-            <p key={transport} className="truncate text-[11px]">
+            <p key={transport} className="truncate text-xs">
               <span className="uppercase tracking-[0.16em] text-muted-foreground">{transport}</span>{' '}
               <span className={result === 'ok' ? 'text-emerald-600' : 'text-destructive'}>{result}</span>
             </p>
@@ -65,7 +65,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         <section className="rounded-md border bg-background/60 p-3">
           <Toggle id="ntfy-enabled" checked={draft.ntfy.enabled} label="ntfy (phone push)"
             onChange={(enabled) => setSection('ntfy', { enabled })} />
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Self-host it, or use ntfy.sh free with no account. Subscribe to the same topic in the ntfy app.
           </p>
           {draft.ntfy.enabled && (
@@ -147,7 +147,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         <section className="rounded-md border bg-background/60 p-3">
           <Toggle id="signalk-enabled" checked={draft.signalk.enabled} label="Publish to SignalK"
             onChange={(enabled) => setSection('signalk', { enabled })} />
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Writes alarms back to notifications.* so a buzzer or MFD reacts. Needs no internet.
           </p>
         </section>
@@ -158,19 +158,19 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         />
 
         <section className="rounded-md border bg-background/60 p-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Watchdog</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Watchdog</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="watchdog-silence">Alarm if no SignalK data for (seconds)</FieldLabel>
               <Input id="watchdog-silence" type="number" value={draft.watchdog.stream_silence_seconds}
                 onChange={(e) => setSection('watchdog', { stream_silence_seconds: Number(e.target.value) })} />
-              <p className="text-[10px] text-muted-foreground">0 uses the default (120s).</p>
+              <p className="text-xs text-muted-foreground">0 uses the default (120s).</p>
             </Field>
             <Field>
               <FieldLabel htmlFor="watchdog-heartbeat">Heartbeat every (minutes)</FieldLabel>
               <Input id="watchdog-heartbeat" type="number" value={draft.watchdog.heartbeat_minutes}
                 onChange={(e) => setSection('watchdog', { heartbeat_minutes: Number(e.target.value) })} />
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 0 disables. A periodic "still alive" makes its absence the alarm.
               </p>
             </Field>

@@ -95,7 +95,7 @@ function MessageAttachmentChips({ attachments }: { attachments: AssistantMessage
         <a
           key={attachment.documentId}
           href={documentViewerHref(attachment.documentId)}
-          className="max-w-40 truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-primary"
+          className="max-w-40 truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-primary"
           title={attachment.filename}
         >
           {attachment.filename}
@@ -481,7 +481,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         </Marker>
       )}
 
-      {stopped && !chat.sending && <Marker className="text-[11px]">Stopped.</Marker>}
+      {stopped && !chat.sending && <Marker className="text-xs">Stopped.</Marker>}
 
       {(chat.error || conversations.errorMessage) && (
         <Bubble variant="destructive">
@@ -523,7 +523,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                 <div
                   key={item.key}
                   className={cn(
-                    'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
+                    'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
                     item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
                   )}
                 >
@@ -600,17 +600,17 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         </InputGroup>
 
         {uploads.error && (
-          <p className="text-[11px] text-destructive" role="alert">
+          <p className="text-xs text-destructive" role="alert">
             {uploads.error}
           </p>
         )}
         <DictationError dictation={dictation} />
-        {!canWrite && <p className="text-[11px] text-muted-foreground">Read-only session</p>}
+        {!canWrite && <p className="text-xs text-muted-foreground">Read-only session</p>}
         {/* Send's disabled-attachment reason is a visible line, not just a
             hover title: the operator most likely to hit this is on the wall
             kiosk or a touchscreen helm, where nothing hovers. */}
         {canWrite && attachmentWaitMessage && (
-          <p className="text-[11px] text-muted-foreground">{attachmentWaitMessage}</p>
+          <p className="text-xs text-muted-foreground">{attachmentWaitMessage}</p>
         )}
         <input
           ref={fileInputRef}

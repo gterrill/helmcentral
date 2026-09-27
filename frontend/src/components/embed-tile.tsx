@@ -131,7 +131,7 @@ export const EmbedTile = memo(function EmbedTile({
           />
         ) : (
           <div className={placeholderClassName}>
-            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
               Loading {title}...
             </span>
           </div>
@@ -193,14 +193,14 @@ export const EmbedTile = memo(function EmbedTile({
             />
           ) : (
             <div className={placeholderClassName}>
-              <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 Loading {title}...
               </span>
             </div>
           )
         ) : (
           <div className={placeholderClassName}>
-            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
               No URL configured
             </span>
             {editing && onConfigure && (

@@ -137,8 +137,8 @@ and skins, rules, dwell, hysteresis, transports, severities, plugins, providers.
 - `AGENTS.md` carries binding UI rules and outranks taste: the 60-30-10 split
   for telemetry colour, `text-gauge-*` tokens for instrument readouts with raw
   palette colours reserved for alert semantics, the standard KPI stack (muted
-  uppercase label over a large bold tabular readout), and the ban on
-  low-opacity text at or below 11px.
+  uppercase label over a large bold tabular readout), and the 12px floor
+  for values, and the ban on low-opacity text below 12px.
 
 ## Evidence on Hand
 

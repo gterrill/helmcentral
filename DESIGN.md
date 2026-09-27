@@ -260,14 +260,14 @@ to keep changing numbers aligned. Prose, form labels and settings text use sans.
 
 ### Named Rules
 
-**Small text sizes.** Below `text-xs` (12px) there are exactly three sizes
-and no others. `text-[11px]` for inline secondary values and unit suffixes.
-`text-[10px]` for uppercase micro-labels, the default for anything else small.
-`text-[9px]` for dense map and marker annotation, and that is the floor. Never
-`text-[8px]`.
+**Small text sizes.** `text-xs` (12px) is the floor for every value, unit
+and piece of mixed-case text. Below it there are exactly two sizes and neither
+carries a value: `text-[10px]` for uppercase, letter-spaced micro-labels, and
+`text-[9px]` for dense map and marker annotation, which is the floor. Never
+`text-[11px]`, never `text-[8px]`.
 
 **Small text contrast.** Do not stack low-opacity modifiers
-(`text-white/50`, `text-white/60`) on anything at or below `text-[11px]`.
+(`text-white/50`, `text-white/60`) on anything below `text-xs`.
 Reduced contrast on already-tiny glyphs is illegible in daylight glare. Use
 `text-muted-foreground` on themed surfaces; on non-themed overlays such as map
 HUDs, never below `/80`.

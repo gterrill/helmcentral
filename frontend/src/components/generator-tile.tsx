@@ -136,7 +136,7 @@ export const GeneratorTile = memo(function GeneratorTile({
 
       {runReason && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">{runReason}</span>
+          <span className="text-xs text-muted-foreground">{runReason}</span>
         </div>
       )}
 
@@ -157,14 +157,14 @@ export const GeneratorTile = memo(function GeneratorTile({
       {isRunning && generatorManualStart && generatorManualStartTimer > 0 && (
         <div className={`mt-3 grid gap-2 ${projectedSocPercent !== null ? 'grid-cols-2' : 'grid-cols-1'}`}>
           <div className="rounded-md border bg-background/60 px-3 py-2">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Timer Remaining</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Timer Remaining</p>
             <p className="mt-0.5 font-mono text-sm tabular-nums text-gauge-secondary">
               {formatRuntime(generatorManualStartTimer)}
             </p>
           </div>
           {projectedSocPercent !== null && (
             <div className="rounded-md border bg-background/60 px-3 py-2">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery at Finish</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Battery at Finish</p>
               <p className="mt-0.5 font-mono text-sm tabular-nums text-gauge-secondary">
                 {Math.round(projectedSocPercent)}%
               </p>
@@ -177,7 +177,7 @@ export const GeneratorTile = memo(function GeneratorTile({
       {!isRunning && (
         <div className="mt-3 rounded-md border bg-background/60 px-3 py-2.5">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Timed Run</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Timed Run</p>
             <button
               role="switch"
               aria-checked={timedRunEnabled}

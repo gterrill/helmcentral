@@ -256,7 +256,7 @@ function PhotoBlock({ item, onOpenEquipment }: { item: EquipmentItem; onOpenEqui
           </div>
           {photoCount > 1 && (
             <>
-              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/90 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/90 px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
                 {activeIndex + 1} / {photoCount}
               </span>
               <div className="absolute bottom-1.5 left-1.5 flex gap-1">
@@ -330,7 +330,7 @@ function BinContents({
           <h2 className="font-mono text-lg font-semibold">{bin.code}</h2>
           {bin.name && <span className="text-sm text-muted-foreground">{bin.name}</span>}
         </div>
-        <p className="text-[11px] text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
+        <p className="text-xs text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
       </div>
 
       {error && (
@@ -370,7 +370,7 @@ function BinContents({
               onClick={() => scrollToPhoto(item.id)}
             >
               <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              {item.quantity > 1 && <span className="shrink-0 text-[11px] text-muted-foreground">×{item.quantity}</span>}
+              {item.quantity > 1 && <span className="shrink-0 text-xs text-muted-foreground">×{item.quantity}</span>}
             </button>
           ))}
         </div>

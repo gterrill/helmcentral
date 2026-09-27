@@ -186,7 +186,7 @@ function NowcastStrip({ bars, isHourlySourced }: { bars: NowcastBar[]; isHourlyS
           costs zero extra vertical space. */}
       {isHourlySourced && (
         <span
-          className="pointer-events-none absolute right-0 top-0 text-[10px] text-muted-foreground"
+          className="pointer-events-none absolute right-0 top-0 text-xs text-muted-foreground"
           data-testid="nowcast-hourly-caption"
         >
           Hourly forecast
@@ -262,7 +262,7 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
           <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Depth</span>
           <span className="font-display text-4xl leading-none tabular-nums text-gauge-secondary">
             {depthDisplay}
-            <span className="ml-1 text-[11px] text-muted-foreground">{depthUnit}</span>
+            <span className="ml-1 text-xs text-muted-foreground">{depthUnit}</span>
           </span>
         </div>
 
@@ -271,14 +271,14 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
           <div className="flex min-w-0 items-center gap-1">
             <span className="font-display text-4xl leading-none tabular-nums text-gauge-secondary">
               {windSpeedTrueKts !== null ? Math.round(windSpeedTrueKts) : '—'}
-              <span className="ml-1 text-[11px] text-muted-foreground">kts</span>
+              <span className="ml-1 text-xs text-muted-foreground">kts</span>
             </span>
             {windDirectionTrueDeg !== null && (
               <>
                 <WindDirectionArrow degrees={windDirectionTrueDeg} />
                 {/* Compass point only: degrees truncated to "SE 1…" on the
                     1920x360 wall. The bearing is in the arrow's aria-label. */}
-                <span className="truncate text-[11px] text-muted-foreground">
+                <span className="truncate text-xs text-muted-foreground">
                   {compassPointFor(windDirectionTrueDeg)}
                 </span>
               </>
@@ -299,7 +299,7 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
           <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Temp</span>
           <span className="font-display text-4xl leading-none tabular-nums text-gauge-secondary">
             {tempValue !== null ? tempValue : '—'}
-            <span className="ml-1 text-[11px] text-muted-foreground">{tempUnit}</span>
+            <span className="ml-1 text-xs text-muted-foreground">{tempUnit}</span>
           </span>
           <BulletGauge
             value={tempValue}
@@ -314,7 +314,7 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
 
       <div className="mt-3 min-w-0">
         {nowcast.showChart && <NowcastStrip bars={nowcast.bars} isHourlySourced={nowcast.isHourlySourced} />}
-        <p className={`truncate text-[11px] text-muted-foreground ${nowcast.showChart ? 'mt-1' : ''}`}>{nowcast.line}</p>
+        <p className={`truncate text-xs text-muted-foreground ${nowcast.showChart ? 'mt-1' : ''}`}>{nowcast.line}</p>
       </div>
     </Tile>
   )

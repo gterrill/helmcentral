@@ -71,7 +71,7 @@ export function PhotoStripEditor({ photos, onFilesPicked, onMakeCover, onRemove,
                 )}
               </div>
               {canWrite && (
-                <div className="flex items-center gap-1.5 text-[10px]">
+                <div className="flex items-center gap-1.5 text-xs">
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-primary disabled:pointer-events-none disabled:opacity-50"

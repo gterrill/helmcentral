@@ -197,12 +197,12 @@ Build an inclusive, quietly dense, highly glanceable dashboard interface using T
 
 ### Micro-Typography Scale
 
-Text below `text-xs` (12px) only ever needs three sizes — use exactly these, nothing else:
+The floor for anything the operator reads as a value is `text-xs` (12px). That covers readouts, unit suffixes, sub-readouts next to a KPI, and any mixed-case text. Below 12px there are exactly two sizes, and neither carries a value:
 
-- `text-[11px]` — secondary inline values (unit suffixes, sub-readouts next to a KPI).
-- `text-[10px]` — standard uppercase micro-labels: axis labels, chart legends, KPI identifier labels. This is the default for anything not covered by the other two tiers.
+- `text-[10px]` — uppercase, letter-spaced micro-labels only: axis labels, chart legends, KPI identifier labels. Capitals at 10px stand taller than lowercase at 11px, and a label is recognised by shape rather than read, so it can go smaller than a value.
 - `text-[9px]` — dense map/marker annotation only (vessel tags, badges). This is the legibility floor; never go smaller (no `text-[8px]` or below).
-- Do not stack low-opacity color modifiers (e.g. `text-white/50`, `text-white/60`) on text at or below `text-[11px]` — reduced contrast on already-tiny glyphs is illegible in daylight glare. On themed surfaces, use `text-muted-foreground` for de-emphasis instead of opacity. On non-themed overlays (e.g. map HUDs), don't go below `/80` opacity for text this small.
+- `text-[11px]` is retired. Mixed-case text at 11px leaves lowercase glyphs about 5.5px tall, which fails at arm's length in glare. Use `text-xs` for values or `text-[10px]` for uppercase labels.
+- Do not stack low-opacity color modifiers (e.g. `text-white/50`, `text-white/60`) on text below `text-xs` — reduced contrast on already-tiny glyphs is illegible in daylight glare. On themed surfaces, use `text-muted-foreground` for de-emphasis instead of opacity. On non-themed overlays (e.g. map HUDs), don't go below `/80` opacity for text this small.
 - SVG `<text>` chart labels follow the same rules as DOM text: use a `fontSize` from the scale above (as a bare string, e.g. `fontSize="10"`), and set `fill` from a theme token (`hsl(var(--muted-foreground))` for axis/legend labels, `hsl(var(--primary))` for accent/emphasis labels) rather than a hardcoded `rgba()`/hex value — otherwise the chart silently stops adapting to dark mode and drifts from the DOM styling.
 
 ### Anti-Slop Constraints

@@ -13,7 +13,7 @@ export function LayoutModeToggle({ editing, onToggle }: LayoutModeToggleProps) {
       type="button"
       onClick={onToggle}
       className={cn(
-        'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors md:text-[11px]',
+        'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors md:text-xs',
         editing
           ? 'border-primary/40 bg-primary/10 text-primary'
           : 'border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary',

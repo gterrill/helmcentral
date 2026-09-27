@@ -82,17 +82,17 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{trendLabel}</span>
         {trendUp && (
-          <span className="text-[10px] font-medium tabular-nums text-gauge-secondary">
+          <span className="text-xs font-medium tabular-nums text-gauge-secondary">
             ▲ +{fmt(Math.abs(delta))}{unit}
           </span>
         )}
         {trendDown && (
-          <span className="text-[10px] font-medium tabular-nums text-amber-500">
+          <span className="text-xs font-medium tabular-nums text-amber-500">
             ▼ −{fmt(Math.abs(delta))}{unit}
           </span>
         )}
         {!trendUp && !trendDown && (
-          <span className="text-[10px] font-medium tabular-nums text-muted-foreground">
+          <span className="text-xs font-medium tabular-nums text-muted-foreground">
             ≈ {fmt(last)}{unit}
           </span>
         )}

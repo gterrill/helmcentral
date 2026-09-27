@@ -3402,7 +3402,7 @@ export function App() {
                   )}
                 </Button>
                 {mateVoiceListening && (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {mateVoice.armed ? 'Mate is listening…' : mateVoice.interim !== '' ? mateVoice.interim : 'Listening…'}
                   </span>
                 )}

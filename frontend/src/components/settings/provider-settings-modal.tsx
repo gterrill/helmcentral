@@ -279,10 +279,10 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                   placeholder={field.placeholder}
                   aria-label={field.label}
                 />
-                {field.help && <p className="text-[10px] text-muted-foreground">{field.help}</p>}
+                {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
               </Field>
             ))}
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Applies on the next call — no restart needed.
             </p>
           </div>
@@ -309,7 +309,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                 aria-label="Allowed secrets"
               />
             </Field>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Allowlist changes require a backend restart to take effect.
             </p>
             <div className="flex justify-end">

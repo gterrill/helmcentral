@@ -32,7 +32,7 @@ export function ProviderIntegrationCard({
     <Card className="gap-3 border-border py-4">
       <CardHeader className="gap-1 px-4">
         <CardTitle className="truncate text-sm font-semibold">{name}</CardTitle>
-        <CardDescription className="line-clamp-2 text-[11px] text-muted-foreground">
+        <CardDescription className="line-clamp-2 text-xs text-muted-foreground">
           {description}
         </CardDescription>
       </CardHeader>

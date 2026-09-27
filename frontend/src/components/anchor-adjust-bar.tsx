@@ -108,7 +108,7 @@ export function AnchorAdjustBar({
       )}
 
       {aboveMaxOriginalRadiusM !== null && (
-        <p className="text-center text-[11px] text-muted-foreground">
+        <p className="text-center text-xs text-muted-foreground">
           Was {formatRadiusDisplay(aboveMaxOriginalRadiusM, isImperial)}, above the maximum
         </p>
       )}
@@ -182,7 +182,7 @@ export function AnchorAdjustBar({
       </div>
 
       {disabledReasons.length > 0 && (
-        <p data-testid="anchor-adjust-reasons" className="text-center text-[11px] text-muted-foreground">
+        <p data-testid="anchor-adjust-reasons" className="text-center text-xs text-muted-foreground">
           {disabledReasons.join(' · ')}
         </p>
       )}
@@ -198,7 +198,7 @@ export function AnchorAdjustBar({
       )}
 
       {noFixNotice && (
-        <p className="text-center text-[11px] text-muted-foreground">
+        <p className="text-center text-xs text-muted-foreground">
           No GPS fix: can&apos;t check the boat against this circle
         </p>
       )}

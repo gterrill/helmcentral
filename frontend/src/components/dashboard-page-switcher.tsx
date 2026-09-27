@@ -110,7 +110,7 @@ export function DashboardPageSwitcher({
       }
     }}>
       <PopoverTrigger
-        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-[11px]"
+        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-xs"
         aria-label="Switch dashboard page"
       >
         {/* Icon-only below `sm`: the header has no room for the page name at phone

@@ -216,9 +216,9 @@ export function FuelRail({ config, values, height }: FuelRailProps) {
               </span>
               <span className={`font-display text-[13px] leading-none tabular-nums ${zoneTextClass(bar.zone)}`}>
                 {bar.percentText ?? '--'}
-                <span className="ml-0.5 text-[10px] text-muted-foreground">%</span>
+                <span className="ml-0.5 text-xs text-muted-foreground">%</span>
               </span>
-              <span className="text-[10px] leading-none tabular-nums text-muted-foreground">
+              <span className="text-xs leading-none tabular-nums text-muted-foreground">
                 {bar.volumeText ?? '--'}
               </span>
             </div>
@@ -233,7 +233,7 @@ export function FuelRail({ config, values, height }: FuelRailProps) {
           </span>
           <span data-testid="fuel-total" className="font-display text-base leading-none tabular-nums text-gauge-primary">
             {totalText ?? '--'}
-            {volumeUnit && <span className="ml-0.5 text-[10px] text-muted-foreground">{volumeUnit}</span>}
+            {volumeUnit && <span className="ml-0.5 text-xs text-muted-foreground">{volumeUnit}</span>}
           </span>
         </div>
       </div>
