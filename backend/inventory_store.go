@@ -1826,6 +1826,6 @@ func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool,
 		SELECT 1 FROM documents d
 		WHERE d.id = ?
 		AND `+documentDeletableAsOrphanPhotoClause+`
-		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)
+		AND `+documentHasNoEquipmentPhotoLinkClause+`
 		AND `+documentHasNoMaintenanceLogPhotoLinkClause, documentID)
 }
