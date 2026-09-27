@@ -24,18 +24,30 @@ due whichever comes first.
 - **Interval not set** covers a job that's named but doesn't have a
   frequency yet - a manufacturer's schedule sometimes lists a service with
   no interval attached, and this shows that plainly instead of hiding it.
-- **Hours unknown** appears when a rule runs on hours but the engine-hours
-  reading isn't currently available - the calendar side of a rule, if it
-  has one, still shows correctly underneath.
+- **Hours unknown** appears when a rule runs on hours but the item's hours
+  reading has never been received at all - the calendar side of a rule, if
+  it has one, still shows correctly underneath.
 
 ## Where hours come from
 
 For gear with a running-hours reading - an engine, a generator, a
 watermaker - Helmcentral reads the current hours straight from the boat's
 own instrument data, the same reading the equipment record's hour meter
-already uses. If a meter or gauge is ever replaced, record the change (the
-old reading, the new reading, and the date) from the item's own page, and
-hours keep counting correctly from where the old one left off.
+already uses. An hour meter only changes while the machine it's on is
+running, so the last reading it ever sent stays the current one for as
+long as the engine is off - at anchor, or mid-service - rather than
+showing as unknown; the Maintenance list and the Complete form show how
+long ago that reading came in.
+
+Wherever you type an hours figure by hand - completing a rule, setting
+what was already done, or a standalone log entry - it's always the number
+on the physical gauge. Helmcentral keeps the running total ("true hours")
+itself, adding whatever a meter replacement changed underneath, so you
+never have to do that arithmetic. If a meter or gauge is ever replaced,
+record the change (the old reading, the new reading, and the date) from
+the item's own page, and hours keep counting correctly from where the old
+one left off - see
+[Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 
 Gear with no hour reading at all - or a rule with no piece of gear behind
 it - takes an hours figure by hand instead, entered when you complete the
@@ -56,11 +68,11 @@ service schedule can be copied in with one action - see
 
 ## Completing a job
 
-**Complete** on a rule opens a short form: the date, the hours (filled in
-automatically where a live reading exists), what was done, who did it, what
-it cost, and any parts used from inventory. A rule that runs on hours
-requires an hours figure to complete - type it in from the gauge if there's
-no live reading to fill it in for you. A certificate or expiry with a fixed
+**Complete** on a rule opens a short form: the date, the hours off the
+gauge (filled in automatically where a live reading exists), what was
+done, who did it, what it cost, and any parts used from inventory. A rule
+that runs on hours requires an hours figure to complete - type it in from
+the gauge yourself if there's no live reading to fill it in for you. A certificate or expiry with a fixed
 date and no recurring interval asks for the new due date, since there's
 nothing to calculate it from automatically; one that renews every so many
 months works it out for you. Saving it writes one line to the service log
