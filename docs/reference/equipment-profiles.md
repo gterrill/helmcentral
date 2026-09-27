@@ -201,8 +201,14 @@ underscores and hyphens, starting with a letter or number.
 
 ## Service intervals
 
-The `service` block is validated and served, but nothing consumes it yet.
-Maintenance work (the datastore, completion logging, service-due alarms) comes
-later. When it lands, a service-due rule will evaluate `runTime above (last
-completion hours + interval)`, and logging a completed job will advance the
-threshold so the alarm clears and re-arms on its own.
+The `service` block feeds **Inventory → Maintenance**: applying a profile to
+an equipment record, then choosing **Use profile schedule** on that record,
+copies every service entry into a maintenance rule in one action - an entry
+with no interval is copied too, showing as a rule whose interval isn't set
+yet rather than being skipped. The profile file itself is never changed;
+each rule is its own editable record from there. See
+[Maintenance](../features/maintenance.md) and
+[Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
+
+There is no service-due alarm - Maintenance is a list and a service log,
+not a notification.
