@@ -92,6 +92,11 @@ heading feeding the wind instrument, not just wind alone. Where it is
 missing or has gone quiet, True mode reads `—` rather than falling back to
 the apparent figures.
 
+The two MAX GUST cards each show the strongest gust over a window - 10M,
+30M, 1HR or 24HR - named in the small boxed tag beside the label. Tap
+anywhere on the card to step to the next window. Each card keeps its own window, remembered on
+this device, so you can watch the last ten minutes against the whole day.
+
 ## Battery & Power fields
 
 Four cards, plus a Shore line that appears once the shore charger reports
