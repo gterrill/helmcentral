@@ -63,8 +63,15 @@ type maintenanceRule struct {
 // maintenanceLogPart is one row of maintenance_log_parts, joined against
 // equipment for its display name - a parts list that only carried ids would
 // make the CSV export and the log view useless without a second lookup.
+//
+// EquipmentID is nil once the part item itself has been deleted
+// (equipment_id ON DELETE SET NULL, documents_store.go's 2026-09-27
+// amendment) - the row survives as pure history. EquipmentName is always
+// populated either way: the equipment's own CURRENT name while still
+// linked, or the part_name snapshot taken at logging time once it isn't
+// (maintenancePartsForLogEntries' own COALESCE).
 type maintenanceLogPart struct {
-	EquipmentID   string  `json:"equipment_id"`
+	EquipmentID   *string `json:"equipment_id"`
 	EquipmentName string  `json:"equipment_name"`
 	Quantity      float64 `json:"quantity"`
 }
@@ -607,6 +614,14 @@ func scanMaintenanceLogEntry(row rowScanner) (maintenanceLogEntry, error) {
 // equipment for a display name - one aggregate query over the whole result
 // (equipmentColumns' own doc comment gives the identical "a handful of rows
 // aboard one boat" reasoning for why this is never N+1).
+//
+// LEFT JOIN, not JOIN: equipment_id is nullable once the part item has been
+// deleted (documents_store.go's 2026-09-27 amendment) - an inner join would
+// silently drop that row out of the result the instant its link is gone,
+// which is exactly the data loss this schema change exists to prevent.
+// COALESCE prefers the equipment's own CURRENT name while still linked,
+// falling back to the part_name snapshot taken at logging time once it
+// isn't.
 func maintenancePartsForLogEntries(q sqlQueryer, ids []string) (map[string][]maintenanceLogPart, error) {
 	out := map[string][]maintenanceLogPart{}
 	if len(ids) == 0 {
@@ -619,11 +634,11 @@ func maintenancePartsForLogEntries(q sqlQueryer, ids []string) (map[string][]mai
 		args[i] = id
 	}
 	rows, err := q.Query(`
-		SELECT lp.log_entry_id, lp.equipment_id, e.name, lp.quantity
+		SELECT lp.log_entry_id, lp.equipment_id, COALESCE(e.name, lp.part_name), lp.quantity
 		FROM maintenance_log_parts lp
-		JOIN equipment e ON e.id = lp.equipment_id
+		LEFT JOIN equipment e ON e.id = lp.equipment_id
 		WHERE lp.log_entry_id IN (`+strings.Join(placeholders, ",")+`)
-		ORDER BY lp.log_entry_id, lower(e.name)`, args...)
+		ORDER BY lp.log_entry_id, lower(COALESCE(e.name, lp.part_name))`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("parts for log entries: %w", err)
 	}
@@ -704,18 +719,36 @@ func maintenanceLogEntryByID(q sqlQueryer, id string) (maintenanceLogEntry, erro
 	return e, nil
 }
 
-// insertMaintenanceLogPartsTx replaces id's own parts wholesale - a
+// insertMaintenanceLogPartsTx replaces id's own LINKED parts wholesale - a
 // whole-set replace, not a diff, matching the log entry's own PUT-style
 // UpdateMaintenanceLogEntry contract (unlike equipment_documents' PATCH
 // diff, there is no separate "existing photos" concern to preserve here:
 // parts are pure data, not something a concurrent upload could race with).
+//
+// "Linked" is the operative word (2026-09-27 amendment): a row whose own
+// equipment_id has already gone to NULL (its part item was deleted -
+// documents_store.go's own comment) can never be re-specified by a fresh
+// parts list at all, since parts is only ever a list of {equipment_id,
+// quantity} and that id no longer exists to name - so only rows that are
+// STILL linked are cleared and replaced here. An orphaned history row
+// therefore survives an unrelated later edit to the same log entry, not
+// just the part's own deletion.
 func insertMaintenanceLogPartsTx(tx *sql.Tx, logEntryID string, parts []maintenanceLogPartInput) error {
-	if _, err := tx.Exec(`DELETE FROM maintenance_log_parts WHERE log_entry_id = ?`, logEntryID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM maintenance_log_parts WHERE log_entry_id = ? AND equipment_id IS NOT NULL`, logEntryID); err != nil {
 		return fmt.Errorf("replace parts: clear: %w", err)
 	}
 	for _, p := range parts {
-		if _, err := tx.Exec(`INSERT INTO maintenance_log_parts (log_entry_id, equipment_id, quantity) VALUES (?, ?, ?)`,
-			logEntryID, p.EquipmentID, p.Quantity); err != nil {
+		// part_name snapshots the item's name AT THE TIME IT WAS LOGGED -
+		// checkMaintenancePartsExist (maintenance_handlers.go) already
+		// confirmed p.EquipmentID exists before this transaction runs, so
+		// this lookup failing here would mean a real race with a concurrent
+		// delete, not an operator mistake - surfaced rather than guessed at.
+		var name string
+		if err := tx.QueryRow(`SELECT name FROM equipment WHERE id = ?`, p.EquipmentID).Scan(&name); err != nil {
+			return fmt.Errorf("replace parts: look up name for %s: %w", p.EquipmentID, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO maintenance_log_parts (id, log_entry_id, equipment_id, part_name, quantity) VALUES (?, ?, ?, ?, ?)`,
+			uuid.NewString(), logEntryID, p.EquipmentID, name, p.Quantity); err != nil {
 			return fmt.Errorf("replace parts: insert %s: %w", p.EquipmentID, err)
 		}
 	}

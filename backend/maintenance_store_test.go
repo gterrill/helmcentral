@@ -473,7 +473,7 @@ func TestDocumentStore_MaintenanceLogEntryCRUDWithParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
 	}
-	if len(entry.Parts) != 1 || entry.Parts[0].EquipmentID != spare.ID || entry.Parts[0].EquipmentName != "Impeller (spare)" {
+	if len(entry.Parts) != 1 || entry.Parts[0].EquipmentID == nil || *entry.Parts[0].EquipmentID != spare.ID || entry.Parts[0].EquipmentName != "Impeller (spare)" {
 		t.Fatalf("expected the part joined with its name, got %+v", entry.Parts)
 	}
 
@@ -496,6 +496,102 @@ func TestDocumentStore_MaintenanceLogEntryCRUDWithParts(t *testing.T) {
 	}
 	if _, err := store.GetMaintenanceLogEntry(entry.ID); !errors.Is(err, errMaintenanceLogEntryNotFound) {
 		t.Fatalf("expected errMaintenanceLogEntryNotFound after delete, got %v", err)
+	}
+}
+
+// TestDocumentStore_DeleteEquipmentUsedAsMaintenancePartKeepsLogHistoryWithSnapshotName
+// pins code-review finding 6: maintenance_log_parts.equipment_id used to
+// CASCADE, so deleting a spare-part item silently erased it from every past
+// log entry (and the CSV export). It is now ON DELETE SET NULL - the row
+// survives, with the part's own name as it was AT THE TIME IT WAS LOGGED
+// (part_name), never the equipment record that may since be gone.
+func TestDocumentStore_DeleteEquipmentUsedAsMaintenancePartKeepsLogHistoryWithSnapshotName(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	spare := mustCreateTestEquipment(t, store, "Impeller (spare)")
+
+	entry, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: spare.ID, Quantity: 2}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
+	}
+
+	if _, err := store.DeleteEquipment(spare.ID, false); err != nil {
+		t.Fatalf("DeleteEquipment(spare): %v", err)
+	}
+
+	got, err := store.GetMaintenanceLogEntry(entry.ID)
+	if err != nil {
+		t.Fatalf("expected the log entry to survive the part's own deletion, got err: %v", err)
+	}
+	if len(got.Parts) != 1 {
+		t.Fatalf("expected the part row to survive with its snapshot name, got %+v", got.Parts)
+	}
+	if got.Parts[0].EquipmentID != nil {
+		t.Fatalf("expected equipment_id to be cleared (SET NULL), got %+v", got.Parts[0].EquipmentID)
+	}
+	if got.Parts[0].EquipmentName != "Impeller (spare)" {
+		t.Fatalf("expected the snapshot name 'Impeller (spare)' to survive, got %q", got.Parts[0].EquipmentName)
+	}
+	if got.Parts[0].Quantity != 2 {
+		t.Fatalf("expected the quantity to survive, got %v", got.Parts[0].Quantity)
+	}
+}
+
+// TestDocumentStore_UpdateMaintenanceLogEntryKeepsOrphanedPartsAcrossAnEdit
+// pins the other half of finding 6: insertMaintenanceLogPartsTx's own
+// wholesale replace only ever clears LINKED parts (equipment_id NOT NULL) -
+// an orphaned row from an already-deleted part item can never be
+// re-specified by a fresh parts list (there is no id left to name it with),
+// so it must survive an unrelated later edit to the same log entry, not
+// just the part's own deletion.
+func TestDocumentStore_UpdateMaintenanceLogEntryKeepsOrphanedPartsAcrossAnEdit(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Main engine")
+	spare := mustCreateTestEquipment(t, store, "Impeller (spare)")
+	other := mustCreateTestEquipment(t, store, "Gasket (spare)")
+
+	entry, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: spare.ID, Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
+	}
+	if _, err := store.DeleteEquipment(spare.ID, false); err != nil {
+		t.Fatalf("DeleteEquipment(spare): %v", err)
+	}
+
+	updated, err := store.UpdateMaintenanceLogEntry(entry.ID, maintenanceLogEntryInput{
+		EquipmentID: &item.ID,
+		PerformedAt: "2026-04-01",
+		Kind:        "repair",
+		Description: "Also fitted a new gasket",
+		Parts:       []maintenanceLogPartInput{{EquipmentID: other.ID, Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMaintenanceLogEntry: %v", err)
+	}
+	if len(updated.Parts) != 2 {
+		t.Fatalf("expected both the orphaned snapshot and the newly linked part, got %+v", updated.Parts)
+	}
+	var sawOrphan, sawLinked bool
+	for _, p := range updated.Parts {
+		if p.EquipmentID == nil && p.EquipmentName == "Impeller (spare)" {
+			sawOrphan = true
+		}
+		if p.EquipmentID != nil && *p.EquipmentID == other.ID {
+			sawLinked = true
+		}
+	}
+	if !sawOrphan || !sawLinked {
+		t.Fatalf("expected one orphaned and one linked part, got %+v", updated.Parts)
 	}
 }
 
