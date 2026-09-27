@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -90,10 +92,19 @@ type telemetryInfluxFetcher struct {
 	slot *telemetryInfluxSlot
 
 	queryGust           func(windows []string) map[string]float64
-	querySolarToday     func(now time.Time) float64
-	querySolarYesterday func(now time.Time) float64
-	querySolarPeak      func(now time.Time) float64
+	querySolarToday     func(now time.Time, loc *time.Location) float64
+	querySolarYesterday func(now time.Time, loc *time.Location) float64
+	querySolarPeak      func(now time.Time, loc *time.Location) float64
 	querySolarTrend     func(now time.Time) []solarTrendPoint
+
+	// vesselLocalLocation resolves the vessel's current local timezone, or
+	// ok=false when no usable position is known yet. Injected for the same
+	// testability reason as the query funcs above; defaults to
+	// currentVesselLocalLocation, which reads globalSignalKSnapshot's cached
+	// navigation.position rather than solarStats (solar_history.go's
+	// in-memory day accumulator, fed only once a solar sample with a
+	// position has been recorded) or a fresh SignalK fetch of its own.
+	vesselLocalLocation func() (loc *time.Location, ok bool)
 }
 
 func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetcher {
@@ -104,7 +115,42 @@ func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetche
 		querySolarYesterday: queryInfluxSolarYesterdayKWh,
 		querySolarPeak:      queryInfluxSolarPeakTodayW,
 		querySolarTrend:     queryInfluxSolarTrend24h,
+		vesselLocalLocation: currentVesselLocalLocation,
 	}
+}
+
+// telemetryInfluxSolarPositionMissing gates the "no vessel position yet" log
+// line to once per state change (in both directions), the same idiom
+// tracksEndpointMissing (tracks.go) uses for its own 404 log line: refresh
+// runs every telemetryInfluxRefreshInterval (30s), and a line every tick
+// while waiting for the first GNSS fix would bury everything else in the log.
+var telemetryInfluxSolarPositionMissing atomic.Bool
+
+// currentVesselLocalLocation derives the vessel's local timezone from
+// globalSignalKSnapshot's own cached navigation.position - the same
+// delta-stream snapshot readOwnEncounterFacts (collision_ais.go) already
+// reads position from via nodeAt, one small node copy under an RLock, not a
+// fresh SignalK HTTP fetch. sampleTracks (tracks.go) already pays for one
+// such fetch per 5s tick to seed solarStats.loc for the in-memory tier; this
+// refresher must not add a second fetch of its own every
+// telemetryInfluxRefreshInterval on top of it.
+//
+// ok is false when no usable position is known yet - absent, or one of
+// hasUsableVesselPosition's rejected sentinel pairs (weather_providers.go),
+// e.g. before the first GNSS fix after a restart. The caller must not fall
+// back to UTC silently in that case (Fallback Policy): refresh reports the
+// solar day-bounded fields as the -1 sentinel for that tick instead of
+// guessing a UTC boundary.
+func currentVesselLocalLocation() (*time.Location, bool) {
+	node := globalSignalKSnapshot.nodeAt("navigation.position")
+	if node == nil {
+		return nil, false
+	}
+	lat, lon, ok := positionFromNode(node)
+	if !ok || !hasUsableVesselPosition(lat, lon) {
+		return nil, false
+	}
+	return vesselLocalLocation(lon), true
 }
 
 // refresh runs one pass unconditionally, the same way updateNearestTideStation
@@ -115,15 +161,39 @@ func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetche
 // result unless influxTelemetryConfigured() is also true (computeMaxGustKtsFor,
 // applyInfluxSolarOverride) -- so there is no configuration branch to
 // duplicate here.
+//
+// The gust ladder and the rolling 24h solar trend are unrelated to vessel
+// position and always run. The three day-boundary solar queries
+// (today/yesterday/peak) additionally need f.vesselLocalLocation to resolve
+// a usable position first: without one, this reports their sentinel -1
+// rather than guessing a UTC boundary (Fallback Policy) - see
+// currentVesselLocalLocation's own doc comment for why.
 func (f *telemetryInfluxFetcher) refresh(now time.Time) {
-	f.slot.set(telemetryInfluxResult{
-		gustKts:           f.queryGust(gustWindowLadder),
-		solarTodayKWh:     f.querySolarToday(now),
-		solarYesterdayKWh: f.querySolarYesterday(now),
-		solarPeakTodayW:   f.querySolarPeak(now),
-		solarTrend24h:     f.querySolarTrend(now),
-		fetchedAt:         now,
-	})
+	result := telemetryInfluxResult{
+		gustKts:       f.queryGust(gustWindowLadder),
+		solarTrend24h: f.querySolarTrend(now),
+		fetchedAt:     now,
+	}
+
+	loc, positionOK := f.vesselLocalLocation()
+	if !positionOK {
+		if telemetryInfluxSolarPositionMissing.CompareAndSwap(false, true) {
+			log.Printf("solar: no vessel position known yet; today_kwh/yesterday_kwh/peak_today_w report unavailable (-1) rather than assuming a UTC day boundary")
+		}
+		result.solarTodayKWh = -1
+		result.solarYesterdayKWh = -1
+		result.solarPeakTodayW = -1
+		f.slot.set(result)
+		return
+	}
+	if telemetryInfluxSolarPositionMissing.CompareAndSwap(true, false) {
+		log.Printf("solar: vessel position known again; today_kwh/yesterday_kwh/peak_today_w resume using local-day boundaries")
+	}
+
+	result.solarTodayKWh = f.querySolarToday(now, loc)
+	result.solarYesterdayKWh = f.querySolarYesterday(now, loc)
+	result.solarPeakTodayW = f.querySolarPeak(now, loc)
+	f.slot.set(result)
 }
 
 // startTelemetryInfluxTicker runs refresh once immediately -- so the first

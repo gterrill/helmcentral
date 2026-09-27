@@ -88,6 +88,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Fixed
 
 - Settings > Logs now lists the newest line at the top.
+- Solar tile Today, Yesterday and Peak Today now reset at local midnight
+  instead of 10 am (for a boat on UTC+10), and each array's own Today and
+  Yesterday yield show kWh rather than a wildly inflated raw figure.
 
 ## [0.34.0] - 2026-09-26
 

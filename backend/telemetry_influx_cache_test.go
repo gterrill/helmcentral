@@ -33,13 +33,14 @@ func TestTelemetryInfluxFetcherRefresh_UsesInjectedQueryFuncs(t *testing.T) {
 			gustCalled = true
 			return map[string]float64{"10m": 12.3, "30m": 14.1, "1h": 15.0, "24h": 20.2}
 		},
-		querySolarToday:     func(time.Time) float64 { todayCalled = true; return 4.5 },
-		querySolarYesterday: func(time.Time) float64 { yesterdayCalled = true; return 6.1 },
-		querySolarPeak:      func(time.Time) float64 { peakCalled = true; return 820 },
+		querySolarToday:     func(time.Time, *time.Location) float64 { todayCalled = true; return 4.5 },
+		querySolarYesterday: func(time.Time, *time.Location) float64 { yesterdayCalled = true; return 6.1 },
+		querySolarPeak:      func(time.Time, *time.Location) float64 { peakCalled = true; return 820 },
 		querySolarTrend: func(time.Time) []solarTrendPoint {
 			trendCalled = true
 			return []solarTrendPoint{{Time: time.Now(), TotalW: 500}}
 		},
+		vesselLocalLocation: func() (*time.Location, bool) { return time.UTC, true },
 	}
 
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
@@ -56,6 +57,159 @@ func TestTelemetryInfluxFetcherRefresh_UsesInjectedQueryFuncs(t *testing.T) {
 	}
 	if !result.fetchedAt.Equal(now) {
 		t.Fatalf("expected fetchedAt %v, got %v", now, result.fetchedAt)
+	}
+}
+
+// TestTelemetryInfluxFetcherRefresh_PassesResolvedLocationToSolarQueries
+// pins refresh()'s wiring: whatever *time.Location its injected
+// vesselLocalLocation func resolves must reach every one of the three
+// day-boundary solar queries, not a hard-coded UTC.
+func TestTelemetryInfluxFetcherRefresh_PassesResolvedLocationToSolarQueries(t *testing.T) {
+	resetTelemetryInfluxSlot(t)
+
+	wantLoc := vesselLocalLocation(153.0)
+
+	var gotTodayLoc, gotYesterdayLoc, gotPeakLoc *time.Location
+	fetcher := &telemetryInfluxFetcher{
+		slot:      globalTelemetryInfluxSlot,
+		queryGust: func([]string) map[string]float64 { return map[string]float64{} },
+		querySolarToday: func(now time.Time, loc *time.Location) float64 {
+			gotTodayLoc = loc
+			return 0
+		},
+		querySolarYesterday: func(now time.Time, loc *time.Location) float64 {
+			gotYesterdayLoc = loc
+			return 0
+		},
+		querySolarPeak: func(now time.Time, loc *time.Location) float64 {
+			gotPeakLoc = loc
+			return 0
+		},
+		querySolarTrend:     func(time.Time) []solarTrendPoint { return nil },
+		vesselLocalLocation: func() (*time.Location, bool) { return wantLoc, true },
+	}
+
+	fetcher.refresh(time.Now().UTC())
+
+	if gotTodayLoc != wantLoc || gotYesterdayLoc != wantLoc || gotPeakLoc != wantLoc {
+		t.Fatalf("expected refresh to pass the resolved vessel-local location to every solar query, got today=%v yesterday=%v peak=%v want=%v",
+			gotTodayLoc, gotYesterdayLoc, gotPeakLoc, wantLoc)
+	}
+}
+
+// TestTelemetryInfluxFetcherRefresh_NoPositionReportsSentinelsAndSkipsSolarQueries
+// covers the "timezone not known at startup" follow-up: before the first
+// solar sample with a position has arrived (or if SignalK never reports
+// panel power at all), refresh() must not silently assume UTC. It must
+// report today_kwh/yesterday_kwh/peak_today_w as the -1 sentinel for that
+// tick, and must not call the three day-boundary solar queries at all - a
+// stub that returns a recognisable non-sentinel value proves this, since
+// calling it with loc=UTC would have "worked" (returned a plausible-looking
+// number) and hidden the bug.
+func TestTelemetryInfluxFetcherRefresh_NoPositionReportsSentinelsAndSkipsSolarQueries(t *testing.T) {
+	resetTelemetryInfluxSlot(t)
+
+	var todayCalled, yesterdayCalled, peakCalled bool
+	fetcher := &telemetryInfluxFetcher{
+		slot:      globalTelemetryInfluxSlot,
+		queryGust: func([]string) map[string]float64 { return map[string]float64{"10m": 5.0} },
+		querySolarToday: func(time.Time, *time.Location) float64 {
+			todayCalled = true
+			return 99
+		},
+		querySolarYesterday: func(time.Time, *time.Location) float64 {
+			yesterdayCalled = true
+			return 99
+		},
+		querySolarPeak: func(time.Time, *time.Location) float64 {
+			peakCalled = true
+			return 99
+		},
+		querySolarTrend:     func(time.Time) []solarTrendPoint { return []solarTrendPoint{{TotalW: 1}} },
+		vesselLocalLocation: func() (*time.Location, bool) { return nil, false },
+	}
+
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	fetcher.refresh(now)
+
+	if todayCalled || yesterdayCalled || peakCalled {
+		t.Fatalf("expected refresh to skip the day-boundary solar queries entirely with no known vessel position, got today=%v yesterday=%v peak=%v",
+			todayCalled, yesterdayCalled, peakCalled)
+	}
+
+	result := globalTelemetryInfluxSlot.get()
+	if result.solarTodayKWh != -1 || result.solarYesterdayKWh != -1 || result.solarPeakTodayW != -1 {
+		t.Fatalf("expected the solar day-bounded fields to report sentinel -1 with no known position, got %+v", result)
+	}
+	// Gust and the rolling 24h trend have nothing to do with vessel position
+	// and must still run.
+	if len(result.gustKts) == 0 {
+		t.Fatalf("expected the gust ladder to still be queried with no known vessel position, got %+v", result)
+	}
+	if len(result.solarTrend24h) == 0 {
+		t.Fatalf("expected the rolling 24h trend to still be queried with no known vessel position, got %+v", result.solarTrend24h)
+	}
+	if !result.fetchedAt.Equal(now) {
+		t.Fatalf("expected fetchedAt %v, got %v", now, result.fetchedAt)
+	}
+}
+
+// TestCurrentVesselLocalLocation_UsesCachedSnapshotPosition pins
+// currentVesselLocalLocation (the real, non-injected implementation
+// newTelemetryInfluxFetcher wires in) to reading globalSignalKSnapshot's own
+// cached navigation.position - the same delta-stream snapshot
+// readOwnEncounterFacts (collision_ais.go) already reads position from via
+// nodeAt - rather than performing a fresh SignalK HTTP fetch of its own.
+func TestCurrentVesselLocalLocation_UsesCachedSnapshotPosition(t *testing.T) {
+	snapshot := snapshotWithSelfValues(map[string]any{
+		"navigation.position": map[string]any{"latitude": -36.8, "longitude": 153.0},
+	})
+	origSnapshot := globalSignalKSnapshot
+	globalSignalKSnapshot = snapshot
+	t.Cleanup(func() { globalSignalKSnapshot = origSnapshot })
+
+	loc, ok := currentVesselLocalLocation()
+	if !ok {
+		t.Fatalf("expected a usable location from a seeded position")
+	}
+	// vesselLocalLocation builds a fresh time.FixedZone per call
+	// (weather_tide.go), so two locations for the same offset are never the
+	// same pointer - compare the offset itself, the idiom
+	// TestVesselLocalLocation_UsesLongitudeOffset (weather_tide_test.go)
+	// already uses.
+	_, gotOffset := time.Now().In(loc).Zone()
+	if gotOffset != 10*3600 {
+		t.Fatalf("expected UTC+10 offset (longitude 153.0), got %d seconds", gotOffset)
+	}
+}
+
+// TestCurrentVesselLocalLocation_NoPositionReportsNotOK covers a fresh
+// process (or a fresh restart) before the delta stream has ever carried a
+// navigation.position update for self.
+func TestCurrentVesselLocalLocation_NoPositionReportsNotOK(t *testing.T) {
+	origSnapshot := globalSignalKSnapshot
+	globalSignalKSnapshot = newSignalKSnapshot()
+	t.Cleanup(func() { globalSignalKSnapshot = origSnapshot })
+
+	if _, ok := currentVesselLocalLocation(); ok {
+		t.Fatalf("expected no usable location when navigation.position has never been seen")
+	}
+}
+
+// TestCurrentVesselLocalLocation_SentinelPositionReportsNotOK covers
+// hasUsableVesselPosition's own rejected sentinel pair (weather_providers.go):
+// -1,-1 is a syntactically valid lat/lon but never a real fix, and must not
+// be handed to vesselLocalLocation as if it were.
+func TestCurrentVesselLocalLocation_SentinelPositionReportsNotOK(t *testing.T) {
+	snapshot := snapshotWithSelfValues(map[string]any{
+		"navigation.position": map[string]any{"latitude": -1.0, "longitude": -1.0},
+	})
+	origSnapshot := globalSignalKSnapshot
+	globalSignalKSnapshot = snapshot
+	t.Cleanup(func() { globalSignalKSnapshot = origSnapshot })
+
+	if _, ok := currentVesselLocalLocation(); ok {
+		t.Fatalf("expected the -1,-1 unset-position sentinel to be rejected, not treated as a real fix")
 	}
 }
 
@@ -179,8 +333,28 @@ func TestStartTelemetryInfluxTicker_RefreshesImmediatelyAtStartup(t *testing.T) 
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go startTelemetryInfluxTicker(ctx)
+	done := make(chan struct{})
+	go func() {
+		startTelemetryInfluxTicker(ctx)
+		close(done)
+	}()
+	// A bare "defer cancel()" only signals the goroutine to stop; it does not
+	// wait for it to actually exit, so the goroutine could still be mid-tick
+	// when the next test starts. That mattered little when refresh() only
+	// touched solarStats' own low-contention lock, but its production
+	// vesselLocalLocation default (currentVesselLocalLocation) now also
+	// RLocks globalSignalKSnapshot on every tick - a lock nearly every other
+	// test in this package also takes - so an un-synchronized leak here risks
+	// perturbing whichever test runs next. Waiting for done keeps this test's
+	// background goroutine fully wound down before it returns.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Errorf("startTelemetryInfluxTicker did not exit within 2s of cancellation")
+		}
+	})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

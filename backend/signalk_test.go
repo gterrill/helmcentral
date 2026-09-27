@@ -1641,6 +1641,12 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 	}
 }
 
+// TestFetchSignalKSolarState_ReadsControllersAndAggregate's yieldToday/
+// yieldYesterday fixture values are in joules, matching this fleet's live
+// SignalK server (meta units "J" on electrical.solar.<id>.yieldToday/
+// yieldYesterday, confirmed 2026-09-28): controller "0" reports 3,600,000J
+// (1.0 kWh) today and 7,200,000J (2.0 kWh) yesterday; controller "1" reports
+// 1,800,000J (0.5 kWh) today and 3,600,000J (1.0 kWh) yesterday.
 func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 	body := []byte(`{
 		"timestamp": "2026-07-22T00:00:00Z",
@@ -1651,15 +1657,15 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 			"solar": {
 				"0": {
 					"panelPower": {"value": 410.3},
-					"yieldToday": {"value": 1.7},
-					"yieldYesterday": {"value": 1.6},
+					"yieldToday": {"value": 3600000},
+					"yieldYesterday": {"value": 7200000},
 					"chargingMode": {"value": "bulk"},
 					"error": {"value": "none"}
 				},
 				"1": {
 					"panelPower": {"value": 370.7},
-					"yieldToday": {"value": 1.4},
-					"yieldYesterday": {"value": 1.5},
+					"yieldToday": {"value": 1800000},
+					"yieldYesterday": {"value": 3600000},
 					"mode": {"value": "absorption"},
 					"error": {"value": ""}
 				}
@@ -1677,11 +1683,11 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 	if !approxEqual(state.CurrentW, 1120.4, 0.01) {
 		t.Fatalf("expected aggregate current from venus 1120.4, got %v", state.CurrentW)
 	}
-	if !approxEqual(state.TodayKWh, 3.1, 0.01) {
-		t.Fatalf("expected today_kwh 3.1, got %v", state.TodayKWh)
+	if !approxEqual(state.TodayKWh, 1.5, 0.001) {
+		t.Fatalf("expected today_kwh 1.5 (1.0 + 0.5 kWh from joules), got %v", state.TodayKWh)
 	}
-	if !approxEqual(state.YesterdayKWh, 3.1, 0.01) {
-		t.Fatalf("expected yesterday_kwh 3.1, got %v", state.YesterdayKWh)
+	if !approxEqual(state.YesterdayKWh, 3.0, 0.001) {
+		t.Fatalf("expected yesterday_kwh 3.0 (2.0 + 1.0 kWh from joules), got %v", state.YesterdayKWh)
 	}
 	if len(state.Controllers) != 2 {
 		t.Fatalf("expected 2 controllers, got %d", len(state.Controllers))
@@ -1694,15 +1700,21 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 	}
 }
 
-func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
+// TestFetchSignalKSolarState_ConvertsJoulesYieldToKWh pins the exact live
+// values from the reported bug (2026-09-28 06:32 AEST): a controller
+// reporting yieldToday 35999.99J and yieldYesterday 9648000.24J must read as
+// ~0.01 kWh and ~2.68 kWh, not the old Wh/kWh-guessing heuristic's 36 kWh
+// and 9648 kWh (normalizeYieldToKWh guessed raw > 200 meant Wh, so divided
+// by 1000 - wrong for a joule value of this magnitude either way).
+func TestFetchSignalKSolarState_ConvertsJoulesYieldToKWh(t *testing.T) {
 	body := []byte(`{
 		"timestamp": "2026-07-22T00:00:00Z",
 		"electrical": {
 			"solar": {
 				"0": {
 					"panelPower": 250,
-					"yieldToday": 1450,
-					"yieldYesterday": 1300
+					"yieldToday": 35999.99,
+					"yieldYesterday": 9648000.24
 				}
 			}
 		}
@@ -1715,11 +1727,108 @@ func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
 
-	if !approxEqual(state.TodayKWh, 1.45, 0.001) {
-		t.Fatalf("expected yieldToday converted to 1.45 kWh, got %v", state.TodayKWh)
+	if !approxEqual(state.TodayKWh, 0.01, 0.001) {
+		t.Fatalf("expected yieldToday 35999.99J converted to ~0.01 kWh, got %v", state.TodayKWh)
 	}
-	if !approxEqual(state.YesterdayKWh, 1.3, 0.001) {
-		t.Fatalf("expected yieldYesterday converted to 1.3 kWh, got %v", state.YesterdayKWh)
+	if !approxEqual(state.YesterdayKWh, 2.68, 0.001) {
+		t.Fatalf("expected yieldYesterday 9648000.24J converted to ~2.68 kWh, got %v", state.YesterdayKWh)
+	}
+}
+
+// TestFetchSignalKSolarState_ConvertsVenusJoulesYieldToKWh covers the
+// electrical.venus.yieldToday/yieldYesterday lookup, which the task says
+// shares the same SignalK spec units (joules) as the per-controller path
+// above, and which overrides the per-controller aggregate when present.
+func TestFetchSignalKSolarState_ConvertsVenusJoulesYieldToKWh(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"venus": {
+				"yieldToday": {"value": 35999.99},
+				"yieldYesterday": {"value": 9648000.24}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKSolarState()
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if !approxEqual(state.TodayKWh, 0.01, 0.001) {
+		t.Fatalf("expected venus yieldToday 35999.99J converted to ~0.01 kWh, got %v", state.TodayKWh)
+	}
+	if !approxEqual(state.YesterdayKWh, 2.68, 0.001) {
+		t.Fatalf("expected venus yieldYesterday 9648000.24J converted to ~2.68 kWh, got %v", state.YesterdayKWh)
+	}
+}
+
+// TestFetchSignalKSolarState_IgnoresDailyYieldFallbackPaths pins the removal
+// of the unverified dailyYield/dailyYieldYesterday fallback lookups (both
+// per-controller and electrical.venus). Only yieldToday/yieldYesterday are
+// confirmed live on this fleet's SignalK server, in joules; dailyYield/
+// dailyYieldYesterday were never verified to carry the same units (or to be
+// published at all) and are removed rather than kept "just in case". A
+// payload carrying only the dailyYield family must report today_kwh/
+// yesterday_kwh as the not-present sentinel -1, not a converted value.
+func TestFetchSignalKSolarState_IgnoresDailyYieldFallbackPaths(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"venus": {
+				"dailyYield": {"value": 3600000},
+				"dailyYieldYesterday": {"value": 7200000}
+			},
+			"solar": {
+				"0": {
+					"dailyYield": {"value": 3600000},
+					"dailyYieldYesterday": {"value": 7200000}
+				}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKSolarState()
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if state.TodayKWh != -1 {
+		t.Fatalf("expected today_kwh sentinel -1 when only dailyYield is present, got %v", state.TodayKWh)
+	}
+	if state.YesterdayKWh != -1 {
+		t.Fatalf("expected yesterday_kwh sentinel -1 when only dailyYieldYesterday is present, got %v", state.YesterdayKWh)
+	}
+	if len(state.Controllers) != 1 || state.Controllers[0].TodayKWh != -1 || state.Controllers[0].YesterdayKWh != -1 {
+		t.Fatalf("expected the controller's own today/yesterday to stay sentinel -1 too, got %+v", state.Controllers)
+	}
+}
+
+// TestJoulesToKWh exercises the pure conversion directly (1 kWh =
+// 3,600,000J), replacing the old normalizeYieldToKWh magnitude heuristic
+// (>200 guessed Wh) entirely - not layered on top of it.
+func TestJoulesToKWh(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  float64
+		want float64
+	}{
+		{"live yieldToday example", 35999.99, 0.01},
+		{"live yieldYesterday example", 9648000.24, 2.68},
+		{"exactly one kWh", 3_600_000, 1.0},
+		{"zero", 0, 0},
+		{"negative is the not-present sentinel", -1, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := roundTo3(joulesToKWh(tc.raw)); !approxEqual(got, tc.want, 0.001) {
+				t.Fatalf("joulesToKWh(%v) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 
