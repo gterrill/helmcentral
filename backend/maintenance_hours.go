@@ -26,8 +26,12 @@ const maintenanceHoursStaleAfter = derivedInputMaxAge
 // the superseded meter/gauge showed at the moment of replacement;
 // NewReading is what the fresh meter itself reads at that same moment
 // (typically 0, but not assumed to be - a replacement with a used meter is
-// a real case).
+// a real case). ChangedAt is the date the replacement actually happened,
+// which is what "most recent" means for latestMeterOffsetHours below;
+// CreatedAt is only when the row was entered into Helmcentral, which a
+// back-filled reset can postdate by months and plays no part in ordering.
 type hourMeterReset struct {
+	ID         string    `json:"id"`
 	OldReading float64   `json:"old_reading"`
 	NewReading float64   `json:"new_reading"`
 	ChangedAt  string    `json:"changed_at"`
@@ -44,17 +48,48 @@ type hourMeterReset struct {
 // true_hours = raw_live + offset, and at the instant of replacement
 // raw_live == NewReading, so true_hours_at_replacement == OldReading by
 // construction.
+//
+// "Most recent" is by ChangedAt (the operator's own stated date the
+// replacement happened), never CreatedAt (when the row was entered) - a
+// reset back-filled into Helmcentral weeks after the fact, dated earlier
+// than a reset already on file, must not be treated as the newer one just
+// because it was typed in later. Ties (two resets on the same date) break
+// on ID, so the result is fully deterministic rather than depending on
+// slice order.
 func latestMeterOffsetHours(resets []hourMeterReset) float64 {
 	if len(resets) == 0 {
 		return 0
 	}
 	latest := resets[0]
 	for _, r := range resets[1:] {
-		if r.CreatedAt.After(latest.CreatedAt) {
+		if meterResetIsAfter(r, latest) {
 			latest = r
 		}
 	}
 	return latest.OldReading - latest.NewReading
+}
+
+// meterResetIsAfter reports whether a happened after b, by ChangedAt - see
+// latestMeterOffsetHours' own doc comment for why. Both dates are written
+// by RecordHourMeterReset after passing installDatePattern, so a parse
+// failure here would mean a row this code itself wrote is malformed rather
+// than an upstream data problem; treated as the earliest possible date
+// (never wins) rather than panicking a status computation over one bad
+// historical row.
+func meterResetIsAfter(a, b hourMeterReset) bool {
+	aDate, aErr := time.Parse("2006-01-02", a.ChangedAt)
+	bDate, bErr := time.Parse("2006-01-02", b.ChangedAt)
+	switch {
+	case aErr == nil && bErr == nil:
+		if !aDate.Equal(bDate) {
+			return aDate.After(bDate)
+		}
+	case aErr == nil && bErr != nil:
+		return true
+	case aErr != nil && bErr == nil:
+		return false
+	}
+	return a.ID > b.ID
 }
 
 // currentEquipmentHours resolves path's live value (SignalK runTime is

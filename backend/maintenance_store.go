@@ -1083,17 +1083,23 @@ func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, new
 	if err := tx.Commit(); err != nil {
 		return hourMeterReset{}, fmt.Errorf("record meter reset: commit: %w", err)
 	}
-	return hourMeterReset{OldReading: oldReading, NewReading: newReading, ChangedAt: changedAt, CreatedAt: now}, nil
+	return hourMeterReset{ID: id, OldReading: oldReading, NewReading: newReading, ChangedAt: changedAt, CreatedAt: now}, nil
 }
 
 // ListHourMeterResets returns equipmentID's own meter-reset history,
-// newest first - the equipment editor's own display of past replacements,
-// and the input latestMeterOffsetHours resolves into a live offset.
+// newest first BY ChangedAt (the date the replacement actually happened,
+// tie-broken by id) - not by created_at, which only says when the row was
+// entered and can disagree with ChangedAt for a back-filled reset. The
+// equipment editor's own display of past replacements, and the input
+// latestMeterOffsetHours (maintenance_hours.go) resolves into a live
+// offset - both read this same order, so the editor's own "most recent
+// replacement" line can never disagree with which reset the status engine
+// is actually using.
 func (s *documentStore) ListHourMeterResets(equipmentID string) ([]hourMeterReset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT old_reading, new_reading, changed_at, created_at FROM hour_meter_resets WHERE equipment_id = ? ORDER BY created_at DESC`, equipmentID)
+	rows, err := s.db.Query(`SELECT id, old_reading, new_reading, changed_at, created_at FROM hour_meter_resets WHERE equipment_id = ? ORDER BY changed_at DESC, id DESC`, equipmentID)
 	if err != nil {
 		return nil, fmt.Errorf("list meter resets: %w", err)
 	}
@@ -1103,7 +1109,7 @@ func (s *documentStore) ListHourMeterResets(equipmentID string) ([]hourMeterRese
 	for rows.Next() {
 		var r hourMeterReset
 		var createdAt int64
-		if err := rows.Scan(&r.OldReading, &r.NewReading, &r.ChangedAt, &createdAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.OldReading, &r.NewReading, &r.ChangedAt, &createdAt); err != nil {
 			return nil, fmt.Errorf("list meter resets: scan: %w", err)
 		}
 		r.CreatedAt = time.Unix(createdAt, 0).UTC()

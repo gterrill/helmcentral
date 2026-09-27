@@ -15,25 +15,49 @@ func TestLatestMeterOffsetHours(t *testing.T) {
 		{
 			name: "one reset: old minus new",
 			resets: []hourMeterReset{
-				{OldReading: 5000, NewReading: 0, CreatedAt: mustParseDate(t, "2026-01-01")},
+				{ID: "a", OldReading: 5000, NewReading: 0, ChangedAt: "2026-01-01"},
 			},
 			want: 5000,
 		},
 		{
-			name: "only the MOST RECENT reset applies, not a sum of all of them",
+			name: "only the MOST RECENT reset (by changed_at, the operator's own date) applies, not a sum of all of them",
 			resets: []hourMeterReset{
-				{OldReading: 5000, NewReading: 0, CreatedAt: mustParseDate(t, "2026-01-01")},
-				{OldReading: 5200, NewReading: 10, CreatedAt: mustParseDate(t, "2026-03-01")},
+				{ID: "a", OldReading: 5000, NewReading: 0, ChangedAt: "2026-01-01"},
+				{ID: "b", OldReading: 5200, NewReading: 10, ChangedAt: "2026-03-01"},
 			},
 			want: 5190, // the second reset's own old_reading already carries the first reset's history
 		},
 		{
-			name: "resets given out of order still pick the latest by time, not by slice position",
+			name: "resets given out of order still pick the latest by changed_at, not by slice position",
 			resets: []hourMeterReset{
-				{OldReading: 5200, NewReading: 10, CreatedAt: mustParseDate(t, "2026-03-01")},
-				{OldReading: 5000, NewReading: 0, CreatedAt: mustParseDate(t, "2026-01-01")},
+				{ID: "b", OldReading: 5200, NewReading: 10, ChangedAt: "2026-03-01"},
+				{ID: "a", OldReading: 5000, NewReading: 0, ChangedAt: "2026-01-01"},
 			},
 			want: 5190,
+		},
+		{
+			// The whole point of the fix: a reset recorded (CreatedAt) well
+			// after another one, but whose own ChangedAt (the date the
+			// replacement actually happened) is EARLIER, must not win just
+			// because it was entered into Helmcentral later. Only ChangedAt
+			// decides "most recent" - CreatedAt plays no part at all.
+			name: "a back-filled reset entered later but dated earlier does not win",
+			resets: []hourMeterReset{
+				{ID: "a", OldReading: 5000, NewReading: 0, ChangedAt: "2026-01-01", CreatedAt: mustParseDate(t, "2026-01-01")},
+				// Entered into the app on 2026-04-01 (CreatedAt), but the
+				// operator says it actually happened back on 2025-06-01
+				// (ChangedAt) - a back-filled history entry.
+				{ID: "b", OldReading: 4000, NewReading: 0, ChangedAt: "2025-06-01", CreatedAt: mustParseDate(t, "2026-04-01")},
+			},
+			want: 5000, // reset "a" (2026-01-01) is still the most recent by date
+		},
+		{
+			name: "two resets on the same date tie-break on id, deterministically",
+			resets: []hourMeterReset{
+				{ID: "z-later-id", OldReading: 100, NewReading: 0, ChangedAt: "2026-01-01"},
+				{ID: "a-earlier-id", OldReading: 200, NewReading: 0, ChangedAt: "2026-01-01"},
+			},
+			want: 100, // "z-later-id" > "a-earlier-id" lexicographically
 		},
 	}
 	for _, tc := range cases {
