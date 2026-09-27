@@ -113,7 +113,10 @@ profile's schedule.
 
 The whole service log, or one item's own, exports as a spreadsheet-ready
 file from the Maintenance list - useful for a broker's survey, an
-insurance claim, or handing history to a new owner.
+insurance claim, or handing history to a new owner. A part named on a past
+entry stays there by name even if that spare is later removed from
+inventory - deleting the item never rewrites what was actually fitted on
+the day.
 
 ## What this is not
 

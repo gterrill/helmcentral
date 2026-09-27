@@ -410,3 +410,49 @@ spreadsheet read back later is never ambiguous about which figure it holds.
 ordered most-recent-first, so resolving "the offset in force at date X" is
 a single forward scan trusting that order, never a second sort or pairwise
 comparison over a list the store already ordered correctly.
+
+## Amendment, 2026-09-27: a deleted spare part no longer erases its own history
+
+`maintenance_log_parts.equipment_id` (§10) originally CASCADEd like
+`maintenance_log_entries.equipment_id` does: a code-review finding pointed
+out that this is the wrong rule for it. A log entry's own `equipment_id` is
+the item the WORK was done ON - the entry has no meaning at all once that
+item is gone, which is exactly why it cascades. A part-used row is
+different: it is a fact about history ("this many of that spare were fitted
+that day"), not a live reference, and the part item itself (a filter, an
+impeller, a gasket) is routinely retired, consolidated into a different
+inventory row, or simply mis-entered and deleted long after the job it was
+used on. CASCADE meant deleting that spare's OWN equipment record silently
+rewrote every past service log entry and the CSV export to say nothing was
+used at all.
+
+**`equipment_id` is now nullable, `ON DELETE SET NULL`, and a new
+`part_name` column snapshots the item's name AT THE TIME IT WAS LOGGED.**
+`maintenancePartsForLogEntries` (`maintenance_store.go`) LEFT JOINs
+`equipment` instead of an inner JOIN (an inner join would silently drop the
+row the instant its link is gone, the same bug in a different shape) and
+shows `COALESCE(equipment.name, part_name)` - the item's own current name
+while still linked, the snapshot once it isn't. The primary key changes
+from the old `(log_entry_id, equipment_id)` composite to the row's own
+`id`, because two orphaned rows on the same entry (two different deleted
+parts) would otherwise collide as soon as both reached `(log_entry_id,
+NULL)`; the real invariant - the same LINKED part can't be listed twice on
+one entry - is now a partial `UNIQUE` index, `WHERE equipment_id IS NOT
+NULL`.
+
+**`insertMaintenanceLogPartsTx`'s own wholesale replace only ever clears
+LINKED rows.** A parts list from the frontend is only ever `{equipment_id,
+quantity}` pairs - it has no way to re-specify an orphaned row (there is no
+id left to name it with), so if the replace cleared every row for the log
+entry the way it used to, editing that entry's parts *at all*, for any
+reason, would quietly finish the job CASCADE started. The `DELETE` is now
+scoped to `equipment_id IS NOT NULL`; an orphaned row survives any later,
+unrelated edit to the same entry, not just the part's own deletion.
+
+This table has never been deployed (single operator, no installed base) -
+no migration was needed for it. `documentStoreSchema`'s statements are
+`CREATE TABLE IF NOT EXISTS`, though, which means a *dev* database that had
+already run once with the old shape keeps it forever; the fix for that one
+case is `DROP TABLE maintenance_log_parts;` against that dev `documents.db`
+before the next start, not migration code for a table nothing has ever
+shipped with.
