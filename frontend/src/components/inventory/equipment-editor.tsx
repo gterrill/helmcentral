@@ -25,6 +25,7 @@ import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/p
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
+import { useMaintenanceLogEntries, useMaintenanceRules } from '@/hooks/use-maintenance'
 import { photoFilename, usePhotoStaging, type FailedPhotoUpload, type LocalPhoto } from '@/hooks/use-photo-staging'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { formatAppLocation } from '@/lib/app-location'
@@ -161,6 +162,16 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
   const { paths } = useSignalKPaths(true)
+  // Code-review finding: the delete confirmation only ever said "This
+  // removes the equipment record," giving no hint that deleting an item
+  // cascades away every maintenance rule and service log entry against it
+  // (ADR 0138 §10 - deliberately, the cascade itself is by design, but the
+  // operator deserves to see the size of it before confirming). Counted
+  // here, independently of MaintenanceEquipmentBlock's own fetch of the
+  // same data - this codebase's own "one hook instance per caller, no
+  // shared cache" idiom (use-maintenance.ts's own header comment).
+  const { rules: maintenanceRules } = useMaintenanceRules(id !== null ? { equipment: id, includeStored: true } : null)
+  const { entries: maintenanceLogEntries } = useMaintenanceLogEntries(id !== null ? { equipment: id } : null)
 
   const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
   // 2026-09-25 refactor: the Documents tab's own PENDING diff - what the
@@ -746,6 +757,21 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     )
   }
 
+  // Code-review finding: the delete confirmation named only the equipment
+  // record, with no hint that its maintenance rules and service log
+  // (ADR 0138 §10's own cascade, left as designed) go with it - stated in
+  // operator words, only when there's actually something to say.
+  const deleteCascadeParts: string[] = []
+  if (maintenanceRules.length > 0) {
+    deleteCascadeParts.push(`${maintenanceRules.length} maintenance rule${maintenanceRules.length === 1 ? '' : 's'}`)
+  }
+  if (maintenanceLogEntries.length > 0) {
+    deleteCascadeParts.push(`${maintenanceLogEntries.length} service log entr${maintenanceLogEntries.length === 1 ? 'y' : 'ies'}`)
+  }
+  const deleteCascadeNote = deleteCascadeParts.length > 0
+    ? ` This also removes ${deleteCascadeParts.join(' and ')}.`
+    : ''
+
   return (
     <div className="flex flex-col gap-4">
       <FieldSet className="rounded-md border border-border bg-card p-4">
@@ -1064,7 +1090,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete &quot;{item?.name}&quot;?</AlertDialogTitle>
-            <AlertDialogDescription>This removes the equipment record. It can&apos;t be undone.</AlertDialogDescription>
+            <AlertDialogDescription>This removes the equipment record.{deleteCascadeNote} It can&apos;t be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           {/* 2026-09-25 amendment: only shown when N > 0 - an item with no
               exclusive photos has nothing this checkbox could offer to
