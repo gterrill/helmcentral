@@ -149,15 +149,33 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     }
   }, [fetchConversations])
 
+  // Code-review finding: startNew() (and remove(), when it clears the
+  // selection outright rather than moving to a next conversation) used to
+  // just reset local state, with no way to tell a select() already in
+  // flight that its own answer no longer matters. A late response then
+  // filled a chat the operator had already left - clicking a conversation,
+  // then immediately pressing "New conversation" before the GET resolved,
+  // left the blank chat re-populated with the abandoned conversation's
+  // messages once it finally did. selectionSeqRef is bumped by every
+  // action that changes which conversation (if any) is "current" - select
+  // itself, startNew, and remove's own selection changes - and each
+  // select() call only applies its own response if its own sequence number
+  // is still the latest one by the time it resolves; anything newer already
+  // won.
+  const selectionSeqRef = useRef(0)
+
   const select = useCallback(async (id: string) => {
+    const seq = (selectionSeqRef.current += 1)
     setActiveId(id)
     try {
       const response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = (await response.json()) as { conversation?: ConversationApi; messages?: MessageApi[] }
+      if (selectionSeqRef.current !== seq) return
       setMessages(Array.isArray(data.messages) ? data.messages.map(mapMessage) : [])
       setError(null)
     } catch (err) {
+      if (selectionSeqRef.current !== seq) return
       setError(err instanceof Error ? err.message : String(err))
       setMessages([])
     }
@@ -233,6 +251,9 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // Defined here, ahead of the re-select effect below, so that effect can
   // call it directly.
   const startNew = useCallback(() => {
+    // Invalidates any select() already in flight (selectionSeqRef's own doc
+    // comment above) - this is the "New conversation" side of the race.
+    selectionSeqRef.current += 1
     setActiveId(null)
     setMessages([])
     setError(null)
@@ -301,6 +322,10 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
         if (next) {
           await select(next.id)
         } else {
+          // Same invalidation as startNew - nothing left to select, so any
+          // select() still in flight for the conversation just deleted must
+          // not be allowed to repopulate the now-empty chat either.
+          selectionSeqRef.current += 1
           setActiveId(null)
           setMessages([])
         }

@@ -134,6 +134,54 @@ describe('useAssistantConversations', () => {
     }])
   })
 
+  // Code-review finding: startNew() didn't cancel or invalidate an
+  // in-flight select() - a late response from a select the operator had
+  // already moved on from (by pressing "New conversation") filled the
+  // blank chat back in with the OLD conversation's messages, even though
+  // activeId had already gone back to null.
+  it('a late select response does not fill the chat startNew already cleared', async () => {
+    let resolveDetail: (value: unknown) => void = () => {}
+    const detailPromise = new Promise((resolve) => { resolveDetail = resolve })
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return detailPromise
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let selectPromise: Promise<void> = Promise.resolve()
+    act(() => {
+      selectPromise = result.current.select('c1')
+    })
+    expect(result.current.activeId).toBe('c1')
+
+    act(() => {
+      result.current.startNew()
+    })
+    expect(result.current.activeId).toBeNull()
+    expect(result.current.messages).toEqual([])
+
+    // The select the operator abandoned finally answers.
+    await act(async () => {
+      resolveDetail({
+        ok: true,
+        json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ conversation_id: 'c1' })] }),
+      })
+      await selectPromise
+    })
+
+    expect(result.current.activeId).toBeNull()
+    expect(result.current.messages).toEqual([])
+  })
+
   it('remove deletes the active conversation and selects the next one', async () => {
     const fetchMock = vi.fn()
       // initial list: nothing is auto-selected on mount any more
