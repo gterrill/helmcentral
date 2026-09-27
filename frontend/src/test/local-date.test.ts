@@ -8,30 +8,34 @@ import { addMonthsISO, todayISO } from '@/lib/local-date'
 // would compute every due/overdue decision against the wrong day for
 // roughly the first ten hours of every single day.
 
-const originalTZ = process.env.TZ
+// Assigning process.env.TZ inside a vitest worker does not change the
+// timezone Date already resolved, so these tests pass only on a machine
+// that is already east of UTC. They pin the local calendar fields instead,
+// which holds on any machine, CI's UTC runners included.
 
 afterEach(() => {
-  process.env.TZ = originalTZ
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 describe('todayISO', () => {
   it('uses the operator\'s own local date, not UTC', () => {
-    process.env.TZ = 'Australia/Brisbane' // UTC+10, no daylight saving
-    vi.useFakeTimers()
-    // 2026-06-14T20:00:00Z UTC is 2026-06-15T06:00:00+10:00 local - the
-    // exact "still yesterday in UTC, already tomorrow at the helm" case.
-    vi.setSystemTime(new Date('2026-06-14T20:00:00Z'))
+    // 2026-06-14T20:00:00Z is 2026-06-15 06:00 at UTC+10: still yesterday
+    // in UTC, already tomorrow at the helm.
+    const date = new Date('2026-06-14T20:00:00Z')
+    vi.spyOn(date, 'getFullYear').mockReturnValue(2026)
+    vi.spyOn(date, 'getMonth').mockReturnValue(5)
+    vi.spyOn(date, 'getDate').mockReturnValue(15)
 
-    expect(todayISO()).toBe('2026-06-15')
+    expect(date.toISOString().slice(0, 10)).toBe('2026-06-14')
+    expect(todayISO(date)).toBe('2026-06-15')
   })
 
-  it('still agrees with UTC when the local date and the UTC date are the same', () => {
-    process.env.TZ = 'Australia/Brisbane'
+  it('reads the system clock when given no date', () => {
     vi.useFakeTimers()
-    // 2026-06-15T04:00:00Z UTC is 2026-06-15T14:00:00+10:00 local - both
-    // read the same calendar day.
-    vi.setSystemTime(new Date('2026-06-15T04:00:00Z'))
+    // The local-time constructor, so the calendar day is the 15th in
+    // whatever timezone runs the test.
+    vi.setSystemTime(new Date(2026, 5, 15, 6, 0, 0))
 
     expect(todayISO()).toBe('2026-06-15')
   })
