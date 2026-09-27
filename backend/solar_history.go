@@ -58,23 +58,6 @@ func (s *solarDayStats) record(sampleW float64, ts time.Time) {
 	s.lastSampleAt = ts
 }
 
-// location returns the vessel-local timezone solarStats currently knows,
-// locked the same way record() reads s.loc. telemetry_influx_cache.go's
-// refresher calls this once per tick so the Influx-backed "today"/
-// "yesterday"/"peak today" queries (influx.go) roll over at the same local
-// midnight this in-memory tier already does, rather than at UTC midnight.
-// Defaults to UTC until tracks.go's sampleTracks has recorded a usable
-// vessel position - the same "no location known yet" default record()
-// itself falls back to, not a new fallback invented for this getter.
-func (s *solarDayStats) location() *time.Location {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.loc == nil {
-		return time.UTC
-	}
-	return s.loc
-}
-
 func inMemorySolarTodayKWh() float64 {
 	solarStats.mu.Lock()
 	defer solarStats.mu.Unlock()

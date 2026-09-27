@@ -1765,6 +1765,49 @@ func TestFetchSignalKSolarState_ConvertsVenusJoulesYieldToKWh(t *testing.T) {
 	}
 }
 
+// TestFetchSignalKSolarState_IgnoresDailyYieldFallbackPaths pins the removal
+// of the unverified dailyYield/dailyYieldYesterday fallback lookups (both
+// per-controller and electrical.venus). Only yieldToday/yieldYesterday are
+// confirmed live on this fleet's SignalK server, in joules; dailyYield/
+// dailyYieldYesterday were never verified to carry the same units (or to be
+// published at all) and are removed rather than kept "just in case". A
+// payload carrying only the dailyYield family must report today_kwh/
+// yesterday_kwh as the not-present sentinel -1, not a converted value.
+func TestFetchSignalKSolarState_IgnoresDailyYieldFallbackPaths(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"venus": {
+				"dailyYield": {"value": 3600000},
+				"dailyYieldYesterday": {"value": 7200000}
+			},
+			"solar": {
+				"0": {
+					"dailyYield": {"value": 3600000},
+					"dailyYieldYesterday": {"value": 7200000}
+				}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKSolarState()
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if state.TodayKWh != -1 {
+		t.Fatalf("expected today_kwh sentinel -1 when only dailyYield is present, got %v", state.TodayKWh)
+	}
+	if state.YesterdayKWh != -1 {
+		t.Fatalf("expected yesterday_kwh sentinel -1 when only dailyYieldYesterday is present, got %v", state.YesterdayKWh)
+	}
+	if len(state.Controllers) != 1 || state.Controllers[0].TodayKWh != -1 || state.Controllers[0].YesterdayKWh != -1 {
+		t.Fatalf("expected the controller's own today/yesterday to stay sentinel -1 too, got %+v", state.Controllers)
+	}
+}
+
 // TestJoulesToKWh exercises the pure conversion directly (1 kWh =
 // 3,600,000J), replacing the old normalizeYieldToKWh magnitude heuristic
 // (>200 guessed Wh) entirely - not layered on top of it.

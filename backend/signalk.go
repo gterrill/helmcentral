@@ -1621,8 +1621,6 @@ func fetchSignalKSolarState() (solarStateData, error) {
 	venusTodayKWh := joulesToKWh(lookupFirstNumber(payload,
 		[]string{"electrical", "venus", "yieldToday", "value"},
 		[]string{"electrical", "venus", "yieldToday"},
-		[]string{"electrical", "venus", "dailyYield", "value"},
-		[]string{"electrical", "venus", "dailyYield"},
 	))
 	if venusTodayKWh >= 0 {
 		state.TodayKWh = roundTo3(venusTodayKWh)
@@ -1631,8 +1629,6 @@ func fetchSignalKSolarState() (solarStateData, error) {
 	venusYesterdayKWh := joulesToKWh(lookupFirstNumber(payload,
 		[]string{"electrical", "venus", "yieldYesterday", "value"},
 		[]string{"electrical", "venus", "yieldYesterday"},
-		[]string{"electrical", "venus", "dailyYieldYesterday", "value"},
-		[]string{"electrical", "venus", "dailyYieldYesterday"},
 	))
 	if venusYesterdayKWh >= 0 {
 		state.YesterdayKWh = roundTo3(venusYesterdayKWh)
@@ -1681,8 +1677,6 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 	todayKWh := joulesToKWh(lookupFirstNumber(entry,
 		[]string{"yieldToday", "value"},
 		[]string{"yieldToday"},
-		[]string{"dailyYield", "value"},
-		[]string{"dailyYield"},
 	))
 	if todayKWh >= 0 {
 		controller.TodayKWh = roundTo3(todayKWh)
@@ -1691,8 +1685,6 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 	yesterdayKWh := joulesToKWh(lookupFirstNumber(entry,
 		[]string{"yieldYesterday", "value"},
 		[]string{"yieldYesterday"},
-		[]string{"dailyYieldYesterday", "value"},
-		[]string{"dailyYieldYesterday"},
 	))
 	if yesterdayKWh >= 0 {
 		controller.YesterdayKWh = roundTo3(yesterdayKWh)

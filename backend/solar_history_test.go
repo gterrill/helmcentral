@@ -118,28 +118,6 @@ func TestSolarDayStats_RolloverUsesLocalMidnight(t *testing.T) {
 	}
 }
 
-// TestSolarDayStats_LocationDefaultsToUTCWhenUnset pins solarStats.location()
-// (the locked getter telemetry_influx_cache.go's refresher reads to pass a
-// *time.Location into the Influx solar queries) to the exact same "no
-// location known yet" default record() itself already uses - not a new
-// fallback invented for the getter.
-func TestSolarDayStats_LocationDefaultsToUTCWhenUnset(t *testing.T) {
-	stats := &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
-
-	if got := stats.location(); got != time.UTC {
-		t.Fatalf("expected UTC default when loc is unset, got %v", got)
-	}
-}
-
-func TestSolarDayStats_LocationReturnsVesselLocalLocationOnceSet(t *testing.T) {
-	loc := vesselLocalLocation(153.0)
-	stats := &solarDayStats{yesterdayKWh: -1, peakTodayW: -1, loc: loc}
-
-	if got := stats.location(); got != loc {
-		t.Fatalf("expected %v, got %v", loc, got)
-	}
-}
-
 func TestInMemorySolarTodayKWh_NoSamplesReturnsSentinel(t *testing.T) {
 	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
 
