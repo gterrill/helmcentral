@@ -593,7 +593,7 @@ export function AnchorWatchDrawer({
                       <span
                         data-testid="anchor-watch-depth-stale-badge"
                         title={depthStaleLabel ? `No update for ${depthStaleLabel}` : 'Source has stopped updating'}
-                        className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400"
+                        className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400"
                       >
                         Stale{depthStaleLabel ? ` ${depthStaleLabel}` : ''}
                       </span>
@@ -640,7 +640,7 @@ export function AnchorWatchDrawer({
                       )}
                     </>
                   ) : (
-                    <p className="text-[11px] text-muted-foreground">No tide station</p>
+                    <p className="text-xs text-muted-foreground">No tide station</p>
                   )}
                 </div>
 
@@ -666,13 +666,13 @@ export function AnchorWatchDrawer({
               </div>
             )}
             {lowWaterClearance.status === 'ok' && (
-              <p data-testid="low-water-clearance" className="mt-2 truncate text-[11px] text-muted-foreground">
+              <p data-testid="low-water-clearance" className="mt-2 truncate text-xs text-muted-foreground">
                 {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
                 {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
               </p>
             )}
             {lowWaterClearance.status === 'unknown' && (
-              <p data-testid="low-water-clearance" className="mt-2 truncate text-[11px] text-muted-foreground">
+              <p data-testid="low-water-clearance" className="mt-2 truncate text-xs text-muted-foreground">
                 {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
               </p>
             )}

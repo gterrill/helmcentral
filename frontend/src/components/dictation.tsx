@@ -277,7 +277,7 @@ export function DictationStatus({ dictation }: { dictation: UseDictationResult }
 
 /**
  * The error line for under the field - same shape the composer already
- * uses for upload errors (`role="alert"`, `text-[11px] text-destructive`).
+ * uses for upload errors (`role="alert"`, `text-xs text-destructive`).
  * An insecure-context origin isn't really an "error" so much as a standing
  * fact about how the app was opened, so it renders muted rather than red,
  * but in the same spot: a `title` tooltip never shows on a touchscreen, so
@@ -285,10 +285,10 @@ export function DictationStatus({ dictation }: { dictation: UseDictationResult }
  */
 export function DictationError({ dictation }: { dictation: UseDictationResult }) {
   if (dictation.unsupportedReason === 'insecure-context') {
-    return <p role="alert" className="text-[11px] text-muted-foreground">Voice input needs the app opened over https</p>
+    return <p role="alert" className="text-xs text-muted-foreground">Voice input needs the app opened over https</p>
   }
   if (dictation.error) {
-    return <p role="alert" className="text-[11px] text-destructive">{dictation.error}</p>
+    return <p role="alert" className="text-xs text-destructive">{dictation.error}</p>
   }
   return null
 }

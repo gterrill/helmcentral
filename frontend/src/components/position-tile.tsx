@@ -60,7 +60,7 @@ export const PositionTile = memo(function PositionTile({
           <p className="font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
           {gnssValidationState === 'degraded' || gnssValidationState === 'critical' ? (
             <p
-              className={`mt-1 max-w-[170px] truncate font-mono text-[10px] ${satellitesValueClass}`}
+              className={`mt-1 max-w-[170px] truncate font-mono text-xs ${satellitesValueClass}`}
               title={gnssDiagnosticLabel}
             >
               {gnssDiagnosticLabel}

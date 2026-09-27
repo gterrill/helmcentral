@@ -308,7 +308,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
           {/* Two rows, not one: at the 768 band a single row has to truncate and the
               first thing the ellipsis eats is the dawn percentage, which is the
               figure the footer exists to show. */}
-          <div className="mt-2 space-y-1 font-display text-[11px] tabular-nums text-muted-foreground">
+          <div className="mt-2 space-y-1 font-display text-xs tabular-nums text-muted-foreground">
             <span className="block truncate">
               {dc24vVoltageLabel}
               <span className="font-display text-muted-foreground">V</span>
@@ -359,7 +359,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               {chargingPowerLabel}
               <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
             </p>
-            <p className="mt-1 truncate font-display text-[11px] tabular-nums text-muted-foreground">
+            <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
               <span className={readoutClass}>{chargingCurrentLabel}</span>
               <span className="ml-1 font-display text-muted-foreground">A</span>
             </p>
@@ -379,7 +379,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
             {loadsTotalLabel}
             <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
           </p>
-          <p className="mt-1 truncate font-display text-[11px] tabular-nums text-muted-foreground">
+          <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
             {`AC ${acOutputLabel} · DC ${dc12vPowerLabel}`}
           </p>
         </div>

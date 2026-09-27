@@ -13,7 +13,7 @@ export function MayaraSection({ draft, onChange }: MayaraSectionProps) {
       <FieldSet>
         <FieldLegend variant="label">Mayara Radar Server</FieldLegend>
 
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           This address is only needed for the radar picture overlay on the anchor watch map. ARPA
           radar targets need no configuration here: they already arrive through the SignalK
           plugin. That plugin does not proxy the spoke stream, so the picture needs a direct

@@ -234,7 +234,7 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
                     value={zoneThreshold(zone)}
                     onChange={(e) => setZone(index, anchoredZone(direction, Number(e.target.value), zone.state))}
                   />
-                  {unitLabel && <span className="text-[11px] text-muted-foreground">{unitLabel}</span>}
+                  {unitLabel && <span className="text-xs text-muted-foreground">{unitLabel}</span>}
                 </div>
                 <select
                   aria-label={`Zone ${index + 1} severity`}

@@ -130,17 +130,17 @@ export function TagRow({ path }: TagRowProps) {
       </div>
 
       {!nfcSupported() && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Writing a tag needs Chrome on Android. Copy the address into an NFC app instead.
         </p>
       )}
       {!window.isSecureContext && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Write tags from the tailnet https address, so they still open on a phone once away from the boat's own network.
         </p>
       )}
       {writeState === 'error' && writeError && (
-        <p role="alert" className="text-[11px] text-destructive">{writeError}</p>
+        <p role="alert" className="text-xs text-destructive">{writeError}</p>
       )}
     </div>
   )

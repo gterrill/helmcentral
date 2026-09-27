@@ -82,10 +82,10 @@ function SightingRow({ sighting }: { sighting: VesselSighting }) {
   return (
     <div className="border-b border-border/60 py-1.5 last:border-b-0">
       <p className="text-xs font-medium text-foreground">{formatSightingTime(sighting.seen_at)}</p>
-      <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
         {formatCoordinate(sighting.lat, true)} {formatCoordinate(sighting.lon, false)}
       </p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">
+      <p className="mt-0.5 text-xs text-muted-foreground">
         {sighting.geoname ? <span>{sighting.geoname}</span> : null}
         {sighting.geoname && label ? ' • ' : ''}
         {label ? <span>{label}</span> : null}

@@ -118,14 +118,14 @@ function CornerCard({ corner, values, ages, style, index }: {
                   staling the whole card: one dead sensor among several must
                   not blank readings that are still live. */}
               {stale && (
-                <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400">
                   Stale {formatDataAge(age)}
                 </span>
               )}
             </span>
             <span className={`font-display leading-none tabular-nums ${zoneTextClass(zone)} ${stacked ? 'text-base' : 'text-2xl'}`}>
               {text ?? '--'}
-              {unit && <span className="ml-0.5 text-[10px] text-muted-foreground">{unit}</span>}
+              {unit && <span className="ml-0.5 text-xs text-muted-foreground">{unit}</span>}
             </span>
             {/* The bar exists to use the dead space in a single-reading card.
                 A card stacking three has none, and colour alone carries the
@@ -209,7 +209,7 @@ function Telltales({ slots, values, ages }: {
           <span key={index} data-telltale={kind}
             className={`flex items-center gap-1 ${telltaleClass(zone, converted)}`}>
             <Icon className="size-4 shrink-0" />
-            <span className="font-display text-[11px] leading-none tabular-nums">{text ?? '--'}</span>
+            <span className="font-display text-xs leading-none tabular-nums">{text ?? '--'}</span>
           </span>
         )
       })}

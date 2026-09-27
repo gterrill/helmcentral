@@ -260,7 +260,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
                 scent - "Mate" alone doesn't say which of several open
                 conversations the sheet is showing). `--` before any thread
                 is selected, same as every other zero-state in this app. */}
-            <div className="truncate text-[11px] text-muted-foreground">
+            <div className="truncate text-xs text-muted-foreground">
               {activeConversationTitle ?? '--'}
             </div>
           </div>

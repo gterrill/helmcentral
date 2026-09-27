@@ -67,7 +67,7 @@ function detectorLine(label: string, status: { ready: boolean; missing?: string 
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ready ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
-      <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+      <span className="min-w-0 truncate text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{label}</span>
         {': '}
         {ready ? 'Ready' : `Not set up${status?.missing ? ` — ${status.missing}` : ''}`}
@@ -213,7 +213,7 @@ function VesselEnginesAndPowerSection() {
     <>
       <FieldSet>
         <FieldLegend variant="label">Engines</FieldLegend>
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Tick every engine the frozen-sensor and engine-differential checks should watch. Each needs a linked
           inventory item so its equipment profile applies gauge zones and pack thresholds.
         </p>
@@ -244,7 +244,7 @@ function VesselEnginesAndPowerSection() {
 
       <FieldSet>
         <FieldLegend variant="label">Power</FieldLegend>
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Pick which battery bank is the house bank the full-bank-charging check watches. Live voltage, current and
           state of charge are shown for every bank so you can tell which one is which.
         </p>
@@ -263,9 +263,9 @@ function VesselEnginesAndPowerSection() {
         <Button type="button" onClick={() => void handleSave()} disabled={saving}>
           {saving ? 'Saving…' : 'Save Vessel Settings'}
         </Button>
-        {saved && !saveError && <span className="text-[11px] text-muted-foreground">Saved.</span>}
+        {saved && !saveError && <span className="text-xs text-muted-foreground">Saved.</span>}
         {(saveError ?? error) && (
-          <span className="text-[11px] text-destructive" role="alert">{saveError ?? error}</span>
+          <span className="text-xs text-destructive" role="alert">{saveError ?? error}</span>
         )}
       </div>
 
@@ -317,7 +317,7 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
           className="h-8 text-sm"
           aria-label={`Display name for ${instance}`}
         />
-        <p className="mt-1 truncate text-[11px] text-muted-foreground tabular-nums">
+        <p className="mt-1 truncate text-xs text-muted-foreground tabular-nums">
           {rpm === null ? '—' : `${Math.round(rpm)} rpm`} · {coolantC === null ? '—' : `${coolantC.toFixed(0)}°C`}
         </p>
       </div>

@@ -172,7 +172,7 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
           <span className="font-display text-2xl font-bold tabular-nums tracking-tight text-gauge-primary">
             {run.checked_count} / {run.total}
           </span>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {resumed
               ? `Started ${formatClockTime(run.started_at)}, ${run.checked_count} of ${run.total} done`
               : `Started ${formatClockTime(run.started_at)} · ${formatElapsed(run.started_at, now)}`}

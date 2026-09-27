@@ -107,7 +107,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
                     onClick={() => void conversations.select(conversation.id)}
                   >
                     <div className="truncate text-sm">{conversation.title}</div>
-                    <div className="text-[11px] text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</div>
+                    <div className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</div>
                   </button>
                   <Button
                     variant="ghost"

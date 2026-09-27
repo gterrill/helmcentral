@@ -127,7 +127,7 @@ export function HelpSheet({ open, onOpenChange, target, onAskMate }: HelpSheetPr
         <SheetHeader className="flex-row items-center justify-between space-y-0 pr-10">
           <div className="min-w-0">
             <SheetTitle className="truncate text-base">{title}</SheetTitle>
-            <div className="truncate text-[11px] text-muted-foreground">{groupLabel}</div>
+            <div className="truncate text-xs text-muted-foreground">{groupLabel}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {history.length > 1 && (

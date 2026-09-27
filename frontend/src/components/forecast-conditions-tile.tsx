@@ -164,7 +164,7 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
                       <span className="font-display text-xl tabular-nums text-gauge-primary">
                         {Math.round(displayTemp(day.high))}°
                       </span>
-                      <span className="text-[11px] text-muted-foreground">{Math.round(displayTemp(day.low))}°</span>
+                      <span className="text-xs text-muted-foreground">{Math.round(displayTemp(day.low))}°</span>
                     </div>
                   ) : (
                     <span className="font-display text-xl text-muted-foreground">--</span>
@@ -193,7 +193,7 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
           )}
         </div>
         {waveLoading && waveForecastDays.length === 0 && !waveError && (
-          <p className="mt-1 text-[11px] text-muted-foreground">Loading wave data…</p>
+          <p className="mt-1 text-xs text-muted-foreground">Loading wave data…</p>
         )}
       </div>
     </Tile>

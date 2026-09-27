@@ -35,7 +35,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
     <section className="rounded-md border bg-background/60 p-3">
       <label
         htmlFor="webpush-enabled"
-        className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground"
+        className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground"
       >
         <input
           id="webpush-enabled"
@@ -45,7 +45,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
         />
         Web push (browser &amp; phone)
       </label>
-      <p className="mt-1 text-[10px] text-muted-foreground">
+      <p className="mt-1 text-xs text-muted-foreground">
         Alarms on the lock screen of any browser registered below, with the dashboard closed. No app to install.
       </p>
 
@@ -53,7 +53,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
         <div className="mt-3 rounded-md border bg-card p-3">
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">This device</p>
           <div className="mt-2">{renderDeviceState()}</div>
-          {error && <p className="mt-2 text-[10px] text-destructive">{error}</p>}
+          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
         </div>
       )}
     </section>
@@ -63,13 +63,13 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
     switch (support.kind) {
       case 'insecure-context':
         return (
-          <div className="text-[10px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             <p className="text-foreground">Web push needs a secure connection.</p>
             <p className="mt-1">
               You are on an http:// address, and browsers only allow push over https. Helmcentral ships no
               certificate of its own — the supported route is Tailscale:
             </p>
-            <pre className="mt-2 overflow-x-auto rounded-sm bg-background/60 p-2 font-mono text-[11px] text-foreground">
+            <pre className="mt-2 overflow-x-auto rounded-sm bg-background/60 p-2 font-mono text-xs text-foreground">
               tailscale serve --bg 8080
             </pre>
             <p className="mt-2">
@@ -81,7 +81,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
 
       case 'ios-not-installed':
         return (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             <span className="text-foreground">On iPhone and iPad, add Helmcentral to your Home Screen first.</span>{' '}
             Tap Share, then Add to Home Screen, then open Helmcentral from the new icon and come back here. iOS only
             allows notifications for installed web apps — and it must be installed from the https:// address, not a
@@ -91,7 +91,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
 
       case 'blocked':
         return (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Notifications are blocked for this site. Re-enable them in your browser&apos;s site settings, then reload.
           </p>
         )
@@ -99,7 +99,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
       case 'no-service-worker':
       case 'unsupported':
         return (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             This browser cannot receive web push. ntfy or email will still reach this device.
           </p>
         )
@@ -110,7 +110,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
           <div className="flex flex-col gap-2">
             {subscribed ? (
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] text-muted-foreground">Subscribed on this device.</p>
+                <p className="text-xs text-muted-foreground">Subscribed on this device.</p>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => void disableOnThisDevice()}>
                   Unsubscribe
                 </Button>
@@ -134,7 +134,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
               </>
             )}
 
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {deviceCount === 0
                 ? 'No devices are subscribed yet, so this transport cannot deliver anything.'
                 : `${deviceCount} device${deviceCount === 1 ? '' : 's'} subscribed.`}

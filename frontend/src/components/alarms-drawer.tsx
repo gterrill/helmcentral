@@ -183,10 +183,10 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
       <Tile title="Active Alarms" icon={<BellRing className="h-3.5 w-3.5 text-gauge-secondary" />}>
         {ackError && (
-          <p className="mb-2 text-[11px] text-destructive">{ackError}</p>
+          <p className="mb-2 text-xs text-destructive">{ackError}</p>
         )}
         {alarms.length === 0 ? (
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">All clear</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">All clear</p>
         ) : (
           <div className="flex flex-col gap-2">
             {alarms.map((alarm) => {
@@ -259,7 +259,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         headline, so it renders muted.
                       */}
                       {alarm.evidence && (
-                        <p className="mt-1.5 text-[11px] text-muted-foreground">{alarm.evidence}</p>
+                        <p className="mt-1.5 text-xs text-muted-foreground">{alarm.evidence}</p>
                       )}
                       {/*
                         "Ignore this sensor" (the frozen/impossible/silent-
@@ -287,7 +287,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         </div>
                       )}
                       {hasMeta && (
-                        <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
                           {timeParts.length > 0 && timeParts.join(' · ')}
                           {timeParts.length > 0 && showPath && ' · '}
                           {showPath && <span className="font-display">{displayPath}</span>}
@@ -306,7 +306,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           href={collisionTuningUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-1.5 inline-block rounded-sm border px-2 py-1 text-[11px] hover:bg-muted"
+                          className="mt-1.5 inline-block rounded-sm border px-2 py-1 text-xs hover:bg-muted"
                         >
                           Adjust thresholds in AIS Target Prioritizer
                         </a>
@@ -371,11 +371,11 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
           </Button>
         }
       >
-        {error && <p className="mb-2 text-[11px] text-destructive">{error}</p>}
+        {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
         {loading ? (
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
         ) : rules.length === 0 ? (
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
             No rules configured
           </p>
         ) : (
@@ -419,12 +419,12 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
 
       <Tile title="History" icon={<BellRing className="h-3.5 w-3.5 text-gauge-secondary" />}>
         {entries.length === 0 ? (
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">No alarms recorded</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">No alarms recorded</p>
         ) : (
           <div className="flex flex-col gap-1">
             {entries.slice(0, 25).map((entry) => (
               <div key={entry.id} className="flex min-w-0 items-baseline justify-between gap-3 border-b py-1 last:border-b-0">
-                <span className="min-w-0 truncate text-[11px]">
+                <span className="min-w-0 truncate text-xs">
                   <span className={severityClass(entry.state)}>{entry.state}</span>
                   {' · '}
                   {entry.label}
@@ -432,7 +432,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                     <span className="ml-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">signalk</span>
                   )}
                 </span>
-                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                   {formatTime(entry.raised_at)}
                   {entry.cleared_at ? ' → cleared' : ''}
                 </span>
@@ -533,7 +533,7 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
             </span>
           )}
         </p>
-        <p className="wrap-break-word text-[11px] text-muted-foreground">
+        <p className="wrap-break-word text-xs text-muted-foreground">
           <RuleCondition rule={rule} unit={unit} />
         </p>
       </div>
@@ -627,7 +627,7 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
             <FieldLabel htmlFor="alarm-value">{hasUnit ? `Threshold (${unit})` : 'Threshold'}</FieldLabel>
             <Input id="alarm-value" type="number" step="any" value={draft.value} onChange={(e) => set('value', Number(e.target.value))} />
             {hasUnit && (
-              <p className="text-[10px] text-muted-foreground">= {formatAlarmReading(draft.value, unit)}</p>
+              <p className="text-xs text-muted-foreground">= {formatAlarmReading(draft.value, unit)}</p>
             )}
           </Field>
         )}
@@ -646,7 +646,7 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
 
       <button
         type="button"
-        className="mt-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground"
+        className="mt-3 text-xs uppercase tracking-[0.16em] text-muted-foreground"
         aria-expanded={advancedOpen}
         onClick={() => setAdvancedOpen((open) => !open)}
       >
@@ -665,7 +665,7 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
                 value={draft.hysteresis}
                 onChange={(e) => set('hysteresis', Number(e.target.value))}
               />
-              <p className="text-[10px] text-muted-foreground">How far back past the threshold before it clears.</p>
+              <p className="text-xs text-muted-foreground">How far back past the threshold before it clears.</p>
             </Field>
           )}
           <Field>
@@ -689,7 +689,7 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
         </div>
       )}
 
-      <label className="mt-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+      <label className="mt-3 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
         <input type="checkbox" checked={draft.enabled} onChange={(e) => set('enabled', e.target.checked)} />
         Enabled
       </label>

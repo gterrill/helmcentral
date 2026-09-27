@@ -580,7 +580,7 @@ export function AnchorRodePlanner({
                   onChange={(e) => handleDepthInputChange(e.target.value)}
                   className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring"
                 />
-                <p className="mt-1 text-[10px] text-muted-foreground">{depthCaption}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{depthCaption}</p>
               </label>
 
               <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
@@ -686,11 +686,11 @@ export function AnchorRodePlanner({
                             )}
                           </div>
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (
-                            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
+                            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
                               Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
                             </p>
                           )}
-                          <p className="mt-2 text-[10px] text-muted-foreground">{result.note}</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{result.note}</p>
                         </div>
                       )}
                     </TabsContent>
@@ -718,13 +718,13 @@ export function AnchorRodePlanner({
               </label>
 
               {rodeDeployedM > 0 && status !== null && (
-                <div className={`rounded-md border px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-[0.12em] ${scopeBadgeClass(status)}`}>
+                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold uppercase tracking-[0.12em] ${scopeBadgeClass(status)}`}>
                   {scopeBadgeLabel(status)}
                 </div>
               )}
 
               {isInactive && (
-                <p className="text-[10px] text-muted-foreground">{inactiveReason}</p>
+                <p className="text-xs text-muted-foreground">{inactiveReason}</p>
               )}
             </SidebarGroupContent>
           </SidebarGroup>
@@ -736,12 +736,12 @@ export function AnchorRodePlanner({
               they gate — rather than repeated inside every method group
               (ADR 0059 §4). */}
           {resolvedLoaM !== null && loaSource !== null && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               LOA {Number(toDisplayDistance(resolvedLoaM, isImperial).toFixed(1))} {unit} from {loaSource === 'settings' ? 'settings' : 'SignalK'}
             </p>
           )}
           {!loaConfigured && (
-            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
+            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
               Set boat length (LOA) in Settings → Anchor to get a swing radius.
             </p>
           )}
@@ -751,11 +751,11 @@ export function AnchorRodePlanner({
               When LOA itself is unresolved the warning above already says
               why, so this slot stays quiet instead of repeating it. */}
           {configuredMethodResult.unavailableReason ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {configuredMethodResult.label} unavailable — {configuredMethodResult.unavailableReason}
             </p>
           ) : configuredSwingRadiusM !== null ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Applies the {configuredMethodResult.label} swing, {Math.round(toDisplayDistance(configuredSwingRadiusM, isImperial))} {unit}
             </p>
           ) : null}

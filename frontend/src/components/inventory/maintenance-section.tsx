@@ -186,7 +186,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                             {rule.description}
                           </button>
                           {rule.hours_unknown && (
-                            <span className="truncate text-[10px] text-muted-foreground">
+                            <span className="truncate text-xs text-muted-foreground">
                               {rule.has_hour_meter_path ? 'Hours unknown/stale' : 'No hour meter bound'}
                             </span>
                           )}
@@ -197,7 +197,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           {rule.acknowledged && (
-                            <Badge variant="outline" className="gap-1 text-[10px]" title={rule.ack_reason}>
+                            <Badge variant="outline" className="gap-1 text-xs" title={rule.ack_reason}>
                               Ack
                             </Badge>
                           )}

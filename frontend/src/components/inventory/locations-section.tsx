@@ -144,7 +144,7 @@ function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProps) {
         )}
       </div>
       {renameWarning && (
-        <p className="pl-2 text-[11px] text-muted-foreground">{renameWarning}</p>
+        <p className="pl-2 text-xs text-muted-foreground">{renameWarning}</p>
       )}
     </div>
   )

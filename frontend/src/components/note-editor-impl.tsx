@@ -537,7 +537,7 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
         <p role="alert" className="text-xs text-destructive">{saveError}</p>
       )}
       <div className="flex items-center justify-end gap-2">
-        {dirty && <span className="text-[11px] text-muted-foreground">Unsaved changes</span>}
+        {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
         <Button type="button" disabled={!dirty || saving} onClick={() => { void handleSave() }}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
@@ -924,7 +924,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
               <span className="truncate">Add from library</span>
             </Button>
           </div>
-          {uploading && <p className="text-[11px] text-muted-foreground">Uploading…</p>}
+          {uploading && <p className="text-xs text-muted-foreground">Uploading…</p>}
 
           <div className="h-px bg-border" aria-hidden="true" />
 

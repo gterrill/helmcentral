@@ -139,7 +139,7 @@ function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass
       <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, fallbackTextClass)}`}>
         {text ?? '--'}
       </span>
-      {unitLabel && <span className={`${unitSizeClass ?? 'text-[11px]'} leading-none text-muted-foreground`}>{unitLabel}</span>}
+      {unitLabel && <span className={`${unitSizeClass ?? 'text-xs'} leading-none text-muted-foreground`}>{unitLabel}</span>}
     </div>
   )
 }

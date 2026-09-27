@@ -500,7 +500,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">{profile.name}</p>
-                <p className="text-[11px] text-muted-foreground">{profile.file} · {profile.kind}</p>
+                <p className="text-xs text-muted-foreground">{profile.file} · {profile.kind}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Button

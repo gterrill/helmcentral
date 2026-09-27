@@ -1087,7 +1087,7 @@ export function DocumentsPanel({
           <Button type="button" variant="outline" size="sm" aria-label="Search documents" onClick={() => setSearchOpen(true)}>
             <Search className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Search
-            <kbd className="ml-1 text-[10px] text-muted-foreground">{isApplePlatform() ? '⌘K' : 'Ctrl K'}</kbd>
+            <kbd className="ml-1 text-xs text-muted-foreground">{isApplePlatform() ? '⌘K' : 'Ctrl K'}</kbd>
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -1193,7 +1193,7 @@ export function DocumentsPanel({
             <div
               key={item.key}
               className={cn(
-                'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
+                'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
                 item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
               )}
             >
@@ -1469,13 +1469,13 @@ export function DocumentsPanel({
                   type="button"
                   aria-label={`Clear tag filter ${documents.selectedTag}`}
                   onClick={() => documents.setSelectedTag(null)}
-                  className="flex min-w-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] hover:bg-accent"
+                  className="flex min-w-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs hover:bg-accent"
                 >
                   <span className="truncate">Tag: {documents.selectedTag}</span>
                   <X className="h-3 w-3 shrink-0" aria-hidden="true" />
                 </button>
               )}
-              <Label htmlFor="documents-search-all-folders" className="text-[11px] text-muted-foreground">
+              <Label htmlFor="documents-search-all-folders" className="text-xs text-muted-foreground">
                 All folders
               </Label>
               <Switch id="documents-search-all-folders" aria-label="All folders" checked={allFolders} onCheckedChange={setAllFolders} />

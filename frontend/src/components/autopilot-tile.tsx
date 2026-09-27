@@ -267,7 +267,7 @@ function AutopilotControls({
                 disabled={active || commandsDisabled || pending.has(`mode-${m}`)}
                 onConfirm={() => onSetMode(m)}
                 className={cn(
-                  'flex-1 px-2 py-1.5 text-[10px]',
+                  'flex-1 px-2 py-1.5 text-xs',
                   active
                     ? 'bg-gauge-primary/20 text-gauge-primary ring-1 ring-inset ring-gauge-primary/40 disabled:opacity-100'
                     : 'border border-border bg-card text-muted-foreground hover:bg-muted',
@@ -277,7 +277,7 @@ function AutopilotControls({
           })}
         </div>
       ) : capabilityError ? (
-        <p className="text-center text-[10px] text-muted-foreground" role="status">
+        <p className="text-center text-xs text-muted-foreground" role="status">
           Mode switching unavailable — {capabilityError}
         </p>
       ) : null}
@@ -355,7 +355,7 @@ function AutopilotControls({
       />
 
       {error && (
-        <p className="text-center text-[11px] font-medium text-red-500" role="alert">
+        <p className="text-center text-xs font-medium text-red-500" role="alert">
           {error}
         </p>
       )}

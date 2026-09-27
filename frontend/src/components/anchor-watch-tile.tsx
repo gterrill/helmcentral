@@ -363,13 +363,13 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
         </div>
       )}
       {lowWaterClearance.status === 'ok' && (
-        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-[11px] text-muted-foreground">
+        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-xs text-muted-foreground">
           {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
           {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
         </p>
       )}
       {lowWaterClearance.status === 'unknown' && (
-        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-[11px] text-muted-foreground">
+        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-xs text-muted-foreground">
           {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
         </p>
       )}

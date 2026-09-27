@@ -21,8 +21,8 @@ export function ChartTooltipBubble({ pixelX, time, primary, secondary, tertiary 
     >
       <p className="text-[9px] font-medium uppercase tracking-wide tabular-nums text-muted-foreground">{time}</p>
       <p className="font-display text-base leading-tight tabular-nums text-foreground">{primary}</p>
-      <p className="text-[10px] tabular-nums text-muted-foreground">{secondary}</p>
-      {tertiary && <p className="text-[10px] tabular-nums text-muted-foreground">{tertiary}</p>}
+      <p className="text-xs tabular-nums text-muted-foreground">{secondary}</p>
+      {tertiary && <p className="text-xs tabular-nums text-muted-foreground">{tertiary}</p>}
     </div>
   )
 }
