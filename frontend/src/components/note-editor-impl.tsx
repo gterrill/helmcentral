@@ -50,6 +50,7 @@ import {
   serializeNoteMarkdown,
 } from '@/lib/note-editor-config'
 import { insertDictatedText } from '@/lib/note-editor-dictation'
+import { insertUploadedPhotos, type UploadedPhoto } from '@/lib/note-editor-image-insert'
 import { resolveNoteHref } from '@/lib/note-links'
 import { cn } from '@/lib/utils'
 
@@ -730,6 +731,11 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
   const [docId, setDocId] = useState('')
   const [alt, setAlt] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Code-review finding: distinct from `error` (role="alert", a real
+  // failure) - this is the "the spot changed" FYI (insertUploadedPhotos'
+  // own movedToEnd), never a failure: the photo is placed, just not where
+  // the operator expected. role="status" below, not "alert".
+  const [notice, setNotice] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -743,29 +749,34 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
   // selection cannot be assumed to survive it the way it does across the
   // synchronous doc-id submit below (which the pre-existing onMouseDown
   // preventDefault on the trigger, further down, was already enough to
-  // protect).
+  // protect). insertUploadedPhotos (lib/note-editor-image-insert.ts) is
+  // what checks this saved spot is still real before trusting it.
   const savedSelectionRef = useRef<typeof editor.selection>(null)
 
-  // Inserts one image node per id, in order, at the position the popover
-  // was opened at (or the end of the document, the same fallback lib/note-
-  // editor-dictation.ts's insertDictatedText uses for a genuinely untouched
-  // note with no selection at all) - a single insertNodes call rather than
-  // one per photo, so a multi-photo library pick lands as sibling nodes in
-  // pick order without threading selection state between calls by hand.
-  const insertPhotos = (ids: string[], caption: string) => {
-    if (ids.length === 0) return
-    const at = savedSelectionRef.current ?? editor.api.end([])
-    const trimmedCaption = caption.trim()
-    editor.tf.insertNodes(
-      ids.map((id) => ({
-        type: KEYS.img,
-        url: `hc-doc:${id}`,
-        caption: trimmedCaption === '' ? [] : [{ text: trimmedCaption }],
-        children: [{ text: '' }],
-      })),
-      { at, select: true },
-    )
-    editor.tf.focus()
+  // Inserts one image node per photo, in order, at the popover's own saved
+  // selection if it's still a real spot in the document, the end of the
+  // note otherwise - see lib/note-editor-image-insert.ts's own doc
+  // comment (extracted there so the actual insertion/fallback/catch logic
+  // is tested headlessly against a real Slate editor, not through jsdom's
+  // own limited Slate-selection support).
+  // Returns whether the insert actually succeeded - callers only clear the
+  // form/close the popover on true, so an insert failure (surfaced via
+  // setError below) leaves the operator looking at the same state a failed
+  // upload already would, rather than having its own error immediately
+  // wiped by a subsequent unconditional setError(null).
+  const insertPhotos = (photos: UploadedPhoto[], caption: string): boolean => {
+    const result = insertUploadedPhotos(editor, photos, caption, savedSelectionRef.current)
+    if (!result.ok) {
+      // Code-review finding: this used to be an unhandled rejection - the
+      // photo IS already a real Document (the upload succeeded), so it is
+      // named here rather than left to look silently lost.
+      setError(result.error ?? 'The photo could not be placed in the note.')
+      return false
+    }
+    setNotice(result.movedToEnd
+      ? 'The note changed while the camera was open, so the photo was placed at the end of the note instead.'
+      : null)
+    return true
   }
 
   const submitDocId = () => {
@@ -778,7 +789,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
       setError('Paste the document id from its Documents address bar (a UUID).')
       return
     }
-    insertPhotos([link.id], alt)
+    if (!insertPhotos([{ id: link.id, name: trimmed }], alt)) return
     setDocId('')
     setAlt('')
     setError(null)
@@ -800,9 +811,10 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
     if (files.length === 0) return
     setUploading(true)
     setError(null)
+    setNotice(null)
     try {
       const outcomes = await downscaleAll(files)
-      const ids: string[] = []
+      const uploaded: UploadedPhoto[] = []
       const failures: { name: string; message: string }[] = []
 
       for (const { file, result } of outcomes) {
@@ -811,20 +823,23 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
           continue
         }
         try {
-          const uploaded = await uploadDocument(result.blob, photoFilename(file.name), ['photo'])
-          ids.push(uploaded.id)
+          const doc = await uploadDocument(result.blob, photoFilename(file.name), ['photo'])
+          uploaded.push({ id: doc.id, name: file.name })
         } catch (err) {
           failures.push({ name: file.name, message: err instanceof Error ? err.message : String(err) })
         }
       }
 
-      if (ids.length > 0) insertPhotos(ids, alt)
+      const inserted = uploaded.length === 0 || insertPhotos(uploaded, alt)
 
       if (failures.length > 0) {
         // Fail loud, not a silent partial success: a single-file pick
         // (Take photo) shows the server's own reason verbatim; a multi-file
         // library pick that partly failed says how many, matching the
-        // equipment editor's own wording for the identical situation.
+        // equipment editor's own wording for the identical situation. This
+        // takes precedence over insertPhotos' own error (both would only
+        // ever line up if an upload half-succeeded AND the insert also
+        // failed - the upload failure is the more actionable of the two).
         setError(
           files.length === 1
             ? failures[0].message
@@ -832,6 +847,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
         )
         return
       }
+      if (!inserted) return
 
       setDocId('')
       setAlt('')
@@ -944,6 +960,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
             disabled={uploading}
           />
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+          {notice && <p role="status" className="text-[11px] text-muted-foreground">{notice}</p>}
           <Button type="button" size="sm" disabled={uploading} onClick={submitDocId}>Insert photo</Button>
         </div>
       </PopoverContent>
