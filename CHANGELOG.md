@@ -62,6 +62,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Wind tile's two MAX GUST cards now show their time window (10M,
+  30M, 1HR, 24HR) as a small button with an up/down marker, in the same
+  style as the Apparent/True and Course Up/North Up toggles. They were
+  always tappable to change the window; now it's visible that they are.
 - Small text on tiles, drawers and settings is easier to read at the helm.
   Secondary readouts such as voltage, charge rate, time to dawn and unit
   suffixes were a size too small to read at arm's length in glare, and are

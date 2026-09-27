@@ -39,6 +39,12 @@ const baseProps = {
   lastUpdateAgeS: null,
 }
 
+// The window a MAX GUST card shows lives in its own chip, split from the
+// "MAX GUST" text, so match on the chip rather than the joined title.
+function gustWindowChips(label: string) {
+  return screen.queryAllByTestId('gust-window-chip').filter((chip) => chip.textContent === label)
+}
+
 // WindTile renders WindGaugeCluster twice (mobile + desktop canvases), so
 // every "MAX GUST" button/text always appears twice. The two clusters are
 // rendered in a fixed JSX order (mobile cluster's left card, mobile's right
@@ -85,8 +91,8 @@ describe('WindTile MAX GUST cards', () => {
   test('render their default windows and values on mount with no localStorage seeded', () => {
     render(<WindTile {...baseProps} />)
 
-    expect(screen.getAllByText('MAX GUST 10M')).toHaveLength(2)
-    expect(screen.getAllByText('MAX GUST 1HR')).toHaveLength(2)
+    expect(gustWindowChips('10M')).toHaveLength(2)
+    expect(gustWindowChips('1HR')).toHaveLength(2)
     expect(screen.getAllByText('7.1', { exact: false })).toHaveLength(2)
     expect(screen.getAllByText('12.3', { exact: false })).toHaveLength(2)
 
@@ -94,25 +100,36 @@ describe('WindTile MAX GUST cards', () => {
     expect(getRightButtons()).toHaveLength(2)
   })
 
+  test('show the window as a chip with a cycle glyph, so the card reads as a control', () => {
+    render(<WindTile {...baseProps} />)
+
+    const chips = screen.getAllByTestId('gust-window-chip')
+    expect(chips.map((chip) => chip.textContent)).toEqual(['10M', '1HR', '10M', '1HR'])
+    for (const chip of chips) {
+      expect(chip.closest('button')).not.toBeNull()
+      expect(chip.querySelector('svg')).not.toBeNull()
+    }
+  })
+
   test('clicking the left card cycles 10m -> 30m -> 1h -> 24h -> 10m, updating title and value each step', () => {
     render(<WindTile {...baseProps} />)
 
     fireEvent.click(getLeftButtons()[0])
-    expect(screen.getAllByText('MAX GUST 30M')).toHaveLength(2)
+    expect(gustWindowChips('30M')).toHaveLength(2)
     expect(screen.getAllByText('9.2', { exact: false })).toHaveLength(2)
 
     // The right card still sits on its own default (1h), so once the left
     // card also reaches 1h there are 4 matching elements total (2 per card).
     fireEvent.click(getLeftButtons()[0])
-    expect(screen.getAllByText('MAX GUST 1HR')).toHaveLength(4)
+    expect(gustWindowChips('1HR')).toHaveLength(4)
     expect(screen.getAllByText('12.3', { exact: false })).toHaveLength(4)
 
     fireEvent.click(getLeftButtons()[0])
-    expect(screen.getAllByText('MAX GUST 24HR')).toHaveLength(2)
+    expect(gustWindowChips('24HR')).toHaveLength(2)
     expect(screen.getAllByText('18.4', { exact: false })).toHaveLength(2)
 
     fireEvent.click(getLeftButtons()[0])
-    expect(screen.getAllByText('MAX GUST 10M')).toHaveLength(2)
+    expect(gustWindowChips('10M')).toHaveLength(2)
     expect(screen.getAllByText('7.1', { exact: false })).toHaveLength(2)
   })
 
@@ -124,13 +141,13 @@ describe('WindTile MAX GUST cards', () => {
     fireEvent.click(getLeftButtons()[0])
     fireEvent.click(getLeftButtons()[0])
     fireEvent.click(getLeftButtons()[0])
-    expect(screen.getAllByText('MAX GUST 24HR')).toHaveLength(2)
-    expect(screen.getAllByText('MAX GUST 1HR')).toHaveLength(2)
+    expect(gustWindowChips('24HR')).toHaveLength(2)
+    expect(gustWindowChips('1HR')).toHaveLength(2)
     expect(screen.getAllByText('12.3', { exact: false })).toHaveLength(2)
 
     // Now click the right card once and confirm the left card (still 24h) is unaffected.
     fireEvent.click(getRightButtons()[0])
-    expect(screen.getAllByText('MAX GUST 24HR')).toHaveLength(4) // left card + right card both now read 24hr
+    expect(gustWindowChips('24HR')).toHaveLength(4) // left card + right card both now read 24hr
     expect(screen.getAllByText('18.4', { exact: false })).toHaveLength(4)
   })
 
@@ -149,10 +166,10 @@ describe('WindTile MAX GUST cards', () => {
 
     render(<WindTile {...baseProps} />)
 
-    expect(screen.getAllByText('MAX GUST 24HR')).toHaveLength(2)
+    expect(gustWindowChips('24HR')).toHaveLength(2)
     expect(screen.getAllByText('18.4', { exact: false })).toHaveLength(2)
     // Left card is unaffected and keeps its own default.
-    expect(screen.getAllByText('MAX GUST 10M')).toHaveLength(2)
+    expect(gustWindowChips('10M')).toHaveLength(2)
   })
 
   test('falls back to the default window for an invalid/corrupt localStorage value, without throwing', () => {
@@ -160,7 +177,7 @@ describe('WindTile MAX GUST cards', () => {
 
     expect(() => render(<WindTile {...baseProps} />)).not.toThrow()
 
-    expect(screen.getAllByText('MAX GUST 10M')).toHaveLength(2)
+    expect(gustWindowChips('10M')).toHaveLength(2)
     expect(screen.getAllByText('7.1', { exact: false })).toHaveLength(2)
   })
 
@@ -176,12 +193,12 @@ describe('WindTile MAX GUST cards', () => {
     // explicitly here to stand in for what a real browser does.
     fireEvent.keyDown(button, { key: 'Enter', code: 'Enter' })
     fireEvent.click(button)
-    expect(screen.getAllByText('MAX GUST 30M')).toHaveLength(2)
+    expect(gustWindowChips('30M')).toHaveLength(2)
 
     fireEvent.keyDown(button, { key: ' ', code: 'Space' })
     fireEvent.click(button)
     // The right card defaults to 1h too, so both cards now read MAX GUST 1HR.
-    expect(screen.getAllByText('MAX GUST 1HR')).toHaveLength(4)
+    expect(gustWindowChips('1HR')).toHaveLength(4)
   })
 })
 
