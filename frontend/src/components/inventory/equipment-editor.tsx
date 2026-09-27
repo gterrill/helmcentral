@@ -20,6 +20,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
+import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
@@ -1032,6 +1033,18 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               </Button>
             )}
           </div>
+        </FieldSet>
+      )}
+
+      {id !== null && (
+        <FieldSet className="rounded-md border border-border bg-card p-4">
+          <FieldLegend variant="label">Maintenance</FieldLegend>
+          <MaintenanceEquipmentBlock
+            equipmentId={id}
+            profileId={draft.profile_id}
+            hourMeterPath={draft.hour_meter_path}
+            canWrite={canWrite}
+          />
         </FieldSet>
       )}
 

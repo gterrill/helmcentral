@@ -224,6 +224,20 @@ function stubFetch() {
       currentDocuments = currentDocuments.filter((d) => d.document_id !== photoDelete[1])
       return Promise.resolve({ ok: true, json: async () => ({ item: currentItem }) })
     }
+    // ADR 0138: the equipment editor's own Maintenance block fetches all
+    // three of these for whichever record is open - empty results are a
+    // perfectly normal state (a fresh item has no rules, no log, no meter
+    // history yet) and none of this suite's own tests are about
+    // Maintenance, so there is nothing more specific for them to return.
+    if (u.includes('/api/inventory/maintenance/rules')) {
+      return Promise.resolve({ ok: true, json: async () => ({ rules: [] }) })
+    }
+    if (u.includes('/api/inventory/maintenance/log')) {
+      return Promise.resolve({ ok: true, json: async () => ({ entries: [] }) })
+    }
+    if (u.includes('/maintenance/meter-resets')) {
+      return Promise.resolve({ ok: true, json: async () => ({ resets: [] }) })
+    }
     return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
   })
   vi.stubGlobal('fetch', fetchMock)

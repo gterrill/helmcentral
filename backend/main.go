@@ -824,6 +824,20 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
 
+		// Maintenance (ADR 0138): service rules and the log they're
+		// completed into, under /api/inventory/maintenance/ - a sub-family
+		// of Inventory's own routes just above, not a separate one.
+		// "export.csv" and copy-profile-schedule/meter-reset/meter-resets
+		// are static path segments ahead of "/:id" purely for readability -
+		// see the read-tier comment above the document library's own
+		// routes on why Echo's router never needs that ordering.
+		{http.MethodGet, "/api/inventory/maintenance/rules", tierRead, listMaintenanceRulesHandler},
+		{http.MethodGet, "/api/inventory/maintenance/rules/:id", tierRead, getMaintenanceRuleHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log", tierRead, listMaintenanceLogEntriesHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log/export.csv", tierRead, exportMaintenanceLogCSVHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log/:id", tierRead, getMaintenanceLogEntryHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/meter-resets", tierRead, listHourMeterResetsHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -936,6 +950,23 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/inventory/equipment/:id/photos", tierWrite, uploadEquipmentPhotoHandler},
 		{http.MethodPut, "/api/inventory/equipment/:id/photos", tierWrite, setEquipmentPhotoOrderHandler},
 		{http.MethodDelete, "/api/inventory/equipment/:id/photos/:documentId", tierWrite, deleteEquipmentPhotoHandler},
+
+		// Maintenance writes (ADR 0138).
+		{http.MethodPost, "/api/inventory/maintenance/rules", tierWrite, createMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id", tierWrite, updateMaintenanceRuleHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/rules/:id", tierWrite, deleteMaintenanceRuleHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/acknowledge", tierWrite, acknowledgeMaintenanceRuleHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/last-done", tierWrite, setMaintenanceRuleLastDoneHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/complete", tierWrite, completeMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, setMaintenanceRuleProcedureNoteHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, createMaintenanceProcedureNoteHandler},
+		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/copy-profile-schedule", tierWrite, copyMaintenanceProfileScheduleHandler},
+		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/meter-reset", tierWrite, recordHourMeterResetHandler},
+		{http.MethodPost, "/api/inventory/maintenance/log", tierWrite, createMaintenanceLogEntryHandler},
+		{http.MethodPut, "/api/inventory/maintenance/log/:id", tierWrite, updateMaintenanceLogEntryHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/log/:id", tierWrite, deleteMaintenanceLogEntryHandler},
+		{http.MethodPost, "/api/inventory/maintenance/log/:id/photos", tierWrite, uploadMaintenanceLogPhotoHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/log/:id/photos/:documentId", tierWrite, deleteMaintenanceLogPhotoHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},

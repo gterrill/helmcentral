@@ -36,6 +36,8 @@ meets your needs.
   operations manual the crew and the next owner can follow.
 - [Inventory](features/inventory-tracking.md), the equipment registry: one record
   per system aboard, its documents, where it lives, and the profile it follows.
+- [Maintenance](features/maintenance.md), what's due on running hours, on the
+  calendar, or both, and the service log it's completed into.
 
 ## How-to guides
 
@@ -64,6 +66,10 @@ Steps for specific tasks.
   editor or on the spot while adding it from a bin.
 - [Run a stocktake](how-to/run-a-stocktake.md), scanning a bin and its
   contents to confirm what's aboard.
+- [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md),
+  copying a profile's service intervals or adding rules by hand.
+- [Log a service](how-to/log-a-service.md), completing a scheduled job or
+  recording a repair or improvement.
 - [Development](how-to/development.md), running the stack, tests and release builds.
 
 ## Reference

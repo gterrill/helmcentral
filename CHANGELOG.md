@@ -13,6 +13,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Inventory has a new **Maintenance** section: rules for what's due on
+  running hours, on the calendar, or both, grouped by Overdue, Due soon,
+  Never recorded, Hours unknown, Interval not set and OK. Completing a rule
+  writes a dated service log entry (with hours, cost, parts used and
+  photos) and resets it to count down again; a rule can be acknowledged
+  with a short reason without hiding it from the list. Certificates and
+  expiries with no equipment behind them - flares, the EPIRB battery,
+  insurance, registration - live in the same list under their own heading.
+  An equipment record with a profile can copy its manufacturer service
+  schedule in with one action, and each item's own page shows its rules
+  and recent service history. The whole service log, or one item's own,
+  exports as a CSV file.
 - Mate now cites documents it found in the library as small icon links
   instead of describing them in a sentence. Tap or click one to open that
   document, and hover or focus it to see its title. A citation to a

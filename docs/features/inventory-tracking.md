@@ -6,8 +6,9 @@ registry: one record per piece of gear, from a bilge pump to a main engine,
 so that "what generator is this and how do I start it" has one answer
 instead of five places to look.
 
-The **Inventory** panel in the sidebar has four sections: Equipment,
-Profiles, Locations and Stocktake.
+The **Inventory** panel in the sidebar has five sections: Equipment,
+Maintenance, Profiles, Locations and Stocktake. Maintenance has its own
+page - see [Maintenance](maintenance.md).
 
 ## Equipment
 
@@ -124,13 +125,14 @@ adding photos.
 
 ## Still to come
 
-The registry is the foundation for the rest. Locations, photos, tags and a
-scan-based stocktake are built; what's still designed and not yet built:
+The registry is the foundation for the rest. Locations, photos, tags, a
+scan-based stocktake and maintenance schedules are built - see
+[Maintenance](maintenance.md) for service intervals by running hours, by
+calendar, or whichever comes first, and the service log they're completed
+into. Still designed and not yet built:
 
-- **Service schedules and maintenance history.** Intervals by running hours,
-  by calendar, or whichever comes first; a log per item of what was done and
-  when; tasks that appear when an interval comes due.
-- **Cost tracking.** What each system has cost over its life, so an
+- **Cost tracking across a system's whole life.** Maintenance already
+  records what each job cost; rolling that up so an
   expensive one cannot hide inside the boat's total.
 - **Minimum stock levels.** A warning once a consumable's quantity drops
   below a level you set.

@@ -336,6 +336,15 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusBadRequest, errEquipmentPhotoSetMismatch.Error()
 	case errors.Is(err, errEquipmentPhotoNotFound):
 		return http.StatusNotFound, errEquipmentPhotoNotFound.Error()
+	// Maintenance (ADR 0138, maintenance_store.go) shares this same mapping
+	// function too - it is a sub-feature of Inventory, not a separate one,
+	// the same reasoning the inventory comment above already gives.
+	case errors.Is(err, errMaintenanceRuleNotFound):
+		return http.StatusNotFound, errMaintenanceRuleNotFound.Error()
+	case errors.Is(err, errMaintenanceLogEntryNotFound):
+		return http.StatusNotFound, errMaintenanceLogEntryNotFound.Error()
+	case errors.Is(err, errMaintenanceLogPhotoNotFound):
+		return http.StatusNotFound, errMaintenanceLogPhotoNotFound.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}
