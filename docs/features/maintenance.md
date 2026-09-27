@@ -58,10 +58,15 @@ service schedule can be copied in with one action - see
 
 **Complete** on a rule opens a short form: the date, the hours (filled in
 automatically where a live reading exists), what was done, who did it, what
-it cost, and any parts used from inventory. Saving it writes one line to
-the service log and resets the rule so it starts counting down again from
-today. Photos can be added to the entry afterward - a data plate, a worn
-part, the finished job.
+it cost, and any parts used from inventory. A rule that runs on hours
+requires an hours figure to complete - type it in from the gauge if there's
+no live reading to fill it in for you. A certificate or expiry with a fixed
+date and no recurring interval asks for the new due date, since there's
+nothing to calculate it from automatically; one that renews every so many
+months works it out for you. Saving it writes one line to the service log
+and resets the rule so it starts counting down again from today. Photos can
+be added to the entry afterward - a data plate, a worn part, the finished
+job.
 
 Repairs and improvements that aren't tied to a scheduled rule can be logged
 the same way from an item's own page, at any time. See
