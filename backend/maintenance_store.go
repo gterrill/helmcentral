@@ -1046,8 +1046,8 @@ func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) 
 		SELECT 1 FROM documents d
 		WHERE d.id = ?
 		AND `+documentDeletableAsOrphanPhotoClause+`
-		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)
-		AND NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)`, documentID)
+		AND `+documentHasNoEquipmentPhotoLinkClause+`
+		AND `+documentHasNoMaintenanceLogPhotoLinkClause, documentID)
 }
 
 // ── hour meter resets ────────────────────────────────────────────────────

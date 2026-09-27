@@ -855,6 +855,26 @@ const photoMIMEsClause = `d.mime IN ('image/jpeg', 'image/png')`
 // table aliased `d` - every caller below joins or selects from it that way.
 const documentDeletableAsOrphanPhotoClause = `d.folder_id IS NULL AND d.kind = 'file'`
 
+// documentHasNoMaintenanceLogPhotoLinkClause is ADR 0138's own addition to
+// "is this photo safe to delete": a document can be shared, by sha256
+// dedupe, between an equipment item's own photo strip and a maintenance log
+// entry's photos (on this item, a different item, or a calendar-only rule's
+// log entry with no item at all) - so a check that only looks at
+// equipment_documents can say a photo is exclusive to one item while a log
+// entry still shows it. Every caller that decides "may this document be
+// deleted" joins this alongside its own equipment_documents check - one
+// predicate, shared, rather than three copies of the same subquery
+// (exclusivePhotoIDsForEquipmentID and DocumentDeletableAsOrphanPhoto here,
+// MaintenanceLogPhotoDeletableAsOrphan's own equipment_documents check in
+// maintenance_store.go is this same shape from the other side).
+const documentHasNoMaintenanceLogPhotoLinkClause = `NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)`
+
+// documentHasNoEquipmentPhotoLinkClause is documentHasNoMaintenanceLogPhotoLinkClause's
+// mirror image, used from the log-entry side (MaintenanceLogPhotoDeletableAsOrphan,
+// maintenance_store.go): a document a maintenance log entry wants to delete
+// must not still be linked to any equipment item's own photo strip either.
+const documentHasNoEquipmentPhotoLinkClause = `NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)`
+
 // photoIDsForEquipmentIDs returns each of ids' own photo document ids
 // (image/jpeg or image/png among its linked documents), cover first -
 // ordered by sort_index then document_id. One aggregate query over every id
@@ -912,6 +932,17 @@ func photoIDsForEquipmentIDs(q sqlQueryer, ids []string) (map[string][]string, e
 // links it - "only this item uses" must never silently delete a document
 // still filed in Documents/a manual, still a note, or still linked
 // elsewhere.
+//
+// ADR 0138 fix: also excludes a photo any maintenance log entry still shows
+// (documentHasNoMaintenanceLogPhotoLinkClause) - without this, deleting an
+// item with "also delete photos only this item uses" checked could destroy
+// a photo a service log entry (on this item's own now-cascading log, a
+// DIFFERENT item's log, or a calendar-only rule's log with no item at all)
+// still needs, since a sha256-deduped upload can be linked from both places
+// at once. This is the same check DocumentDeletableAsOrphanPhoto already
+// applies to the single-photo "Remove and delete" path; this is the
+// item-delete path applying the identical predicate rather than a second,
+// divergent copy of it.
 func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string, error) {
 	rows, err := q.Query(`
 		SELECT ed.document_id
@@ -920,6 +951,7 @@ func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string
 		WHERE ed.equipment_id = ?
 		AND (SELECT COUNT(*) FROM equipment_documents ed2 WHERE ed2.document_id = ed.document_id) = 1
 		AND `+documentDeletableAsOrphanPhotoClause+`
+		AND `+documentHasNoMaintenanceLogPhotoLinkClause+`
 		ORDER BY ed.sort_index, ed.document_id`, equipmentID)
 	if err != nil {
 		return nil, fmt.Errorf("exclusive photo ids for equipment: %w", err)
@@ -1795,5 +1827,5 @@ func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool,
 		WHERE d.id = ?
 		AND `+documentDeletableAsOrphanPhotoClause+`
 		AND NOT EXISTS (SELECT 1 FROM equipment_documents ed WHERE ed.document_id = d.id)
-		AND NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)`, documentID)
+		AND `+documentHasNoMaintenanceLogPhotoLinkClause, documentID)
 }

@@ -401,6 +401,58 @@ func TestDocumentStore_MaintenanceLogPhotoSharedWithEquipmentIsNotOrphan(t *test
 	}
 }
 
+// TestDocumentStore_DeleteEquipmentWithDeletePhotosSparesOneALogEntryStillUses
+// pins the code-review finding: exclusivePhotoIDsForEquipmentID (what
+// DeleteEquipment's own deletePhotos=true path uses to decide "only this
+// item uses it") used to check equipment_documents alone, so a photo
+// exclusive to ONE item's own strip but ALSO linked to a maintenance log
+// entry - on a DIFFERENT item, so it survives the deleted item's own
+// cascade - was reported as safe to delete and destroyed a document that
+// log entry still needed.
+func TestDocumentStore_DeleteEquipmentWithDeletePhotosSparesAPhotoALogEntryStillUses(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Item to delete")
+	otherItem := mustCreateTestEquipment(t, store, "Other item")
+	entry, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{EquipmentID: &otherItem.ID, PerformedAt: "2026-04-01", Kind: "repair"})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceLogEntry: %v", err)
+	}
+	photo := mustInsertPhotoDocument(t, store, "logphotosha3", "shared-with-log.jpg")
+
+	if err := store.AddEquipmentPhoto(item.ID, photo.ID); err != nil {
+		t.Fatalf("AddEquipmentPhoto: %v", err)
+	}
+	if err := store.AddMaintenanceLogPhoto(entry.ID, photo.ID); err != nil {
+		t.Fatalf("AddMaintenanceLogPhoto: %v", err)
+	}
+
+	got, err := store.GetEquipment(item.ID)
+	if err != nil {
+		t.Fatalf("GetEquipment: %v", err)
+	}
+	if len(got.ExclusivePhotoIDs) != 0 {
+		t.Fatalf("expected the photo to be excluded from ExclusivePhotoIDs while a log entry still shows it, got %+v", got.ExclusivePhotoIDs)
+	}
+
+	deletedSHAs, err := store.DeleteEquipment(item.ID, true)
+	if err != nil {
+		t.Fatalf("DeleteEquipment: %v", err)
+	}
+	if len(deletedSHAs) != 0 {
+		t.Fatalf("expected no photo document to be deleted, got %+v", deletedSHAs)
+	}
+	if _, err := store.Get(photo.ID); err != nil {
+		t.Fatalf("expected the shared photo document to survive, got err: %v", err)
+	}
+	afterEntry, err := store.GetMaintenanceLogEntry(entry.ID)
+	if err != nil {
+		t.Fatalf("GetMaintenanceLogEntry: %v", err)
+	}
+	if len(afterEntry.PhotoIDs) != 1 || afterEntry.PhotoIDs[0] != photo.ID {
+		t.Fatalf("expected the log entry to keep showing the photo, got %+v", afterEntry.PhotoIDs)
+	}
+}
+
 func TestDocumentStore_HourMeterResetHistoryRoundTrips(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item := mustCreateTestEquipment(t, store, "Generator")
