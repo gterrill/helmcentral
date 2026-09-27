@@ -585,6 +585,25 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
+
+	existingRule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	// An hours-interval rule can never sensibly complete without a
+	// reading - live when the item's meter is bound and fresh, typed in by
+	// hand from the gauge otherwise (spec: never guessed at). Refusing this
+	// here, before the store ever runs, also protects
+	// CompleteMaintenanceRule's own "blank hours leaves the baseline
+	// unchanged" rule (maintenance_store.go) from ever being asked to
+	// interpret a blank hours field for a rule that actually needs one.
+	if existingRule.IntervalHours != nil && in.Hours == nil {
+		return writeInventoryValidationError(c, &inventoryValidationError{
+			Field:   "hours",
+			Message: "hours is required to complete an hours-based rule - enter the current reading if it isn't filled in automatically",
+		})
+	}
+
 	if err := checkMaintenancePartsExist(in.Parts); err != nil {
 		if errors.Is(err, errEquipmentNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})

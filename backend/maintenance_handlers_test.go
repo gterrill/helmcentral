@@ -323,6 +323,38 @@ func TestCompleteMaintenanceRuleHandler_UnknownPartReturns404(t *testing.T) {
 	}
 }
 
+// TestCompleteMaintenanceRuleHandler_HoursRequiredWhenIntervalHoursSet pins
+// the code-review finding: completing an hours-based rule with no hours
+// given used to silently null the rule's own hours baseline (an unrelated
+// bug, fixed alongside this one) rather than being refused outright - an
+// hours-interval rule can never sensibly complete without a reading, live
+// or typed in by hand from the gauge.
+func TestCompleteMaintenanceRuleHandler_HoursRequiredWhenIntervalHoursSet(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	hours := 250.0
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-06-01"}`, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no hours given, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := globalDocumentStore.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: engine.ID})
+	if err != nil {
+		t.Fatalf("ListMaintenanceLogEntries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected the refused completion to write no log entry, got %+v", entries)
+	}
+}
+
 // ── procedure note ───────────────────────────────────────────────────────
 
 func TestCreateMaintenanceProcedureNoteHandler_CreatesAndLinks(t *testing.T) {

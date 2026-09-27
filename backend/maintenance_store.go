@@ -943,8 +943,20 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 		return maintenanceRule{}, maintenanceLogEntry{}, err
 	}
 
+	// Blank hours must never wipe an hours baseline the rule already
+	// carries - completing a months-only rule with no hours given says
+	// nothing about hours at all, and validateMaintenanceLogEntryCore's own
+	// caller (completeMaintenanceRuleHandler) already refuses a blank hours
+	// value outright when the rule's own IntervalHours is set, so by the
+	// time this runs, in.Hours == nil only ever means "this completion had
+	// nothing to say about hours," never "clear it."
+	lastDoneHours := rule.LastDoneHours
+	if in.Hours != nil {
+		lastDoneHours = in.Hours
+	}
+
 	if _, err := tx.Exec(`UPDATE maintenance_rules SET last_done_at = ?, last_done_hours = ?, ack_reason = '', ack_at = NULL, updated_at = ? WHERE id = ?`,
-		in.PerformedAt, in.Hours, now.Unix(), ruleID); err != nil {
+		in.PerformedAt, lastDoneHours, now.Unix(), ruleID); err != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, fmt.Errorf("complete maintenance rule: reset baseline: %w", err)
 	}
 

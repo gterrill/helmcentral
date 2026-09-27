@@ -154,6 +154,39 @@ func TestDocumentStore_CompleteMaintenanceRuleResetsBaselineAndClearsAck(t *test
 	}
 }
 
+// TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUnchanged
+// pins the code-review finding: completing a calendar/months-based rule
+// (interval_hours unset) with no hours given used to unconditionally write
+// last_done_hours = NULL, wiping out an hours figure the rule already
+// carried (e.g. from an earlier Set-last-done) even though nothing about
+// this completion said anything about hours at all.
+func TestDocumentStore_CompleteMaintenanceRuleBlankHoursLeavesBaselineHoursUnchanged(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item := mustCreateTestEquipment(t, store, "Generator")
+	months := 12
+	rule, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &item.ID, Description: "Anode check", IntervalMonths: &months})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	priorHours := 900.0
+	if _, err := store.SetMaintenanceRuleLastDone(rule.ID, ptrString("2025-06-01"), &priorHours); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+
+	updated, _, err := store.CompleteMaintenanceRule(rule.ID, maintenanceLogEntryInput{PerformedAt: "2026-06-01"})
+	if err != nil {
+		t.Fatalf("CompleteMaintenanceRule: %v", err)
+	}
+	if updated.LastDoneAt != "2026-06-01" {
+		t.Fatalf("expected last_done_at to advance, got %q", updated.LastDoneAt)
+	}
+	if updated.LastDoneHours == nil || *updated.LastDoneHours != priorHours {
+		t.Fatalf("expected last_done_hours to stay at %v (blank hours must not wipe it), got %+v", priorHours, updated.LastDoneHours)
+	}
+}
+
+func ptrString(s string) *string { return &s }
+
 func TestDocumentStore_AcknowledgeMaintenanceRuleSetsAndClears(t *testing.T) {
 	store := newTestDocumentStore(t)
 	item := mustCreateTestEquipment(t, store, "Bow thruster")
