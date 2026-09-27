@@ -177,6 +177,17 @@ func TestAnchorPublishesBowCorrectedPosition(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("drop: %d %v", code, result)
 	}
+	// The drop starts its own background place-name resolve
+	// (setAnchorWatch's fire-and-forget path). Wait for it to finish before
+	// this test (and its t.TempDir()) tears down, or that goroutine can
+	// still be writing anchor_watch.json into this test's temp dir - or
+	// reading whatever placeNameProviderResolve a later test has since
+	// installed - after this test has already moved on (the same class of
+	// leaked-goroutine race as
+	// TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts; seen on
+	// CI as an intermittent "TempDir RemoveAll cleanup: directory not
+	// empty").
+	waitForPlaceNameResolveIdle(t)
 	frames := stub.captured()
 	if len(frames) != 1 {
 		t.Fatalf("wanted one delta, got %d", len(frames))

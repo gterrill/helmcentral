@@ -542,6 +542,18 @@ func TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts(t *testing.T) 
 		t.Fatalf("drop: %d %v", code, resp)
 	}
 
+	// The drop above starts its own background place-name resolve
+	// (setAnchorWatch's fire-and-forget path) against whatever resolver is
+	// live at that moment. Wait for it to finish before installing the trap
+	// provider below, or that goroutine can still be in flight when the
+	// swap happens and end up calling the trap itself once it finally runs
+	// - a legitimate resolve for the drop's own point, miscounted as one
+	// the restore started. This is what made CI flaky: its own setup drop's
+	// resolve occasionally didn't reach resolveAndCachePlaceName until
+	// after the swap below, so a legitimate resolve for the drop's own
+	// point got counted as one the restore had wrongly started.
+	waitForPlaceNameResolveIdle(t)
+
 	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
 		400: {Name: "Should Not Be Called"},
 	}}
