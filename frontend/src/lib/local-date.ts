@@ -23,3 +23,21 @@ export function todayISO(date: Date = new Date()): string {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/**
+ * dateISO plus months, as YYYY-MM-DD - the frontend's own read-only
+ * preview of what the backend will compute for a fixed-due-date rule that
+ * also carries interval_months (completeMaintenanceRuleHandler advances
+ * fixed_due_date to performed_at + interval_months itself; this is only
+ * ever a display of that same arithmetic, never sent to the server).
+ * Calendar-safe the same way Go's time.AddDate is: adding a month to
+ * January 31 lands on whatever March actually has (JS's own Date
+ * normalises an out-of-range day by rolling into the following month,
+ * which is the same "spills over" behaviour, not a mismatch worth
+ * guarding against here).
+ */
+export function addMonthsISO(dateISO: string, months: number): string {
+  const [year, month, day] = dateISO.split('-').map(Number)
+  const d = new Date(year, month - 1 + months, day)
+  return todayISO(d)
+}

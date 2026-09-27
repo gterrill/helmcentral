@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
@@ -27,7 +27,7 @@ import {
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
 import { documentViewerHref } from '@/lib/document-citation'
-import { todayISO } from '@/lib/local-date'
+import { addMonthsISO, todayISO } from '@/lib/local-date'
 
 // ADR 0138: the service log's own two write dialogs - completing a rule
 // (spec §6, always kind='maintenance') and a standalone entry (repair,
@@ -181,8 +181,25 @@ interface MaintenanceCompleteDialogProps {
   onComplete: (input: Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'>) => Promise<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>
 }
 
+// requiresHoursNow/requiresNewDueDateNow mirror the backend's own two
+// completion-time requirements (completeMaintenanceRuleHandler,
+// maintenance_handlers.go) client-side, so the operator sees why Complete
+// is disabled rather than submitting and getting a 400 back: hours are
+// required whenever the rule runs on hours at all (live or typed in from
+// the gauge), and a fixed-due-date rule with no interval_months has no
+// formula to advance its own due date from, so the operator's own next
+// date is required.
+function requiresHoursNow(rule: MaintenanceRule): boolean {
+  return rule.interval_hours != null
+}
+
+function requiresNewDueDateNow(rule: MaintenanceRule): boolean {
+  return rule.fixed_due_date !== '' && rule.interval_months == null
+}
+
 export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: MaintenanceCompleteDialogProps) {
   const [form, setForm] = useState<LogFormState>(() => blankForm(rule?.current_hours))
+  const [newDueDate, setNewDueDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [completedEntry, setCompletedEntry] = useState<MaintenanceLogEntry | null>(null)
@@ -193,17 +210,24 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
   useEffect(() => {
     if (rule) {
       setForm(blankForm(rule.current_hours))
+      setNewDueDate('')
       setCompletedEntry(null)
       setCompletedRule(null)
       setError(null)
     }
   }, [rule])
 
+  const missingHours = rule != null && requiresHoursNow(rule) && form.hours.trim() === ''
+  const missingNewDueDate = rule != null && requiresNewDueDateNow(rule) && newDueDate.trim() === ''
+  const canComplete = !missingHours && !missingNewDueDate
+
   const handleSave = async () => {
+    if (!rule || !canComplete) return
     setSaving(true)
     setError(null)
     try {
-      const result = await onComplete(toInput(form))
+      const input = requiresNewDueDateNow(rule) ? { ...toInput(form), new_due_date: newDueDate } : toInput(form)
+      const result = await onComplete(input)
       setCompletedEntry(result.entry)
       setCompletedRule(result.rule)
     } catch (err) {
@@ -253,7 +277,9 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                   <Input id="maintenance-complete-date" type="date" value={form.performedAt} onChange={(e) => setForm((p) => ({ ...p, performedAt: e.target.value }))} />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="maintenance-complete-hours">Hours</FieldLabel>
+                  <FieldLabel htmlFor="maintenance-complete-hours">
+                    Hours{rule && requiresHoursNow(rule) ? ' (required)' : ''}
+                  </FieldLabel>
                   <Input
                     id="maintenance-complete-hours"
                     type="number"
@@ -261,8 +287,34 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                     value={form.hours}
                     onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))}
                   />
+                  {rule && requiresHoursNow(rule) && rule.current_hours == null && (
+                    <FieldDescription>
+                      {rule.has_hour_meter_path
+                        ? 'The live reading is unknown or stale - enter the current hours from the gauge.'
+                        : 'This item has no live hour meter - enter the current hours from the gauge.'}
+                    </FieldDescription>
+                  )}
                 </Field>
               </div>
+              {rule && requiresNewDueDateNow(rule) && (
+                <Field>
+                  <FieldLabel htmlFor="maintenance-complete-new-due-date">New due date (required)</FieldLabel>
+                  <Input
+                    id="maintenance-complete-new-due-date"
+                    type="date"
+                    value={newDueDate}
+                    onChange={(e) => setNewDueDate(e.target.value)}
+                  />
+                  <FieldDescription>
+                    This rule has no monthly interval to compute the next date from - enter it yourself.
+                  </FieldDescription>
+                </Field>
+              )}
+              {rule && rule.fixed_due_date !== '' && rule.interval_months != null && (
+                <p className="text-sm text-muted-foreground">
+                  Next due: {addMonthsISO(form.performedAt || todayISO(), rule.interval_months)}
+                </p>
+              )}
               <Field>
                 <FieldLabel htmlFor="maintenance-complete-description">Notes</FieldLabel>
                 <Textarea id="maintenance-complete-description" rows={3} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
@@ -286,7 +338,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
             {error && <FieldError errors={[{ message: error }]} />}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Cancel</Button>
-              <Button type="button" disabled={saving} onClick={() => { void handleSave() }}>
+              <Button type="button" disabled={saving || !canComplete} onClick={() => { void handleSave() }}>
                 {saving ? 'Completing...' : 'Complete'}
               </Button>
             </DialogFooter>
@@ -345,6 +397,15 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedEntry, setSavedEntry] = useState<MaintenanceLogEntry | null>(entry ?? null)
+  // Code-review finding: savedEntry alone used to decide whether Save even
+  // showed - which is right for a brand new entry (nothing left to save
+  // once it exists, only photos), but wrong for EDITING one, where
+  // savedEntry starts non-null immediately and Save vanished on open,
+  // leaving Done as the only button - a further edit was silently
+  // discarded on close. dirty tracks "changed since the last successful
+  // save" separately, so Save stays available (and Done reads as Cancel)
+  // for as long as there is something it would actually save.
+  const [dirty, setDirty] = useState(false)
 
   const { items } = useEquipment(open ? {} : null)
 
@@ -353,6 +414,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
       setForm(entry ? formFromEntry(entry) : blankForm())
       setKind(entry?.kind ?? 'repair')
       setSavedEntry(entry ?? null)
+      setDirty(false)
       setError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -360,12 +422,43 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
 
   const isEditing = Boolean(entry)
 
+  const updateForm = (updater: (prev: LogFormState) => LogFormState) => {
+    setForm(updater)
+    setDirty(true)
+  }
+
+  const updateKind = (next: MaintenanceLogKind) => {
+    setKind(next)
+    setDirty(true)
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setError(null)
     try {
       const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind })
       setSavedEntry(result)
+      setDirty(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Code-review finding: this had no error handling at all - a failed
+  // delete's rejection went uncaught, so onCancel simply never ran (the
+  // dialog correctly stayed open) but the operator saw no reason why
+  // nothing happened. Errors now surface the same way every other write
+  // in this dialog already does (FieldError, role="alert"), and onCancel
+  // only fires once the delete has actually succeeded.
+  const handleDelete = async () => {
+    if (!entry || !onDelete) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onDelete(entry.id)
+      onCancel()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -404,11 +497,11 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
           <div className="grid grid-cols-2 gap-3">
             <Field>
               <FieldLabel htmlFor="maintenance-log-date">Date</FieldLabel>
-              <Input id="maintenance-log-date" type="date" value={form.performedAt} onChange={(e) => setForm((p) => ({ ...p, performedAt: e.target.value }))} />
+              <Input id="maintenance-log-date" type="date" value={form.performedAt} onChange={(e) => updateForm((p) => ({ ...p, performedAt: e.target.value }))} />
             </Field>
             <Field>
               <FieldLabel htmlFor="maintenance-log-kind">Kind</FieldLabel>
-              <Select value={kind} onValueChange={(v) => setKind(v as MaintenanceLogKind)}>
+              <Select value={kind} onValueChange={(v) => updateKind(v as MaintenanceLogKind)}>
                 <SelectTrigger id="maintenance-log-kind" aria-label="Kind">
                   <SelectValue>{(value: string) => KIND_LABELS[value as MaintenanceLogKind]}</SelectValue>
                 </SelectTrigger>
@@ -422,27 +515,27 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
           </div>
           <Field>
             <FieldLabel htmlFor="maintenance-log-hours">Hours</FieldLabel>
-            <Input id="maintenance-log-hours" type="number" inputMode="decimal" value={form.hours} onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))} />
+            <Input id="maintenance-log-hours" type="number" inputMode="decimal" value={form.hours} onChange={(e) => updateForm((p) => ({ ...p, hours: e.target.value }))} />
           </Field>
           <Field>
             <FieldLabel htmlFor="maintenance-log-description">Description</FieldLabel>
-            <Textarea id="maintenance-log-description" rows={3} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
+            <Textarea id="maintenance-log-description" rows={3} value={form.description} onChange={(e) => updateForm((p) => ({ ...p, description: e.target.value }))} />
           </Field>
           <div className="grid grid-cols-3 gap-3">
             <Field className="col-span-1">
               <FieldLabel htmlFor="maintenance-log-who">Who</FieldLabel>
-              <Input id="maintenance-log-who" value={form.who} onChange={(e) => setForm((p) => ({ ...p, who: e.target.value }))} />
+              <Input id="maintenance-log-who" value={form.who} onChange={(e) => updateForm((p) => ({ ...p, who: e.target.value }))} />
             </Field>
             <Field className="col-span-1">
               <FieldLabel htmlFor="maintenance-log-cost">Cost</FieldLabel>
-              <Input id="maintenance-log-cost" type="number" inputMode="decimal" min={0} value={form.cost} onChange={(e) => setForm((p) => ({ ...p, cost: e.target.value }))} />
+              <Input id="maintenance-log-cost" type="number" inputMode="decimal" min={0} value={form.cost} onChange={(e) => updateForm((p) => ({ ...p, cost: e.target.value }))} />
             </Field>
             <Field className="col-span-1">
               <FieldLabel htmlFor="maintenance-log-currency">Currency</FieldLabel>
-              <Input id="maintenance-log-currency" value={form.currency} onChange={(e) => setForm((p) => ({ ...p, currency: e.target.value }))} placeholder="AUD" />
+              <Input id="maintenance-log-currency" value={form.currency} onChange={(e) => updateForm((p) => ({ ...p, currency: e.target.value }))} placeholder="AUD" />
             </Field>
           </div>
-          <PartsEditor parts={form.parts} onChange={(parts) => setForm((p) => ({ ...p, parts }))} items={items} />
+          <PartsEditor parts={form.parts} onChange={(parts) => updateForm((p) => ({ ...p, parts }))} items={items} />
 
           {savedEntry && (
             <Field>
@@ -461,14 +554,14 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
 
         <DialogFooter>
           {isEditing && onDelete && (
-            <Button type="button" variant="ghost" className="mr-auto text-destructive" disabled={saving} onClick={() => { if (entry) void onDelete(entry.id).then(onCancel) }}>
+            <Button type="button" variant="ghost" className="mr-auto text-destructive" disabled={saving} onClick={() => { void handleDelete() }}>
               Delete
             </Button>
           )}
           <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-            {savedEntry ? 'Done' : 'Cancel'}
+            {savedEntry && !dirty ? 'Done' : 'Cancel'}
           </Button>
-          {!savedEntry && (
+          {(!savedEntry || dirty) && (
             <Button type="button" disabled={saving} onClick={() => { void handleSave() }}>
               {saving ? 'Saving...' : 'Save'}
             </Button>

@@ -161,7 +161,7 @@ describe('MaintenanceSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /complete/i }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByLabelText('Hours')).toHaveValue(987.5)
+    expect(within(dialog).getByLabelText(/^Hours/)).toHaveValue(987.5)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/complete'))).toBe(true))

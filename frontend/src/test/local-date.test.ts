@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { todayISO } from '@/lib/local-date'
+import { addMonthsISO, todayISO } from '@/lib/local-date'
 
 // ADR 0138's 2026-09-27 amendment: calendar dates (a maintenance rule's
 // "today") are the operator's own LOCAL date, never UTC. The boat this
@@ -42,5 +42,21 @@ describe('todayISO', () => {
 
   it('zero-pads a single-digit month and day', () => {
     expect(todayISO(new Date(2026, 0, 5, 12, 0, 0))).toBe('2026-01-05')
+  })
+})
+
+describe('addMonthsISO', () => {
+  it('adds whole months', () => {
+    expect(addMonthsISO('2026-05-20', 12)).toBe('2027-05-20')
+  })
+
+  it('rolls over the year boundary', () => {
+    expect(addMonthsISO('2026-11-15', 3)).toBe('2027-02-15')
+  })
+
+  it('normalises an out-of-range day the same way a calendar would', () => {
+    // Jan 31 + 1 month has no Feb 31 - it spills into March, matching the
+    // backend's own time.AddDate semantics (maintenance_handlers.go).
+    expect(addMonthsISO('2026-01-31', 1)).toBe('2026-03-03')
   })
 })
