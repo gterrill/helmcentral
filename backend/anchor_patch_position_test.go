@@ -542,6 +542,18 @@ func TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts(t *testing.T) 
 		t.Fatalf("drop: %d %v", code, resp)
 	}
 
+	// The drop above starts its own background place-name resolve
+	// (setAnchorWatch's fire-and-forget path) against whatever resolver is
+	// live at that moment. Wait for it to finish before installing the trap
+	// provider below, or that goroutine can still be in flight when the
+	// swap happens and end up calling the trap itself once it finally runs
+	// - a legitimate resolve for the drop's own point, miscounted as one
+	// the restore started. This is what made CI flaky: its own setup drop's
+	// resolve occasionally didn't reach resolveAndCachePlaceName until
+	// after the swap below, so a legitimate resolve for the drop's own
+	// point got counted as one the restore had wrongly started.
+	waitForPlaceNameResolveIdle(t)
+
 	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
 		400: {Name: "Should Not Be Called"},
 	}}
@@ -594,6 +606,17 @@ func TestPatchAnchorWatch_RestoreWithEmptyPlaceNameStillResolvesFresh(t *testing
 		t.Fatalf("drop: %d %v", code, resp)
 	}
 
+	// Same reasoning as TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts:
+	// wait for the drop's own resolve to finish before installing the fake
+	// provider below. Here the stakes cut the other way - this test proves
+	// the PATCH's own resolve for the restored point DOES start and land -
+	// and a still-in-flight drop resolve holds the single-flight guard
+	// (place_name.go's placeNameResolve), so the PATCH's own
+	// startPlaceNameResolve call would silently no-op instead of running,
+	// and the waitForCondition below would time out for a reason that has
+	// nothing to do with what this test is meant to prove.
+	waitForPlaceNameResolveIdle(t)
+
 	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
 		400: {Name: "Resolved After Undo"},
 	}}
@@ -621,6 +644,15 @@ func TestPatchAnchorWatch_RestoreWithEmptyPlaceNameStillResolvesFresh(t *testing
 		defer anchorWatchMu.RUnlock()
 		return anchorWatchState != nil && anchorWatchState.PlaceName == "Resolved After Undo"
 	})
+
+	// resolveAndPinAnchorWatchPlaceName updates the in-memory state above and
+	// THEN calls saveAnchorWatch - the wait above only proves the former.
+	// Without also waiting for the guard to clear, this test can return (and
+	// its t.TempDir() start tearing down) while that goroutine is still
+	// writing anchor_watch.json, the same leaked-goroutine race this test's
+	// earlier waitForPlaceNameResolveIdle call exists to avoid, just at the
+	// other end.
+	waitForPlaceNameResolveIdle(t)
 }
 
 // Test: restore is rejected outright without a position change - it exists

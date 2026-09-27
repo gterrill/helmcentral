@@ -45,6 +45,14 @@ func TestAnchorLifecyclePublishesPositionAndExplicitNull(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("drop/reposition: %d %v", code, body)
 		}
+		// Each drop/reposition starts its own background place-name resolve
+		// (setAnchorWatch's fire-and-forget path). Wait for it to finish
+		// before the next one and before Raise below, or a leaked goroutine
+		// can still be writing anchor_watch.json into this test's
+		// t.TempDir() after the test (and that cleanup) has moved on - seen
+		// on CI as an intermittent "TempDir RemoveAll cleanup: directory not
+		// empty" for this exact test.
+		waitForPlaceNameResolveIdle(t)
 	}
 	if rec := raiseAnchor(t); rec.Code != http.StatusOK {
 		t.Fatalf("raise: %d %s", rec.Code, rec.Body.String())
@@ -87,6 +95,11 @@ func TestAnchorPublishFailureIsExplicitAndRetainsWatch(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("initial drop: %d", code)
 	}
+	// The drop starts its own background place-name resolve. Wait for it to
+	// finish before the SignalK stub goes dark below, and before this
+	// test's t.TempDir() tears down - the same leaked-goroutine race as
+	// TestAnchorLifecyclePublishesPositionAndExplicitNull above.
+	waitForPlaceNameResolveIdle(t)
 	stub.mu.Lock()
 	stub.ingest = false
 	stub.mu.Unlock()
@@ -138,6 +151,13 @@ func TestAnchorRaiseFileRemovalFailureReportsExplicitly(t *testing.T) {
 	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
 		t.Fatalf("drop: %d %v", code, resp)
 	}
+	// Wait for the drop's own background place-name resolve to finish
+	// before the chmod below makes the directory read-only. Otherwise that
+	// resolve's own persist attempt can land mid-chmod and fail with a
+	// confusing "permission denied" - a real, observed log line from this
+	// exact test, unrelated to (and easily mistaken for) the removal
+	// failure this test exists to check.
+	waitForPlaceNameResolveIdle(t)
 
 	dir := filepath.Dir(anchorWatchFilePath())
 	if err := os.Chmod(dir, 0o555); err != nil {
@@ -177,6 +197,17 @@ func TestAnchorPublishesBowCorrectedPosition(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("drop: %d %v", code, result)
 	}
+	// The drop starts its own background place-name resolve
+	// (setAnchorWatch's fire-and-forget path). Wait for it to finish before
+	// this test (and its t.TempDir()) tears down, or that goroutine can
+	// still be writing anchor_watch.json into this test's temp dir - or
+	// reading whatever placeNameProviderResolve a later test has since
+	// installed - after this test has already moved on (the same class of
+	// leaked-goroutine race as
+	// TestPatchAnchorWatch_RestoreAppliesThePreAdjustPerPointFacts; seen on
+	// CI as an intermittent "TempDir RemoveAll cleanup: directory not
+	// empty").
+	waitForPlaceNameResolveIdle(t)
 	frames := stub.captured()
 	if len(frames) != 1 {
 		t.Fatalf("wanted one delta, got %d", len(frames))
