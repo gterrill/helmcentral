@@ -381,7 +381,15 @@ interface MaintenanceLogEntryDialogProps {
   equipmentId: string
   open: boolean
   onCancel: () => void
-  onSave: (input: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>
+  // Code-review finding: the caller used to decide create-vs-update from
+  // its OWN `editingEntry` state, which never changed after a brand new
+  // entry's first save - creatingEntry stayed true, so a second Save on
+  // the still-open dialog called create again (a silent duplicate, with no
+  // photos and no Delete, since the caller's own state never learned this
+  // entry now has an id). existingId is this dialog's own savedEntry.id -
+  // the one place that actually knows whether there is now something to
+  // update - so the caller never has to guess.
+  onSave: (input: MaintenanceLogEntryInput, existingId: string | null) => Promise<MaintenanceLogEntry>
   onDelete?: (id: string) => Promise<void>
 }
 
@@ -436,7 +444,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     setSaving(true)
     setError(null)
     try {
-      const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind })
+      const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind }, savedEntry?.id ?? null)
       setSavedEntry(result)
       setDirty(false)
     } catch (err) {
@@ -452,12 +460,19 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   // nothing happened. Errors now surface the same way every other write
   // in this dialog already does (FieldError, role="alert"), and onCancel
   // only fires once the delete has actually succeeded.
+  //
+  // Keyed on savedEntry, not entry: entry only reflects what the dialog
+  // was OPENED with (undefined for a brand new standalone entry), while
+  // savedEntry is whatever actually exists on the server right now - true
+  // the instant a fresh entry's first Save returns, which is exactly when
+  // Delete has to start working too (the other half of the same
+  // code-review finding as onSave's existingId above).
   const handleDelete = async () => {
-    if (!entry || !onDelete) return
+    if (!savedEntry || !onDelete) return
     setSaving(true)
     setError(null)
     try {
-      await onDelete(entry.id)
+      await onDelete(savedEntry.id)
       onCancel()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -553,7 +568,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
         {error && <FieldError errors={[{ message: error }]} />}
 
         <DialogFooter>
-          {isEditing && onDelete && (
+          {savedEntry && onDelete && (
             <Button type="button" variant="ghost" className="mr-auto text-destructive" disabled={saving} onClick={() => { void handleDelete() }}>
               Delete
             </Button>

@@ -86,6 +86,46 @@ describe('MaintenanceLogEntryDialog: editing an existing entry', () => {
   })
 })
 
+describe('MaintenanceLogEntryDialog: creating a brand new standalone entry', () => {
+  // Code-review finding: the CALLER used to decide create-vs-update from
+  // its own editingEntry state, which stayed null/undefined for the whole
+  // life of a brand-new-entry dialog (creatingEntry never became
+  // editingEntry after the first save) - so a second Save on the still-open
+  // dialog called create AGAIN: a silent duplicate entry, with no photos
+  // (they were attached to the first one) and no Delete button (isEditing
+  // was keyed off the same stale prop). onSave's second argument -
+  // existingId, sourced from this dialog's OWN savedEntry, never the
+  // caller's - is what lets the caller update instead the second time.
+  it('passes the newly created entry\'s own id as existingId on a second Save, and offers Delete', async () => {
+    const onSave = vi.fn()
+      .mockResolvedValueOnce(makeEntry({ id: 'log-99', description: 'first' }))
+      .mockResolvedValueOnce(makeEntry({ id: 'log-99', description: 'second' }))
+    const onCancel = vi.fn()
+    const onDelete = vi.fn()
+
+    render(
+      <MaintenanceLogEntryDialog entry={undefined} equipmentId="eq-1" open onCancel={onCancel} onSave={onSave} onDelete={onDelete} />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'first' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][1]).toBeNull()
+
+    // The entry now exists on the server - Delete must appear, and photos
+    // (already covered elsewhere by the savedEntry-gated PhotoStripEditor)
+    // are keyed off the same state.
+    await screen.findByRole('button', { name: 'Delete' })
+
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'second' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave.mock.calls[1][1]).toBe('log-99')
+  })
+})
+
 describe('MaintenanceLogEntryDialog: delete', () => {
   it('surfaces a failed delete as an alert and keeps the dialog open', async () => {
     const entry = makeEntry()

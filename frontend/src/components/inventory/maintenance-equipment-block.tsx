@@ -240,8 +240,8 @@ export function MaintenanceEquipmentBlock({ equipmentId, profileId, hourMeterPat
         equipmentId={equipmentId}
         open={creatingEntry || editingEntry !== null}
         onCancel={() => { setCreatingEntry(false); setEditingEntry(null); void refreshEntries() }}
-        onSave={async (input) => {
-          const saved = editingEntry ? await updateMaintenanceLogEntry(editingEntry.id, input) : await createMaintenanceLogEntry(input)
+        onSave={async (input, existingId) => {
+          const saved = existingId ? await updateMaintenanceLogEntry(existingId, input) : await createMaintenanceLogEntry(input)
           await refreshEntries()
           return saved
         }}
