@@ -91,6 +91,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Solar tile Today, Yesterday and Peak Today now reset at local midnight
   instead of 10 am (for a boat on UTC+10), and each array's own Today and
   Yesterday yield show kWh rather than a wildly inflated raw figure.
+- The Link and Image buttons in the note editor now open their popup where
+  you can actually reach it. It was rendering behind the document viewer
+  panel, so a note could not be given a link or a photo at all.
+- Picking the item for a new maintenance rule, the kind or a part when
+  logging service work, and a note's type when capturing one now all open
+  their list where you can actually reach it. Each was rendering behind the
+  dialog or sheet it lives in, so there was no way to make the pick at all.
 
 ## [0.34.0] - 2026-09-26
 

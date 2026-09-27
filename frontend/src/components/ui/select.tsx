@@ -48,8 +48,15 @@ const SelectPopup = React.forwardRef<
   }
 >(({ className, children, sideOffset = 4, align = "start", ...props }, ref) => (
   <SelectPrimitive.Portal>
+    {/* z-85, not the usual z-50: a select's trigger commonly lives inside a
+        dialog (z-80) - the maintenance rule dialog's Item picker
+        (maintenance-rule-dialog.tsx) is the case that exposed this - and the
+        popup still needs to draw on top of whichever surface it's in. Below
+        tooltip (z-90), the one layer that must outrank everything. ADR 0139,
+        which fixed the same defect in popover.tsx and named this Select as
+        needing the identical treatment. */}
     <SelectPrimitive.Positioner
-      className="isolate z-50"
+      className="isolate z-85"
       sideOffset={sideOffset}
       align={align}
       alignItemWithTrigger={false}
@@ -57,7 +64,7 @@ const SelectPopup = React.forwardRef<
       <SelectPrimitive.Popup
         ref={ref}
         className={cn(
-          "relative z-50 max-h-(--available-height) min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
+          "relative z-85 max-h-(--available-height) min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
           className
         )}
         {...props}

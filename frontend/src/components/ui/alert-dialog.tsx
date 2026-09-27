@@ -16,10 +16,12 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Backdrop
     className={cn(
-      // z-70, matching dialog.tsx: popovers and menus sit at z-60 (ADR
-      // 0107), and an alert dialog confirming an action started from one
-      // (e.g. layout-toolbar.tsx's Delete page, opened from what used to be
-      // inside the page switcher's popover) must draw above it, not under it.
+      // z-70, matching dialog.tsx: dropdown menus sit at z-60 (ADR 0107),
+      // and an alert dialog confirming an action started from one (e.g.
+      // layout-toolbar.tsx's Delete page, opened from what used to be inside
+      // the page switcher's popover) must draw above the menu case, not
+      // under it. Popovers are the exception, at z-85 above this layer
+      // (ADR 0139) because their own trigger can sit inside a dialog.
       "fixed inset-0 z-70 bg-black/80 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0",
       className
     )}
