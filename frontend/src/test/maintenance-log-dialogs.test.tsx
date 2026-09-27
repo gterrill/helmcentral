@@ -86,6 +86,31 @@ describe('MaintenanceLogEntryDialog: editing an existing entry', () => {
   })
 })
 
+describe('MaintenanceLogEntryDialog: a part whose own item has been deleted', () => {
+  // Code-review finding 6: maintenance_log_parts.equipment_id going to
+  // null (its item was deleted) must not make the part disappear from the
+  // log entry - it shows read-only, by its snapshot name, separate from
+  // the editable parts list (which can't represent it - there's no id
+  // left to add or remove by).
+  it('shows an orphaned part read-only by its snapshot name, not in the editable list', () => {
+    const entry = makeEntry({
+      parts: [
+        { equipment_id: null, equipment_name: 'Impeller (spare)', quantity: 2 },
+        { equipment_id: 'eq-gasket', equipment_name: 'Gasket (spare)', quantity: 1 },
+      ],
+    })
+    render(
+      <MaintenanceLogEntryDialog entry={entry} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
+    )
+
+    expect(screen.getByText(/Also used \(no longer in inventory\): Impeller \(spare\) x2/)).toBeInTheDocument()
+    // The still-linked part is in the ordinary editable list (PartsEditor
+    // itself, not this finding) - only the orphaned one gets the read-only
+    // note, so it must appear exactly once.
+    expect(screen.getAllByText(/Impeller \(spare\)/)).toHaveLength(1)
+  })
+})
+
 describe('MaintenanceLogEntryDialog: creating a brand new standalone entry', () => {
   // Code-review finding: the CALLER used to decide create-vs-update from
   // its own editingEntry state, which stayed null/undefined for the whole

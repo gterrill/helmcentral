@@ -149,8 +149,23 @@ function formFromEntry(entry: MaintenanceLogEntry): LogFormState {
     who: entry.who,
     cost: entry.cost != null ? String(entry.cost) : '',
     currency: entry.currency,
-    parts: entry.parts.map((p) => ({ equipment_id: p.equipment_id, quantity: p.quantity })),
+    // A part whose own equipment_id has gone to null (its item was
+    // deleted - backend 2026-09-27 amendment) survives as pure history but
+    // can never be re-specified here: PartsEditor only ever works with an
+    // equipment_id to add/remove by, and there is no id left to name it
+    // with. orphanedParts (below) is where it's actually shown.
+    parts: entry.parts
+      .filter((p): p is typeof p & { equipment_id: string } => p.equipment_id !== null)
+      .map((p) => ({ equipment_id: p.equipment_id, quantity: p.quantity })),
   }
+}
+
+/** Parts used on this entry whose own item has since been deleted -
+ * read-only history, shown separately from the editable PartsEditor list
+ * above (formFromEntry's own comment explains why they can't be merged
+ * into it). */
+function orphanedParts(entry: MaintenanceLogEntry | null): MaintenanceLogEntry['parts'] {
+  return entry ? entry.parts.filter((p) => p.equipment_id === null) : []
 }
 
 function toInput(form: LogFormState): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
@@ -566,6 +581,16 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
             </Field>
           </div>
           <PartsEditor parts={form.parts} onChange={(parts) => updateForm((p) => ({ ...p, parts }))} items={items} />
+
+          {/* Code-review finding: a part whose own item has since been
+              deleted survives as history (backend 2026-09-27 amendment) but
+              can't be edited here - shown read-only, with the name it had
+              when it was logged, so it isn't just silently missing. */}
+          {orphanedParts(savedEntry).length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Also used (no longer in inventory): {orphanedParts(savedEntry).map((p) => `${p.equipment_name} x${p.quantity}`).join(', ')}
+            </p>
+          )}
 
           {savedEntry && (
             <Field>

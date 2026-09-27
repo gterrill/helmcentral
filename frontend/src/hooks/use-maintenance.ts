@@ -116,8 +116,15 @@ export const BLANK_RULE_DRAFT: MaintenanceRuleInput = {
   profile_service_id: '',
 }
 
+/** A part used on a log entry. equipment_id is null once the part item
+ * itself has been deleted (backend: maintenance_log_parts.equipment_id ON
+ * DELETE SET NULL, 2026-09-27 amendment) - the row survives as history,
+ * equipment_name still carries its name either way (the item's own
+ * current name while linked, a snapshot from when it was logged once it
+ * isn't). Never editable once orphaned: PartsEditor only ever works with
+ * an equipment_id to add or remove by. */
 export interface MaintenanceLogPart {
-  equipment_id: string
+  equipment_id: string | null
   equipment_name: string
   quantity: number
 }
