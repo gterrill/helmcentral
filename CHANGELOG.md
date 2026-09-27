@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-27
+
 ### Added
 
 - Inventory has a new **Maintenance** section: rules for what's due on
@@ -25,6 +27,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   schedule in with one action, and each item's own page shows its rules
   and recent service history. The whole service log, or one item's own,
   exports as a CSV file.
+  Running hours come from the engine's own hour reading on the network,
+  which holds while the engine is off, or from the figure you read off
+  the gauge. Record an hour meter swap once and the totals carry on
+  across it.
 - Mate now cites documents it found in the library as small icon links
   instead of describing them in a sentence. Tap or click one to open that
   document, and hover or focus it to see its title. A citation to a
@@ -369,7 +375,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/gterrill/helmcentral/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/gterrill/helmcentral/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/gterrill/helmcentral/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/gterrill/helmcentral/compare/v0.31.0...v0.32.0
