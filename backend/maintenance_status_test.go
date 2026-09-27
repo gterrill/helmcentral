@@ -31,14 +31,14 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 	}{
 		{
 			name:       "no interval at all is interval_not_set",
-			in:         maintenanceRuleStatusInput{Now: now},
+			in:         maintenanceRuleStatusInput{Today: now},
 			wantStatus: maintenanceStatusIntervalNotSet,
 		},
 		{
 			name: "interval set but never done is never_recorded",
 			in: maintenanceRuleStatusInput{
 				IntervalHours: f(250),
-				Now:           now,
+				Today:         now,
 			},
 			wantStatus: maintenanceStatusNeverRecorded,
 		},
@@ -48,7 +48,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalHours: f(250),
 				LastDoneHours: f(1000),
 				Hours:         maintenanceHourReading{Known: true, Hours: 1100},
-				Now:           now,
+				Today:         now,
 			},
 			wantStatus: maintenanceStatusOK,
 			wantHours:  f(150), // 1000+250-1100
@@ -59,7 +59,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalHours: f(250),
 				LastDoneHours: f(1000),
 				Hours:         maintenanceHourReading{Known: true, Hours: 1220},
-				Now:           now,
+				Today:         now,
 			},
 			wantStatus: maintenanceStatusDueSoon,
 			wantHours:  f(30), // <= default 50
@@ -70,7 +70,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalHours: f(250),
 				LastDoneHours: f(1000),
 				Hours:         maintenanceHourReading{Known: true, Hours: 1400},
-				Now:           now,
+				Today:         now,
 			},
 			wantStatus: maintenanceStatusOverdue,
 			wantHours:  f(-150),
@@ -82,7 +82,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				DueSoonHours:  f(10),
 				LastDoneHours: f(1000),
 				Hours:         maintenanceHourReading{Known: true, Hours: 1220}, // 30 remaining
-				Now:           now,
+				Today:         now,
 			},
 			// 30 remaining > overridden 10-hour window, so this is OK even
 			// though it would have been due-soon under the default window.
@@ -95,7 +95,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalHours: f(250),
 				LastDoneHours: f(1000),
 				Hours:         maintenanceHourReading{Known: false},
-				Now:           now,
+				Today:         now,
 			},
 			wantStatus:   maintenanceStatusHoursUnknown,
 			wantHoursUnk: true,
@@ -105,7 +105,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			in: maintenanceRuleStatusInput{
 				IntervalMonths: i(12),
 				LastDoneAt:     ptrTime(mustParseDate(t, "2026-01-01")),
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusOK,
 			wantDays:   i(200), // 2027-01-01 minus 2026-06-15
@@ -115,7 +115,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			in: maintenanceRuleStatusInput{
 				IntervalMonths: i(6),
 				LastDoneAt:     ptrTime(mustParseDate(t, "2025-12-20")), // due 2026-06-20
-				Now:            now,                                     // 5 days out
+				Today:          now,                                     // 5 days out
 			},
 			wantStatus: maintenanceStatusDueSoon,
 			wantDays:   i(5),
@@ -125,7 +125,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			in: maintenanceRuleStatusInput{
 				IntervalMonths: i(6),
 				LastDoneAt:     ptrTime(mustParseDate(t, "2025-06-01")), // due 2025-12-01
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusOverdue,
 		},
@@ -140,7 +140,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalMonths: i(12),
 				DueSoonMonths:  i(8),
 				LastDoneAt:     ptrTime(mustParseDate(t, "2026-01-01")), // due 2027-01-01
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusDueSoon,
 		},
@@ -148,7 +148,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			name: "fixed due date needs no baseline at all",
 			in: maintenanceRuleStatusInput{
 				FixedDueDate: ptrTime(mustParseDate(t, "2026-07-01")),
-				Now:          now,
+				Today:        now,
 			},
 			wantStatus: maintenanceStatusDueSoon, // 16 days out, within 1-month default window
 			wantDays:   i(16),
@@ -157,7 +157,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 			name: "fixed due date already passed is overdue with no last-done",
 			in: maintenanceRuleStatusInput{
 				FixedDueDate: ptrTime(mustParseDate(t, "2026-01-01")),
-				Now:          now,
+				Today:        now,
 			},
 			wantStatus: maintenanceStatusOverdue,
 		},
@@ -169,7 +169,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				LastDoneAt:     ptrTime(mustParseDate(t, "2026-01-01")), // months: ok, 200 days out
 				LastDoneHours:  f(1000),
 				Hours:          maintenanceHourReading{Known: true, Hours: 1400}, // hours: overdue
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusOverdue,
 		},
@@ -181,7 +181,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				LastDoneAt:     ptrTime(mustParseDate(t, "2025-06-01")), // months: overdue
 				LastDoneHours:  f(1000),
 				Hours:          maintenanceHourReading{Known: true, Hours: 1100}, // hours: ok
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusOverdue,
 		},
@@ -193,7 +193,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				LastDoneAt:     ptrTime(mustParseDate(t, "2025-06-01")), // months: overdue
 				LastDoneHours:  f(1000),
 				Hours:          maintenanceHourReading{Known: false}, // hours: unknown
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus:   maintenanceStatusOverdue,
 			wantHoursUnk: true,
@@ -204,7 +204,7 @@ func TestComputeMaintenanceRuleStatus(t *testing.T) {
 				IntervalMonths: i(12),
 				LastDoneHours:  f(1000), // no LastDoneAt at all
 				Hours:          maintenanceHourReading{Known: true, Hours: 1050},
-				Now:            now,
+				Today:          now,
 			},
 			wantStatus: maintenanceStatusNeverRecorded,
 		},
@@ -261,7 +261,7 @@ func TestComputeMaintenanceRuleStatus_AcknowledgedIsNotAnInput(t *testing.T) {
 		IntervalHours: f(250),
 		LastDoneHours: f(1000),
 		Hours:         maintenanceHourReading{Known: true, Hours: 1400},
-		Now:           now,
+		Today:         now,
 	}
 	first := computeMaintenanceRuleStatus(in)
 	second := computeMaintenanceRuleStatus(in)

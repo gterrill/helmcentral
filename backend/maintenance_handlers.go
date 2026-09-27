@@ -86,6 +86,27 @@ type maintenanceRuleView struct {
 	HoursStaleSince *string `json:"hours_stale_since"`
 }
 
+// requireTodayParam reads and validates the ?today=YYYY-MM-DD query param
+// every rule-view-returning endpoint requires - the operator's own local
+// calendar date (frontend: lib/local-date.ts's todayISO, read from the
+// browser's own clock), never derived from the server's own wall clock.
+// AGENTS.md fail-fast: missing or malformed is a 400 naming the field,
+// never a silent fallback to the server's own time.Now() - a boat well
+// east of UTC would otherwise have every due/overdue decision computed
+// against the WRONG calendar date whenever it's evening in the server's own
+// UTC day but already tomorrow, or still yesterday, at the helm.
+func requireTodayParam(c echo.Context) (time.Time, *inventoryValidationError) {
+	raw := strings.TrimSpace(c.QueryParam("today"))
+	if raw == "" {
+		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's"}
+	}
+	today, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today must be YYYY-MM-DD"}
+	}
+	return today, nil
+}
+
 // parseMaintenanceDate parses a YYYY-MM-DD column into a *time.Time for the
 // status engine, nil for blank. A value that fails to parse is treated the
 // same as blank (excluded from the calendar axis) rather than failing the
@@ -106,8 +127,12 @@ func parseMaintenanceDate(s string) *time.Time {
 }
 
 // buildMaintenanceRuleView composes rule's stored fields with a fresh
-// status computation. eq is nil for a calendar-only rule.
-func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours maintenanceHourReading, now time.Time) maintenanceRuleView {
+// status computation. eq is nil for a calendar-only rule. today is the
+// operator's own local calendar date (requireTodayParam) - never an
+// instant, and never the server's own clock; see
+// maintenanceRuleStatusInput.Today's own doc comment (maintenance_status.go)
+// for why.
+func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours maintenanceHourReading, today time.Time) maintenanceRuleView {
 	result := computeMaintenanceRuleStatus(maintenanceRuleStatusInput{
 		IntervalHours:  rule.IntervalHours,
 		IntervalMonths: rule.IntervalMonths,
@@ -117,7 +142,7 @@ func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours mai
 		LastDoneAt:     parseMaintenanceDate(rule.LastDoneAt),
 		LastDoneHours:  rule.LastDoneHours,
 		Hours:          hours,
-		Now:            now,
+		Today:          today,
 	})
 
 	view := maintenanceRuleView{
@@ -178,11 +203,15 @@ func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReadi
 // endpoint answers with this, so the frontend always sees status
 // recomputed against the CURRENT live reading right after its own write,
 // never a value that could already be stale by the time the response
-// arrives.
-func resolveMaintenanceRuleView(rule maintenanceRule) (maintenanceRuleView, error) {
+// arrives. today is the operator's own local calendar date
+// (requireTodayParam), used only for the status engine's calendar axis;
+// the hours axis still reads the actual wall-clock instant (time.Now()
+// here) for staleness, which is a real elapsed-time question independent
+// of which calendar day it is at the helm.
+func resolveMaintenanceRuleView(rule maintenanceRule, today time.Time) (maintenanceRuleView, error) {
 	now := time.Now().UTC()
 	if rule.EquipmentID == nil {
-		return buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, now), nil
+		return buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today), nil
 	}
 	eq, err := globalDocumentStore.GetEquipment(*rule.EquipmentID)
 	if err != nil {
@@ -192,7 +221,7 @@ func resolveMaintenanceRuleView(rule maintenanceRule) (maintenanceRuleView, erro
 	if err != nil {
 		return maintenanceRuleView{}, err
 	}
-	return buildMaintenanceRuleView(rule, &eq, hours, now), nil
+	return buildMaintenanceRuleView(rule, &eq, hours, today), nil
 }
 
 // ── validation ───────────────────────────────────────────────────────────
@@ -394,6 +423,11 @@ func checkMaintenancePartsExist(parts []maintenanceLogPartInput) error {
 // per rule the way resolveMaintenanceRuleView does for a single-rule
 // response.
 func listMaintenanceRulesHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
+
 	filter := maintenanceRuleFilter{
 		EquipmentID:   c.QueryParam("equipment"),
 		IncludeStored: c.QueryParam("include_stored") == "true",
@@ -418,7 +452,7 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 				// a certificate/expiry rule is never part of.
 				continue
 			}
-			views = append(views, buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, now))
+			views = append(views, buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today))
 			continue
 		}
 
@@ -443,18 +477,22 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 		if systemFilter != "" && eq.System != systemFilter {
 			continue
 		}
-		views = append(views, buildMaintenanceRuleView(rule, &eq, hoursCache[id], now))
+		views = append(views, buildMaintenanceRuleView(rule, &eq, hoursCache[id], today))
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"rules": views})
 }
 
 func getMaintenanceRuleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	rule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -464,6 +502,10 @@ func getMaintenanceRuleHandler(c echo.Context) error {
 // ── rules: write ─────────────────────────────────────────────────────────
 
 func createMaintenanceRuleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceRuleRequest
 	if err := c.Bind(&req); err != nil {
@@ -477,7 +519,7 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -485,6 +527,10 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 }
 
 func updateMaintenanceRuleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceRuleRequest
 	if err := c.Bind(&req); err != nil {
@@ -498,7 +544,7 @@ func updateMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -521,6 +567,10 @@ type maintenanceAckRequest struct {
 // reason clears the acknowledgement (AcknowledgeMaintenanceRule's own doc
 // comment, maintenance_store.go).
 func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceAckRequest
 	if err := c.Bind(&req); err != nil {
@@ -530,7 +580,7 @@ func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -547,6 +597,10 @@ type maintenanceLastDoneRequest struct {
 // last_done_hours?} - spec §3's onboarding action, writing NO log entry
 // (SetMaintenanceRuleLastDone's own doc comment).
 func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceLastDoneRequest
 	if err := c.Bind(&req); err != nil {
@@ -570,7 +624,7 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -582,6 +636,10 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 // 'maintenance' and equipment_id always comes from the rule; both are
 // caller-fixed, never taken from the request body.
 func completeMaintenanceRuleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceLogEntryRequest
 	if err := c.Bind(&req); err != nil {
@@ -658,7 +716,7 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -675,6 +733,10 @@ type maintenanceProcedureNoteRequest struct {
 // checked here, since the store has no way to express "must be a note" as
 // a foreign key (documents.kind is not part of any REFERENCES target).
 func setMaintenanceRuleProcedureNoteHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceProcedureNoteRequest
 	if err := c.Bind(&req); err != nil {
@@ -694,7 +756,7 @@ func setMaintenanceRuleProcedureNoteHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule)
+	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -797,6 +859,10 @@ func createMaintenanceProcedureNote(title string) (document, error) {
 // an operator is free to retitle the note afterward from Documents like
 // any other.
 func createMaintenanceProcedureNoteHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	rule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
 	if err != nil {
 		return writeDocumentError(c, err)
@@ -816,7 +882,7 @@ func createMaintenanceProcedureNoteHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(updated)
+	view, err := resolveMaintenanceRuleView(updated, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -832,6 +898,10 @@ func createMaintenanceProcedureNoteHandler(c echo.Context) error {
 // linked to it) - a real, expected conflict, not a 404 (the ITEM exists;
 // its profile reference just doesn't resolve to anything right now).
 func copyMaintenanceProfileScheduleHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	id := c.Param("id")
 	item, err := globalDocumentStore.GetEquipment(id)
 	if err != nil {
@@ -865,7 +935,7 @@ func copyMaintenanceProfileScheduleHandler(c echo.Context) error {
 	}
 	views := make([]maintenanceRuleView, len(created))
 	for i, rule := range created {
-		views[i] = buildMaintenanceRuleView(rule, &item, hours, now)
+		views[i] = buildMaintenanceRuleView(rule, &item, hours, today)
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"rules": views})
 }

@@ -100,7 +100,17 @@ type maintenanceRuleStatusInput struct {
 	LastDoneAt    *time.Time
 	LastDoneHours *float64
 	Hours         maintenanceHourReading
-	Now           time.Time
+	// Today is the OPERATOR'S OWN LOCAL calendar date - never the server's
+	// wall clock, and never an instant. A boat well east of UTC reading a
+	// server-side time.Now().UTC() before its own local morning would have
+	// every due/overdue decision computed against yesterday's date; the
+	// caller (maintenance_handlers.go's requireTodayParam) takes this as a
+	// required, validated ?today=YYYY-MM-DD from the frontend (which reads
+	// the browser's own local clock, lib/local-date.ts's todayISO) rather
+	// than ever defaulting to time.Now() itself. Only ever compared as a
+	// bare calendar date (civilDateUTC/dateOnlyDaysUntil below), never as
+	// an instant - the time-of-day component, if any, is discarded.
+	Today time.Time
 }
 
 // maintenanceRuleStatusResult is what the API and the list actually show.
@@ -205,7 +215,7 @@ func computeMaintenanceRuleStatus(in maintenanceRuleStatusInput) maintenanceRule
 		} else {
 			due = in.LastDoneAt.AddDate(0, *in.IntervalMonths, 0)
 		}
-		days := dateOnlyDaysUntil(due, in.Now)
+		days := dateOnlyDaysUntil(due, in.Today)
 		remainingDays = &days
 
 		windowMonths := maintenanceDefaultDueSoonMonths
@@ -213,7 +223,7 @@ func computeMaintenanceRuleStatus(in maintenanceRuleStatusInput) maintenanceRule
 			windowMonths = *in.DueSoonMonths
 		}
 		dueSoonAt := due.AddDate(0, -windowMonths, 0)
-		nowDate := civilDateUTC(in.Now)
+		nowDate := civilDateUTC(in.Today)
 		switch {
 		case !nowDate.Before(civilDateUTC(due)):
 			candidates = append(candidates, maintenanceStatusOverdue)

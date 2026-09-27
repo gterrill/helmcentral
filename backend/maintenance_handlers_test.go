@@ -28,7 +28,7 @@ func mustCreateHandlerTestEquipment(t *testing.T, name string) equipmentItem {
 func TestListMaintenanceRulesHandler_EmptyReturnsEmptyArray(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules", "", "")
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?today=2026-06-15", "", "")
 	if err := listMaintenanceRulesHandler(c); err != nil {
 		t.Fatalf("listMaintenanceRulesHandler: %v", err)
 	}
@@ -43,6 +43,109 @@ func TestListMaintenanceRulesHandler_EmptyReturnsEmptyArray(t *testing.T) {
 	}
 	if resp.Rules == nil {
 		t.Fatalf("expected an empty array, got null")
+	}
+}
+
+// TestListMaintenanceRulesHandler_RequiresTodayParam and
+// TestCompleteMaintenanceRuleHandler_RequiresTodayParam pin the code-review
+// finding: status is a calendar-date computation, and the server has no
+// business guessing the operator's own local "today" from its own UTC
+// clock - a boat well east of UTC reading the SERVER's UTC date before its
+// own local morning would see yesterday's date used for every due/overdue
+// decision. Every endpoint that returns a computed rule view requires an
+// explicit ?today=YYYY-MM-DD from the frontend (which computes it from the
+// browser's own local clock, lib/local-date.ts), fail-fast rather than
+// falling back to the server's own notion of "now" - representative
+// coverage here (list, a write endpoint); every other rule-view endpoint
+// shares the exact same requireTodayParam call.
+func TestListMaintenanceRulesHandler_RequiresTodayParam(t *testing.T) {
+	withTestDocumentStore(t)
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules", "", "")
+	if err := listMaintenanceRulesHandler(c); err != nil {
+		t.Fatalf("listMaintenanceRulesHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no today param, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?today=15-06-2026", "", "")
+	if err := listMaintenanceRulesHandler(c); err != nil {
+		t.Fatalf("listMaintenanceRulesHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a malformed today param, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCompleteMaintenanceRuleHandler_RequiresTodayParam(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	months := 12
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Anode check", IntervalMonths: &months})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-06-01"}`, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no today param, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := globalDocumentStore.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: engine.ID})
+	if err != nil {
+		t.Fatalf("ListMaintenanceLogEntries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected the refused completion (missing today) to write no log entry, got %+v", entries)
+	}
+}
+
+// TestListMaintenanceRulesHandler_StatusFollowsGivenTodayNotServerClock
+// proves the server actually USES the given today rather than its own
+// wall clock for the calendar computation - a rule due 2026-06-20 reads
+// due_soon when today=2026-06-15 (5 days out, inside the default 1-month
+// window) and overdue when today=2026-07-01, regardless of when the test
+// itself happens to run.
+func TestListMaintenanceRulesHandler_StatusFollowsGivenTodayNotServerClock(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	months := 6
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Anode check", IntervalMonths: &months})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	at := "2025-12-20" // due 2026-06-20
+	if _, err := globalDocumentStore.SetMaintenanceRuleLastDone(rule.ID, &at, nil); err != nil {
+		t.Fatalf("SetMaintenanceRuleLastDone: %v", err)
+	}
+
+	fetchStatus := func(today string) string {
+		t.Helper()
+		c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?today="+today, "", "")
+		if err := listMaintenanceRulesHandler(c); err != nil {
+			t.Fatalf("listMaintenanceRulesHandler: %v", err)
+		}
+		var resp struct {
+			Rules []maintenanceRuleView `json:"rules"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(resp.Rules) != 1 {
+			t.Fatalf("expected 1 rule, got %+v", resp.Rules)
+		}
+		return resp.Rules[0].Status
+	}
+
+	if got := fetchStatus("2026-06-15"); got != string(maintenanceStatusDueSoon) {
+		t.Fatalf("expected due_soon for today=2026-06-15, got %q", got)
+	}
+	if got := fetchStatus("2026-07-01"); got != string(maintenanceStatusOverdue) {
+		t.Fatalf("expected overdue for today=2026-07-01, got %q", got)
 	}
 }
 
@@ -67,7 +170,7 @@ func TestListMaintenanceRulesHandler_ComputesStatusAndFiltersBySystemAndStored(t
 	}
 
 	// No filter: all 3 visible, every one "never_recorded" (nothing done yet).
-	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules", "", "")
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?today=2026-06-15", "", "")
 	if err := listMaintenanceRulesHandler(c); err != nil {
 		t.Fatalf("listMaintenanceRulesHandler: %v", err)
 	}
@@ -87,7 +190,7 @@ func TestListMaintenanceRulesHandler_ComputesStatusAndFiltersBySystemAndStored(t
 	}
 
 	// system=propulsion: only the engine's own rule, the cert rule excluded.
-	c, rec = newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?system=propulsion", "", "")
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules?system=propulsion&today=2026-06-15", "", "")
 	if err := listMaintenanceRulesHandler(c); err != nil {
 		t.Fatalf("listMaintenanceRulesHandler: %v", err)
 	}
@@ -102,7 +205,7 @@ func TestListMaintenanceRulesHandler_ComputesStatusAndFiltersBySystemAndStored(t
 func TestGetMaintenanceRuleHandler_NotFound(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules/bogus", "", "bogus")
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules/bogus?today=2026-06-15", "", "bogus")
 	if err := getMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("getMaintenanceRuleHandler: %v", err)
 	}
@@ -116,7 +219,7 @@ func TestGetMaintenanceRuleHandler_NotFound(t *testing.T) {
 func TestCreateMaintenanceRuleHandler_RequiresDescription(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules", `{"interval_months":6}`, "")
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules?today=2026-06-15", `{"interval_months":6}`, "")
 	if err := createMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("createMaintenanceRuleHandler: %v", err)
 	}
@@ -128,7 +231,7 @@ func TestCreateMaintenanceRuleHandler_RequiresDescription(t *testing.T) {
 func TestCreateMaintenanceRuleHandler_RequiresAtLeastOneInterval(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules", `{"description":"Oil change"}`, "")
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules?today=2026-06-15", `{"description":"Oil change"}`, "")
 	if err := createMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("createMaintenanceRuleHandler: %v", err)
 	}
@@ -140,7 +243,7 @@ func TestCreateMaintenanceRuleHandler_RequiresAtLeastOneInterval(t *testing.T) {
 func TestCreateMaintenanceRuleHandler_IntervalHoursRequiresEquipment(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules", `{"description":"Oil change","interval_hours":250}`, "")
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules?today=2026-06-15", `{"description":"Oil change","interval_hours":250}`, "")
 	if err := createMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("createMaintenanceRuleHandler: %v", err)
 	}
@@ -154,7 +257,7 @@ func TestCreateAndUpdateMaintenanceRuleHandler_RoundTrip(t *testing.T) {
 	engine := mustCreateHandlerTestEquipment(t, "Generator")
 
 	body := `{"equipment_id":"` + engine.ID + `","description":"Oil change","interval_hours":250}`
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules", body, "")
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules?today=2026-06-15", body, "")
 	if err := createMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("createMaintenanceRuleHandler: %v", err)
 	}
@@ -172,7 +275,7 @@ func TestCreateAndUpdateMaintenanceRuleHandler_RoundTrip(t *testing.T) {
 	}
 
 	updateBody := `{"equipment_id":"` + engine.ID + `","description":"Oil and filter change","interval_hours":300}`
-	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/maintenance/rules/"+created.Rule.ID, updateBody, created.Rule.ID)
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/maintenance/rules/"+created.Rule.ID+"?today=2026-06-15", updateBody, created.Rule.ID)
 	if err := updateMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("updateMaintenanceRuleHandler: %v", err)
 	}
@@ -209,7 +312,7 @@ func TestAcknowledgeMaintenanceRuleHandler_SetsAndClears(t *testing.T) {
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/acknowledge", `{"reason":"waiting on parts"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/acknowledge?today=2026-06-15", `{"reason":"waiting on parts"}`, rule.ID)
 	if err := acknowledgeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("acknowledgeMaintenanceRuleHandler: %v", err)
 	}
@@ -237,7 +340,7 @@ func TestSetMaintenanceRuleLastDoneHandler_ValidatesAndWritesNoLogEntry(t *testi
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done", `{}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done?today=2026-06-15", `{}`, rule.ID)
 	if err := setMaintenanceRuleLastDoneHandler(c); err != nil {
 		t.Fatalf("setMaintenanceRuleLastDoneHandler: %v", err)
 	}
@@ -245,7 +348,7 @@ func TestSetMaintenanceRuleLastDoneHandler_ValidatesAndWritesNoLogEntry(t *testi
 		t.Fatalf("expected 400 for neither field given, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done", `{"last_done_at":"2026-01-15"}`, rule.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done?today=2026-06-15", `{"last_done_at":"2026-01-15"}`, rule.ID)
 	if err := setMaintenanceRuleLastDoneHandler(c); err != nil {
 		t.Fatalf("setMaintenanceRuleLastDoneHandler: %v", err)
 	}
@@ -276,7 +379,7 @@ func TestCompleteMaintenanceRuleHandler_WritesLogAndResetsBaseline(t *testing.T)
 	}
 
 	body := `{"performed_at":"2026-06-01","description":"Changed oil","who":"Skipper","cost":45.5,"currency":"AUD","parts":[{"equipment_id":"` + spare.ID + `","quantity":1}]}`
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", body, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", body, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -314,7 +417,7 @@ func TestCompleteMaintenanceRuleHandler_UnknownPartReturns404(t *testing.T) {
 	}
 
 	body := `{"performed_at":"2026-06-01","parts":[{"equipment_id":"does-not-exist","quantity":1}]}`
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", body, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", body, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -338,7 +441,7 @@ func TestCompleteMaintenanceRuleHandler_HoursRequiredWhenIntervalHoursSet(t *tes
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-06-01"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", `{"performed_at":"2026-06-01"}`, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -368,7 +471,7 @@ func TestCompleteMaintenanceRuleHandler_FixedDueDateRequiresNewDueDate(t *testin
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-05-20"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", `{"performed_at":"2026-05-20"}`, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -377,7 +480,7 @@ func TestCompleteMaintenanceRuleHandler_FixedDueDateRequiresNewDueDate(t *testin
 	}
 
 	body := `{"performed_at":"2026-05-20","new_due_date":"2027-06-01"}`
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", body, rule.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", body, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -410,7 +513,7 @@ func TestCompleteMaintenanceRuleHandler_FixedDueDateWithIntervalMonthsIsComputed
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-05-20"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", `{"performed_at":"2026-05-20"}`, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil {
 		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
 	}
@@ -439,7 +542,7 @@ func TestCreateMaintenanceProcedureNoteHandler_CreatesAndLinks(t *testing.T) {
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/procedure-note", "", rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/procedure-note?today=2026-06-15", "", rule.ID)
 	if err := createMaintenanceProcedureNoteHandler(c); err != nil {
 		t.Fatalf("createMaintenanceProcedureNoteHandler: %v", err)
 	}
@@ -482,7 +585,7 @@ func TestSetMaintenanceRuleProcedureNoteHandler_RejectsNonNoteDocument(t *testin
 		t.Fatalf("Insert: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/maintenance/rules/"+rule.ID+"/procedure-note", `{"note_id":"`+manual.ID+`"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/maintenance/rules/"+rule.ID+"/procedure-note?today=2026-06-15", `{"note_id":"`+manual.ID+`"}`, rule.ID)
 	if err := setMaintenanceRuleProcedureNoteHandler(c); err != nil {
 		t.Fatalf("setMaintenanceRuleProcedureNoteHandler: %v", err)
 	}
@@ -514,7 +617,7 @@ func TestCopyMaintenanceProfileScheduleHandler(t *testing.T) {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule", "", engine.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule?today=2026-06-15", "", engine.ID)
 	if err := copyMaintenanceProfileScheduleHandler(c); err != nil {
 		t.Fatalf("copyMaintenanceProfileScheduleHandler: %v", err)
 	}
@@ -544,7 +647,7 @@ func TestCopyMaintenanceProfileScheduleHandler(t *testing.T) {
 	}
 
 	// Pressing it again must not duplicate.
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule", "", engine.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule?today=2026-06-15", "", engine.ID)
 	if err := copyMaintenanceProfileScheduleHandler(c); err != nil {
 		t.Fatalf("copyMaintenanceProfileScheduleHandler (second): %v", err)
 	}
@@ -560,7 +663,7 @@ func TestCopyMaintenanceProfileScheduleHandler_NoProfileIsConflict(t *testing.T)
 	withTestDocumentStore(t)
 	engine := mustCreateHandlerTestEquipment(t, "Main engine")
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule", "", engine.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+engine.ID+"/maintenance/copy-profile-schedule?today=2026-06-15", "", engine.ID)
 	if err := copyMaintenanceProfileScheduleHandler(c); err != nil {
 		t.Fatalf("copyMaintenanceProfileScheduleHandler: %v", err)
 	}

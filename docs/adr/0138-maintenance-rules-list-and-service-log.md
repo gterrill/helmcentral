@@ -290,3 +290,45 @@ entry - and a second feature would be a second copy of `computeMaintenanceRuleSt
 with no behavioural difference to justify the duplication. §7's `equipment_id
 IS NULL` plus a different list heading gets the same operator-facing
 distinction for the cost of one nullable column.
+
+## Amendment, 2026-09-27: status compares the operator's own local date, never the server's
+
+A `/code-review medium` pass found that every date computation in §2 ran
+against `time.Now().UTC()` - the server's own clock, in UTC. A boat well
+east of UTC (this one runs at UTC+10) reading its own wall calendar before
+about 10am local is still in the PREVIOUS day by UTC. Every "is this rule
+due yet" decision was therefore being made against yesterday's date for
+roughly the first ten hours of every single day at the helm - not a rare
+edge case, a guaranteed daily window.
+
+**Calendar dates are the operator's own local dates, decided once, on the
+browser.** `frontend/src/lib/local-date.ts`'s `todayISO()` reads the
+browser's own `getFullYear()/getMonth()/getDate()` - never
+`toISOString()`, which always renders in UTC regardless of the device's own
+timezone. This is the one and only place "today" is decided; the value
+then travels as data.
+
+**The server never computes its own "today," and refuses to guess when it
+isn't told one.** Every endpoint that returns a rule view with a computed
+status (`list`, and every write that echoes the freshly-recomputed rule
+back - create, update, acknowledge, last-done, complete, procedure-note,
+copy-profile-schedule) now requires an explicit `?today=YYYY-MM-DD` query
+parameter, validated by `requireTodayParam`
+(`maintenance_handlers.go`) - missing or malformed is a 400 naming the
+`today` field, never a silent fallback to the server's own clock
+(AGENTS.md's fallback policy: a wrong answer computed confidently is worse
+than a request that is refused outright). `maintenanceRuleStatusInput.Now`
+is renamed to `Today` (`maintenance_status.go`) to make the contract
+impossible to get quietly wrong a second time - the field name itself now
+says "a calendar date," not "an instant," and every one of the pure
+engine's own tests supplies one accordingly.
+
+This is deliberately narrower than "make the server timezone-aware." The
+hours axis (how stale is a live SignalK reading) is correctly left on the
+server's own wall-clock instant (`time.Now()`, still UTC internally) inside
+`equipmentHourReading` - staleness is a real elapsed-time question with no
+calendar-date component, and giving it the operator's midnight-truncated
+local date instead would make a reading read stale or fresh at the wrong
+moment. Only the calendar axis - due dates, baselines, "today" - moved to
+the operator's own local date; the two clocks in this feature answer two
+different questions and are kept on the inputs suited to each.
