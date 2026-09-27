@@ -10,16 +10,20 @@ import (
 // current true running hours. It reuses the exact same snapshot-reading
 // machinery Mate's diagnostics tools already read a path through (ADR
 // 0131, alarm_reader.go/signalk_paths.go's pathAge) rather than inventing a
-// second way to ask "what does this path say and how old is that" -
-// AGENTS.md fail-fast: a bound path with a missing or stale value is
-// reported as unknown, never guessed at from whatever was last seen.
-
-// maintenanceHoursStaleAfter is the same staleness threshold Mate's own
-// diagnostics tools and every derived path already use
-// (assistantDiagnosticsStaleAfter, derivedInputMaxAge) - reused rather than
-// picked afresh, so "hours unknown" here can never disagree with what a
-// tile bound to the same path already shows as stale.
-const maintenanceHoursStaleAfter = derivedInputMaxAge
+// second way to ask "what does this path say and how old is that".
+//
+// Amendment, 2026-09-27: an hour meter is not like an ordinary telemetry
+// path. A depth or wind reading going quiet for two minutes means the
+// sensor or feed died - the boat's depth didn't stop existing. An engine's
+// runtime counter, by contrast, is EXPECTED to stop publishing the instant
+// the engine is switched off, because there is nothing left to count: the
+// meter does not "go stale," it correctly stops moving. Treating that as
+// "hours unknown" (the behaviour this file had before this amendment) made
+// every hours-based rule read unknown at anchor and while the engine was
+// off for its own service - precisely when an operator is most likely to
+// be looking. The last value this path ever reported is therefore always
+// the current reading, however old; only its age is worth telling the
+// operator (currentEquipmentHours' own AsOf), never used to discard it.
 
 // hourMeterReset is one row of hour_meter_resets: an operator-recorded
 // meter replacement (maintenance_store.go). OldReading is the true hours
@@ -27,9 +31,9 @@ const maintenanceHoursStaleAfter = derivedInputMaxAge
 // NewReading is what the fresh meter itself reads at that same moment
 // (typically 0, but not assumed to be - a replacement with a used meter is
 // a real case). ChangedAt is the date the replacement actually happened,
-// which is what "most recent" means for latestMeterOffsetHours below;
-// CreatedAt is only when the row was entered into Helmcentral, which a
-// back-filled reset can postdate by months and plays no part in ordering.
+// which is what "in force at" means for offsetInForceAt below; CreatedAt
+// is only when the row was entered into Helmcentral, which a back-filled
+// reset can postdate by months and plays no part in ordering.
 type hourMeterReset struct {
 	ID         string    `json:"id"`
 	OldReading float64   `json:"old_reading"`
@@ -38,72 +42,72 @@ type hourMeterReset struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// latestMeterOffsetHours is the figure added to the live meter's own raw
-// reading so true hours keep counting across a replacement. Only the MOST
-// RECENT reset matters, never a sum of every reset ever recorded: the
-// operator's own OldReading at each replacement already states the
-// cumulative true hours at that moment (it is what the superseded meter
-// was showing, which already reflects every earlier replacement), so
-// offset = latest.OldReading - latest.NewReading is the whole answer -
-// true_hours = raw_live + offset, and at the instant of replacement
-// raw_live == NewReading, so true_hours_at_replacement == OldReading by
-// construction.
+// offsetInForceAt is the figure that turns a GAUGE (raw meter) reading FROM
+// atDate into true hours: true = gauge + offsetInForceAt(resets, atDate).
+// Only the most recent reset THAT HAD ALREADY HAPPENED by atDate counts,
+// never a sum of every reset ever recorded and never one dated after
+// atDate - the operator's own OldReading at each replacement already
+// states the cumulative true hours at that moment (it is what the
+// superseded meter was showing, which already reflects every earlier
+// replacement), so offset = reset.OldReading - reset.NewReading is the
+// whole answer once the right reset is picked; at the instant of
+// replacement raw_live == NewReading, so true_hours_at_replacement ==
+// OldReading by construction.
 //
-// "Most recent" is by ChangedAt (the operator's own stated date the
-// replacement happened), never CreatedAt (when the row was entered) - a
-// reset back-filled into Helmcentral weeks after the fact, dated earlier
-// than a reset already on file, must not be treated as the newer one just
-// because it was typed in later. Ties (two resets on the same date) break
-// on ID, so the result is fully deterministic rather than depending on
-// slice order.
-func latestMeterOffsetHours(resets []hourMeterReset) float64 {
-	if len(resets) == 0 {
-		return 0
-	}
-	latest := resets[0]
-	for _, r := range resets[1:] {
-		if meterResetIsAfter(r, latest) {
-			latest = r
+// This is the ONE place gauge and true hours convert into each other
+// (2026-09-27 amendment below) - a live reading (atDate = now/today) and a
+// back-filled completion or "set last done" (atDate = whatever date the
+// operator actually gave) share this same function so the two can never
+// quietly disagree about which offset a given date should use.
+//
+// resets is trusted to already be ChangedAt-descending, most-recent-first
+// - ListHourMeterResets' own contract (`ORDER BY changed_at DESC, id
+// DESC`) - so the first entry whose ChangedAt is on or before atDate IS
+// the answer; this is a single forward scan, never a second sort or
+// pairwise comparison over a list the store already ordered correctly.
+// ChangedAt/atDate are compared as YYYY-MM-DD strings - installDatePattern
+// guarantees that shape for every ChangedAt on file, and ISO date strings
+// of the same length sort lexicographically exactly the way they sort
+// chronologically, the same idiom maintenance_store.go's own
+// CompleteMaintenanceRule uses for its baseline-only-moves-forward check.
+func offsetInForceAt(resets []hourMeterReset, atDate time.Time) float64 {
+	cutoff := atDate.Format("2006-01-02")
+	for _, r := range resets {
+		if r.ChangedAt <= cutoff {
+			return r.OldReading - r.NewReading
 		}
 	}
-	return latest.OldReading - latest.NewReading
+	return 0
 }
 
-// meterResetIsAfter reports whether a happened after b, by ChangedAt - see
-// latestMeterOffsetHours' own doc comment for why. Both dates are written
-// by RecordHourMeterReset after passing installDatePattern, so a parse
-// failure here would mean a row this code itself wrote is malformed rather
-// than an upstream data problem; treated as the earliest possible date
-// (never wins) rather than panicking a status computation over one bad
-// historical row.
-func meterResetIsAfter(a, b hourMeterReset) bool {
-	aDate, aErr := time.Parse("2006-01-02", a.ChangedAt)
-	bDate, bErr := time.Parse("2006-01-02", b.ChangedAt)
-	switch {
-	case aErr == nil && bErr == nil:
-		if !aDate.Equal(bDate) {
-			return aDate.After(bDate)
-		}
-	case aErr == nil && bErr != nil:
-		return true
-	case aErr != nil && bErr == nil:
-		return false
-	}
-	return a.ID > b.ID
+// gaugeToTrueHours is offsetInForceAt spelled out at its one call shape:
+// what every write of an operator-typed hours figure (completeMaintenanceRuleHandler,
+// setMaintenanceRuleLastDoneHandler, the standalone log entry handlers -
+// maintenance_handlers.go) actually wants. The operator always types a
+// GAUGE (raw meter) reading; every stored hours figure the status engine
+// later compares (last_done_hours, and a log entry's own hours next to it)
+// is always TRUE hours - this is the one conversion between the two.
+func gaugeToTrueHours(resets []hourMeterReset, gauge float64, atDate time.Time) float64 {
+	return gauge + offsetInForceAt(resets, atDate)
 }
 
 // currentEquipmentHours resolves path's live value (SignalK runTime is
-// published in seconds - converted to hours here) plus offsetHours (this
-// item's own latestMeterOffsetHours) into the maintenanceHourReading every
-// rule on this item shares. Known is false whenever the figure cannot be
-// trusted at all:
+// published in seconds - converted to hours here) into the
+// maintenanceHourReading every rule on this item shares: Gauge is that raw
+// conversion, Hours is Gauge plus offsetHours (this item's own
+// offsetInForceAt at "now") - true hours. Known is false only when there is
+// nothing here for the engine to read live at all:
 //
 //   - path is blank: no hour_meter_path is bound on this item - the
-//     operator records readings manually instead (spec §2), and there is
-//     nothing here for the engine to read live.
+//     operator records readings manually instead (spec §2).
 //   - the bound path has never carried a value in this snapshot.
-//   - the bound path's value IS present but its age exceeds
-//     maintenanceHoursStaleAfter - stale, not guessed at.
+//
+// A value that IS present is Known regardless of its age (this file's own
+// 2026-09-27 amendment) - AsOf carries how long ago it was received, when
+// the snapshot has usable timestamp evidence for it (pathAge returning -1
+// is only reachable for a hand-built fixture missing every timestamp; a
+// real SignalK delta always carries one), so the frontend can show "as of
+// <time>" without the reading itself being discarded.
 //
 // reader and snapshot are both injectable (the same idiom
 // assistantToolDeps.signalKDiagnostics uses) so this is testable against a
@@ -121,15 +125,11 @@ func currentEquipmentHours(reader alarmReader, snapshot *signalKSnapshot, path s
 		return maintenanceHourReading{}
 	}
 
-	age := pathAge(snapshot, sample, trimmed, now)
-	if age < 0 {
-		return maintenanceHourReading{}
+	gauge := sample.Value / 3600.0
+	reading := maintenanceHourReading{Known: true, Hours: gauge + offsetHours, Gauge: gauge}
+	if age := pathAge(snapshot, sample, trimmed, now); age >= 0 {
+		asOf := now.Add(-time.Duration(age * float64(time.Second)))
+		reading.AsOf = &asOf
 	}
-	if age > maintenanceHoursStaleAfter.Seconds() {
-		lastGood := now.Add(-time.Duration(age * float64(time.Second)))
-		return maintenanceHourReading{StaleSince: &lastGood}
-	}
-
-	hours := sample.Value/3600.0 + offsetHours
-	return maintenanceHourReading{Known: true, Hours: hours}
+	return reading
 }

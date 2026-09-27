@@ -647,7 +647,7 @@ func TestDocumentStore_HourMeterResetHistoryRoundTrips(t *testing.T) {
 		t.Fatalf("expected the most recent reset first, got %+v", resets)
 	}
 
-	offset := latestMeterOffsetHours(resets)
+	offset := offsetInForceAt(resets, mustParseDate(t, "2026-06-01"))
 	if offset != 5190 {
 		t.Fatalf("expected offset 5190 (5200-10), got %v", offset)
 	}

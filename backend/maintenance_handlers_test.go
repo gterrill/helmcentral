@@ -365,6 +365,77 @@ func TestSetMaintenanceRuleLastDoneHandler_ValidatesAndWritesNoLogEntry(t *testi
 	}
 }
 
+// TestSetMaintenanceRuleLastDoneHandler_ConvertsGaugeHoursToTrue pins
+// code-review finding 4 for the onboarding "Set last done" path: the
+// operator types a gauge reading here too, converted using the offset in
+// force on the given last_done_at date - never today's, for the same
+// back-filling reason completing a rule needs it.
+func TestSetMaintenanceRuleLastDoneHandler_ConvertsGaugeHoursToTrue(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	hours := 250.0
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 500, 0, "2026-01-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset: %v", err)
+	}
+
+	body := `{"last_done_at":"2026-02-01","last_done_hours":50}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done?today=2026-06-15", body, rule.ID)
+	if err := setMaintenanceRuleLastDoneHandler(c); err != nil {
+		t.Fatalf("setMaintenanceRuleLastDoneHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rule maintenanceRuleView `json:"rule"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Rule.LastDoneHours == nil || *resp.Rule.LastDoneHours != 550 {
+		t.Fatalf("expected 550 (50 gauge + 500 offset in force on 2026-02-01), got %+v", resp.Rule.LastDoneHours)
+	}
+}
+
+// TestSetMaintenanceRuleLastDoneHandler_NoDateGivenUsesTodaysOffset covers
+// the other half: an hours-only Set-last-done (no date) has nothing but
+// "today" to say when the reading is from, so it converts with whichever
+// offset is in force today.
+func TestSetMaintenanceRuleLastDoneHandler_NoDateGivenUsesTodaysOffset(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	hours := 250.0
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 500, 0, "2026-01-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset: %v", err)
+	}
+
+	body := `{"last_done_hours":50}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done?today=2026-06-15", body, rule.ID)
+	if err := setMaintenanceRuleLastDoneHandler(c); err != nil {
+		t.Fatalf("setMaintenanceRuleLastDoneHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rule maintenanceRuleView `json:"rule"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Rule.LastDoneHours == nil || *resp.Rule.LastDoneHours != 550 {
+		t.Fatalf("expected 550 (50 gauge + 500 offset in force today), got %+v", resp.Rule.LastDoneHours)
+	}
+}
+
 func TestCompleteMaintenanceRuleHandler_WritesLogAndResetsBaseline(t *testing.T) {
 	withTestDocumentStore(t)
 	engine := mustCreateHandlerTestEquipment(t, "Generator")
@@ -404,6 +475,54 @@ func TestCompleteMaintenanceRuleHandler_WritesLogAndResetsBaseline(t *testing.T)
 	}
 	if resp.Rule.Status != string(maintenanceStatusOK) {
 		t.Fatalf("expected ok status right after completion, got %q", resp.Rule.Status)
+	}
+}
+
+// TestCompleteMaintenanceRuleHandler_ConvertsGaugeHoursUsingOffsetInForceAtCompletionDate
+// pins code-review finding 4: the operator always types a GAUGE (raw
+// meter) reading into "hours", never true hours - the server converts,
+// using the offset that was IN FORCE ON THE COMPLETION'S OWN DATE, not
+// today's. A back-filled completion dated before the most recent meter
+// replacement must use the earlier offset, or it reads with wildly wrong
+// true hours once converted.
+func TestCompleteMaintenanceRuleHandler_ConvertsGaugeHoursUsingOffsetInForceAtCompletionDate(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	hours := 250.0
+	rule, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Oil change", IntervalHours: &hours})
+	if err != nil {
+		t.Fatalf("CreateMaintenanceRule: %v", err)
+	}
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 500, 0, "2026-01-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset (older): %v", err)
+	}
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 1000, 0, "2026-05-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset (newer): %v", err)
+	}
+
+	// Completed 2026-03-01 - AFTER the older reset, BEFORE the newer one -
+	// with a gauge reading of 50. True hours must use the OLDER offset
+	// (500), not the newer one (1000) that hadn't happened yet.
+	body := `{"performed_at":"2026-03-01","hours":50}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", body, rule.ID)
+	if err := completeMaintenanceRuleHandler(c); err != nil {
+		t.Fatalf("completeMaintenanceRuleHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rule  maintenanceRuleView `json:"rule"`
+		Entry maintenanceLogEntry `json:"entry"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Entry.Hours == nil || *resp.Entry.Hours != 550 {
+		t.Fatalf("expected the log entry's own hours converted to true hours (50 gauge + 500 offset in force on 2026-03-01) = 550, got %+v", resp.Entry.Hours)
+	}
+	if resp.Rule.LastDoneHours == nil || *resp.Rule.LastDoneHours != 550 {
+		t.Fatalf("expected the rule's baseline set to true hours 550, got %+v", resp.Rule.LastDoneHours)
 	}
 }
 
@@ -808,6 +927,67 @@ func TestMaintenanceLogEntryHandlers_CRUD(t *testing.T) {
 	}
 }
 
+// TestCreateAndUpdateMaintenanceLogEntryHandler_ConvertsGaugeHoursToTrue
+// pins code-review finding 4's own "check the standalone log entry form
+// for the same issue" instruction: a standalone entry's own hours field is
+// a gauge reading exactly like the Complete dialog's, and must convert the
+// same way - on create (offset in force on the entry's own performed_at),
+// and again on update (equipment_id is immutable, so the conversion has to
+// look the existing entry's own equipment_id up, not take it from the
+// request).
+func TestCreateAndUpdateMaintenanceLogEntryHandler_ConvertsGaugeHoursToTrue(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 500, 0, "2026-01-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset (older): %v", err)
+	}
+	if _, err := globalDocumentStore.RecordHourMeterReset(engine.ID, 1000, 0, "2026-05-01"); err != nil {
+		t.Fatalf("RecordHourMeterReset (newer): %v", err)
+	}
+
+	// Created dated 2026-03-01 (between the two resets) with a gauge
+	// reading of 50 - must convert with the OLDER offset (500).
+	body := `{"equipment_id":"` + engine.ID + `","performed_at":"2026-03-01","kind":"repair","description":"Belt","hours":50}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/log", body, "")
+	if err := createMaintenanceLogEntryHandler(c); err != nil {
+		t.Fatalf("createMaintenanceLogEntryHandler: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Entry maintenanceLogEntry `json:"entry"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if created.Entry.Hours == nil || *created.Entry.Hours != 550 {
+		t.Fatalf("expected 550 (50 gauge + 500 offset in force on 2026-03-01), got %+v", created.Entry.Hours)
+	}
+
+	// Updated dated 2026-06-01 (after both resets) with a gauge reading of
+	// 20 - must now convert with the NEWER offset (1000), and must find
+	// the entry's own equipment_id itself since the update body never
+	// carries one.
+	updateBody := `{"performed_at":"2026-06-01","kind":"repair","description":"Belt","hours":20}`
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/maintenance/log/"+created.Entry.ID, updateBody, created.Entry.ID)
+	if err := updateMaintenanceLogEntryHandler(c); err != nil {
+		t.Fatalf("updateMaintenanceLogEntryHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var updated struct {
+		Entry maintenanceLogEntry `json:"entry"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if updated.Entry.Hours == nil || *updated.Entry.Hours != 1020 {
+		t.Fatalf("expected 1020 (20 gauge + 1000 offset in force on 2026-06-01), got %+v", updated.Entry.Hours)
+	}
+}
+
 // ── log entry photos ─────────────────────────────────────────────────────
 
 func newMaintenanceLogPhotoUploadContext(t *testing.T, id string, fields []documentUploadField) (echo.Context, *httptest.ResponseRecorder) {
@@ -884,7 +1064,12 @@ func TestExportMaintenanceLogCSVHandler(t *testing.T) {
 		t.Fatalf("expected text/csv content type, got %q", ct)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "date,item,rule,kind,hours,description,who,cost,currency,parts") {
+	// "hours (true)" - code-review finding 4: every stored hours figure is
+	// always TRUE hours (gauge plus whatever meter-reset offset applied),
+	// never the raw gauge reading the operator actually typed in, so the
+	// export says so rather than leaving "hours" ambiguous in a spreadsheet
+	// read back months later.
+	if !strings.Contains(body, "date,item,rule,kind,hours (true),description,who,cost,currency,parts") {
 		t.Fatalf("expected the header row, got %q", body)
 	}
 	if !strings.Contains(body, "2026-06-01,Generator,,repair,,Replaced belt,Skipper,,,") {

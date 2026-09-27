@@ -72,18 +72,24 @@ type maintenanceRuleView struct {
 	RemainingDays    *int     `json:"remaining_days"`
 	HoursUnknown     bool     `json:"hours_unknown"`
 	HasHourMeterPath bool     `json:"has_hour_meter_path"`
-	// CurrentHours is the item's own live true-hours reading right now
-	// (nil unless Hours.Known) - a convenience for the frontend's Complete
-	// dialog, which prefills its hours field from this rather than
-	// re-deriving it from RemainingHours/LastDoneHours arithmetic.
+	// CurrentHours is the item's own live GAUGE (raw meter) reading right
+	// now (nil unless Hours.Known) - deliberately the RAW figure, not true
+	// hours, because the frontend's Complete/last-done/log-entry forms
+	// prefill their own "Hours" field with this and the operator always
+	// works in gauge readings (2026-09-27 amendment, gaugeToTrueHours -
+	// maintenance_hours.go); the server converts back to true hours, with
+	// whichever offset was in force on the date given, when it stores
+	// whatever the operator actually submits.
 	CurrentHours *float64 `json:"current_hours"`
-	// HoursStaleSince (RFC3339) is set only when the item's hour meter path
-	// IS bound but its value is older than the staleness threshold - spec's
-	// own "unknown/stale since X". Blank/null both when the hours axis
-	// isn't relevant to this rule at all and when nothing has ever been
-	// received for the path (see currentEquipmentHours' own doc comment on
-	// the difference).
-	HoursStaleSince *string `json:"hours_stale_since"`
+	// HoursAsOf (RFC3339) is set whenever CurrentHours is - the wall-clock
+	// instant that live reading was last received, so the frontend can show
+	// "as of <time>" (2026-09-27 amendment: an hour meter's last value is
+	// always current, however old, since it only changes while its engine
+	// runs - see currentEquipmentHours' own doc comment,
+	// maintenance_hours.go). Null when CurrentHours itself is null, or on
+	// the rare fixture with no timestamp evidence at all for an otherwise
+	// live reading.
+	HoursAsOf *string `json:"hours_as_of"`
 }
 
 // requireTodayParam reads and validates the ?today=YYYY-MM-DD query param
@@ -172,30 +178,48 @@ func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours mai
 		view.System = eq.System
 		view.HasHourMeterPath = strings.TrimSpace(eq.HourMeterPath) != ""
 	}
-	if hours.StaleSince != nil {
-		s := hours.StaleSince.UTC().Format(time.RFC3339)
-		view.HoursStaleSince = &s
+	if hours.AsOf != nil {
+		s := hours.AsOf.UTC().Format(time.RFC3339)
+		view.HoursAsOf = &s
 	}
 	if hours.Known {
-		h := hours.Hours
-		view.CurrentHours = &h
+		g := hours.Gauge
+		view.CurrentHours = &g
 	}
 	return view
 }
 
 // equipmentHourReading resolves eq's current true hours (live value plus
-// its own latest meter-reset offset) - shared by resolveMaintenanceRuleView
-// (one rule) and listMaintenanceRulesHandler's own per-equipment cache (many
-// rules), so the two can never disagree about how an item's hours are
-// computed.
+// its own currently-in-force meter-reset offset) - shared by
+// resolveMaintenanceRuleView (one rule) and listMaintenanceRulesHandler's
+// own per-equipment cache (many rules), so the two can never disagree about
+// how an item's hours are computed.
 func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReading, error) {
 	resets, err := globalDocumentStore.ListHourMeterResets(eq.ID)
 	if err != nil {
 		return maintenanceHourReading{}, err
 	}
-	offset := latestMeterOffsetHours(resets)
+	offset := offsetInForceAt(resets, now)
 	reader := snapshotAlarmReader(globalSignalKSnapshot)
 	return currentEquipmentHours(reader, globalSignalKSnapshot, eq.HourMeterPath, offset, now), nil
+}
+
+// convertGaugeHoursToTrue looks up equipmentID's own hour-meter reset
+// history and converts a GAUGE (raw meter) reading FROM atDate into true
+// hours (gaugeToTrueHours, maintenance_hours.go). Every endpoint that
+// accepts an operator-typed hours figure destined for a rule's own
+// last_done_hours or a log entry's own hours column shares this one
+// conversion (2026-09-27 amendment - docs/adr/0138) - completing a rule,
+// setting its baseline by hand, and a standalone log entry's own hours
+// field all mean the same thing by "hours" once this has run, so gauge and
+// true can never quietly diverge into two competing meanings of the word
+// between them.
+func convertGaugeHoursToTrue(equipmentID string, gauge float64, atDate time.Time) (float64, error) {
+	resets, err := globalDocumentStore.ListHourMeterResets(equipmentID)
+	if err != nil {
+		return 0, err
+	}
+	return gaugeToTrueHours(resets, gauge, atDate), nil
 }
 
 // resolveMaintenanceRuleView builds the response view for a single rule -
@@ -620,6 +644,36 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 		return writeInventoryValidationError(c, &inventoryValidationError{Field: "last_done_hours", Message: "last_done_hours cannot be negative"})
 	}
 
+	// The operator always types a GAUGE (raw meter) reading here too
+	// (2026-09-27 amendment) - converted to true hours with the offset in
+	// force on whichever date the reading is FROM: the date given, when
+	// there is one, otherwise today's (an hours-only Set-last-done, with no
+	// date at all, only ever means "this is the CURRENT reading" - there is
+	// no other date to convert it at).
+	if req.LastDoneHours != nil {
+		existingRule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		if existingRule.EquipmentID != nil {
+			atDate := today
+			if req.LastDoneAt != nil && *req.LastDoneAt != "" {
+				parsed, parseErr := time.Parse("2006-01-02", *req.LastDoneAt)
+				if parseErr != nil {
+					// Already passed installDatePattern above; a failure
+					// here would be this code disagreeing with itself.
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse last_done_at: %v", parseErr)})
+				}
+				atDate = parsed
+			}
+			trueHours, err := convertGaugeHoursToTrue(*existingRule.EquipmentID, *req.LastDoneHours, atDate)
+			if err != nil {
+				return writeDocumentError(c, err)
+			}
+			req.LastDoneHours = &trueHours
+		}
+	}
+
 	rule, err := globalDocumentStore.SetMaintenanceRuleLastDone(c.Param("id"), req.LastDoneAt, req.LastDoneHours)
 	if err != nil {
 		return writeDocumentError(c, err)
@@ -668,6 +722,29 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 		})
 	}
 
+	// performed_at already passed installDatePattern in
+	// validateMaintenanceLogEntryCore; a parse failure here would be this
+	// code disagreeing with itself, not an operator mistake - surfaced
+	// rather than silently skipped. Parsed once, shared by the gauge
+	// conversion below and the fixed-due-date computation further down.
+	performedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
+	if parseErr != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
+	}
+
+	// The operator always types a GAUGE (raw meter) reading (2026-09-27
+	// amendment, docs/adr/0138) - convert to true hours here, using the
+	// offset that was in force on THIS COMPLETION'S OWN DATE, so a
+	// back-filled old service converts with the offset that actually
+	// applied then, never today's.
+	if in.Hours != nil && existingRule.EquipmentID != nil {
+		trueHours, err := convertGaugeHoursToTrue(*existingRule.EquipmentID, *in.Hours, performedAt)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		in.Hours = &trueHours
+	}
+
 	// A fixed-due-date rule (spec §7's certificates/expiries, or an
 	// ordinary item rule that happens to carry one) must not read overdue
 	// again the instant it's completed - its own due date has to advance.
@@ -684,15 +761,7 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	newFixedDueDate := ""
 	if existingRule.FixedDueDate != "" {
 		if existingRule.IntervalMonths != nil {
-			completedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
-			if parseErr != nil {
-				// performed_at already passed installDatePattern in
-				// validateMaintenanceLogEntryCore; a failure here would be
-				// this code disagreeing with itself, not an operator
-				// mistake - surfaced rather than silently skipped.
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
-			}
-			newFixedDueDate = completedAt.AddDate(0, *existingRule.IntervalMonths, 0).Format("2006-01-02")
+			newFixedDueDate = performedAt.AddDate(0, *existingRule.IntervalMonths, 0).Format("2006-01-02")
 		} else {
 			trimmed := strings.TrimSpace(req.NewDueDate)
 			if trimmed == "" || !installDatePattern.MatchString(trimmed) {
@@ -1028,6 +1097,23 @@ func createMaintenanceLogEntryHandler(c echo.Context) error {
 	in.EquipmentID = equipmentID
 	in.Kind = kind
 
+	// The operator always types a GAUGE (raw meter) reading (2026-09-27
+	// amendment) - same rule as completing a rule, converted here with the
+	// offset in force on this entry's own performed_at.
+	if in.Hours != nil {
+		performedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
+		if parseErr != nil {
+			// Already passed installDatePattern in
+			// validateMaintenanceLogEntryCore.
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
+		}
+		trueHours, err := convertGaugeHoursToTrue(*equipmentID, *in.Hours, performedAt)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		in.Hours = &trueHours
+	}
+
 	if err := checkMaintenancePartsExist(in.Parts); err != nil {
 		if errors.Is(err, errEquipmentNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -1062,6 +1148,29 @@ func updateMaintenanceLogEntryHandler(c echo.Context) error {
 		return writeInventoryValidationError(c, &inventoryValidationError{Field: "kind", Message: "kind must be maintenance, repair or improvement"})
 	}
 	in.Kind = kind
+
+	// Same gauge-to-true conversion as create, but equipment_id is
+	// immutable (this file's own doc comment above) - never taken from the
+	// request, so the existing entry has to be read back to learn it.
+	if in.Hours != nil {
+		existing, err := globalDocumentStore.GetMaintenanceLogEntry(c.Param("id"))
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		if existing.EquipmentID != nil {
+			performedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
+			if parseErr != nil {
+				// Already passed installDatePattern in
+				// validateMaintenanceLogEntryCore.
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
+			}
+			trueHours, err := convertGaugeHoursToTrue(*existing.EquipmentID, *in.Hours, performedAt)
+			if err != nil {
+				return writeDocumentError(c, err)
+			}
+			in.Hours = &trueHours
+		}
+	}
 
 	if err := checkMaintenancePartsExist(in.Parts); err != nil {
 		if errors.Is(err, errEquipmentNotFound) {
@@ -1248,7 +1357,12 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 	c.Response().WriteHeader(http.StatusOK)
 
 	w := csv.NewWriter(c.Response())
-	if err := w.Write([]string{"date", "item", "rule", "kind", "hours", "description", "who", "cost", "currency", "parts"}); err != nil {
+	// "hours (true)" - every stored hours figure is always true hours
+	// (gauge plus whatever meter-reset offset was in force when it was
+	// logged, gaugeToTrueHours - maintenance_hours.go), never the raw
+	// gauge reading the operator actually typed in; named explicitly so
+	// the export is never ambiguous read back later.
+	if err := w.Write([]string{"date", "item", "rule", "kind", "hours (true)", "description", "who", "cost", "currency", "parts"}); err != nil {
 		return err
 	}
 	for _, e := range entries {
