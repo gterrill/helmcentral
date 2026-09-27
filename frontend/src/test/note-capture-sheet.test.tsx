@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { NoteCaptureSheet } from '@/components/documents/note-capture-sheet'
 import { useNotes } from '@/hooks/use-notes'
 import type { NoteRecord } from '@/hooks/use-notes'
+import { LAZY_NOTE_EDITOR_TIMEOUT_MS } from './helpers/lazy-note-editor'
 
 // ADR 0119/0121: the one capture sheet, opened only from Documents' New →
 // Note menu - this file is about what the sheet itself does with whatever
@@ -116,9 +117,12 @@ const current = () => instances[instances.length - 1]
 
 // Awaits the lazy editor body and returns its contentEditable surface -
 // every test that needs to reach into the body (to dictate into it, toggle
-// source mode, or fire a keydown on it) starts here.
+// source mode, or fire a keydown on it) starts here. The generous timeout
+// (rather than findBy*'s 1000ms default) is because THIS is the await that
+// can race the lazy editor chunk's first import - see
+// helpers/lazy-note-editor.ts.
 async function findEditorBody() {
-  return screen.findByRole('textbox', { name: 'Note body' })
+  return screen.findByRole('textbox', { name: 'Note body' }, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS })
 }
 
 // Dictates `text` as a single final result into the (already-mounted)
