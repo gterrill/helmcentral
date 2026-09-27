@@ -7,12 +7,16 @@ import { SectionNav, type SectionNavGroup } from '@/components/section-nav'
 // already has. Inventory has one job with four parts rather than groups of
 // jobs, so it is a single unlabelled group.
 
-export type InventorySectionId = 'equipment' | 'profiles' | 'locations' | 'stocktake'
+export type InventorySectionId = 'equipment' | 'maintenance' | 'profiles' | 'locations' | 'stocktake'
 
 const INVENTORY_SECTION_GROUPS: Array<SectionNavGroup<InventorySectionId>> = [
   {
     items: [
       { id: 'equipment', label: 'Equipment' },
+      // ADR 0138: service rules and the log they're completed into - a
+      // plain sortable list, not a fifth index/editor split, so it sits
+      // beside Equipment rather than nested under it.
+      { id: 'maintenance', label: 'Maintenance' },
       { id: 'profiles', label: 'Profiles' },
       { id: 'locations', label: 'Locations' },
       // ADR 0127 (the plan's Phase B): NFC and keyboard-wedge scanning, not the

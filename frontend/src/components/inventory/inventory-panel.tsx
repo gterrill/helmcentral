@@ -7,6 +7,7 @@ import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/invent
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationsSection } from '@/components/inventory/locations-section'
+import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import { INVENTORY_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
@@ -154,6 +155,9 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
           canWrite={canWrite}
         />
       )
+    }
+    if (activeSectionId === 'maintenance') {
+      return <MaintenanceSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
     }
     if (activeSectionId === 'profiles') return <ProfilesSection canWrite={canWrite} />
     if (activeSectionId === 'locations') {

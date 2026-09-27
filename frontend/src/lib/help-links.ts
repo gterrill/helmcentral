@@ -89,6 +89,7 @@ export const SETTINGS_HELP_TARGETS: Record<SettingsSectionId, HelpTarget> = {
  * two tables above. */
 export const INVENTORY_HELP_TARGETS: Record<InventorySectionId, HelpTarget> = {
   equipment: { page: 'features/inventory-tracking', heading: 'Equipment' },
+  maintenance: { page: 'features/maintenance' },
   profiles: { page: 'features/inventory-tracking', heading: 'Profiles' },
   locations: { page: 'features/inventory-tracking', heading: 'Locations' },
   stocktake: { page: 'features/inventory-tracking', heading: 'Doing a stocktake' },
