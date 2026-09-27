@@ -153,9 +153,18 @@ type maintenanceLogEntryInput struct {
 // status stored are excluded from the list"); the equipment editor's own
 // Maintenance block passes IncludeStored=true, since an operator editing a
 // stored item's own page obviously still wants to see and manage its rules.
+//
+// System (2026-09-27, code-review finding), blank by default, narrows to
+// one system's own gear - the Maintenance list's own filter dropdown. A
+// calendar-only rule has no system to match against and is excluded
+// whenever System is non-blank, the same as IncludeStored's own
+// equipment-status subquery excludes a stored item's rule: filtered in SQL,
+// not by the caller loading every rule's own equipment first and
+// discarding the ones that don't match.
 type maintenanceRuleFilter struct {
 	EquipmentID   string
 	IncludeStored bool
+	System        string
 }
 
 // ── maintenance rules ────────────────────────────────────────────────────
@@ -354,6 +363,14 @@ func (s *documentStore) ListMaintenanceRules(filter maintenanceRuleFilter) ([]ma
 		// be stored. Only a rule that DOES name an item is filtered by
 		// that item's status.
 		query += ` AND (equipment_id IS NULL OR equipment_id IN (SELECT id FROM equipment WHERE status != 'stored'))`
+	}
+	if filter.System != "" {
+		// Unlike IncludeStored above, a calendar-only rule (equipment_id
+		// NULL) IS excluded here - it has no system to match against, and
+		// `NULL IN (...)` is never true in SQL, so this needs no separate
+		// "OR equipment_id IS NULL" clause the way IncludeStored's does.
+		query += ` AND equipment_id IN (SELECT id FROM equipment WHERE system = ?)`
+		args = append(args, filter.System)
 	}
 	query += ` ORDER BY equipment_id IS NULL, equipment_id, lower(description)`
 

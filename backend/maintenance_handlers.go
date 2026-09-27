@@ -194,7 +194,18 @@ func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours mai
 // resolveMaintenanceRuleView (one rule) and listMaintenanceRulesHandler's
 // own per-equipment cache (many rules), so the two can never disagree about
 // how an item's hours are computed.
+//
+// An item with no hour_meter_path at all has nothing here for the engine to
+// read live (currentEquipmentHours' own doc comment) - checked BEFORE
+// ListHourMeterResets runs (2026-09-27 code-review finding), not after,
+// since a meter-reset history is only ever meaningful for an item with a
+// live path to apply its offset to; every rule aboard a boat's own gear
+// with no wired meter (a genset with a mechanical-only hour meter, say)
+// used to cost a reset-history query for nothing.
 func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReading, error) {
+	if strings.TrimSpace(eq.HourMeterPath) == "" {
+		return maintenanceHourReading{}, nil
+	}
 	resets, err := globalDocumentStore.ListHourMeterResets(eq.ID)
 	if err != nil {
 		return maintenanceHourReading{}, err
@@ -439,7 +450,11 @@ func checkMaintenancePartsExist(parts []maintenanceLogPartInput) error {
 
 // listMaintenanceRulesHandler is GET /api/inventory/maintenance/rules
 // ?equipment=&system=&include_stored=: every rule matching the given
-// filters, each with a freshly computed status. Batches the per-equipment
+// filters, each with a freshly computed status. The system filter is
+// applied in SQL (ListMaintenanceRules' own doc comment) - a rule outside
+// the requested system is never in `rules` at all, so it never costs an
+// equipment fetch or an hours/meter-reset lookup here, only to be discarded
+// afterward (2026-09-27 code-review finding). Batches the per-equipment
 // hours reading and meter-reset lookup ONCE per distinct equipment_id
 // among the matching rules (equipmentColumns' own "a handful of items
 // aboard one boat" reasoning, inventory_store.go, applies the same way
@@ -455,13 +470,13 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 	filter := maintenanceRuleFilter{
 		EquipmentID:   c.QueryParam("equipment"),
 		IncludeStored: c.QueryParam("include_stored") == "true",
+		System:        c.QueryParam("system"),
 	}
 	rules, err := globalDocumentStore.ListMaintenanceRules(filter)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 
-	systemFilter := c.QueryParam("system")
 	now := time.Now().UTC()
 
 	equipmentCache := map[string]equipmentItem{}
@@ -470,12 +485,6 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 	views := make([]maintenanceRuleView, 0, len(rules))
 	for _, rule := range rules {
 		if rule.EquipmentID == nil {
-			if systemFilter != "" {
-				// A calendar-only rule has no system to match against - a
-				// system filter is asking for one system's own gear, which
-				// a certificate/expiry rule is never part of.
-				continue
-			}
 			views = append(views, buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today))
 			continue
 		}
@@ -498,9 +507,6 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 			}
 		}
 
-		if systemFilter != "" && eq.System != systemFilter {
-			continue
-		}
 		views = append(views, buildMaintenanceRuleView(rule, &eq, hoursCache[id], today))
 	}
 

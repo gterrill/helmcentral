@@ -449,6 +449,60 @@ func TestDocumentStore_ListMaintenanceRulesExcludesStoredItemsByDefault(t *testi
 	}
 }
 
+// TestDocumentStore_ListMaintenanceRulesFiltersBySystem pins code-review
+// finding 9: the system filter is now applied IN SQL (a subquery against
+// equipment.system, the same idiom IncludeStored's own status subquery
+// already uses), not by the handler loading every rule's equipment first
+// and discarding the ones that don't match - a calendar-only rule (no
+// equipment_id at all) has no system to match against and is excluded
+// whenever a system filter is given, the same as the handler's own
+// pre-refactor behaviour.
+func TestDocumentStore_ListMaintenanceRulesFiltersBySystem(t *testing.T) {
+	store := newTestDocumentStore(t)
+	engine, err := store.CreateEquipment(equipmentItem{Name: "Main engine", Category: "mechanical", System: "propulsion"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	pump, err := store.CreateEquipment(equipmentItem{Name: "Fresh water pump", Category: "general", System: "water"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	months := 6
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &engine.ID, Description: "Anode check", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (engine): %v", err)
+	}
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &pump.ID, Description: "Filter check", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (pump): %v", err)
+	}
+	if _, err := store.CreateMaintenanceRule(maintenanceRuleInput{Description: "Registration renewal", IntervalMonths: &months}); err != nil {
+		t.Fatalf("CreateMaintenanceRule (cert): %v", err)
+	}
+
+	propulsion, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "propulsion"})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(System=propulsion): %v", err)
+	}
+	if len(propulsion) != 1 || propulsion[0].Description != "Anode check" {
+		t.Fatalf("expected only the engine's own rule, got %+v", propulsion)
+	}
+
+	water, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "water"})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(System=water): %v", err)
+	}
+	if len(water) != 1 || water[0].Description != "Filter check" {
+		t.Fatalf("expected only the pump's own rule, got %+v", water)
+	}
+
+	all, err := store.ListMaintenanceRules(maintenanceRuleFilter{})
+	if err != nil {
+		t.Fatalf("ListMaintenanceRules(no filter): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected all 3 rules with no system filter, got %d: %+v", len(all), all)
+	}
+}
+
 func toEquipmentInputForTest(item equipmentItem, status string) equipmentItem {
 	item.Status = status
 	return item
