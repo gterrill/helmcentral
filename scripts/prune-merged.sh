@@ -8,10 +8,11 @@
 # an ancestor of main too, and deleting it would take a session's fresh
 # checkout. A branch with commits after its PR merged is kept.
 #
-# A worktree with uncommitted or untracked changes is skipped along with its
-# branch: it may be another session's unfinished work (AGENTS.md, Shared
-# Working Tree). main, the checked-out branch and the worktree this runs from
-# are never touched.
+# A worktree with uncommitted or untracked changes, or with any process still
+# running inside it, is skipped along with its branch: it may be another
+# session's unfinished work (AGENTS.md, Shared Working Tree). main, the
+# checked-out branch, the main checkout's branch and the worktree this runs
+# from are never touched.
 set -eu
 
 command -v gh >/dev/null 2>&1 || { echo "prune-merged: gh is required to tell which PRs are merged" >&2; exit 1; }
@@ -19,6 +20,10 @@ command -v gh >/dev/null 2>&1 || { echo "prune-merged: gh is required to tell wh
 confirm="${CONFIRM:-0}"
 here="$(git rev-parse --show-toplevel)"
 current="$(git branch --show-current)"
+# The main working tree is listed first. git refuses to remove it, and under
+# set -e that refusal would stop the run, so a merged branch still checked out
+# there is left for its session to move off.
+main_wt="$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
 
 git fetch --quiet --prune origin
 
@@ -27,6 +32,17 @@ worktree_for() {
   git worktree list --porcelain | awk -v ref="refs/heads/$1" '
     /^worktree / { path = substr($0, 10) }
     $0 == "branch " ref { print path }'
+}
+
+# Space-separated pids whose working directory is inside the given worktree,
+# or empty. A preview server left running there would outlive the directory
+# and keep its port, but so would another session's tests or language server,
+# and the two look the same from here, so the caller skips rather than kills.
+pids_in() {
+  lsof -a -d cwd -Fpn 2>/dev/null | awk -v dir="$1" '
+    /^p/ { pid = substr($0, 2) }
+    /^n/ { path = substr($0, 2); if (path == dir || index(path, dir "/") == 1) print pid }' |
+    sort -un | tr '\n' ' ' | sed 's/ $//'
 }
 
 # 0 when the branch tip is the head of a merged PR or already in origin/main.
@@ -57,8 +73,16 @@ for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
     if [ "$wt" = "$here" ]; then
       echo "skip $branch: this command is running in its worktree"; skipped=$((skipped + 1)); continue
     fi
+    if [ "$wt" = "$main_wt" ]; then
+      echo "skip $branch: checked out in the main checkout $wt"; skipped=$((skipped + 1)); continue
+    fi
     if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
       echo "skip $branch: $wt has uncommitted or untracked changes"; skipped=$((skipped + 1)); continue
+    fi
+    pids="$(pids_in "$wt")"
+    if [ -n "$pids" ]; then
+      echo "skip $branch: processes still running in $wt (pids $pids); stop them and re-run"
+      skipped=$((skipped + 1)); continue
     fi
   fi
 

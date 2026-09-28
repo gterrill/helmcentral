@@ -52,10 +52,12 @@
   the running backend on :8080, so the page shows the same live data as :5173
   and the two can be compared side by side. Ports 5173 and 5174 belong to the
   dev and e2e stacks; go up from 5175 if another worktree already holds it.
-  Stop the server once the change is checked.
+  Stop the server once the change is checked; `make prune-merged` will not
+  remove a worktree while it runs.
 - Once a branch's PR is merged, `make prune-merged` lists the worktrees and
   local and remote branches it would clear; `CONFIRM=1` deletes them. It
-  skips any worktree with uncommitted changes.
+  skips any worktree with uncommitted changes or with a process still
+  running inside it, such as a forgotten preview server, and names the pids.
 
 ## Fallback Policy
 

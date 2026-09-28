@@ -48,7 +48,8 @@ worktree:
 # Clears up after merged work: removes each worktree, local branch and remote
 # branch whose GitHub PR is merged. Lists what it would do by default;
 # `make prune-merged CONFIRM=1` deletes. Worktrees with uncommitted or
-# untracked changes are skipped. Rules in scripts/prune-merged.sh.
+# untracked changes, or with a process still running in them, are skipped.
+# Rules in scripts/prune-merged.sh.
 prune-merged:
 	@CONFIRM="$(CONFIRM)" sh scripts/prune-merged.sh
 
