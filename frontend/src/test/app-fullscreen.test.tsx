@@ -229,6 +229,31 @@ vi.mock('@/hooks/use-route-activation', () => ({
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,
+  forecastWarningDetailsUrl: () => null,
+}))
+
+// One live, acknowledgeable alarm - enough to drive the AlarmBanner (see
+// app-mate-voice.test.tsx's own mock for the same hook) so its own
+// right-aligned View/Acknowledge buttons are actually on screen for the
+// exit-button overlap test below. collisionAlarmStatesByVessel is
+// re-exported from this module and imported alongside useAlarms in
+// App.tsx, so it has to be mocked here too.
+const mockAlarm = {
+  rule_id: 'helmcentral:test-alarm',
+  label: 'Test alarm',
+  path: 'notifications.test',
+  phase: 'active' as const,
+  state: 'alarm' as const,
+  value: 1,
+  message: 'Test alarm firing',
+  silenced: false,
+  can_silence: false,
+  can_acknowledge: true,
+}
+
+vi.mock('@/hooks/use-alarms', () => ({
+  useAlarms: () => ({ alarms: [mockAlarm], worst: 'alarm', acknowledge: vi.fn(), silence: vi.fn() }),
+  collisionAlarmStatesByVessel: () => new Map(),
 }))
 
 vi.mock('@/hooks/use-server-trails', () => ({
@@ -300,6 +325,30 @@ describe('App full screen', () => {
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
     // The grid itself stays on screen - full screen only removes the chrome.
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+  })
+
+  // [P1 finding] The floating exit button used to be `fixed right-2 top-2`,
+  // the same top-right corner the live alarm banner's own View/Acknowledge
+  // buttons land in once the header is gone (AlarmBanner's action row is
+  // always the trailing, right-aligned child of its row) - a tap meant for
+  // "View" landed on the exit button instead. happy-dom does no real CSS
+  // layout, so this can't assert actual pixel overlap; it checks the
+  // Tailwind position classes directly instead, the same way test/helpers/
+  // z-ladder.tsx checks z-index classes without a real layout engine.
+  it('does not float in the same top-right corner as the live alarm banner\'s own View/Acknowledge buttons', () => {
+    stubFullscreenEnabled(true)
+    render(<App />)
+
+    fireFullscreenChange(document.documentElement)
+
+    // Sanity: the banner (with its own right-aligned actions) is actually
+    // showing in this state.
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument()
+
+    const exitButton = screen.getByRole('button', { name: 'Exit full screen' })
+    expect(exitButton.className).toMatch(/\bfixed\b/)
+    expect(exitButton.className).toMatch(/\btop-2\b/)
+    expect(exitButton.className).not.toMatch(/\bright-2\b/)
   })
 
   it('clicking "Exit full screen" calls document.exitFullscreen()', () => {

@@ -64,7 +64,7 @@ func legacyPluginOverridesDBPath() string {
 // business database, configured identically no matter which of the six
 // stores (documentStore, assistantStore, nearbyContactStore, alarmLogStore,
 // webPushSubscriptionStore, pluginOverridesStore) is opening it: foreign
-// keys enforced, a five-second busy timeout so one store's write never
+// keys enforced, a 30-second busy timeout so one store's write never
 // surfaces to another as a bare "database is locked", and WAL with
 // synchronous(NORMAL) so a long document write never blocks a concurrent
 // read from Mate's conversation history or the AIS sighting log - readers
@@ -112,7 +112,7 @@ func openHelmcentralDB(path string) (*sql.DB, error) {
 		}
 	}
 
-	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open helmcentral database: %w", err)
@@ -179,7 +179,8 @@ func checkForLegacyDatabaseFiles(legacyDocsPath, legacyAssistantPath, legacyNear
 			"error, so `docker exec` will not reliably reach it - run "+
 			"`docker compose run --rm helmcentral /app/helmcentral migrate-db` against the same volume, then "+
 			"`docker compose up -d helmcentral`. Native install: stop the service, run "+
-			"`/usr/local/bin/helmcentral migrate-db`, then start it again",
+			"`sudo -u helmcentral HELMCENTRAL_STATE_DIR=/var/lib/helmcentral /usr/local/bin/helmcentral migrate-db`, "+
+			"then start it again",
 		strings.Join(found, ", "))
 }
 

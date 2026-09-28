@@ -34,10 +34,11 @@ RestartSec=5s
 # override store, tile cache or helmcentral.sqlite (documents, Mate's
 # conversations, the AIS sighting log) calls log.Fatalf rather than
 # degrading - as does finding a pre-upgrade documents.sqlite/
-# assistant.sqlite/nearby-contacts.sqlite still sitting in the data
-# directory, which needs the one-time `helmcentral migrate-db` command run
-# first. Cap restarts so a genuinely broken state dir surfaces as a failed
-# unit instead of an endless loop.
+# assistant.sqlite/nearby-contacts.sqlite/alarm-log.sqlite/
+# webpush-subscriptions.sqlite/plugin_overrides.sqlite still sitting in the
+# data directory, which needs the one-time `helmcentral migrate-db` command
+# run first. Cap restarts so a genuinely broken state dir surfaces as a
+# failed unit instead of an endless loop.
 StartLimitIntervalSec=120
 StartLimitBurst=5
 

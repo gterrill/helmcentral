@@ -2294,32 +2294,46 @@ func isForeignKeyConstraintErr(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteForeignKeyConstraintCode
 }
 
+// chunkEmbeddingsBatchSize bounds how many chunk vectors SetChunkEmbeddings
+// commits per transaction. Six stores share one SQLite file under BEGIN
+// IMMEDIATE (openHelmcentralDB), so a long transaction here would hold the
+// write lock against the alarm log, the push queue and the sighting log too.
+// Splitting is safe: ON CONFLICT(chunk_id) DO UPDATE makes each row's write
+// independent and idempotent, so a committed batch is a valid partial result
+// and a caller that retries the whole call just rewrites those rows. A var,
+// not a const, so tests can shrink it to force a split.
+var chunkEmbeddingsBatchSize = 200
+
 // SetChunkEmbeddings writes vectors (chunk id -> raw embedding, as returned
-// by the embeddings call - not yet normalised) as model/dims rows, all in
-// one transaction so a caller's batch either lands completely or not at
-// all. Every vector's length is checked against dims before any write -
-// rejected outright, not silently skipped, so a caller can't end up with a
-// partially-embedded batch and no indication which entries didn't take.
-// ON CONFLICT(chunk_id) DO UPDATE means re-embedding a chunk (a changed
-// model, or PendingEmbedChunks handing the same chunk back after an earlier
-// partial failure) replaces the old vector in place rather than erroring on
-// the existing row - document_chunk_embeddings' PRIMARY KEY is chunk_id
-// alone, by design (see the table's schema comment). A chunk_id that
-// doesn't exist trips the foreign key; isForeignKeyConstraintErr turns that
-// into a message naming the id rather than surfacing modernc/sqlite's bare
-// "FOREIGN KEY constraint failed".
+// by the embeddings call - not yet normalised) as model/dims rows, in
+// batches of at most chunkEmbeddingsBatchSize committed one transaction at a
+// time (see that var's own doc comment for why). Chunk ids are sorted first
+// so which ids land in which batch is deterministic rather than following
+// Go's randomised map iteration order. Every vector's length is checked
+// against dims before any write - rejected outright, not silently skipped,
+// so a caller can't end up with a partially-embedded batch and no
+// indication which entries didn't take. ON CONFLICT(chunk_id) DO UPDATE
+// means re-embedding a chunk (a changed model, or PendingEmbedChunks
+// handing the same chunk back after an earlier partial failure) replaces
+// the old vector in place rather than erroring on the existing row -
+// document_chunk_embeddings' PRIMARY KEY is chunk_id alone, by design (see
+// the table's schema comment). A chunk_id that doesn't exist trips the
+// foreign key; isForeignKeyConstraintErr turns that into a message naming
+// the id rather than surfacing modernc/sqlite's bare "FOREIGN KEY
+// constraint failed".
 func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[int64][]float32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("set chunk embeddings: begin: %w", err)
+	ids := make([]int64, 0, len(vectors))
+	for id := range vectors {
+		ids = append(ids, id)
 	}
-	defer tx.Rollback()
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
-	now := s.now().Unix()
-	for chunkID, vec := range vectors {
+	units := make(map[int64][]float32, len(ids))
+	for _, chunkID := range ids {
+		vec := vectors[chunkID]
 		if len(vec) != dims {
 			return fmt.Errorf("set chunk embeddings: chunk %d: vector has %d dimensions, want %d", chunkID, len(vec), dims)
 		}
@@ -2327,11 +2341,37 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 		if err != nil {
 			return fmt.Errorf("set chunk embeddings: chunk %d: %w", chunkID, err)
 		}
+		units[chunkID] = unit
+	}
 
+	now := s.now().Unix()
+	for start := 0; start < len(ids); start += chunkEmbeddingsBatchSize {
+		end := start + chunkEmbeddingsBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := s.setChunkEmbeddingsBatchTx(model, dims, units, ids[start:end], now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setChunkEmbeddingsBatchTx commits one batch of SetChunkEmbeddings'
+// already-validated, normalised vectors in its own transaction. Callers
+// already hold s.mu.
+func (s *documentStore) setChunkEmbeddingsBatchTx(model string, dims int, units map[int64][]float32, ids []int64, now int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("set chunk embeddings: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, chunkID := range ids {
 		if _, err := tx.Exec(
 			`INSERT INTO document_chunk_embeddings (chunk_id, model, dims, vector, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(chunk_id) DO UPDATE SET model = excluded.model, dims = excluded.dims, vector = excluded.vector, created_at = excluded.created_at`,
-			chunkID, model, dims, encodeEmbedding(unit), now,
+			chunkID, model, dims, encodeEmbedding(units[chunkID]), now,
 		); err != nil {
 			if isForeignKeyConstraintErr(err) {
 				return fmt.Errorf("set chunk embeddings: chunk %d does not exist: %w", chunkID, err)

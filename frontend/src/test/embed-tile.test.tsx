@@ -664,6 +664,35 @@ describe('EmbedTile portal follows a tile that moves without resizing', () => {
   // react-grid-layout slides a moved tile over a CSS transition, so the
   // style mutation fires at the start of the move, when the tile is still
   // where it was. The end of the slide has to be caught separately.
+  // [P1 finding] Toggling the widget's `frameless` setting while the embed
+  // is already mounted swaps EmbedTile's returned branch: the old
+  // container div + EmbedFrame unmount and a *new* container div +
+  // EmbedFrame mount, together, in the same commit. React attaches a host
+  // node's ref only after its child subtree's own layout effects have
+  // already run in that same commit, so EmbedFrame's containerRef.current
+  // read used to see null forever - no portalStyle, no ResizeObserver
+  // attached to notice anything later, and the iframe simply never comes
+  // back.
+  test('keeps rendering the portalled iframe after toggling frameless while the embed is already mounted', () => {
+    const { rerender } = render(
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <EmbedTile config={{ ...config, frameless: false }} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+    expect(screen.getByTestId('embed-frame-portal')).toBeInTheDocument()
+
+    act(() => {
+      rerender(
+        <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+          <EmbedTile config={{ ...config, frameless: true }} editing={false} />
+        </DisplayShell>,
+      )
+    })
+
+    expect(screen.getByTestId('embed-frame-portal')).toBeInTheDocument()
+  })
+
   test('recomputes the portal position when an ancestor finishes a transition', () => {
     render(
       <DisplayShell display={display({ rotate: 0 })} alarms={[]}>

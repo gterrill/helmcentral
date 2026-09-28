@@ -21,7 +21,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   - Docker Compose: `docker compose run --rm helmcentral /app/helmcentral migrate-db`,
     then `docker compose up -d helmcentral`.
   - Native install: stop the service, run
-    `/usr/local/bin/helmcentral migrate-db`, then start it again.
+    `sudo -u helmcentral HELMCENTRAL_STATE_DIR=/var/lib/helmcentral /usr/local/bin/helmcentral migrate-db`,
+    then start it again.
 
   The migration renames your existing database into place and copies your
   Mate conversation history, sighting log, alarm history, registered phone
