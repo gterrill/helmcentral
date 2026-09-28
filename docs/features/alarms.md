@@ -128,6 +128,11 @@ to the plugin's own settings, which is where the thresholds live. Raising the
 warning tier's speed floor to a couple of knots quietens a marina without
 losing a boat actually moving down the fairway.
 
+The vessel in alarm is also marked in the Nearby Vessels tile: its row picks
+up a red or amber highlight and a label naming the severity, and it moves to
+the top of the list, worst state first, so it doesn't have to be found by
+scrolling past everything else nearby.
+
 When both vessels are moving and the picture is clear enough to read, the card
 adds a second line naming the encounter and what the rules ask of you, for
 example:
