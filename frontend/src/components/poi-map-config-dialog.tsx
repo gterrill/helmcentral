@@ -153,8 +153,9 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
                 }))}
               />
               <FieldDescription>
-                How long the ranked list shows one point's summary before cycling to the next
-                one that has a summary. {POI_MAP_SUMMARY_CYCLE_SECONDS_MIN} to{' '}
+                How long the ranked list highlights one point, with a ring on its marker,
+                before cycling to the next. Its summary shows too if it has one.{' '}
+                {POI_MAP_SUMMARY_CYCLE_SECONDS_MIN} to{' '}
                 {POI_MAP_SUMMARY_CYCLE_SECONDS_MAX} seconds; {POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT} when left blank.
               </FieldDescription>
             </Field>

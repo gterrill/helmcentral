@@ -2189,7 +2189,15 @@ export function App() {
           />
         )
       case 'nearby-vessels':
-        return <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} lastUpdateAgeS={nearbyVesselsAgeS} />
+        return (
+          <NearbyVesselsTile
+            vessels={nearbyVessels}
+            loading={nearbyVesselsLoading}
+            distanceUnits={uiConfig.distanceUnits}
+            lastUpdateAgeS={nearbyVesselsAgeS}
+            aisCollisionAlarms={aisCollisionAlarms}
+          />
+        )
       case 'radar-targets':
         return (
           <RadarTargetsTile

@@ -583,7 +583,26 @@ describe('PoiMapTile', () => {
   })
 
   describe('cycling POI summary (split layout)', () => {
-    it('shows only one summary at a time, for the highest-ranked POI that has a detail', async () => {
+    // The row itself must show it is the cycled-to one independently of the
+    // summary text - a POI with no detail renders no summary block at all,
+    // so without this the map marker's ring would be the only visible sign
+    // of the cycle and the matching list row would look identical to every
+    // other row.
+    it('highlights the cycled-to row itself, not only the map marker ring, even with no detail to show', async () => {
+      const features = [
+        feature({ id: 'a', name: 'A', distanceM: 100, detail: '' }),
+        feature({ id: 'b', name: 'B', distanceM: 200, detail: '' }),
+      ]
+      usePoiMock.mockReturnValue(poiResult({ features }))
+
+      await renderTile({ config: config({ layout: 'split' }) })
+
+      const rows = screen.getAllByTestId('poi-list-row')
+      expect(rows[0]).toHaveAttribute('data-expanded', 'true')
+      expect(rows[1]).toHaveAttribute('data-expanded', 'false')
+    })
+
+    it('highlights the ranked list row useCyclingIndex points at, and shows its summary when it has one', async () => {
       const features = [
         feature({ id: 'a', name: 'A', distanceM: 100, detail: 'About A.' }),
         feature({ id: 'b', name: 'B', distanceM: 200, detail: '' }),
@@ -599,21 +618,27 @@ describe('PoiMapTile', () => {
       expect(screen.getByTestId('poi-marker-expanded')).toBeInTheDocument()
     })
 
-    it('shows whatever POI useCyclingIndex points at, skipping ranked POIs without a detail', async () => {
+    // The bug this covers: cycling used to skip any ranked POI with no
+    // detail entirely, so on a live feed where only one of several POIs has
+    // one, the cycle got a set of size 1 and never advanced at all. It must
+    // now cycle through every ranked POI - the highlight/ring lands on 'b'
+    // here even though 'b' has no detail to show.
+    it('highlights whatever POI useCyclingIndex points at in the full ranked list, even with no detail', async () => {
       const features = [
         feature({ id: 'a', name: 'A', distanceM: 100, detail: 'About A.' }),
         feature({ id: 'b', name: 'B', distanceM: 200, detail: '' }),
         feature({ id: 'c', name: 'C', distanceM: 300, detail: 'About C.' }),
       ]
       usePoiMock.mockReturnValue(poiResult({ features }))
-      // 'b' has no detail, so the cyclable set is [a, c] - index 1 is 'c',
-      // not the ranked list's own third row.
+      // Index 1 of the full ranked list [a, b, c] is 'b', which has no
+      // detail - the cycle must still land on it and show no summary text.
       useCyclingIndexMock.mockReturnValue(1)
 
       await renderTile({ config: config({ layout: 'split', summaryCycleSeconds: 5 }) })
 
-      expect(screen.getByTestId('poi-list-row-summary')).toHaveTextContent('About C.')
-      expect(useCyclingIndexMock).toHaveBeenCalledWith(2, 5, 'a|c')
+      expect(screen.getByTestId('poi-marker-rank-b').closest('[data-testid="poi-marker-expanded"]')).toBeTruthy()
+      expect(screen.queryByTestId('poi-list-row-summary')).toBeNull()
+      expect(useCyclingIndexMock).toHaveBeenCalledWith(3, 5, 'a|b|c')
     })
 
     it('passes a configured summaryCycleSeconds through to useCyclingIndex', async () => {
@@ -632,7 +657,10 @@ describe('PoiMapTile', () => {
       expect(useCyclingIndexMock).toHaveBeenLastCalledWith(1, 10, 'a')
     })
 
-    it('shows no summary at all when no ranked POI has a detail', async () => {
+    // The row/marker still gets highlighted and cycled even when nothing in
+    // range has a detail at all - only the summary text itself is absent.
+    // Cycling is not conditional on any POI having a detail to show.
+    it('still highlights the cycled-to row when no ranked POI has a detail, showing no summary text', async () => {
       const features = [
         feature({ id: 'a', name: 'A', distanceM: 100, detail: '' }),
         feature({ id: 'b', name: 'B', distanceM: 200, detail: '' }),
@@ -642,15 +670,16 @@ describe('PoiMapTile', () => {
       await renderTile({ config: config({ layout: 'split' }) })
 
       expect(screen.queryByTestId('poi-list-row-summary')).toBeNull()
-      expect(screen.queryByTestId('poi-marker-expanded')).toBeNull()
+      expect(screen.getByTestId('poi-marker-expanded')).toBeInTheDocument()
+      expect(useCyclingIndexMock).toHaveBeenCalledWith(2, 10, 'a|b')
     })
 
     // useCyclingIndex's own tests cover actually resetting the index when its
     // resetKey argument changes (use-cycling-index.test.ts); this is the half
     // of that contract that's this tile's job - computing a resetKey that
-    // changes exactly when the cyclable set's shape genuinely does, and not
+    // changes exactly when the ranked list's shape genuinely does, and not
     // on every poll's fresh-but-identical array.
-    it('recomputes the resetKey only when the cyclable set actually changes shape', async () => {
+    it('recomputes the resetKey only when the ranked list actually changes shape', async () => {
       const initial = [
         feature({ id: 'a', name: 'A', distanceM: 100, detail: 'About A.' }),
         feature({ id: 'b', name: 'B', distanceM: 200, detail: 'About B.' }),

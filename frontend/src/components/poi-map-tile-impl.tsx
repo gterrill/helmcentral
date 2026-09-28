@@ -93,10 +93,10 @@ const FOLLOW_THROTTLE_MS = 2000
 const FOLLOW_EASE_DURATION_MS = 500
 
 // Clearance kept around the fitted vessel+ranked-POIs bounding box, in
-// screen pixels, so a marker (h-7 w-7, 28px) plus its name label doesn't sit
+// screen pixels, so a marker (h-9 w-9, 36px) plus its name label doesn't sit
 // flush against the tile's edge. Exported for the test suite, which computes
 // the same fit independently to check the tile's jumpTo/easeTo calls against.
-export const POI_MAP_FIT_PADDING_PX = 36
+export const POI_MAP_FIT_PADDING_PX = 44
 
 // Fallback box for the one frame before ResizeObserver reports a real size
 // (or in an environment, such as jsdom, that never fires it at all).
@@ -197,21 +197,25 @@ export default function PoiMapTileImpl({
     return ranks
   }, [rankedList])
 
-  // Cycling summary (split layout): only one ranked POI shows its detail at
-  // a time, advancing every summaryCycleSeconds. Most POIs never get a
-  // detail at all (PoiFeature's own doc: it's an editorial summary or a
-  // Wikipedia first sentence, when the provider has one), so those are
-  // skipped outright rather than getting an empty turn in the rotation.
-  const cyclableFeatures = useMemo(() => rankedList.filter((f) => f.detail !== ''), [rankedList])
+  // Cycling summary (split layout): one ranked POI at a time gets the
+  // highlight - its list row and marker ring - advancing every
+  // summaryCycleSeconds through every POI in the ranked list, not only the
+  // ones with a detail. Most POIs never get a detail at all (PoiFeature's
+  // own doc: it's an editorial summary or a Wikipedia first sentence, when
+  // the provider has one); on live OSM data that's often just one POI out
+  // of several, and filtering the cycle down to only those used to leave it
+  // with nothing to advance through. The highlight always lands somewhere;
+  // the summary text underneath it only shows when that POI actually has
+  // one (see PoiListRow below).
   // A plain, order-sensitive key rather than the array itself: identical ids
   // in a new array (every poll gives rankedList a fresh reference) must not
-  // reset the cycle, but a real change to the set - a POI gaining/losing its
-  // detail, dropping out of range, or the ranking reordering - should. See
-  // useCyclingIndex's own doc for why this is what it takes as resetKey.
-  const cyclableKey = useMemo(() => cyclableFeatures.map((f) => f.id).join('|'), [cyclableFeatures])
+  // reset the cycle, but a real change to the set - a POI dropping out of
+  // range or the ranking reordering - should. See useCyclingIndex's own doc
+  // for why this is what it takes as resetKey.
+  const rankedListKey = useMemo(() => rankedList.map((f) => f.id).join('|'), [rankedList])
   const summaryCycleSeconds = config.summaryCycleSeconds ?? POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT
-  const cycleIndex = useCyclingIndex(cyclableFeatures.length, summaryCycleSeconds, cyclableKey)
-  const expandedPoiId = cycleIndex !== null ? cyclableFeatures[cycleIndex].id : null
+  const cycleIndex = useCyclingIndex(rankedList.length, summaryCycleSeconds, rankedListKey)
+  const expandedPoiId = cycleIndex !== null ? rankedList[cycleIndex].id : null
 
   const dark = isDarkTheme || forceDark
   const mapStyle = dark ? STYLE_DARK : STYLE_LIGHT
@@ -535,25 +539,25 @@ export default function PoiMapTileImpl({
                         <div
                           data-testid={expanded ? 'poi-marker-expanded' : undefined}
                           className={cn(
-                            'relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card shadow-md',
+                            'relative flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-md',
                             // Subtle: the ranked list's own row already carries the
                             // full summary, this ring only helps the eye match
                             // that row back to its marker on the map.
                             expanded && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
                           )}
                         >
-                          <Icon className="h-3.5 w-3.5 text-foreground" />
+                          <Icon className="h-5 w-5 text-foreground" />
                           {rank !== undefined && (
                             <span
                               data-testid={`poi-marker-rank-${feature.id}`}
-                              className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
+                              className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
                             >
                               {rank}
                             </span>
                           )}
                         </div>
                         {!suppressed && feature.name && (
-                          <div className="mt-0.5 max-w-20 truncate text-center text-[9px] font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                          <div className="mt-0.5 max-w-28 truncate text-center text-xs font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
                             {feature.name}
                           </div>
                         )}
@@ -634,23 +638,37 @@ function PoiListRow({
   const category = poiCategoryById(feature.category)
   const Icon = category?.icon ?? MapPin
   return (
-    <div className="flex items-start gap-1.5 rounded-xs px-1 py-0.5" data-testid="poi-list-row">
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground">
+    <div
+      data-testid="poi-list-row"
+      data-expanded={expanded}
+      className={cn(
+        'flex items-start gap-1.5 rounded-xs border-l-2 py-0.5 pr-1 pl-0.5',
+        // Always a 2px border, transparent when not cycled-to, so the row's
+        // own width never shifts as the cycle moves on - only its colour
+        // does. This is the row's half of the highlight; the marker ring
+        // above is the map's half. Neither depends on the POI having a
+        // detail - most don't, and the row must still show which one is
+        // current even when there's no summary text to make that obvious.
+        expanded ? 'border-primary bg-muted' : 'border-transparent',
+      )}
+    >
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground">
         {rank}
       </span>
       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-1">
-          <span className="truncate text-xs font-semibold text-foreground">{feature.name || category?.label || feature.category}</span>
+          <span className="truncate text-sm font-semibold text-foreground">{feature.name || category?.label || feature.category}</span>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {formatPoiDistance(feature.distanceM, distanceUnits)} {formatBearing(feature.bearingDeg)}
           </span>
         </div>
-        {/* Only the currently cycled-to row shows its detail, and it shows
-            the whole thing (wrapped, capped at three lines) rather than the
-            single truncated line every row used to carry — see
-            PoiMapTileImpl's cycling effects above. */}
-        {expanded && (
+        {/* The cycle highlights every row in turn (see PoiMapTileImpl's
+            cycling logic above), but most POIs have no detail at all - this
+            only renders when the cycled-to row actually has one to show,
+            and shows the whole thing (wrapped, capped at three lines)
+            rather than the single truncated line every row used to carry. */}
+        {expanded && feature.detail !== '' && (
           <div data-testid="poi-list-row-summary" className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">
             {feature.detail}
           </div>
