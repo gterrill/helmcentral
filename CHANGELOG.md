@@ -11,6 +11,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- A camera feed in an embed tile shows on the flybridge wall display again.
+  The display's browser stopped drawing live camera video on a scaled or
+  upside-down display; the embed is now drawn so that browser can show it.
+
 ## [0.35.0] - 2026-09-27
 
 ### Added

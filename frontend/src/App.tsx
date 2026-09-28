@@ -3100,7 +3100,18 @@ export function App() {
     }
 
     return (
-      <DisplayShell display={wallDisplay} alarms={alarms}>
+      <DisplayShell
+        display={wallDisplay}
+        alarms={alarms}
+        overlay={
+          <DisplayRemoteToast
+            announcementId={remoteAnnouncementId}
+            pageName={activePage?.name ?? ''}
+            position={displayRotation.position}
+            paused={displayRotation.paused}
+          />
+        }
+      >
         {pagesError ? (
           // Distinct from the empty-feed message below: a failed fetch is a
           // wall that cannot see its pages, not a wall with none assigned,
@@ -3116,12 +3127,6 @@ export function App() {
           dashboardGrid
         )}
         <DisplayRemoteController rotation={displayRotation} onAction={bumpRemoteAnnouncement} />
-        <DisplayRemoteToast
-          announcementId={remoteAnnouncementId}
-          pageName={activePage?.name ?? ''}
-          position={displayRotation.position}
-          paused={displayRotation.paused}
-        />
       </DisplayShell>
     )
   }

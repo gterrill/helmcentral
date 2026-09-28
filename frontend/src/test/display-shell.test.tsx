@@ -1,7 +1,8 @@
 import { render } from '@testing-library/react'
+import { useContext } from 'react'
 import { describe, expect, test, vi, afterEach, beforeEach } from 'vitest'
 
-import { DisplayShell } from '@/components/display-shell'
+import { DisplayShell, DisplayTransformContext, type DisplayTransform } from '@/components/display-shell'
 import type { Display } from '@/lib/displays'
 import type { ScreenWakeLockStatus } from '@/hooks/use-screen-wake-lock'
 
@@ -169,7 +170,11 @@ describe('DisplayShell', () => {
     expect(mockWakeLock).toHaveBeenCalledWith(true)
   })
 
-  test('renders the status badge inside the inner canvas, not as a sibling of it', () => {
+  // The badge moved out of the main box and into the overlay layer (see the
+  // "overlay layer" tests below): a portalled embed iframe (embed-tile.tsx)
+  // paints above the main box's own transformed stacking context, which
+  // hid the badge behind it until this split.
+  test('renders the status badge inside the overlay layer, not the main box a portalled embed paints above', () => {
     const { getByTestId } = render(
       <DisplayShell display={display()} alarms={[{
         rule_id: 'r1', label: 'depth', path: 'environment.depth.belowTransducer', phase: 'active', state: 'alarm',
@@ -178,8 +183,11 @@ describe('DisplayShell', () => {
         <div>content</div>
       </DisplayShell>,
     )
+    const overlay = getByTestId('display-shell-overlay')
     const inner = getByTestId('display-shell-inner')
-    expect(inner).toContainElement(document.querySelector('[data-testid="display-alarm-pill"]'))
+    const badge = document.querySelector('[data-testid="display-alarm-pill"]') as HTMLElement | null
+    expect(overlay).toContainElement(badge)
+    expect(inner).not.toContainElement(badge)
   })
 
   test('surfaces a non-off/held wake-lock status through the status badge', () => {
@@ -249,5 +257,111 @@ describe('DisplayShell', () => {
     expect(document.documentElement.style.cursor).toBe('none')
     unmount()
     expect(document.documentElement.style.cursor).toBe('')
+  })
+
+  // EmbedTile reads this to know it's painting under this shell's own
+  // transformed ancestor chain and needs to portal its iframe out from
+  // under it (see embed-tile.test.tsx).
+  test('provides the outer rotation, inner scale and pixel shift to descendants via DisplayTransformContext', () => {
+    mockPixelShift.mockReturnValue({ dx: 8, dy: 8 })
+    let seen: DisplayTransform | null = null
+    function Probe() {
+      seen = useContext(DisplayTransformContext)
+      return null
+    }
+    render(
+      <DisplayShell display={display({ rotate: 180, scale: 1.5, pixel_shift: true })} alarms={[]}>
+        <Probe />
+      </DisplayShell>,
+    )
+    // Partial match: clipElement's own timing is covered by the dedicated
+    // test below, not this one.
+    expect(seen).toMatchObject({ rotate: 180, scale: 1.5, dx: 8, dy: 8 })
+  })
+
+  test('DisplayTransformContext is null outside a DisplayShell', () => {
+    let seen: DisplayTransform | null | undefined
+    function Probe() {
+      seen = useContext(DisplayTransformContext)
+      return null
+    }
+    render(<Probe />)
+    expect(seen).toBeNull()
+  })
+
+  // EmbedTile's portal crops itself to this element's own bounding box
+  // (embed-tile.tsx's EmbedFrame), so it needs the live node, not just the
+  // display record's own width/height - those are logical, not the actual
+  // on-screen rotated/scaled footprint.
+  test('exposes the outer box element through DisplayTransformContext once it mounts, for embeds to clip against', () => {
+    // A plain `let` reassigned only inside Probe's closure would have
+    // TypeScript narrow it to the literal `null` it was initialised with -
+    // it can't see into the closure to know better - which then makes the
+    // property read below look like dead code. An object wrapper's property
+    // isn't narrowed that way.
+    const captured: { seen: DisplayTransform | null } = { seen: null }
+    function Probe() {
+      captured.seen = useContext(DisplayTransformContext)
+      return null
+    }
+    const { getByTestId } = render(
+      <DisplayShell display={display()} alarms={[]}>
+        <Probe />
+      </DisplayShell>,
+    )
+    expect(captured.seen?.clipElement).toBe(getByTestId('display-shell-outer'))
+  })
+
+  // The overlay layer exists so a portalled embed iframe (body-level, no
+  // transformed ancestor of its own) can be painted *under* the status
+  // badge/toast rather than over them - see EmbedFrame's own doc comment
+  // (embed-tile.tsx) for why the iframe has to live at body level at all.
+  describe('overlay layer', () => {
+    test('is a sibling of the main box with the same footprint and rotation, but non-interactive and transparent', () => {
+      const { getByTestId } = render(
+        <DisplayShell display={display({ rotate: 180, scale: 1.5, width: 1920, height: 360 })} alarms={[]}>
+          <div>content</div>
+        </DisplayShell>,
+      )
+      const outer = getByTestId('display-shell-outer')
+      const overlay = getByTestId('display-shell-overlay')
+
+      expect(overlay).not.toBe(outer)
+      expect(overlay.parentElement).toBe(outer.parentElement)
+      expect(overlay.style.width).toBe(outer.style.width)
+      expect(overlay.style.height).toBe(outer.style.height)
+      expect(overlay.style.transform).toBe(outer.style.transform)
+      expect(overlay.className).toContain('pointer-events-none')
+      expect(overlay.className).toContain('z-10')
+      expect(overlay.className).not.toContain('bg-background')
+    })
+
+    test('mirrors the inner scale + pixel-shift transform too, so a fixed-position child still lands in the right spot', () => {
+      mockPixelShift.mockReturnValue({ dx: 8, dy: 8 })
+      const { getByTestId } = render(
+        <DisplayShell display={display({ scale: 1.5, pixel_shift: true })} alarms={[]}>
+          <div>content</div>
+        </DisplayShell>,
+      )
+      const inner = getByTestId('display-shell-inner')
+      const overlay = getByTestId('display-shell-overlay')
+      const overlayInner = overlay.firstElementChild as HTMLElement
+      expect(overlayInner.style.transform).toBe(inner.style.transform)
+      expect(overlayInner.style.width).toBe(inner.style.width)
+      expect(overlayInner.style.height).toBe(inner.style.height)
+    })
+
+    test('renders the overlay prop inside the overlay layer rather than as an ordinary child', () => {
+      const { getByTestId } = render(
+        <DisplayShell display={display()} alarms={[]} overlay={<div data-testid="custom-overlay">Toast</div>}>
+          <div>content</div>
+        </DisplayShell>,
+      )
+      const overlayLayer = getByTestId('display-shell-overlay')
+      const inner = getByTestId('display-shell-inner')
+      const custom = getByTestId('custom-overlay')
+      expect(overlayLayer).toContainElement(custom)
+      expect(inner).not.toContainElement(custom)
+    })
   })
 })
