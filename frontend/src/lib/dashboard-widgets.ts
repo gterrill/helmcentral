@@ -387,9 +387,10 @@ export interface PoiMapWidgetConfig {
   showAis?: boolean
   showTrail?: boolean
   /**
-   * How many seconds the split layout's ranked list shows one POI's summary
-   * before cycling to the next one that has one. "map" layout has no ranked
-   * list to cycle, so this is ignored there. Undefined means
+   * How many seconds the split layout's ranked list highlights one POI
+   * (ring on its marker, row expanded, summary shown if it has one) before
+   * cycling to the next POI in rank order. "map" layout has no ranked list
+   * to cycle, so this is ignored there. Undefined means
    * POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT.
    */
   summaryCycleSeconds?: number

@@ -195,9 +195,11 @@ than going blank when a fetch fails.
 
 The map keeps the vessel and the five nearest matches in view, but never
 zooms in tighter than the range. In the map-and-list layout one row at a time
-shows its description, moving to the next described match every few seconds,
-and that match's marker gets a ring. An active route shows as a line, with
-the leg you're on drawn brighter.
+is highlighted, moving to the next match every few seconds and back to the
+first once it reaches the end, and that match's marker gets a ring. Its
+description shows too when it has one - many points of interest, especially
+from OpenStreetMap, don't. An active route shows as a line, with the leg
+you're on drawn brighter.
 
 See [Add a Nearby map](../how-to/add-a-nearby-map.md) for setup, and [POI
 categories](../reference/poi-categories.md) for what each category matches

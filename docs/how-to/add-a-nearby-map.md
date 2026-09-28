@@ -12,9 +12,10 @@ With write access, in layout mode:
    list** adds the ranked list of the five nearest matches beside it, so it
    needs a wider tile to read comfortably.
 6. With **Map and list**, set **Summary cycle** to how many seconds each
-   described match stays on screen before the list moves to the next one -
-   3 to 120 seconds, 10 by default. Only matches with a description take a
-   turn; leave this alone if you'd rather not think about it.
+   match stays highlighted, with a ring on its marker, before the list moves
+   to the next one - 3 to 120 seconds, 10 by default. Its description shows
+   too if it has one; many points of interest don't. Leave this alone if
+   you'd rather not think about it.
 7. Tick the categories you want: anchorages, bays, islands, marinas, fuel,
    boat ramps, moorings, historic landmarks, lookouts, dive and snorkel
    spots, and walking trails. At least one is required.

@@ -11,6 +11,34 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The Wind tile's two MAX GUST cards now show their time window (10M,
+  30M, 1HR, 24HR) as a small button with an up/down marker, in the same
+  style as the Apparent/True and Course Up/North Up toggles. They were
+  always tappable to change the window; now it's visible that they are.
+
+### Fixed
+
+- Solar tile Today, Yesterday and Peak Today now reset at local midnight
+  instead of 10 am (for a boat on UTC+10), and each array's own Today and
+  Yesterday yield show kWh rather than a wildly inflated raw figure.
+- The Link and Image buttons in the note editor now open their popup where
+  you can actually reach it. It was rendering behind the document viewer
+  panel, so a note could not be given a link or a photo at all.
+- Picking the item for a new maintenance rule, the kind or a part when
+  logging service work, and a note's type when capturing one now all open
+  their list where you can actually reach it. Each was rendering behind the
+  dialog or sheet it lives in, so there was no way to make the pick at all.
+- The Nearby map's summary cycle now actually cycles. It used to advance only
+  through points that have a description, and most points of interest -
+  especially from OpenStreetMap - don't have one, so on a typical live feed
+  the highlight got stuck on a single point instead of moving through the
+  list. It now moves through every point in the ranked list in turn, ring on
+  its marker and row highlighted, showing the description only when that
+  point has one. Its map markers, name labels and rank badges are also
+  bigger, for reading from across the cabin on the wall display.
+
 ## [0.35.0] - 2026-09-27
 
 ### Added
@@ -62,10 +90,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- The Wind tile's two MAX GUST cards now show their time window (10M,
-  30M, 1HR, 24HR) as a small button with an up/down marker, in the same
-  style as the Apparent/True and Course Up/North Up toggles. They were
-  always tappable to change the window; now it's visible that they are.
 - Small text on tiles, drawers and settings is easier to read at the helm.
   Secondary readouts such as voltage, charge rate, time to dawn and unit
   suffixes were a size too small to read at arm's length in glare, and are
@@ -92,16 +116,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Fixed
 
 - Settings > Logs now lists the newest line at the top.
-- Solar tile Today, Yesterday and Peak Today now reset at local midnight
-  instead of 10 am (for a boat on UTC+10), and each array's own Today and
-  Yesterday yield show kWh rather than a wildly inflated raw figure.
-- The Link and Image buttons in the note editor now open their popup where
-  you can actually reach it. It was rendering behind the document viewer
-  panel, so a note could not be given a link or a photo at all.
-- Picking the item for a new maintenance rule, the kind or a part when
-  logging service work, and a note's type when capturing one now all open
-  their list where you can actually reach it. Each was rendering behind the
-  dialog or sheet it lives in, so there was no way to make the pick at all.
 
 ## [0.34.0] - 2026-09-26
 

@@ -10,8 +10,8 @@ import { useEffect, useState } from 'react'
  * losing whatever made it eligible, or the set reordering) should, so the
  * index can never point past the end of a shorter set or land on an item
  * unrelated to the one that was showing before. A joined-ids string is the
- * usual shape (see poi-map-tile-impl.tsx's cyclableKey), but any string that
- * changes exactly when the set's shape does works.
+ * usual shape (see poi-map-tile-impl.tsx's rankedListKey), but any string
+ * that changes exactly when the set's shape does works.
  *
  * Returns null when count is 0 (nothing to cycle through), and never
  * advances - no timer is even started - when count is 1, since there is
