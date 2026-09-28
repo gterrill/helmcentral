@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { ReactNode } from 'react'
 
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
@@ -103,9 +104,13 @@ interface TideChartProps {
   isImperial: boolean
   windowStart: Date // start of the day to display
   windowEnd: Date // windowStart + 24h
+  /** The "Data: ... updated ..." line, rendered right-aligned beside the
+   * legend. ForecastTideSection owns the data-fetch state this describes and
+   * passes it down, since the legend it rides beside lives here. */
+  footerMeta?: ReactNode
 }
 
-export function TideChart({ chart, isImperial, windowStart, windowEnd }: TideChartProps) {
+export function TideChart({ chart, isImperial, windowStart, windowEnd, footerMeta }: TideChartProps) {
   const [containerRef, measuredWidth] = useMeasuredWidth()
   const viewportWidth = measuredWidth > 0 ? measuredWidth : DEFAULT_VIEWPORT_WIDTH
   const CHART_RIGHT = viewportWidth - CHART_RIGHT_MARGIN
@@ -263,7 +268,10 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
     // genuine tide fetch failure already gets its own louder red-and-Retry
     // state in ForecastTideSection's `error && !chart` branch.
     return (
-      <ChartUnavailableMessage testId="forecast-tide-unavailable" message="Tide forecast unavailable for this day" tone="quiet" />
+      <>
+        <ChartUnavailableMessage testId="forecast-tide-unavailable" message="Tide forecast unavailable for this day" tone="quiet" />
+        {footerMeta && <div className="mt-1 flex justify-end">{footerMeta}</div>}
+      </>
     )
   }
 
@@ -432,9 +440,12 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         </svg>
       </div>
 
-      <p data-testid="forecast-tide-legend" className="mt-1 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Tide height</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="vertical" color="hsl(var(--gauge-primary) / 0.7)" strokeWidth={1.5} dasharray="4 3" /> now</span>
-      </p>
+      <div className="mt-1 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+        <p data-testid="forecast-tide-legend" className="min-w-0 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Tide height</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="vertical" color="hsl(var(--gauge-primary) / 0.7)" strokeWidth={1.5} dasharray="4 3" /> now</span>
+        </p>
+        {footerMeta}
+      </div>
 
     </div>
   )

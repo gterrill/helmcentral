@@ -60,24 +60,28 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
     return { windowStart: start, windowEnd: end }
   }, [dayOffset])
 
+  // Rendered beside TideChart's legend at the bottom (same row, right-aligned)
+  // once a chart exists to host it; falls back to the section's own bottom
+  // when there is no station, the fetch is still loading or failed, or the
+  // day has no chart data at all - matching the Cloud/Wind/Wave cards'
+  // "still show the meta even with no legend to share a row with" rule.
+  const tideRefreshMeta = (isCached || updatedAt) ? (
+    <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
+      Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
+      {' · '}
+      {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+      {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
+    </p>
+  ) : null
+
   return (
     <div className="mt-3 rounded-md border bg-card/70 p-2">
-      <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
-        <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          {/* Tide is a single-axis chart, so the unit belongs here rather than
-              on the chart's ticks - the same rule Wind (kts) and Wave (m)
-              follow. See the axis-idiom rule block in forecast-drawer.tsx. */}
-          <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
-        </h4>
-        {(isCached || updatedAt) && (
-          <p className="text-xs text-muted-foreground">
-            Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
-            {' · '}
-            {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
-            {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
-          </p>
-        )}
-      </div>
+      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        {/* Tide is a single-axis chart, so the unit belongs here rather than
+            on the chart's ticks - the same rule Wind (kts) and Wave (m)
+            follow. See the axis-idiom rule block in forecast-drawer.tsx. */}
+        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
+      </h4>
 
       {settingsLoading ? (
         <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
@@ -142,7 +146,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
               </Button>
             </div>
           ) : chart ? (
-            <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} />
+            <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} footerMeta={tideRefreshMeta} />
           ) : (
             <p className="py-6 text-center text-xs text-muted-foreground">No tide data available</p>
           )}
@@ -151,6 +155,11 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
           {settingsError && <p className="mt-1 text-xs text-destructive">{settingsError}</p>}
         </>
       )}
+
+      {/* TideChart hosts tideRefreshMeta itself once a chart exists (beside
+          its legend); every other branch above has no legend row to share,
+          so it surfaces here instead of disappearing. */}
+      {!chart && tideRefreshMeta && <div className="mt-1 flex justify-end">{tideRefreshMeta}</div>}
     </div>
   )
 })

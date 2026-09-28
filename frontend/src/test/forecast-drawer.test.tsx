@@ -310,6 +310,7 @@ describe('ForecastDrawer refresh age', () => {
     expect(meta).toHaveTextContent('cached')
     expect(meta).toHaveTextContent('2 hours ago')
     expect(meta).toHaveTextContent('weatherkit')
+    expect(meta.className).toContain('text-sm')
   })
 
   it('labels a freshly fetched forecast as live', () => {
@@ -649,7 +650,9 @@ describe('ForecastDrawer refresh age', () => {
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-summary')).toHaveTextContent(
+      'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.',
+    )
     expect(screen.getAllByTestId('forecast-wave-arrow').length).toBeGreaterThan(0)
     expect(screen.getAllByText('6.0s').length).toBeGreaterThan(0)
   })
@@ -666,9 +669,9 @@ describe('ForecastDrawer refresh age', () => {
       />,
     )
 
-    expect(
-      screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec and sea surface temperature of 21°C.'),
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-summary')).toHaveTextContent(
+      'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec and sea surface temperature of 21°C.',
+    )
   })
 
   // Regression test for a real clipping bug: WindBarb and WaveDirectionArrow
@@ -806,6 +809,7 @@ describe('ForecastDrawer refresh age', () => {
     expect(meta).toHaveTextContent('cached')
     expect(meta).toHaveTextContent('2 hours ago')
     expect(meta).toHaveTextContent('refreshes every 1h')
+    expect(meta.className).toContain('text-sm')
   })
 
   it('uses 6-hour-block labels on the wave chart', () => {
@@ -1014,7 +1018,18 @@ describe('ForecastDrawer refresh age', () => {
   it('shows the precipitation summary sentence for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('Slight chance of rain after 5PM.')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-summary')).toHaveTextContent('Slight chance of rain after 5PM.')
+  })
+
+  // Task 3 (chart card layout): the rain prognosis and the sun-protection
+  // sentence used to be two separate paragraphs; they now read as one
+  // sentence, rain first then sun, and the rain half simply drops out when
+  // the provider has nothing to say about precipitation for the day.
+  it('omits the rain sentence when the day has no precipitation summary', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitationSummary: null })]} loading={false} error={null} unit="metric" />)
+
+    const summary = screen.getByTestId('forecast-cloud-summary')
+    expect(summary.textContent).toBe('Sun protection recommended from 7AM to 5PM.')
   })
 
   // Pins the recharts-backed bar rendering: each bar is colored by its probability gradient
@@ -1043,7 +1058,7 @@ describe('ForecastDrawer refresh age', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-cloud-chart')
-    expect(screen.getByText('Sun protection recommended from 7AM to 5PM.')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-summary')).toHaveTextContent('Sun protection recommended from 7AM to 5PM.')
     const uvAreaFills = chart.querySelectorAll('path.recharts-area-area')
     // One for UV area background and one for temperature area
     expect(uvAreaFills.length).toBe(2)
@@ -1113,6 +1128,7 @@ describe('ForecastDrawer refresh age', () => {
 
     const legend = screen.getByTestId('forecast-wind-legend')
     expect(legend.textContent).not.toMatch(/[—-] ?- ?Gusts|— Wind/)
+    expect(legend.className).toContain('text-sm')
 
     const swatchLines = Array.from(legend.querySelectorAll('svg line'))
     const windSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-wind) / 0.95)')
@@ -1131,6 +1147,7 @@ describe('ForecastDrawer refresh age', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     const legend = screen.getByTestId('forecast-wave-legend')
+    expect(legend.className).toContain('text-sm')
     const swatchLines = Array.from(legend.querySelectorAll('svg line'))
     const waveSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-wave) / 0.9)')
     const chopSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
@@ -1147,6 +1164,7 @@ describe('ForecastDrawer refresh age', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const legend = screen.getByTestId('forecast-cloud-legend')
+    expect(legend.className).toContain('text-sm')
     expect(legend.querySelector('svg rect')).toBeTruthy()
     const swatchLines = Array.from(legend.querySelectorAll('svg line'))
     const tempSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-temp) / 0.9)')
@@ -1189,7 +1207,7 @@ describe('ForecastDrawer refresh age', () => {
     )
 
     expect(screen.getByTestId('forecast-cloud-chart')).toBeInTheDocument()
-    expect(screen.getByText('No sun protection needed.')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-summary')).toHaveTextContent('No sun protection needed.')
   })
 
   it('shows no sun protection needed when UV stays low all day', () => {
@@ -1202,7 +1220,7 @@ describe('ForecastDrawer refresh age', () => {
       />,
     )
 
-    expect(screen.getByText('No sun protection needed.')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-summary')).toHaveTextContent('No sun protection needed.')
   })
 
   it('renders the cloud & temperature graph with 6-hour-block labels and condition icons', () => {
@@ -1351,7 +1369,7 @@ describe('ForecastDrawer wave leading indicators', () => {
     const day = buildWaveDay({ hourlyWave: buildHourlyWave(24, 8, () => 3) })
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[day]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByTestId('forecast-wave-largest')).toHaveTextContent('5.6 m')
+    expect(screen.getByTestId('forecast-wave-summary')).toHaveTextContent('5.6 m')
   })
 
   // Page 233: wave heights do not normally exceed 0.8 times the wind in knots.
@@ -2494,8 +2512,108 @@ function expectPrecedes(key: HTMLElement, chart: HTMLElement) {
   expect(key.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 }
 
+// The "Data: ... updated ..." line used to sit in each card's header, above
+// the chart. It now sits at the bottom of the card, sharing a row with that
+// card's legend and right-aligned against it - and still has to surface even
+// when there is no legend to share a row with (chart unavailable or loading).
+describe('ForecastDrawer refresh meta placement', () => {
+  it('places the cloud refresh meta after the chart, sharing a parent row with the legend', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        provider="weatherkit"
+        isCached
+        updatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    const meta = screen.getByTestId('forecast-refresh-meta')
+    const legend = screen.getByTestId('forecast-cloud-legend')
+    expectPrecedes(chart, meta)
+    expect(meta.parentElement).toBe(legend.parentElement)
+  })
+
+  it('still shows the cloud refresh meta at the bottom when the chart is unavailable', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ hourlyCloud: [] })]}
+        loading={false}
+        error={null}
+        unit="metric"
+        isCached
+        updatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-cloud-unavailable')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-refresh-meta')).toBeInTheDocument()
+  })
+
+  it('places the wave refresh meta after the chart, sharing a parent row with the legend', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveProvider="open-meteo-marine"
+        waveIsCached
+        waveUpdatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    const chart = screen.getByTestId('forecast-wave-chart')
+    const meta = screen.getByTestId('forecast-wave-refresh-meta')
+    const legend = screen.getByTestId('forecast-wave-legend')
+    expectPrecedes(chart, meta)
+    expect(meta.parentElement).toBe(legend.parentElement)
+  })
+
+  it('still shows the wave refresh meta at the bottom, right-aligned, while wave data is loading', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveLoading
+        waveIsCached
+        waveUpdatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-loading')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-refresh-meta')).toBeInTheDocument()
+  })
+
+  it('still shows the wave refresh meta at the bottom when the wave fetch fails outright', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveLoading={false}
+        waveError="HTTP error! status: 502"
+        waveIsCached
+        waveUpdatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-error')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-refresh-meta')).toBeInTheDocument()
+  })
+})
+
 describe('ForecastDrawer chart decoder keys', () => {
-  it('puts the rain-opacity key above the cloud chart, not in the swatch row', () => {
+  it('puts the rain-opacity key above the cloud chart, in the header beside the title', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const key = screen.getByTestId('forecast-cloud-key')
@@ -2503,9 +2621,10 @@ describe('ForecastDrawer chart decoder keys', () => {
     expect(key.className).toContain('text-sm')
     expectPrecedes(key, screen.getByTestId('forecast-cloud-chart'))
     expect(screen.getByTestId('forecast-cloud-legend')).not.toHaveTextContent(/opacity/i)
+    expect(within(key.parentElement as HTMLElement).getByText('Cloud, Temperature & Rain')).toBeInTheDocument()
   })
 
-  it('puts the wind-barb key above the wind chart, not in the swatch row', () => {
+  it('puts the wind-barb key above the wind chart, in the header beside the title', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const key = screen.getByTestId('forecast-wind-key')
@@ -2514,9 +2633,10 @@ describe('ForecastDrawer chart decoder keys', () => {
     expect(key.className).toContain('text-sm')
     expectPrecedes(key, screen.getByTestId('forecast-wind-chart'))
     expect(screen.getByTestId('forecast-wind-legend')).not.toHaveTextContent(/feather/i)
+    expect(within(key.parentElement as HTMLElement).getByText('Wind (kts)')).toBeInTheDocument()
   })
 
-  it('puts the swell-arrow key above the wave chart, not in the swatch row', () => {
+  it('puts the swell-arrow key above the wave chart, in the header beside the title', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     const key = screen.getByTestId('forecast-wave-key')
@@ -2525,6 +2645,7 @@ describe('ForecastDrawer chart decoder keys', () => {
     expect(key.className).toContain('text-sm')
     expectPrecedes(key, screen.getByTestId('forecast-wave-chart'))
     expect(screen.getByTestId('forecast-wave-legend')).not.toHaveTextContent(/arrows show/i)
+    expect(within(key.parentElement as HTMLElement).getByText('Wave (m)')).toBeInTheDocument()
   })
 
   // The wave key explained the period beside each arrow but not the
@@ -2536,10 +2657,9 @@ describe('ForecastDrawer chart decoder keys', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     const key = screen.getByTestId('forecast-wave-key')
-    expect(key).toHaveTextContent(/1:25/)
-    expect(key).toHaveTextContent(/1:10/)
-    expect(key).toHaveTextContent(/rolls?/i)
-    expect(key).toHaveTextContent(/breaks?/i)
+    expect(key).toHaveTextContent(
+      'Arrows show the direction the swell is heading. Period and height over wavelength ratio (under 1:25 rolls, past 1:10 breaks) are below.',
+    )
   })
 
   it('puts the shaded-band key above the upper-air chart, not in the swatch row', () => {
