@@ -17,24 +17,31 @@ backend/data/dashboard-pages.json
 # so a stray `git add -A` can't stage multi-GiB MBTiles.
 backend/data/sat-charts/
 backend/data/tile-cache.sqlite
-backend/data/nearby-contacts.sqlite
 backend/data/secrets.sqlite
 backend/data/secrets.key
 backend/data/sessions.sqlite
 backend/data/plugin_overrides.sqlite
 backend/data/alarm-rules.json
 backend/data/alarm-log.sqlite
-backend/data/assistant.sqlite
-backend/data/documents.sqlite
 backend/data/documents/
 backend/data/webpush-subscriptions.sqlite
+# helmcentral.sqlite (ADR 0141) replaces documents.sqlite/assistant.sqlite/
+# nearby-contacts.sqlite, kept below only because a pre-upgrade install
+# still has them on disk until the one-time `migrate-db` command runs;
+# *.sqlite.migrated is what that command renames each of them to afterward,
+# never deleted.
+backend/data/helmcentral.sqlite
+backend/data/nearby-contacts.sqlite
+backend/data/assistant.sqlite
+backend/data/documents.sqlite
+backend/data/*.sqlite.migrated
 backend/data/alarm-transports.json
 backend/data/anchor_watch.json
 backend/data/anchor_placemarks.json
-# WAL mode (tile-cache.sqlite, and nearby-contacts.sqlite as of the backend
-# perf audit) leaves a -wal and -shm file next to the main one between
-# checkpoints; cover every sqlite file in backend/data with one pattern pair
-# rather than listing each store's WAL siblings individually above.
+# WAL mode (tile-cache.sqlite, and helmcentral.sqlite as of ADR 0141) leaves
+# a -wal and -shm file next to the main one between checkpoints; cover every
+# sqlite file in backend/data with one pattern pair rather than listing each
+# store's WAL siblings individually above.
 backend/data/*.sqlite-wal
 backend/data/*.sqlite-shm
 # Allow the embed placeholder while ignoring real build output. backend/dist is

@@ -208,8 +208,30 @@ type tankLevelData struct {
 }
 
 func main() {
+	// migrate-db is a one-off, operator-run subcommand (ADR 0141), never
+	// automatic at startup: it renames and copies data, so it has to be a
+	// deliberate action, not something that could run again unintentionally
+	// on a normal restart. This is the only flag the binary has, so a plain
+	// os.Args check is enough - no flag package needed for one subcommand.
+	if len(os.Args) > 1 && os.Args[1] == "migrate-db" {
+		os.Exit(runMigrateDBCommand())
+	}
+
 	e := echo.New()
 	port := getEnv("PORT", "8080")
+
+	// Fail-fast startup guard (ADR 0141): refuse to start against a
+	// pre-upgrade data directory that still has documents.sqlite,
+	// assistant.sqlite or nearby-contacts.sqlite at the exact paths
+	// migrate-db itself resolves them to (legacyDocumentsDBPath and
+	// friends - not merely default filenames beside helmcentral.sqlite,
+	// since DOCUMENTS_DB_PATH/ASSISTANT_DB_PATH/NEARBY_CONTACTS_DB_PATH can
+	// point anywhere), rather than either ignoring that history or starting
+	// against an empty combined file while it sits untouched at its old
+	// path. Runs before any store below opens anything.
+	if err := checkForLegacyDatabaseFiles(legacyDocumentsDBPath(), legacyAssistantDBPath(), legacyNearbyContactsDBPath()); err != nil {
+		log.Fatalf("startup: %v", err)
+	}
 
 	// Place-name resolution (place_name.go) and the assistant's find_places
 	// tool (assistant_tools.go) both go through whichever installed POI
@@ -341,9 +363,10 @@ func main() {
 	globalTileCache = tc
 
 	// Nearby-vessel contact store (backs the "seen before" history on the
-	// Nearby Vessels tile). Fail fast on open error, same reasoning as the
-	// tile cache above.
-	ncs, err := newNearbyContactStore(nearbyContactsDBPath())
+	// Nearby Vessels tile), one of the three stores sharing helmcentral.sqlite
+	// (ADR 0141). Fail fast on open error, same reasoning as the tile cache
+	// above.
+	ncs, err := newNearbyContactStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open nearby contacts store: %v", err)
 	}
@@ -357,22 +380,24 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
-	// Onboard assistant conversation history (ADR 0093). Fail fast on open
+	// Onboard assistant conversation history (ADR 0093), another of the
+	// three stores sharing helmcentral.sqlite (ADR 0141). Fail fast on open
 	// error, same reasoning as the stores above.
-	as, err := newAssistantStore(assistantDBPath())
+	as, err := newAssistantStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open assistant store: %v", err)
 	}
 	globalAssistantStore = as
 
 	// Document store (ADR 0106): metadata, virtual folders, tags, chunks and
-	// FTS5 search behind a flat, hash-named folder of file bytes. Fail fast
+	// FTS5 search behind a flat, hash-named folder of file bytes - the third
+	// of the three stores sharing helmcentral.sqlite (ADR 0141). Fail fast
 	// on open error, same reasoning as the other stores above. The
 	// documents directory is created (not just the database's own parent,
 	// which newDocumentStore already handles) so the boot sweep below
 	// always has somewhere to os.ReadDir, even on a brand new install that
 	// has never taken an upload yet.
-	ds, err := newDocumentStore(documentsDBPath())
+	ds, err := newDocumentStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open document store: %v", err)
 	}

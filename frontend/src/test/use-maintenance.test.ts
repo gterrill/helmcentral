@@ -40,11 +40,11 @@ describe('useMaintenanceRules', () => {
   })
 
   it('surfaces the server\'s own error message rather than a generic one', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(500, { error: 'documents.sqlite is locked' }))
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(500, { error: 'helmcentral.sqlite is locked' }))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useMaintenanceRules({}))
-    await waitFor(() => expect(result.current.error).toBe('documents.sqlite is locked'))
+    await waitFor(() => expect(result.current.error).toBe('helmcentral.sqlite is locked'))
   })
 })
 

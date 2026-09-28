@@ -16,8 +16,10 @@ Helmcentral logs a warning at startup when this is on.
 
 ## How the in-app help gets embedded
 
-`ASSISTANT_DB_PATH` holds Mate's conversations, not the in-app help Mate
-reads from when a question is about Helmcentral itself. That help is staged
+Mate's conversation history lives in `helmcentral.sqlite`
+(`HELMCENTRAL_DB_PATH`) alongside the rest of Helmcentral's business data
+(ADR 0141) - not the in-app help Mate reads from when a question is about
+Helmcentral itself. That help is staged
 into `backend/help` from `docs/features`, `docs/how-to` and `docs/reference`,
 the same way the built frontend is staged into `backend/dist` for the
 `//go:embed` that ships both inside the binary. `make help-stage` does this

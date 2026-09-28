@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -78,10 +76,6 @@ type assistantStore struct {
 // /api/assistant/conversations handlers (assistant_handlers.go).
 var globalAssistantStore *assistantStore
 
-func assistantDBPath() string {
-	return cacheFilePath("ASSISTANT_DB_PATH", "data/assistant.sqlite")
-}
-
 // errAssistantConversationNotFound is returned by DeleteConversation and
 // AppendMessage when the conversation id does not exist, so a caller can
 // distinguish "already gone" (or "never existed") from every other database
@@ -93,17 +87,23 @@ func assistantDBPath() string {
 // row.
 var errAssistantConversationNotFound = errors.New("assistant conversation not found")
 
-func newAssistantStore(dbPath string) (*assistantStore, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, fmt.Errorf("assistant store dir: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open assistant store: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-
+// createAssistantSchema creates conversations, messages and
+// message_attachments (and their indexes) if they do not already exist.
+// Factored out of newAssistantStore so migrateToHelmcentralDB
+// (helmcentral_db.go) can create this store's tables in the combined
+// database ahead of copying rows into them, without duplicating the schema
+// itself.
+//
+// message_attachments (ADR 0106) carries the documents attached to a user
+// message, position-ordered, with no declared foreign key to
+// messages/documents - AppendMessage and DeleteConversation manage the rows
+// directly rather than relying on a cascade. That is a schema choice, not a
+// pragma one: the connection this runs on has foreign_keys=1 set (every
+// store sharing the combined file does, via openHelmcentralDB), it is simply
+// that a table with no REFERENCES clause has nothing for the pragma to
+// enforce. Per ADR 0141, a declared FK from message_attachments.document_id
+// to documents is deliberately left for later, not added here.
+func createAssistantSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS conversations (
 			id         TEXT PRIMARY KEY,
@@ -111,8 +111,7 @@ func newAssistantStore(dbPath string) (*assistantStore, error) {
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create conversations table: %w", err)
+		return fmt.Errorf("create conversations table: %w", err)
 	}
 
 	if _, err := db.Exec(`
@@ -129,23 +128,16 @@ func newAssistantStore(dbPath string) (*assistantStore, error) {
 			tool_rounds       INTEGER NOT NULL DEFAULT 0,
 			created_at        INTEGER NOT NULL
 		)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create messages table: %w", err)
+		return fmt.Errorf("create messages table: %w", err)
 	}
 
 	// Messages are always read for one conversation in seq order
 	// (ListMessages) or aggregated by conversation for the next seq
 	// (AppendMessage) - this one index covers both.
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS messages_conversation_seq ON messages (conversation_id, seq)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("index messages table: %w", err)
+		return fmt.Errorf("index messages table: %w", err)
 	}
 
-	// message_attachments (ADR 0106): the documents attached to a user
-	// message, position-ordered. No foreign key to messages/documents - this
-	// store has no foreign_keys pragma at all (unlike documentStore), so
-	// AppendMessage and DeleteConversation manage the rows directly rather
-	// than relying on a cascade.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS message_attachments (
 			message_id  TEXT NOT NULL,
@@ -154,12 +146,35 @@ func newAssistantStore(dbPath string) (*assistantStore, error) {
 			position    INTEGER NOT NULL,
 			PRIMARY KEY (message_id, document_id)
 		)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create message_attachments table: %w", err)
+		return fmt.Errorf("create message_attachments table: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments (message_id)`); err != nil {
+		return fmt.Errorf("index message_attachments table: %w", err)
+	}
+
+	return nil
+}
+
+// newAssistantStore opens (creating if necessary) the SQLite database at
+// dbPath - dbPath is helmcentralDBPath() in production, the same file
+// documentStore and nearbyContactStore also open - and ensures every table
+// this store needs exists. Opened through openHelmcentralDB
+// (helmcentral_db.go), which is what sets foreign_keys(1) and WAL: before
+// ADR 0141 this store opened its own file directly, with no pragmas beyond
+// SetMaxOpenConns(1), because it had no cross-table integrity to enforce and
+// no concurrent reader/writer of its own file to protect against blocking.
+// Sharing the combined file changes neither fact about this store's own
+// schema, but it does now inherit foreign_keys and WAL as a consequence of
+// being one of three stores that opens the same file.
+func newAssistantStore(dbPath string) (*assistantStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createAssistantSchema(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("index message_attachments table: %w", err)
+		return nil, err
 	}
 
 	return &assistantStore{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
