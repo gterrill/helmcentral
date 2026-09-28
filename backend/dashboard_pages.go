@@ -363,10 +363,11 @@ type dashboardPoiMapConfig struct {
 	// existed keeps the byte-identical file the other ADR 0031 configs do.
 	ShowAis   bool `json:"showAis,omitempty"`
 	ShowTrail bool `json:"showTrail,omitempty"`
-	// How long the split layout's ranked list shows one POI's summary before
-	// cycling to the next one that has one. omitempty + zero-means-unset: no
-	// valid value is ever 0 (poiMapSummaryCycleSecondsMin is 3), so a widget
-	// saved before this field existed, or one that never set it, keeps the
+	// How long the split layout's ranked list highlights one POI (ring on
+	// its marker, row expanded, summary shown if it has one) before cycling
+	// to the next POI in rank order. omitempty + zero-means-unset: no valid
+	// value is ever 0 (poiMapSummaryCycleSecondsMin is 3), so a widget saved
+	// before this field existed, or one that never set it, keeps the
 	// byte-identical file the other optional fields above do, and the
 	// frontend's own default (10s) applies whenever it's absent.
 	SummaryCycleSeconds int `json:"summaryCycleSeconds,omitempty"`

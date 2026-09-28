@@ -102,6 +102,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   logging service work, and a note's type when capturing one now all open
   their list where you can actually reach it. Each was rendering behind the
   dialog or sheet it lives in, so there was no way to make the pick at all.
+- The Nearby map's summary cycle now actually cycles. It used to advance only
+  through points that have a description, and most points of interest -
+  especially from OpenStreetMap - don't have one, so on a typical live feed
+  the highlight got stuck on a single point instead of moving through the
+  list. It now moves through every point in the ranked list in turn, ring on
+  its marker and row highlighted, showing the description only when that
+  point has one. Its map markers, name labels and rank badges are also
+  bigger, for reading from across the cabin on the wall display.
 
 ## [0.34.0] - 2026-09-26
 
