@@ -1,6 +1,17 @@
 import { Globe, Settings2 } from 'lucide-react'
-import { memo, useEffect, useMemo, useState } from 'react'
+import {
+  memo,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
+import { createPortal } from 'react-dom'
 
+import { DisplayTransformContext } from '@/components/display-shell'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { useInView } from '@/hooks/use-in-view'
@@ -36,6 +47,218 @@ function withTheme(rawUrl: string, isDarkTheme: boolean): string {
   } catch {
     return rawUrl
   }
+}
+
+interface EmbedFrameProps {
+  /** The tile's own frame container (both branches below pass their
+   * `frameContainerRef`) — used only to measure and position the iframe
+   * when it has to be portalled; ignored otherwise. */
+  containerRef: RefObject<HTMLDivElement | null>
+  src: string
+  title: string
+  className: string
+}
+
+/** Field-by-field, not a deep-equal library: `portalStyle` only ever has
+ * these seven fields (see `reposition` below), and this is what lets a
+ * no-op reposition bail out of setState entirely rather than committing a
+ * new-but-identical style object on every ResizeObserver/MutationObserver
+ * firing on an otherwise-static tile. */
+function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
+  return (
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.transform === b.transform &&
+    a.clipPath === b.clipPath &&
+    a.visibility === b.visibility
+  )
+}
+
+/**
+ * The `<iframe>` itself, factored out because the frameless and Tile-wrapped
+ * branches below both need one with identical attributes.
+ *
+ * WPE WebKit 2.44.1 (the flybridge kiosk's browser) fails to composite a
+ * multipart MJPEG `<img>` inside this iframe whenever the iframe sits under
+ * a CSS-transformed ancestor in its own document — verified on-device. A
+ * wall display is exactly that: display-shell.tsx rotates its outer box and
+ * scales/pixel-shifts its inner box, and every tile paints inside both. The
+ * same iframe, transformed directly with no transformed ancestor between it
+ * and the viewport, renders fine on-device. So inside a DisplayShell
+ * (DisplayTransformContext non-null) this portals the iframe onto
+ * `document.body` — outside the transformed chain entirely — and applies
+ * the shell's own rotation/scale to the iframe itself instead of inheriting
+ * it from an ancestor. The container div keeps its ref and testid either
+ * way; it's what gets measured to position the portalled iframe, and what
+ * stays in place as an (empty) placeholder for it.
+ *
+ * Outside a DisplayShell, DisplayTransformContext is null and this renders
+ * the iframe inline exactly as before — no portal, no behaviour change.
+ *
+ * Once portalled, the iframe is repositioned to track the container's own
+ * rect (see `reposition` inside the layout effect below): centred over it,
+ * rotated/scaled to match, cropped to the display's outer box (which the
+ * portal otherwise escapes, since `overflow-hidden` only clips the outer
+ * box's actual DOM descendants), and re-run on every resize/mutation of the
+ * container or any ancestor up to the shell's own inner box.
+ */
+function EmbedFrame({ containerRef, src, title, className }: EmbedFrameProps) {
+  const displayTransform = useContext(DisplayTransformContext)
+  const [portalStyle, setPortalStyle] = useState<CSSProperties | null>(null)
+
+  // Recomputed on the container's own size and every ancestor's up to the
+  // shell's inner box (ResizeObserver + MutationObserver, both below), on
+  // window resize, and whenever the shell's rotation/scale/pixel-shift/clip
+  // element changes — a pixel-shift move alone doesn't resize anything, so
+  // ResizeObserver and window resize wouldn't otherwise catch it.
+  useLayoutEffect(() => {
+    if (!displayTransform) return
+    const container = containerRef.current
+    if (!container) return
+    // Re-bound to a variable whose own type is already non-null, rather than
+    // relying on `displayTransform` staying narrowed inside the nested
+    // `reposition` closure below — TS's control-flow narrowing doesn't carry
+    // an outer guard into a nested function body.
+    const shellTransform = displayTransform
+
+    function reposition() {
+      if (!container) return
+      const r = container.getBoundingClientRect()
+      const w = container.offsetWidth
+      const h = container.offsetHeight
+      // The on-screen size over the layout size, rather than the shell's
+      // scale alone: the hero row enlarges its tile with a transform of its
+      // own, and that has to reach the iframe too.
+      const s = w > 0 ? r.width / w : shellTransform.scale
+      const rotated = shellTransform.rotate === 180
+
+      const style: CSSProperties = {
+        position: 'fixed',
+        left: r.left + r.width / 2 - w / 2,
+        top: r.top + r.height / 2 - h / 2,
+        width: w,
+        height: h,
+        transformOrigin: 'center center',
+        transform: `${rotated ? 'rotate(180deg) ' : ''}scale(${s})`,
+      }
+
+      // The outer box clips everything painted inside it with
+      // overflow-hidden, but this iframe lives at document.body and
+      // escapes that clip entirely - re-derive the same crop by hand from
+      // how far the container's own rect extends past the outer box's.
+      const outer = shellTransform.clipElement
+      if (outer) {
+        const o = outer.getBoundingClientRect()
+        const oTop = Math.max(0, o.top - r.top)
+        const oBottom = Math.max(0, r.bottom - o.bottom)
+        const oLeft = Math.max(0, o.left - r.left)
+        const oRight = Math.max(0, r.right - o.right)
+
+        if (oTop > 0 || oBottom > 0 || oLeft > 0 || oRight > 0) {
+          // clip-path insets the element's own (local, pre-transform) box.
+          // Unrotated, local top/right/bottom/left line up with screen
+          // top/right/bottom/left one-to-one. Rotated 180, the iframe's own
+          // `transform` above turns its local top into screen bottom (and
+          // local left into screen right), so the inset that belongs on
+          // local top is the overflow measured at screen bottom, and so on
+          // round the box.
+          const [top, right, bottom, left] = rotated
+            ? [oBottom, oLeft, oTop, oRight]
+            : [oTop, oRight, oBottom, oLeft]
+          style.clipPath = `inset(${top / s}px ${right / s}px ${bottom / s}px ${left / s}px)`
+        }
+
+        const outsideEntirely =
+          r.right <= o.left || r.left >= o.right || r.bottom <= o.top || r.top >= o.bottom
+        if (outsideEntirely) style.visibility = 'hidden'
+      }
+
+      setPortalStyle((prev) => (prev && portalStylesEqual(prev, style) ? prev : style))
+    }
+
+    reposition()
+
+    const resizeObserver = new ResizeObserver(reposition)
+    resizeObserver.observe(container)
+
+    // react-grid-layout moves a tile by writing `transform`/`top`/`left` (or
+    // toggling a class mid-drag) onto the grid-item element, never by
+    // resizing the tile's own container - and a sibling growing (e.g. the
+    // hero row) shifts everything below it the same way. Neither trips the
+    // ResizeObserver above, so every ancestor between the container and the
+    // shell's own inner box (which already re-broadcasts its own changes
+    // through displayTransform) gets watched too, for exactly the
+    // attributes react-grid-layout and the grid actually touch.
+    const shellInner = container.closest('[data-testid="display-shell-inner"]')
+    const ancestors: Element[] = []
+    for (let node = container.parentElement; node && node !== shellInner; node = node.parentElement) {
+      ancestors.push(node)
+    }
+    ancestors.forEach((ancestor) => resizeObserver.observe(ancestor))
+
+    const mutationObserver = new MutationObserver(reposition)
+    ancestors.forEach((ancestor) =>
+      mutationObserver.observe(ancestor, { attributes: true, attributeFilter: ['style', 'class'] }),
+    )
+
+    // react-grid-layout slides a moved tile over a CSS transition, so the
+    // mutation above fires while the tile is still at its old spot. Catch
+    // the end of the slide too, but only an ancestor's own transition, not
+    // one bubbling up from a tile's content.
+    function handleTransitionEnd(event: Event) {
+      if (event.target === event.currentTarget) reposition()
+    }
+    ancestors.forEach((ancestor) => ancestor.addEventListener('transitionend', handleTransitionEnd))
+
+    window.addEventListener('resize', reposition)
+    return () => {
+      resizeObserver.disconnect()
+      mutationObserver.disconnect()
+      ancestors.forEach((ancestor) => ancestor.removeEventListener('transitionend', handleTransitionEnd))
+      window.removeEventListener('resize', reposition)
+    }
+  }, [displayTransform, containerRef])
+
+  const frameProps = {
+    src,
+    title,
+    loading: 'lazy' as const,
+    // F-3 (security audit): "no-referrer-when-downgrade" sent this page's
+    // full URL — including a deep-link path like /dashboard/<page id> — as
+    // the Referer header on every request an http-served embed makes. The
+    // embed never needs that.
+    referrerPolicy: 'no-referrer' as const,
+    // allow-same-origin is needed for the embedded app's own session
+    // (Grafana will not render without it). isValidEmbedUrl
+    // (lib/dashboard-widgets.ts) rejects any embed URL whose origin equals
+    // this app's own before the config dialog can save it, so through that
+    // dialog allow-same-origin can only ever apply to a genuinely different
+    // origin. It is NOT enforced by the backend yet — see
+    // validateEmbedWidget's comment in backend/dashboard_pages.go — so a
+    // same-origin URL saved by calling the API directly, bypassing this
+    // dialog, would still render here with the sandbox defeated against
+    // this window.
+    sandbox: 'allow-scripts allow-same-origin allow-popups allow-forms',
+    className,
+  }
+
+  if (!displayTransform) {
+    return <iframe {...frameProps} />
+  }
+
+  if (!portalStyle) return null
+
+  return createPortal(
+    <iframe
+      {...frameProps}
+      data-testid="embed-frame-portal"
+      data-rotate={displayTransform.rotate}
+      style={portalStyle}
+    />,
+    document.body,
+  )
 }
 
 /**
@@ -107,26 +330,10 @@ export const EmbedTile = memo(function EmbedTile({
         className="h-full w-full overflow-hidden rounded-md border border-border bg-background"
       >
         {mountFrame ? (
-          <iframe
+          <EmbedFrame
+            containerRef={frameContainerRef}
             src={src}
             title={title}
-            loading="lazy"
-            // F-3 (security audit): "no-referrer-when-downgrade" sent this
-            // page's full URL — including a deep-link path like
-            // /dashboard/<page id> — as the Referer header on every request
-            // an http-served embed makes. The embed never needs that.
-            referrerPolicy="no-referrer"
-            // allow-same-origin is needed for the embedded app's own session
-            // (Grafana will not render without it). isValidEmbedUrl
-            // (lib/dashboard-widgets.ts) rejects any embed URL whose origin
-            // equals this app's own before the config dialog can save it, so
-            // through that dialog allow-same-origin can only ever apply to a
-            // genuinely different origin. It is NOT enforced by the backend
-            // yet — see validateEmbedWidget's comment in
-            // backend/dashboard_pages.go — so a same-origin URL saved by
-            // calling the API directly, bypassing this dialog, would still
-            // render here with the sandbox defeated against this window.
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
             className="h-full w-full border-0"
           />
         ) : (
@@ -165,26 +372,10 @@ export const EmbedTile = memo(function EmbedTile({
       <div ref={frameContainerRef} data-testid="embed-frame-container" className="h-full min-h-[240px]">
         {hasUsableUrl ? (
           mountFrame ? (
-            <iframe
+            <EmbedFrame
+              containerRef={frameContainerRef}
               src={src}
               title={title}
-              loading="lazy"
-              // F-3 (security audit): "no-referrer-when-downgrade" sent this
-              // page's full URL — including a deep-link path like
-              // /dashboard/<page id> — as the Referer header on every request
-              // an http-served embed makes. The embed never needs that.
-              referrerPolicy="no-referrer"
-              // allow-same-origin is needed for the embedded app's own session
-              // (Grafana will not render without it). isValidEmbedUrl
-              // (lib/dashboard-widgets.ts) rejects any embed URL whose origin
-              // equals this app's own before the config dialog can save it, so
-              // through that dialog allow-same-origin can only ever apply to a
-              // genuinely different origin. It is NOT enforced by the backend
-              // yet — see validateEmbedWidget's comment in
-              // backend/dashboard_pages.go — so a same-origin URL saved by
-              // calling the API directly, bypassing this dialog, would still
-              // render here with the sandbox defeated against this window.
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
               className={cn(
                 'h-full w-full rounded-md border-0 bg-background',
                 // Let drag/resize gestures pass through to the grid underneath.

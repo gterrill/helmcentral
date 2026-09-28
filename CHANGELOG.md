@@ -44,6 +44,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- The dashboard has a full screen button in the header. It hides the sidebar
+  and header so the tiles fill the whole screen, for a tablet at the helm or a
+  screen at the nav station. Live alarms still show. On a touchscreen, swipe
+  left or right on the grid to move between pages. Press Esc, or the small
+  exit button in the top corner, to bring the sidebar and header back. Not
+  offered on an iPhone, which doesn't support it.
 - The Nearby Vessels tile now marks any vessel with a live collision alarm:
   the row picks up a red or amber highlight and a "Collision alarm" or
   "Collision warning" label depending on severity, and that vessel moves to
@@ -76,6 +82,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   its marker and row highlighted, showing the description only when that
   point has one. Its map markers, name labels and rank badges are also
   bigger, for reading from across the cabin on the wall display.
+- A camera feed in an embed tile shows on the flybridge wall display again.
+  The display's browser stopped drawing live camera video on a scaled or
+  upside-down display; the embed is now drawn so that browser can show it.
 
 ## [0.35.0] - 2026-09-27
 

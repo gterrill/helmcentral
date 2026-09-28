@@ -371,6 +371,11 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           ref={tideTooltip.svgRef}
           tabIndex={0}
           role="img"
+          // Horizontal drag here scrubs the chart (useChartTooltip above),
+          // so full screen's swipe-paging (use-swipe-paging.ts) has to leave
+          // a gesture that starts on this surface alone rather than reading
+          // it as a page turn.
+          data-no-swipe
           aria-label={`Tide height at ${chart.station.name} for ${windowStart.toLocaleDateString('en-US', { weekday: 'long' })}, in ${unit}. Use arrow keys to read values.`}
           onPointerDown={tideTooltip.onPointerDown}
           onPointerMove={tideTooltip.onPointerMove}

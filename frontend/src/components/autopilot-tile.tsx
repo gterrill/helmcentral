@@ -87,6 +87,11 @@ function HoldToConfirmButton({ label, ariaLabel, disabled, onConfirm, className 
       type="button"
       disabled={disabled}
       aria-label={ariaLabel}
+      // A drifting finger during the hold cancels it via onPointerLeave
+      // above; full screen's swipe-paging must not additionally read that
+      // same drift as a page turn while the operator is mid-confirm on an
+      // engage/disengage/tack/gybe.
+      data-no-swipe
       onPointerDown={start}
       onPointerUp={clear}
       onPointerLeave={clear}
