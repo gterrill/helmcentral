@@ -278,6 +278,32 @@ func TestBuildAssistantSystemPrompt_AsksToCreateRouteForPassage(t *testing.T) {
 	}
 }
 
+// The operator asked about an outer-reef day trip; Mate said there was no
+// window through Thursday but Friday looked possible (13-16 kts, 1.4-1.5m).
+// The operator then moved anchorage to Dunk Island and asked only "What do
+// the conditions look like now?" Mate fetched a fresh forecast for the new
+// anchorage and reported it as a standalone anchorage briefing - better
+// numbers than the Friday window it had called possible - without ever
+// relating the two or saying its earlier verdict no longer held. The prompt
+// must tell Mate to carry an open plan forward across turns and relate fresh
+// forecast or conditions data back to it, even when the operator's question
+// only asks about the boat's current position.
+func TestBuildAssistantSystemPrompt_OpenPlanContinuityGuidance(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"open plan or pending decision",
+		"even when the operator only asks",
+		"opens, closes or shifts the window",
+		"no longer holds",
+		"naming the day and what changed",
+		"already settled or abandoned",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the open-plan continuity guidance to mention %q, got:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildAssistantSystemPrompt_ProviderLine(t *testing.T) {
 	pc := basePromptContext()
 	pc.WeatherProvider = "open-meteo"
