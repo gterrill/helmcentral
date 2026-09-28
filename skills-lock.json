@@ -14,10 +14,10 @@
       "computedHash": "d0a2dde1c45b6173eac67569e1f3ac1d2f647a650b44149a468f109023c23d24"
     },
     "shadcn": {
-      "source": "syahiidkamil/software-engineer-ai-agent-atlas",
+      "source": "shadcn/ui",
       "sourceType": "github",
-      "skillPath": ".claude/skills/shadcn/SKILL.md",
-      "computedHash": "80a6226e78f6d1fe464214ae0ef449d49d8ffaa3e7704f011e9b418c678ad4d1"
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "f615de216e085a84e31593ad0fa9062232adc40cd87b7c7ab2b8e49abf6500be"
     }
   }
 }
