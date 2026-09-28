@@ -3523,14 +3523,26 @@ export function App() {
             "Exit full screen" counterpart) is gone in this state, so a
             screen with no Esc key needs its own way back. Esc and the
             browser's own chrome still work too - useFullscreen's
-            `fullscreenchange` listener is what notices either one. */}
+            `fullscreenchange` listener is what notices either one.
+
+            Pinned top-LEFT, not top-right: the live alarm banner below
+            (data-testid="alarm-banner-stack") is a normal-flow element that
+            becomes the top-most thing on screen once the header is gone,
+            and its own View/Acknowledge buttons (alarm-banner.tsx) are
+            always the trailing, right-aligned child of its row - a `fixed`
+            control sharing that corner would sit on top of them and steal
+            the tap. The sidebar (and everything else that might otherwise
+            occupy the left corner) is fully unmounted while full screen, so
+            the left corner is free with no equivalent offset math needed -
+            simpler and more robust than chasing the banner's height, which
+            varies with wrapped text and how many alarms are shown. */}
         {isFullscreenDashboard && (
           <Button
             variant="outline"
             size="icon"
             aria-label="Exit full screen"
             title="Exit full screen"
-            className="fixed right-2 top-2 z-60 border-border bg-card/80 text-muted-foreground"
+            className="fixed left-2 top-2 z-60 border-border bg-card/80 text-muted-foreground"
             onClick={() => fullscreen.exit()}
           >
             <Minimize className="h-4 w-4" />

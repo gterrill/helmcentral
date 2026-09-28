@@ -2090,6 +2090,114 @@ func TestDocumentStore_SetChunkEmbeddingsUnknownChunkIDReturnsLegibleError(t *te
 	}
 }
 
+// TestDocumentStore_SetChunkEmbeddingsBatchesAcrossMultipleTransactions pins
+// a review finding: six stores now share one SQLite file under
+// BEGIN IMMEDIATE with a busy_timeout, so a SetChunkEmbeddings call big
+// enough to run long must not hold that single shared write lock for its
+// entire duration in one transaction - it has to commit in bounded batches
+// instead. This forces chunkEmbeddingsBatchSize down to 2 and embeds 4 real
+// chunks plus one bogus id that sorts after every real one, so the batches
+// are [chunk1,chunk2], [chunk3,chunk4], [bogus] - proving the split by
+// checking that the first two batches' chunks are durably embedded even
+// though the last batch's failure makes the call as a whole return an
+// error. This is safe, not a correctness regression: document_chunk_embeddings'
+// ON CONFLICT(chunk_id) DO UPDATE makes every row's write independent and
+// idempotent, so a caller that treats the whole call as failed and retries
+// every chunk (recordEmbedBatchFailure, documents_embed.go) just re-writes
+// the already-committed ones harmlessly.
+func TestDocumentStore_SetChunkEmbeddingsBatchesAcrossMultipleTransactions(t *testing.T) {
+	origBatchSize := chunkEmbeddingsBatchSize
+	chunkEmbeddingsBatchSize = 2
+	t.Cleanup(func() { chunkEmbeddingsBatchSize = origBatchSize })
+
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-batch-embed", "manual.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "chunk one"},
+		{Seq: 2, Source: "local", Text: "chunk two"},
+		{Seq: 3, Source: "local", Text: "chunk three"},
+		{Seq: 4, Source: "local", Text: "chunk four"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 4 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+
+	var maxID int64
+	vectors := make(map[int64][]float32, len(chunks)+1)
+	for _, c := range chunks {
+		vectors[c.ID] = []float32{1, 0, 0}
+		if c.ID > maxID {
+			maxID = c.ID
+		}
+	}
+	// Sorts after every real id, so it lands alone in the final batch of
+	// size 2 (5 ids total: two full batches of real ids, then this one on
+	// its own).
+	bogusChunkID := maxID + 1000
+	vectors[bogusChunkID] = []float32{1, 0, 0}
+
+	err = store.SetChunkEmbeddings("test-model", 3, vectors)
+	if err == nil {
+		t.Fatalf("expected an error from the bogus chunk id's batch")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d", bogusChunkID)) {
+		t.Fatalf("expected the error to name the bogus chunk id %d, got %q", bogusChunkID, err.Error())
+	}
+
+	var embeddedCount int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings`).Scan(&embeddedCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if embeddedCount != len(chunks) {
+		t.Fatalf("expected the %d real chunks from the earlier, already-committed batches to be durably embedded despite the later batch's failure, got %d", len(chunks), embeddedCount)
+	}
+}
+
+// TestDocumentStore_SetChunkEmbeddingsBatchSplitStillEmbedsEveryChunk covers
+// the ordinary (no failure) path across a batch boundary: splitting into
+// several transactions must not lose or skip any chunk when every one of
+// them is valid.
+func TestDocumentStore_SetChunkEmbeddingsBatchSplitStillEmbedsEveryChunk(t *testing.T) {
+	origBatchSize := chunkEmbeddingsBatchSize
+	chunkEmbeddingsBatchSize = 2
+	t.Cleanup(func() { chunkEmbeddingsBatchSize = origBatchSize })
+
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-batch-embed-ok", "manual2.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "chunk one"},
+		{Seq: 2, Source: "local", Text: "chunk two"},
+		{Seq: 3, Source: "local", Text: "chunk three"},
+		{Seq: 4, Source: "local", Text: "chunk four"},
+		{Seq: 5, Source: "local", Text: "chunk five"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 5 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+
+	vectors := make(map[int64][]float32, len(chunks))
+	for _, c := range chunks {
+		vectors[c.ID] = []float32{1, 0, 0}
+	}
+	if err := store.SetChunkEmbeddings("test-model", 3, vectors); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	var embeddedCount int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings`).Scan(&embeddedCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if embeddedCount != len(chunks) {
+		t.Fatalf("expected all %d chunks embedded across batch boundaries, got %d", len(chunks), embeddedCount)
+	}
+}
+
 // TestDocumentStore_EmbeddingCountsReportsExpectedTotals builds one
 // document embedded under the model being asked about, one embedded under a
 // different (stale) model, and one left entirely unembedded (with one

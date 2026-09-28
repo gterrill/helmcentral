@@ -15,17 +15,24 @@ interface ProbeProps {
   enabled: boolean
   onNext: () => void
   onPrevious: () => void
+  /** A key on the rendered surface, distinct from the hook's own re-render -
+   *  changing it forces React to unmount the old DOM node and mount a new
+   *  one at the same spot, simulating the container being replaced (e.g.
+   *  a session expiring mid-full-screen swaps the surface for
+   *  LoginScreen, then a fresh one mounts after logging back in) while
+   *  `enabled` stays whatever the caller already set it to. */
+  surfaceKey?: string
 }
 
 // Test-only component: attaches the hook's ref to a rendered surface, with
 // a few nested "ignored area" stand-ins (a chart-scrub surface, a map, a
 // text input) so gestures starting inside them can be asserted separately
 // from gestures starting on the bare surface.
-function Probe({ enabled, onNext, onPrevious }: ProbeProps) {
+function Probe({ enabled, onNext, onPrevious, surfaceKey }: ProbeProps) {
   const ref = useSwipePaging({ enabled, onNext, onPrevious })
   return createElement(
     'div',
-    { ref, 'data-testid': 'surface' },
+    { ref, key: surfaceKey, 'data-testid': 'surface' },
     createElement('div', { 'data-no-swipe': true, 'data-testid': 'no-swipe-zone' }, 'chart'),
     createElement('div', { className: 'maplibregl-map', 'data-testid': 'map-zone' }, 'map'),
     createElement('input', { 'data-testid': 'text-input' }),
@@ -246,6 +253,29 @@ describe('useSwipePaging', () => {
 
     expect(onNextA).not.toHaveBeenCalled()
     expect(onNextB).toHaveBeenCalledTimes(1)
+  })
+
+  // [P1 finding] The listener effect used to depend on `[enabled]` alone.
+  // If the ref'd element is swapped for a new DOM node while `enabled`
+  // never flips - a session expiring mid-full-screen unmounts the swipe
+  // surface for LoginScreen, then a fresh surface mounts once logged back
+  // in, still full screen - the effect never reran, so the listeners stayed
+  // on the detached old node and the new surface never got any.
+  it('keeps listening after the ref\'d element is replaced while enabled stays true throughout', () => {
+    const onNext = vi.fn()
+    const onPrevious = vi.fn()
+    const { getByTestId, rerender } = render(
+      createElement(Probe, { enabled: true, onNext, onPrevious, surfaceKey: 'a' }),
+    )
+
+    // A different key forces React to unmount the first surface element and
+    // mount a brand new one, standing in for the login round-trip - `enabled`
+    // itself is unchanged across this rerender.
+    rerender(createElement(Probe, { enabled: true, onNext, onPrevious, surfaceKey: 'b' }))
+
+    swipe(getByTestId('surface'), { startX: 250, startY: 100, endX: 150, endY: 100 })
+
+    expect(onNext).toHaveBeenCalledTimes(1)
   })
 
   // Without touch-action: pan-y the browser claims a sideways drag as its own

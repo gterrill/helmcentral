@@ -105,6 +105,15 @@ type telemetryInfluxFetcher struct {
 	// in-memory day accumulator, fed only once a solar sample with a
 	// position has been recorded) or a fresh SignalK fetch of its own.
 	vesselLocalLocation func() (loc *time.Location, ok bool)
+
+	// lastKnownLoc is the most recent *time.Location vesselLocalLocation
+	// resolved from a real fix, kept across ticks (refresh runs serially on
+	// one goroutine - startTelemetryInfluxTicker - so no lock is needed).
+	// A boat's local zone does not change tick to tick just because the
+	// -1,-1 unset-position sentinel flapped in at anchor or GNSS blinked;
+	// this is what lets a tick with no current fix still report real solar
+	// figures instead of -1, as long as a fix has been seen at least once.
+	lastKnownLoc *time.Location
 }
 
 func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetcher {
@@ -164,10 +173,16 @@ func currentVesselLocalLocation() (*time.Location, bool) {
 //
 // The gust ladder and the rolling 24h solar trend are unrelated to vessel
 // position and always run. The three day-boundary solar queries
-// (today/yesterday/peak) additionally need f.vesselLocalLocation to resolve
-// a usable position first: without one, this reports their sentinel -1
-// rather than guessing a UTC boundary (Fallback Policy) - see
-// currentVesselLocalLocation's own doc comment for why.
+// (today/yesterday/peak) additionally need a usable position to resolve a
+// zone: f.vesselLocalLocation reports the CURRENT tick's position, but this
+// tick's fix flapping (the -1,-1 sentinel at anchor, or GNSS blinking) does
+// not mean the boat changed timezone, so a tick with no current fix reuses
+// f.lastKnownLoc from whichever earlier tick last resolved one instead of
+// re-deriving from scratch. Only when no position has EVER been resolved -
+// f.lastKnownLoc is still nil, which is true at most until the first fix
+// after a restart - does this report the sentinel -1 rather than guessing a
+// UTC boundary (Fallback Policy). See currentVesselLocalLocation's own doc
+// comment for why the sentinel pair is rejected in the first place.
 func (f *telemetryInfluxFetcher) refresh(now time.Time) {
 	result := telemetryInfluxResult{
 		gustKts:       f.queryGust(gustWindowLadder),
@@ -176,7 +191,17 @@ func (f *telemetryInfluxFetcher) refresh(now time.Time) {
 	}
 
 	loc, positionOK := f.vesselLocalLocation()
-	if !positionOK {
+	if positionOK {
+		f.lastKnownLoc = loc
+		if telemetryInfluxSolarPositionMissing.CompareAndSwap(true, false) {
+			log.Printf("solar: vessel position known again; today_kwh/yesterday_kwh/peak_today_w resume using local-day boundaries")
+		}
+	} else if f.lastKnownLoc != nil {
+		// No fix this tick, but a real one has been seen before: the solar
+		// data is fine and the zone does not change tick to tick, so reuse
+		// it rather than reporting unavailable.
+		loc = f.lastKnownLoc
+	} else {
 		if telemetryInfluxSolarPositionMissing.CompareAndSwap(false, true) {
 			log.Printf("solar: no vessel position known yet; today_kwh/yesterday_kwh/peak_today_w report unavailable (-1) rather than assuming a UTC day boundary")
 		}
@@ -185,9 +210,6 @@ func (f *telemetryInfluxFetcher) refresh(now time.Time) {
 		result.solarPeakTodayW = -1
 		f.slot.set(result)
 		return
-	}
-	if telemetryInfluxSolarPositionMissing.CompareAndSwap(true, false) {
-		log.Printf("solar: vessel position known again; today_kwh/yesterday_kwh/peak_today_w resume using local-day boundaries")
 	}
 
 	result.solarTodayKWh = f.querySolarToday(now, loc)

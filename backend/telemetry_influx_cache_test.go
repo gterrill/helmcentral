@@ -154,6 +154,75 @@ func TestTelemetryInfluxFetcherRefresh_NoPositionReportsSentinelsAndSkipsSolarQu
 	}
 }
 
+// TestTelemetryInfluxFetcherRefresh_PositionFlapReusesLastKnownLocation
+// covers a review finding: the -1,-1 sentinel position (see
+// hasUsableVesselPosition, weather_providers.go) flaps in and out at anchor,
+// and the very first tick after every restart also has no fix yet. Neither
+// case means the boat's local timezone actually changed, and the solar
+// figures themselves are unaffected - only the day-boundary math needs a
+// zone. Once a real fix has been resolved once, a later tick with no fix
+// must keep using that last-known zone (and must still call the
+// day-boundary queries with it) rather than reporting -1 the way
+// "never seen a position at all" correctly still does.
+func TestTelemetryInfluxFetcherRefresh_PositionFlapReusesLastKnownLocation(t *testing.T) {
+	resetTelemetryInfluxSlot(t)
+
+	knownLoc := vesselLocalLocation(153.0)
+
+	var gotTodayLoc, gotYesterdayLoc, gotPeakLoc *time.Location
+	positionOK := true // tick 1 has a fix; tick 2 (below) flips this to false
+	fetcher := &telemetryInfluxFetcher{
+		slot:      globalTelemetryInfluxSlot,
+		queryGust: func([]string) map[string]float64 { return map[string]float64{"10m": 5.0} },
+		querySolarToday: func(now time.Time, loc *time.Location) float64 {
+			gotTodayLoc = loc
+			return 4.5
+		},
+		querySolarYesterday: func(now time.Time, loc *time.Location) float64 {
+			gotYesterdayLoc = loc
+			return 6.1
+		},
+		querySolarPeak: func(now time.Time, loc *time.Location) float64 {
+			gotPeakLoc = loc
+			return 820
+		},
+		querySolarTrend: func(time.Time) []solarTrendPoint { return []solarTrendPoint{{TotalW: 1}} },
+		vesselLocalLocation: func() (*time.Location, bool) {
+			if positionOK {
+				return knownLoc, true
+			}
+			return nil, false
+		},
+	}
+
+	tick1 := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	fetcher.refresh(tick1)
+
+	result := globalTelemetryInfluxSlot.get()
+	if result.solarTodayKWh != 4.5 || result.solarYesterdayKWh != 6.1 || result.solarPeakTodayW != 820 {
+		t.Fatalf("expected tick 1's real fix to produce real solar figures, got %+v", result)
+	}
+
+	// Tick 2: the position sentinel flaps in (GNSS untrusted at anchor).
+	positionOK = false
+	gotTodayLoc, gotYesterdayLoc, gotPeakLoc = nil, nil, nil
+	tick2 := tick1.Add(telemetryInfluxRefreshInterval)
+	fetcher.refresh(tick2)
+
+	if gotTodayLoc != knownLoc || gotYesterdayLoc != knownLoc || gotPeakLoc != knownLoc {
+		t.Fatalf("expected tick 2 to reuse the last-known location for every day-boundary query, got today=%v yesterday=%v peak=%v want=%v",
+			gotTodayLoc, gotYesterdayLoc, gotPeakLoc, knownLoc)
+	}
+
+	result = globalTelemetryInfluxSlot.get()
+	if result.solarTodayKWh == -1 || result.solarYesterdayKWh == -1 || result.solarPeakTodayW == -1 {
+		t.Fatalf("expected tick 2 to keep reporting real solar figures using the last-known zone despite the position flap, got %+v", result)
+	}
+	if !result.fetchedAt.Equal(tick2) {
+		t.Fatalf("expected fetchedAt %v, got %v", tick2, result.fetchedAt)
+	}
+}
+
 // TestCurrentVesselLocalLocation_UsesCachedSnapshotPosition pins
 // currentVesselLocalLocation (the real, non-injected implementation
 // newTelemetryInfluxFetcher wires in) to reading globalSignalKSnapshot's own

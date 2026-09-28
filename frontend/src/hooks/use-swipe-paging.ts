@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const MIN_DISTANCE_PX = 60
 const MIN_DX_DY_RATIO = 1.5
@@ -44,9 +44,21 @@ export interface UseSwipePagingOptions {
  * one that started on a surface with its own drag meaning) is left alone -
  * this hook never calls preventDefault, so nothing it declines to treat as
  * a swipe is disturbed.
+ *
+ * Returns a callback ref (a plain useState setter, not a RefObject),
+ * because `enabled` is not the only thing that can change while the caller
+ * keeps rendering: the element behind the ref can be swapped for a new one
+ * with `enabled` staying true throughout — e.g. a session expiring while
+ * full screen unmounts this surface for LoginScreen, and logging back in
+ * mounts a fresh one with the dashboard already back in its full screen
+ * state. A RefObject's `.current` would silently point at the detached old
+ * node forever, since nothing about that swap would be in the effect's own
+ * dependency array to make it re-run. Holding the element in state instead
+ * means the effect below can depend on it directly and reattach its
+ * listeners to whichever element is actually live.
  */
 export function useSwipePaging<T extends HTMLElement>(options: UseSwipePagingOptions) {
-  const ref = useRef<T>(null)
+  const [element, setElement] = useState<T | null>(null)
 
   // Read fresh on every fire rather than closed over at listener-attach
   // time (same reasoning as use-press-repeat's onStepRef), so a caller
@@ -59,7 +71,7 @@ export function useSwipePaging<T extends HTMLElement>(options: UseSwipePagingOpt
 
   useEffect(() => {
     if (!options.enabled) return
-    const container = ref.current
+    const container = element
     if (!container) return
 
     // The pointerId currently being tracked as a candidate single-touch
@@ -128,7 +140,7 @@ export function useSwipePaging<T extends HTMLElement>(options: UseSwipePagingOpt
       container.removeEventListener('pointercancel', handlePointerCancel)
       container.style.touchAction = previousTouchAction
     }
-  }, [options.enabled])
+  }, [options.enabled, element])
 
-  return ref
+  return setElement
 }

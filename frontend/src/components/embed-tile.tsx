@@ -1,13 +1,13 @@
 import { Globe, Settings2 } from 'lucide-react'
 import {
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useState,
   type CSSProperties,
-  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -50,10 +50,11 @@ function withTheme(rawUrl: string, isDarkTheme: boolean): string {
 }
 
 interface EmbedFrameProps {
-  /** The tile's own frame container (both branches below pass their
-   * `frameContainerRef`) — used only to measure and position the iframe
-   * when it has to be portalled; ignored otherwise. */
-  containerRef: RefObject<HTMLDivElement | null>
+  /** The tile's own frame container element (both branches below pass their
+   * `frameContainerEl` state, not a ref object — see the layout effect
+   * below for why) — used only to measure and position the iframe when it
+   * has to be portalled; ignored otherwise. */
+  container: HTMLDivElement | null
   src: string
   title: string
   className: string
@@ -103,8 +104,21 @@ function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
  * portal otherwise escapes, since `overflow-hidden` only clips the outer
  * box's actual DOM descendants), and re-run on every resize/mutation of the
  * container or any ancestor up to the shell's own inner box.
+ *
+ * `container` arrives as plain state, not a ref object, on purpose: when
+ * the container div and this component mount together in the same commit
+ * (e.g. toggling the widget's `frameless` setting swaps EmbedTile between
+ * the frameless and Tile-wrapped branches while an embed is already
+ * mounted), React attaches a host node's ref only after its child
+ * subtree's own layout effects have already run in that commit — so a
+ * `containerRef.current` read here would still see null on this first
+ * pass. Reading `container` as a prop instead means the parent's own
+ * callback ref, once it fires and updates that state, drives a second
+ * render with the real element, and the dependency array below picks that
+ * up and reruns the effect against a container that is now guaranteed to
+ * be attached.
  */
-function EmbedFrame({ containerRef, src, title, className }: EmbedFrameProps) {
+function EmbedFrame({ container, src, title, className }: EmbedFrameProps) {
   const displayTransform = useContext(DisplayTransformContext)
   const [portalStyle, setPortalStyle] = useState<CSSProperties | null>(null)
 
@@ -112,10 +126,12 @@ function EmbedFrame({ containerRef, src, title, className }: EmbedFrameProps) {
   // shell's inner box (ResizeObserver + MutationObserver, both below), on
   // window resize, and whenever the shell's rotation/scale/pixel-shift/clip
   // element changes — a pixel-shift move alone doesn't resize anything, so
-  // ResizeObserver and window resize wouldn't otherwise catch it.
+  // ResizeObserver and window resize wouldn't otherwise catch it. Also
+  // rerun whenever `container` itself changes identity (see the doc
+  // comment above) rather than only on mount, since a null-then-set
+  // transition has to re-attach the observers it skipped the first time.
   useLayoutEffect(() => {
     if (!displayTransform) return
-    const container = containerRef.current
     if (!container) return
     // Re-bound to a variable whose own type is already non-null, rather than
     // relying on `displayTransform` staying narrowed inside the nested
@@ -219,7 +235,7 @@ function EmbedFrame({ containerRef, src, title, className }: EmbedFrameProps) {
       ancestors.forEach((ancestor) => ancestor.removeEventListener('transitionend', handleTransitionEnd))
       window.removeEventListener('resize', reposition)
     }
-  }, [displayTransform, containerRef])
+  }, [displayTransform, container])
 
   const frameProps = {
     src,
@@ -290,6 +306,25 @@ export const EmbedTile = memo(function EmbedTile({
   // tile back out afterwards never tears the iframe down and forces the
   // embedded app to reload.
   const [frameContainerRef, inView] = useInView<HTMLDivElement>({ rootMargin: '200px' })
+
+  // The container element, held as state rather than read straight off
+  // frameContainerRef.current, so EmbedFrame can depend on it. Toggling
+  // `frameless` swaps which of the two branches below returns the
+  // container div and the EmbedFrame together, in the same commit — if
+  // EmbedFrame read `frameContainerRef.current` directly in that commit's
+  // own layout effect, it would still see null (a host node's ref attaches
+  // after its child subtree's layout effects have already run in that same
+  // commit). Setting state from this callback ref instead schedules a
+  // follow-up render with the real element once React has actually
+  // attached it, and EmbedFrame's effect reruns against that.
+  const [frameContainerEl, setFrameContainerEl] = useState<HTMLDivElement | null>(null)
+  const setFrameContainer = useCallback(
+    (node: HTMLDivElement | null) => {
+      frameContainerRef.current = node
+      setFrameContainerEl(node)
+    },
+    [frameContainerRef],
+  )
   const [shouldMount, setShouldMount] = useState(false)
 
   useEffect(() => {
@@ -325,13 +360,13 @@ export const EmbedTile = memo(function EmbedTile({
   if (hasUsableUrl && config?.frameless && !editing) {
     return (
       <div
-        ref={frameContainerRef}
+        ref={setFrameContainer}
         data-testid="embed-frame-container"
         className="h-full w-full overflow-hidden rounded-md border border-border bg-background"
       >
         {mountFrame ? (
           <EmbedFrame
-            containerRef={frameContainerRef}
+            container={frameContainerEl}
             src={src}
             title={title}
             className="h-full w-full border-0"
@@ -369,11 +404,11 @@ export const EmbedTile = memo(function EmbedTile({
           it. The iframe is `h-full`, and in the narrow CSS grid the enclosing chain is
           auto-height, so without a floor the frame collapses to its ~150px intrinsic
           default rather than the height the tile was given. */}
-      <div ref={frameContainerRef} data-testid="embed-frame-container" className="h-full min-h-[240px]">
+      <div ref={setFrameContainer} data-testid="embed-frame-container" className="h-full min-h-[240px]">
         {hasUsableUrl ? (
           mountFrame ? (
             <EmbedFrame
-              containerRef={frameContainerRef}
+              container={frameContainerEl}
               src={src}
               title={title}
               className={cn(
