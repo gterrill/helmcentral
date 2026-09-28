@@ -1659,6 +1659,9 @@ export function ForecastDrawer({
 
                     <svg
                       ref={cloudTooltip.svgRef}
+                      // Horizontal drag scrubs the chart - full screen's
+                      // swipe-paging leaves a gesture starting here alone.
+                      data-no-swipe
                       viewBox={`0 0 ${forecastChartWidth} 265`}
                       preserveAspectRatio="none"
                       className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
@@ -1819,6 +1822,9 @@ export function ForecastDrawer({
 
                       <svg
                         ref={windTooltip.svgRef}
+                        // Horizontal drag scrubs the chart - full screen's
+                        // swipe-paging leaves a gesture starting here alone.
+                        data-no-swipe
                         viewBox={`0 0 ${forecastChartWidth} 265`}
                         preserveAspectRatio="none"
                         className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
@@ -2034,6 +2040,9 @@ export function ForecastDrawer({
 
                         <svg
                           ref={waveTooltip.svgRef}
+                          // Horizontal drag scrubs the chart - full screen's
+                          // swipe-paging leaves a gesture starting here alone.
+                          data-no-swipe
                           viewBox={`0 0 ${forecastChartWidth} 265`}
                           preserveAspectRatio="none"
                           className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
@@ -2227,6 +2236,9 @@ export function ForecastDrawer({
 
               <svg
                 ref={upperAirTooltip.svgRef}
+                // Horizontal drag scrubs the chart - full screen's
+                // swipe-paging leaves a gesture starting here alone.
+                data-no-swipe
                 viewBox={`0 0 ${upperAirChartWidth} 265`}
                 preserveAspectRatio="none"
                 className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
