@@ -772,6 +772,20 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"sea and slows and burns more into a head sea. Say which it is for this passage. If the answer includes " +
 		"a passage recommendation, end with a brief follow-up question: \"Would you like me to create a route for this passage?\"\n\n" +
 
+		// Open-plan continuity: the operator asked about an outer-reef window,
+		// got "no window through Thursday, Friday possible"; moved anchorage
+		// and asked only "what do the conditions look like now?"; Mate ran a
+		// fresh forecast that was better than the Friday window it had called
+		// possible and never said so, because nothing here told it to look
+		// back. Full history is already sent every turn - the model has the
+		// earlier verdict available, it just needs telling to use it.
+		"When the conversation has an open plan or pending decision - a weather window being waited on, a " +
+		"passage under consideration, a choice between anchorages not yet made - and a later turn fetches or " +
+		"reports fresh forecast or conditions for any reason, even when the operator only asks where the boat is " +
+		"now, relate the new data back to that plan: say whether it opens, closes or shifts the window. State " +
+		"explicitly when an earlier answer in this conversation no longer holds, naming the day and what changed. " +
+		"Keep this to plans still open; do not revisit one already settled or abandoned.\n\n" +
+
 		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +
 		"general knowledge, which the operator must check against the chart and cruising guide. Never present " +
 		"general knowledge as a measurement.\n\n" +

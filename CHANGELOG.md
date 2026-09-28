@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate keeps a trip or weather window you've been discussing in mind for the
+  rest of the conversation. When a later question brings in a fresh forecast,
+  such as asking about conditions after moving anchorage, it says whether the
+  window has opened, closed or shifted, and tells you when an earlier call no
+  longer holds.
+
 ## [0.36.0] - 2026-09-28
 
 ### Breaking
