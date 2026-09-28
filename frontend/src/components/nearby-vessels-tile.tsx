@@ -1,13 +1,15 @@
 import { Ship } from 'lucide-react'
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tile } from '@/components/ui/tile'
 import type { DistanceUnits } from '@/config/app-config'
+import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sightings'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { cn } from '@/lib/utils'
 
 // formatRelativeAge renders a seconds count on the shared s/m/h/d ladder.
 // Both the server-computed age_seconds (currently capped well under an hour
@@ -120,6 +122,54 @@ function VesselHistoryPopover({ vessel, children }: { vessel: NearbyVessel; chil
   )
 }
 
+/**
+ * Two-tier collapse of the live collision-alarm ladder for this row (ADR
+ * 0140). The anchor-watch map (ADR 0088) paints one red for every state from
+ * `alert` through `emergency` — a marker has only one colour to spend, and
+ * shape already says "this is AIS." A list row has room for a text label as
+ * well as colour, so it keeps the split the map deliberately gives up:
+ * `alert`/`warn` read as a still-forming risk (amber, "Collision warning"),
+ * `alarm`/`emergency` as an imminent one (red, "Collision alarm") — the same
+ * `alarm` cutoff the map uses for its own ring. `normal` is not a state
+ * collisionAlarmStatesByVessel actually hands back, but the type doesn't
+ * rule it out, so it is treated as no alarm rather than crashing the lookup.
+ */
+type CollisionTier = 'warn' | 'alarm'
+
+function collisionTier(state: AlarmState | undefined): CollisionTier | null {
+  if (state === undefined || state === 'normal') return null
+  return ALARM_STATES.indexOf(state) >= ALARM_STATES.indexOf('alarm') ? 'alarm' : 'warn'
+}
+
+const COLLISION_TIER_STYLE: Record<CollisionTier, { row: string; text: string; label: string }> = {
+  alarm: {
+    row: 'border-red-500 bg-red-50 dark:bg-red-950/60',
+    text: 'text-red-600 dark:text-red-400',
+    label: 'Collision alarm',
+  },
+  warn: {
+    row: 'border-amber-500 bg-amber-50 dark:bg-amber-950/60',
+    text: 'text-amber-600 dark:text-amber-400',
+    label: 'Collision warning',
+  },
+}
+
+/**
+ * Alarmed vessels first, worst state first; unalarmed vessels — and vessels
+ * tied on tier — keep the order the feed gave them (nearest first, set by
+ * the backend). Builds a new array rather than sorting `vessels` in place,
+ * so the memoised prop from App.tsx is never mutated, and ties break on the
+ * original index so the result doesn't depend on the sort being stable.
+ */
+function sortByCollisionAlarm(vessels: NearbyVessel[], aisCollisionAlarms: ReadonlyMap<string, AlarmState> | undefined): NearbyVessel[] {
+  if (!aisCollisionAlarms || aisCollisionAlarms.size === 0) return vessels
+
+  return vessels
+    .map((vessel, index) => ({ vessel, index, rank: ALARM_STATES.indexOf(aisCollisionAlarms.get(vessel.id) ?? 'normal') }))
+    .sort((a, b) => (b.rank !== a.rank ? b.rank - a.rank : a.index - b.index))
+    .map((entry) => entry.vessel)
+}
+
 type NearbyVesselsTileProps = {
   vessels: NearbyVessel[]
   loading: boolean
@@ -133,6 +183,14 @@ type NearbyVesselsTileProps = {
    * today, so this is always null until a source actually publishes one.
    */
   lastUpdateAgeS: number | null
+  /**
+   * Vessel id -> worst live collision-alarm state (ADR 0088), keyed the same
+   * way collisionAlarmStatesByVessel keys it and the anchor-watch map reads
+   * it. Optional and left undefined by every existing caller/test with no
+   * alarm feed wired up, so the tile renders exactly as it did before this
+   * prop existed.
+   */
+  aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
 }
 
 function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
@@ -142,8 +200,9 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   return `${Math.round(rangeMeters)} m`
 }
 
-export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS }: NearbyVesselsTileProps) {
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms }: NearbyVesselsTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
+  const sortedVessels = useMemo(() => sortByCollisionAlarm(vessels, aisCollisionAlarms), [vessels, aisCollisionAlarms])
 
   return (
     <Tile
@@ -153,26 +212,44 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
       staleLabel={formatDataAge(lastUpdateAgeS)}
     >
       <div className="mt-3 space-y-2">
-        {vessels.map((vessel) => (
-          <div key={vessel.id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/45 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
-              <p className="mt-1 text-xs text-muted-foreground">({formatRelativeAge(vessel.age_seconds)})</p>
-              {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
-                <VesselHistoryPopover vessel={vessel}>
-                  <p className="mt-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
-                    Seen {vessel.seen_count}x before
-                    {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
-                  </p>
-                </VesselHistoryPopover>
-              ) : null}
+        {sortedVessels.map((vessel) => {
+          const tier = collisionTier(aisCollisionAlarms?.get(vessel.id))
+          const tierStyle = tier ? COLLISION_TIER_STYLE[tier] : null
+
+          return (
+            <div
+              key={vessel.id}
+              role={tierStyle ? 'group' : undefined}
+              aria-label={tierStyle ? `${vessel.name}, ${tierStyle.label.toLowerCase()}` : undefined}
+              className={cn(
+                'flex items-center justify-between gap-2 rounded-md border px-3 py-2',
+                tierStyle ? tierStyle.row : 'bg-muted/45',
+              )}
+            >
+              <div className="min-w-0">
+                <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
+                {tierStyle ? (
+                  <p className={cn('mt-1 text-[10px] font-semibold uppercase tracking-[0.16em]', tierStyle.text)}>{tierStyle.label}</p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">({formatRelativeAge(vessel.age_seconds)})</p>
+                {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
+                  <VesselHistoryPopover vessel={vessel}>
+                    <p className="mt-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
+                      Seen {vessel.seen_count}x before
+                      {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
+                    </p>
+                  </VesselHistoryPopover>
+                ) : null}
+              </div>
+              <div className="shrink-0 text-right">
+                <p className={cn('font-display text-3xl leading-none', tierStyle ? tierStyle.text : 'text-gauge-secondary')}>{formatRange(vessel.range_m, distanceUnits)}</p>
+                {typeof vessel.sog_knots === 'number' ? (
+                  <p className={cn('mt-1 text-xs', tierStyle ? tierStyle.text : 'text-gauge-secondary')}>{vessel.sog_knots.toFixed(1)} kts</p>
+                ) : null}
+              </div>
             </div>
-            <div className="shrink-0 text-right">
-              <p className="font-display text-3xl leading-none text-gauge-secondary">{formatRange(vessel.range_m, distanceUnits)}</p>
-              {typeof vessel.sog_knots === 'number' ? <p className="mt-1 text-xs text-gauge-secondary">{vessel.sog_knots.toFixed(1)} kts</p> : null}
-            </div>
-          </div>
-        ))}
+          )
+        })}
 
         {!loading && vessels.length === 0 ? (
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">No nearby targets</div>

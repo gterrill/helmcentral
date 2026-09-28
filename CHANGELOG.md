@@ -11,6 +11,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- The Nearby Vessels tile now marks any vessel with a live collision alarm:
+  the row picks up a red or amber highlight and a "Collision alarm" or
+  "Collision warning" label depending on severity, and that vessel moves to
+  the top of the list, worst first, above everything else nearby.
+
 ### Changed
 
 - The Wind tile's two MAX GUST cards now show their time window (10M,
