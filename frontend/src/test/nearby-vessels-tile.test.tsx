@@ -2,6 +2,8 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import type { AlarmState } from '@/hooks/use-alarms'
+import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 
 describe('NearbyVesselsTile', () => {
@@ -188,5 +190,110 @@ describe('NearbyVesselsTile', () => {
     expect(keyWarning).toBe(false)
 
     consoleError.mockRestore()
+  })
+})
+
+// A vessel with a live AIS collision alarm (ADR 0088) is marked and moved to
+// the top of this list the same way it is marked on the anchor-watch map,
+// except the row has room for a text label the map's marker doesn't: the
+// two-tier collapse (collisionTier in nearby-vessels-tile.tsx) groups
+// alert/warn as "Collision warning" (amber) and alarm/emergency as
+// "Collision alarm" (red), matching the map's own alarm-tier ring cutoff.
+describe('NearbyVesselsTile collision alarms', () => {
+  const vessels: NearbyVessel[] = [
+    { id: 'urn:mrn:imo:mmsi:100000001', name: 'NEAR BOAT', range_m: 50, age_seconds: 5 },
+    { id: 'urn:mrn:imo:mmsi:100000002', name: 'ALARM BOAT', range_m: 200, age_seconds: 5 },
+    { id: 'urn:mrn:imo:mmsi:100000003', name: 'EMERGENCY BOAT', range_m: 300, age_seconds: 5 },
+  ]
+
+  function vesselNames(): (string | null)[] {
+    return screen.getAllByText(/BOAT$/).map((el) => el.textContent)
+  }
+
+  it('marks an alarm-tier vessel with the collision alarm label and red styling', () => {
+    const aisCollisionAlarms = new Map<string, AlarmState>([['urn:mrn:imo:mmsi:100000002', 'alarm']])
+
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={vessels}
+        aisCollisionAlarms={aisCollisionAlarms}
+      />,
+    )
+
+    expect(screen.getByText('Collision alarm')).toBeInTheDocument()
+    const row = screen.getByRole('group', { name: 'ALARM BOAT, collision alarm' })
+    expect(row.className).toContain('border-red-500')
+    expect(row.className).toContain('bg-red-50')
+  })
+
+  it('marks a warn-tier vessel with the collision warning label and amber styling', () => {
+    const aisCollisionAlarms = new Map<string, AlarmState>([['urn:mrn:imo:mmsi:100000002', 'warn']])
+
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={vessels}
+        aisCollisionAlarms={aisCollisionAlarms}
+      />,
+    )
+
+    expect(screen.getByText('Collision warning')).toBeInTheDocument()
+    const row = screen.getByRole('group', { name: 'ALARM BOAT, collision warning' })
+    expect(row.className).toContain('border-amber-500')
+    expect(row.className).toContain('bg-amber-50')
+  })
+
+  it('sorts alarmed vessels above a nearer unalarmed one, worst state first', () => {
+    const aisCollisionAlarms = new Map<string, AlarmState>([
+      ['urn:mrn:imo:mmsi:100000002', 'alarm'],
+      ['urn:mrn:imo:mmsi:100000003', 'emergency'],
+    ])
+
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={vessels}
+        aisCollisionAlarms={aisCollisionAlarms}
+      />,
+    )
+
+    expect(vesselNames()).toEqual(['EMERGENCY BOAT', 'ALARM BOAT', 'NEAR BOAT'])
+  })
+
+  it('renders exactly as before when no alarm map is passed', () => {
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={vessels}
+      />,
+    )
+
+    expect(screen.queryByText(/Collision/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('group')).not.toBeInTheDocument()
+    expect(vesselNames()).toEqual(['NEAR BOAT', 'ALARM BOAT', 'EMERGENCY BOAT'])
+  })
+
+  it('renders exactly as before when the alarm map is empty', () => {
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={vessels}
+        aisCollisionAlarms={new Map()}
+      />,
+    )
+
+    expect(screen.queryByText(/Collision/)).not.toBeInTheDocument()
+    expect(vesselNames()).toEqual(['NEAR BOAT', 'ALARM BOAT', 'EMERGENCY BOAT'])
   })
 })
