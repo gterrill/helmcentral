@@ -217,6 +217,7 @@ describe('TideChart', () => {
 
     expect(screen.getByTestId('forecast-tide-legend')).toHaveTextContent('Tide height')
     expect(screen.getByTestId('forecast-tide-legend').textContent).not.toContain('Tide height (')
+    expect(screen.getByTestId('forecast-tide-legend').className).toContain('text-sm')
   })
 
   it('shows the Now marker when the window contains the current time', () => {
@@ -688,5 +689,50 @@ describe('TideChart pointer tooltip accuracy', () => {
     // the old uniform-index mapping landed on 5:15 AM for this exact cursor
     // position (index 16 of 39, inside the unequal 13h segment).
     expect(Math.abs(parseClockTime(secondaryText) - parseClockTime('10:00 AM'))).toBeLessThanOrEqual(5)
+  })
+
+  // The tide refresh line ("Data: ... updated ...") used to sit in
+  // ForecastTideSection's header. It now rides in through an optional
+  // footerMeta prop and renders beside the legend, right-aligned, matching
+  // the Cloud/Wind/Wave cards' footer row in forecast-drawer.tsx.
+  it('renders footerMeta right-aligned beside the legend', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+        footerMeta={<p data-testid="forecast-tide-refresh-meta">Data: NOAA · live · updated just now</p>}
+      />,
+    )
+
+    const meta = screen.getByTestId('forecast-tide-refresh-meta')
+    const legend = screen.getByTestId('forecast-tide-legend')
+    expect(meta.parentElement).toBe(legend.parentElement)
+  })
+
+  // When the day has no extremes in the window, TideChart renders the quiet
+  // unavailable message instead of the legend row - footerMeta still has to
+  // surface somewhere, so it drops to the bottom instead of vanishing.
+  it('still renders footerMeta at the bottom when the day has no extremes in this window', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    render(
+      <TideChart
+        chart={buildChart({ extremes: [] })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+        footerMeta={<p data-testid="forecast-tide-refresh-meta">Data: NOAA · live · updated just now</p>}
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-tide-unavailable')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-tide-refresh-meta')).toBeInTheDocument()
   })
 })

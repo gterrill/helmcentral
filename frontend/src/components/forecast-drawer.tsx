@@ -1290,6 +1290,26 @@ export function ForecastDrawer({
     return <div className="py-8 text-center text-muted-foreground">No forecast data available</div>
   }
 
+  // Shared by the Cloud and Wave cards: rendered beside each card's legend at
+  // the bottom (same row, right-aligned) when there is one, or standalone at
+  // the card's bottom when the chart is unavailable or still loading and no
+  // legend row exists to share.
+  const cloudRefreshMeta = (isCached || updatedAt) ? (
+    <p data-testid="forecast-refresh-meta" className="text-sm text-muted-foreground">
+      {provider ? `Data: ${provider} · ` : ''}
+      {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+      {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 60)}m` : ''}
+    </p>
+  ) : null
+
+  const waveRefreshMeta = (waveIsCached || waveUpdatedAt) ? (
+    <p data-testid="forecast-wave-refresh-meta" className="text-sm text-muted-foreground">
+      {waveProvider ? `Data: ${waveProvider} · ` : ''}
+      {waveIsCached ? 'cached' : 'live'} · updated {formatRefreshAge(waveUpdatedAt, Date.now())}
+      {waveTtlSeconds ? ` · refreshes every ${Math.round(waveTtlSeconds / 3600)}h` : ''}
+    </p>
+  ) : null
+
   return (
     <div className="space-y-4 pb-4">
       {hourlyEntries.length > 0 && (
@@ -1543,26 +1563,23 @@ export function ForecastDrawer({
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   <Cloud size={13} className="text-gauge-secondary" /> Cloud, Temperature & Rain
                 </h4>
-                {(isCached || updatedAt) && (
-                  <p data-testid="forecast-refresh-meta" className="text-xs text-muted-foreground">
-                    {provider ? `Data: ${provider} · ` : ''}
-                    {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
-                    {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 60)}m` : ''}
+                {cloudHourly.length > 0 && (
+                  <p data-testid="forecast-cloud-key" className="text-sm text-muted-foreground sm:text-right">
+                    Rain bar height is the rate in mm/hr, and bar opacity is the chance of it falling.
                   </p>
                 )}
               </div>
               {cloudHourly.length > 0 ? (
                 <>
-                  <p className="mb-2 text-base text-foreground/80">
-                    {uvProtectionStart && uvProtectionEnd
-                      ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
-                      : 'No sun protection needed.'}
-                  </p>
-                  {selectedDay.precipitationSummary && (
-                    <p className="mb-2 text-base text-foreground/80">{selectedDay.precipitationSummary}</p>
-                  )}
-                  <p data-testid="forecast-cloud-key" className="mb-2 text-sm text-muted-foreground">
-                    Rain bar height is the rate in mm/hr, and bar opacity is the chance of it falling.
+                  <p data-testid="forecast-cloud-summary" className="mb-2 text-sm text-foreground/80">
+                    {(() => {
+                      const sunSentence = uvProtectionStart && uvProtectionEnd
+                        ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
+                        : 'No sun protection needed.'
+                      return selectedDay.precipitationSummary
+                        ? `${selectedDay.precipitationSummary} ${sunSentence}`
+                        : sunSentence
+                    })()}
                   </p>
                   <div className="relative">
                   {cloudTooltipEntry && (
@@ -1725,27 +1742,37 @@ export function ForecastDrawer({
                     ))}
                   </div>
                   </div>
-                  <p data-testid="forecast-cloud-legend" className="mt-1 text-2xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="hsl(var(--chart-uv) / 0.5)" /> UV background</span>
-                  </p>
+                  <div className="mt-1 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                    <p data-testid="forecast-cloud-legend" className="min-w-0 text-sm text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="hsl(var(--chart-uv) / 0.5)" /> UV background</span>
+                    </p>
+                    {cloudRefreshMeta}
+                  </div>
                 </>
               ) : (
-                <ChartUnavailableMessage testId="forecast-cloud-unavailable" message="Cloud & temperature forecast unavailable for this day" />
+                <>
+                  <ChartUnavailableMessage testId="forecast-cloud-unavailable" message="Cloud & temperature forecast unavailable for this day" />
+                  {cloudRefreshMeta && <div className="mt-1 flex justify-end">{cloudRefreshMeta}</div>}
+                </>
               )}
             </div>
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Wind size={13} className="text-gauge-secondary" /> Wind ({windUnit})
-              </h4>
+              <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <Wind size={13} className="text-gauge-secondary" /> Wind ({windUnit})
+                </h4>
+                {windHourly.length > 0 && (
+                  <p data-testid="forecast-wind-key" className="text-sm text-muted-foreground sm:text-right">
+                    Barbs show the direction the wind is coming from. A full feather is 10kt, a half feather 5kt.
+                  </p>
+                )}
+              </div>
               {windHourly.length > 0 ? (
                 <>
                   {selectedDay.windSummary && (
                     <p className="mb-2 text-base text-foreground/80">{selectedDay.windSummary}</p>
                   )}
-                  <p data-testid="forecast-wind-key" className="mb-2 text-sm text-muted-foreground">
-                    Barbs show the direction the wind is coming from. A full feather is 10kt, a half feather 5kt.
-                  </p>
                   <div className="relative">
                     {windTooltipEntry && (
                       <ChartTooltipBubble
@@ -1860,7 +1887,7 @@ export function ForecastDrawer({
                       </svg>
                     </div>
                   </div>
-                  <p data-testid="forecast-wind-legend" className="mt-1 text-2xs text-muted-foreground">
+                  <p data-testid="forecast-wind-legend" className="mt-1 text-sm text-muted-foreground">
                     <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wind) / 0.95)" strokeWidth={2.4} /> Wind</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.75)" strokeWidth={1.5} dasharray="4 3" /> Gusts</span> ({windUnit})
                   </p>
                 </>
@@ -1879,40 +1906,47 @@ export function ForecastDrawer({
                       amber marker here rather than inheriting that state. */}
                   {waveStale && <ForecastStaleBadge testId="forecast-wave-stale-badge" staleLabel={waveStaleLabel} />}
                 </h4>
-                {(waveIsCached || waveUpdatedAt) && (
-                  <p data-testid="forecast-wave-refresh-meta" className="text-xs text-muted-foreground">
-                    {waveProvider ? `Data: ${waveProvider} · ` : ''}
-                    {waveIsCached ? 'cached' : 'live'} · updated {formatRefreshAge(waveUpdatedAt, Date.now())}
-                    {waveTtlSeconds ? ` · refreshes every ${Math.round(waveTtlSeconds / 3600)}h` : ''}
+                {!waveLoading && !waveUnavailableDueToError && waveHourly.length > 0 && (
+                  <p data-testid="forecast-wave-key" className="text-sm text-muted-foreground sm:text-right">
+                    Arrows show the direction the swell is heading. Period and height over wavelength ratio (under 1:25 rolls, past 1:10 breaks) are below.
                   </p>
                 )}
               </div>
               <div data-testid="forecast-wave-body" className={waveStale ? 'grayscale' : undefined}>
                 {waveLoading ? (
-                  <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
-                    Loading wave forecast...
-                  </p>
+                  <>
+                    <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
+                      Loading wave forecast...
+                    </p>
+                    {waveRefreshMeta && <div className="mt-1 flex justify-end">{waveRefreshMeta}</div>}
+                  </>
                 ) : waveUnavailableDueToError ? (
-                  <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" onRetry={onWaveRetry} />
+                  <>
+                    <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" onRetry={onWaveRetry} />
+                    {waveRefreshMeta && <div className="mt-1 flex justify-end">{waveRefreshMeta}</div>}
+                  </>
                 ) : waveHourly.length > 0 ? (
                   <>
                     {(() => {
                       const baseSummary = selectedWaveDay?.waveSummary
-                      if (!baseSummary) return null
-                      if (waveSeaTemperatureF === null) {
-                        return <p className="mb-2 text-base text-foreground/80">{baseSummary}</p>
+                      let summaryPart = ''
+                      if (baseSummary) {
+                        if (waveSeaTemperatureF === null) {
+                          summaryPart = baseSummary
+                        } else {
+                          const seaTempDisplay = `${Math.round(displayTemp(waveSeaTemperatureF))}${tempUnit}`
+                          const trimmed = baseSummary.replace(/\.$/, '')
+                          summaryPart = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
+                        }
                       }
-                      const seaTempDisplay = `${Math.round(displayTemp(waveSeaTemperatureF))}${tempUnit}`
-                      const trimmed = baseSummary.replace(/\.$/, '')
-                      const summaryWithTemp = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
-                      return <p className="mb-2 text-base text-foreground/80">{summaryWithTemp}</p>
+                      const largestPart = wavePeakHeightM > 0
+                        ? `Largest wave you are likely to meet: ${(wavePeakHeightM * HIGHEST_WAVE_MULTIPLE).toFixed(1)} m. Roughly one wave in seven reaches the significant height.`
+                        : ''
+                      const combined = [summaryPart, largestPart].filter(Boolean).join(' ')
+                      return combined ? (
+                        <p data-testid="forecast-wave-summary" className="mb-2 text-sm text-foreground/80">{combined}</p>
+                      ) : null
                     })()}
-                    {wavePeakHeightM > 0 && (
-                      <p data-testid="forecast-wave-largest" className="mb-2 text-sm text-muted-foreground">
-                        Largest wave you are likely to meet: {(wavePeakHeightM * HIGHEST_WAVE_MULTIPLE).toFixed(1)} m.
-                        Roughly one wave in seven reaches the significant height.
-                      </p>
-                    )}
                     {waveIndicatorMessages.length > 0 ? (
                       <ul
                         data-testid="forecast-wave-indicators"
@@ -1939,10 +1973,6 @@ export function ForecastDrawer({
                         None of the leading indicators tripped for this day.
                       </p>
                     )}
-                    <p data-testid="forecast-wave-key" className="mb-2 text-sm text-muted-foreground">
-                      Arrows show the direction the swell is heading, with its period in seconds below each. The
-                      number after it is height over wavelength: under 1:25 rolls, past 1:10 breaks.
-                    </p>
                     <div className="relative">
                       {waveTooltipEntry && (
                         <ChartTooltipBubble
@@ -2105,12 +2135,18 @@ export function ForecastDrawer({
                         </svg>
                       </div>
                     </div>
-                    <p data-testid="forecast-wave-legend" className="mt-1 text-2xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span>
-                    </p>
+                    <div className="mt-1 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                      <p data-testid="forecast-wave-legend" className="min-w-0 text-sm text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span>
+                      </p>
+                      {waveRefreshMeta}
+                    </div>
                   </>
                 ) : (
-                  <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
+                  <>
+                    <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
+                    {waveRefreshMeta && <div className="mt-1 flex justify-end">{waveRefreshMeta}</div>}
+                  </>
                 )}
               </div>
             </div>

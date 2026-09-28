@@ -226,4 +226,33 @@ describe('ForecastTideSection', () => {
 
     expect(screen.getByText(/Data: noaa/)).toBeInTheDocument()
   })
+
+  // The refresh line used to sit in this component's own header, above the
+  // chart. It now rides down into TideChart as footerMeta and sits beside
+  // the tide legend at the bottom, matching the Cloud/Wind/Wave cards.
+  it('renders the refresh meta at text-sm, sharing a row with the tide legend rather than the header', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState())
+    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString() }))
+
+    render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+
+    const meta = screen.getByTestId('forecast-tide-refresh-meta')
+    expect(meta.className).toContain('text-sm')
+    const legend = screen.getByTestId('forecast-tide-legend')
+    expect(meta.parentElement).toBe(legend.parentElement)
+  })
+
+  // When there is no chart to host the footer row (no station yet, still
+  // loading, or the fetch failed with nothing cached), the refresh meta must
+  // still surface somewhere rather than disappearing along with the header
+  // line it used to live in.
+  it('shows the refresh meta at the bottom of the section when no chart is available to host it', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState())
+    mockedUseTideChart.mockReturnValue(chartState({ chart: null, updatedAt: new Date().toISOString() }))
+
+    render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+
+    expect(screen.getByText('No tide data available')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-tide-refresh-meta')).toBeInTheDocument()
+  })
 })

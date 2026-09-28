@@ -46,6 +46,13 @@
   `make worktree NAME=<short-name>` creates one alongside this directory with
   `frontend/node_modules` symlinked, so tests run immediately. Only one
   checkout can run the dev stack; use the one that is already up.
+- To check a UI change made in a worktree, leave the dev stack alone and run
+  the worktree's frontend on the next free port against the same backend:
+  `cd frontend && npx vite --port 5175 --strictPort`. Vite proxies `/api` to
+  the running backend on :8080, so the page shows the same live data as :5173
+  and the two can be compared side by side. Ports 5173 and 5174 belong to the
+  dev and e2e stacks; go up from 5175 if another worktree already holds it.
+  Stop the server once the change is checked.
 - Once a branch's PR is merged, `make prune-merged` lists the worktrees and
   local and remote branches it would clear; `CONFIRM=1` deletes them. It
   skips any worktree with uncommitted changes.

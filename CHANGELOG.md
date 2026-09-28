@@ -19,6 +19,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   window has opened, closed or shifted, and tells you when an earlier call no
   longer holds.
 
+### Changed
+
+- The forecast page's chart legends and data-source lines are bigger and
+  easier to read at a glance, and now sit together at the bottom of each
+  chart instead of split between the top and bottom. The cloud, wind and
+  wave keys sit beside their chart's title. Rain and sun, and wave height
+  and the largest wave you're likely to meet, now read as one sentence each
+  instead of two.
+
 ## [0.36.0] - 2026-09-28
 
 ### Breaking
