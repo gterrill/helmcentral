@@ -82,3 +82,6 @@ settings.yaml
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+
+# Continue editor extension; the skills installer writes a copy here.
+.continue/
