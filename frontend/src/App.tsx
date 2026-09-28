@@ -6,8 +6,10 @@ import {
   CloudSun,
   FileText,
   LayoutDashboard,
+  Maximize,
   Mic,
   MicOff,
+  Minimize,
   Radar as RadarIcon,
   Route,
   Settings,
@@ -141,6 +143,8 @@ import { useMateVoice } from '@/hooks/use-mate-voice'
 import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
+import { useFullscreen } from '@/hooks/use-fullscreen'
+import { useSwipePaging } from '@/hooks/use-swipe-paging'
 import {
   DASHBOARD_WIDGET_DEFAULT_SIZE,
   duplicateWidget,
@@ -290,6 +294,10 @@ const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
 // on this the way embed-tile.tsx's own mount deferral is.
 const NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS = 2000
 
+// How long the full screen swipe-paging toast (the page name + "n / total"
+// pill) stays up after a swipe changes the page, before it clears itself.
+const SWIPE_PAGE_TOAST_MS = 1500
+
 /**
  * ADR 0110: `/` (and every other collapse-to-first-page case — an unknown
  * deep-linked page id, a page that just got deleted) has to land on the
@@ -379,6 +387,13 @@ export function App() {
   // the toggle that would exit edit mode, so a stored flag would strand the
   // dashboard in a non-interactive state with no way back out.
   const layoutEditing = layoutEditingRequested && canEditLayout
+  const fullscreen = useFullscreen()
+  // Chrome only hides for the dashboard grid itself, not a panel - if the
+  // operator reaches a panel while fullscreen (an alarm banner tap, say),
+  // the sidebar and header have to come back so it's reachable. Fullscreen
+  // itself is never auto-exited on navigation; the operator leaves it with
+  // Esc or the floating exit button below.
+  const isFullscreenDashboard = fullscreen.isFullscreen && activePanel === null
   // The page a "New Page" click just created (ADR 0107): its name field
   // starts empty and focused instead of showing "Untitled page", and is the
   // only page whose field behaves that way. Cleared once that field settles
@@ -545,6 +560,58 @@ export function App() {
   const { displays, loading: displaysLoading, error: displaysError, refetch: refetchDisplays, createDisplay, updateDisplay, deleteDisplay } = useDisplays()
   const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId, !isDisplay)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
+  // ADR 0110: a page assigned to a display leaves the Dashboard sub-list
+  // (and the header's DashboardPageSwitcher, and full screen swipe paging
+  // just below) for the sidebar's own "Wall displays" group, nested under
+  // the display it's actually on. Hoisted up here (rather than declared
+  // beside its other two uses, right before the non-display return) because
+  // the swipe hook below needs it and every hook in this component has to
+  // run unconditionally, before any of the early returns further down
+  // (auth gate, wall display).
+  const dashboardSubListPages = pages.filter((p) => !p.display_id)
+  const [swipePageToast, setSwipePageToast] = useState<{ name: string; index: number; total: number } | null>(null)
+  const swipePageToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Left/right switches to the next/previous page in the same sub-list and
+  // order the header's DashboardPageSwitcher shows, going through
+  // setActivePageId - the same path its own onSelect uses - so the URL and
+  // history behave exactly as a header pick would. No wrap at either end.
+  const goToDashboardPageOffset = (offset: 1 | -1) => {
+    const list = dashboardSubListPages
+    if (list.length === 0) return
+    // A wall-display page opened from the sidebar is not in this list, so
+    // there is no neighbour to move to.
+    const currentIndex = list.findIndex((p) => p.id === activePageId)
+    if (currentIndex === -1) return
+    const nextIndex = currentIndex + offset
+    if (nextIndex < 0 || nextIndex >= list.length) return
+    const nextPage = list[nextIndex]
+    setActivePageId(nextPage.id)
+    if (swipePageToastTimerRef.current !== null) clearTimeout(swipePageToastTimerRef.current)
+    setSwipePageToast({ name: nextPage.name, index: nextIndex + 1, total: list.length })
+    swipePageToastTimerRef.current = setTimeout(() => {
+      swipePageToastTimerRef.current = null
+      setSwipePageToast(null)
+    }, SWIPE_PAGE_TOAST_MS)
+  }
+  // Full screen only, and never while a layout is being edited - a swipe
+  // there could just as easily be a drag meant for the grid itself.
+  const swipeContainerRef = useSwipePaging<HTMLDivElement>({
+    enabled: isFullscreenDashboard && !layoutEditing,
+    onNext: () => goToDashboardPageOffset(1),
+    onPrevious: () => goToDashboardPageOffset(-1),
+  })
+  // Drops the toast (and whatever timer is still counting it down) the
+  // instant full screen ends, rather than leaving it to finish counting down
+  // over whatever the operator navigated to instead.
+  useEffect(() => {
+    if (!isFullscreenDashboard) setSwipePageToast(null)
+    return () => {
+      if (swipePageToastTimerRef.current !== null) {
+        clearTimeout(swipePageToastTimerRef.current)
+        swipePageToastTimerRef.current = null
+      }
+    }
+  }, [isFullscreenDashboard])
   // Hoisted ahead of the polling hooks below (item B) that gate themselves on
   // which widgets the active page (or the wall's current page, which drives
   // activePageId exactly the same way — see useDisplayRotation below) actually
@@ -3139,11 +3206,6 @@ export function App() {
     )
   }
 
-  // ADR 0110: a page assigned to a display leaves the Dashboard sub-list
-  // (and the header's DashboardPageSwitcher below) for the sidebar's own
-  // "Wall displays" group, nested under the display it's actually on.
-  const dashboardSubListPages = pages.filter((p) => !p.display_id)
-
   return (
     <SidebarProvider>
       <div
@@ -3156,6 +3218,7 @@ export function App() {
         {toastMessage}
       </div>
 
+      {!isFullscreenDashboard && (
       <Sidebar collapsible="icon">
         <SidebarContent>
           <SidebarMenu>
@@ -3235,6 +3298,7 @@ export function App() {
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
+      )}
 
       {/* The shell is min-h-svh, so panels normally grow the page and the
           window scrolls. Mate's thread scrolls inside its own viewport
@@ -3246,6 +3310,7 @@ export function App() {
             gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
             The breadcrumb is the designated slack absorber, so it truncates while the
             clock and controls keep their size. */}
+        {!isFullscreenDashboard && (
         <header className="relative z-60 flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
@@ -3318,9 +3383,33 @@ export function App() {
                 />
                 {/* Gated on the same breakpoint the bento grid uses to decide whether
                     to mount at all. Below `lg` there is no grid to rearrange, so the
-                    control is absent rather than present-but-inert. */}
-                {canEditLayout && (
+                    control is absent rather than present-but-inert. Also hidden while
+                    full screen: the header holding it is what full screen removes, so
+                    there is no chrome left to toggle from. */}
+                {canEditLayout && !fullscreen.isFullscreen && (
                   <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+                )}
+                {/* Full screen (MDN Fullscreen API): fullscreens the whole
+                    document, header and sidebar included, so the grid gets
+                    the entire screen - see isFullscreenDashboard above for
+                    the chrome-hiding half of this and the floating "Exit
+                    full screen" button it renders in the header's place.
+                    Not rendered at all when unsupported (`fullscreen.supported`
+                    is feature-detected via `document.fullscreenEnabled`,
+                    which iPhone Safari lacks) rather than shown disabled. */}
+                {fullscreen.supported && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Full screen"
+                    title="Full screen"
+                    onClick={() => {
+                      setLayoutEditing(false)
+                      fullscreen.enter()
+                    }}
+                  >
+                    <Maximize className="h-4 w-4" />
+                  </Button>
                 )}
               </>
             )}
@@ -3429,8 +3518,48 @@ export function App() {
             />
           </div>
         </header>
+        )}
+        {/* Full screen, touch-first exit affordance: the header (and its
+            "Exit full screen" counterpart) is gone in this state, so a
+            screen with no Esc key needs its own way back. Esc and the
+            browser's own chrome still work too - useFullscreen's
+            `fullscreenchange` listener is what notices either one. */}
+        {isFullscreenDashboard && (
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Exit full screen"
+            title="Exit full screen"
+            className="fixed right-2 top-2 z-60 border-border bg-card/80 text-muted-foreground"
+            onClick={() => fullscreen.exit()}
+          >
+            <Minimize className="h-4 w-4" />
+          </Button>
+        )}
+        {/* Swipe-paging toast: names the page a left/right swipe just
+            landed on, plus its position in the same sub-list order the
+            header's page switcher uses ("2 / 4"). role="status" +
+            aria-live="polite" rather than a visual-only toast, since a
+            screen reader user swiping the same gesture should hear the
+            same confirmation a sighted operator sees. Self-clears via
+            goToDashboardPageOffset's timer, or immediately if full screen
+            ends first (the effect above). */}
+        {isFullscreenDashboard && swipePageToast && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-none fixed left-1/2 top-4 z-60 -translate-x-1/2 rounded-full border border-border bg-card/90 px-4 py-2 text-center shadow-lg"
+          >
+            <p className="font-display text-xs font-semibold uppercase tracking-[0.14em] text-foreground">
+              {swipePageToast.name}
+            </p>
+            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+              {swipePageToast.index} / {swipePageToast.total}
+            </p>
+          </div>
+        )}
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
-          <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
+          <div className={cn('mx-auto flex w-full flex-1 min-h-0 flex-col gap-4', !isFullscreenDashboard && 'max-w-[1800px]')}>
             <ConnectionBanner />
             {/* z-55 keeps a live alarm above the Mate sheet's backdrop (z-50)
                 while staying under the dashboard header, which sits at
@@ -3466,7 +3595,7 @@ export function App() {
               />
             </div>
 
-            <div className="min-h-0 flex-1">
+            <div ref={swipeContainerRef} data-testid="dashboard-swipe-surface" className="min-h-0 flex-1">
               {activePanel === null ? (
                 dashboardGrid
               ) : (

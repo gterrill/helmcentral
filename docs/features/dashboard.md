@@ -81,6 +81,24 @@ See [Create a dashboard page](../how-to/create-a-dashboard-page.md) for the
 full walkthrough, including renaming and deleting, and [Reorder dashboard
 pages](../how-to/reorder-dashboard-pages.md) for changing the sequence.
 
+## Full screen
+
+Tap the full screen button (four outward corners) in the header and the
+sidebar, header and browser bars all go, leaving the tiles on the whole
+screen. A tablet mounted at the helm or a screen at the nav station then reads
+like a dedicated instrument. A live alarm still shows over
+the grid; full screen never quiets one. Press Esc, or tap the small exit
+button that appears in the corner for a screen with no keyboard, to bring the
+sidebar and header back. Following an alarm banner into the alarms list also
+brings them back, since you need the sidebar to get anywhere else from there.
+On a touchscreen, swipe left or right anywhere on the grid to move to the
+next or previous page, the same order they're listed in normally. A page
+name and its position ("2 / 4") show briefly in the middle of the screen so
+you know where you landed. A map or a chart keeps its own drag for panning
+or reading values off it, so swiping across one of those moves the map or
+the chart instead of the page. Full screen isn't offered on an iPhone, which
+doesn't support it.
+
 ## Wall displays
 
 A wall display is a screen somewhere on the boat that shows the dashboard and

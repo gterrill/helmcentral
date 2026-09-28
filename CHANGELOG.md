@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- The dashboard has a full screen button in the header. It hides the sidebar
+  and header so the tiles fill the whole screen, for a tablet at the helm or a
+  screen at the nav station. Live alarms still show. On a touchscreen, swipe
+  left or right on the grid to move between pages. Press Esc, or the small
+  exit button in the top corner, to bring the sidebar and header back. Not
+  offered on an iPhone, which doesn't support it.
 - The Nearby Vessels tile now marks any vessel with a live collision alarm:
   the row picks up a red or amber highlight and a "Collision alarm" or
   "Collision warning" label depending on severity, and that vessel moves to
