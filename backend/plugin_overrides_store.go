@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,63 +16,45 @@ import (
 // the /api/plugins/:type/:id/overrides handlers (reads/writes).
 var globalPluginOverridesStore *pluginOverridesStore
 
-func pluginOverridesDBPath() string {
-	return cacheFilePath("PLUGIN_OVERRIDES_DB_PATH", "data/plugin_overrides.sqlite")
-}
-
 // pluginOverridesStore is a SQLite-backed store of per-plugin allowed-hosts/
-// allowed-secrets overrides, mirroring nearby_contacts.go's SQLite-store
-// pattern (single-connection pool, CREATE TABLE IF NOT EXISTS). Unlike
-// secrets_store.go, this is a NEW sibling store rather than an addition to
-// the encrypted secrets store: overrides are plain string arrays (hostnames,
-// secret key NAMES - never secret values), so there is nothing here that
-// needs encryption at rest, and this store has an entirely different
-// lifecycle (one row per plugin file, not one row per secret key). See
-// docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md.
+// allowed-secrets overrides, sharing helmcentral.sqlite with the other five
+// stores (ADR 0141). Unlike secrets_store.go, this is a sibling store rather
+// than an addition to the encrypted secrets store: overrides are plain
+// string arrays (hostnames, secret key NAMES - never secret values), so
+// there is nothing here that needs encryption at rest, and this store has an
+// entirely different lifecycle (one row per plugin file, not one row per
+// secret key). See docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md.
 type pluginOverridesStore struct{ db *sql.DB }
 
-// newPluginOverridesStore opens (creating if necessary) the SQLite database
-// at dbPath and ensures the plugin_overrides table exists. Mirrors
-// newNearbyContactStore's idiom exactly; unlike newSecretsStore, there is no
-// master-key/encryption integrity check to run at open time - a normal
-// sqlite open failure is the only fail-fast condition here.
-func newPluginOverridesStore(dbPath string) (*pluginOverridesStore, error) {
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create plugin overrides directory: %w", err)
-		}
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open plugin overrides database: %w", err)
-	}
-	// modernc.org/sqlite surfaces concurrent writes as "database is locked"
-	// rather than queueing them itself; capping the pool at one connection
-	// makes database/sql queue callers instead, same reasoning as
-	// nearby_contacts.go and secrets_store.go's single-writer SQLite usage.
-	db.SetMaxOpenConns(1)
-
+// createPluginOverridesSchema creates plugin_overrides and
+// plugin_config_values if they do not already exist. Factored out of
+// newPluginOverridesStore so migrateToHelmcentralDB (helmcentral_db.go) can
+// create this store's tables in the combined database ahead of copying rows
+// into them, without duplicating the schema itself.
+//
+// plugin_config_values holds one row per (plugin, declared config field) -
+// the values a plugin author's <name>.config_fields.json sidecar exposes as
+// operator-editable in the Settings provider modal (the "plugins declare
+// their own settings" rewrite of ADR 0100), applied on the very next plugin
+// call with no restart. Unlike plugin_overrides above (one row per plugin,
+// both allowlists together), this is one row per field so a partial save
+// (or the absence of any saved value at all, the normal default) is a
+// natural, ungrouped state - most plugins have zero rows here forever. It
+// was added to this store after plugin_overrides itself shipped, so a
+// legacy plugin_overrides.sqlite from before that has plugin_overrides but
+// no plugin_config_values table at all - migrateAttachedLegacyData
+// (helmcentral_db.go) creates it directly on such a file, with this exact
+// DDL, before copying from it.
+func createPluginOverridesSchema(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS plugin_overrides (
 		wasm_path       TEXT PRIMARY KEY,
 		allowed_hosts   TEXT NOT NULL,
 		allowed_secrets TEXT NOT NULL,
 		updated_at      INTEGER NOT NULL
 	)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create plugin_overrides table: %w", err)
+		return fmt.Errorf("create plugin_overrides table: %w", err)
 	}
 
-	// plugin_config_values holds one row per (plugin, declared config field)
-	// - the values a plugin author's <name>.config_fields.json sidecar
-	// exposes as operator-editable in the Settings provider modal (the
-	// "plugins declare their own settings" rewrite of ADR 0100), applied on
-	// the very next plugin call with no restart. Unlike plugin_overrides
-	// above (one row per plugin, both allowlists together), this is one row
-	// per field so a partial save (or the absence of any saved value at all,
-	// the normal default) is a natural, ungrouped state - most plugins have
-	// zero rows here forever.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS plugin_config_values (
 		wasm_path  TEXT NOT NULL,
 		key        TEXT NOT NULL,
@@ -82,8 +62,25 @@ func newPluginOverridesStore(dbPath string) (*pluginOverridesStore, error) {
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY (wasm_path, key)
 	)`); err != nil {
+		return fmt.Errorf("create plugin_config_values table: %w", err)
+	}
+
+	return nil
+}
+
+// newPluginOverridesStore opens (creating if necessary) the SQLite database
+// at dbPath and ensures its tables exist. Unlike newSecretsStore, there is
+// no master-key/encryption integrity check to run at open time - a normal
+// sqlite open failure is the only fail-fast condition here.
+func newPluginOverridesStore(dbPath string) (*pluginOverridesStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createPluginOverridesSchema(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create plugin_config_values table: %w", err)
+		return nil, err
 	}
 
 	return &pluginOverridesStore{db: db}, nil

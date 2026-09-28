@@ -146,9 +146,9 @@ func TestOpenHelmcentralDB_ReadThenWriteTransactionSurvivesInterveningWrite(t *t
 	}
 }
 
-// ── all three stores sharing one file ───────────────────────────────────
+// ── all six stores sharing one file ─────────────────────────────────────
 
-func TestThreeStores_ShareOneFileConcurrently(t *testing.T) {
+func TestSixStores_ShareOneFileConcurrently(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
 
 	docStore, err := newDocumentStore(path)
@@ -173,6 +173,24 @@ func TestThreeStores_ShareOneFileConcurrently(t *testing.T) {
 	ncStore.dwell = 0
 	defer ncStore.close()
 
+	alStore, err := newAlarmLogStore(path)
+	if err != nil {
+		t.Fatalf("newAlarmLogStore: %v", err)
+	}
+	defer alStore.Close()
+
+	wpStore, err := newWebPushSubscriptionStore(path)
+	if err != nil {
+		t.Fatalf("newWebPushSubscriptionStore: %v", err)
+	}
+	defer wpStore.Close()
+
+	poStore, err := newPluginOverridesStore(path)
+	if err != nil {
+		t.Fatalf("newPluginOverridesStore: %v", err)
+	}
+	defer poStore.db.Close()
+
 	// Write through each store.
 	doc, err := docStore.Insert(document{SHA256: "shared-file-sha", Filename: "manual.pdf", MIME: "application/pdf"})
 	if err != nil {
@@ -189,9 +207,21 @@ func TestThreeStores_ShareOneFileConcurrently(t *testing.T) {
 		t.Fatalf("recordContactIfNew: %v", err)
 	}
 
+	if _, err := alStore.RecordRaised(alarmLogEntry{RuleID: "rule-shared", Label: "Shared file test", State: alarmStateAlarm, RaisedAt: now}); err != nil {
+		t.Fatalf("RecordRaised: %v", err)
+	}
+
+	if _, err := wpStore.Upsert(webPushSubscription{Endpoint: "https://push.example/shared-file", P256dh: "k", Auth: "a", VAPIDPublicKey: "key-shared"}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if err := poStore.Set("plugins/tides/shared-file.wasm", []string{"example.com"}, nil); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
 	// Read every write back, through the store that wrote it - proving all
-	// three actually landed in the one shared file rather than three
-	// separate ones that happened to share a name.
+	// six actually landed in the one shared file rather than six separate
+	// ones that happened to share a name.
 	gotDoc, ok, err := docStore.GetBySHA("shared-file-sha")
 	if err != nil || !ok {
 		t.Fatalf("GetBySHA: ok=%v err=%v", ok, err)
@@ -212,7 +242,22 @@ func TestThreeStores_ShareOneFileConcurrently(t *testing.T) {
 		t.Fatalf("expected 1 nearby contact row, got %d", count)
 	}
 
-	// And confirm it is genuinely one file on disk, not three.
+	entries, err := alStore.Recent(10)
+	if err != nil || len(entries) != 1 || entries[0].RuleID != "rule-shared" {
+		t.Fatalf("expected the shared-file alarm log entry, got entries=%+v err=%v", entries, err)
+	}
+
+	subs, err := wpStore.All()
+	if err != nil || len(subs) != 1 || subs[0].Endpoint != "https://push.example/shared-file" {
+		t.Fatalf("expected the shared-file push subscription, got subs=%+v err=%v", subs, err)
+	}
+
+	hosts, _, ok, err := poStore.Get("plugins/tides/shared-file.wasm")
+	if err != nil || !ok || len(hosts) != 1 || hosts[0] != "example.com" {
+		t.Fatalf("expected the shared-file plugin override, got hosts=%v ok=%v err=%v", hosts, ok, err)
+	}
+
+	// And confirm it is genuinely one file on disk, not six.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected shared file to exist: %v", err)
 	}
@@ -220,64 +265,98 @@ func TestThreeStores_ShareOneFileConcurrently(t *testing.T) {
 
 // ── checkForLegacyDatabaseFiles (startup guard) ─────────────────────────
 
-// legacyGuardTestPaths returns three legacy paths inside a fresh temp dir,
-// at their DEFAULT filenames beside where helmcentral.sqlite would go -
-// none of them created yet. Most tests use these; the one that exercises a
+// legacyGuardTestPaths returns six legacy paths inside a fresh temp dir, at
+// their DEFAULT filenames beside where helmcentral.sqlite would go - none
+// of them created yet. Most tests use these; the one that exercises a
 // legacy path outside this directory builds its own paths instead.
-func legacyGuardTestPaths(t *testing.T) (legacyDocs, legacyAssistant, legacyNearby string) {
+func legacyGuardTestPaths(t *testing.T) (legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides string) {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "documents.sqlite"),
 		filepath.Join(dir, "assistant.sqlite"),
-		filepath.Join(dir, "nearby-contacts.sqlite")
+		filepath.Join(dir, "nearby-contacts.sqlite"),
+		filepath.Join(dir, "alarm-log.sqlite"),
+		filepath.Join(dir, "webpush-subscriptions.sqlite"),
+		filepath.Join(dir, "plugin_overrides.sqlite")
 }
 
 func TestCheckForLegacyDatabaseFiles_NoneFoundReturnsNil(t *testing.T) {
-	legacyDocs, legacyAssistant, legacyNearby := legacyGuardTestPaths(t)
-	if err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby); err != nil {
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
+	if err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides); err != nil {
 		t.Fatalf("expected nil when no legacy files exist, got %v", err)
 	}
 }
 
 func TestCheckForLegacyDatabaseFiles_DetectsDocumentsSqlite(t *testing.T) {
-	legacyDocs, legacyAssistant, legacyNearby := legacyGuardTestPaths(t)
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
 	mustWriteFile(t, legacyDocs, "x")
 
-	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby)
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when documents.sqlite is present")
 	}
 }
 
 func TestCheckForLegacyDatabaseFiles_DetectsAssistantSqlite(t *testing.T) {
-	legacyDocs, legacyAssistant, legacyNearby := legacyGuardTestPaths(t)
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
 	mustWriteFile(t, legacyAssistant, "x")
 
-	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby)
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when assistant.sqlite is present")
 	}
 }
 
 func TestCheckForLegacyDatabaseFiles_DetectsNearbyContactsSqlite(t *testing.T) {
-	legacyDocs, legacyAssistant, legacyNearby := legacyGuardTestPaths(t)
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
 	mustWriteFile(t, legacyNearby, "x")
 
-	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby)
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when nearby-contacts.sqlite is present")
 	}
 }
 
+func TestCheckForLegacyDatabaseFiles_DetectsAlarmLogSqlite(t *testing.T) {
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
+	mustWriteFile(t, legacyAlarmLog, "x")
+
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err == nil {
+		t.Fatal("expected an error when alarm-log.sqlite is present")
+	}
+}
+
+func TestCheckForLegacyDatabaseFiles_DetectsWebPushSqlite(t *testing.T) {
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
+	mustWriteFile(t, legacyWebPush, "x")
+
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err == nil {
+		t.Fatal("expected an error when webpush-subscriptions.sqlite is present")
+	}
+}
+
+func TestCheckForLegacyDatabaseFiles_DetectsPluginOverridesSqlite(t *testing.T) {
+	legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := legacyGuardTestPaths(t)
+	mustWriteFile(t, legacyPluginOverrides, "x")
+
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err == nil {
+		t.Fatal("expected an error when plugin_overrides.sqlite is present")
+	}
+}
+
 // TestCheckForLegacyDatabaseFiles_DetectsPathOutsideHelmcentralDir pins the
 // review finding that the guard used to derive default filenames from
-// helmcentralPath's own directory, while migrate-db resolves the three
-// legacy paths independently through DOCUMENTS_DB_PATH/ASSISTANT_DB_PATH/
-// NEARBY_CONTACTS_DB_PATH (legacyDocumentsDBPath and friends,
-// backend/helmcentral_db.go) - which can point anywhere. An install that
-// had set one of those env vars to a custom location would pass the old
-// guard (nothing at the default path beside helmcentral.sqlite) and start
-// up against an empty combined file while its real legacy data sat
+// helmcentralPath's own directory, while migrate-db resolves each legacy
+// path independently through DOCUMENTS_DB_PATH/ASSISTANT_DB_PATH/
+// NEARBY_CONTACTS_DB_PATH/ALARM_LOG_DB/WEBPUSH_DB_PATH/
+// PLUGIN_OVERRIDES_DB_PATH (legacyDocumentsDBPath and friends,
+// backend/helmcentral_db.go) - which can each point anywhere. An install
+// that had set one of those env vars to a custom location would pass the
+// old guard (nothing at the default path beside helmcentral.sqlite) and
+// start up against an empty combined file while its real legacy data sat
 // untouched at the custom path. Passing the exact paths in, the same ones
 // migrate-db itself resolves and uses, closes that gap: this legacy
 // documents.sqlite lives in a directory that has nothing to do with where
@@ -287,14 +366,17 @@ func TestCheckForLegacyDatabaseFiles_DetectsPathOutsideHelmcentralDir(t *testing
 	legacyDocs := filepath.Join(legacyDir, "custom-documents.sqlite")
 	mustWriteFile(t, legacyDocs, "x")
 
-	// The other two legacy paths, and helmcentral.sqlite's own directory,
+	// The other five legacy paths, and helmcentral.sqlite's own directory,
 	// are a completely different temp dir - only legacyDocs, off on its
 	// own custom path, exists at all.
 	helmcentralDir := t.TempDir()
 	legacyAssistant := filepath.Join(helmcentralDir, "assistant.sqlite")
 	legacyNearby := filepath.Join(helmcentralDir, "nearby-contacts.sqlite")
+	legacyAlarmLog := filepath.Join(helmcentralDir, "alarm-log.sqlite")
+	legacyWebPush := filepath.Join(helmcentralDir, "webpush-subscriptions.sqlite")
+	legacyPluginOverrides := filepath.Join(helmcentralDir, "plugin_overrides.sqlite")
 
-	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby)
+	err := checkForLegacyDatabaseFiles(legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when a legacy file exists at a custom path outside the helmcentral directory")
 	}
@@ -366,22 +448,25 @@ func TestRenameDocumentsFileForward_UndoesPartialRenameOnSidecarFailure(t *testi
 // ── migrateToHelmcentralDB ───────────────────────────────────────────────
 
 // migrateTestPaths returns a fresh temp dir's would-be helmcentral.sqlite
-// path plus the three legacy paths inside it, none of them created yet.
-func migrateTestPaths(t *testing.T) (newPath, legacyDocs, legacyAssistant, legacyNearby string) {
+// path plus the six legacy paths inside it, none of them created yet.
+func migrateTestPaths(t *testing.T) (newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides string) {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "helmcentral.sqlite"),
 		filepath.Join(dir, "documents.sqlite"),
 		filepath.Join(dir, "assistant.sqlite"),
-		filepath.Join(dir, "nearby-contacts.sqlite")
+		filepath.Join(dir, "nearby-contacts.sqlite"),
+		filepath.Join(dir, "alarm-log.sqlite"),
+		filepath.Join(dir, "webpush-subscriptions.sqlite"),
+		filepath.Join(dir, "plugin_overrides.sqlite")
 }
 
 func TestMigrateToHelmcentralDB_RefusesWhenHelmcentralAlreadyExists(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustWriteFile(t, newPath, "already here")
 	mustWriteFile(t, legacyDocs, "irrelevant")
 
-	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when helmcentral.sqlite already exists")
 	}
@@ -393,25 +478,181 @@ func TestMigrateToHelmcentralDB_RefusesWhenHelmcentralAlreadyExists(t *testing.T
 	}
 }
 
-func TestMigrateToHelmcentralDB_RefusesWhenDocumentsMissing(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
-	// legacyDocs deliberately not created.
+// TestMigrateToHelmcentralDB_RefusesWhenNoLegacyFilesExist pins the review
+// finding that refusing outright whenever documents.sqlite alone was
+// missing - regardless of what else was present - left an install old
+// enough to predate the document store (ADR 0106) unable to migrate even
+// though it genuinely had other legacy data. The refusal now only fires
+// when NONE of the six legacy files exist at all: a plain fresh install
+// with nothing to migrate.
+func TestMigrateToHelmcentralDB_RefusesWhenNoLegacyFilesExist(t *testing.T) {
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
+	// None of the six legacy paths created.
 
-	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
-		t.Fatal("expected an error when documents.sqlite does not exist")
+		t.Fatal("expected an error when no legacy database file exists")
 	}
 	if _, statErr := os.Stat(newPath); statErr == nil {
 		t.Fatal("expected no helmcentral.sqlite to be created on refusal")
 	}
 }
 
+// TestMigrateToHelmcentralDB_DocumentsMissingButOtherLegacyFilesPresentSucceeds
+// covers the install this review finding was about: no documents.sqlite
+// ever existed (predating ADR 0106), but assistant.sqlite and
+// alarm-log.sqlite do. migrateWithoutDocumentsFile creates helmcentral.sqlite
+// fresh, with the documents schema but no document rows, then ATTACHes and
+// copies the two legacy files that do exist - the same single transaction
+// migrateWithDocumentsFile's ATTACH-and-copy step uses. All six stores,
+// including documentStore itself (with an empty but usable schema), must be
+// able to open the result afterward.
+func TestMigrateToHelmcentralDB_DocumentsMissingButOtherLegacyFilesPresentSucceeds(t *testing.T) {
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
+	// legacyDocs, legacyNearby, legacyWebPush and legacyPluginOverrides
+	// deliberately absent - only assistant and alarm-log exist, standing in
+	// for an install old enough to predate the document store but that had
+	// Mate and alarms configured.
+	mustCreateLegacyAssistantDB(t, legacyAssistant)
+	mustCreateLegacyAlarmLogDB(t, legacyAlarmLog)
+
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err != nil {
+		t.Fatalf("migrateToHelmcentralDB: %v", err)
+	}
+
+	if result.DocumentsRenamed {
+		t.Error("expected DocumentsRenamed to be false when documents.sqlite never existed")
+	}
+	if !result.AssistantMigrated {
+		t.Error("expected AssistantMigrated to be true")
+	}
+	if !result.AlarmLogMigrated {
+		t.Error("expected AlarmLogMigrated to be true")
+	}
+	if result.NearbyMigrated || result.WebPushMigrated || result.PluginOverridesMigrated {
+		t.Errorf("expected the three absent legacy files to report false, got %+v", result)
+	}
+
+	if _, statErr := os.Stat(newPath); statErr != nil {
+		t.Fatalf("expected helmcentral.sqlite to exist: %v", statErr)
+	}
+	assertJournalModeWAL(t, newPath)
+
+	for _, p := range []string{legacyAssistant, legacyAlarmLog} {
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s to no longer exist, stat err = %v", p, statErr)
+		}
+		if _, statErr := os.Stat(p + ".migrated"); statErr != nil {
+			t.Errorf("expected %s.migrated to exist: %v", p, statErr)
+		}
+	}
+
+	// documents.sqlite never existed, so there is no legacyDocs (or
+	// legacyDocs.migrated) to check either way - only that documentStore
+	// itself can open the combined file with a usable, empty schema.
+	docStore, err := newDocumentStore(newPath)
+	if err != nil {
+		t.Fatalf("newDocumentStore on migrated file: %v", err)
+	}
+	docStore.Close()
+
+	asStore, err := newAssistantStore(newPath)
+	if err != nil {
+		t.Fatalf("newAssistantStore on migrated file: %v", err)
+	}
+	defer asStore.Close()
+	convs, err := asStore.ListConversations()
+	if err != nil || len(convs) != 1 || convs[0].Title != "legacy conversation" {
+		t.Fatalf("expected the migrated conversation to survive, got convs=%+v err=%v", convs, err)
+	}
+
+	ncStore, err := newNearbyContactStore(newPath)
+	if err != nil {
+		t.Fatalf("newNearbyContactStore on migrated file: %v", err)
+	}
+	ncStore.close()
+
+	alStore, err := newAlarmLogStore(newPath)
+	if err != nil {
+		t.Fatalf("newAlarmLogStore on migrated file: %v", err)
+	}
+	defer alStore.Close()
+	entries, err := alStore.Recent(10)
+	if err != nil || len(entries) != 1 || entries[0].RuleID != "rule-1" {
+		t.Fatalf("expected the migrated alarm log entry to survive, got entries=%+v err=%v", entries, err)
+	}
+
+	wpStore, err := newWebPushSubscriptionStore(newPath)
+	if err != nil {
+		t.Fatalf("newWebPushSubscriptionStore on migrated file: %v", err)
+	}
+	wpStore.Close()
+
+	poStore, err := newPluginOverridesStore(newPath)
+	if err != nil {
+		t.Fatalf("newPluginOverridesStore on migrated file: %v", err)
+	}
+	poStore.db.Close()
+}
+
+// TestMigrateToHelmcentralDB_FailureWithoutDocumentsFileRemovesHelmcentralFile
+// pins the failure-cleanup half of the same fix: when documents.sqlite never
+// existed, there is nothing to rename helmcentral.sqlite back to on failure,
+// so migrateWithoutDocumentsFile removes the file it created instead. A
+// broken webpush-subscriptions.sqlite (missing vapid_public_key, a required
+// column with no default) fails the copy after assistant has already copied
+// successfully inside the same transaction; the assistant file must come out
+// of the rollback untouched, and a rerun after fixing the fixture must
+// succeed.
+func TestMigrateToHelmcentralDB_FailureWithoutDocumentsFileRemovesHelmcentralFile(t *testing.T) {
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
+	mustCreateLegacyAssistantDB(t, legacyAssistant)
+	mustCreateLegacyWebPushDBMissingColumn(t, legacyWebPush)
+
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err == nil {
+		t.Fatal("expected an error when the web push copy fails")
+	}
+
+	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected helmcentral.sqlite to have been removed, stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(newPath + "-wal"); !os.IsNotExist(statErr) {
+		t.Errorf("expected helmcentral.sqlite-wal to have been removed too, stat err = %v", statErr)
+	}
+
+	if _, statErr := os.Stat(legacyAssistant); statErr != nil {
+		t.Errorf("expected assistant.sqlite to remain at its original name (its own copy was inside the same rolled-back transaction): %v", statErr)
+	}
+	if _, statErr := os.Stat(legacyAssistant + ".migrated"); !os.IsNotExist(statErr) {
+		t.Errorf("expected assistant.sqlite NOT to be renamed to .migrated, since nothing committed, stat err = %v", statErr)
+	}
+
+	// Fix the broken fixture and confirm the install is genuinely retryable.
+	if err := os.Remove(legacyWebPush); err != nil {
+		t.Fatalf("remove broken legacy webpush db: %v", err)
+	}
+	mustCreateLegacyWebPushDB(t, legacyWebPush)
+
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err != nil {
+		t.Fatalf("second migrateToHelmcentralDB after fixing the fixture: %v", err)
+	}
+	if !result.AssistantMigrated {
+		t.Error("expected AssistantMigrated to be true on the successful retry")
+	}
+	if !result.WebPushMigrated {
+		t.Error("expected WebPushMigrated to be true on the successful retry")
+	}
+}
+
 func TestMigrateToHelmcentralDB_RefusesWhenHotJournalPresent(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustCreateLegacyDocumentsDB(t, legacyDocs)
 	mustWriteFile(t, legacyDocs+"-journal", "hot journal")
 
-	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when a hot rollback journal is present")
 	}
@@ -509,6 +750,181 @@ func mustCreateLegacyNearbyDBMissingColumn(t *testing.T, path string) {
 	}
 }
 
+// mustCreateLegacyAlarmLogDB creates a real pre-migration alarm-log.sqlite
+// via newAlarmLogStore itself, with one alarm_log occurrence and one queued
+// notification, so the migration's row-count verification has real data in
+// both tables to check.
+func mustCreateLegacyAlarmLogDB(t *testing.T, path string) {
+	t.Helper()
+	store, err := newAlarmLogStore(path)
+	if err != nil {
+		t.Fatalf("newAlarmLogStore (legacy fixture): %v", err)
+	}
+	defer store.Close()
+	now := time.Date(2026, time.September, 20, 8, 0, 0, 0, time.UTC)
+	if _, err := store.RecordRaised(alarmLogEntry{RuleID: "rule-1", Label: "Legacy alarm", State: alarmStateAlarm, RaisedAt: now}); err != nil {
+		t.Fatalf("RecordRaised (legacy fixture): %v", err)
+	}
+	if err := store.Enqueue("ntfy", "rule-1", []byte("legacy payload"), now); err != nil {
+		t.Fatalf("Enqueue (legacy fixture): %v", err)
+	}
+}
+
+// mustCreateLegacyAlarmLogDBMissingRuleIDColumn creates a pre-migration
+// alarm-log.sqlite whose notification_queue table predates
+// ensureQueueTable/createAlarmLogSchema's own ALTER TABLE that added
+// rule_id: a real install that was never reopened after that column
+// shipped. migrateAttachedLegacyData (helmcentral_db.go) patches this
+// column onto the attached legacy file before copying, so migration must
+// succeed against it - unlike mustCreateLegacyNearbyDBMissingColumn above,
+// this is not a fixture used to force a failure.
+func mustCreateLegacyAlarmLogDBMissingRuleIDColumn(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-rule_id legacy alarm log db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE alarm_log (
+		id             TEXT PRIMARY KEY,
+		rule_id        TEXT NOT NULL,
+		source         TEXT NOT NULL,
+		label          TEXT NOT NULL,
+		path           TEXT NOT NULL,
+		state          TEXT NOT NULL,
+		message        TEXT NOT NULL,
+		value_at_raise REAL NOT NULL,
+		raised_at      INTEGER NOT NULL,
+		acked_at       INTEGER,
+		cleared_at     INTEGER
+	)`); err != nil {
+		t.Fatalf("create pre-rule_id alarm_log table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO alarm_log (id, rule_id, source, label, path, state, message, value_at_raise, raised_at)
+		VALUES ('log-1', 'rule-1', 'rule', 'Legacy alarm', 'electrical.batteries.house.voltage', 'alarm', 'House bank low', 11.0, 0)`); err != nil {
+		t.Fatalf("insert pre-rule_id alarm_log row: %v", err)
+	}
+	// notification_queue as it existed before rule_id was ALTER TABLE'd on -
+	// no rule_id column at all.
+	if _, err := db.Exec(`CREATE TABLE notification_queue (
+		id              TEXT PRIMARY KEY,
+		transport       TEXT NOT NULL,
+		payload         BLOB NOT NULL,
+		attempts        INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at INTEGER NOT NULL,
+		created_at      INTEGER NOT NULL,
+		last_error      TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create pre-rule_id notification_queue table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO notification_queue (id, transport, payload, attempts, next_attempt_at, created_at)
+		VALUES ('queue-1', 'ntfy', 'legacy payload', 0, 0, 0)`); err != nil {
+		t.Fatalf("insert pre-rule_id notification_queue row: %v", err)
+	}
+}
+
+// mustCreateLegacyWebPushDB creates a real pre-migration
+// webpush-subscriptions.sqlite via newWebPushSubscriptionStore itself, with
+// one registered device.
+func mustCreateLegacyWebPushDB(t *testing.T, path string) {
+	t.Helper()
+	store, err := newWebPushSubscriptionStore(path)
+	if err != nil {
+		t.Fatalf("newWebPushSubscriptionStore (legacy fixture): %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Upsert(webPushSubscription{
+		Endpoint:       "https://push.example/legacy",
+		P256dh:         "legacy-p256dh",
+		Auth:           "legacy-auth",
+		Label:          "Legacy phone",
+		VAPIDPublicKey: "legacy-key",
+	}); err != nil {
+		t.Fatalf("Upsert (legacy fixture): %v", err)
+	}
+}
+
+// mustCreateLegacyWebPushDBMissingColumn creates a pre-migration
+// webpush-subscriptions.sqlite whose push_subscriptions table is missing
+// the vapid_public_key column, standing in for a corrupt or hand-edited
+// legacy file - used to force a failure during the copy of a NEW (post
+// ADR 0141) table, the same way mustCreateLegacyNearbyDBMissingColumn does
+// for nearby-contacts above. vapid_public_key has no default, so the
+// explicit-column-list copy fails deterministically at the SQL level ("no
+// such column: vapid_public_key").
+func mustCreateLegacyWebPushDBMissingColumn(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open broken legacy webpush db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE push_subscriptions (
+		id              TEXT PRIMARY KEY,
+		endpoint        TEXT NOT NULL UNIQUE,
+		p256dh          TEXT NOT NULL,
+		auth            TEXT NOT NULL,
+		label           TEXT NOT NULL DEFAULT '',
+		user_agent      TEXT NOT NULL DEFAULT '',
+		created_at      INTEGER NOT NULL,
+		last_success_at INTEGER,
+		last_error      TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create broken push_subscriptions table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, created_at) VALUES ('sub-1', 'https://push.example/broken', 'p', 'a', 0)`); err != nil {
+		t.Fatalf("insert broken push_subscriptions row: %v", err)
+	}
+}
+
+// mustCreateLegacyPluginOverridesDB creates a real pre-migration
+// plugin_overrides.sqlite via newPluginOverridesStore itself, with one
+// override row and one config value row.
+func mustCreateLegacyPluginOverridesDB(t *testing.T, path string) {
+	t.Helper()
+	store, err := newPluginOverridesStore(path)
+	if err != nil {
+		t.Fatalf("newPluginOverridesStore (legacy fixture): %v", err)
+	}
+	defer store.db.Close()
+	if err := store.Set("plugins/tides/bom.wasm", []string{"www.bom.gov.au"}, nil); err != nil {
+		t.Fatalf("Set (legacy fixture): %v", err)
+	}
+	if err := store.SetConfigValues("plugins/poi/osm-overpass.wasm", map[string]string{"overpass_url": "https://overpass.example/api/interpreter"}); err != nil {
+		t.Fatalf("SetConfigValues (legacy fixture): %v", err)
+	}
+}
+
+// mustCreateLegacyPluginOverridesDBMissingConfigValuesTable creates a
+// pre-migration plugin_overrides.sqlite that predates plugin_config_values
+// (createPluginOverridesSchema's second table, added after plugin_overrides
+// itself shipped): a real install that was never reopened after that table
+// shipped, so plugin_config_values doesn't exist in it at all.
+// migrateAttachedLegacyData (helmcentral_db.go) creates this table directly
+// on the attached legacy file before copying, so migration must succeed
+// against it - unlike mustCreateLegacyNearbyDBMissingColumn above, this is
+// not a fixture used to force a failure.
+func mustCreateLegacyPluginOverridesDBMissingConfigValuesTable(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-plugin_config_values legacy db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE plugin_overrides (
+		wasm_path       TEXT PRIMARY KEY,
+		allowed_hosts   TEXT NOT NULL,
+		allowed_secrets TEXT NOT NULL,
+		updated_at      INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatalf("create pre-plugin_config_values plugin_overrides table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO plugin_overrides (wasm_path, allowed_hosts, allowed_secrets, updated_at)
+		VALUES ('plugins/tides/bom.wasm', '["www.bom.gov.au"]', '[]', 0)`); err != nil {
+		t.Fatalf("insert pre-plugin_config_values plugin_overrides row: %v", err)
+	}
+}
+
 // TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile pins the
 // review finding that a failure partway through migration - here, the
 // nearby-contacts copy hitting a legacy file with a missing column - must
@@ -517,12 +933,12 @@ func mustCreateLegacyNearbyDBMissingColumn(t *testing.T, path string) {
 // would otherwise refuse at the very first check (helmcentral.sqlite
 // already exists) with no documents.sqlite left to migrate from.
 func TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustCreateLegacyDocumentsDB(t, legacyDocs)
 	mustCreateLegacyAssistantDB(t, legacyAssistant)
 	mustCreateLegacyNearbyDBMissingColumn(t, legacyNearby)
 
-	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when the nearby-contacts copy fails")
 	}
@@ -564,7 +980,7 @@ func TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile(t *testi
 	}
 	mustCreateLegacyNearbyDB(t, legacyNearby)
 
-	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err != nil {
 		t.Fatalf("second migrateToHelmcentralDB after fixing the fixture: %v", err)
 	}
@@ -573,6 +989,47 @@ func TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile(t *testi
 	}
 	if !result.NearbyMigrated {
 		t.Error("expected NearbyMigrated to be true on the successful retry")
+	}
+}
+
+// TestMigrateToHelmcentralDB_FailureInNewTableRestoresDocumentsFile pins the
+// same review finding as TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile
+// above, but with the failure inside one of the three tables added by this
+// change (alarm log, web push, plugin overrides) instead of nearby-contacts:
+// a broken push_subscriptions table (missing vapid_public_key, a required
+// column with no default) fails the copy after assistant, nearby-contacts
+// and alarm-log have already copied successfully inside the same
+// transaction. Every one of the five ATTACH-and-copy legacy files - not
+// just the one that failed - must come out of the rollback untouched: none
+// renamed to .migrated, since nothing committed.
+func TestMigrateToHelmcentralDB_FailureInNewTableRestoresDocumentsFile(t *testing.T) {
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
+	mustCreateLegacyDocumentsDB(t, legacyDocs)
+	mustCreateLegacyAssistantDB(t, legacyAssistant)
+	mustCreateLegacyNearbyDB(t, legacyNearby)
+	mustCreateLegacyAlarmLogDB(t, legacyAlarmLog)
+	mustCreateLegacyWebPushDBMissingColumn(t, legacyWebPush)
+	mustCreateLegacyPluginOverridesDB(t, legacyPluginOverrides)
+
+	_, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
+	if err == nil {
+		t.Fatal("expected an error when the web push copy fails")
+	}
+
+	if _, statErr := os.Stat(legacyDocs); statErr != nil {
+		t.Fatalf("expected documents.sqlite to be restored to its original name: %v", statErr)
+	}
+	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected helmcentral.sqlite to be gone after the restore, stat err = %v", statErr)
+	}
+
+	for _, p := range []string{legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides} {
+		if _, statErr := os.Stat(p); statErr != nil {
+			t.Errorf("expected %s to remain at its original name (its own copy was inside the same rolled-back transaction): %v", p, statErr)
+		}
+		if _, statErr := os.Stat(p + ".migrated"); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s NOT to be renamed to .migrated, since nothing committed, stat err = %v", p, statErr)
+		}
 	}
 }
 
@@ -586,7 +1043,7 @@ func TestMigrateToHelmcentralDB_FailureAfterRenameRestoresDocumentsFile(t *testi
 // since the operator has no other way to know the data already made it in
 // safely and this is a cleanup-only failure, not a lost migration.
 func TestMigrateToHelmcentralDB_RenameToMigratedFailureExplainsManualFix(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustCreateLegacyDocumentsDB(t, legacyDocs)
 	mustCreateLegacyAssistantDB(t, legacyAssistant)
 	// legacyNearby deliberately left absent - keeps this test scoped to the
@@ -598,7 +1055,7 @@ func TestMigrateToHelmcentralDB_RenameToMigratedFailureExplainsManualFix(t *test
 		t.Fatalf("mkdir blocker: %v", err)
 	}
 
-	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err == nil {
 		t.Fatal("expected an error when renaming assistant.sqlite to .migrated fails")
 	}
@@ -635,10 +1092,10 @@ func TestMigrateToHelmcentralDB_RenameToMigratedFailureExplainsManualFix(t *test
 }
 
 func TestMigrateToHelmcentralDB_OnlyDocumentsPresent(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustCreateLegacyDocumentsDB(t, legacyDocs)
 
-	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err != nil {
 		t.Fatalf("migrateToHelmcentralDB: %v", err)
 	}
@@ -673,13 +1130,27 @@ func TestMigrateToHelmcentralDB_OnlyDocumentsPresent(t *testing.T) {
 	}
 }
 
-func TestMigrateToHelmcentralDB_HappyPathAllThreeFiles(t *testing.T) {
-	newPath, legacyDocs, legacyAssistant, legacyNearby := migrateTestPaths(t)
+// TestMigrateToHelmcentralDB_HappyPathAllSixFiles exercises the full
+// migration with every one of the six legacy files present and holding real
+// rows: documents.sqlite (renamed forward) plus the five ATTACH-and-copy
+// files (assistant, nearby-contacts, alarm-log, webpush-subscriptions,
+// plugin_overrides). The alarm-log and plugin_overrides fixtures are
+// deliberately the pre-lazy-migration shapes
+// (mustCreateLegacyAlarmLogDBMissingRuleIDColumn,
+// mustCreateLegacyPluginOverridesDBMissingConfigValuesTable) rather than the
+// current ones, so this happy path also proves migrateAttachedLegacyData's
+// own column/table patch-up runs successfully as part of an otherwise
+// ordinary migration, not only in a test that targets it directly.
+func TestMigrateToHelmcentralDB_HappyPathAllSixFiles(t *testing.T) {
+	newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides := migrateTestPaths(t)
 	mustCreateLegacyDocumentsDB(t, legacyDocs)
 	mustCreateLegacyAssistantDB(t, legacyAssistant)
 	mustCreateLegacyNearbyDB(t, legacyNearby)
+	mustCreateLegacyAlarmLogDBMissingRuleIDColumn(t, legacyAlarmLog)
+	mustCreateLegacyWebPushDB(t, legacyWebPush)
+	mustCreateLegacyPluginOverridesDBMissingConfigValuesTable(t, legacyPluginOverrides)
 
-	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby)
+	result, err := migrateToHelmcentralDB(newPath, legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides)
 	if err != nil {
 		t.Fatalf("migrateToHelmcentralDB: %v", err)
 	}
@@ -690,10 +1161,19 @@ func TestMigrateToHelmcentralDB_HappyPathAllThreeFiles(t *testing.T) {
 	if !result.NearbyMigrated {
 		t.Error("expected NearbyMigrated to be true")
 	}
+	if !result.AlarmLogMigrated {
+		t.Error("expected AlarmLogMigrated to be true")
+	}
+	if !result.WebPushMigrated {
+		t.Error("expected WebPushMigrated to be true")
+	}
+	if !result.PluginOverridesMigrated {
+		t.Error("expected PluginOverridesMigrated to be true")
+	}
 
-	// documents.sqlite is gone (renamed to helmcentral.sqlite); assistant and
-	// nearby-contacts are gone from their own names, renamed to .migrated,
-	// never deleted outright. (renameLegacyToMigrated's own handling of a
+	// documents.sqlite is gone (renamed to helmcentral.sqlite); the other
+	// five are gone from their own names, renamed to .migrated, never
+	// deleted outright. (renameLegacyToMigrated's own handling of a
 	// surviving -wal/-shm sidecar is covered directly, in isolation, by
 	// TestRenameLegacyToMigrated_RenamesWALAndSHMSidecarsWhenPresent below -
 	// not here, since DETACHing a WAL-mode attached database, the step
@@ -701,12 +1181,12 @@ func TestMigrateToHelmcentralDB_HappyPathAllThreeFiles(t *testing.T) {
 	// -wal/-shm as a side effect when (as here) nothing else still has it
 	// open, so there is never really one left over to plant for this test
 	// to find.)
-	for _, p := range []string{legacyDocs, legacyAssistant, legacyNearby} {
+	for _, p := range []string{legacyDocs, legacyAssistant, legacyNearby, legacyAlarmLog, legacyWebPush, legacyPluginOverrides} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("expected %s to no longer exist, stat err = %v", p, err)
 		}
 	}
-	for _, p := range []string{legacyAssistant + ".migrated", legacyNearby + ".migrated"} {
+	for _, p := range []string{legacyAssistant + ".migrated", legacyNearby + ".migrated", legacyAlarmLog + ".migrated", legacyWebPush + ".migrated", legacyPluginOverrides + ".migrated"} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("expected %s to exist: %v", p, err)
 		}
@@ -748,6 +1228,51 @@ func TestMigrateToHelmcentralDB_HappyPathAllThreeFiles(t *testing.T) {
 		t.Fatalf("expected the migrated sighting to survive, got %d rows", count)
 	}
 
+	alStore, err := newAlarmLogStore(newPath)
+	if err != nil {
+		t.Fatalf("newAlarmLogStore on migrated file: %v", err)
+	}
+	defer alStore.Close()
+	entries, err := alStore.Recent(10)
+	if err != nil || len(entries) != 1 || entries[0].RuleID != "rule-1" {
+		t.Fatalf("expected the migrated alarm log entry to survive, got entries=%+v err=%v", entries, err)
+	}
+	depth, err := alStore.QueueDepth()
+	if err != nil || depth != 1 {
+		t.Fatalf("expected the migrated notification queue row to survive, got depth=%d err=%v", depth, err)
+	}
+	// The pre-rule_id legacy fixture's queued row must have picked up the
+	// default empty rule_id, from the ALTER TABLE migrateAttachedLegacyData
+	// applies to the attached legacy file before copying - not an error, and
+	// not left NULL.
+	var ruleID string
+	if err := alStore.db.QueryRow(`SELECT rule_id FROM notification_queue WHERE id = 'queue-1'`).Scan(&ruleID); err != nil {
+		t.Fatalf("read migrated notification_queue.rule_id: %v", err)
+	}
+	if ruleID != "" {
+		t.Errorf("expected the pre-rule_id row's rule_id to default to empty, got %q", ruleID)
+	}
+
+	wpStore, err := newWebPushSubscriptionStore(newPath)
+	if err != nil {
+		t.Fatalf("newWebPushSubscriptionStore on migrated file: %v", err)
+	}
+	defer wpStore.Close()
+	subs, err := wpStore.All()
+	if err != nil || len(subs) != 1 || subs[0].Endpoint != "https://push.example/legacy" {
+		t.Fatalf("expected the migrated push subscription to survive, got subs=%+v err=%v", subs, err)
+	}
+
+	poStore, err := newPluginOverridesStore(newPath)
+	if err != nil {
+		t.Fatalf("newPluginOverridesStore on migrated file: %v", err)
+	}
+	defer poStore.db.Close()
+	hosts, _, ok, err := poStore.Get("plugins/tides/bom.wasm")
+	if err != nil || !ok || len(hosts) != 1 || hosts[0] != "www.bom.gov.au" {
+		t.Fatalf("expected the migrated plugin override to survive, got hosts=%v ok=%v err=%v", hosts, ok, err)
+	}
+
 	// Row counts reported by the migration itself must match what actually
 	// landed.
 	if result.AssistantRowCounts["conversations"] != 1 {
@@ -758,6 +1283,21 @@ func TestMigrateToHelmcentralDB_HappyPathAllThreeFiles(t *testing.T) {
 	}
 	if result.NearbyRowCounts["nearby_vessel_contacts"] != 1 {
 		t.Errorf("expected 1 migrated sighting reported, got %d", result.NearbyRowCounts["nearby_vessel_contacts"])
+	}
+	if result.AlarmLogRowCounts["alarm_log"] != 1 {
+		t.Errorf("expected 1 migrated alarm log entry reported, got %d", result.AlarmLogRowCounts["alarm_log"])
+	}
+	if result.AlarmLogRowCounts["notification_queue"] != 1 {
+		t.Errorf("expected 1 migrated notification queue row reported, got %d", result.AlarmLogRowCounts["notification_queue"])
+	}
+	if result.WebPushRowCounts["push_subscriptions"] != 1 {
+		t.Errorf("expected 1 migrated push subscription reported, got %d", result.WebPushRowCounts["push_subscriptions"])
+	}
+	if result.PluginOverridesRowCounts["plugin_overrides"] != 1 {
+		t.Errorf("expected 1 migrated plugin override reported, got %d", result.PluginOverridesRowCounts["plugin_overrides"])
+	}
+	if result.PluginOverridesRowCounts["plugin_config_values"] != 0 {
+		t.Errorf("expected 0 migrated plugin config values (the legacy file predated that table), got %d", result.PluginOverridesRowCounts["plugin_config_values"])
 	}
 }
 

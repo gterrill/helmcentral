@@ -3,8 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -33,13 +31,11 @@ type webPushSubscription struct {
 	LastError     string     `json:"last_error,omitempty"`
 }
 
-// webPushSubscriptionStore owns its own SQLite file rather than sharing
-// alarm-log.sqlite. Everything in that file is prunable operational data — a
-// capped log view and a queue that expires itself at 24h — whereas these rows
-// are durable device registrations whose loss cannot be recovered without
-// physically revisiting every phone. Mixing the two lifetimes would make
-// "can I delete alarm-log.sqlite?" a dangerous question that today has a safe
-// answer.
+// webPushSubscriptionStore shares helmcentral.sqlite with the other five
+// stores (ADR 0141). These rows are durable device registrations whose loss
+// cannot be recovered without physically revisiting every phone, unlike
+// alarm_log's own prunable log view and self-expiring queue - a distinction
+// that lives in the row's own lifetime now, not in which file it sits in.
 type webPushSubscriptionStore struct {
 	mu sync.Mutex
 	db *sql.DB
@@ -47,28 +43,18 @@ type webPushSubscriptionStore struct {
 
 var globalWebPushSubscriptionStore *webPushSubscriptionStore
 
-func webPushDBPath() string {
-	return cacheFilePath("WEBPUSH_DB_PATH", "data/webpush-subscriptions.sqlite")
-}
-
-func newWebPushSubscriptionStore(dbPath string) (*webPushSubscriptionStore, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, fmt.Errorf("web push store dir: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open web push store: %w", err)
-	}
-	// modernc/sqlite surfaces concurrent writes as "database is locked"; the
-	// other stores in this package serialize the same way.
-	db.SetMaxOpenConns(1)
-
-	// endpoint UNIQUE is load-bearing. A browser re-issues subscribe() on every
-	// service-worker update and permission re-grant, always with the same
-	// endpoint; without the constraint (and the ON CONFLICT upsert below) one
-	// phone accumulates a row per update and receives that many copies of every
-	// alarm.
+// createWebPushSchema creates push_subscriptions if it does not already
+// exist. Factored out of newWebPushSubscriptionStore so
+// migrateToHelmcentralDB (helmcentral_db.go) can create this store's table
+// in the combined database ahead of copying rows into it, without
+// duplicating the schema itself.
+//
+// endpoint UNIQUE is load-bearing. A browser re-issues subscribe() on every
+// service-worker update and permission re-grant, always with the same
+// endpoint; without the constraint (and the ON CONFLICT upsert in Upsert
+// below) one phone accumulates a row per update and receives that many
+// copies of every alarm.
+func createWebPushSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS push_subscriptions (
 			id               TEXT PRIMARY KEY,
@@ -82,8 +68,20 @@ func newWebPushSubscriptionStore(dbPath string) (*webPushSubscriptionStore, erro
 			last_success_at  INTEGER,
 			last_error       TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
+		return fmt.Errorf("create push subscriptions table: %w", err)
+	}
+	return nil
+}
+
+func newWebPushSubscriptionStore(dbPath string) (*webPushSubscriptionStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createWebPushSchema(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create push subscriptions table: %w", err)
+		return nil, err
 	}
 
 	return &webPushSubscriptionStore{db: db}, nil

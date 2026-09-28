@@ -30,12 +30,18 @@ back up that file. There is no key-recovery mechanism.
 
 `data/documents/` (every uploaded file's bytes) and `data/helmcentral.sqlite`
 (documents, notes, the equipment registry, inventory, maintenance, Mate's
-conversation history and the AIS sighting log - everything Helmcentral
-knows about your boat) are one backup unit - the database on its own
+conversation history, the AIS sighting log, alarm history, registered phone
+alert devices and plugin settings - everything Helmcentral knows about your
+boat and this installation) are one backup unit - the database on its own
 describes files it can no longer produce, and the folder on its own is just
 anonymous content hashes. Once a few manuals and a season's worth of
 receipts and photos have gone through it, expect `data/documents/` to be the
 largest single thing in the state directory.
+
+Alarm history trims itself automatically, so it never needs clearing out by
+hand. Deleting `data/helmcentral.sqlite` to tidy up old alarms would take
+your documents, inventory and maintenance records with it, so don't delete
+it for that.
 
 `data/helmcentral.sqlite` runs in WAL mode, which means a plain file copy
 taken while Helmcentral is running can miss data still sitting in its
@@ -150,8 +156,6 @@ dir when one is set.
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |
 | `SECRETS_KEY_PATH` | `data/secrets.key` |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
-| `PLUGIN_OVERRIDES_DB_PATH` | `data/plugin_overrides.sqlite` |
-| `WEBPUSH_DB_PATH` | `data/webpush-subscriptions.sqlite` |
 | `HELMCENTRAL_DB_PATH` | `data/helmcentral.sqlite` |
 | `DOCUMENTS_DIR` | `data/documents` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
@@ -230,18 +234,19 @@ settings a plugin can expose.
 
 ## Startup behaviour
 
-Startup is fail-fast. If the secrets store, session store, plugin-override
-store, tile cache or `helmcentral.sqlite` itself cannot be opened, the
-process exits rather than running degraded: this is usually a permissions
-problem on the state directory, or a `secrets.key` that no longer matches the
-store. Check `journalctl -u helmcentral -n 50`.
+Startup is fail-fast. If the secrets store, session store, tile cache or
+`helmcentral.sqlite` itself cannot be opened, the process exits rather than
+running degraded: this is usually a permissions problem on the state
+directory, or a `secrets.key` that no longer matches the store. Check
+`journalctl -u helmcentral -n 50`.
 
 Upgrading from a release that still wrote `documents.sqlite`,
-`assistant.sqlite` or `nearby-contacts.sqlite` separately needs a one-time
-migration before Helmcentral will start: if any of those files are still
-sitting in the state directory, startup refuses and names the exact command
-to run. See the **Breaking** entry for the release you're upgrading to in
-`CHANGELOG.md` for that command.
+`assistant.sqlite`, `nearby-contacts.sqlite`, `alarm-log.sqlite`,
+`webpush-subscriptions.sqlite` or `plugin_overrides.sqlite` separately needs
+a one-time migration before Helmcentral will start: if any of those files
+are still sitting in the state directory, startup refuses and names the
+exact command to run. See the **Breaking** entry for the release you're
+upgrading to in `CHANGELOG.md` for that command.
 
 `auth.mode: signalk` adds one more fail-fast check: Helmcentral probes the
 SignalK server's security status once at startup and refuses to boot if
@@ -290,9 +295,8 @@ installed web apps, and only on iOS 16.4 or later. It must be installed
 address produces an app that cannot receive push, with no indication on
 screen explaining why.
 
-Registered devices are stored in `backend/data/webpush-subscriptions.sqlite`
-(`WEBPUSH_DB_PATH`), separate from the alarm log so that clearing alarm history
-never disconnects a phone.
+Registered devices are stored in `backend/data/helmcentral.sqlite`
+(`HELMCENTRAL_DB_PATH`), alongside your other records.
 
 ## Security
 

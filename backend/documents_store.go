@@ -264,6 +264,30 @@ type documentStore struct {
 	now func() time.Time
 }
 
+// createDocumentsSchema creates every documents-store table, index and FTS5
+// trigger (documentStoreSchema below), then applies applyDocumentStoreMigrations,
+// if they do not already exist. Factored out of newDocumentStore so
+// migrateToHelmcentralDB's migrateWithoutDocumentsFile (helmcentral_db.go)
+// can give a freshly created helmcentral.sqlite this store's tables
+// directly - an install old enough to predate the document store has no
+// legacy documents.sqlite to rename forward and inherit a schema from - the
+// same way createAssistantSchema and friends already let
+// migrateAttachedLegacyData create the other five stores' tables ahead of
+// copying into them.
+func createDocumentsSchema(db *sql.DB) error {
+	for _, stmt := range documentStoreSchema {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create documents schema: %w", err)
+		}
+	}
+
+	if err := applyDocumentStoreMigrations(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // newDocumentStore opens (creating if necessary) the SQLite database at
 // dbPath - dbPath is helmcentralDBPath() in production, the same file
 // assistantStore and nearbyContactStore also open - and ensures every
@@ -285,14 +309,7 @@ func newDocumentStore(dbPath string) (*documentStore, error) {
 		return nil, err
 	}
 
-	for _, stmt := range documentStoreSchema {
-		if _, err := db.Exec(stmt); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("create documents schema: %w", err)
-		}
-	}
-
-	if err := applyDocumentStoreMigrations(db); err != nil {
+	if err := createDocumentsSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -748,8 +765,9 @@ var documentStoreSchema = []string{
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's
 // tables first shipped, to a database that predates them - the exact ALTER
-// TABLE idiom at alarm_log_store.go:311 (ensureQueueTable's rule_id
-// column): tolerate ONLY an error containing "duplicate column name" (a
+// TABLE idiom in alarm_log_store.go's createAlarmLogSchema (the
+// notification_queue.rule_id column): tolerate ONLY an error containing
+// "duplicate column name" (a
 // previous run of this same function already added it - every database
 // this codebase opens, fresh or not, runs this on every startup), and
 // return every other error, since anything else is a real, unexplained
