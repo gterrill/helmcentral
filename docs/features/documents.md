@@ -224,9 +224,20 @@ first being handed the file.
 
 The library is two things, and both are needed together: the
 `data/documents/` folder (every file's bytes, one flat folder, named by
-content) and `data/documents.sqlite` (everything that describes them -
-titles, folders, tags, the search index). The database on its own
-describes files it can no longer produce; the folder on its own is just
-anonymous names with nothing left to say what any of them are. Back both
-up as one unit. See [Configuration](../reference/configuration.md) for the
-exact paths and how to override them.
+content) and `data/helmcentral.sqlite` (everything that describes
+them - titles, folders, tags, the search index - alongside the rest of your
+boat's records: inventory, equipment, maintenance, Mate's conversations and
+the nearby-vessel history). The database on its own describes files it can
+no longer produce; the folder on its own is just anonymous names with
+nothing left to say what any of them are. Back both up as one unit.
+
+Copying `helmcentral.sqlite` while Helmcentral is running can leave out
+changes still waiting to be written through. Stop Helmcentral first, or use
+SQLite's own backup command instead of a plain file copy:
+
+```sh
+sqlite3 data/helmcentral.sqlite ".backup /path/to/backup/helmcentral.sqlite"
+```
+
+See [Configuration](../reference/configuration.md) for the exact paths and
+how to override them.

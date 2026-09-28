@@ -208,8 +208,33 @@ type tankLevelData struct {
 }
 
 func main() {
+	// migrate-db is a one-off, operator-run subcommand (ADR 0141), never
+	// automatic at startup: it renames and copies data, so it has to be a
+	// deliberate action, not something that could run again unintentionally
+	// on a normal restart. This is the only flag the binary has, so a plain
+	// os.Args check is enough - no flag package needed for one subcommand.
+	if len(os.Args) > 1 && os.Args[1] == "migrate-db" {
+		os.Exit(runMigrateDBCommand())
+	}
+
 	e := echo.New()
 	port := getEnv("PORT", "8080")
+
+	// Fail-fast startup guard (ADR 0141): refuse to start against a
+	// pre-upgrade data directory that still has documents.sqlite,
+	// assistant.sqlite, nearby-contacts.sqlite, alarm-log.sqlite,
+	// webpush-subscriptions.sqlite or plugin_overrides.sqlite at the exact
+	// paths migrate-db itself resolves them to (legacyDocumentsDBPath and
+	// friends - not merely default filenames beside helmcentral.sqlite,
+	// since DOCUMENTS_DB_PATH/ASSISTANT_DB_PATH/NEARBY_CONTACTS_DB_PATH/
+	// ALARM_LOG_DB/WEBPUSH_DB_PATH/PLUGIN_OVERRIDES_DB_PATH can each point
+	// anywhere), rather than either ignoring that history or starting
+	// against an empty combined file while it sits untouched at its old
+	// path. Runs before any store below opens anything.
+	if err := checkForLegacyDatabaseFiles(legacyDocumentsDBPath(), legacyAssistantDBPath(), legacyNearbyContactsDBPath(),
+		legacyAlarmLogDBPath(), legacyWebPushDBPath(), legacyPluginOverridesDBPath()); err != nil {
+		log.Fatalf("startup: %v", err)
+	}
 
 	// Place-name resolution (place_name.go) and the assistant's find_places
 	// tool (assistant_tools.go) both go through whichever installed POI
@@ -287,13 +312,14 @@ func main() {
 
 	// Plugin allowlist override store (per-plugin allowed_hosts/
 	// allowed_secrets overrides settable from the Settings UI instead of
-	// hand-editing companion JSON files over SSH). Must also be opened
-	// before provider registration below, since loadWasm*Providers ->
+	// hand-editing companion JSON files over SSH), one of the six stores
+	// sharing helmcentral.sqlite (ADR 0141). Must also be opened before
+	// provider registration below, since loadWasm*Providers ->
 	// manifestForWasmPlugin -> allowedHostsForWasmPlugin/
 	// allowedSecretsForWasmPlugin check this store first. Fail fast on open
 	// error, same reasoning as the other stores here - this store has no
 	// encryption/integrity check to run, just a normal sqlite open.
-	pos, err := newPluginOverridesStore(pluginOverridesDBPath())
+	pos, err := newPluginOverridesStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("plugin overrides store: %v", err)
 	}
@@ -341,38 +367,42 @@ func main() {
 	globalTileCache = tc
 
 	// Nearby-vessel contact store (backs the "seen before" history on the
-	// Nearby Vessels tile). Fail fast on open error, same reasoning as the
-	// tile cache above.
-	ncs, err := newNearbyContactStore(nearbyContactsDBPath())
+	// Nearby Vessels tile), one of the six stores sharing helmcentral.sqlite
+	// (ADR 0141). Fail fast on open error, same reasoning as the tile cache
+	// above.
+	ncs, err := newNearbyContactStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open nearby contacts store: %v", err)
 	}
 	globalNearbyContactStore = ncs
 
-	// Alarm log (occurrence history behind the alarm centre). Fail fast on open
-	// error, same reasoning as the stores above.
-	als, err := newAlarmLogStore(alarmLogDBPath())
+	// Alarm log (occurrence history and notification queue behind the alarm
+	// centre), another of the six stores sharing helmcentral.sqlite (ADR
+	// 0141). Fail fast on open error, same reasoning as the stores above.
+	als, err := newAlarmLogStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open alarm log store: %v", err)
 	}
 	globalAlarmLogStore = als
 
-	// Onboard assistant conversation history (ADR 0093). Fail fast on open
+	// Onboard assistant conversation history (ADR 0093), another of the six
+	// stores sharing helmcentral.sqlite (ADR 0141). Fail fast on open
 	// error, same reasoning as the stores above.
-	as, err := newAssistantStore(assistantDBPath())
+	as, err := newAssistantStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open assistant store: %v", err)
 	}
 	globalAssistantStore = as
 
 	// Document store (ADR 0106): metadata, virtual folders, tags, chunks and
-	// FTS5 search behind a flat, hash-named folder of file bytes. Fail fast
+	// FTS5 search behind a flat, hash-named folder of file bytes - another
+	// of the six stores sharing helmcentral.sqlite (ADR 0141). Fail fast
 	// on open error, same reasoning as the other stores above. The
 	// documents directory is created (not just the database's own parent,
 	// which newDocumentStore already handles) so the boot sweep below
 	// always has somewhere to os.ReadDir, even on a brand new install that
 	// has never taken an upload yet.
-	ds, err := newDocumentStore(documentsDBPath())
+	ds, err := newDocumentStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open document store: %v", err)
 	}
@@ -448,11 +478,13 @@ func main() {
 		log.Printf("loaded %d help page(s)", len(globalHelp))
 	}
 
-	// Registered web push devices. Its own file rather than the alarm log's:
-	// these are durable device registrations whose loss cannot be recovered
-	// without physically revisiting every phone, unlike the log's prunable
-	// history and self-expiring queue.
-	wps, err := newWebPushSubscriptionStore(webPushDBPath())
+	// Registered web push devices, another of the six stores sharing
+	// helmcentral.sqlite (ADR 0141): durable device registrations whose loss
+	// cannot be recovered without physically revisiting every phone, unlike
+	// the alarm log's own prunable history and self-expiring queue - a
+	// distinction that lives in the row's own lifetime, not in which file
+	// it sits in.
+	wps, err := newWebPushSubscriptionStore(helmcentralDBPath())
 	if err != nil {
 		log.Fatalf("failed to open web push subscription store: %v", err)
 	}

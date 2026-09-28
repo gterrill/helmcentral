@@ -6,8 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -85,10 +83,6 @@ const contactConfirmMaxTickGap = 15 * time.Second
 // opened once in main() and shared by the track poller (writes) and the
 // /api/nearby-vessels + sightings handlers (reads).
 var globalNearbyContactStore *nearbyContactStore
-
-func nearbyContactsDBPath() string {
-	return cacheFilePath("NEARBY_CONTACTS_DB_PATH", "data/nearby-contacts.sqlite")
-}
 
 // lastContact is the most recent seen-at time and position recorded for a
 // vessel, tracked in memory by nearbyContactStore.lastSeen and, on a cold
@@ -173,31 +167,12 @@ type nearbyContactRecord struct {
 	NavContext string
 }
 
-func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create nearby contacts directory: %w", err)
-		}
-	}
-
-	// WAL + synchronous(NORMAL) + busy_timeout(5000), same DSN form and
-	// reasoning as tile_cache.go's newTileCache: the default rollback-
-	// journal mode blocks every reader behind the poller's writes
-	// (recordContactIfNew, tracks.go, every 5s), and summaries() now needs
-	// to read while a write may be in flight rather than queuing behind it.
-	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open nearby contacts database: %w", err)
-	}
-	// SQLite only allows one writer at a time; modernc.org/sqlite's default
-	// busy behavior surfaces concurrent writes as "database is locked"
-	// rather than waiting. Capping the pool at one connection makes
-	// database/sql itself queue callers instead, matching tile_cache.go's
-	// reasoning for its own single-writer SQLite usage.
-	db.SetMaxOpenConns(1)
-
+// createNearbyContactSchema creates the nearby_vessel_contacts table and its
+// indexes if they do not already exist. Factored out of newNearbyContactStore
+// so migrateToHelmcentralDB (helmcentral_db.go) can create this store's
+// tables in the combined database ahead of copying rows into them, without
+// duplicating the schema itself.
+func createNearbyContactSchema(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS nearby_vessel_contacts (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		vessel_key  TEXT NOT NULL,
@@ -208,13 +183,11 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 		geoname     TEXT NOT NULL DEFAULT '',
 		nav_context TEXT NOT NULL
 	)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create nearby_vessel_contacts table: %w", err)
+		return fmt.Errorf("create nearby_vessel_contacts table: %w", err)
 	}
 
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_nearby_vessel_contacts_vessel_key ON nearby_vessel_contacts(vessel_key)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key index: %w", err)
+		return fmt.Errorf("create nearby_vessel_contacts vessel_key index: %w", err)
 	}
 
 	// summaries() scans per vessel_key ordered by seen_at (backend perf audit
@@ -222,8 +195,32 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 	// for that, and every row for a busy vessel_key. This compound index
 	// lets it walk seen_at order directly within each vessel_key.
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_nearby_vessel_contacts_vessel_key_seen_at ON nearby_vessel_contacts(vessel_key, seen_at)`); err != nil {
+		return fmt.Errorf("create nearby_vessel_contacts vessel_key/seen_at index: %w", err)
+	}
+
+	return nil
+}
+
+// newNearbyContactStore opens (creating if necessary) the SQLite database at
+// dbPath - dbPath is helmcentralDBPath() in production, the same file
+// documentStore and assistantStore also open - and ensures the
+// nearby_vessel_contacts table and its indexes exist. Opened through
+// openHelmcentralDB (helmcentral_db.go), which is what actually sets WAL and
+// synchronous(NORMAL): before ADR 0141 this store carried that reasoning
+// alone (the default rollback-journal mode blocks every reader behind the
+// poller's writes, recordContactIfNew, tracks.go, every 5s, and summaries()
+// needs to read while a write may be in flight rather than queuing behind
+// it) - now every store sharing the file gets it, which is exactly what lets
+// a long document write never stall a concurrent AIS poll tick.
+func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createNearbyContactSchema(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key/seen_at index: %w", err)
+		return nil, err
 	}
 
 	return &nearbyContactStore{

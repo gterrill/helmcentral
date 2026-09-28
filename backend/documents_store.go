@@ -247,10 +247,6 @@ var (
 // globalAssistantStore (assistant_store.go).
 var globalDocumentStore *documentStore
 
-func documentsDBPath() string {
-	return cacheFilePath("DOCUMENTS_DB_PATH", "data/documents.sqlite")
-}
-
 func documentsDirPath() string {
 	return cacheFilePath("DOCUMENTS_DIR", "data/documents")
 }
@@ -268,49 +264,52 @@ type documentStore struct {
 	now func() time.Time
 }
 
-// newDocumentStore opens (creating if necessary) the SQLite database at
-// dbPath and ensures every table, index, and FTS5 trigger exists. No WAL:
-// unlike tile_cache.go/nearby_contacts.go, this store's whole point is that
-// the backup unit is exactly one db file plus one folder of hash-named
-// files (ADR 0106) - a WAL sidecar file would break that. foreign_keys(1)
-// is required (not merely nice to have): documents.folder_id's ON DELETE
-// RESTRICT, document_tags/document_chunks' ON DELETE CASCADE, and the FTS5
-// triggers' correctness after a cascade all depend on it actually being
-// enforced, so it is read back and verified rather than trusted - modernc's
-// _pragma DSN parameters are otherwise silently unverified.
-func newDocumentStore(dbPath string) (*documentStore, error) {
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create documents store directory: %w", err)
-		}
-	}
-
-	dsn := dbPath + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open documents database: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-
-	var fk int
-	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("check foreign_keys pragma: %w", err)
-	}
-	if fk != 1 {
-		db.Close()
-		return nil, fmt.Errorf("foreign_keys pragma did not take effect (got %d, want 1)", fk)
-	}
-
+// createDocumentsSchema creates every documents-store table, index and FTS5
+// trigger (documentStoreSchema below), then applies applyDocumentStoreMigrations,
+// if they do not already exist. Factored out of newDocumentStore so
+// migrateToHelmcentralDB's migrateWithoutDocumentsFile (helmcentral_db.go)
+// can give a freshly created helmcentral.sqlite this store's tables
+// directly - an install old enough to predate the document store has no
+// legacy documents.sqlite to rename forward and inherit a schema from - the
+// same way createAssistantSchema and friends already let
+// migrateAttachedLegacyData create the other five stores' tables ahead of
+// copying into them.
+func createDocumentsSchema(db *sql.DB) error {
 	for _, stmt := range documentStoreSchema {
 		if _, err := db.Exec(stmt); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("create documents schema: %w", err)
+			return fmt.Errorf("create documents schema: %w", err)
 		}
 	}
 
 	if err := applyDocumentStoreMigrations(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// newDocumentStore opens (creating if necessary) the SQLite database at
+// dbPath - dbPath is helmcentralDBPath() in production, the same file
+// assistantStore and nearbyContactStore also open - and ensures every
+// table, index, and FTS5 trigger exists. Opened through openHelmcentralDB
+// (helmcentral_db.go), which is what actually sets foreign_keys(1) and WAL:
+// documents.folder_id's ON DELETE RESTRICT, document_tags/document_chunks'
+// ON DELETE CASCADE, and the FTS5 triggers' correctness after a cascade all
+// depend on foreign_keys actually being enforced, which is why that opener
+// reads it back and verifies it rather than trusting modernc's own _pragma
+// DSN parameters. Before ADR 0141 this store deliberately ran with no WAL,
+// on the reasoning that the backup unit was exactly one db file plus one
+// folder of hash-named files (ADR 0106) and a WAL sidecar would break that;
+// the operator chose one shared, WAL-mode file instead, so a safe backup
+// now takes the form ADR 0141 describes (`.backup`/`VACUUM INTO`, or the
+// service stopped) rather than a plain copy of the file.
+func newDocumentStore(dbPath string) (*documentStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createDocumentsSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -371,7 +370,7 @@ var documentStoreSchema = []string{
 	// EXISTS is a complete no-op against a table that already exists on
 	// disk (SQLite never diffs an existing table's columns against new
 	// CREATE TABLE text), so on a database that predates this feature -
-	// every boat's actual documents.sqlite - listing the columns here
+	// every boat's actual database file - listing the columns here
 	// would do nothing at all; only ALTER TABLE reaches an
 	// already-materialised table. Keeping them out of the CREATE TABLE
 	// text entirely (rather than listing them here ALSO, redundantly, for
@@ -458,7 +457,7 @@ var documentStoreSchema = []string{
 	// notes_format.go). Added straight into this schema (not
 	// applyDocumentStoreMigrations below) because both tables are brand
 	// new - CREATE TABLE IF NOT EXISTS is already the correct idiom for a
-	// table that has never existed on any boat's documents.sqlite, unlike
+	// table that has never existed on any boat's database file, unlike
 	// the notes/manuals columns below, which had to be ALTER TABLE'd onto
 	// an ALREADY-EXISTING documents table.
 	`CREATE TABLE IF NOT EXISTS note_checklist_runs (
@@ -500,14 +499,14 @@ var documentStoreSchema = []string{
 	)`,
 
 	// Inventory (plan "Inventory: the equipment registry and locations"): the
-	// equipment registry's own tables, living in documents.sqlite rather than
+	// equipment registry's own tables, living in the same database file rather than
 	// a file of their own - the one-store-one-file convention (ADR 0024 §3,
 	// followed again by ADR 0065) is per LIFECYCLE, not per feature, and
 	// equipment references documents on every read (equipment_documents
 	// below), so a foreign key plus a join is worth more here than file
 	// independence. All four tables are brand new - CREATE TABLE IF NOT
 	// EXISTS is already the correct idiom for a table that has never existed
-	// on any boat's documents.sqlite, unlike the notes/manuals columns above,
+	// on any boat's database file, unlike the notes/manuals columns above,
 	// which had to be ALTER TABLE'd onto an already-existing documents table
 	// (applyDocumentStoreMigrations' own doc comment explains why those two
 	// idioms can't be mixed within a single table).
@@ -766,8 +765,9 @@ var documentStoreSchema = []string{
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's
 // tables first shipped, to a database that predates them - the exact ALTER
-// TABLE idiom at alarm_log_store.go:311 (ensureQueueTable's rule_id
-// column): tolerate ONLY an error containing "duplicate column name" (a
+// TABLE idiom in alarm_log_store.go's createAlarmLogSchema (the
+// notification_queue.rule_id column): tolerate ONLY an error containing
+// "duplicate column name" (a
 // previous run of this same function already added it - every database
 // this codebase opens, fresh or not, runs this on every startup), and
 // return every other error, since anything else is a real, unexplained
@@ -776,7 +776,7 @@ var documentStoreSchema = []string{
 // Called by newDocumentStore AFTER the documentStoreSchema loop above, on
 // every open - cheap (each ALTER is a single fast metadata change on
 // modern SQLite, and the tolerated-duplicate path doesn't even do that
-// much work) and the only place any documents.sqlite, new or years old,
+// much work) and the only place any database file, new or years old,
 // ever gets these columns.
 //
 // The three CREATE INDEX statements at the end are deliberately not part
@@ -786,7 +786,7 @@ var documentStoreSchema = []string{
 // documentStoreSchema (which executes BEFORE this function, by the calling
 // order newDocumentStore uses) would work on a brand new database, where
 // CREATE TABLE just created those columns - but fail with "no such
-// column" against a real, already-existing documents.sqlite, where
+// column" against a real, already-existing database file, where
 // CREATE TABLE IF NOT EXISTS is a no-op and only the ALTER statements
 // below actually add them. Keeping the indexes here, after the ALTERs
 // that guarantee their columns exist either way, is correct on both a

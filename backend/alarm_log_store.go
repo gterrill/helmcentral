@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -42,23 +40,13 @@ type alarmLogStore struct {
 
 var globalAlarmLogStore *alarmLogStore
 
-func alarmLogDBPath() string {
-	return cacheFilePath("ALARM_LOG_DB", "data/alarm-log.sqlite")
-}
-
-func newAlarmLogStore(dbPath string) (*alarmLogStore, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, fmt.Errorf("alarm log dir: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open alarm log: %w", err)
-	}
-	// modernc/sqlite surfaces concurrent writes as "database is locked"; the
-	// other stores in this package serialize the same way.
-	db.SetMaxOpenConns(1)
-
+// createAlarmLogSchema creates alarm_log (and its indexes) and
+// notification_queue if they do not already exist, and ALTER TABLEs
+// notification_queue.rule_id onto a database that predates it. Factored out
+// of newAlarmLogStore so migrateToHelmcentralDB (helmcentral_db.go) can
+// create this store's tables in the combined database ahead of copying rows
+// into them, without duplicating the schema itself.
+func createAlarmLogSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS alarm_log (
 			id             TEXT PRIMARY KEY,
@@ -73,26 +61,54 @@ func newAlarmLogStore(dbPath string) (*alarmLogStore, error) {
 			acked_at       INTEGER,
 			cleared_at     INTEGER
 		)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create alarm log table: %w", err)
+		return fmt.Errorf("create alarm log table: %w", err)
 	}
 
 	// The log is read newest-first and looked up by rule while an alarm is open.
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS alarm_log_raised_at ON alarm_log (raised_at DESC)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("index alarm log: %w", err)
+		return fmt.Errorf("index alarm log: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS alarm_log_open ON alarm_log (rule_id, cleared_at)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("index alarm log: %w", err)
+		return fmt.Errorf("index alarm log: %w", err)
 	}
 
-	store := &alarmLogStore{db: db}
-	if err := store.ensureQueueTable(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create notification queue table: %w", err)
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS notification_queue (
+			id              TEXT PRIMARY KEY,
+			transport       TEXT NOT NULL,
+			rule_id         TEXT NOT NULL DEFAULT '',
+			payload         BLOB NOT NULL,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at INTEGER NOT NULL,
+			created_at      INTEGER NOT NULL,
+			last_error      TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		return fmt.Errorf("create notification queue table: %w", err)
 	}
-	return store, nil
+
+	// rule_id arrived after the table shipped, and it is what lets a newer
+	// transition supersede an older queued one. Databases created before it
+	// carry rows with the default empty rule, which supersede nothing -- they
+	// drain on their own within notifyMaxAge.
+	if _, err := db.Exec(`ALTER TABLE notification_queue ADD COLUMN rule_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("create notification queue table: %w", err)
+	}
+	return nil
+}
+
+func newAlarmLogStore(dbPath string) (*alarmLogStore, error) {
+	db, err := openHelmcentralDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := createAlarmLogSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &alarmLogStore{db: db}, nil
 }
 
 func (s *alarmLogStore) Close() error {
@@ -287,32 +303,6 @@ type queuedNotification struct {
 	Payload   []byte
 	Attempts  int
 	LastError string
-}
-
-func (s *alarmLogStore) ensureQueueTable() error {
-	if _, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS notification_queue (
-			id              TEXT PRIMARY KEY,
-			transport       TEXT NOT NULL,
-			rule_id         TEXT NOT NULL DEFAULT '',
-			payload         BLOB NOT NULL,
-			attempts        INTEGER NOT NULL DEFAULT 0,
-			next_attempt_at INTEGER NOT NULL,
-			created_at      INTEGER NOT NULL,
-			last_error      TEXT NOT NULL DEFAULT ''
-		)`); err != nil {
-		return err
-	}
-
-	// rule_id arrived after the table shipped, and it is what lets a newer
-	// transition supersede an older queued one. Databases created before it
-	// carry rows with the default empty rule, which supersede nothing -- they
-	// drain on their own within notifyMaxAge.
-	if _, err := s.db.Exec(`ALTER TABLE notification_queue ADD COLUMN rule_id TEXT NOT NULL DEFAULT ''`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
-		return err
-	}
-	return nil
 }
 
 func (s *alarmLogStore) Enqueue(transport, ruleID string, payload []byte, dueAt time.Time) error {

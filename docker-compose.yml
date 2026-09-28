@@ -17,7 +17,7 @@ services:
       # (Settings -> Widgets -> Nearby -> osm-overpass's gear icon), not an
       # env var (ADR 0100) - see docs/reference/configuration.md.
     volumes:
-      # All persistent state: settings.yaml, the four SQLite stores, routes,
+      # All persistent state: settings.yaml, the SQLite stores, routes,
       # dashboard pages and plugin caches. Created on first run if absent —
       # no file needs to exist before the first `up`.
       - ./backend-data:/app/data

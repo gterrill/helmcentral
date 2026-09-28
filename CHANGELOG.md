@@ -11,6 +11,37 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Documents, inventory, equipment, maintenance, Mate's conversations, the
+  nearby-vessel sighting history, alarm history, registered phone alert
+  devices and plugin settings now live in one file, `helmcentral.sqlite`.**
+  They previously sat in six separate database files. After upgrading,
+  Helmcentral refuses to start until you run a one-time migration:
+  - Docker Compose: `docker compose run --rm helmcentral /app/helmcentral migrate-db`,
+    then `docker compose up -d helmcentral`.
+  - Native install: stop the service, run
+    `/usr/local/bin/helmcentral migrate-db`, then start it again.
+
+  The migration renames your existing database into place and copies your
+  Mate conversation history, sighting log, alarm history, registered phone
+  alert devices and plugin settings into it; nothing is deleted - the old
+  files are kept alongside it with a `.migrated` suffix. If it fails partway
+  through, it puts your database back the way it found it, so you can fix
+  the problem and run the same command again. If you set
+  `DOCUMENTS_DB_PATH`, `ASSISTANT_DB_PATH`, `NEARBY_CONTACTS_DB_PATH`,
+  `ALARM_LOG_DB`, `WEBPUSH_DB_PATH` or `PLUGIN_OVERRIDES_DB_PATH`, those are
+  gone; set `HELMCENTRAL_DB_PATH` instead if you need a non-default
+  location. Back up `helmcentral.sqlite` with Helmcentral stopped, or with
+  `sqlite3 helmcentral.sqlite ".backup ..."` while it's running - copying
+  the file directly while it runs can miss data still waiting to be written
+  through. Alarm history still trims its own old entries. If you used to
+  delete `alarm-log.sqlite` to clear it, don't delete `helmcentral.sqlite`
+  instead: it now holds your documents, inventory and maintenance records
+  too. See
+  [Configuration](https://github.com/gterrill/helmcentral/blob/main/docs/reference/configuration.md)
+  for details.
+
 ### Added
 
 - The dashboard has a full screen button in the header. It hides the sidebar

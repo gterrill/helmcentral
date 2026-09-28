@@ -12,8 +12,9 @@ import (
 // form document_chunk_embeddings.vector stores. Little-endian rather than
 // native byte order because the blob has to read back identically wherever
 // it's opened next: this boat's own box is armv7 today, a dev machine is
-// amd64, and the sqlite file moves between them freely (ADR 0106's "the
-// backup unit is one db file" - see newDocumentStore's doc comment).
+// amd64, and the sqlite file - helmcentral.sqlite since ADR 0141, the same
+// reasoning ADR 0106 gave for documents.sqlite before it - moves between
+// them freely.
 func encodeEmbedding(vec []float32) []byte {
 	out := make([]byte, len(vec)*4)
 	for i, v := range vec {

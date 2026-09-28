@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -356,16 +357,22 @@ func TestDocumentIndexer_ReadinessReadErrorPropagatesFromProcessOne(t *testing.T
 // repeated: no documentsIndexerErrorBackoff wait, no operator-visible
 // failure, just a tight spin. This is the same shape as
 // TestDocumentIndexer_ReadinessReadErrorPropagatesFromProcessOne above, but
-// for a write instead of a read: it chmods the sqlite database's own
-// directory read-only (0o555) so NextPending's SELECT still succeeds but
-// any write - including failDoc's own SetFailed, reached here via a forced
-// extraction error - fails with "attempt to write a readonly database".
-// Chmodding the db FILE itself is not enough to reproduce this: the
-// connection's file descriptor was opened (read-write) before the chmod,
-// and Unix permission checks apply at open(), not at write(), so writes
-// through an already-open fd keep working regardless of the file's mode
-// bits afterward - confirmed empirically against this driver before
-// writing this test.
+// for a write instead of a read: it swaps the store's connection for a
+// second one opened with the SQLite URI "mode=ro" parameter, so NextPending's
+// own SELECT still succeeds but any write - including failDoc's own
+// SetFailed, reached here via a forced extraction error - fails with
+// "attempt to write a readonly database". Before ADR 0141 (documentStore
+// with no WAL) this test instead chmodded the db's containing directory
+// read-only, exploiting the rollback-journal mode's need to create a fresh
+// "-journal" file per write transaction; under WAL there is no such file to
+// block the creation of (the "-wal"/"-shm" siblings already exist, opened
+// before any chmod, so writes through them keep succeeding regardless of
+// directory permissions - the same "checks happen at open(), not at write()"
+// fact this comment used to cite, just on a different file). Reopening
+// explicitly read-only sidesteps that: SQLite's own URI "mode" parameter
+// forces SQLITE_READONLY on every write through this connection, independent
+// of journal mode or file permissions - confirmed empirically against this
+// driver before rewriting this test for WAL.
 func TestDocumentIndexer_FailedSetFailedPropagatesFromProcessOne(t *testing.T) {
 	dbDir := t.TempDir()
 	dbPath := filepath.Join(dbDir, "documents.sqlite")
@@ -387,23 +394,26 @@ func TestDocumentIndexer_FailedSetFailedPropagatesFromProcessOne(t *testing.T) {
 		return extractedDocument{}, errors.New("boom: extraction failed")
 	}
 
-	// Make every WRITE to the sqlite file fail while NextPending's own
-	// SELECT still succeeds - a read-only database, per the finding's own
-	// wording. See the doc comment above for why this chmods the
-	// containing directory rather than the db file itself.
-	if err := os.Chmod(dbDir, 0o555); err != nil {
-		t.Fatalf("chmod db dir read-only: %v", err)
+	// Swap the store's own connection for a read-only one to the same file,
+	// now that the writable connection above has already created the
+	// schema and seeded the row. Every subsequent write through this
+	// connection - including failDoc's own SetFailed - fails with
+	// SQLITE_READONLY; reads (NextPending's SELECT) keep working.
+	if err := store.db.Close(); err != nil {
+		t.Fatalf("close writable connection: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dbDir, 0o755) })
+	roDB, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open read-only connection: %v", err)
+	}
+	t.Cleanup(func() { roDB.Close() })
+	store.db = roDB
 
 	_, err = idx.processOne(context.Background())
 	if err == nil {
 		t.Fatalf("expected processOne to propagate SetFailed's own write error so Run's backoff applies, got nil")
 	}
 
-	if err := os.Chmod(dbDir, 0o755); err != nil {
-		t.Fatalf("chmod db dir writable again: %v", err)
-	}
 	got, getErr := store.Get(doc.ID)
 	if getErr != nil {
 		t.Fatalf("Get: %v", getErr)

@@ -53,8 +53,8 @@ type signalKNotifyConfig struct {
 
 // webPushConfig carries no fields beyond the toggle, deliberately. The VAPID
 // keypair is generated into the secrets store and the registered devices live
-// in their own SQLite file, so there is nothing for an operator to type and
-// nothing for validateAlarmTransports to check.
+// in helmcentral.sqlite (ADR 0141), so there is nothing for an operator to
+// type and nothing for validateAlarmTransports to check.
 type webPushConfig struct {
 	Enabled bool `json:"enabled"`
 }

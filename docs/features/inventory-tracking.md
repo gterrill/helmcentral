@@ -270,8 +270,13 @@ like the tiles themselves, is designed but not yet built.
 
 ## Your data
 
-Inventory lives in Helmcentral's own database in its state directory, beside
-the document library it links to. Photos are ordinary image files next to
-it; export to JSON or CSV is part of the design and not yet built. Include
-the state directory in your backups; once you have a few hundred photos, it
-will be the biggest part of it.
+Inventory lives in `data/helmcentral.sqlite`, the same database as the
+document library it links to. Photos are ordinary image files next to it;
+export to JSON or CSV is part of the design and not yet built. Include the
+state directory in your backups; once you have a few hundred photos, it will
+be the biggest part of it.
+
+Copy `helmcentral.sqlite` with Helmcentral stopped, or take a live backup
+with `sqlite3 data/helmcentral.sqlite ".backup /path/to/backup/helmcentral.sqlite"`
+rather than copying the file directly while it's running - see
+[Configuration](../reference/configuration.md) for the full backup guidance.
