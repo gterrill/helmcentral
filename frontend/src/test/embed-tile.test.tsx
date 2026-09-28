@@ -1,7 +1,41 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { DisplayShell } from '@/components/display-shell'
 import { EmbedTile, MOUNT_IDLE_TIMEOUT_MS } from '@/components/embed-tile'
+import type { Display } from '@/lib/displays'
+
+// DisplayShell pulls in the shared telemetry stream and the pixel-shift/wake-
+// lock hooks for its own status badge; mocked the same way display-
+// shell.test.tsx does, so mounting it here doesn't open a real EventSource
+// or start real interval/wake-lock timers.
+vi.mock('@/hooks/use-telemetry-stream', () => ({
+  useTelemetryStatus: () => 'connected' as const,
+}))
+
+const { mockPixelShift, mockWakeLock } = vi.hoisted(() => ({
+  mockPixelShift: vi.fn(() => ({ dx: 0, dy: 0 })),
+  mockWakeLock: vi.fn(() => ({ status: 'off' as const })),
+}))
+vi.mock('@/hooks/use-pixel-shift', () => ({ usePixelShift: mockPixelShift }))
+vi.mock('@/hooks/use-screen-wake-lock', () => ({ useScreenWakeLock: mockWakeLock }))
+
+function display(overrides: Partial<Display> = {}): Display {
+  return {
+    id: 'd1',
+    name: 'Flybridge',
+    slug: 'flybridge',
+    width: 1920,
+    height: 360,
+    scale: 1,
+    rotate: 0,
+    pixel_shift: false,
+    wake_lock: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
 
 const config = { title: 'Windrose', url: 'http://boat.local:3000/d-solo/abc?panelId=2' }
 
@@ -9,6 +43,34 @@ function getIframe(): HTMLIFrameElement {
   const frame = document.querySelector('iframe')
   if (!frame) throw new Error('expected an iframe to be rendered')
   return frame
+}
+
+// Mocks just enough of a browser's box model - offsetWidth/offsetHeight and
+// getBoundingClientRect, both from the same box - for EmbedFrame's
+// positioning/clipping math to have real numbers to work with. happy-dom
+// implements no layout at all, so every element's rect and
+// offsetWidth/offsetHeight are 0 by default (display-shell.test.tsx's own
+// mock for the inner canvas does the same thing for the same reason).
+// Deliberately keeps offsetWidth/offsetHeight equal to the rect's own
+// width/height (i.e. assumes scale 1 for the box being mocked), so a
+// caller's expected left/top collapses to plain box.left/box.top.
+function mockBox(el: Element, box: { top: number; left: number; right: number; bottom: number }) {
+  const width = box.right - box.left
+  const height = box.bottom - box.top
+  el.getBoundingClientRect = () =>
+    ({
+      top: box.top,
+      left: box.left,
+      right: box.right,
+      bottom: box.bottom,
+      width,
+      height,
+      x: box.left,
+      y: box.top,
+      toJSON() {},
+    }) as DOMRect
+  Object.defineProperty(el, 'offsetWidth', { configurable: true, value: width })
+  Object.defineProperty(el, 'offsetHeight', { configurable: true, value: height })
 }
 
 // happy-dom's own IntersectionObserver is an inert stub — every method is a
@@ -367,5 +429,373 @@ describe('EmbedTile lazy loading', () => {
 
     const container = screen.getByTestId('embed-frame-container')
     expect(container).toHaveTextContent('Loading Windrose...')
+  })
+})
+
+// WPE WebKit 2.44.1 (the flybridge kiosk browser) can't composite a
+// multipart MJPEG <img> inside this iframe when it sits under a CSS-
+// transformed ancestor - which is exactly what display-shell.tsx's rotated
+// outer box / scaled inner box give it. Verified on-device, the workaround
+// is to portal the iframe onto document.body (no transformed ancestor) and
+// apply the shell's own rotation/scale to the iframe itself instead.
+describe('EmbedTile inside a DisplayShell (WPE compositing workaround)', () => {
+  test('outside a DisplayShell, the iframe stays inline inside embed-frame-container', () => {
+    render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    const frame = getIframe()
+    expect(container).toContainElement(frame)
+    expect(screen.queryByTestId('embed-frame-portal')).toBeNull()
+  })
+
+  test('inside a rotated DisplayShell, the iframe is portalled to document.body, rotated and scaled to match', () => {
+    render(
+      <DisplayShell display={display({ rotate: 180, scale: 1.5 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+
+    expect(outer).not.toContainElement(portalFrame)
+    expect(portalFrame.parentElement).toBe(document.body)
+    expect(portalFrame.style.transform).toContain('rotate(180deg)')
+    expect(portalFrame.style.transform).toContain('scale(')
+  })
+
+  test('inside a DisplayShell with rotate 0, the iframe is still portalled but gets no rotation', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0, scale: 1.2 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+    expect(portalFrame.parentElement).toBe(document.body)
+    expect(portalFrame.style.transform).not.toContain('rotate(')
+    expect(portalFrame.style.transform).toContain('scale(')
+  })
+
+  test('removes the portalled iframe from document.body on unmount', () => {
+    const { unmount } = render(
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+    expect(screen.getByTestId('embed-frame-portal')).toBeInTheDocument()
+
+    unmount()
+
+    expect(document.querySelector('[data-testid="embed-frame-portal"]')).toBeNull()
+  })
+
+  // No z-index (or a z-0) is load-bearing: display-shell.tsx's overlay
+  // layer is given an explicit z-10 specifically so it paints above this,
+  // and an explicit z-index here would fight that ordering.
+  test('sets no z-index on the portalled iframe, so the overlay layer above it wins the stacking order', () => {
+    render(
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    expect(screen.getByTestId('embed-frame-portal').style.zIndex).toBe('')
+  })
+})
+
+// react-grid-layout moves a tile by writing `transform`/`top`/`left` (or a
+// class toggle mid-drag) onto the grid-item element - never by resizing the
+// tile's own container - and a sibling growing (e.g. the hero row) shifts
+// everything below it the same way. Neither is caught by a ResizeObserver
+// on the container alone, so EmbedFrame also watches every ancestor between
+// the container and the shell's own inner box.
+describe('EmbedTile portal follows a tile that moves without resizing', () => {
+  class FakeResizeObserver {
+    static instances: FakeResizeObserver[] = []
+    readonly callback: ResizeObserverCallback
+    observed: Element[] = []
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback
+      FakeResizeObserver.instances.push(this)
+    }
+    observe(target: Element) {
+      this.observed.push(target)
+    }
+    unobserve(target: Element) {
+      this.observed = this.observed.filter((el) => el !== target)
+    }
+    disconnect() {}
+  }
+
+  class FakeMutationObserver {
+    static instances: FakeMutationObserver[] = []
+    readonly callback: MutationCallback
+    observedTargets: Node[] = []
+    observedOptions: (MutationObserverInit | undefined)[] = []
+    constructor(callback: MutationCallback) {
+      this.callback = callback
+      FakeMutationObserver.instances.push(this)
+    }
+    observe(target: Node, options?: MutationObserverInit) {
+      this.observedTargets.push(target)
+      this.observedOptions.push(options)
+    }
+    disconnect() {}
+    takeRecords(): MutationRecord[] {
+      return []
+    }
+    trigger() {
+      this.callback([] as unknown as MutationRecord[], this as unknown as MutationObserver)
+    }
+  }
+
+  test('registers the container and every ancestor up to (not including) the shell inner box with the ResizeObserver', () => {
+    FakeResizeObserver.instances = []
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+    render(
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    const shellInner = screen.getByTestId('display-shell-inner')
+    const expectedAncestors: Element[] = []
+    for (let node = container.parentElement; node && node !== shellInner; node = node.parentElement) {
+      expectedAncestors.push(node)
+    }
+    // Sanity: the Tile chrome between the container and the shell's inner
+    // box really does give this test something to walk, so this isn't
+    // passing vacuously on an empty list either way.
+    expect(expectedAncestors.length).toBeGreaterThan(0)
+
+    const observer = FakeResizeObserver.instances.at(-1)!
+    expect(new Set(observer.observed)).toEqual(new Set([container, ...expectedAncestors]))
+    expect(observer.observed).not.toContain(shellInner)
+  })
+
+  test('recomputes the portal position when a mutation on an ancestor reports a style/class change', () => {
+    FakeMutationObserver.instances = []
+    vi.stubGlobal('MutationObserver', FakeMutationObserver)
+
+    render(
+      <DisplayShell display={display({ rotate: 0 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(container, { top: 40, left: 60, right: 260, bottom: 160 })
+
+    const mutationObserver = FakeMutationObserver.instances.at(-1)!
+    expect(mutationObserver.observedOptions[0]).toEqual({
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+    })
+
+    act(() => {
+      mutationObserver.trigger()
+    })
+
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+    expect(portalFrame.style.left).toBe('60px')
+    expect(portalFrame.style.top).toBe('40px')
+  })
+
+  // The guard that skips a redundant setState when reposition recomputes
+  // the exact same style - without it, every ResizeObserver/MutationObserver
+  // firing on an otherwise-static tile would still rewrite the portal's
+  // style attribute. Watched here at the DOM level (a real MutationObserver
+  // on the portal iframe itself) rather than by counting React renders:
+  // returning the same style object from the state updater can still leave
+  // React re-invoking the component, but React's own prop-diffing then
+  // skips writing an unchanged `style` object to the DOM either way - which
+  // is the actual, observable "churn" this guard exists to avoid.
+  test('does not rewrite the portal iframe style attribute when a reposition trigger recomputes the exact same style', async () => {
+    render(
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(container, { top: 10, left: 10, right: 210, bottom: 110 })
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+    const mutations: MutationRecord[] = []
+    const styleWatcher = new MutationObserver((records) => mutations.push(...records))
+    styleWatcher.observe(portalFrame, { attributes: true, attributeFilter: ['style'] })
+
+    // Same geometry again - nothing has actually moved.
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mutations).toHaveLength(0)
+
+    // A genuine change still gets through the guard.
+    mockBox(container, { top: 20, left: 20, right: 220, bottom: 120 })
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mutations.length).toBeGreaterThan(0)
+
+    styleWatcher.disconnect()
+  })
+
+  // react-grid-layout slides a moved tile over a CSS transition, so the
+  // style mutation fires at the start of the move, when the tile is still
+  // where it was. The end of the slide has to be caught separately.
+  test('recomputes the portal position when an ancestor finishes a transition', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(container, { top: 70, left: 90, right: 290, bottom: 190 })
+
+    act(() => {
+      container.parentElement!.dispatchEvent(new Event('transitionend', { bubbles: true }))
+    })
+
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+    expect(portalFrame.style.left).toBe('90px')
+    expect(portalFrame.style.top).toBe('70px')
+  })
+})
+
+// The hero row enlarges its tile with a transform of its own, on top of the
+// display's scale. The portalled iframe must pick that up too, or a hero
+// embed paints smaller than its frame.
+describe('EmbedTile portal matches any extra ancestor scale', () => {
+  test('scales by the on-screen size over the layout size, not the display scale alone', () => {
+    render(
+      <DisplayShell display={display({ rotate: 180, scale: 1 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    // Laid out at 200x100, drawn at 230x115: a 1.15 hero enlargement.
+    mockBox(container, { top: 0, left: 0, right: 230, bottom: 115 })
+    Object.defineProperty(container, 'offsetWidth', { configurable: true, value: 200 })
+    Object.defineProperty(container, 'offsetHeight', { configurable: true, value: 100 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    const portalFrame = screen.getByTestId('embed-frame-portal')
+    expect(portalFrame.style.width).toBe('200px')
+    expect(portalFrame.style.transform).toBe('rotate(180deg) scale(1.15)')
+    expect(portalFrame.style.left).toBe('15px')
+  })
+})
+
+// The shell's outer box clips its own content with overflow-hidden, but a
+// portalled iframe lives at document.body and escapes that clip entirely.
+// EmbedFrame re-derives the same crop by hand from the outer box's and the
+// container's own bounding rects.
+describe('EmbedTile portal is cropped to the display outer box', () => {
+  test('clips the sides that overflow the display, converted to local (unscaled) px', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0, scale: 1 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(outer, { top: 0, left: 0, right: 400, bottom: 300 })
+    mockBox(container, { top: -8, left: -5, right: 420, bottom: 312 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('inset(8px 20px 12px 5px)')
+  })
+
+  test('swaps top/bottom and left/right for a rotated display, since local top paints at screen bottom', () => {
+    render(
+      <DisplayShell display={display({ rotate: 180, scale: 1 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(outer, { top: 0, left: 0, right: 400, bottom: 300 })
+    mockBox(container, { top: -8, left: -5, right: 420, bottom: 312 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('inset(12px 5px 8px 20px)')
+  })
+
+  test('omits clipPath entirely when the tile sits fully inside the display', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(outer, { top: 0, left: 0, right: 400, bottom: 300 })
+    mockBox(container, { top: 50, left: 50, right: 150, bottom: 150 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('')
+  })
+
+  test('hides the frame entirely once the tile has scrolled fully outside the display', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(outer, { top: 0, left: 0, right: 400, bottom: 300 })
+    mockBox(container, { top: 400, left: 400, right: 500, bottom: 500 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(screen.getByTestId('embed-frame-portal').style.visibility).toBe('hidden')
   })
 })

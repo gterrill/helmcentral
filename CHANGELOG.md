@@ -45,6 +45,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   its marker and row highlighted, showing the description only when that
   point has one. Its map markers, name labels and rank badges are also
   bigger, for reading from across the cabin on the wall display.
+- A camera feed in an embed tile shows on the flybridge wall display again.
+  The display's browser stopped drawing live camera video on a scaled or
+  upside-down display; the embed is now drawn so that browser can show it.
 
 ## [0.35.0] - 2026-09-27
 
