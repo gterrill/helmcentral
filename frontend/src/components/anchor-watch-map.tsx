@@ -1,6 +1,6 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
 import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Satellite, Ship, X } from 'lucide-react'
@@ -13,6 +13,7 @@ import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targ
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
+import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
 import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
@@ -22,19 +23,10 @@ import { hasWebGL2 } from '@/lib/webgl'
 import { ANCHOR_VIEW_MAX_ZOOM, ANCHOR_VIEW_MIN_ZOOM, fitRadiusZoom } from '@/lib/anchor-view'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import {
-  ADJUST_MAX_ZOOM,
-  adjustZoomBounds,
   anchorMoveOffset,
-  clampRadiusM,
   formatMovedLabel,
-  MIN_ALARM_RADIUS_M,
   metersPerPixel,
-  radiusForZoom,
   radiusStepM,
-  ringRadiusPx,
-  snapRadiusM,
-  zoomForRingRadius,
-  type AlarmRadiusBounds,
 } from '@/lib/anchor-adjust'
 import {
   resolveMarkerLabelSuppression,
@@ -408,53 +400,57 @@ export interface AnchorWatchMapProps {
   // opt out: neither host passes it, so neither ever shows the icon,
   // regardless of `interactive`.
   onAdjust?: () => void
-  // Whether Adjust mode (ADR 0136) is open. Owned by the host
-  // (anchor-watch-drawer.tsx), not this component: the drawer decides entry/
-  // exit (the Move icon, Escape, Cancel, a successful Set, raising the
-  // anchor, the watch disappearing) and this component only reacts to the
-  // prop — camera lock, the fixed crosshair, the screen-space ring, the
-  // reference layers, and pan/zoom capture.
+  // Whether Adjust mode (ADR 0136, radius decoupled from zoom by ADR 0143)
+  // is open. Owned by the host (anchor-watch-drawer.tsx), not this
+  // component: the drawer decides entry/exit (the Move icon, Cancel, Save, a
+  // successful Save, raising the anchor, the watch disappearing) and this
+  // component only reacts to the prop — the one-time camera fit, the fixed
+  // crosshair, the geographic draft-radius circle, the reference layers, and
+  // pan/zoom/keyboard capture. Zoom itself is never touched by Adjust beyond
+  // that one entry fit — the operator can pinch/scroll freely to look
+  // around without changing the radius.
   adjustActive?: boolean
-  // The radius ceiling/floor (lib/anchor-adjust.ts's alarmRadiusBounds) —
-  // required whenever adjustActive is true, so pinch/scroll-wheel zoom can
-  // be locked to the exact range the operator is allowed to set. Optional in
-  // the type only because every non-Adjust render omits it.
-  adjustRadiusBounds?: AlarmRadiusBounds
-  // Fires once on Adjust entry (with the committed position/radius as the
-  // starting draft) and again on every pan/zoom while it stays open — the
-  // host's only view into the live draft, since nothing is written until
-  // Set. Never fires while adjustActive is false.
-  onAdjustDraftChange?: (draft: AnchorAdjustDraft) => void
+  // The draft radius (ADR 0143): plain state owned by the host, not derived
+  // from zoom. Required whenever adjustActive is true (drives the geographic
+  // draft circle and the corner toolbar's readout) — optional in the type
+  // only because every non-Adjust render omits it.
+  adjustRadiusM?: number
+  // The host's own alarmRadiusBounds check against the current draft radius
+  // — rendered by the corner radius toolbar's disabled +/- state. Computed
+  // by the host (lib/anchor-adjust.ts's clampRadiusM/alarmRadiusBounds),
+  // since bounds themselves are none of this component's business any more.
+  adjustRadiusAtMin?: boolean
+  adjustRadiusAtMax?: boolean
+  /** "Chain onboard + boat length" / "Chain onboard, without boat length" — the toolbar's own + button's disabled reason. */
+  adjustRadiusMaxDisabledReason?: string
+  // Fires once on Adjust entry (with the anchor as the starting draft
+  // position) and again on every pan/zoom while it stays open — the host's
+  // only view into the live draft position, since nothing is written until
+  // Save. Never fires while adjustActive is false. Position only: the draft
+  // radius is the host's own state (adjustRadiusM above), stepped through
+  // onAdjustRadiusStep, never derived from a camera move.
+  onAdjustPositionChange?: (position: AnchorAdjustPosition) => void
+  // The corner toolbar's own +/- and the map's own keyboard +/- both land
+  // here with a signed delta in metres (lib/anchor-adjust.ts's
+  // radiusStepM) — the host owns clamping/snapping into alarmRadiusBounds,
+  // this component never computes a target radius itself.
+  onAdjustRadiusStep?: (deltaM: number) => void
   // Enter/Escape inside the map container (never window — the keyboard
-  // scoping the plan asks for) delegate to the host's own Set/Cancel
+  // scoping the plan asks for) delegate to the host's own Save/Cancel
   // handlers rather than this component owning any commit logic itself.
+  // onAdjustCancelKey doubles as the Adjust icon's own toggle-off handler
+  // while adjustActive is true (clicking it again behaves like Cancel).
   onAdjustSetKey?: () => void
   onAdjustCancelKey?: () => void
 }
 
-/** The Adjust mode's live draft — nothing more than what Set would PATCH, reported up so the host's bottom bar and warning banner can read it. */
-export interface AnchorAdjustDraft {
+/** Adjust mode's live draft position — the map's own centre, reported up so the host's warning banner and commit logic can read it. Radius is the host's own state (adjustRadiusM), not part of this shape. */
+export interface AnchorAdjustPosition {
   lat: number
   lon: number
-  radiusM: number
 }
 
-/** Imperative surface Adjust mode's bottom bar (owned by the host) drives the camera through — setting an absolute target radius by easing zoom so the fixed-size ring keeps representing it. */
-export interface AnchorWatchMapHandle {
-  setAdjustRadius: (targetRadiusM: number) => void
-  /**
-   * The last radius setAdjustRadius (or the map's own keyboard +/-) actually
-   * commanded, or null before Adjust has ever set one this session — the
-   * host's own +/- step handler bases its next target on this, not the
-   * draft it last received, for the same reason the map's own keyboard
-   * handler does (see pendingTargetRadiusMRef's doc comment): the reported
-   * draft only updates once the 150ms ease reports back, which can lag
-   * behind a rapid hold's 80ms repeat interval.
-   */
-  getAdjustRadiusTarget: () => number | null
-}
-
-export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapProps>(function AnchorWatchMap({
+export function AnchorWatchMap({
   vesselLat,
   vesselLon,
   vesselHeadingDeg,
@@ -493,11 +489,15 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
   viewKey = '',
   onAdjust,
   adjustActive = false,
-  adjustRadiusBounds,
-  onAdjustDraftChange,
+  adjustRadiusM,
+  adjustRadiusAtMin = false,
+  adjustRadiusAtMax = false,
+  adjustRadiusMaxDisabledReason = '',
+  onAdjustPositionChange,
+  onAdjustRadiusStep,
   onAdjustSetKey,
   onAdjustCancelKey,
-}: AnchorWatchMapProps, ref) {
+}: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
   // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
   // MapLibre 5 throws synchronously when it can't get a context — mounting
@@ -1029,15 +1029,18 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
 
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
+    const { latitude, longitude, zoom } = e.viewState
     // Adjust mode's camera is following a DRAFT, not the operator's own pan
     // of the ordinary chart — persisting it as the stored centre/zoom would
     // leave every other view (and this one, after Cancel) reopening on
     // wherever Adjust happened to leave the map, including a session that
-    // never actually got Set. handleAdjustMove (below) is the one place
-    // that reads the camera while Adjust is open.
-    if (adjustActive) return
-    const { latitude, longitude, zoom } = e.viewState
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    // never actually got Saved. handleAdjustMove (above) is the one place
+    // that reports the draft position while Adjust is open; this only skips
+    // the persistence, not the zoom tracking below — zoom is free during
+    // Adjust (ADR 0143), so marker scale and the satellite-imagery fade
+    // still need to track a genuine pinch/scroll the same as anywhere else
+    // on this map.
+    if (!adjustActive && Number.isFinite(latitude) && Number.isFinite(longitude)) {
       // Tagged with the session the view is following (a ref, so this stays
       // a stable handler) — a pan is only worth restoring for the anchorage
       // it was made in.
@@ -1047,69 +1050,39 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
     // there's nothing to track — see the currentZoom state's own comment.
     if (interactive && Number.isFinite(zoom)) {
       setCurrentZoom(zoom)
-      writeStoredZoom(zoom, viewSessionRef.current, viewKey)
+      if (!adjustActive) writeStoredZoom(zoom, viewSessionRef.current, viewKey)
     }
     // A pan/zoom changes every AIS vessel's projected screen position, so
     // the label-declutter result can change even with no new AIS poll.
     recomputeAisLabelSuppressionRef.current()
   }, [adjustActive, interactive, viewKey])
 
-  // ── Adjust mode (ADR 0136) ───────────────────────────────────────────────
+  // ── Adjust mode (ADR 0136, radius decoupled from zoom by ADR 0143) ───────
   // Nothing below ever writes to the server — Adjust mode's only write is
-  // the host's own Set button (anchor-watch-drawer.tsx's
+  // the host's own Save button (anchor-watch-drawer.tsx's
   // useAnchorAdjustCommit), well after this component has reported a draft
-  // up. Everything here is camera control and screen-space rendering: the
-  // fixed crosshair, the screen-space swing ring, the faded reference
-  // layers, and pan/zoom/keyboard capture.
+  // position up. Everything here is camera control and rendering: a one-time
+  // camera fit on entry, the fixed crosshair, the geographic draft-radius
+  // circle (a real map layer, so it always represents the true ground
+  // radius regardless of zoom — unlike the old fixed-screen-size ring),
+  // the faded reference layers, and pan/zoom/keyboard capture. Zoom itself
+  // is otherwise untouched: the operator can pinch/scroll freely to look
+  // around without changing the radius, which is now the host's own plain
+  // state (adjustRadiusM), never derived from the camera.
 
   // Focus returns here on exit (the plan's own keyboard requirement).
   const moveButtonRef = useRef<HTMLButtonElement | null>(null)
 
-  const [adjustDraft, setAdjustDraft] = useState<AnchorAdjustDraft | null>(null)
-  // Mirrors adjustDraft synchronously, same reasoning as adjustRingPxRef
-  // below: the resize handler further down needs the latest draft without
-  // adding adjustDraft itself to that effect's own dependency list, which
-  // would tear down and re-subscribe its ResizeObserver on every pan/pinch.
-  const adjustDraftRef = useRef<AnchorAdjustDraft | null>(null)
-  // The last radius applyAdjustRadius was actually asked to reach — distinct
-  // from adjustDraft.radiusM, which only updates once the camera's own
-  // moveend/move event reports back (code-review finding). easeTo's 150ms
-  // transition is slower than usePressRepeat's 80ms repeat interval, so a
-  // held +/- (or rapid native key-repeat on the keyboard's own +/-) can fire
-  // its next step before that report lands; deriving the next target from
-  // adjustDraft.radiusM in that window recomputes from a stale, mid-ease
-  // value instead of continuing from where the previous step was actually
-  // headed, landing off the exact step grid (74/78/83 ft instead of
-  // 75/80/85). Every step now bases itself on this instead.
-  const pendingTargetRadiusMRef = useRef<number | null>(null)
-  // The container's short side in CSS pixels, remeasured on entry and on
-  // resize — drives the fixed ring's own diameter and every zoom<->radius
-  // conversion below, so a resized window or a rotated kiosk-sized drawer
-  // keeps the ring's ground radius accurate rather than a stale measurement
-  // from whenever Adjust happened to open.
-  //
-  // Mirrored into a ref (updated synchronously, not just via the state
-  // setter) because map.jumpTo() below fires MapLibre's 'move' event
-  // *synchronously*, within the very same effect that just measured this
-  // value — well before React has re-rendered and handed handleAdjustMove a
-  // closure that actually sees the new state. A handler reading the state
-  // value here would process that first synchronous move against whatever
-  // adjustRingPx held on the PREVIOUS render (0, on entry), computing a
-  // radius of 0 and clamping straight to the floor. The ref is always
-  // current at the moment it's read, regardless of which render's closure
-  // is doing the reading.
-  const [adjustRingPx, setAdjustRingPxState] = useState(0)
-  const adjustRingPxRef = useRef(0)
-  const setAdjustRingPx = useCallback((px: number) => {
-    adjustRingPxRef.current = px
-    setAdjustRingPxState(px)
-  }, [])
+  // The draft position (map centre) — reported to the host on every pan/
+  // zoom so its warning banner and commit logic can read it. The draft
+  // radius lives entirely in the host's own state (adjustRadiusM prop); this
+  // component never stores or derives it.
+  const [adjustPosition, setAdjustPosition] = useState<AnchorAdjustPosition | null>(null)
 
-  const reportAdjustDraft = useCallback((draft: AnchorAdjustDraft) => {
-    adjustDraftRef.current = draft
-    setAdjustDraft(draft)
-    onAdjustDraftChange?.(draft)
-  }, [onAdjustDraftChange])
+  const reportAdjustPosition = useCallback((position: AnchorAdjustPosition) => {
+    setAdjustPosition(position)
+    onAdjustPositionChange?.(position)
+  }, [onAdjustPositionChange])
 
   // Guards the exit branch below from running its restore/focus-return on
   // the component's very first mount (adjustActive starts false, and the
@@ -1124,57 +1097,33 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
   // camera and the draft on every 5s anchor-watch poll, which is exactly
   // what the plan's "the poll must not reset the draft or the camera"
   // requirement rules out. Safe by construction — nothing writes to the
-  // server (and so nothing changes these props) until Set, so they are
+  // server (and so nothing changes these props) until Save, so they are
   // frozen at their entry values for the life of one Adjust session.
   useEffect(() => {
     const map = mapRef.current?.getMap?.()
     if (adjustActive) {
       everEnteredAdjustRef.current = true
       if (anchorLat === null || anchorLon === null) return
-      const shortSidePx = measureShortSidePx()
-      const ringPx = ringRadiusPx(shortSidePx)
-      setAdjustRingPx(ringPx)
-      const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: radiusMeters, maxReason: null }
-      // Clamped, not the raw committed radiusMeters (code-review finding):
-      // the drawer's own openAdjust already seeds ITS draft with
-      // clampRadiusM(radiusMeters, bounds) so a radius saved before the
-      // current chain+LOA ceiling existed starts inside it — this entry
-      // effect used to report the raw value right after, silently
-      // overwriting that clamped seed with one Set would PATCH straight
-      // back out to. MapLibre's own setMinZoom/setMaxZoom below already
-      // clamp the CAMERA to whatever the raw radius's zoom would have been,
-      // so the ring was already showing the clamped ground radius while this
-      // reported the wrong number as the draft.
-      const clampedRadiusM = clampRadiusM(radiusMeters, bounds)
-      const initialZoom = zoomForRingRadius(clampedRadiusM, anchorLat, ringPx)
-      const zoomBounds = adjustZoomBounds(bounds, anchorLat, ringPx)
+      // Centre on the anchor so the crosshair starts on it, but leave the
+      // zoom exactly where the operator had it: the radius doesn't ride on
+      // zoom, so there's nothing to fit.
       if (map) {
-        map.setMinZoom(zoomBounds.minZoom)
-        map.setMaxZoom(zoomBounds.maxZoom)
         // Touch-pinch rotate is the one rotation gesture the Map's own
         // dragRotate={false} prop (always on, not Adjust-specific) doesn't
         // already cover.
         map.touchZoomRotate?.disableRotation?.()
-        map.jumpTo({ center: [anchorLon, anchorLat], zoom: initialZoom })
+        map.jumpTo({ center: [anchorLon, anchorLat] })
         // CSS alone (the full-screen phone layout) doesn't tell MapLibre its
         // container resized — belt-and-suspenders alongside MapLibre's own
         // trackResize default.
         map.resize()
       }
-      setCurrentZoom(initialZoom)
-      pendingTargetRadiusMRef.current = clampedRadiusM
-      reportAdjustDraft({ lat: anchorLat, lon: anchorLon, radiusM: clampedRadiusM })
+      reportAdjustPosition({ lat: anchorLat, lon: anchorLon })
       mapWrapperRef.current?.focus()
     } else if (everEnteredAdjustRef.current) {
       everEnteredAdjustRef.current = false
-      if (map) {
-        map.setMinZoom(ANCHOR_VIEW_MIN_ZOOM)
-        map.setMaxZoom(ADJUST_MAX_ZOOM)
-        map.touchZoomRotate?.enableRotation?.()
-      }
-      adjustDraftRef.current = null
-      pendingTargetRadiusMRef.current = null
-      setAdjustDraft(null)
+      map?.touchZoomRotate?.enableRotation?.()
+      setAdjustPosition(null)
       // "Return focus to the Move icon on exit" — a no-op (optional
       // chaining) if the icon isn't currently rendered, e.g. the anchor was
       // raised as part of this same exit and hasAnchor has already gone
@@ -1186,64 +1135,16 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
 
   // Fires on every pan/zoom while Adjust is open (react-map-gl's onMove,
   // distinct from onMoveEnd — this needs the live value while a gesture is
-  // still in progress, not just once it settles). The draft radius is
-  // clamped to bounds as a safety net (minZoom/maxZoom already stop pinch
-  // at the limits) and snapped to a whole display unit — "snap the
-  // displayed/committed value, not the zoom" avoids the readout jittering
-  // by fractions of a metre as a gesture settles at an off zoom.
-  const handleAdjustMove = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number }; originalEvent?: unknown }) => {
+  // still in progress, not just once it settles). Position only: a pinch/
+  // scroll changes zoom, which this reports nothing about — the radius is
+  // the host's own state, stepped only through the corner toolbar or the
+  // keyboard's own +/- (onAdjustRadiusStep below).
+  const handleAdjustMove = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (!adjustActive) return
-    const { latitude, longitude, zoom } = e.viewState
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(zoom)) return
-    const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: radiusMeters, maxReason: null }
-    // Reads the ref, not the closed-over adjustRingPx state — see its own
-    // doc comment above for why: map.jumpTo() on entry fires this
-    // synchronously, before this render's state update has reached a new
-    // closure.
-    const rawRadiusM = radiusForZoom(zoom, latitude, adjustRingPxRef.current)
-    const snappedRadiusM = snapRadiusM(clampRadiusM(rawRadiusM, bounds), isImperial)
-    // A genuine pan/pinch gesture is just as authoritative as a commanded
-    // step for what the NEXT step should continue from (pendingTargetRadiusMRef's
-    // own doc comment) — without this, stepping once, then pinching by hand,
-    // then stepping again would resume from the first step's stale target
-    // instead of wherever the pinch actually left the ring.
-    //
-    // Gated on e.originalEvent (code-review finding, round 2): this handler
-    // fires on EVERY animation frame of applyAdjustRadius's own 150ms
-    // easeTo, not only on a genuine gesture — MapLibre only attaches
-    // originalEvent to a move event it fired for real user input
-    // (drag/wheel/touch); a programmatic easeTo/jumpTo call with no
-    // eventData argument (every call this file makes) fires 'move' with
-    // originalEvent undefined. Writing the ref unconditionally meant a
-    // still-in-flight frame of a step's own ease — not yet at the target,
-    // since the ease takes longer than usePressRepeat's 80ms repeat or a
-    // keyboard's own auto-repeat — would overwrite the correct target that
-    // same step had just recorded, so the NEXT step read back a stale,
-    // not-yet-settled value instead of continuing from where the previous
-    // one was actually headed.
-    if (e.originalEvent !== undefined) {
-      pendingTargetRadiusMRef.current = snappedRadiusM
-    }
-    reportAdjustDraft({ lat: latitude, lon: longitude, radiusM: snappedRadiusM })
-  }, [adjustActive, adjustRadiusBounds, radiusMeters, isImperial, reportAdjustDraft])
-
-  // Eases the camera's zoom to whatever represents `targetRadiusM` on the
-  // fixed-size ring — the ring's own screen size never changes, only the
-  // ground scale under it. The draft itself is updated by the moveend/move
-  // events this triggers, not written here directly, so there is exactly
-  // one place (handleAdjustMove) that derives it from the camera. Takes the
-  // absolute target, not a delta, so the same function serves the keyboard's
-  // relative +/- (which computes its own target first) and the host's chip
-  // taps (which already have an absolute value in hand) without either
-  // needing a second copy.
-  const applyAdjustRadius = useCallback((targetRadiusMRaw: number) => {
-    if (!adjustActive || !adjustDraft) return
-    const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: adjustDraft.radiusM, maxReason: null }
-    const targetRadiusM = clampRadiusM(targetRadiusMRaw, bounds)
-    pendingTargetRadiusMRef.current = targetRadiusM
-    const zoom = zoomForRingRadius(targetRadiusM, adjustDraft.lat, adjustRingPxRef.current)
-    mapRef.current?.easeTo({ zoom, duration: 150 })
-  }, [adjustActive, adjustDraft, adjustRadiusBounds])
+    const { latitude, longitude } = e.viewState
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
+    reportAdjustPosition({ lat: latitude, lon: longitude })
+  }, [adjustActive, reportAdjustPosition])
 
   // Keyboard pan (arrows) — converts a metre offset to a pixel offset at the
   // current zoom/latitude and pans by it, same mechanism a drag gesture
@@ -1252,19 +1153,27 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
     if (!adjustActive) return
     const map = mapRef.current?.getMap?.()
     const zoom = map?.getZoom() ?? currentZoom
-    const lat = adjustDraft?.lat ?? anchorLat
+    const lat = adjustPosition?.lat ?? anchorLat
     if (lat === null || lat === undefined) return
     const mPerPx = metersPerPixel(lat, zoom)
     if (!(mPerPx > 0)) return
     // Screen y grows downward; north is -y.
     map?.panBy([eastM / mPerPx, -northM / mPerPx], { duration: 0 })
-  }, [adjustActive, adjustDraft, anchorLat, currentZoom])
+  }, [adjustActive, adjustPosition, anchorLat, currentZoom])
 
   // Scoped to the map container's own onKeyDown, never window — a keydown
-  // anywhere else on the page (the bottom bar's own inputs, the rest of the
-  // drawer) must not pan or resize the ring.
+  // anywhere else on the page (the corner toolbar's own buttons, the rest of
+  // the drawer) must not pan or step the radius.
   const handleAdjustKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!adjustActive) return
+    // The control buttons stay up during Adjust and sit inside this
+    // container, so their own keys bubble here. Only Escape applies from a
+    // button: Enter on "Increase radius" or the Adjust icon means that
+    // button, not Save, and arrows/+/- belong to the button too.
+    const fromControl = e.target !== e.currentTarget
+      && e.target instanceof Element
+      && e.target.closest('button, input, select, textarea, a[href]') !== null
+    if (fromControl && e.key !== 'Escape') return
     const panStepM = e.shiftKey ? 5 : 1
     const step = radiusStepM(isImperial)
     switch (e.key) {
@@ -1272,36 +1181,58 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
       case 'ArrowDown': e.preventDefault(); panAdjustByMeters(0, -panStepM); break
       case 'ArrowLeft': e.preventDefault(); panAdjustByMeters(-panStepM, 0); break
       case 'ArrowRight': e.preventDefault(); panAdjustByMeters(panStepM, 0); break
-      // Steps from the last commanded target (pendingTargetRadiusMRef), not
-      // adjustDraft.radiusM directly — see that ref's own doc comment for
-      // why: a native key-repeat firing faster than the 150ms ease would
-      // otherwise recompute from a stale, mid-ease draft.
       case '+':
-      case '=': e.preventDefault(); if (adjustDraft) applyAdjustRadius((pendingTargetRadiusMRef.current ?? adjustDraft.radiusM) + step); break
+      case '=': e.preventDefault(); onAdjustRadiusStep?.(step); break
       case '-':
-      case '_': e.preventDefault(); if (adjustDraft) applyAdjustRadius((pendingTargetRadiusMRef.current ?? adjustDraft.radiusM) - step); break
+      case '_': e.preventDefault(); onAdjustRadiusStep?.(-step); break
       case 'Enter': e.preventDefault(); onAdjustSetKey?.(); break
       case 'Escape': e.preventDefault(); onAdjustCancelKey?.(); break
       default: break
     }
-  }, [adjustActive, isImperial, panAdjustByMeters, applyAdjustRadius, adjustDraft, onAdjustSetKey, onAdjustCancelKey])
+  }, [adjustActive, isImperial, panAdjustByMeters, onAdjustRadiusStep, onAdjustSetKey, onAdjustCancelKey])
 
-  // The bottom bar (owned by the host, anchor-watch-drawer.tsx) drives the
-  // camera's radius through this — its own +/- buttons and chip taps need to
-  // ease the SAME zoom this component's keyboard handler above eases,
-  // rather than a second copy of the conversion.
-  useImperativeHandle(ref, () => ({
-    setAdjustRadius: applyAdjustRadius,
-    getAdjustRadiusTarget: () => pendingTargetRadiusMRef.current,
-  }), [applyAdjustRadius])
+  // Clicking the Adjust icon again behaves like Cancel (the plan's own
+  // requirement) — the icon stays on screen and pressed for the whole
+  // session rather than disappearing the moment Adjust opens, so it's the
+  // one control that's always there to back out through.
+  const handleAdjustIconClick = useCallback(() => {
+    if (adjustActive) {
+      onAdjustCancelKey?.()
+    } else {
+      onAdjust?.()
+    }
+  }, [adjustActive, onAdjust, onAdjustCancelKey])
 
   // The reference line + faded original circle's label ("moved 8 m ·
   // 045°") — null (and so not rendered) under 1 m of movement, and null
   // outright with no draft yet (the one render before the entry effect
   // above has run).
-  const adjustMovedLabel = adjustActive && adjustDraft && anchorLat !== null && anchorLon !== null
-    ? formatMovedLabel(anchorMoveOffset(anchorLat, anchorLon, adjustDraft.lat, adjustDraft.lon), isImperial)
+  // The data cards stay up during Adjust and describe the draft, not the
+  // saved watch: distance and bearing run from wherever the crosshair sits
+  // to the boat, and Radius is the toolbar's value, so the operator sees
+  // where the boat would be in the new circle while panning. A null
+  // committed distance means no live boat position, and that holds for the
+  // draft too.
+  const metricsDistanceM = adjustActive && adjustPosition && distanceMeters !== null
+    ? haversineMeters(adjustPosition.lat, adjustPosition.lon, vesselLat, vesselLon)
+    : distanceMeters
+  const metricsBearingDeg = adjustActive && adjustPosition && bearingDegProp !== null
+    ? Math.round(bearingDeg(adjustPosition.lat, adjustPosition.lon, vesselLat, vesselLon))
+    : bearingDegProp
+  const metricsRadiusM = adjustActive && adjustRadiusM !== undefined ? adjustRadiusM : radiusMeters
+
+  const adjustMovedLabel = adjustActive && adjustPosition && anchorLat !== null && anchorLon !== null
+    ? formatMovedLabel(anchorMoveOffset(anchorLat, anchorLon, adjustPosition.lat, adjustPosition.lon), isImperial)
     : null
+
+  // The draft swing circle (ADR 0143): a real geographic polygon centred on
+  // the draft position, recomputed on every pan/zoom — it always represents
+  // the true ground radius, unlike the old fixed-screen-size ring, because
+  // it's genuine map geometry rather than a DOM overlay sized in pixels.
+  const adjustCircleGeoJSON = useMemo<GeoJSON.Feature<GeoJSON.Polygon> | null>(() => {
+    if (!adjustActive || !adjustPosition || adjustRadiusM === undefined) return null
+    return generateCircleGeoJSON(adjustPosition.lon, adjustPosition.lat, adjustRadiusM)
+  }, [adjustActive, adjustPosition, adjustRadiusM])
 
   // ── Initial map view ─────────────────────────────────────────────────────
   // mountView, resolved above, has already decided whether the stored centre
@@ -1480,53 +1411,15 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
       recomputeAvoidZones()
       recomputeAisLabelSuppressionRef.current()
       retryPendingFit()
-      // The full-screen phone layout (className flips to fixed inset-0 on
-      // Adjust entry) resizes this exact container, and so does an ordinary
-      // browser window resize or a kiosk rotation while Adjust is already
-      // open. The ring's pixel size has to track the new short side — but a
-      // resize is not a gesture, so the ground radius it represents (what
-      // the bar shows and Set would commit) must not drift just because the
-      // container changed shape (code-review finding: this used to update
-      // only adjustRingPx, leaving the zoom bounds and the reported draft
-      // radius stale until the next pan/pinch silently snapped them onto
-      // the new ring). Recompute the ring, recompute the zoom bounds
-      // against it, and re-aim the camera's zoom so the operator's own
-      // chosen radius stays exactly what it was.
-      const draft = adjustDraftRef.current
-      if (adjustActive && draft) {
-        const newRingPx = ringRadiusPx(measureShortSidePx())
-        setAdjustRingPx(newRingPx)
-        const bounds: AlarmRadiusBounds = adjustRadiusBounds ?? { minM: MIN_ALARM_RADIUS_M, maxM: draft.radiusM, maxReason: null }
-        // Clamped, not the existing draft.radiusM as-is (code-review
-        // finding, same reasoning as the entry effect above): if the bounds
-        // have narrowed since the draft was last set (a settings change to
-        // chain onboard/LOA landing mid-session), a resize must pull the
-        // reported radius back inside them like every other path already
-        // does, not just keep re-asserting whatever it already was.
-        const clampedRadiusM = clampRadiusM(draft.radiusM, bounds)
-        // Keeps the pending-target tracking (see its own doc comment) in
-        // sync with a resize too, so a keyboard/bar step immediately after
-        // one continues from the radius the resize just settled on, not a
-        // stale value from before it.
-        pendingTargetRadiusMRef.current = clampedRadiusM
-        const zoomBounds = adjustZoomBounds(bounds, draft.lat, newRingPx)
-        const map = mapRef.current?.getMap?.()
-        if (map) {
-          map.setMinZoom(zoomBounds.minZoom)
-          map.setMaxZoom(zoomBounds.maxZoom)
-          map.jumpTo({ zoom: zoomForRingRadius(clampedRadiusM, draft.lat, newRingPx) })
-        }
-        // Restated explicitly rather than left to jumpTo's own synchronous
-        // 'move' event (which handleAdjustMove would otherwise re-derive
-        // from the new ringPx/zoom pair): the radius has to read back as
-        // exactly what it was, not a value that merely round-trips close to
-        // it through a second floating-point conversion.
-        reportAdjustDraft({ ...draft, radiusM: clampedRadiusM })
-      }
+      // A resize no longer needs any Adjust-specific handling (ADR 0143):
+      // the draft circle is real map geometry keyed off the draft position
+      // and the host's own radius state, not a fixed-pixel ring sized off
+      // this container — it already tracks a container resize the same way
+      // it tracks a pan or a zoom, with no recompute needed here.
     })
     observer.observe(wrapper)
     return () => observer.disconnect()
-  }, [recomputeAvoidZones, retryPendingFit, adjustActive, measureShortSidePx, setAdjustRingPx, adjustRadiusBounds, reportAdjustDraft])
+  }, [recomputeAvoidZones, retryPendingFit])
 
   return (
     <div
@@ -1586,11 +1479,11 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
         dragPan
       >
         {/* Alarm circle fill — during Adjust this is the ORIGINAL circle
-            (nothing is written until Set, so circleGeoJSON/radiusMeters
+            (nothing is written until Save, so circleGeoJSON/radiusMeters
             stay frozen at the committed watch for the whole session),
             faded down so it reads as reference rather than as the live
-            alarm boundary — that role belongs to the screen-space ring
-            below, which tracks the draft. */}
+            alarm boundary — that role belongs to the draft circle below,
+            which tracks the draft position and the host's own draft radius. */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
           <Layer
             id="alarm-circle-fill"
@@ -1612,18 +1505,46 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
           />
         </Source>
 
+        {/* Adjust mode's own draft swing circle (ADR 0143): a real
+            geographic polygon centred on the draft position (the crosshair,
+            always the map's own centre) at the host's own draft radius
+            (adjustRadiusM) — genuine map geometry, so it always represents
+            the true ground radius regardless of zoom, replacing the old
+            fixed-screen-size ring that pinch/scroll used to resize. */}
+        {adjustCircleGeoJSON && (
+          <Source id="adjust-draft-circle" type="geojson" data={adjustCircleGeoJSON}>
+            <Layer
+              id="adjust-draft-circle-fill"
+              type="fill"
+              paint={{
+                'fill-color': isDarkTheme ? '#38bdf8' : '#0ea5e9',
+                'fill-opacity': 0.15,
+              }}
+            />
+            <Layer
+              id="adjust-draft-circle-stroke"
+              type="line"
+              paint={{
+                'line-color': isDarkTheme ? '#38bdf8' : '#0284c7',
+                'line-width': 2,
+                'line-opacity': 0.95,
+              }}
+            />
+          </Source>
+        )}
+
         {/* Adjust mode's reference line: original anchor -> the draft
             (the crosshair, always the map's own centre) — a real map layer
             rather than a screen-space overlay, so it projects correctly
             through every pan/zoom with no extra project() bookkeeping. */}
-        {adjustActive && adjustDraft && anchorLat !== null && anchorLon !== null && (
+        {adjustActive && adjustPosition && anchorLat !== null && anchorLon !== null && (
           <Source
             id="adjust-reference-line"
             type="geojson"
             data={{
               type: 'Feature',
               properties: {},
-              geometry: { type: 'LineString', coordinates: [[anchorLon, anchorLat], [adjustDraft.lon, adjustDraft.lat]] },
+              geometry: { type: 'LineString', coordinates: [[anchorLon, anchorLat], [adjustPosition.lon, adjustPosition.lat]] },
             }}
           >
             <Layer
@@ -1939,7 +1860,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
         {/* The ORIGINAL anchor position, faded — the reference line above
             runs from here to the draft. Frozen for the session (see the
             alarm-circle comment above: nothing writes to the server until
-            Set), so this is exactly anchorLat/anchorLon, not a separate
+            Save), so this is exactly anchorLat/anchorLon, not a separate
             captured value. */}
         {hasAnchor && adjustActive && (
           <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 990 }}>
@@ -2064,12 +1985,7 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
           AGENTS.md sets for text this small — a translucent ground can't
           promise 4.5:1 against arbitrary imagery underneath it, so the fix
           is a ground dark enough that it doesn't have to. */}
-      {/* Hidden during Adjust: Distance/Bearing/Radius here describe the
-          COMMITTED watch, and would read as live numbers contradicting the
-          draft the crosshair/ring and the bottom bar are actually showing.
-          The moved-distance/bearing label near the crosshair and the bar's
-          own RADIUS readout are Adjust's replacement for this panel. */}
-      {!adjustActive && (
+      {/* During Adjust these rows follow the draft (see metricsDistanceM). */}
       <div
         ref={metricsPanelRef}
         className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur-sm"
@@ -2081,23 +1997,23 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
             ? [
                 {
                   label: 'Distance',
-                  value: distanceMeters !== null
+                  value: metricsDistanceM !== null
                     ? isImperial
-                      ? `${Math.round(distanceMeters * 3.28084)}`
-                      : `${Math.round(distanceMeters)}`
+                      ? `${Math.round(metricsDistanceM * 3.28084)}`
+                      : `${Math.round(metricsDistanceM)}`
                     : '—',
                   unit: isImperial ? 'ft' : 'm',
                 },
                 {
                   label: 'Bearing',
-                  value: bearingDegProp !== null ? `${bearingDegProp}` : '—',
+                  value: metricsBearingDeg !== null ? `${metricsBearingDeg}` : '—',
                   unit: '°',
                 },
                 {
                   label: 'Radius',
                   value: isImperial
-                    ? `${Math.round(radiusMeters * 3.28084)}`
-                    : `${Math.round(radiusMeters)}`,
+                    ? `${Math.round(metricsRadiusM * 3.28084)}`
+                    : `${Math.round(metricsRadiusM)}`,
                   unit: isImperial ? 'ft' : 'm',
                 },
               ]
@@ -2174,7 +2090,6 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
           </div>
         ))}
       </div>
-      )}
 
       {/* Zoom + Recenter controls. Design critique item 3: six buttons
           stacked in-tile clipped the bottom two at tile height. The
@@ -2186,77 +2101,83 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
           Kiosk maps are display-only: every button here is an interaction
           control (zoom, fullscreen, satellite/radar-echo toggle, recentre) —
           nothing informational — so the whole stack is dropped rather than
-          picked apart one button at a time when `interactive` is false. */}
-      {interactive && !adjustActive && (
+          picked apart one button at a time when `interactive` is false.
+          Unlike every other control here, the Adjust icon (and its own
+          radius toolbar) stay mounted through Adjust rather than hiding —
+          ADR 0143 made the icon itself Adjust's one persistent, always-
+          reachable way back out (toggles to Cancel when tapped again). */}
+      {interactive && (
       <div
         ref={mapControlsRef}
-        className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1"
+        className="pointer-events-auto absolute right-3 top-3 flex flex-col items-end gap-1"
         style={{ zIndex: 2100 }}
         data-testid="anchor-watch-controls"
       >
-        {onFullscreen && (
-          <button
-            onClick={onFullscreen}
-            aria-label="Full screen"
-            className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-            style={{ transition: 'background-color 150ms ease-out' }}
-          >
-            <Expand className="h-4 w-4" />
-          </button>
-        )}
-        <button
-          onClick={handleZoomIn}
-          aria-label="Zoom in"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleZoomOut}
-          aria-label="Zoom out"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Minus className="h-4 w-4" />
-        </button>
-        {expandedControls && (
-          <>
+        <>
+            {onFullscreen && (
+              <button
+                onClick={onFullscreen}
+                aria-label="Full screen"
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+                style={{ transition: 'background-color 150ms ease-out' }}
+              >
+                <Expand className="h-4 w-4" />
+              </button>
+            )}
             <button
-              onClick={handleImageryToggle}
-              aria-label="Toggle satellite imagery"
-              className={cn(
-                'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
-                showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-              )}
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              <Satellite className="h-4 w-4" />
-            </button>
-            <button
-              onClick={handleRadarEchoToggle}
-              aria-label="Toggle radar echo overlay"
-              disabled={!radarEchoAvailability.available}
-              title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
-              className={cn(
-                'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
-                showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-                !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
-              )}
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              <Radar className="h-4 w-4" />
-            </button>
-            <button
-              onClick={handleRecenter}
-              aria-label="Re-centre on anchor"
+              onClick={handleZoomIn}
+              aria-label="Zoom in"
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
               style={{ transition: 'background-color 150ms ease-out' }}
             >
-              <Crosshair className="h-4 w-4" />
+              <Plus className="h-4 w-4" />
             </button>
-          </>
-        )}
+            <button
+              onClick={handleZoomOut}
+              aria-label="Zoom out"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+            {expandedControls && (
+              <>
+                <button
+                  onClick={handleImageryToggle}
+                  aria-label="Toggle satellite imagery"
+                  className={cn(
+                    'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
+                    showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+                  )}
+                  style={{ transition: 'background-color 150ms ease-out' }}
+                >
+                  <Satellite className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleRadarEchoToggle}
+                  aria-label="Toggle radar echo overlay"
+                  disabled={!radarEchoAvailability.available}
+                  title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
+                  className={cn(
+                    'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
+                    showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+                    !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
+                  )}
+                  style={{ transition: 'background-color 150ms ease-out' }}
+                >
+                  <Radar className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleRecenter}
+                  aria-label="Re-centre on anchor"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+                  style={{ transition: 'background-color 150ms ease-out' }}
+                >
+                  <Crosshair className="h-4 w-4" />
+                </button>
+              </>
+            )}
+        </>
         {/* Adjust mode entry point (ADR 0133, ADR 0136): only when there is
             a map to open it on (canRenderMap — no WebGL2 means no map, and
             the header's own text Adjust button is that state's entry point
@@ -2267,18 +2188,52 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
             host's stack, not only the fullscreen drawer's expanded set.
             Move, not Crosshair — Crosshair is already this same stack's
             recentre icon a few buttons up (expandedControls), and reusing
-            it here would give two different actions the same glyph. */}
+            it here would give two different actions the same glyph.
+
+            aria-pressed and the active background (ADR 0143) mark the icon
+            as the one Adjust control that never disappears; clicking it
+            again calls onAdjustCancelKey (Cancel) rather than reopening. */}
         {canRenderMap && hasAnchor && onAdjust && (
-          <button
-            ref={moveButtonRef}
-            onClick={onAdjust}
-            aria-label="Adjust anchor"
-            title="Adjust anchor"
-            className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-            style={{ transition: 'background-color 150ms ease-out' }}
-          >
-            <Move className="h-4 w-4" />
-          </button>
+          <>
+            <button
+              ref={moveButtonRef}
+              onClick={handleAdjustIconClick}
+              aria-label="Adjust anchor"
+              aria-pressed={adjustActive}
+              title="Adjust anchor"
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
+                adjustActive ? 'bg-primary hover:bg-primary/90' : 'bg-black/65 hover:bg-black/80',
+              )}
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Move className="h-4 w-4" />
+            </button>
+            {/* The radius toolbar slides out directly under the icon on
+                entry — mounted only while Adjust is active (so it's cleanly
+                absent, not just hidden, the rest of the time) and revealed
+                with a short CSS transition FROM its own @starting-style
+                (Tailwind's `starting:` variant, Baseline 2024), which
+                `motion-reduce:` disables per prefers-reduced-motion. */}
+            {adjustActive && (
+              <div
+                className={cn(
+                  'max-w-60 overflow-hidden opacity-100 transition-[max-width,opacity] duration-200 ease-out',
+                  'starting:max-w-0 starting:opacity-0 motion-reduce:transition-none',
+                )}
+              >
+                <AnchorAdjustRadiusToolbar
+                  radiusM={adjustRadiusM ?? 0}
+                  isImperial={isImperial}
+                  atMin={adjustRadiusAtMin}
+                  atMax={adjustRadiusAtMax}
+                  maxDisabledReason={adjustRadiusMaxDisabledReason}
+                  stepM={radiusStepM(isImperial)}
+                  onStepRadius={(deltaM) => onAdjustRadiusStep?.(deltaM)}
+                />
+              </div>
+            )}
+          </>
         )}
         {/* No stop/clear control here — both hosts are gaining a labeled
             Raise button with its own confirm dialog (anchor-watch-tile.tsx,
@@ -2288,44 +2243,30 @@ export const AnchorWatchMap = forwardRef<AnchorWatchMapHandle, AnchorWatchMapPro
       )}
 
       {/* Adjust mode's fixed centre crosshair (replaces the anchor marker)
-          and its screen-space swing ring — DOM/SVG overlays, not map
-          layers, per the plan: the ring's own pixel size never changes as
-          the operator pinches/scrolls, only the ground scale under it does,
-          which is what makes stepping the radius read as "the ring stays
-          fixed" rather than visibly resizing. */}
+          — a DOM overlay, not a map layer, per the plan: it always sits at
+          the exact centre of the viewport, which is by construction also
+          the centre the draft circle above is drawn around. */}
       {adjustActive && canRenderMap && (
-        <>
-          <div
-            className="pointer-events-none absolute inset-0 flex items-center justify-center"
-            style={{ zIndex: 1600 }}
-            data-testid="anchor-adjust-ring"
-          >
-            <div
-              className="rounded-full border-2 border-dashed border-primary/80"
-              style={{ width: adjustRingPx * 2, height: adjustRingPx * 2 }}
-            />
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+          style={{ zIndex: 1650 }}
+        >
+          <div className="relative flex flex-col items-center" data-testid="anchor-adjust-crosshair">
+            <div className="absolute h-9 w-px bg-primary" />
+            <div className="absolute h-px w-9 bg-primary" />
+            <div className="h-4 w-4 rounded-full border-2 border-primary bg-primary/25" />
+            {adjustMovedLabel && (
+              <div
+                data-testid="anchor-adjust-moved-label"
+                className="absolute top-6 whitespace-nowrap rounded bg-black/85 px-2 py-0.5 text-xs font-medium tracking-wide text-white"
+              >
+                {adjustMovedLabel}
+              </div>
+            )}
           </div>
-          <div
-            className="pointer-events-none absolute inset-0 flex items-center justify-center"
-            style={{ zIndex: 1650 }}
-          >
-            <div className="relative flex flex-col items-center" data-testid="anchor-adjust-crosshair">
-              <div className="absolute h-9 w-px bg-primary" />
-              <div className="absolute h-px w-9 bg-primary" />
-              <div className="h-4 w-4 rounded-full border-2 border-primary bg-primary/25" />
-              {adjustMovedLabel && (
-                <div
-                  data-testid="anchor-adjust-moved-label"
-                  className="absolute top-6 whitespace-nowrap rounded bg-black/85 px-2 py-0.5 text-xs font-medium tracking-wide text-white"
-                >
-                  {adjustMovedLabel}
-                </div>
-              )}
-            </div>
-          </div>
-        </>
+        </div>
       )}
 
     </div>
   )
-})
+}

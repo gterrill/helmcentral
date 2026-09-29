@@ -81,6 +81,8 @@ export interface AnchorRodePlannerProps {
   onWindBandChange: (bandId: string) => void
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   onApplyAlarmRadius: (radiusMeters: number) => Promise<void>
+  /** Set while something else owns the radius (Anchor Watch's Adjust mode): Apply is disabled and this is shown as the reason. Adjust saves its own draft, which would silently overwrite a radius applied here mid-session. */
+  applyLockedReason?: string | null
 }
 
 function toDisplayDistance(meters: number, isImperial: boolean): number {
@@ -133,6 +135,7 @@ export function AnchorRodePlanner({
   onWindBandChange,
   onUpdateRodeAndConditions,
   onApplyAlarmRadius,
+  applyLockedReason = null,
 }: AnchorRodePlannerProps) {
   const [open, setOpen] = useState<boolean>(() => globalThis.localStorage?.getItem(RODE_PLANNER_OPEN_KEY) === 'true')
 
@@ -349,9 +352,9 @@ export function AnchorRodePlanner({
   }, [handlePersist, pendingRode, pendingSeaState])
 
   const handleApplyAlarmRadius = useCallback(() => {
-    if (isInactive || configuredSwingRadiusM === null) return
+    if (isInactive || configuredSwingRadiusM === null || applyLockedReason !== null) return
     void onApplyAlarmRadius(configuredSwingRadiusM)
-  }, [isInactive, configuredSwingRadiusM, onApplyAlarmRadius])
+  }, [isInactive, configuredSwingRadiusM, onApplyAlarmRadius, applyLockedReason])
 
   const unit = isImperial ? 'ft' : 'm'
   const bowRollerHeightM = anchorConfig.bowRollerHeightM
@@ -759,11 +762,14 @@ export function AnchorRodePlanner({
               Applies the {configuredMethodResult.label} swing, {Math.round(toDisplayDistance(configuredSwingRadiusM, isImperial))} {unit}
             </p>
           ) : null}
+          {applyLockedReason !== null && (
+            <p className="text-xs text-muted-foreground">{applyLockedReason}</p>
+          )}
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            disabled={isInactive || configuredSwingRadiusM === null}
+            disabled={isInactive || configuredSwingRadiusM === null || applyLockedReason !== null}
             onClick={handleApplyAlarmRadius}
           >
             Apply as alarm radius

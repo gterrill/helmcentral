@@ -11,22 +11,30 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { SeabedType, SeaState } from '@/lib/catenary'
-import { AnchorAdjustBar, type AnchorAdjustChip } from '@/components/anchor-adjust-bar'
+import { AnchorAdjustActions } from '@/components/anchor-adjust-actions'
+import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
-import { AnchorWatchMap, type AnchorAdjustDraft, type AnchorWatchMapHandle } from '@/components/anchor-watch-map'
+import { AnchorWatchMap, type AnchorAdjustPosition } from '@/components/anchor-watch-map'
 import { Button } from '@/components/ui/button'
 import { useAnchorAdjustCommit, type AnchorAdjustTarget } from '@/hooks/use-anchor-adjust-commit'
 import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM, type AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { haversineMeters } from '@/lib/geo'
-import { computeScopeRecommendation, computeSwingRadiusM, resolveLoaM } from '@/lib/rode-plan'
+import { computeScopeRecommendation, resolveLoaM } from '@/lib/rode-plan'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hasWebGL2 } from '@/lib/webgl'
 import { cn } from '@/lib/utils'
 import { feetToMeters, metersToFeet } from '@/lib/units'
+
+/** Adjust mode's live draft (ADR 0136, ADR 0143) — the drawer's own plain state: position comes from the map's pan, radius is stepped directly by the corner toolbar/keyboard, no longer derived from zoom. */
+interface AnchorAdjustDraft {
+  lat: number
+  lon: number
+  radiusM: number
+}
 
 /** A tide height in feet, converted to the host's chosen unit — matches depth-tide-tile.tsx's own conversion. */
 function tideValueDisplay(heightFt: number, isImperial: boolean): string {
@@ -308,7 +316,6 @@ export function AnchorWatchDrawer({
   const [adjustActive, setAdjustActive] = useState(false)
   const [adjustDraft, setAdjustDraft] = useState<AnchorAdjustDraft | null>(null)
   const [confirmingSet, setConfirmingSet] = useState(false)
-  const mapHandleRef = useRef<AnchorWatchMapHandle>(null)
   const headerAdjustButtonRef = useRef<HTMLButtonElement>(null)
   // The watch's own values the instant Adjust opened: what Set's "previous"
   // (and so Undo) restores. A ref, not state — it must never itself trigger
@@ -390,20 +397,51 @@ export function AnchorWatchDrawer({
     if (!canUseMapForAdjust) headerAdjustButtonRef.current?.focus()
   }, [canUseMapForAdjust])
 
-  // Exit paths beyond Cancel/Set/Escape: raising the anchor, or the watch
+  // Exit paths beyond Cancel/Save: raising the anchor, or the watch
   // disappearing under the operator (another client raised it, or the
   // server auto-raised it — ADR 0099). A draft with no committed anchor left
   // to compare against, undo against, or eventually PATCH over is
   // meaningless — closing here is the fail-fast response, not a frozen
-  // session nobody can Set or Cancel out of usefully.
+  // session nobody can Save or Cancel out of usefully.
   useEffect(() => {
     if (adjustActive && !isAnchored) closeAdjust()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAnchored])
 
-  const handleAdjustDraftChange = useCallback((draft: AnchorAdjustDraft) => {
-    setAdjustDraft(draft)
+  // If alarmRadiusBounds narrows while Adjust stays open (a settings change
+  // to chain onboard/LOA landing mid-session), pull the draft radius back
+  // inside the new ceiling — the same reasoning entry (openAdjust) already
+  // applies to the starting draft, just re-checked on every bounds change
+  // rather than only once at entry. ADR 0143 replaces what used to be a
+  // ResizeObserver-triggered reclamp (the old fixed-screen-size ring had to
+  // notice a resize to notice this) with a plain effect on the bounds
+  // themselves, which is both simpler and strictly more correct — it now
+  // reacts to the actual cause, not a resize that happened to accompany it.
+  useEffect(() => {
+    if (!adjustActive) return
+    setAdjustDraft((current) => {
+      if (!current) return current
+      const clamped = clampRadiusM(current.radiusM, adjustBounds)
+      return clamped === current.radiusM ? current : { ...current, radiusM: clamped }
+    })
+  }, [adjustActive, adjustBounds])
+
+  // The map's own onMove reports the live pan centre only — the draft radius
+  // is this drawer's own state (handleStepRadius below), never derived from
+  // the camera any more (ADR 0143).
+  const handleAdjustPositionChange = useCallback((position: AnchorAdjustPosition) => {
+    setAdjustDraft((current) => (current ? { ...current, lat: position.lat, lon: position.lon } : current))
   }, [])
+
+  // Both the corner toolbar's own +/- and the map's own keyboard +/- land
+  // here with a signed delta in metres, clamped into alarmRadiusBounds and
+  // snapped to a whole display unit — the one place radius actually changes
+  // during Adjust now that it's plain state instead of an eased zoom.
+  const handleStepRadius = useCallback((deltaM: number) => {
+    setAdjustDraft((current) => (
+      current ? { ...current, radiusM: snapRadiusM(clampRadiusM(current.radiusM + deltaM, adjustBounds), isImperial) } : current
+    ))
+  }, [adjustBounds, isImperial])
 
   // "Alarm would sound now" — the boat's live distance from the DRAFT anchor
   // against the DRAFT radius, mirroring useAnchorWatch's own dragging
@@ -429,50 +467,10 @@ export function AnchorWatchDrawer({
     if (!warningActive) setConfirmingSet(false)
   }, [warningActive])
 
-  // Both the bar's own +/- and its chip taps land here, and both give an
-  // ABSOLUTE target (not a delta) — clamped and snapped to a whole display
-  // unit exactly the way the map's own onMove-driven draft already is
-  // (lib/anchor-adjust.ts's clampRadiusM/snapRadiusM), so the readout never
-  // shows a difference between a value reached by pinch and one reached by
-  // tapping + . With a map, the camera drives the actual number (this only
-  // eases zoom via the ref; handleAdjustDraftChange reports the result). With
-  // no map there is no camera to ease, so this writes the draft directly.
-  const applyAdjustRadiusTarget = useCallback((targetRadiusMRaw: number) => {
-    const targetRadiusM = snapRadiusM(clampRadiusM(targetRadiusMRaw, adjustBounds), isImperial)
-    if (canUseMapForAdjust) {
-      mapHandleRef.current?.setAdjustRadius(targetRadiusM)
-    } else {
-      setAdjustDraft((current) => (current ? { ...current, radiusM: targetRadiusM } : current))
-    }
-  }, [adjustBounds, isImperial, canUseMapForAdjust])
-
-  const handleStepRadius = useCallback((deltaM: number) => {
-    if (!adjustDraft) return
-    // With a map, base the step on AnchorWatchMap's own pending-target
-    // handle, not adjustDraft.radiusM (code-review finding): the draft only
-    // updates once the camera's 150ms ease reports back through a
-    // moveend/move event, which a rapid second tap/hold (usePressRepeat's
-    // 80ms interval) can outrun — recomputing from adjustDraft.radiusM in
-    // that window bases the next step on a stale, mid-ease value instead of
-    // where the previous step was actually headed, landing off the exact
-    // step grid. See AnchorWatchMapHandle.getAdjustRadiusTarget's own doc
-    // comment. With no map there is no ease/lag at all (applyAdjustRadiusTarget
-    // writes the draft synchronously), so adjustDraft.radiusM is already
-    // exactly right there.
-    const baseRadiusM = canUseMapForAdjust
-      ? mapHandleRef.current?.getAdjustRadiusTarget() ?? adjustDraft.radiusM
-      : adjustDraft.radiusM
-    applyAdjustRadiusTarget(baseRadiusM + deltaM)
-  }, [adjustDraft, applyAdjustRadiusTarget, canUseMapForAdjust])
-
-  const handleApplyChip = useCallback((valueM: number) => {
-    applyAdjustRadiusTarget(valueM)
-  }, [applyAdjustRadiusTarget])
-
-  // Set — Enter (via the map's own scoped keydown) and the bar's Set button
-  // both call this exact function, so the "needs a second tap while the
-  // warning shows" state is never split across two code paths that could
-  // disagree about whether it's armed.
+  // Save — Enter (via the map's own scoped keydown) and the overlay/panel's
+  // own Save button both call this exact function, so the "needs a second
+  // tap while the warning shows" state is never split across two code paths
+  // that could disagree about whether it's armed.
   const handleAdjustSet = useCallback(() => {
     if (!adjustDraft || !adjustOpenedFromRef.current) return
     if (warningActive && !confirmingSet) {
@@ -482,8 +480,8 @@ export function AnchorWatchDrawer({
     const previous = adjustOpenedFromRef.current
     // lat/lon travel only when the draft position actually moved
     // (lib/anchor-adjust.ts's buildAdjustCommitTargets, 0.5 m tolerance) —
-    // the common case (the bar's own +/-/chips, or the whole no-WebGL2 path,
-    // which can only ever change radius) must PATCH radius_meters alone, or
+    // the common case (the corner toolbar's own +/-, or the whole no-WebGL2
+    // path, which can only ever change radius) must PATCH radius_meters alone, or
     // the backend treats it as a genuine reposition: resets the self trail
     // and requires a fresh SignalK publish that 502s if SignalK is down for
     // a change that never touched position (code-review finding). Undo
@@ -501,26 +499,9 @@ export function AnchorWatchDrawer({
     closeAdjust()
   }, [closeAdjust])
 
-  // Chips: "fail visibly, no substitution" (the plan's own words) — each
-  // carries its own reason rather than falling back to a computed default
-  // when an input is missing.
-  const rodeLoaChip: AnchorAdjustChip = useMemo(() => {
-    if (rodeDeployedM <= 0) return { label: 'Rode + LOA', valueM: null, reason: 'no rode out recorded' }
-    if (resolvedLoaM === null) return { label: 'Rode + LOA', valueM: null, reason: 'no boat length' }
-    return { label: 'Rode + LOA', valueM: rodeDeployedM + resolvedLoaM, reason: null }
-  }, [rodeDeployedM, resolvedLoaM])
-
-  const plannerSwingChip: AnchorAdjustChip = useMemo(() => {
-    if (scopeRecommendation.unavailableReason) {
-      return { label: 'Planner swing', valueM: null, reason: scopeRecommendation.unavailableReason }
-    }
-    const swingM = computeSwingRadiusM(scopeRecommendation.recommendedRodeM, bowOffsetM, resolvedLoaM)
-    return swingM === null
-      ? { label: 'Planner swing', valueM: null, reason: 'no boat length' }
-      : { label: 'Planner swing', valueM: swingM, reason: null }
-  }, [scopeRecommendation, bowOffsetM, resolvedLoaM])
-
   const adjustDisplayRadiusM = adjustDraft?.radiusM ?? radiusMeters
+  const adjustRadiusAtMin = adjustDisplayRadiusM <= adjustBounds.minM
+  const adjustRadiusAtMax = adjustDisplayRadiusM >= adjustBounds.maxM
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -549,20 +530,6 @@ export function AnchorWatchDrawer({
         <div
           className={cn(
             'flex min-w-0 flex-1 flex-col gap-3',
-            // Adjust mode takes over the whole viewport on phones — page
-            // chrome (this header, the rode planner sidebar, the Drop/Raise
-            // row) hidden, map + bottom bar filling the screen. At lg and up
-            // it stays in place in the drawer layout (the plan's own
-            // requirement): the fixed positioning and the chrome-hiding
-            // below both drop out at the lg breakpoint.
-            //
-            // z-70, not z-50: the app shell's own top header is z-60 (App.tsx)
-            // and its live-alarm banner z-55, both above a bare z-50 — a
-            // full-screen takeover has to outrank the chrome it's replacing,
-            // not sit under it. z-70 matches the Sheet component's own layer
-            // (components/ui/sheet.tsx), the closest existing precedent for
-            // "this view now owns the whole screen."
-            adjustActive && 'fixed inset-0 z-70 bg-background p-3 lg:static lg:z-auto lg:bg-transparent lg:p-0',
           )}
         >
           {/* Header (ADR 0133's amendment): live depth as the hero KPI — what
@@ -578,12 +545,11 @@ export function AnchorWatchDrawer({
               equivalent): depth and the water under the keel matter while
               deciding where to drop, not only once the hook is down. Only
               the Adjust text button below is anchor-gated — there is
-              nothing to adjust with no anchor set. Hidden on phones during
-              Adjust (see the wrapper's own comment above); still shown at
-              lg and up. */}
+              nothing to adjust with no anchor set. Stays up during Adjust:
+              entering Adjust must not resize the map. */}
           <div
             data-testid="anchor-watch-header"
-            className={cn('rounded-md border bg-background/60 px-3 py-3', adjustActive && 'hidden lg:block')}
+            className="rounded-md border bg-background/60 px-3 py-3"
           >
             <div className="flex flex-wrap items-start gap-4">
                 <div className={cn('min-w-0', depthStale && 'grayscale')}>
@@ -677,16 +643,47 @@ export function AnchorWatchDrawer({
               </p>
             )}
           </div>
-          {/* Skipped outright in the no-WebGL2 Adjust path: there's no map to
-              show, and the header's own text button already opens the bar
-              only (the plan's own "Moving the anchor needs the map" state) —
-              rendering AnchorWatchMap's WebGL2 fallback message underneath
-              the bar's identical notice would just repeat it. */}
-          {!(adjustActive && !canUseMapForAdjust) && (
-          <div className="min-h-0 flex-1 rounded-xl border bg-background/70">
+          {/* ADR 0143: Adjust's radius controls and Cancel/Save no longer
+              dock in a bottom bar that eats the map — the corner toolbar
+              lives inside AnchorWatchMap's own control stack, and
+              Cancel/Save float as an overlay at the bottom of the map
+              itself (below), so the map keeps its full height throughout.
+              The no-WebGL2 path has no map to overlay onto, so it gets its
+              own self-contained panel with the same small components
+              inline instead. */}
+          {adjustActive && !canUseMapForAdjust ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 rounded-xl border bg-background/70 p-4">
+              <AnchorAdjustRadiusToolbar
+                variant="panel"
+                radiusM={adjustDisplayRadiusM}
+                isImperial={isImperial}
+                atMin={adjustRadiusAtMin}
+                atMax={adjustRadiusAtMax}
+                maxDisabledReason={adjustMaxDisabledReason}
+                stepM={adjustStepM}
+                onStepRadius={handleStepRadius}
+              />
+              <AnchorAdjustActions
+                variant="panel"
+                isImperial={isImperial}
+                atMin={adjustRadiusAtMin}
+                atMax={adjustRadiusAtMax}
+                radiusM={adjustDisplayRadiusM}
+                maxDisabledReason={adjustMaxDisabledReason}
+                warningActive={warningActive}
+                confirmingSet={confirmingSet}
+                committing={adjustCommitting}
+                onCancel={handleAdjustCancel}
+                onSave={handleAdjustSet}
+                noMapNotice
+                aboveMaxOriginalRadiusM={aboveMaxOriginalRadiusM}
+                noFixNotice={!hasGpsFix}
+              />
+            </div>
+          ) : (
+          <div className="relative min-h-0 flex-1 rounded-xl border bg-background/70">
             {vesselLat !== null && vesselLon !== null ? (
               <AnchorWatchMap
-                ref={mapHandleRef}
                 vesselLat={vesselLat}
                 vesselLon={vesselLon}
                 vesselHeadingDeg={vesselHeadingDeg}
@@ -731,8 +728,12 @@ export function AnchorWatchDrawer({
                 className="h-full w-full"
                 onAdjust={openAdjust}
                 adjustActive={adjustActive}
-                adjustRadiusBounds={adjustBounds}
-                onAdjustDraftChange={handleAdjustDraftChange}
+                adjustRadiusM={adjustDisplayRadiusM}
+                adjustRadiusAtMin={adjustRadiusAtMin}
+                adjustRadiusAtMax={adjustRadiusAtMax}
+                adjustRadiusMaxDisabledReason={adjustMaxDisabledReason}
+                onAdjustPositionChange={handleAdjustPositionChange}
+                onAdjustRadiusStep={handleStepRadius}
                 onAdjustSetKey={handleAdjustSet}
                 onAdjustCancelKey={handleAdjustCancel}
               />
@@ -741,37 +742,40 @@ export function AnchorWatchDrawer({
                 No GPS fix
               </div>
             )}
+            {/* Cancel/Save float over the map's bottom-centre (clear of
+                MapLibre's own compact attribution control, bottom-right) so
+                the map itself keeps its full height — the operator's whole
+                complaint about the old bottom bar. */}
+            {adjustActive && vesselLat !== null && vesselLon !== null && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-3">
+                <AnchorAdjustActions
+                  variant="overlay"
+                  className="pointer-events-auto"
+                  isImperial={isImperial}
+                  atMin={adjustRadiusAtMin}
+                  atMax={adjustRadiusAtMax}
+                  radiusM={adjustDisplayRadiusM}
+                  maxDisabledReason={adjustMaxDisabledReason}
+                  warningActive={warningActive}
+                  confirmingSet={confirmingSet}
+                  committing={adjustCommitting}
+                  onCancel={handleAdjustCancel}
+                  onSave={handleAdjustSet}
+                  aboveMaxOriginalRadiusM={aboveMaxOriginalRadiusM}
+                  noFixNotice={!hasGpsFix}
+                />
+              </div>
+            )}
           </div>
           )}
 
-          {/* Adjust mode's bottom bar replaces the Drop/Raise row for the
-              length of the session — the two are mutually exclusive (there
-              is nothing to drop or raise mid-Adjust). Prominence otherwise
-              follows state (see anchor-watch-tile.tsx): Drop is the idle
-              state's one action and gets a generous centered target; Raise
-              is a confirmed departure chore and sits compact at the trailing
-              edge rather than spanning the whole map column. */}
-          {adjustActive ? (
-            <AnchorAdjustBar
-              radiusM={adjustDisplayRadiusM}
-              isImperial={isImperial}
-              atMin={adjustDisplayRadiusM <= adjustBounds.minM}
-              atMax={adjustDisplayRadiusM >= adjustBounds.maxM}
-              maxDisabledReason={adjustMaxDisabledReason}
-              stepM={adjustStepM}
-              onStepRadius={handleStepRadius}
-              chips={[rodeLoaChip, plannerSwingChip]}
-              onApplyChip={handleApplyChip}
-              warningActive={warningActive}
-              confirmingSet={confirmingSet}
-              committing={adjustCommitting}
-              onCancel={handleAdjustCancel}
-              onSet={handleAdjustSet}
-              noMapNotice={!canUseMapForAdjust}
-              aboveMaxOriginalRadiusM={aboveMaxOriginalRadiusM}
-              noFixNotice={!hasGpsFix}
-            />
-          ) : (
+          {/* Stays up during Adjust so the map keeps its size. Raising
+              mid-Adjust closes Adjust (see the isAnchored effect above).
+              Prominence otherwise follows state (see anchor-watch-tile.tsx):
+              Drop is the idle state's one action and gets a generous
+              centered target; Raise is a confirmed departure chore and sits
+              compact at the trailing edge rather than spanning the whole map
+              column. */}
             <div className={anchorState === 'none' ? 'flex justify-center' : 'flex justify-end'}>
               <AnchorDropRaiseButton
                 className={anchorState === 'none' ? 'w-full max-w-xs' : undefined}
@@ -781,14 +785,8 @@ export function AnchorWatchDrawer({
                 onRaise={onClearAnchor}
               />
             </div>
-          )}
         </div>
 
-        {/* Hidden entirely during Adjust: on phones the fixed full-screen
-            layer above already covers it, and at lg+ it would otherwise sit
-            beside a map whose whole point is undivided attention while
-            positioning the anchor. */}
-        {!adjustActive && (
         <AnchorRodePlanner
           anchorState={anchorState}
           rodeDeployedM={rodeDeployedM}
@@ -809,8 +807,8 @@ export function AnchorWatchDrawer({
           onWindBandChange={onWindBandChange}
           onUpdateRodeAndConditions={onUpdateRodeAndConditions}
           onApplyAlarmRadius={applyRadius}
+          applyLockedReason={adjustActive ? 'Save or cancel Adjust first' : null}
         />
-        )}
       </div>
     </div>
   )

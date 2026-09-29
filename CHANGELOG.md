@@ -27,6 +27,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   wave keys sit beside their chart's title. Rain and sun, and wave height
   and the largest wave you're likely to meet, now read as one sentence each
   instead of two.
+- Anchor Watch's Adjust mode no longer ties the alarm radius to the map's
+  zoom. Pinch or scroll to zoom in and look around while positioning the
+  anchor, the same as anywhere else on the chart, without changing the
+  radius. A small − / + control under the Adjust icon changes the radius
+  instead, and Cancel / Save now sit over the bottom of the map rather than
+  in a bar that used to take a chunk of it. Entering Adjust no longer changes
+  the zoom, resizes the map or hides the page around it: the data cards on
+  the left stay up and show distance and bearing from the new position as
+  you pan. The two
+  radius shortcuts ("Rode + LOA", "Planner swing") are gone; use the − / +
+  control, or the rode planner's own "Apply as alarm radius" button.
 
 ## [0.36.0] - 2026-09-28
 

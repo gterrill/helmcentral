@@ -51,10 +51,10 @@ neighbour swinging closer than expected sometimes call for it. **Adjust**
 opens a focused view of the chart: the anchor sits fixed at the centre of the
 screen, and panning the chart underneath it moves the anchor to wherever the
 centre lands, with a faded copy of the original position and circle left on
-screen for reference. Pinching or zooming resizes the alarm circle's ground
-radius while its size on screen stays put, and a control bar at the bottom
-shows the radius plainly, with shortcuts to match it to your deployed rode or
-to whatever the rode planner currently recommends.
+screen for reference. Pinch or scroll to zoom in and check exactly where
+you're about to drop the anchor, the same as on any other chart. Zooming
+never changes the alarm radius. A small − / + control sits under the Adjust
+icon for that, with the radius shown plainly between the two buttons.
 
 Nothing changes on the boat's instrument network until you confirm the
 change: you can back out at any point and the watch stays exactly as it was.
