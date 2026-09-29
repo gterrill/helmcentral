@@ -55,7 +55,7 @@ var (
 // — read back as a second, foreign-looking alarm, and a path this instance no
 // longer has a rule for but another Helmcentral instance still published to
 // shows up as a ghost with no engine status behind it at all.
-func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) bool) []alarmStatus {
+func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) bool, now time.Time) []alarmStatus {
 	// nodeAt copies only the notifications branch, not the whole self tree
 	// selfTree() would -- this runs once per activeAlarms() call (the alarms
 	// SSE event, the REST handler, the heartbeat) and unitForAlarmPath below
@@ -76,6 +76,19 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 		if owned(status.Label) {
 			continue
 		}
+		// ADR 0144: a leaf whose own "sentence" field says it came from a
+		// repeating NMEA 0183 message (signalk-server's parser re-asserts
+		// arrivalCircleEntered/perpendicularPassed on every APB sentence and
+		// only clears them when a later one arrives with the flag unset) is
+		// set aside once that sentence has gone quiet for too long, rather
+		// than surfaced as though the condition were still being reported
+		// right now. root is already a copy this call holds, so this is a
+		// cheap in-memory walk, not another snapshot lock/copy.
+		if leaf := notificationLeafAt(root, status.Label); leaf != nil {
+			if stale, _, _, _ := nmeaNotificationIsStale(snapshot, leaf, now); stale {
+				continue
+			}
+		}
 		// Label is also the real SignalK data path the notification is
 		// about -- Path is "notifications."+Label, which carries no meta of
 		// its own -- so the unit lookup is keyed off Label, derived-aware for
@@ -89,6 +102,141 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// nmeaNotificationStaleAfter is how long an NMEA 0183 sentence may go unseen
+// -- or, never having been seen at all, how long this process may go on
+// listening without seeing it -- before a live notification that names it
+// stops being surfaced (ADR 0144).
+//
+// signalk-server's NMEA 0183 parser raises notifications like
+// arrivalCircleEntered and perpendicularPassed from APB sentences and
+// re-asserts them on every repeat -- typically once a second while the
+// plotter is actively steering the route -- clearing one only when a later
+// sentence arrives with the flag unset. There is no timeout of its own: stop
+// the route on the plotter, or lose the NMEA 0183 feed, and the sentence
+// simply stops arriving, so the notification stays "alarm" on the SignalK
+// tree forever (the boat's own arrivalCircleEntered, stuck live since the APB
+// feed stopped at 2026-09-28T00:52:49Z). Five minutes is far longer than any
+// real gap between repeats while short enough that an abandoned route stops
+// paging within a few minutes rather than staying live for days.
+const nmeaNotificationStaleAfter = 5 * time.Minute
+
+// nmeaRepeatingRouteSentences are the only sentences the stale check applies
+// to: route sentences the plotter re-sends every second or so while it steers
+// a route, so their silence means the route has stopped. A one-shot sentence
+// (a DSC distress call, say) raises its notification once and never repeats,
+// and timing that out would hide an alarm that still stands.
+var nmeaRepeatingRouteSentences = map[string]bool{"APB": true, "RMB": true}
+
+// nmeaNotificationIsStale reports whether a live notification leaf, whose own
+// "sentence" field names an NMEA 0183 sentence type, should be treated as
+// stale -- and if so, what to log about it.
+//
+// Staleness is measured by snapshot.lastSentenceSeen(sentence), the receive
+// time of the latest delta update that actually carried fresh vessel data for
+// that sentence, never by the leaf's own "timestamp". The leaf's timestamp
+// cannot be trusted for this: the SignalK Notifications API re-emits a
+// notification's leaf -- with the ORIGINAL sentence and source object, and a
+// BRAND NEW timestamp -- whenever another client acknowledges or silences it,
+// or the periodic REST reconcile re-copies it from the server (ADR 0086).
+// That is exactly what made the boat's stuck arrivalCircleEntered leaf read
+// 02:43:31Z, nearly two hours after its APB feed actually died at
+// 00:52:49Z: an acknowledge in between refreshed the timestamp with no new
+// APB sentence ever arriving. Reading the leaf's own timestamp as "last seen"
+// would make a dead alarm look fresh again on every such touch -- silently
+// re-raising and re-dispatching it -- and, the other way, would hide a
+// genuinely live alarm after five minutes of APB updates that all happen to
+// avoid this exact leaf, since notification-only updates change nothing
+// about the underlying route.
+//
+// A "sentence" this process has never once seen for real (everSeen false) is
+// not automatically stale: it is given until listeningSince()+
+// nmeaNotificationStaleAfter before its absence counts as evidence of
+// anything, rather than declaring every notification stale the instant the
+// process starts. This is what clears a notification left behind by a
+// restart -- the REST reconcile brings the old leaf straight back with its
+// old sentence and old timestamp (ADR 0086), but a freshly started process
+// has recorded no sighting of that sentence at all, and five minutes of
+// listening with nothing repeating is itself the evidence the route is gone.
+func nmeaNotificationIsStale(snapshot *signalKSnapshot, leaf map[string]any, now time.Time) (stale bool, sentence string, lastSeen time.Time, everSeen bool) {
+	sentence, _ = leaf["sentence"].(string)
+	if !nmeaRepeatingRouteSentences[sentence] {
+		return false, sentence, time.Time{}, false
+	}
+
+	if seen, ok := snapshot.lastSentenceSeen(sentence); ok {
+		return now.Sub(seen) > nmeaNotificationStaleAfter, sentence, seen, true
+	}
+
+	listenSince := snapshot.listeningSince()
+	if listenSince.IsZero() {
+		// No delta has ever been applied at all: there is no clock to measure
+		// a grace period against yet, so nothing here can honestly be called
+		// stale.
+		return false, sentence, time.Time{}, false
+	}
+	return now.Sub(listenSince) > nmeaNotificationStaleAfter, sentence, time.Time{}, false
+}
+
+// notificationLeafAt walks an already-fetched notifications subtree (as
+// snapshot.nodeAt(notificationsRoot) returns it) to the leaf at a dotted
+// label -- the same string notificationStatus sets as Label -- returning nil
+// if any segment along the way is missing. A pure map walk over a copy the
+// caller already holds, so a second lookup for one label costs nothing beyond
+// signalKNotifications' own tree fetch.
+func notificationLeafAt(root map[string]any, label string) map[string]any {
+	node := root
+	for _, segment := range strings.Split(label, ".") {
+		if node == nil {
+			return nil
+		}
+		child, ok := node[segment].(map[string]any)
+		if !ok {
+			return nil
+		}
+		node = child
+	}
+	return node
+}
+
+// nmeaStaleInfo is what logStaleNMEATransitions needs to describe why a
+// notification was set aside: the sentence it came from and when the delta
+// stream last carried a real update for that sentence, if ever.
+type nmeaStaleInfo struct {
+	Sentence string
+	LastSeen time.Time
+	EverSeen bool
+}
+
+// staleNMEANotificationLabels returns every currently-live (per SignalK's own
+// state) self notification label that signalKNotifications is excluding
+// because its leaf has gone stale (nmeaNotificationIsStale), keyed by label.
+//
+// Kept separate from signalKNotifications, which every alarm list already
+// reads several times a second, so a caller that needs to tell "genuinely
+// cleared" apart from "still alarm on the bus, just set aside" -- only
+// busNotificationWatcher's own once-per-transition diagnostic log needs that
+// -- does not have to change what every other consumer gets back.
+func staleNMEANotificationLabels(snapshot *signalKSnapshot, root map[string]any, now time.Time) map[string]nmeaStaleInfo {
+	if root == nil {
+		return nil
+	}
+
+	var out []alarmStatus
+	collectSignalKNotifications(root, nil, &out)
+
+	stale := map[string]nmeaStaleInfo{}
+	for _, status := range out {
+		leaf := notificationLeafAt(root, status.Label)
+		if leaf == nil {
+			continue
+		}
+		if isStale, sentence, lastSeen, everSeen := nmeaNotificationIsStale(snapshot, leaf, now); isStale {
+			stale[status.Label] = nmeaStaleInfo{Sentence: sentence, LastSeen: lastSeen, EverSeen: everSeen}
+		}
+	}
+	return stale
 }
 
 func collectSignalKNotifications(node map[string]any, prefix []string, out *[]alarmStatus) {

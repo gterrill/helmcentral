@@ -703,6 +703,200 @@ func TestApplyDeltaSourceSeenIgnoresEmptySourceRef(t *testing.T) {
 	}
 }
 
+// ── sentenceSeen and listenSince: the ADR 0144 stale-notification clock ────
+
+func apbSourceObject() map[string]any {
+	return map[string]any{"sentence": "APB", "talker": "AI", "type": "NMEA0183", "label": "notificationApi"}
+}
+
+// An update naming a sentence and carrying real vessel data (a path outside
+// "notifications.") is what the stale-notification check treats as evidence
+// that sentence is still repeating.
+func TestApplyDeltaRecordsLastSentenceSeenForANonNotificationValue(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	if _, ok := snapshot.lastSentenceSeen("APB"); ok {
+		t.Fatalf("expected APB unseen before any delta")
+	}
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source: apbSourceObject(),
+			Values: []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+		}},
+	}, testNow)
+
+	seen, ok := snapshot.lastSentenceSeen("APB")
+	if !ok {
+		t.Fatalf("expected APB recorded as seen")
+	}
+	if !seen.Equal(testNow) {
+		t.Fatalf("lastSentenceSeen: got %v, want %v", seen, testNow)
+	}
+}
+
+// The regression this exists to fix: the SignalK Notifications API re-emits
+// a notification's own leaf -- same sentence, fresh timestamp -- purely as a
+// side effect of an acknowledge or silence, with no navigation data at all.
+// That must never look like the sentence itself is still repeating.
+func TestApplyDeltaDoesNotRecordSentenceSeenForANotificationOnlyUpdate(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source: apbSourceObject(),
+			Values: []signalKValue{{Path: "notifications.arrivalCircleEntered", Value: map[string]any{"state": "alarm"}}},
+		}},
+	}, testNow)
+
+	if _, ok := snapshot.lastSentenceSeen("APB"); ok {
+		t.Fatalf("a notifications-only update must never count as the sentence repeating")
+	}
+}
+
+// A single APB update carries both the notification and real navigation
+// values at once (the actual shape on the wire); the notification value
+// present alongside a real one must not stop the real one from counting.
+func TestApplyDeltaRecordsSentenceSeenWhenUpdateMixesNotificationAndNavigationValues(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source: apbSourceObject(),
+			Values: []signalKValue{
+				{Path: "notifications.arrivalCircleEntered", Value: map[string]any{"state": "alarm"}},
+				{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2},
+			},
+		}},
+	}, testNow)
+
+	if _, ok := snapshot.lastSentenceSeen("APB"); !ok {
+		t.Fatalf("expected APB recorded as seen when the same update also carries real navigation data")
+	}
+}
+
+// signalk-server replays its cached values when a stream connects
+// (sendCachedValues defaults on), so a reconnect delivers the last APB course
+// values from whenever the route stopped. An update already older than the
+// stale window is that replay, not evidence the sentence is still arriving,
+// and must not be recorded, or every reconnect would hold a dead route's
+// alarm up for another window.
+func TestApplyDeltaSentenceSeenIgnoresAReplayOlderThanTheStaleWindow(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source:    apbSourceObject(),
+			Timestamp: testNow.Add(-48 * time.Hour).UTC().Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+		}},
+	}, testNow)
+
+	if seen, ok := snapshot.lastSentenceSeen("APB"); ok {
+		t.Fatalf("a replayed update must not record the sentence as seen, got %v", seen)
+	}
+}
+
+// Staleness is measured against Helmcentral's clock, so a live update is
+// recorded at its receive time. A SignalK host a minute or two behind must
+// not age every live APB by its skew.
+func TestApplyDeltaSentenceSeenUsesReceiveTimeForALiveUpdate(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source:    apbSourceObject(),
+			Timestamp: testNow.Add(-2 * time.Minute).UTC().Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+		}},
+	}, testNow)
+
+	seen, _ := snapshot.lastSentenceSeen("APB")
+	if !seen.Equal(testNow) {
+		t.Fatalf("lastSentenceSeen: got %v, want the receive time %v", seen, testNow)
+	}
+}
+
+// A timestamp ahead of the receive time (a skewed clock) is recorded at the
+// receive time, so it cannot hold an alarm up past its stale window.
+func TestApplyDeltaSentenceSeenRecordsAFutureTimestampAtReceiveTime(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source:    apbSourceObject(),
+			Timestamp: testNow.Add(time.Hour).UTC().Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+		}},
+	}, testNow)
+
+	seen, _ := snapshot.lastSentenceSeen("APB")
+	if !seen.Equal(testNow) {
+		t.Fatalf("lastSentenceSeen: got %v, want the receive time %v", seen, testNow)
+	}
+}
+
+// A replayed old update arriving after a live one must not move the
+// last-seen time backwards.
+func TestApplyDeltaSentenceSeenNeverMovesBackwards(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	apply := func(ts time.Time) {
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{
+				Source:    apbSourceObject(),
+				Timestamp: ts.UTC().Format(time.RFC3339),
+				Values:    []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+			}},
+		}, testNow)
+	}
+	apply(testNow)
+	apply(testNow.Add(-48 * time.Hour))
+
+	seen, _ := snapshot.lastSentenceSeen("APB")
+	if !seen.Equal(testNow) {
+		t.Fatalf("lastSentenceSeen: got %v, want %v", seen, testNow)
+	}
+}
+
+// listeningSince marks when this process actually started observing the
+// bus -- construction alone (before any delta) gives no evidence of that yet.
+func TestSignalKSnapshotListeningSinceIsZeroBeforeAnyDelta(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	if got := snapshot.listeningSince(); !got.IsZero() {
+		t.Fatalf("listeningSince before any delta: got %v, want zero", got)
+	}
+}
+
+// The first delta sets the clock; a later one must not move it, or a
+// long-running process would never accumulate more than a few seconds of
+// "listening" credit each time a fresh delta happened to arrive.
+func TestSignalKSnapshotListeningSinceIsSetOnFirstAppliedDeltaAndDoesNotMove(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	first := testNow
+	second := testNow.Add(time.Hour)
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, first)
+	if got := snapshot.listeningSince(); !got.Equal(first) {
+		t.Fatalf("listeningSince after first delta: got %v, want %v", got, first)
+	}
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.1}}}},
+	}, second)
+	if got := snapshot.listeningSince(); !got.Equal(first) {
+		t.Fatalf("listeningSince after a second delta: got %v, want it to stay at %v", got, first)
+	}
+}
+
 // TestKnownContextsReturnsEmptySliceWhenNoneApplied verifies that knownContexts
 // returns an empty slice when no deltas have been applied.
 func TestKnownContextsReturnsEmptySliceWhenNoneApplied(t *testing.T) {
@@ -941,7 +1135,7 @@ func TestReconcileNotificationsReplacesALiveLeafTheServerNowSaysIsNormal(t *test
 		t.Fatalf("expected arrivalCircleEntered among the corrected paths, got %v", changed)
 	}
 
-	for _, status := range signalKNotifications(snapshot, ownsNothing) {
+	for _, status := range signalKNotifications(snapshot, ownsNothing, alarmNow) {
 		if status.Label == "arrivalCircleEntered" {
 			t.Fatalf("the server's normal copy must not surface as live: %+v", status)
 		}
@@ -1039,7 +1233,7 @@ func TestReconcileNotificationsAddsALiveLeafWeDidNotHold(t *testing.T) {
 		t.Fatalf("expected the newly-discovered live leaf reported, got %v", changed)
 	}
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 || statuses[0].Label != "navigation.arrivalCircleEntered" {
 		t.Fatalf("expected the leaf added and listed, got %+v", statuses)
 	}

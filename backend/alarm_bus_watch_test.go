@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 	"time"
 )
@@ -420,5 +423,103 @@ func TestBusNotificationWatcherIgnoresAGhostUnderItsOwnNamespaceWithNoLocalRule(
 	watcher.check(alarmNow)
 	if events := watcher.check(alarmNow.Add(time.Second)); len(events) != 0 {
 		t.Fatalf("a path under Helmcentral's own namespace must never be raised as a foreign bus alarm, got %+v", events)
+	}
+}
+
+// ── an NMEA 0183 sentence-repeat notification going stale behaves as a clear
+// (ADR 0144) ─────────────────────────────────────────────────────────────
+//
+// signalk-server never times out arrivalCircleEntered/perpendicularPassed
+// itself -- it only clears one when a later APB sentence arrives with the
+// flag unset. Stop the plotter's route and the sentence stops arriving
+// entirely, so without this the alarm this watcher already raised would stay
+// open forever with no trace anything changed.
+
+func TestBusNotificationWatcherClearsAnNMEASentenceNotificationOnceItGoesStale(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	applyAPBNavigationUpdate(snapshot, alarmNow)
+	applyAPBNotificationUpdate(snapshot, busTestNotification(alarmStateAlarm, "WP arrival circle entered!"), alarmNow)
+
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = time.Second
+
+	watcher.check(alarmNow)
+	events := watcher.check(alarmNow.Add(2 * time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("setup: expected a raise, got %+v", events)
+	}
+
+	stale := alarmNow.Add(nmeaNotificationStaleAfter + time.Minute)
+	events = watcher.check(stale)
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected a clear once the sentence stops repeating, got %+v", events)
+	}
+}
+
+// The diagnostic log carries one line for the whole stale spell, and one more
+// when the notification is no longer excluded -- not one every tick either
+// way.
+func TestBusNotificationWatcherLogsStaleTransitionOnceEachWay(t *testing.T) {
+	value := busTestNotification(alarmStateAlarm, "WP arrival circle entered!")
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	applyAPBNavigationUpdate(snapshot, alarmNow)
+	applyAPBNotificationUpdate(snapshot, value, alarmNow)
+
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = time.Second
+
+	var logBuf bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
+	watcher.check(alarmNow)
+	watcher.check(alarmNow.Add(2 * time.Second))
+
+	stale := alarmNow.Add(nmeaNotificationStaleAfter + time.Minute)
+	watcher.check(stale)
+	watcher.check(stale.Add(time.Second)) // still stale a tick later: must not log again
+
+	if got := strings.Count(logBuf.String(), "set aside"); got != 1 {
+		t.Fatalf("expected exactly one 'set aside' log line, got %d: %s", got, logBuf.String())
+	}
+
+	// APB starts repeating again with fresh navigation data.
+	fresh := stale.Add(2 * time.Second)
+	applyAPBNavigationUpdate(snapshot, fresh)
+
+	watcher.check(fresh)
+
+	if got := strings.Count(logBuf.String(), "no longer set aside"); got != 1 {
+		t.Fatalf("expected exactly one 'no longer set aside' log line, got %d: %s", got, logBuf.String())
+	}
+}
+
+// A notification that genuinely clears while it is set aside has cleared, not
+// come back. Logging "no longer set aside" would say the opposite.
+func TestBusNotificationWatcherDoesNotLogUnsetAsideWhenAStaleNotificationClears(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	applyAPBNavigationUpdate(snapshot, alarmNow)
+	applyAPBNotificationUpdate(snapshot, busTestNotification(alarmStateAlarm, "WP arrival circle entered!"), alarmNow)
+
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = time.Second
+
+	var logBuf bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
+	stale := alarmNow.Add(nmeaNotificationStaleAfter + time.Minute)
+	watcher.check(stale)
+
+	applyAPBNotificationUpdate(snapshot, busTestNotification(alarmStateNormal, "WP arrival circle entered!"), stale)
+	watcher.check(stale.Add(time.Second))
+
+	if strings.Contains(logBuf.String(), "no longer set aside") {
+		t.Fatalf("a genuine clear must not be logged as coming back: %s", logBuf.String())
 	}
 }

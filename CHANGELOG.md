@@ -28,6 +28,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and the largest wave you're likely to meet, now read as one sentence each
   instead of two.
 
+### Fixed
+
+- Arrival circle and waypoint perpendicular passed alarms from the plotter's
+  route no longer stay lit forever after the route is stopped or cancelled;
+  they now clear themselves within a few minutes of the plotter going quiet.
+
 ## [0.36.0] - 2026-09-28
 
 ### Breaking
