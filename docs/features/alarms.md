@@ -102,6 +102,14 @@ view. The 30-second re-check described above is what catches it, rather than
 leaving that alarm on your board until the same reading happens to change
 again.
 
+Arrival circle and waypoint perpendicular passed alarms, raised from the
+plotter's active route, go stale a different way: stopping or cancelling the
+route on the plotter gives no signal that the alarm should clear, so it can
+otherwise stay lit long after the route itself is gone. Helmcentral notices
+when the plotter stops sending route updates and drops these two alarms from
+the board on its own within a few minutes, rather than leaving them showing
+for as long as the boat keeps running.
+
 ## Anomaly detection
 
 A separate set of checks (frozen and impossible sensor readings, charging

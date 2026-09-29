@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 // snapshotFromSelfTreeJSON builds a local snapshot from a REST-shaped JSON
@@ -48,7 +49,7 @@ func TestSignalKNotificationsSurfacesAnAlarmFromAnotherProducer(t *testing.T) {
 		"method":  []any{"visual", "sound"},
 	})
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -69,7 +70,7 @@ func TestSignalKNotificationsIgnoresNormalState(t *testing.T) {
 		"message": "Depth OK",
 	})
 
-	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing, alarmNow); len(statuses) != 0 {
 		t.Fatalf("normal is the cleared state and must not surface, got %+v", statuses)
 	}
 }
@@ -78,7 +79,7 @@ func TestSignalKNotificationsIgnoresNormalState(t *testing.T) {
 func TestSignalKNotificationsIgnoresClearedNullValue(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob", nil)
 
-	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing, alarmNow); len(statuses) != 0 {
 		t.Fatalf("a null notification is cleared and must not surface, got %+v", statuses)
 	}
 }
@@ -89,7 +90,7 @@ func TestSignalKNotificationsIgnoresUnknownState(t *testing.T) {
 		"message": "not a real severity",
 	})
 
-	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing, alarmNow); len(statuses) != 0 {
 		t.Fatalf("an unrecognised state must not raise anything, got %+v", statuses)
 	}
 }
@@ -105,7 +106,7 @@ func TestSignalKNotificationsCollectsSeveralAndOrdersThem(t *testing.T) {
 	}, alarmNow)
 	snapshot.setSelfContext("vessels.self")
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 2 {
 		t.Fatalf("expected 2 notifications, got %d (%+v)", len(statuses), statuses)
 	}
@@ -119,7 +120,7 @@ func TestSignalKNotificationsCollectsSeveralAndOrdersThem(t *testing.T) {
 func TestSignalKNotificationsNamespaceTheirRuleIDs(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob", map[string]any{"state": "emergency"})
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(statuses))
 	}
@@ -131,7 +132,7 @@ func TestSignalKNotificationsNamespaceTheirRuleIDs(t *testing.T) {
 func TestSignalKNotificationsEmptyWhenNoneRaised(t *testing.T) {
 	snapshot := snapshotWithSelfDelta("environment.depth.belowTransducer", 3.0, alarmNow)
 
-	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing, alarmNow); len(statuses) != 0 {
 		t.Fatalf("expected no notifications, got %+v", statuses)
 	}
 }
@@ -167,7 +168,7 @@ func TestSignalKNotificationsSurfacesTheAPIStatusAndCapabilities(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", liveNotificationStatus()))
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -186,7 +187,7 @@ func TestSignalKNotificationsReadsAcknowledgedFromTheAPIStatus(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", status))
 
-	got := signalKNotifications(snapshot, ownsNothing)[0]
+	got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
 	if got.Phase != alarmPhaseAcknowledged {
 		t.Fatalf("phase: got %q, want %q", got.Phase, alarmPhaseAcknowledged)
 	}
@@ -204,7 +205,7 @@ func TestSignalKNotificationsKeepsASilencedAlarmActive(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", status))
 
-	got := signalKNotifications(snapshot, ownsNothing)[0]
+	got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
 	if !got.Silenced {
 		t.Fatalf("expected silenced")
 	}
@@ -225,7 +226,7 @@ func TestSignalKNotificationsRefusesBothActionsForAnEmergency(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob",
 		notificationWithStatus("emergency", liveNotificationStatus()))
 
-	got := signalKNotifications(snapshot, ownsNothing)[0]
+	got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
 	if got.CanAcknowledge || got.CanSilence {
 		t.Fatalf("an emergency cannot be silenced or acknowledged, got can_ack %v can_silence %v", got.CanAcknowledge, got.CanSilence)
 	}
@@ -253,7 +254,7 @@ func TestSignalKNotificationsFallsBackToTheMethodArrayWithoutAStatusObject(t *te
 			if tc.method != nil {
 				value["method"] = tc.method
 			}
-			got := signalKNotifications(snapshotWithNotification("notifications.bilge", value), ownsNothing)[0]
+			got := signalKNotifications(snapshotWithNotification("notifications.bilge", value), ownsNothing, alarmNow)[0]
 
 			if got.Phase != tc.wantPhase {
 				t.Fatalf("phase: got %q, want %q", got.Phase, tc.wantPhase)
@@ -400,7 +401,7 @@ func TestSignalKNotificationsOffersNoSilenceOnceAcknowledged(t *testing.T) {
 	value := notificationWithStatus("alarm", status)
 	value["method"] = []any{}
 
-	got := signalKNotifications(snapshotWithNotification("notifications.arrivalCircleEntered", value), ownsNothing)[0]
+	got := signalKNotifications(snapshotWithNotification("notifications.arrivalCircleEntered", value), ownsNothing, alarmNow)[0]
 
 	if got.Phase != alarmPhaseAcknowledged {
 		t.Fatalf("phase: got %q, want %q", got.Phase, alarmPhaseAcknowledged)
@@ -465,7 +466,7 @@ func TestSignalKNotificationsSkipsPathsHelmcentralOwns(t *testing.T) {
 	}, alarmNow)
 	snapshot.setSelfContext("vessels.self")
 
-	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate())
+	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate(), alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected exactly the foreign radar notification, got %d: %+v", len(statuses), statuses)
 	}
@@ -489,7 +490,7 @@ func TestSignalKNotificationsSetsUnitFromTheDataPathMeta(t *testing.T) {
 		"electrical": {"batteries": {"house": {"voltage": {"value": 14.9, "meta": {"units": "V"}}}}}
 	}`)
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -507,7 +508,7 @@ func TestSignalKNotificationsOmitsUnitWhenDataPathHasNoMeta(t *testing.T) {
 		}}}}}}
 	}`)
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -537,7 +538,7 @@ func TestSignalKNotificationsOmitRuleOnlyJSONFields(t *testing.T) {
 		"state": "alarm", "message": "House bank critically low", "method": []any{"visual", "sound"},
 	})
 
-	statuses := signalKNotifications(snapshot, ownsNothing)
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(statuses))
 	}
@@ -575,8 +576,217 @@ func TestSignalKNotificationsDoesNotOwnAPathOfADisabledRule(t *testing.T) {
 		"method":  []any{"visual", "sound"},
 	})
 
-	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate())
+	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate(), alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("a disabled rule's path is not owned, so the bus notification must still show, got %d: %+v", len(statuses), statuses)
+	}
+}
+
+// ── NMEA 0183 sentence-repeat notifications go stale (ADR 0144) ────────────
+//
+// signalk-server's NMEA 0183 parser raises arrivalCircleEntered and
+// perpendicularPassed from APB sentences and only clears one when a LATER
+// sentence arrives with the flag unset -- there is no timeout of its own.
+// Stop the route on the plotter and the sentence simply stops arriving, so
+// the notification stays "alarm" on the SignalK tree forever. The value below
+// is the real shape captured off the boat's server (GET
+// /signalk/v1/api/vessels/self/notifications/arrivalCircleEntered).
+//
+// Staleness is judged by whether the APB sentence itself is still repeating
+// (signalKSnapshot.lastSentenceSeen), never by the notification leaf's own
+// "timestamp": the Notifications API re-emits that leaf -- with the
+// original sentence and a brand new timestamp -- whenever another client
+// acknowledges or silences it, or the periodic REST reconcile re-copies it
+// (ADR 0086), with no new APB sentence involved at all. apbSource is the
+// shape captured off the boat; apbNavigationValue is what a real APB update
+// also carries every repeat (courseRhumbline/courseGreatCircle
+// crossTrackError and friends) -- the one signal that means "this sentence
+// is genuinely still arriving."
+
+func arrivalCircleEnteredValue() map[string]any {
+	return map[string]any{
+		"method":  []any{},
+		"state":   "alarm",
+		"message": "WP arrival circle entered!",
+		"id":      "489f8f89-0000-0000-0000-000000000000",
+		"status": map[string]any{
+			"silenced": false, "acknowledged": true,
+			"canSilence": true, "canAcknowledge": true, "canClear": false,
+		},
+	}
+}
+
+func apbSource() map[string]any {
+	return map[string]any{"sentence": "APB", "talker": "AI", "type": "NMEA0183", "label": "notificationApi"}
+}
+
+// applyAPBNavigationUpdate is a real APB repeat touching actual route
+// data -- the kind that keeps signalKSnapshot.lastSentenceSeen("APB")
+// advancing.
+func applyAPBNavigationUpdate(snapshot *signalKSnapshot, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source: apbSource(),
+			Values: []signalKValue{{Path: "navigation.courseRhumbline.crossTrackError", Value: 3.2}},
+		}},
+	}, at)
+}
+
+// applyAPBNotificationUpdate is the notification leaf itself, carrying the
+// same APB source -- either the initial raise, or the Notifications API's
+// re-emit of the same leaf after an acknowledge/silence, which is what makes
+// this update deliberately carry no navigation data.
+func applyAPBNotificationUpdate(snapshot *signalKSnapshot, value any, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source:    apbSource(),
+			Timestamp: at.UTC().Format(time.RFC3339Nano),
+			Values:    []signalKValue{{Path: "notifications.arrivalCircleEntered", Value: value}},
+		}},
+	}, at)
+}
+
+func TestSignalKNotificationsSurfacesALiveNotificationWhileItsSentenceIsStillRepeating(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), alarmNow)
+	fresh := alarmNow.Add(4 * time.Minute)
+	applyAPBNavigationUpdate(snapshot, fresh)
+
+	statuses := signalKNotifications(snapshot, ownsNothing, fresh)
+	if len(statuses) != 1 {
+		t.Fatalf("a notification whose sentence is still repeating must stay surfaced, got %d: %+v", len(statuses), statuses)
+	}
+}
+
+func TestSignalKNotificationsExcludesANotificationOnceItsSentenceStopsRepeating(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	applyAPBNavigationUpdate(snapshot, alarmNow)
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), alarmNow)
+
+	later := alarmNow.Add(nmeaNotificationStaleAfter + time.Second)
+	statuses := signalKNotifications(snapshot, ownsNothing, later)
+	if len(statuses) != 0 {
+		t.Fatalf("a notification whose sentence has stopped repeating for over %s must not surface, got %+v", nmeaNotificationStaleAfter, statuses)
+	}
+}
+
+// The regression this whole redesign exists to fix: an acknowledge or
+// silence from another SignalK client makes the Notifications API re-emit
+// the leaf with a brand new timestamp and the original APB source, but no
+// navigation data. Reading the leaf's own timestamp as "last seen" would
+// have made a dead alarm look fresh for another five minutes on every such
+// touch and re-raised it forever.
+func TestSignalKNotificationsAckReEmitDoesNotRefreshSentenceLiveness(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	// APB was genuinely live at t=0, then the feed died: no more navigation
+	// data ever arrives after this.
+	applyAPBNavigationUpdate(snapshot, alarmNow)
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), alarmNow)
+
+	// Long past the stale window, another client acknowledges the alarm.
+	// signalk-server re-emits the leaf: same sentence, brand new timestamp,
+	// still carrying no navigation data.
+	ackAt := alarmNow.Add(nmeaNotificationStaleAfter + time.Minute)
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), ackAt)
+
+	statuses := signalKNotifications(snapshot, ownsNothing, ackAt)
+	if len(statuses) != 0 {
+		t.Fatalf("an acknowledge re-emit must not make a dead sentence look fresh, got %+v", statuses)
+	}
+}
+
+// A sentence never once seen over the delta stream at all -- the shape a
+// restart leaves behind: the REST reconcile (ADR 0086) brings the old leaf
+// straight back with its own old sentence and timestamp, but this fresh
+// process has recorded no APB sighting whatsoever. It is given a grace
+// period before that absence counts as evidence of anything.
+func TestSignalKNotificationsSurfacesANeverSeenSentenceWithinTheListeningGracePeriod(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	start := alarmNow
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), start)
+
+	soon := start.Add(4 * time.Minute)
+	statuses := signalKNotifications(snapshot, ownsNothing, soon)
+	if len(statuses) != 1 {
+		t.Fatalf("a sentence never seen but still within the listening grace period must stay surfaced, got %d: %+v", len(statuses), statuses)
+	}
+}
+
+// The other side of the same case: once this process has been listening for
+// a full stale window with no sighting of the sentence at all, that absence
+// is itself the evidence -- this is what actually clears the boat's stuck
+// arrivalCircleEntered after a Helmcentral restart.
+func TestSignalKNotificationsHidesANeverSeenSentenceOnceTheListeningGracePeriodPasses(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	start := alarmNow
+	applyAPBNotificationUpdate(snapshot, arrivalCircleEnteredValue(), start)
+
+	late := start.Add(nmeaNotificationStaleAfter + time.Second)
+	statuses := signalKNotifications(snapshot, ownsNothing, late)
+	if len(statuses) != 0 {
+		t.Fatalf("a sentence never seen after a full listening window must not surface, got %+v", statuses)
+	}
+}
+
+// Only route sentences that repeat every second while the plotter steers
+// (APB, RMB) are timed out. A one-shot sentence such as a DSC distress call
+// raises its notification once and never repeats, so its silence says
+// nothing about whether the alarm still stands.
+func TestSignalKNotificationsNeverExcludesANotificationFromAOneShotSentence(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	start := alarmNow
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Source:    map[string]any{"sentence": "DSC", "talker": "CD", "type": "NMEA0183", "label": "vhf"},
+			Timestamp: start.UTC().Format(time.RFC3339Nano),
+			Values: []signalKValue{{
+				Path:  "notifications.mob",
+				Value: map[string]any{"state": "emergency", "message": "DSC distress"},
+			}},
+		}},
+	}, start)
+
+	late := start.Add(24 * time.Hour)
+	if statuses := signalKNotifications(snapshot, ownsNothing, late); len(statuses) != 1 {
+		t.Fatalf("a DSC notification must stay surfaced however long it has been, got %+v", statuses)
+	}
+}
+
+// Victron, N2K and Helmcentral's own notifications carry no "sentence" at
+// all, and must never be timed out just because they have sat unchanged for a
+// long time -- they are event-driven, not a message repeating on a timer.
+func TestSignalKNotificationsNeverExcludesANotificationWithoutASentence(t *testing.T) {
+	old := alarmNow.Add(-24 * time.Hour)
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: old.UTC().Format(time.RFC3339Nano),
+			Values: []signalKValue{{
+				Path:  "notifications.electrical.batteries.house.voltage",
+				Value: map[string]any{"state": "alarm", "message": "House bank critically low"},
+			}},
+		}},
+	}, alarmNow)
+	snapshot.setSelfContext("vessels.self")
+
+	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
+	if len(statuses) != 1 {
+		t.Fatalf("a notification with no sentence must never be excluded for age, got %d: %+v", len(statuses), statuses)
 	}
 }

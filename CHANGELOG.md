@@ -39,6 +39,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   radius shortcuts ("Rode + LOA", "Planner swing") are gone; use the − / +
   control, or the rode planner's own "Apply as alarm radius" button.
 
+### Fixed
+
+- Arrival circle and waypoint perpendicular passed alarms from the plotter's
+  route no longer stay lit forever after the route is stopped or cancelled;
+  they now clear themselves within a few minutes of the plotter going quiet.
+
 ## [0.36.0] - 2026-09-28
 
 ### Breaking
