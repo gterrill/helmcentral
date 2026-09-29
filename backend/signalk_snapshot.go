@@ -390,8 +390,12 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				// stream only has it inside the update's source object. The
 				// stale-notification check (ADR 0144) reads it off the leaf,
 				// so copy it across or a delta-fed leaf would never have one.
+				// An update with no sentence drops an earlier one: the tag
+				// must name whoever wrote the leaf last, not whoever once did.
 				if sentence, _ := update.Source["sentence"].(string); sentence != "" {
 					child["sentence"] = sentence
+				} else {
+					delete(child, "sentence")
 				}
 			}
 		}

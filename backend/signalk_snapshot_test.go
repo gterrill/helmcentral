@@ -1823,3 +1823,31 @@ func TestVesselNotificationBranchesDoesNotCountAsAWholeTreeCopy(t *testing.T) {
 		t.Fatalf("expected the target's notifications branch, got %v", branches)
 	}
 }
+
+// A leaf's sentence names whichever update last wrote it. An update with no
+// sentence must drop an earlier one, or a notification once written with an
+// APB source would stay subject to the APB stale check after a different
+// producer raises it.
+func TestApplyDeltaDropsALeafSentenceWhenALaterUpdateHasNone(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	apply := func(source map[string]any) {
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{
+				Source: source,
+				Values: []signalKValue{{Path: "notifications.mob", Value: map[string]any{"state": "emergency"}}},
+			}},
+		}, testNow)
+	}
+	apply(apbSourceObject())
+	if leaf := snapshot.nodeAt("notifications.mob"); leaf["sentence"] != "APB" {
+		t.Fatalf("precondition: leaf should carry APB after the first update, got %+v", leaf)
+	}
+	apply(nil)
+
+	leaf := snapshot.nodeAt("notifications.mob")
+	if _, has := leaf["sentence"]; has {
+		t.Fatalf("leaf kept a sentence from an earlier update: %+v", leaf)
+	}
+}
