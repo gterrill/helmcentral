@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ADJUST_MAX_ZOOM,
-  ADJUST_RING_FRACTION,
   adjustWarningActive,
-  adjustZoomBounds,
   alarmRadiusBounds,
   anchorMoveOffset,
   buildAdjustCommitTargets,
@@ -13,13 +10,10 @@ import {
   metersPerPixel,
   MIN_ALARM_RADIUS_M,
   POSITION_UNCHANGED_TOLERANCE_M,
-  radiusForZoom,
   RADIUS_STEP_FT,
   RADIUS_STEP_M,
   radiusStepM,
-  ringRadiusPx,
   snapRadiusM,
-  zoomForRingRadius,
 } from '@/lib/anchor-adjust'
 
 describe('alarmRadiusBounds', () => {
@@ -55,53 +49,6 @@ describe('metersPerPixel', () => {
     const atEquator = metersPerPixel(0, 12)
     const at60 = metersPerPixel(60, 12)
     expect(at60).toBeCloseTo(atEquator * Math.cos((60 * Math.PI) / 180), 6)
-  })
-})
-
-describe('ringRadiusPx', () => {
-  it('is 35% of the container short side', () => {
-    expect(ringRadiusPx(400)).toBeCloseTo(140, 6)
-  })
-  it('matches the documented ADJUST_RING_FRACTION constant', () => {
-    expect(ringRadiusPx(1000)).toBeCloseTo(1000 * ADJUST_RING_FRACTION, 6)
-  })
-})
-
-describe('zoomForRingRadius / radiusForZoom round-trip', () => {
-  it('radiusForZoom inverts zoomForRingRadius', () => {
-    const lat = -25.29
-    const ringPx = 140
-    const radiusM = 24
-    const zoom = zoomForRingRadius(radiusM, lat, ringPx)
-    expect(radiusForZoom(zoom, lat, ringPx)).toBeCloseTo(radiusM, 6)
-  })
-
-  it('a bigger radius needs a smaller (more zoomed-out) zoom for the same ring', () => {
-    const lat = -25.29
-    const ringPx = 140
-    expect(zoomForRingRadius(50, lat, ringPx)).toBeLessThan(zoomForRingRadius(10, lat, ringPx))
-  })
-
-  it('falls back to a safe zoom for un-computable input rather than NaN/Infinity', () => {
-    expect(Number.isFinite(zoomForRingRadius(0, -25, 140))).toBe(true)
-    expect(Number.isFinite(zoomForRingRadius(-5, -25, 140))).toBe(true)
-    expect(Number.isFinite(zoomForRingRadius(24, -25, 0))).toBe(true)
-  })
-})
-
-describe('adjustZoomBounds', () => {
-  it('a larger max radius maps to a smaller minZoom, and vice versa', () => {
-    const lat = -25.29
-    const ringPx = 140
-    const narrow = adjustZoomBounds({ minM: 5, maxM: 20, maxReason: null }, lat, ringPx)
-    const wide = adjustZoomBounds({ minM: 5, maxM: 200, maxReason: null }, lat, ringPx)
-    expect(wide.minZoom).toBeLessThan(narrow.minZoom)
-    expect(narrow.minZoom).toBeLessThanOrEqual(narrow.maxZoom)
-  })
-
-  it('never exceeds ADJUST_MAX_ZOOM even for a tiny minimum radius', () => {
-    const bounds = adjustZoomBounds({ minM: 5, maxM: 200, maxReason: null }, -25.29, 140)
-    expect(bounds.maxZoom).toBeLessThanOrEqual(ADJUST_MAX_ZOOM)
   })
 })
 

@@ -988,4 +988,24 @@ describe('AnchorRodePlanner — Depth cell', () => {
       expect(screen.getByText('Below bow height plus tide rise, not saved')).toBeInTheDocument()
     })
   })
+
+  it('locks Apply as alarm radius and says why while Adjust is open', () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
+    const props = baseProps()
+    renderPlanner({
+      onApplyAlarmRadius,
+      anchorConfig: { ...props.anchorConfig, loaM: 0 },
+      vesselLengthOverallM: 17.9,
+      bowOffsetM: 2,
+      applyLockedReason: 'Finish Adjust first',
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    selectMethodTab(/catenary/i)
+
+    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    expect(apply).toBeDisabled()
+    expect(screen.getByText('Finish Adjust first')).toBeInTheDocument()
+    fireEvent.click(apply)
+    expect(onApplyAlarmRadius).not.toHaveBeenCalled()
+  })
 })

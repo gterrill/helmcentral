@@ -3,7 +3,6 @@ import { render, screen, within, fireEvent, act } from '@testing-library/react'
 import { toast } from 'sonner'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { TideToday } from '@/hooks/use-tide-today'
-import { zoomForRingRadius, ringRadiusPx } from '@/lib/anchor-adjust'
 
 // Only used by the Undo/restore describe block further down — every other
 // test in this file predates any toast-driven flow, so mocking this file-wide
@@ -354,55 +353,38 @@ describe('AnchorWatchDrawer header — no-WebGL2 Adjust text button (ADR 0136)',
 
     fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
 
-    expect(screen.getByTestId('anchor-adjust-bar')).toBeInTheDocument()
-    expect(screen.getByTestId('anchor-adjust-bar')).toHaveTextContent('Moving the anchor needs the map')
+    expect(screen.getByTestId('anchor-adjust-radius-toolbar')).toBeInTheDocument()
+    expect(screen.getByTestId('anchor-adjust-actions')).toHaveTextContent('Moving the anchor needs the map')
   })
 })
 
-// Code-review finding: the bar's own +/- drove the map's easeTo (150ms),
-// but a rapid second tap/hold — usePressRepeat's 80ms repeat interval — used
-// to recompute its next target from adjustDraft.radiusM, which only updates
-// once that ease reports back. Two steps with nothing landing in between
-// (this mock's easeTo never fires a synthetic 'move' event, exactly like a
-// real ease still in flight) is the scenario that used to drift off the
-// step grid; the bar now reads AnchorWatchMap's own pending-target handle
-// instead (getAdjustRadiusTarget) so it continues from where the previous
-// step was actually headed.
-describe('AnchorWatchDrawer Adjust bar — repeated steps land on the exact grid (with a map)', () => {
+// ADR 0143: the radius is plain state now, not an eased zoom — two rapid
+// taps of the corner toolbar's + (rendered inside AnchorWatchMap's own
+// control stack once Adjust is open) must land on 21 then 22 m, with no
+// camera movement at all, since the toolbar and the camera are now
+// completely decoupled.
+describe('AnchorWatchDrawer Adjust — repeated corner-toolbar steps land on the exact grid (with a map)', () => {
   afterEach(() => {
     vi.clearAllMocks()
     vi.restoreAllMocks()
   })
 
-  it("bases the bar's second step on the last commanded target, not the still-easing draft", () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
-      width: 400,
-      height: 300,
-      top: 0,
-      left: 0,
-      right: 400,
-      bottom: 300,
-      x: 0,
-      y: 0,
-      toJSON: () => {},
-    }))
+  it('two rapid taps of + step the draft radius by 1 m each, touching no camera call', () => {
     render(<AnchorWatchDrawer {...baseProps} radiusMeters={20} />)
     fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+    easeToMock.mockClear()
+    jumpToMock.mockClear()
 
     const increment = screen.getByRole('button', { name: 'Increase radius' })
     fireEvent.pointerDown(increment)
     fireEvent.pointerUp(increment)
+    expect(screen.getByTestId('anchor-adjust-radius-value')).toHaveTextContent('21')
     fireEvent.pointerDown(increment)
     fireEvent.pointerUp(increment)
+    expect(screen.getByTestId('anchor-adjust-radius-value')).toHaveTextContent('22')
 
-    expect(easeToMock).toHaveBeenCalledTimes(2)
-    const ringPx = ringRadiusPx(300) // the short side of the 400x300 stubbed rect
-    const firstZoom = easeToMock.mock.calls[0][0].zoom
-    const secondZoom = easeToMock.mock.calls[1][0].zoom
-    expect(firstZoom).toBeCloseTo(zoomForRingRadius(21, -25.2938, ringPx), 5)
-    // Without the fix, this second tap re-derives from the draft (still
-    // reporting 20 m) and lands back on 21 m again instead of 22 m.
-    expect(secondZoom).toBeCloseTo(zoomForRingRadius(22, -25.2938, ringPx), 5)
+    expect(easeToMock).not.toHaveBeenCalled()
+    expect(jumpToMock).not.toHaveBeenCalled()
   })
 })
 
@@ -442,21 +424,21 @@ describe('AnchorWatchDrawer Adjust — Undo carries the pre-Adjust per-point fac
     fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
 
     // A genuine gesture (a real originalEvent) that moves the draft position
-    // but keeps the same radius (20 m) — isolates the position-vs-facts
-    // behaviour from the warning/double-tap mechanic.
-    const ringPx = ringRadiusPx(300)
+    // but keeps the same radius (20 m, plain state now — untouched by any
+    // camera move) — isolates the position-vs-facts behaviour from the
+    // warning/double-tap mechanic.
     act(() => {
       latestOnMove?.({
         viewState: {
           latitude: baseProps.anchorLat + 0.00002,
           longitude: baseProps.anchorLon,
-          zoom: zoomForRingRadius(20, baseProps.anchorLat, ringPx),
+          zoom: 15,
         },
         originalEvent: new WheelEvent('wheel'),
       })
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /^Set/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await act(async () => { await Promise.resolve() })
 
     expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
@@ -502,7 +484,7 @@ describe('AnchorWatchDrawer Adjust — Undo carries the pre-Adjust per-point fac
     fireEvent.pointerDown(increment)
     fireEvent.pointerUp(increment)
 
-    fireEvent.click(screen.getByRole('button', { name: /^Set/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await act(async () => { await Promise.resolve() })
 
     expect(adjustAnchorMock).toHaveBeenCalledTimes(1)
