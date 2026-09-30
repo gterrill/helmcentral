@@ -73,7 +73,7 @@ export interface EngineProfile {
 }
 
 export interface EngineProfileProblem {
-  file: string
+  id: string
   error: string
 }
 

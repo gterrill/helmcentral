@@ -78,6 +78,12 @@ type maintenanceRule struct {
 	ProfileServiceID string   `json:"profile_service_id"`
 	ProcedureNoteID  string   `json:"procedure_note_id"`
 	AckReason        string   `json:"ack_reason"`
+	// OverriddenFields names the fields of a profile job this item overrides,
+	// and NotApplicable is meaningful only when it is one of them. Both are
+	// always empty on a hand rule. On a job row the interval and description
+	// columns are NOT effective values (maintenance_schedule.go).
+	OverriddenFields []string `json:"overridden_fields"`
+	NotApplicable    bool     `json:"not_applicable"`
 	// Acknowledged is derived from ack_at (NULL means unacknowledged) -
 	// exposed as a bool rather than making every caller compare a
 	// timestamp to the zero value.
@@ -143,14 +149,13 @@ var validMaintenanceLogKinds = map[string]bool{"maintenance": true, "repair": tr
 // a baseline, a linked note, or an acknowledgement as a side effect of
 // saving the form.
 type maintenanceRuleInput struct {
-	EquipmentID      *string
-	Description      string
-	IntervalHours    *float64
-	IntervalMonths   *int
-	DueSoonHours     *float64
-	DueSoonMonths    *int
-	FixedDueDate     string
-	ProfileServiceID string
+	EquipmentID    *string
+	Description    string
+	IntervalHours  *float64
+	IntervalMonths *int
+	DueSoonHours   *float64
+	DueSoonMonths  *int
+	FixedDueDate   string
 }
 
 type maintenanceLogPartInput struct {
@@ -197,21 +202,27 @@ type maintenanceRuleFilter struct {
 
 const maintenanceRuleColumns = `id, equipment_id, description, interval_hours, interval_months,
 	due_soon_hours, due_soon_months, fixed_due_date, last_done_at, last_done_hours,
-	profile_service_id, procedure_note_id, ack_reason, ack_at, created_at, updated_at`
+	profile_service_id, procedure_note_id, ack_reason, ack_at, created_at, updated_at,
+	overridden_fields, not_applicable`
 
 func scanMaintenanceRule(row rowScanner) (maintenanceRule, error) {
 	var r maintenanceRule
 	var equipmentID, procedureNoteID sql.NullString
 	var ackAt sql.NullInt64
 	var createdAt, updatedAt int64
+	var overridden string
+	var notApplicable int
 
 	if err := row.Scan(
 		&r.ID, &equipmentID, &r.Description, &r.IntervalHours, &r.IntervalMonths,
 		&r.DueSoonHours, &r.DueSoonMonths, &r.FixedDueDate, &r.LastDoneAt, &r.LastDoneHours,
 		&r.ProfileServiceID, &procedureNoteID, &r.AckReason, &ackAt, &createdAt, &updatedAt,
+		&overridden, &notApplicable,
 	); err != nil {
 		return maintenanceRule{}, err
 	}
+	r.OverriddenFields = decodeOverriddenFields(overridden)
+	r.NotApplicable = notApplicable != 0
 	if equipmentID.Valid {
 		v := equipmentID.String
 		r.EquipmentID = &v
@@ -277,10 +288,10 @@ func createMaintenanceRuleTx(tx *sql.Tx, now time.Time, in maintenanceRuleInput)
 			id, equipment_id, description, interval_hours, interval_months,
 			due_soon_hours, due_soon_months, fixed_due_date, last_done_at, last_done_hours,
 			profile_service_id, procedure_note_id, ack_reason, ack_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, '', NULL, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', NULL, '', NULL, '', NULL, ?, ?)`,
 		id, nullableString(in.EquipmentID), strings.TrimSpace(in.Description), in.IntervalHours, in.IntervalMonths,
 		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate,
-		in.ProfileServiceID, now.Unix(), now.Unix(),
+		now.Unix(), now.Unix(),
 	); err != nil {
 		return maintenanceRule{}, fmt.Errorf("create maintenance rule: %w", err)
 	}
@@ -313,6 +324,9 @@ func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
 // the same write (see RunMaintenanceTx).
 func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanceRuleInput) (maintenanceRule, error) {
+	if isMaintenanceJobID(id) {
+		return maintenanceRule{}, &inventoryValidationError{Field: "id", Message: "a profile job has no fields of its own to replace; change it for this item with overrides"}
+	}
 
 	ok, err := rowExists(tx, `SELECT 1 FROM maintenance_rules WHERE id = ?`, id)
 	if err != nil {
@@ -336,11 +350,11 @@ func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanc
 		UPDATE maintenance_rules SET
 			equipment_id = ?, description = ?, interval_hours = ?, interval_months = ?,
 			due_soon_hours = ?, due_soon_months = ?, fixed_due_date = ?,
-			profile_service_id = ?, updated_at = ?
+			updated_at = ?
 		WHERE id = ?`,
 		nullableString(in.EquipmentID), strings.TrimSpace(in.Description), in.IntervalHours, in.IntervalMonths,
 		in.DueSoonHours, in.DueSoonMonths, in.FixedDueDate,
-		in.ProfileServiceID, now.Unix(),
+		now.Unix(),
 		id,
 	); err != nil {
 		return maintenanceRule{}, fmt.Errorf("update maintenance rule: %w", err)
@@ -353,79 +367,34 @@ func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanc
 	return updated, nil
 }
 
-// DeleteMaintenanceRule removes a rule. Its log entries survive with
-// rule_id set to NULL (ON DELETE SET NULL, the schema's own doc comment) -
-// history is never erased by deleting the rule that generated it.
+// DeleteMaintenanceRule removes a rule through cmdDeleteMaintenanceRule: a
+// hand rule, or a profile job row whose service has left the profile. Its log
+// entries survive with rule_id set to NULL (ON DELETE SET NULL, the schema's
+// own doc comment) - history is never erased by deleting the rule that
+// generated it.
 func (s *documentStore) DeleteMaintenanceRule(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	res, err := s.db.Exec(`DELETE FROM maintenance_rules WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete maintenance rule: %w", err)
-	}
-	return checkRowsAffected(res, errMaintenanceRuleNotFound)
+	return s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		return cmdDeleteMaintenanceRule(tx, id)
+	})
 }
 
-// GetMaintenanceRule reads a single rule.
-func (s *documentStore) GetMaintenanceRule(id string) (maintenanceRule, error) {
+// GetMaintenanceRuleRow reads a single stored row. A profile job's interval
+// and description columns are not its effective values: anything that shows or
+// acts on them resolves through ResolveMaintenanceRule instead.
+func (s *documentStore) GetMaintenanceRuleRow(id string) (maintenanceRule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return maintenanceRuleByID(s.db, id)
 }
 
-// ListMaintenanceRules returns every rule matching filter, ordered so a
-// caller building the Maintenance list can group/sort client-side without
-// a second pass: calendar-only rules (equipment_id NULL) first grouped
-// separately is a DISPLAY decision (the frontend's own "Certificates and
-// expiries" heading), so this just orders by equipment_id then
-// description - stable and predictable, nothing more. Status (spec §4) is
-// computed by the handler, never here - this is a plain read.
-func (s *documentStore) ListMaintenanceRules(filter maintenanceRuleFilter) ([]maintenanceRule, error) {
+// ListMaintenanceRuleRows returns the stored rows matching filter, in the
+// order the schedule sorts them. Like GetMaintenanceRuleRow it is the raw
+// table, not the schedule: a profile's untouched jobs have no rows, and a job
+// row's values are not effective (MaintenanceSchedule is the schedule).
+func (s *documentStore) ListMaintenanceRuleRows(filter maintenanceRuleFilter) ([]maintenanceRule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	query := `SELECT ` + maintenanceRuleColumns + ` FROM maintenance_rules WHERE 1=1`
-	var args []any
-	if filter.EquipmentID != "" {
-		query += ` AND equipment_id = ?`
-		args = append(args, filter.EquipmentID)
-	}
-	if !filter.IncludeStored {
-		// A rule with no equipment_id at all (a calendar-only certificate)
-		// is never excluded by an item's own status - there is no item to
-		// be stored. Only a rule that DOES name an item is filtered by
-		// that item's status.
-		query += ` AND (equipment_id IS NULL OR equipment_id IN (SELECT id FROM equipment WHERE status != 'stored'))`
-	}
-	if filter.System != "" {
-		// Unlike IncludeStored above, a calendar-only rule (equipment_id
-		// NULL) IS excluded here - it has no system to match against, and
-		// `NULL IN (...)` is never true in SQL, so this needs no separate
-		// "OR equipment_id IS NULL" clause the way IncludeStored's does.
-		query += ` AND equipment_id IN (SELECT id FROM equipment WHERE system = ?)`
-		args = append(args, filter.System)
-	}
-	query += ` ORDER BY equipment_id IS NULL, equipment_id, lower(description)`
-
-	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list maintenance rules: %w", err)
-	}
-	defer rows.Close()
-
-	out := []maintenanceRule{}
-	for rows.Next() {
-		r, err := scanMaintenanceRule(rows)
-		if err != nil {
-			return nil, fmt.Errorf("list maintenance rules: scan: %w", err)
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list maintenance rules: %w", err)
-	}
-	return out, nil
+	return queryMaintenanceRuleRows(s.db, filter)
 }
 
 // AcknowledgeMaintenanceRule sets (a non-blank reason) or clears (a blank
@@ -450,12 +419,10 @@ func (s *documentStore) AcknowledgeMaintenanceRule(id, reason string) (maintenan
 // the same write (see RunMaintenanceTx).
 func acknowledgeMaintenanceRuleTx(tx *sql.Tx, now time.Time, id, reason string) (maintenanceRule, error) {
 
-	ok, err := rowExists(tx, `SELECT 1 FROM maintenance_rules WHERE id = ?`, id)
-	if err != nil {
-		return maintenanceRule{}, fmt.Errorf("acknowledge maintenance rule: check exists: %w", err)
-	}
-	if !ok {
-		return maintenanceRule{}, errMaintenanceRuleNotFound
+	// A profile job's row is created by its first write (this one, if nothing
+	// has touched it yet).
+	if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
+		return maintenanceRule{}, err
 	}
 
 	trimmed := strings.TrimSpace(reason)
@@ -498,6 +465,9 @@ func (s *documentStore) SetMaintenanceRuleLastDone(id string, at *string, hours 
 // the same write (see RunMaintenanceTx).
 func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *string, hours *float64) (maintenanceRule, error) {
 
+	if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
+		return maintenanceRule{}, err
+	}
 	existing, err := maintenanceRuleByID(tx, id)
 	if err != nil {
 		return maintenanceRule{}, err
@@ -528,121 +498,20 @@ func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *stri
 // by the handler to be a real note) or clears (blank) a rule's procedure
 // note - spec §8.
 func (s *documentStore) SetMaintenanceRuleProcedureNote(id, noteID string) (maintenanceRule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return maintenanceRule{}, fmt.Errorf("set procedure note: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	ok, err := rowExists(tx, `SELECT 1 FROM maintenance_rules WHERE id = ?`, id)
-	if err != nil {
-		return maintenanceRule{}, fmt.Errorf("set procedure note: check exists: %w", err)
-	}
-	if !ok {
-		return maintenanceRule{}, errMaintenanceRuleNotFound
-	}
-
-	now := s.now()
-	if _, err := tx.Exec(`UPDATE maintenance_rules SET procedure_note_id = ?, updated_at = ? WHERE id = ?`,
-		nullableString(nilIfEmpty(noteID)), now.Unix(), id); err != nil {
-		return maintenanceRule{}, fmt.Errorf("set procedure note: %w", err)
-	}
-
-	updated, err := maintenanceRuleByID(tx, id)
-	if err != nil {
-		return maintenanceRule{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return maintenanceRule{}, fmt.Errorf("set procedure note: commit: %w", err)
-	}
-	return updated, nil
-}
-
-// CopyProfileServiceEntries is spec §1's "Use profile schedule" action: for
-// every entry in services not already copied to a rule on this item
-// (tracked by profile_service_id, so pressing the button twice never
-// duplicates a rule), insert one. An entry with both intervals nil is
-// copied as an "interval not set" rule (maintenance_status.go's own state
-// for exactly this shape) rather than skipped - spec's own "not hidden, not
-// due". The profile file itself is never written to; this only ever reads
-// engineProfileService values the handler already loaded.
-func (s *documentStore) CopyProfileServiceEntries(equipmentID string, services []engineProfileService) ([]maintenanceRule, error) {
-	var out0 []maintenanceRule
+	var out maintenanceRule
 	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE maintenance_rules SET procedure_note_id = ?, updated_at = ? WHERE id = ?`,
+			nullableString(nilIfEmpty(noteID)), now.Unix(), id); err != nil {
+			return fmt.Errorf("set procedure note: %w", err)
+		}
 		var err error
-		out0, err = copyProfileServiceEntriesTx(tx, now, equipmentID, services)
+		out, err = maintenanceRuleByID(tx, id)
 		return err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return out0, nil
-}
-
-// copyProfileServiceEntriesTx is CopyProfileServiceEntries inside a transaction the caller owns and commits, with now
-// supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
-func copyProfileServiceEntriesTx(tx *sql.Tx, now time.Time, equipmentID string, services []engineProfileService) ([]maintenanceRule, error) {
-
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
-	if err != nil {
-		return nil, fmt.Errorf("copy profile service entries: check equipment: %w", err)
-	}
-	if !ok {
-		return nil, errEquipmentNotFound
-	}
-
-	already := map[string]bool{}
-	rows, err := tx.Query(`SELECT profile_service_id FROM maintenance_rules WHERE equipment_id = ? AND profile_service_id != ''`, equipmentID)
-	if err != nil {
-		return nil, fmt.Errorf("copy profile service entries: read existing: %w", err)
-	}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("copy profile service entries: scan existing: %w", err)
-		}
-		already[id] = true
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("copy profile service entries: %w", err)
-	}
-	rows.Close()
-
-	var createdIDs []string
-	for _, svc := range services {
-		if already[svc.ID] {
-			continue
-		}
-		id := uuid.NewString()
-		if _, err := tx.Exec(`
-			INSERT INTO maintenance_rules (
-				id, equipment_id, description, interval_hours, interval_months,
-				due_soon_hours, due_soon_months, fixed_due_date, last_done_at, last_done_hours,
-				profile_service_id, procedure_note_id, ack_reason, ack_at, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, NULL, NULL, '', '', NULL, ?, NULL, '', NULL, ?, ?)`,
-			id, equipmentID, svc.Description, svc.IntervalHours, svc.IntervalMonths, svc.ID, now.Unix(), now.Unix(),
-		); err != nil {
-			return nil, fmt.Errorf("copy profile service entries: insert %s: %w", svc.ID, err)
-		}
-		createdIDs = append(createdIDs, id)
-	}
-
-	created := make([]maintenanceRule, 0, len(createdIDs))
-	for _, id := range createdIDs {
-		r, err := maintenanceRuleByID(tx, id)
-		if err != nil {
-			return nil, err
-		}
-		created = append(created, r)
-	}
-
-	return created, nil
+	return out, err
 }
 
 // ── service log ──────────────────────────────────────────────────────────
@@ -1040,6 +909,9 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 // the same write (see RunMaintenanceTx).
 func completeMaintenanceRuleTx(tx *sql.Tx, now time.Time, ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 
+	if _, err := prepareMaintenanceRuleWriteTx(tx, now, ruleID); err != nil {
+		return maintenanceRule{}, maintenanceLogEntry{}, err
+	}
 	rule, err := maintenanceRuleByID(tx, ruleID)
 	if err != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, err

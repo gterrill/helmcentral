@@ -62,8 +62,13 @@ six months into its life. **Set last done** records what was already true
 happened through Helmcentral. Completing the rule later works exactly the
 same either way.
 
-If an item was set up from an equipment profile, its manufacturer's
-service schedule can be copied in with one action - see
+An item that uses an equipment profile follows that profile's service
+schedule live: correct an interval on the profile and every item using it
+follows. A unit that differs can change a job for itself only, marked as
+such and resettable, and a job that doesn't apply can be set not applicable.
+If an item's profile is missing or damaged, its profile jobs aren't shown
+at all and the Maintenance list says which item and why, rather than
+counting down from numbers that may no longer be right. See
 [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 
 ## Completing a job
@@ -106,8 +111,8 @@ updating.
 first, then due soon, then the rest - filterable by system, so the
 electrical side of the boat can be checked without scrolling past the
 rest. Each item's own page also shows its own rules and recent service
-history, alongside where the hours come from and the option to copy in a
-profile's schedule.
+history, alongside where the hours come from. Jobs from the item's profile
+and jobs added for that item alone are listed separately.
 
 ## Exporting the service log
 
@@ -137,8 +142,8 @@ their place. A rule flagged that way can still read as fine on its calendar
 side alone, so treat "hours unknown" as a reason to read the meter yourself.
 
 Mate can also propose changes to the schedule. Ask it to add a rule, change
-an interval, set what was last done, log a job as done, acknowledge a rule,
-or copy in an item's profile schedule, and it answers with a card listing
+an interval, set what was last done, log a job as done or acknowledge a
+rule, and it answers with a card listing
 each change in one line, such as "Generator · Oil and filter: every 250 h or
 12 mo, last done 9 Jan 2025 at 239 h (meter)". Nothing has changed at that
 point. Tap **Apply** and every change on the card is made together, or

@@ -25,7 +25,7 @@ const bundled: EngineProfile = {
   service: [{ id: 'engine-oil', description: 'Engine oil & filter' }],
 }
 
-function stubProfiles(profiles: EngineProfile[], problems: { file: string; error: string }[] = []) {
+function stubProfiles(profiles: EngineProfile[], problems: { id: string; error: string }[] = []) {
   vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
     if (String(url).includes('/api/equipment-profiles') || String(url).includes('/api/engine-profiles')) {
       return Promise.resolve({ ok: true, json: async () => ({ profiles, problems }) })
@@ -234,11 +234,11 @@ describe('EngineProfileDialog', () => {
     })
   })
 
-  // One bad drop-in file must not be silent.
+  // One bad stored profile must not be silent.
   test('reports a profile that failed to load', async () => {
-    stubProfiles([bundled], [{ file: 'broken.json', error: 'unexpected end of JSON input' }])
+    stubProfiles([bundled], [{ id: 'broken', error: 'unexpected end of JSON input' }])
     renderDialog()
-    expect(await screen.findByText(/broken\.json/)).toBeInTheDocument()
+    expect(await screen.findByText(/broken:/)).toBeInTheDocument()
   })
 
   test('says so when there are no profiles at all', async () => {

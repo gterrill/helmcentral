@@ -89,11 +89,27 @@ type assistantEquipmentHit struct {
 	HoursAsOf           string   `json:"hours_as_of,omitempty"`
 	RuleCount           int      `json:"rule_count"`
 	ProfileID           string   `json:"profile_id,omitempty"`
-	// ProfileMissing is set when the item names a profile that is no longer
-	// installed, so the manufacturer's schedule can not be compared.
-	ProfileMissing bool                   `json:"profile_missing,omitempty"`
-	ProfileService []engineProfileService `json:"profile_service,omitempty"`
-	Link           string                 `json:"link"`
+	// Rules is the item's effective schedule from the resolver: the jobs its
+	// equipment profile supplies (live, with this item's overrides applied)
+	// plus the rules made by hand. Same field names as list_maintenance,
+	// minus the status, which only list_maintenance works out.
+	Rules []assistantEquipmentRule `json:"rules"`
+	// ScheduleErrors is set when the item's profile could not supply its
+	// jobs. Its profile jobs are then absent from Rules; say so rather than
+	// reading the gap as "nothing to do".
+	ScheduleErrors []maintenanceScheduleError `json:"schedule_errors,omitempty"`
+	Link           string                     `json:"link"`
+}
+
+type assistantEquipmentRule struct {
+	ID               string   `json:"id"`
+	Description      string   `json:"description"`
+	IntervalHours    *float64 `json:"interval_hours,omitempty"`
+	IntervalMonths   *int     `json:"interval_months,omitempty"`
+	Source           string   `json:"source"`
+	OverriddenFields []string `json:"overridden_fields,omitempty"`
+	// NotApplicable is a profile job this item has marked as not applying.
+	NotApplicable bool `json:"not_applicable,omitempty"`
 }
 
 type assistantFindEquipmentResult struct {
@@ -137,20 +153,24 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 		items = items[:limit]
 	}
 
-	rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{IncludeStored: true})
+	sched, err := store.MaintenanceSchedule(maintenanceRuleFilter{IncludeStored: true})
 	if err != nil {
 		return "", fmt.Errorf("find_equipment: %w", err)
 	}
-	ruleCounts := map[string]int{}
-	for _, r := range rules {
-		if r.EquipmentID != nil {
-			ruleCounts[*r.EquipmentID]++
+	rulesByItem := map[string][]assistantEquipmentRule{}
+	for _, r := range sched.Rules {
+		if r.EquipmentID == nil {
+			continue
 		}
+		rulesByItem[*r.EquipmentID] = append(rulesByItem[*r.EquipmentID], assistantEquipmentRule{
+			ID: r.ID, Description: r.Description,
+			IntervalHours: r.IntervalHours, IntervalMonths: r.IntervalMonths,
+			Source: r.Source, OverriddenFields: r.OverriddenFields, NotApplicable: r.NotApplicable,
+		})
 	}
-
-	var profiles []engineProfile
-	if d.profiles != nil {
-		profiles = d.profiles()
+	errorsByItem := map[string][]maintenanceScheduleError{}
+	for _, e := range sched.Errors {
+		errorsByItem[e.EquipmentID] = append(errorsByItem[e.EquipmentID], e)
 	}
 
 	now := time.Now().UTC()
@@ -165,7 +185,8 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 			System: it.System, Status: it.Status,
 			HourMeterBound: strings.TrimSpace(it.HourMeterPath) != "",
 			HoursKnown:     hours.Known,
-			RuleCount:      ruleCounts[it.ID],
+			Rules:          rulesByItem[it.ID],
+			ScheduleErrors: errorsByItem[it.ID],
 			ProfileID:      it.ProfileID,
 			Link:           assistantEquipmentLink(it.ID),
 		}
@@ -176,16 +197,9 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 				hit.HoursAsOf = hours.AsOf.UTC().Format(time.RFC3339)
 			}
 		}
-		if it.ProfileID != "" {
-			found := false
-			for _, p := range profiles {
-				if p.ID == it.ProfileID {
-					hit.ProfileService = p.Service
-					found = true
-					break
-				}
-			}
-			hit.ProfileMissing = !found
+		hit.RuleCount = len(hit.Rules)
+		if hit.Rules == nil {
+			hit.Rules = []assistantEquipmentRule{}
 		}
 		result.Equipment = append(result.Equipment, hit)
 	}
@@ -267,19 +281,28 @@ type assistantMaintenanceRuleRow struct {
 	HasHourMeterPath    bool     `json:"has_hour_meter_path"`
 	CurrentMeterReading *float64 `json:"current_meter_reading,omitempty"`
 
-	Acknowledged     bool                    `json:"acknowledged,omitempty"`
-	AckReason        string                  `json:"ack_reason,omitempty"`
-	ProfileServiceID string                  `json:"profile_service_id,omitempty"`
+	Acknowledged     bool   `json:"acknowledged,omitempty"`
+	AckReason        string `json:"ack_reason,omitempty"`
+	ProfileServiceID string `json:"profile_service_id,omitempty"`
+	// Source is "profile" for a job the item's equipment profile supplies and
+	// "item" for a rule made by hand; OverriddenFields names what this item
+	// changes from the profile's own values (ADR 0148).
+	Source           string                  `json:"source"`
+	OverriddenFields []string                `json:"overridden_fields,omitempty"`
 	ProcedureNote    *assistantProcedureNote `json:"procedure_note,omitempty"`
 	Link             string                  `json:"link"`
 }
 
 type assistantListMaintenanceResult struct {
 	// Today is the date every status was computed against.
-	Today     string                        `json:"today"`
-	Rules     []assistantMaintenanceRuleRow `json:"rules"`
-	Total     int                           `json:"total"`
-	Truncated bool                          `json:"truncated,omitempty"`
+	Today string                        `json:"today"`
+	Rules []assistantMaintenanceRuleRow `json:"rules"`
+	// ScheduleErrors lists items whose equipment profile could not supply its
+	// jobs. Those items' profile jobs are absent from Rules; say so rather
+	// than reading the gap as "nothing to do".
+	ScheduleErrors []maintenanceScheduleError `json:"schedule_errors,omitempty"`
+	Total          int                        `json:"total"`
+	Truncated      bool                       `json:"truncated,omitempty"`
 }
 
 func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -321,7 +344,7 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 		}
 	}
 
-	rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{
+	sched, err := store.MaintenanceSchedule(maintenanceRuleFilter{
 		EquipmentID:   equipmentID,
 		IncludeStored: args.IncludeStored,
 		System:        system,
@@ -330,12 +353,12 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 		return "", fmt.Errorf("list_maintenance: %w", err)
 	}
 
-	rows := make([]assistantMaintenanceRuleRow, 0, len(rules))
-	for _, rule := range rules {
+	rows := make([]assistantMaintenanceRuleRow, 0, len(sched.Rules))
+	for _, rule := range sched.Rules {
 		if args.CalendarOnly && rule.EquipmentID != nil {
 			continue
 		}
-		view, err := resolveMaintenanceRuleView(rule, today)
+		view, err := viewForEffectiveRule(rule, today)
 		if err != nil {
 			return "", fmt.Errorf("list_maintenance: resolve %q: %w", rule.Description, err)
 		}
@@ -354,7 +377,8 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 			CurrentMeterReading: view.CurrentHours,
 			Acknowledged:        view.Acknowledged, AckReason: view.AckReason,
 			ProfileServiceID: view.ProfileServiceID,
-			Link:             assistantMaintenanceLink,
+			Source:           view.Source, OverriddenFields: view.OverriddenFields,
+			Link: assistantMaintenanceLink,
 		}
 		if view.RemainingDays != nil {
 			row.NextDueDate = today.AddDate(0, 0, *view.RemainingDays).Format("2006-01-02")
@@ -386,7 +410,7 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rank(rows[i].Status) < rank(rows[j].Status) })
 
-	result := assistantListMaintenanceResult{Today: today.Format("2006-01-02"), Rules: rows, Total: len(rows)}
+	result := assistantListMaintenanceResult{Today: today.Format("2006-01-02"), Rules: rows, ScheduleErrors: sched.Errors, Total: len(rows)}
 	shrink := func() bool {
 		if len(result.Rules) <= 1 {
 			return false
@@ -476,11 +500,17 @@ func (d assistantToolDeps) executeGetMaintenanceLog(ctx context.Context, raw jso
 		}
 	}
 	if ruleID != "" {
-		if _, err := store.GetMaintenanceRule(ruleID); err != nil {
-			if errors.Is(err, errMaintenanceRuleNotFound) {
+		if _, err := store.ResolveMaintenanceRule(ruleID); err != nil {
+			var unavailable *maintenanceCommandError
+			switch {
+			case errors.Is(err, errMaintenanceRuleNotFound):
 				return "", fmt.Errorf("get_maintenance_log: no maintenance rule with id %q (find it with list_maintenance)", ruleID)
+			case errors.As(err, &unavailable):
+				// The job exists; its profile is unavailable. History is
+				// still readable.
+			default:
+				return "", fmt.Errorf("get_maintenance_log: %w", err)
 			}
-			return "", fmt.Errorf("get_maintenance_log: %w", err)
 		}
 	}
 

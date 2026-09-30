@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { createRef, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { EquipmentEditor } from '@/components/inventory/equipment-editor'
+import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
+import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { downloadDocument } from '@/lib/document-download'
 
@@ -114,6 +115,8 @@ let failingPhotoUploadNames: Set<string>
  * ?delete_photos=true - the delete-checkbox tests' own assertion. */
 let deletedWithPhotos: boolean
 const fetchMock = vi.fn()
+/** What GET .../maintenance/profile-change-preview answers (ADR 0148). */
+let profilePreviewBody: { kept: unknown[]; leaving: unknown[]; new: unknown[] }
 
 // Mirrors backend/inventory_store.go's normalizeAliases: trim every alias,
 // drop blanks, dedupe case-insensitively (folding only the comparison key,
@@ -252,6 +255,9 @@ function stubFetch() {
     // perfectly normal state (a fresh item has no rules, no log, no meter
     // history yet) and none of this suite's own tests are about
     // Maintenance, so there is nothing more specific for them to return.
+    if (u.includes('/maintenance/profile-change-preview')) {
+      return Promise.resolve({ ok: true, json: async () => profilePreviewBody })
+    }
     if (u.includes('/api/inventory/maintenance/rules')) {
       return Promise.resolve({ ok: true, json: async () => ({ rules: [] }) })
     }
@@ -287,6 +293,7 @@ beforeEach(() => {
   uploadedPhotoOrder = []
   failingPhotoUploadNames = new Set()
   deletedWithPhotos = false
+  profilePreviewBody = { kept: [], leaving: [], new: [] }
   stubFetch()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -581,6 +588,181 @@ describe('EquipmentEditor', () => {
     expect(screen.getByLabelText('Model')).toHaveValue('13.5 kW MDKD')
   })
 
+  describe('changing the profile of an item with a schedule (ADR 0148)', () => {
+    async function pickProfile(name: string) {
+      fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }))
+      const option = await screen.findByRole('option', { name })
+      fireEvent.pointerDown(option)
+      fireEvent.pointerUp(option)
+      fireEvent.click(option)
+    }
+    const putCalls = () => fetchMock.mock.calls.filter(([url, init]) =>
+      /\/equipment\/eq-1$/.test(String(url)) && (init as RequestInit | undefined)?.method === 'PUT')
+
+    it('shows what is kept, leaving and new, and asks before saving', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = {
+        kept: [{ service_id: 'oil', description: 'Engine oil and filter' }],
+        leaving: [{ service_id: 'belt', description: 'Drive belt' }],
+        new: [{ service_id: 'coolant', description: 'Coolant flush' }],
+      }
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+
+      await pickProfile('Onan 13.5kW')
+
+      await waitFor(() => expect(fetchMock.mock.calls.some(([u]) =>
+        String(u).includes('/equipment/eq-1/maintenance/profile-change-preview?profile_id=cummins-onan-13-5kw-60hz'))).toBe(true))
+      expect(await screen.findByText('Engine oil and filter')).toBeInTheDocument()
+      expect(screen.getByText('Drive belt')).toBeInTheDocument()
+      expect(screen.getByText('Coolant flush')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      const dialog = await screen.findByRole('alertdialog')
+      expect(within(dialog).getByText('Drive belt')).toBeInTheDocument()
+      expect(putCalls()).toHaveLength(0)
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Change profile' }))
+      await waitFor(() => expect(putCalls()).toHaveLength(1))
+    })
+
+    it('keeps the old profile when the operator backs out of the confirmation', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await screen.findByText('Drive belt')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      const dialog = await screen.findByRole('alertdialog')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+      expect(putCalls()).toHaveLength(0)
+    })
+
+    it('saves straight away when the change touches no maintenance jobs', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('profile-change-preview'))).toBe(true))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(putCalls()).toHaveLength(1))
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    it('gates the ref save ("Save and Continue") behind the same confirmation', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
+      const ref = createRef<EquipmentEditorHandle>()
+      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await screen.findByText('Drive belt')
+
+      let result: Promise<void> | undefined
+      act(() => { result = ref.current!.save() })
+      const dialog = await screen.findByRole('alertdialog')
+      expect(putCalls()).toHaveLength(0)
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Change profile' }))
+      await act(async () => { await result })
+      expect(putCalls()).toHaveLength(1)
+    })
+
+    it('rejects the ref save when the operator declines', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
+      const ref = createRef<EquipmentEditorHandle>()
+      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await screen.findByText('Drive belt')
+
+      let result: Promise<void> | undefined
+      act(() => { result = ref.current!.save() })
+      const dialog = await screen.findByRole('alertdialog')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      await expect(result).rejects.toThrow(/not confirmed/i)
+      expect(putCalls()).toHaveLength(0)
+    })
+
+    it('blocks Save when the preview fails, and choosing the original profile unblocks it', async () => {
+      currentItem = makeItem({ profile_id: 'cummins-onan-13-5kw-60hz' })
+      const baseImpl = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+        if (String(url).includes('profile-change-preview')) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'preview exploded' }) })
+        }
+        return baseImpl(url, init)
+      })
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('No profile')
+      await screen.findByText(/preview exploded/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(screen.getAllByText(/preview exploded/).length).toBeGreaterThan(1))
+      expect(putCalls()).toHaveLength(0)
+
+      await pickProfile('Onan 13.5kW')
+      await waitFor(() => expect(screen.queryByText(/preview exploded/)).not.toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Generator 2' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(putCalls()).toHaveLength(1))
+    })
+
+    it('clears the profile change summary once a ref save ("Save and Continue") succeeds', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
+      const ref = createRef<EquipmentEditorHandle>()
+      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await screen.findByText('Drive belt')
+
+      let result: Promise<void> | undefined
+      act(() => { result = ref.current!.save() })
+      const dialog = await screen.findByRole('alertdialog')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Change profile' }))
+      await act(async () => { await result })
+
+      expect(putCalls()).toHaveLength(1)
+      expect(screen.queryByText('Drive belt')).not.toBeInTheDocument()
+    })
+
+    it('does not carry one item\'s profile change preview onto the next item', async () => {
+      currentItem = makeItem({ profile_id: 'old-profile' })
+      profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
+      const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn(), onDiscarded: vi.fn() }
+      const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
+      await waitForLoaded()
+      await pickProfile('Onan 13.5kW')
+      await screen.findByText('Drive belt')
+
+      currentItem = makeItem({ id: 'eq-2', name: 'Item B' })
+      rerender(<EquipmentEditor id="eq-2" {...props} />)
+      await screen.findByDisplayValue('Item B')
+
+      expect(screen.queryByText('Drive belt')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item B2' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(fetchMock.mock.calls.some(([u, init]) =>
+        /\/equipment\/eq-2$/.test(String(u)) && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    it('does not ask for a preview on an unsaved new item', async () => {
+      render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await screen.findByLabelText('Name')
+      await pickProfile('Onan 13.5kW')
+      await screen.findByLabelText('Model')
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('profile-change-preview'))).toBe(false)
+    })
+  })
+
   it('never overwrites a manufacturer the operator already typed when picking a profile', async () => {
     currentItem = makeItem({ manufacturer: 'Kohler', model: '' })
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
@@ -796,7 +978,7 @@ describe('EquipmentEditor', () => {
       const u = String(url)
       const method = init?.method ?? 'GET'
       if (u.includes('/api/inventory/maintenance/rules')) {
-        return Promise.resolve({ ok: true, json: async () => ({ rules: [{ id: 'r1' }, { id: 'r2' }] }) })
+        return Promise.resolve({ ok: true, json: async () => ({ rules: [{ id: 'r1', description: 'Oil', status: 'ok', ...ITEM_RULE_PROVENANCE }, { id: 'r2', description: 'Belt', status: 'ok', ...ITEM_RULE_PROVENANCE }] }) })
       }
       if (u.includes('/api/inventory/maintenance/log')) {
         return Promise.resolve({ ok: true, json: async () => ({ entries: [{ id: 'e1' }] }) })

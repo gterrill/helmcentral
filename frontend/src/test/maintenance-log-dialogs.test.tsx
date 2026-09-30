@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MaintenanceCompleteDialog, MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import type { MaintenanceLogEntry, MaintenanceRule } from '@/hooks/use-maintenance'
+import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 
 // ADR 0138: code-review fixes to the service log's two write dialogs -
 // editing an existing entry actually saves (issue 1), a failed delete is
@@ -32,6 +33,7 @@ function makeRule(overrides: Partial<MaintenanceRule> = {}): MaintenanceRule {
     ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
     status: 'due_soon', remaining_hours: null, remaining_days: null,
     hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
+    ...ITEM_RULE_PROVENANCE,
     ...overrides,
   }
 }

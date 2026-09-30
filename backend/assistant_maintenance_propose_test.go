@@ -47,7 +47,7 @@ type maintenanceRowCounts struct{ rules, entries int }
 
 func countMaintenanceRows(t *testing.T, store *documentStore) maintenanceRowCounts {
 	t.Helper()
-	rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{IncludeStored: true})
+	rules, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{IncludeStored: true})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules: %v", err)
 	}
@@ -223,29 +223,26 @@ func TestCompleteValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 func TestProposeMaintenanceChanges_WritesNothing(t *testing.T) {
 	deps, store := proposeDeps(t)
 	oil := fptr(250)
-	svc := []engineProfileService{{ID: "impeller", Description: "Impeller", IntervalHours: fptr(500)}}
-	deps.profiles = func() []engineProfile { return []engineProfile{{ID: "onan", Name: "Onan generator", Service: svc}} }
 	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan", HourMeterPath: "electrical.generator.0.runtime"})
 	rule := mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil and filter", IntervalHours: oil})
 	before := countMaintenanceRows(t, store)
-	beforeRule, _ := store.GetMaintenanceRule(rule.ID)
+	beforeRule, _ := store.GetMaintenanceRuleRow(rule.ID)
 
 	args := fmt.Sprintf(`{"ops":[
 		{"op":"create_rule","equipment_id":%q,"description":"Belts","interval_months":12},
 		{"op":"update_rule","rule_id":%q,"interval_hours":300},
 		{"op":"set_last_done","rule_id":%q,"last_done_at":"2025-01-09","last_done_meter_reading":239},
 		{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01","meter_reading":239},
-		{"op":"acknowledge","rule_id":%q,"reason":"waiting for parts"},
-		{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID, rule.ID, rule.ID, rule.ID, rule.ID, gen.ID)
+		{"op":"acknowledge","rule_id":%q,"reason":"waiting for parts"}]}`, gen.ID, rule.ID, rule.ID, rule.ID, rule.ID)
 	proposal := runPropose(t, deps, args)
 
-	if len(proposal.Ops) != 6 || proposal.ID == "" || proposal.Status != assistantProposalPending {
-		t.Fatalf("expected a pending 6-op proposal with an id, got %+v", proposal)
+	if len(proposal.Ops) != 5 || proposal.ID == "" || proposal.Status != assistantProposalPending {
+		t.Fatalf("expected a pending 5-op proposal with an id, got %+v", proposal)
 	}
 	if after := countMaintenanceRows(t, store); after != before {
 		t.Fatalf("propose must write nothing: rows %+v before, %+v after", before, after)
 	}
-	afterRule, _ := store.GetMaintenanceRule(rule.ID)
+	afterRule, _ := store.GetMaintenanceRuleRow(rule.ID)
 	if !afterRule.UpdatedAt.Equal(beforeRule.UpdatedAt) || afterRule.LastDoneAt != beforeRule.LastDoneAt || afterRule.Acknowledged {
 		t.Fatalf("propose must not touch the rule: before %+v, after %+v", beforeRule, afterRule)
 	}
@@ -318,12 +315,11 @@ func TestProposeMaintenanceChanges_RefusesBadOps(t *testing.T) {
 		{"field from another op", fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"r","meter_reading":3}]}`, rule.ID), "meter_reading: does not apply to acknowledge"},
 		{"unknown rule", `{"ops":[{"op":"acknowledge","rule_id":"nope","reason":"r"}]}`, "rule_id: no maintenance rule"},
 		{"missing rule id", `{"ops":[{"op":"acknowledge","reason":"r"}]}`, "rule_id: is required"},
-		{"unknown equipment", `{"ops":[{"op":"copy_profile_schedule","equipment_id":"nope"}]}`, "equipment_id: no equipment"},
+		{"copy op is gone", `{"ops":[{"op":"copy_profile_schedule","equipment_id":"x"}]}`, "op: unknown op"},
 		{"acknowledge needs a reason", fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q}]}`, rule.ID), "reason: is required"},
 		{"update changes nothing", fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"interval_months":12}]}`, rule.ID), "exactly as it is"},
 		{"bad clear", fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"clear":["description"]}]}`, rule.ID), "clear: cannot clear"},
 		{"reading with no item", `{"ops":[{"op":"create_rule","description":"Cert","interval_months":12,"last_done_meter_reading":10}]}`, "last_done_meter_reading"},
-		{"item with no profile", fmt.Sprintf(`{"ops":[{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID), "no profile to copy"},
 		{"second op is the bad one", fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"r"},{"op":"acknowledge","rule_id":"nope","reason":"r"}]}`, rule.ID), "ops[1] (acknowledge)"},
 	}
 	for _, tc := range cases {
@@ -332,20 +328,6 @@ func TestProposeMaintenanceChanges_RefusesBadOps(t *testing.T) {
 				t.Fatalf("expected the error to contain %q, got %q", tc.want, msg)
 			}
 		})
-	}
-}
-
-func TestProposeMaintenanceChanges_CopyWithNothingMissingIsRefused(t *testing.T) {
-	deps, store := proposeDeps(t)
-	deps.profiles = func() []engineProfile {
-		return []engineProfile{{ID: "onan", Name: "Onan generator", Service: []engineProfileService{{ID: "oil", Description: "Oil", IntervalMonths: iptr(12)}}}}
-	}
-	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan"})
-	mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil", IntervalMonths: iptr(12), ProfileServiceID: "oil"})
-
-	msg := proposeError(t, deps, fmt.Sprintf(`{"ops":[{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID))
-	if !strings.Contains(msg, "nothing to copy") {
-		t.Fatalf("expected nothing-to-copy, got %q", msg)
 	}
 }
 

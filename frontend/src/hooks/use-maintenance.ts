@@ -38,7 +38,22 @@ function withToday(url: string): string {
 // Inventory, not a separate one), so a second class carrying the identical
 // fields would be pure duplication with no behavioural difference.
 
-export type MaintenanceStatus = 'overdue' | 'due_soon' | 'ok' | 'never_recorded' | 'interval_not_set' | 'hours_unknown'
+export type MaintenanceStatus = 'overdue' | 'due_soon' | 'ok' | 'never_recorded' | 'interval_not_set' | 'hours_unknown' | 'not_applicable'
+
+/** ADR 0148: a rule is either one of its equipment profile's service jobs
+ * ("profile", resolved live, only per-item state stored) or one the operator
+ * added for the item by hand ("item"). */
+export type MaintenanceRuleSource = 'profile' | 'item'
+
+/** The fields of a profile job an item may override (ADR 0148 section 3). */
+export type MaintenanceOverrideField = 'description' | 'interval_hours' | 'interval_months' | 'not_applicable'
+
+/** What "Reset to profile" would restore; null on a hand rule. */
+export interface MaintenanceProfileValues {
+  description: string
+  interval_hours: number | null
+  interval_months: number | null
+}
 
 export type MaintenanceLogKind = 'maintenance' | 'repair' | 'improvement'
 
@@ -65,8 +80,9 @@ export interface MaintenanceRule {
   procedure_note_id: string
   ack_reason: string
   acknowledged: boolean
-  created_at: string
-  updated_at: string
+  /** null for a profile job nothing has been written to yet (it has no row). */
+  created_at: string | null
+  updated_at: string | null
   status: MaintenanceStatus
   remaining_hours: number | null
   remaining_days: number | null
@@ -84,6 +100,57 @@ export interface MaintenanceRule {
    * server adds whichever meter-reset offset applies when it stores
    * whatever is actually submitted. */
   current_hours: number | null
+
+  // ADR 0148. description/interval_* above are EFFECTIVE values: the
+  // profile's own with this item's overrides applied, for a profile job.
+  source: MaintenanceRuleSource
+  profile_id: string
+  overridden_fields: MaintenanceOverrideField[]
+  not_applicable: boolean
+  profile_values: MaintenanceProfileValues | null
+  first_at_hours: number | null
+  supersedes: string[]
+  removed_from_profile: boolean
+}
+
+/** A profile job is live: its definition belongs to the profile, so the
+ * rule's own PUT/DELETE refuse it and only overrides change it. */
+export function isProfileJob(rule: Pick<MaintenanceRule, 'source'>): boolean {
+  return rule.source === 'profile'
+}
+
+/** The body PUT /rules/:id/overrides accepts: any subset. The first four are
+ * overrides (null on an interval overrides it to "none"); the last three are
+ * plain per-item state (null clears). */
+export interface MaintenanceOverridesInput {
+  description?: string
+  interval_hours?: number | null
+  interval_months?: number | null
+  not_applicable?: boolean
+  due_soon_hours?: number | null
+  due_soon_months?: number | null
+  fixed_due_date?: string | null
+}
+
+/** One item whose profile is missing or invalid: its profile jobs are not
+ * shown from any stored copy. */
+export interface MaintenanceScheduleError {
+  equipment_id: string
+  equipment_name: string
+  profile_id: string
+  error: string
+}
+
+export interface MaintenanceProfileChangeEntry {
+  service_id: string
+  description: string
+}
+
+/** GET .../maintenance/profile-change-preview */
+export interface MaintenanceProfileChangePreview {
+  kept: MaintenanceProfileChangeEntry[]
+  leaving: MaintenanceProfileChangeEntry[]
+  new: MaintenanceProfileChangeEntry[]
 }
 
 /** The body POST/PUT /api/inventory/maintenance/rules(/:id) accept - a
@@ -223,6 +290,8 @@ export interface MaintenanceRuleFilter {
  */
 export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
   const [rules, setRules] = useState<MaintenanceRule[]>([])
+  const [removed, setRemoved] = useState<MaintenanceRule[]>([])
+  const [scheduleErrors, setScheduleErrors] = useState<MaintenanceScheduleError[]>([])
   const [loading, setLoading] = useState(filter !== null)
   const [error, setError] = useState<string | null>(null)
   const seqRef = useRef(0)
@@ -235,6 +304,8 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
     if (filter === null) {
       seqRef.current += 1
       setRules([])
+      setRemoved([])
+      setScheduleErrors([])
       setError(null)
       setLoading(false)
       return
@@ -250,9 +321,15 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
       const qs = params.toString()
       const res = await fetch(`${apiBaseUrl}/api/inventory/maintenance/rules${qs ? `?${qs}` : ''}`)
       if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as { rules?: MaintenanceRule[] }
+      const data = (await res.json()) as {
+        rules?: MaintenanceRule[]
+        removed?: MaintenanceRule[]
+        schedule_errors?: MaintenanceScheduleError[]
+      }
       if (seq !== seqRef.current) return
       setRules(data.rules ?? [])
+      setRemoved(data.removed ?? [])
+      setScheduleErrors(data.schedule_errors ?? [])
       setError(null)
     } catch (err) {
       if (seq !== seqRef.current) return
@@ -267,7 +344,7 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  return { rules, loading, error, refresh }
+  return { rules, removed, scheduleErrors, loading, error, refresh }
 }
 
 /** POST /api/inventory/maintenance/rules */
@@ -335,14 +412,33 @@ export async function createMaintenanceProcedureNote(id: string): Promise<{ rule
   )
 }
 
-/** POST /api/inventory/equipment/:id/maintenance/copy-profile-schedule -
- * spec's "Use profile schedule" one-action copy. Idempotent: pressing it
- * again returns an empty array rather than duplicating anything. */
-export async function copyMaintenanceProfileSchedule(equipmentId: string): Promise<MaintenanceRule[]> {
-  const data = await submitJSON<{ rules: MaintenanceRule[] }>(
-    withToday(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/copy-profile-schedule`), 'POST',
+/** PUT /api/inventory/maintenance/rules/:id/overrides - the only way to
+ * change a profile job (ADR 0148). */
+export async function setMaintenanceRuleOverrides(id: string, input: MaintenanceOverridesInput): Promise<MaintenanceRule> {
+  const data = await submitJSON<{ rule: MaintenanceRule }>(
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/overrides`), 'PUT', input,
   )
-  return data.rules
+  return data.rule
+}
+
+/** DELETE /api/inventory/maintenance/rules/:id/overrides/:field - "Reset to
+ * profile" for one field. */
+export async function resetMaintenanceRuleOverride(id: string, field: MaintenanceOverrideField): Promise<MaintenanceRule> {
+  const data = await submitJSON<{ rule: MaintenanceRule }>(
+    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/overrides/${encodeURIComponent(field)}`), 'DELETE',
+  )
+  return data.rule
+}
+
+/** GET /api/inventory/equipment/:id/maintenance/profile-change-preview -
+ * which of the item's jobs carry over, leave or arrive if its profile
+ * became profileId ('' for no profile). */
+export async function previewProfileChange(equipmentId: string, profileId: string): Promise<MaintenanceProfileChangePreview> {
+  const qs = new URLSearchParams({ profile_id: profileId }).toString()
+  const data = await submitJSON<Partial<MaintenanceProfileChangePreview>>(
+    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/profile-change-preview?${qs}`, 'GET',
+  )
+  return { kept: data.kept ?? [], leaving: data.leaving ?? [], new: data.new ?? [] }
 }
 
 /** POST /api/inventory/equipment/:id/maintenance/meter-reset - records a
@@ -509,13 +605,14 @@ export const MAINTENANCE_STATUS_LABELS: Record<MaintenanceStatus, string> = {
   never_recorded: 'Never recorded',
   hours_unknown: 'Hours unknown',
   interval_not_set: 'Interval not set',
+  not_applicable: 'Not applicable',
   ok: 'OK',
 }
 
 // Display order (spec §9): Overdue, Due soon, Never recorded, Hours
 // unknown, Interval not set, OK.
 export const MAINTENANCE_STATUS_ORDER: MaintenanceStatus[] = [
-  'overdue', 'due_soon', 'never_recorded', 'hours_unknown', 'interval_not_set', 'ok',
+  'overdue', 'due_soon', 'never_recorded', 'hours_unknown', 'interval_not_set', 'ok', 'not_applicable',
 ]
 
 /**

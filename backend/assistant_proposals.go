@@ -237,8 +237,7 @@ func (s *assistantStore) DismissProposal(id string) (assistantProposal, error) {
 // schedule can never overwrite a later edit.
 //
 // When the schedule no longer matches the proposal (that check, an operation
-// the commands now refuse, a target that is gone, or a profile copy that would
-// create a different set of rules than the card promised), the transaction
+// the commands now refuse, or a target that is gone), the transaction
 // rolls back and the proposal is then marked stale, with the reason, in a
 // separate transaction. The card and Mate's next turn both see that; Apply can
 // never be offered again for something that can only fail the same way.
@@ -252,11 +251,11 @@ func (s *assistantStore) DismissProposal(id string) (assistantProposal, error) {
 // what makes "the operations and the applied mark commit together" true; the
 // commands read only through tx, never through globalDocumentStore, whose
 // separate connection would not see the transaction's own writes.
-func (s *assistantStore) ApplyProposal(id string, today time.Time, profiles []engineProfile) (assistantProposal, error) {
+func (s *assistantStore) ApplyProposal(id string, today time.Time) (assistantProposal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	p, err := s.applyProposalTx(id, today, profiles)
+	p, err := s.applyProposalTx(id, today)
 	if err == nil || !proposalGoesStale(err) {
 		return p, err
 	}
@@ -270,7 +269,7 @@ func (s *assistantStore) ApplyProposal(id string, today time.Time, profiles []en
 }
 
 // applyProposalTx is ApplyProposal's transaction; the caller holds s.mu.
-func (s *assistantStore) applyProposalTx(id string, today time.Time, profiles []engineProfile) (assistantProposal, error) {
+func (s *assistantStore) applyProposalTx(id string, today time.Time) (assistantProposal, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return assistantProposal{}, fmt.Errorf("begin apply proposal: %w", err)
@@ -297,7 +296,7 @@ func (s *assistantStore) applyProposalTx(id string, today time.Time, profiles []
 	now := s.now()
 	results := make([]assistantProposalOpResult, 0, len(p.Ops))
 	for i, op := range p.Ops {
-		res, err := applyMaintenanceProposalOp(tx, now, today, profiles, op)
+		res, err := applyMaintenanceProposalOp(tx, now, today, op)
 		if err != nil {
 			return assistantProposal{}, fmt.Errorf("change %d of %d (%s): %w", i+1, len(p.Ops), op.Op, err)
 		}
@@ -333,12 +332,9 @@ type assistantProposalOpResult struct {
 	RuleIDs []string `json:"rule_ids,omitempty"`
 	EntryID string   `json:"entry_id,omitempty"`
 	// NewFixedDueDate is the fixed due date a completion moved the rule to,
-	// when it moved. CopiedServiceIDs and CopiedNames are the profile services
-	// a copy created rules for. Propose's dry run reads them to write the
-	// card's summary from what Apply will actually do.
-	NewFixedDueDate  string   `json:"new_fixed_due_date,omitempty"`
-	CopiedServiceIDs []string `json:"copied_service_ids,omitempty"`
-	CopiedNames      []string `json:"copied_names,omitempty"`
+	// when it moved. Propose's dry run reads it to write the card's summary
+	// from what Apply will actually do.
+	NewFixedDueDate string `json:"new_fixed_due_date,omitempty"`
 }
 
 // staleProposalError is a stale refusal carrying its stored or freshly worked

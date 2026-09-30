@@ -7,26 +7,51 @@ it or the item was fitted yesterday.
 Prefer to describe it and check a card? Mate can propose the rules for you;
 see [Set up a maintenance schedule with Mate](set-up-a-maintenance-schedule-with-mate.md).
 
-## Copy a schedule from an equipment profile
+## Use the equipment profile's schedule
 
-If the item was set up using a manufacturer's equipment profile, its
-service intervals are already loaded and ready to copy in.
+An item that uses an equipment profile gets that profile's service jobs
+automatically. There is nothing to copy: open the item from **Inventory →
+Equipment** and its **Maintenance** block lists them under **From profile**.
+Fix an interval on the profile and every item using it follows at once.
 
-1. Open the item from **Inventory → Equipment**.
-2. In the **Maintenance** block, tap **Use profile schedule**.
-3. Every job the profile lists is added as a rule. A job the manufacturer
-   names but gives no interval for (a "slot") is added too, showing
-   **Interval not set** until you fill one in.
-4. Tapping this again later only adds jobs you don't already have - it
-   never duplicates one you've already copied in.
+A job the profile names but gives no interval for shows **Interval not
+set**. Fill it in on the profile when every unit of that model is serviced
+the same way (from **Inventory → Profiles**), or on the item when it's this
+one unit only.
 
-Rules copied this way are yours to edit afterward - change the interval,
-add a due-soon window, or fill in a slot's frequency once you find it in
-the manual.
+## Change a profile job for this item only
+
+Some units differ: an impeller in silty water wants changing sooner, or a
+job the manufacturer lists doesn't apply to how this unit is fitted.
+
+1. Open the job from the item's **Maintenance** block.
+2. Each field shows the profile's value. Change the description, the hours
+   interval or the months interval, or turn on **Not applicable to this
+   item**.
+3. Save. The changed value is marked on the item's page and in the
+   Maintenance list, so you can see at a glance which jobs no longer follow
+   the profile.
+4. **Reset to profile** beside a changed field puts it back.
+
+Due-soon windows and a fixed due date are set the same way and are always
+this item's own.
+
+## If the item changes profile or a job leaves the profile
+
+Choosing a different profile for an item shows what happens first: which
+jobs keep their history, which leave the schedule and which arrive new.
+A job that leaves (because the item changed profile, or the job was taken
+out of the profile) keeps its history. It moves to **No longer in the
+profile** on the item's page, where you can read its log or delete it.
+
+Saving a profile that drops a job some item has history for asks you to
+confirm first, and names the items. A profile any item still uses can't be
+deleted until those items use another one.
 
 ## Add a rule by hand
 
-For gear with no profile, or a job the profile doesn't cover:
+For gear with no profile, or a job the profile doesn't cover. These show
+under **Added for this item**:
 
 1. From **Inventory → Maintenance**, tap **New rule** - or, from the
    item's own page, tap **Add rule** in its Maintenance block.

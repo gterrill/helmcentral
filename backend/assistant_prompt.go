@@ -705,8 +705,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"what is due, overdue or coming up, or how a schedule looks, call list_maintenance (get an equipment id " +
 		"from find_equipment first when the question names an item; use get_maintenance_log for what was actually " +
 		"done and when) and answer from what it returns, never from memory and never by working out a status " +
-		"yourself. When asked to review a schedule, compare the rules with the linked profile's service block " +
-		"(find_equipment) and with the manuals (search_documents), then name the gaps: a service the manufacturer " +
+		"yourself. When asked to review a schedule, compare the item's rules (profile jobs are live: " +
+		"their source is \"profile\", and overridden_fields shows where this item departs from the profile) " +
+		"with the manuals (search_documents), then name the gaps: a service the manufacturer " +
 		"lists that has no rule, a rule whose interval differs, a rule with no last-done baseline. When a rule's " +
 		"hours are unknown (hours_unknown is set, or there is no current_meter_reading), say the hours are unknown; never " +
 		"give a figure in their place, and note that a rule flagged this way may be judged on its calendar interval " +
@@ -716,6 +717,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"meter only when no replacement is recorded. You never change the maintenance schedule yourself. To change it, call " +
 		"propose_maintenance_changes: the operator sees your proposal as a card under your reply and taps Apply. Propose only " +
 		"what the operator asked for or agreed to, read the rules first so you use real ids, and put every change in one call. " +
+		"A profile job (id starting job:) is live from the equipment profile: changing it for one item is an update_rule " +
+		"override, and not_applicable can be set per item; changing it for every item means editing the profile, " +
+		"which you cannot do. " +
 		"After proposing, say that the proposal is waiting and they should tap Apply; never say it is done, added or changed. " +
 		"Hours in a proposal are meter readings, what their gauge shows, the same as the Maintenance form, never cumulative " +
 		"engine hours. If a change was dismissed, or went stale (its status line says why), do not propose it again " +

@@ -3,6 +3,9 @@ import { renderHook, waitFor } from '@testing-library/react'
 
 import {
   maintenanceLogExportURL,
+  previewProfileChange,
+  resetMaintenanceRuleOverride,
+  setMaintenanceRuleOverrides,
   useMaintenanceRules,
   MAINTENANCE_DEFAULT_DUE_SOON_HOURS,
   MAINTENANCE_DEFAULT_DUE_SOON_MONTHS,
@@ -27,6 +30,16 @@ describe('useMaintenanceRules', () => {
     expect(url).toContain('equipment=eq-1')
     expect(url).toContain('system=propulsion')
     expect(url).toContain('include_stored=true')
+  })
+
+  it('exposes removed jobs and schedule errors from the response', async () => {
+    const removed = [{ id: 'job:eq-1:old', description: 'Old job' }]
+    const errors = [{ equipment_id: 'eq-1', equipment_name: 'Main engine', profile_id: 'gone', error: 'profile not found' }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { rules: [], removed, schedule_errors: errors })))
+
+    const { result } = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(result.current.scheduleErrors).toEqual(errors))
+    expect(result.current.removed).toEqual(removed)
   })
 
   it('fetches nothing at all when filter is null', () => {
@@ -62,5 +75,41 @@ describe('due-soon defaults', () => {
   it('match the backend\'s own constants (maintenance_status.go)', () => {
     expect(MAINTENANCE_DEFAULT_DUE_SOON_HOURS).toBe(50)
     expect(MAINTENANCE_DEFAULT_DUE_SOON_MONTHS).toBe(1)
+  })
+})
+
+describe('profile job writes', () => {
+  it('setMaintenanceRuleOverrides PUTs the subset with today and returns the rule', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rule: { id: 'job:eq-1:oil' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const rule = await setMaintenanceRuleOverrides('job:eq-1:oil', { interval_hours: 100, not_applicable: false })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toMatch(/\/rules\/job%3Aeq-1%3Aoil\/overrides\?today=\d{4}-\d{2}-\d{2}$/)
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ interval_hours: 100, not_applicable: false })
+    expect(rule.id).toBe('job:eq-1:oil')
+  })
+
+  it('resetMaintenanceRuleOverride DELETEs one field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rule: { id: 'job:eq-1:oil' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await resetMaintenanceRuleOverride('job:eq-1:oil', 'interval_hours')
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('/overrides/interval_hours?today=')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('previewProfileChange asks with the new profile id and fills missing lists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { kept: [{ service_id: 'a', description: 'A' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const preview = await previewProfileChange('eq-1', 'new-profile')
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/equipment/eq-1/maintenance/profile-change-preview?profile_id=new-profile')
+    expect(preview).toEqual({ kept: [{ service_id: 'a', description: 'A' }], leaving: [], new: [] })
   })
 })

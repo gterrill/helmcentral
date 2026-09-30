@@ -3,10 +3,12 @@ package main
 import (
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,8 +21,8 @@ import (
 
 // This file serves the maintenance feature's HTTP API (ADR 0138): service
 // rules and the log they're completed into, under /api/inventory/maintenance/
-// and, for the two actions that are really about one item
-// (copy-profile-schedule, meter-reset), under
+// and, for the actions that are really about one item
+// (meter-reset, profile-change-preview), under
 // /api/inventory/equipment/:id/maintenance/. inventory_handlers.go is this
 // file's own model throughout: validate-then-store the same two-step split
 // validateEquipmentInput/CreateEquipment uses, writeDocumentError/
@@ -47,24 +49,42 @@ import (
 // false for a calendar-only rule (EquipmentID nil) - there is no item to
 // join them from.
 type maintenanceRuleView struct {
-	ID               string    `json:"id"`
-	EquipmentID      *string   `json:"equipment_id"`
-	EquipmentName    string    `json:"equipment_name"`
-	System           string    `json:"system"`
-	Description      string    `json:"description"`
-	IntervalHours    *float64  `json:"interval_hours"`
-	IntervalMonths   *int      `json:"interval_months"`
-	DueSoonHours     *float64  `json:"due_soon_hours"`
-	DueSoonMonths    *int      `json:"due_soon_months"`
-	FixedDueDate     string    `json:"fixed_due_date"`
-	LastDoneAt       string    `json:"last_done_at"`
-	LastDoneHours    *float64  `json:"last_done_hours"`
-	ProfileServiceID string    `json:"profile_service_id"`
-	ProcedureNoteID  string    `json:"procedure_note_id"`
-	AckReason        string    `json:"ack_reason"`
-	Acknowledged     bool      `json:"acknowledged"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string   `json:"id"`
+	EquipmentID      *string  `json:"equipment_id"`
+	EquipmentName    string   `json:"equipment_name"`
+	System           string   `json:"system"`
+	Description      string   `json:"description"`
+	IntervalHours    *float64 `json:"interval_hours"`
+	IntervalMonths   *int     `json:"interval_months"`
+	DueSoonHours     *float64 `json:"due_soon_hours"`
+	DueSoonMonths    *int     `json:"due_soon_months"`
+	FixedDueDate     string   `json:"fixed_due_date"`
+	LastDoneAt       string   `json:"last_done_at"`
+	LastDoneHours    *float64 `json:"last_done_hours"`
+	ProfileServiceID string   `json:"profile_service_id"`
+	ProcedureNoteID  string   `json:"procedure_note_id"`
+	AckReason        string   `json:"ack_reason"`
+	Acknowledged     bool     `json:"acknowledged"`
+	// CreatedAt/UpdatedAt are null for a profile job nothing has been written
+	// to yet: it has no row, so no timestamps to report.
+	CreatedAt *time.Time `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at"`
+
+	// Where the rule comes from (ADR 0148). Description and the two intervals
+	// above are EFFECTIVE: for a profile job ("profile") the profile's live
+	// values with this item's overrides applied, for a hand rule ("item") the
+	// stored ones. ProfileValues is what Reset to profile would restore (null
+	// for a hand rule); FirstAtHours and Supersedes are the profile's, shown
+	// read-only. RemovedFromProfile marks a parked job: its service has left
+	// the item's profile, so it has no status and is never due.
+	Source             string                    `json:"source"`
+	ProfileID          string                    `json:"profile_id"`
+	OverriddenFields   []string                  `json:"overridden_fields"`
+	NotApplicable      bool                      `json:"not_applicable"`
+	ProfileValues      *maintenanceProfileValues `json:"profile_values"`
+	FirstAtHours       *float64                  `json:"first_at_hours"`
+	Supersedes         []string                  `json:"supersedes"`
+	RemovedFromProfile bool                      `json:"removed_from_profile"`
 
 	// Computed fresh on every response (maintenance_status.go) - never
 	// stored.
@@ -139,40 +159,65 @@ func parseMaintenanceDate(s string) *time.Time {
 // instant, and never the server's own clock; see
 // maintenanceRuleStatusInput.Today's own doc comment (maintenance_status.go)
 // for why.
-func buildMaintenanceRuleView(rule maintenanceRule, eq *equipmentItem, hours maintenanceHourReading, today time.Time) maintenanceRuleView {
-	result := computeMaintenanceRuleStatus(maintenanceRuleStatusInput{
-		IntervalHours:  rule.IntervalHours,
-		IntervalMonths: rule.IntervalMonths,
-		DueSoonHours:   rule.DueSoonHours,
-		DueSoonMonths:  rule.DueSoonMonths,
-		FixedDueDate:   parseMaintenanceDate(rule.FixedDueDate),
-		LastDoneAt:     parseMaintenanceDate(rule.LastDoneAt),
-		LastDoneHours:  rule.LastDoneHours,
-		Hours:          hours,
-		Today:          today,
-	})
+func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, hours maintenanceHourReading, today time.Time) maintenanceRuleView {
+	rule := eff.maintenanceRule
+	var result maintenanceRuleStatusResult
+	switch {
+	case eff.RemovedFromProfile:
+		// Parked: no status at all, never due.
+	case rule.NotApplicable:
+		result = maintenanceRuleStatusResult{Status: maintenanceStatusNotApplicable}
+	default:
+		result = computeMaintenanceRuleStatus(maintenanceRuleStatusInput{
+			IntervalHours:  rule.IntervalHours,
+			IntervalMonths: rule.IntervalMonths,
+			DueSoonHours:   rule.DueSoonHours,
+			DueSoonMonths:  rule.DueSoonMonths,
+			FixedDueDate:   parseMaintenanceDate(rule.FixedDueDate),
+			LastDoneAt:     parseMaintenanceDate(rule.LastDoneAt),
+			LastDoneHours:  rule.LastDoneHours,
+			Hours:          hours,
+			Today:          today,
+		})
+	}
 
+	supersedes := eff.Supersedes
+	if supersedes == nil {
+		supersedes = []string{}
+	}
+	overridden := rule.OverriddenFields
+	if overridden == nil {
+		overridden = []string{}
+	}
 	view := maintenanceRuleView{
-		ID:               rule.ID,
-		EquipmentID:      rule.EquipmentID,
-		Description:      rule.Description,
-		IntervalHours:    rule.IntervalHours,
-		IntervalMonths:   rule.IntervalMonths,
-		DueSoonHours:     rule.DueSoonHours,
-		DueSoonMonths:    rule.DueSoonMonths,
-		FixedDueDate:     rule.FixedDueDate,
-		LastDoneAt:       rule.LastDoneAt,
-		LastDoneHours:    rule.LastDoneHours,
-		ProfileServiceID: rule.ProfileServiceID,
-		ProcedureNoteID:  rule.ProcedureNoteID,
-		AckReason:        rule.AckReason,
-		Acknowledged:     rule.Acknowledged,
-		CreatedAt:        rule.CreatedAt,
-		UpdatedAt:        rule.UpdatedAt,
-		Status:           string(result.Status),
-		RemainingHours:   result.RemainingHours,
-		RemainingDays:    result.RemainingDays,
-		HoursUnknown:     result.HoursUnknown,
+		ID:                 rule.ID,
+		EquipmentID:        rule.EquipmentID,
+		Description:        rule.Description,
+		IntervalHours:      rule.IntervalHours,
+		IntervalMonths:     rule.IntervalMonths,
+		DueSoonHours:       rule.DueSoonHours,
+		DueSoonMonths:      rule.DueSoonMonths,
+		FixedDueDate:       rule.FixedDueDate,
+		LastDoneAt:         rule.LastDoneAt,
+		LastDoneHours:      rule.LastDoneHours,
+		ProfileServiceID:   rule.ProfileServiceID,
+		ProcedureNoteID:    rule.ProcedureNoteID,
+		AckReason:          rule.AckReason,
+		Acknowledged:       rule.Acknowledged,
+		CreatedAt:          timePtrUnlessZero(rule.CreatedAt),
+		UpdatedAt:          timePtrUnlessZero(rule.UpdatedAt),
+		Source:             eff.Source,
+		ProfileID:          eff.ProfileID,
+		OverriddenFields:   overridden,
+		NotApplicable:      rule.NotApplicable,
+		ProfileValues:      eff.ProfileValues,
+		FirstAtHours:       eff.FirstAtHours,
+		Supersedes:         supersedes,
+		RemovedFromProfile: eff.RemovedFromProfile,
+		Status:             string(result.Status),
+		RemainingHours:     result.RemainingHours,
+		RemainingDays:      result.RemainingDays,
+		HoursUnknown:       result.HoursUnknown,
 	}
 	if eq != nil {
 		view.EquipmentName = eq.Name
@@ -244,12 +289,22 @@ func convertGaugeHoursToTrue(equipmentID string, gauge float64, atDate time.Time
 // the hours axis still reads the actual wall-clock instant (time.Now()
 // here) for staleness, which is a real elapsed-time question independent
 // of which calendar day it is at the helm.
-func resolveMaintenanceRuleView(rule maintenanceRule, today time.Time) (maintenanceRuleView, error) {
-	now := time.Now().UTC()
-	if rule.EquipmentID == nil {
-		return buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today), nil
+func resolveMaintenanceRuleView(id string, today time.Time) (maintenanceRuleView, error) {
+	eff, err := globalDocumentStore.ResolveMaintenanceRule(id)
+	if err != nil {
+		return maintenanceRuleView{}, err
 	}
-	eq, err := globalDocumentStore.GetEquipment(*rule.EquipmentID)
+	return viewForEffectiveRule(eff, today)
+}
+
+// viewForEffectiveRule is resolveMaintenanceRuleView for a rule already
+// resolved by the schedule.
+func viewForEffectiveRule(eff effectiveMaintenanceRule, today time.Time) (maintenanceRuleView, error) {
+	now := time.Now().UTC()
+	if eff.EquipmentID == nil {
+		return buildMaintenanceRuleView(eff, nil, maintenanceHourReading{}, today), nil
+	}
+	eq, err := globalDocumentStore.GetEquipment(*eff.EquipmentID)
 	if err != nil {
 		return maintenanceRuleView{}, err
 	}
@@ -257,7 +312,7 @@ func resolveMaintenanceRuleView(rule maintenanceRule, today time.Time) (maintena
 	if err != nil {
 		return maintenanceRuleView{}, err
 	}
-	return buildMaintenanceRuleView(rule, &eq, hours, today), nil
+	return buildMaintenanceRuleView(eff, &eq, hours, today), nil
 }
 
 // ── validation ───────────────────────────────────────────────────────────
@@ -287,8 +342,8 @@ type maintenanceRuleRequest struct {
 //   - due_soon_hours/due_soon_months, when given, must be >= 0.
 //   - fixed_due_date, when given, must be blank or YYYY-MM-DD.
 //   - at least one of interval_hours/interval_months/fixed_due_date is
-//     required UNLESS profile_service_id names a profile schedule entry
-//     copied with both slots empty (spec §1's own "interval not set" rule).
+//     required (an "interval not set" slot exists only as a profile job).
+//   - profile_service_id must be blank: a rule by hand is never a profile job.
 //
 // It does NOT check that equipment_id names a real item - the same split
 // validateEquipmentInput's own doc comment gives for zone_id/bin_id:
@@ -325,9 +380,17 @@ func validateMaintenanceRuleInput(req maintenanceRuleRequest) (maintenanceRuleIn
 		return maintenanceRuleInput{}, &inventoryValidationError{Field: "fixed_due_date", Message: "fixed_due_date must be blank or YYYY-MM-DD"}
 	}
 
-	profileServiceID := strings.TrimSpace(req.ProfileServiceID)
+	// A rule made by hand never belongs to a profile service: profile jobs
+	// come from the profile itself (maintenance_schedule.go), so this request
+	// shape cannot name one.
+	if strings.TrimSpace(req.ProfileServiceID) != "" {
+		return maintenanceRuleInput{}, &inventoryValidationError{
+			Field:   "profile_service_id",
+			Message: "profile_service_id cannot be set: a profile's jobs come from the equipment profile, not from rules created by hand",
+		}
+	}
 	hasInterval := req.IntervalHours != nil || req.IntervalMonths != nil || fixedDueDate != ""
-	if !hasInterval && profileServiceID == "" {
+	if !hasInterval {
 		return maintenanceRuleInput{}, &inventoryValidationError{
 			Field:   "interval_hours",
 			Message: "at least one of interval_hours, interval_months or a fixed due date is required",
@@ -335,14 +398,13 @@ func validateMaintenanceRuleInput(req maintenanceRuleRequest) (maintenanceRuleIn
 	}
 
 	return maintenanceRuleInput{
-		EquipmentID:      equipmentID,
-		Description:      description,
-		IntervalHours:    req.IntervalHours,
-		IntervalMonths:   req.IntervalMonths,
-		DueSoonHours:     req.DueSoonHours,
-		DueSoonMonths:    req.DueSoonMonths,
-		FixedDueDate:     fixedDueDate,
-		ProfileServiceID: profileServiceID,
+		EquipmentID:    equipmentID,
+		Description:    description,
+		IntervalHours:  req.IntervalHours,
+		IntervalMonths: req.IntervalMonths,
+		DueSoonHours:   req.DueSoonHours,
+		DueSoonMonths:  req.DueSoonMonths,
+		FixedDueDate:   fixedDueDate,
 	}, nil
 }
 
@@ -473,7 +535,7 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 		IncludeStored: c.QueryParam("include_stored") == "true",
 		System:        c.QueryParam("system"),
 	}
-	rules, err := globalDocumentStore.ListMaintenanceRules(filter)
+	sched, err := globalDocumentStore.MaintenanceSchedule(filter)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -483,49 +545,62 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 	equipmentCache := map[string]equipmentItem{}
 	hoursCache := map[string]maintenanceHourReading{}
 
-	views := make([]maintenanceRuleView, 0, len(rules))
-	for _, rule := range rules {
+	viewOf := func(rule effectiveMaintenanceRule) (maintenanceRuleView, error) {
 		if rule.EquipmentID == nil {
-			views = append(views, buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today))
-			continue
+			return buildMaintenanceRuleView(rule, nil, maintenanceHourReading{}, today), nil
 		}
-
 		id := *rule.EquipmentID
 		eq, ok := equipmentCache[id]
 		if !ok {
+			var err error
 			eq, err = globalDocumentStore.GetEquipment(id)
 			if err != nil {
 				// The foreign key guarantees this row exists; a failure here
 				// is a real problem, not an expected "not found" - surfaced
 				// rather than silently dropping the rule from the list
 				// (AGENTS.md fail-fast).
-				return writeDocumentError(c, err)
+				return maintenanceRuleView{}, err
 			}
 			equipmentCache[id] = eq
 			hoursCache[id], err = equipmentHourReading(eq, now)
 			if err != nil {
-				return writeDocumentError(c, err)
+				return maintenanceRuleView{}, err
 			}
 		}
-
-		views = append(views, buildMaintenanceRuleView(rule, &eq, hoursCache[id], today))
+		return buildMaintenanceRuleView(rule, &eq, hoursCache[id], today), nil
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"rules": views})
+	views := make([]maintenanceRuleView, 0, len(sched.Rules))
+	for _, rule := range sched.Rules {
+		view, err := viewOf(rule)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		views = append(views, view)
+	}
+	removed := make([]maintenanceRuleView, 0, len(sched.Removed))
+	for _, rule := range sched.Removed {
+		view, err := viewOf(rule)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		removed = append(removed, view)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"rules": views, "removed": removed, "schedule_errors": sched.Errors})
 }
 
 func getMaintenanceRuleHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	rule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
+	view, err := resolveMaintenanceRuleView(c.Param("id"), today)
 	if err != nil {
-		return writeDocumentError(c, err)
-	}
-	view, err := resolveMaintenanceRuleView(rule, today)
-	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"rule": view})
 }
@@ -551,7 +626,7 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -559,6 +634,9 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 }
 
 func updateMaintenanceRuleHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -577,18 +655,165 @@ func updateMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"rule": view})
 }
 
+// deleteMaintenanceRuleHandler is DELETE /api/inventory/maintenance/rules/:id:
+// a hand rule, or a job row whose service has left its profile. A live profile
+// job is a 400 (cmdDeleteMaintenanceRule).
 func deleteMaintenanceRuleHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	if err := globalDocumentStore.DeleteMaintenanceRule(c.Param("id")); err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// setMaintenanceRuleOverridesHandler is PUT
+// /api/inventory/maintenance/rules/:id/overrides: any subset of
+// {description, interval_hours, interval_months, not_applicable} for one
+// profile job. An interval given as null overrides it to "none".
+func setMaintenanceRuleOverridesHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
+	limitNoteRequestBody(c)
+	var raw map[string]json.RawMessage
+	if err := c.Bind(&raw); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	}
+	in, verr := parseMaintenanceOverrides(raw)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdSetMaintenanceRuleOverrides(tx, now, c.Param("id"), in)
+		return err
+	})
+	if err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rule": view})
+}
+
+// resetMaintenanceRuleOverrideHandler is DELETE
+// /api/inventory/maintenance/rules/:id/overrides/:field.
+func resetMaintenanceRuleOverrideHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdResetMaintenanceRuleOverride(tx, now, c.Param("id"), c.Param("field"))
+		return err
+	})
+	if err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rule": view})
+}
+
+// parseMaintenanceOverrides reads an overrides body. It distinguishes a field
+// that is absent (left alone) from one that is null (an interval overridden to
+// none), which a typed struct cannot.
+func parseMaintenanceOverrides(raw map[string]json.RawMessage) (maintenanceOverridesInput, *inventoryValidationError) {
+	var in maintenanceOverridesInput
+	for name, value := range raw {
+		bad := func(msg string) *inventoryValidationError {
+			return &inventoryValidationError{Field: name, Message: name + " " + msg}
+		}
+		switch name {
+		case overrideDescription:
+			var v string
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be a string")
+			}
+			in.Description = &v
+		case overrideIntervalHours:
+			var v *float64
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be a number or null")
+			}
+			in.IntervalHours = &maintenanceIntervalHoursOverride{Value: v}
+		case overrideIntervalMonths:
+			var v *int
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be a whole number or null")
+			}
+			in.IntervalMonths = &maintenanceIntervalMonthsOverride{Value: v}
+		case overrideNotApplicable:
+			var v bool
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be true or false")
+			}
+			in.NotApplicable = &v
+		case "due_soon_hours":
+			var v *float64
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be a number or null")
+			}
+			in.DueSoonHours = &maintenanceNullableFloat{Value: v}
+		case "due_soon_months":
+			var v *int
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be a whole number or null")
+			}
+			in.DueSoonMonths = &maintenanceNullableInt{Value: v}
+		case "fixed_due_date":
+			var v *string
+			if err := json.Unmarshal(value, &v); err != nil {
+				return in, bad("must be YYYY-MM-DD or null")
+			}
+			blank := ""
+			if v == nil {
+				v = &blank
+			}
+			in.FixedDueDate = v
+		default:
+			return in, &inventoryValidationError{Field: name, Message: name + " cannot be set here; the fields are " +
+				strings.Join(maintenanceOverrideFields, ", ") + ", due_soon_hours, due_soon_months, fixed_due_date"}
+		}
+	}
+	return in, nil
+}
+
+// maintenanceProfileChangePreviewHandler is GET
+// /api/inventory/equipment/:id/maintenance/profile-change-preview
+// ?profile_id=<new profile, or empty to clear>: which of the item's profile
+// jobs carry over, leave, or arrive if its profile were changed.
+func maintenanceProfileChangePreviewHandler(c echo.Context) error {
+	id := c.Param("id")
+	newProfileID := strings.TrimSpace(c.QueryParam("profile_id"))
+	preview, err := globalDocumentStore.PreviewMaintenanceProfileChange(id, newProfileID)
+	if err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
+	return c.JSON(http.StatusOK, preview)
 }
 
 type maintenanceAckRequest struct {
@@ -600,6 +825,9 @@ type maintenanceAckRequest struct {
 // reason clears the acknowledgement (AcknowledgeMaintenanceRule's own doc
 // comment, maintenance_store.go).
 func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -618,7 +846,7 @@ func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -635,6 +863,9 @@ type maintenanceLastDoneRequest struct {
 // last_done_hours?} - spec §3's onboarding action, writing NO log entry
 // (SetMaintenanceRuleLastDone's own doc comment).
 func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -653,7 +884,7 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -665,6 +896,9 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 // 'maintenance' and equipment_id always comes from the rule; both are
 // caller-fixed, never taken from the request body.
 func completeMaintenanceRuleHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -684,7 +918,7 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -701,6 +935,9 @@ type maintenanceProcedureNoteRequest struct {
 // checked here, since the store has no way to express "must be a note" as
 // a foreign key (documents.kind is not part of any REFERENCES target).
 func setMaintenanceRuleProcedureNoteHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -722,9 +959,9 @@ func setMaintenanceRuleProcedureNoteHandler(c echo.Context) error {
 	}
 	rule, err := globalDocumentStore.SetMaintenanceRuleProcedureNote(c.Param("id"), noteID)
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(rule, today)
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -827,13 +1064,24 @@ func createMaintenanceProcedureNote(title string) (document, error) {
 // an operator is free to retitle the note afterward from Documents like
 // any other.
 func createMaintenanceProcedureNoteHandler(c echo.Context) error {
+	if err := decodeRuleIDParam(c); err != nil {
+		return writeMaintenanceCommandError(c, err)
+	}
 	today, verr := requireTodayParam(c)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	rule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
+	// The effective description titles the note; a job the profile cannot
+	// supply refuses here, before a note is made for it.
+	rule, err := globalDocumentStore.ResolveMaintenanceRule(c.Param("id"))
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
+	}
+
+	// Refuse before the note exists: linking a removed job 409s, and the note
+	// written first would be left behind as an orphan.
+	if err := refuseRemovedJobWrite(rule); err != nil {
+		return writeMaintenanceCommandError(c, err)
 	}
 
 	title := strings.TrimSpace(rule.Description)
@@ -848,51 +1096,13 @@ func createMaintenanceProcedureNoteHandler(c echo.Context) error {
 
 	updated, err := globalDocumentStore.SetMaintenanceRuleProcedureNote(rule.ID, doc.ID)
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
-	view, err := resolveMaintenanceRuleView(updated, today)
+	view, err := resolveMaintenanceRuleView(updated.ID, today)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"rule": view, "note": toDocumentJSON(doc)})
-}
-
-// ── copy profile schedule ────────────────────────────────────────────────
-
-// copyMaintenanceProfileScheduleHandler is POST
-// /api/inventory/equipment/:id/maintenance/copy-profile-schedule - spec
-// §1's "Use profile schedule" one-action copy. 409 when the item has no
-// profile, or its profile is no longer loaded (deleted since the item was
-// linked to it) - a real, expected conflict, not a 404 (the ITEM exists;
-// its profile reference just doesn't resolve to anything right now).
-func copyMaintenanceProfileScheduleHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
-	}
-	id := c.Param("id")
-	profiles, _ := engineProfiles()
-	var created []maintenanceRule
-	var item equipmentItem
-	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		created, item, err = cmdCopyMaintenanceProfileSchedule(tx, now, id, profiles)
-		return err
-	})
-	if err != nil {
-		return writeMaintenanceCommandError(c, err)
-	}
-
-	now := time.Now().UTC()
-	hours, err := equipmentHourReading(item, now)
-	if err != nil {
-		return writeDocumentError(c, err)
-	}
-	views := make([]maintenanceRuleView, len(created))
-	for i, rule := range created {
-		views[i] = buildMaintenanceRuleView(rule, &item, hours, today)
-	}
-	return c.JSON(http.StatusCreated, map[string]any{"rules": views})
 }
 
 // ── hour meter resets ────────────────────────────────────────────────────
@@ -1220,7 +1430,9 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 	}
 
 	itemNames := map[string]string{}
-	ruleDescriptions := map[string]string{}
+	type ruleLabel struct{ description, schedule string }
+	ruleLabels := map[string]ruleLabel{}
+	profiles := currentMaintenanceProfiles()
 	for _, e := range entries {
 		if e.EquipmentID != nil {
 			if _, ok := itemNames[*e.EquipmentID]; !ok {
@@ -1230,10 +1442,12 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 			}
 		}
 		if e.RuleID != nil {
-			if _, ok := ruleDescriptions[*e.RuleID]; !ok {
-				if rule, err := globalDocumentStore.GetMaintenanceRule(*e.RuleID); err == nil {
-					ruleDescriptions[*e.RuleID] = rule.Description
+			if _, ok := ruleLabels[*e.RuleID]; !ok {
+				description, schedule, err := globalDocumentStore.MaintenanceRuleHistoryLabel(profiles, *e.RuleID)
+				if err != nil {
+					return writeDocumentError(c, err)
 				}
+				ruleLabels[*e.RuleID] = ruleLabel{description, schedule}
 			}
 		}
 	}
@@ -1248,7 +1462,7 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 	// logged, gaugeToTrueHours - maintenance_hours.go), never the raw
 	// gauge reading the operator actually typed in; named explicitly so
 	// the export is never ambiguous read back later.
-	if err := w.Write([]string{"date", "item", "rule", "kind", "hours (true)", "description", "who", "cost", "currency", "parts"}); err != nil {
+	if err := w.Write([]string{"date", "item", "rule", "kind", "hours (true)", "description", "who", "cost", "currency", "parts", "schedule"}); err != nil {
 		return err
 	}
 	for _, e := range entries {
@@ -1256,9 +1470,9 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 		if e.EquipmentID != nil {
 			itemName = itemNames[*e.EquipmentID]
 		}
-		ruleDescription := ""
+		ruleDescription, schedule := "", ""
 		if e.RuleID != nil {
-			ruleDescription = ruleDescriptions[*e.RuleID]
+			ruleDescription, schedule = ruleLabels[*e.RuleID].description, ruleLabels[*e.RuleID].schedule
 		}
 		hours := ""
 		if e.Hours != nil {
@@ -1272,11 +1486,42 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 		for i, p := range e.Parts {
 			parts[i] = fmt.Sprintf("%s x%s", p.EquipmentName, strconv.FormatFloat(p.Quantity, 'f', -1, 64))
 		}
-		row := []string{e.PerformedAt, itemName, ruleDescription, e.Kind, hours, e.Description, e.Who, cost, e.Currency, strings.Join(parts, "; ")}
+		row := []string{e.PerformedAt, itemName, ruleDescription, e.Kind, hours, e.Description, e.Who, cost, e.Currency, strings.Join(parts, "; "), schedule}
 		if err := w.Write(row); err != nil {
 			return err
 		}
 	}
 	w.Flush()
 	return w.Error()
+}
+
+func timePtrUnlessZero(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// decodeRuleIDParam replaces the :id param with its decoded form. Echo prefers
+// URL.RawPath, so a job id the browser sent through encodeURIComponent
+// (job%3A<uuid>%3A<service>) arrives still escaped and matches no job. A
+// malformed escape is a 400.
+func decodeRuleIDParam(c echo.Context) error {
+	raw := c.Param("id")
+	id, err := url.PathUnescape(raw)
+	if err != nil {
+		return &maintenanceCommandError{Status: http.StatusBadRequest, Message: "malformed maintenance rule id"}
+	}
+	if id == raw {
+		return nil
+	}
+	names := c.ParamNames()
+	values := c.ParamValues()
+	for i, n := range names {
+		if n == "id" && i < len(values) {
+			values[i] = id
+		}
+	}
+	c.SetParamValues(values...)
+	return nil
 }

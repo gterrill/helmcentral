@@ -177,10 +177,6 @@ type assistantToolDeps struct {
 	// zero value means "not supplied", and list_maintenance then fails
 	// rather than guess.
 	today time.Time
-	// profiles lists the installed equipment profiles, for find_equipment's
-	// view of the manufacturer's service block. Production returns
-	// engineProfiles(); nil (a test that never sets it) means none installed.
-	profiles func() []engineProfile
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -223,10 +219,6 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
-		profiles: func() []engineProfile {
-			profiles, _ := engineProfiles()
-			return profiles
-		},
 	}
 }
 
@@ -586,9 +578,10 @@ func assistantToolDefinitions() []openRouterTool {
 				Description: "Find items in the boat's equipment registry by name, manufacturer, model or " +
 					"alias, optionally within one system. Returns each item's id, system, whether its hour " +
 					"meter is bound and reading right now (current_meter_reading is what the meter shows and " +
-					"is absent when the reading is unknown - never assume 0), how many maintenance rules it has, " +
-					"and the linked profile's service block (the manufacturer's recommended intervals) so you " +
-					"can compare the rules against it. Use it to get an equipment id for list_maintenance or " +
+					"is absent when the reading is unknown - never assume 0), and its effective maintenance rules " +
+					"(rules: id, description, intervals, source, overridden_fields, not_applicable) as the " +
+					"schedule resolves them - the linked profile's jobs are live, with this item's overrides " +
+					"applied - plus schedule_errors when its profile could not supply its jobs. Use it to get an equipment id for list_maintenance or " +
 					"get_maintenance_log.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
@@ -662,10 +655,13 @@ func assistantToolDefinitions() []openRouterTool {
 					"you have real ids. Give every change in one call as a list of ops; the card applies them all " +
 					"together or not at all. Ops: create_rule (equipment_id optional for a calendar-only rule; may " +
 					"also carry last_done_at and last_done_meter_reading), update_rule (rule_id plus only the fields " +
-					"that change; list interval fields to remove in clear), set_last_done (rule_id, last_done_at " +
+					"that change; list interval fields to remove in clear; not_applicable only on a job: id), set_last_done (rule_id, last_done_at " +
 					"and/or last_done_meter_reading), complete_rule (rule_id, performed_at, meter_reading, and " +
-					"optionally description, who, cost, new_due_date), acknowledge (rule_id, reason), " +
-					"copy_profile_schedule (equipment_id; copies the profile's service entries that have no rule yet). " +
+					"optionally description, who, cost, new_due_date), acknowledge (rule_id, reason). " +
+					"A rule whose id starts with job: comes from the item's equipment profile; update_rule on one " +
+					"is a per-item override of the profile's live value (description, interval_hours, interval_months), and " +
+					"not_applicable true/false marks it as not applying to that item or restores it; a change to the " +
+					"profile itself reaches every item, so never propose copying profile jobs into rules. " +
 					"Every hours figure here is a METER reading, what the operator's gauge shows, never cumulative " +
 					"engine hours. Dates are YYYY-MM-DD. A call that fails names the field to correct. Deleting rules " +
 					"or log entries, photos, parts, meter replacements and procedure notes cannot be proposed.",
@@ -678,8 +674,8 @@ func assistantToolDefinitions() []openRouterTool {
 							"items": {
 								"type": "object",
 								"properties": {
-									"op": {"type": "string", "description": "create_rule, update_rule, set_last_done, complete_rule, acknowledge or copy_profile_schedule."},
-									"equipment_id": {"type": "string", "description": "create_rule (optional) and copy_profile_schedule: an id from find_equipment."},
+									"op": {"type": "string", "description": "create_rule, update_rule, set_last_done, complete_rule, or acknowledge."},
+									"equipment_id": {"type": "string", "description": "create_rule (optional): an id from find_equipment."},
 									"rule_id": {"type": "string", "description": "update_rule, set_last_done, complete_rule, acknowledge: an id from list_maintenance."},
 									"description": {"type": "string", "description": "create_rule/update_rule: the rule's description. complete_rule: what was done."},
 									"interval_hours": {"type": "number", "description": "Interval in meter hours."},
@@ -687,6 +683,7 @@ func assistantToolDefinitions() []openRouterTool {
 									"due_soon_hours": {"type": "number", "description": "Warn this many meter hours before due."},
 									"due_soon_months": {"type": "integer", "description": "Warn this many months before due."},
 									"fixed_due_date": {"type": "string", "description": "A fixed due date, YYYY-MM-DD."},
+									"not_applicable": {"type": "boolean", "description": "update_rule on a job: rule only: true marks the profile job as not applying to this item, false makes it apply again."},
 									"clear": {"type": "array", "items": {"type": "string"}, "description": "update_rule only: interval_hours, interval_months, due_soon_hours, due_soon_months or fixed_due_date to remove."},
 									"last_done_at": {"type": "string", "description": "create_rule/set_last_done: the date it was last done, YYYY-MM-DD."},
 									"last_done_meter_reading": {"type": "number", "description": "create_rule/set_last_done: the meter reading when it was last done."},

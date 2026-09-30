@@ -43,7 +43,7 @@ func TestDocumentStore_CreateMaintenanceRuleRoundTrips(t *testing.T) {
 		t.Fatalf("a brand new rule must not be acknowledged")
 	}
 
-	got, err := store.GetMaintenanceRule(rule.ID)
+	got, err := store.GetMaintenanceRuleRow(rule.ID)
 	if err != nil {
 		t.Fatalf("GetMaintenanceRule: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestDocumentStore_DeleteEquipmentCascadesMaintenanceRules(t *testing.T) {
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 
-	if _, err := store.GetMaintenanceRule(rule.ID); !errors.Is(err, errMaintenanceRuleNotFound) {
+	if _, err := store.GetMaintenanceRuleRow(rule.ID); !errors.Is(err, errMaintenanceRuleNotFound) {
 		t.Fatalf("expected the rule to be gone with its item (CASCADE), got %v", err)
 	}
 }
@@ -375,43 +375,6 @@ func TestDocumentStore_SetMaintenanceRuleLastDoneWritesNoLogEntry(t *testing.T) 
 	}
 }
 
-func TestDocumentStore_CopyProfileServiceEntriesSkipsAlreadyCopied(t *testing.T) {
-	store := newTestDocumentStore(t)
-	item := mustCreateTestEquipment(t, store, "Main engine")
-
-	hours := 250.0
-	months := 12
-	services := []engineProfileService{
-		{ID: "engine-oil", Description: "Engine oil and filter", IntervalHours: &hours, IntervalMonths: &months},
-		{ID: "impeller", Description: "Raw water impeller"}, // both intervals nil - a slot
-	}
-
-	created, err := store.CopyProfileServiceEntries(item.ID, services)
-	if err != nil {
-		t.Fatalf("CopyProfileServiceEntries: %v", err)
-	}
-	if len(created) != 2 {
-		t.Fatalf("expected 2 rules created, got %d", len(created))
-	}
-
-	// Pressing "Use profile schedule" again must not duplicate anything.
-	second, err := store.CopyProfileServiceEntries(item.ID, services)
-	if err != nil {
-		t.Fatalf("CopyProfileServiceEntries (second call): %v", err)
-	}
-	if len(second) != 0 {
-		t.Fatalf("expected no new rules on the second copy, got %+v", second)
-	}
-
-	rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{EquipmentID: item.ID, IncludeStored: true})
-	if err != nil {
-		t.Fatalf("ListMaintenanceRules: %v", err)
-	}
-	if len(rules) != 2 {
-		t.Fatalf("expected exactly 2 rules total, got %d", len(rules))
-	}
-}
-
 func TestDocumentStore_ListMaintenanceRulesExcludesStoredItemsByDefault(t *testing.T) {
 	store := newTestDocumentStore(t)
 	deployed := mustCreateTestEquipment(t, store, "Deployed engine")
@@ -432,7 +395,7 @@ func TestDocumentStore_ListMaintenanceRulesExcludesStoredItemsByDefault(t *testi
 		t.Fatalf("CreateMaintenanceRule: %v", err)
 	}
 
-	visible, err := store.ListMaintenanceRules(maintenanceRuleFilter{})
+	visible, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules: %v", err)
 	}
@@ -440,7 +403,7 @@ func TestDocumentStore_ListMaintenanceRulesExcludesStoredItemsByDefault(t *testi
 		t.Fatalf("expected the stored item's rule to be excluded (2 remaining: the deployed item's + the calendar-only one), got %d: %+v", len(visible), visible)
 	}
 
-	all, err := store.ListMaintenanceRules(maintenanceRuleFilter{IncludeStored: true})
+	all, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{IncludeStored: true})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules(IncludeStored): %v", err)
 	}
@@ -478,7 +441,7 @@ func TestDocumentStore_ListMaintenanceRulesFiltersBySystem(t *testing.T) {
 		t.Fatalf("CreateMaintenanceRule (cert): %v", err)
 	}
 
-	propulsion, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "propulsion"})
+	propulsion, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{System: "propulsion"})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules(System=propulsion): %v", err)
 	}
@@ -486,7 +449,7 @@ func TestDocumentStore_ListMaintenanceRulesFiltersBySystem(t *testing.T) {
 		t.Fatalf("expected only the engine's own rule, got %+v", propulsion)
 	}
 
-	water, err := store.ListMaintenanceRules(maintenanceRuleFilter{System: "water"})
+	water, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{System: "water"})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules(System=water): %v", err)
 	}
@@ -494,7 +457,7 @@ func TestDocumentStore_ListMaintenanceRulesFiltersBySystem(t *testing.T) {
 		t.Fatalf("expected only the pump's own rule, got %+v", water)
 	}
 
-	all, err := store.ListMaintenanceRules(maintenanceRuleFilter{})
+	all, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules(no filter): %v", err)
 	}

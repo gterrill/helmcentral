@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { Upload, Download, PencilLine, Trash2, Plus } from 'lucide-react'
+import { Upload, Download, PencilLine, Trash2, Plus, Library } from 'lucide-react'
 
 import {
   AlertDialog,
@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { ProfileCatalogueDialog } from '@/components/inventory/profile-catalogue-dialog'
 import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { apiBaseUrl } from '@/config/api'
@@ -129,6 +130,25 @@ function toEditableProfile(profile: EngineProfile) {
   }
 }
 
+interface ProfileGuardEntry {
+  equipment_id: string
+  equipment_name: string
+  service_id?: string
+  description?: string
+}
+
+interface ProfileGuard {
+  kind: 'save' | 'delete'
+  message: string
+  affected: ProfileGuardEntry[]
+}
+
+/** The 409 body's `affected` list, or null when the response is not one. */
+function readGuard(kind: ProfileGuard['kind'], status: number, payload: { error?: string; affected?: unknown } | null): ProfileGuard | null {
+  if (status !== 409 || !Array.isArray(payload?.affected) || payload.affected.length === 0) return null
+  return { kind, message: payload.error ?? '', affected: payload.affected as ProfileGuardEntry[] }
+}
+
 interface ProfilesSectionProps {
   /** Code review: this section moved from admin-only Settings into
    * Inventory (any signed-in operator can open that panel) without its own
@@ -149,6 +169,7 @@ interface ProfilesSectionProps {
 export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   const { profiles, loading, error: loadError, reload } = useEquipmentProfiles(true)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const [catalogueOpen, setCatalogueOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [profile, setProfile] = useState(defaultProfile)
@@ -163,6 +184,10 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   const [deleting, setDeleting] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // ADR 0148: a 409 from a save or delete that names the equipment items the
+  // change would hit. A save can be repeated with the operator's go-ahead; a
+  // delete can only be refused until those items use another profile.
+  const [guard, setGuard] = useState<ProfileGuard | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<EquipmentProfileValidationError[]>([])
 
@@ -196,6 +221,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
     setProfile(toEditableProfile(selectedProfile))
     setIsEditing(false)
     setError(null)
+    setGuard(null)
     setJsonError(null)
     setValidationErrors([])
   }, [selectedProfile?.id, isCreating])
@@ -290,6 +316,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   const handleDelete = async () => {
     if (!profile.id || isCreating) return
     setError(null)
+    setGuard(null)
     setValidationErrors([])
     try {
       setDeleting(true)
@@ -297,7 +324,12 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
         method: 'DELETE',
       })
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        const payload = (await response.json().catch(() => null)) as { error?: string; affected?: unknown } | null
+        const refused = readGuard('delete', response.status, payload)
+        if (refused) {
+          setGuard(refused)
+          return
+        }
         throw new Error(payload?.error ?? 'Unable to delete profile.')
       }
 
@@ -326,8 +358,9 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
     void handleDelete()
   }
 
-  const handleSave = async () => {
+  const handleSave = async (confirmRemoved = false) => {
     setError(null)
+    setGuard(null)
     setJsonError(null)
     setValidationErrors([])
 
@@ -369,7 +402,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
       }
       const endpoint = isCreating
         ? `${apiBaseUrl}/api/equipment-profiles`
-        : `${apiBaseUrl}/api/equipment-profiles/${encodeURIComponent(profile.id)}`
+        : `${apiBaseUrl}/api/equipment-profiles/${encodeURIComponent(profile.id)}${confirmRemoved ? '?confirm_removed=1' : ''}`
 
       const response = await fetch(endpoint, {
         method: isCreating ? 'POST' : 'PUT',
@@ -381,7 +414,13 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
         const payload = (await response.json().catch(() => null)) as {
           error?: string
           errors?: EquipmentProfileValidationError[]
+          affected?: unknown
         } | null
+        const refused = readGuard('save', response.status, payload)
+        if (refused) {
+          setGuard(refused)
+          return
+        }
         if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
           setValidationErrors(payload.errors)
         }
@@ -403,6 +442,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   }
 
   const handleCancel = () => {
+    setGuard(null)
     if (selectedProfile) {
       setProfile(toEditableProfile(selectedProfile))
     }
@@ -420,7 +460,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
 
         <div className="mt-3 space-y-4">
           {loadError && (
-            // A failed fetch and an empty profiles directory must not look
+            // A failed fetch and an empty profile list must not look
             // the same: one means "nothing installed," the other means the
             // backend is broken.
             <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
@@ -430,9 +470,22 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
 
           {canWrite && (
             <div className="flex flex-wrap gap-2">
+              <ProfileCatalogueDialog
+                open={catalogueOpen}
+                onOpenChange={setCatalogueOpen}
+                onAdded={(id) => {
+                  setIsCreating(false)
+                  setSelectedID(id)
+                  reload()
+                }}
+              />
               <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>
                 <Plus className="h-4 w-4" />
                 New profile
+              </Button>
+              <Button type="button" variant="outline" className="gap-2" onClick={() => setCatalogueOpen(true)}>
+                <Library className="h-4 w-4" />
+                Add from catalogue
               </Button>
               <Button type="button" variant="outline" className="gap-2" onClick={handleUploadClick} disabled={uploading || saving || deleting}>
                 <Upload className="h-4 w-4" />
@@ -494,6 +547,29 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
             <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
               {error}
             </p>
+          )}
+
+          {guard && (
+            <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+              <p>
+                {guard.kind === 'save'
+                  ? 'This edit removes service jobs that these items already hold history or settings for. The jobs leave their schedules; the history is kept.'
+                  : 'These items still use this profile. Give them another profile first.'}
+              </p>
+              <ul className="list-disc space-y-0.5 pl-5 text-xs">
+                {guard.affected.map((entry, index) => (
+                  <li key={`${entry.equipment_id}:${entry.service_id ?? ''}:${index}`}>
+                    {entry.equipment_name}
+                    {entry.description ? `: ${entry.description}` : ''}
+                  </li>
+                ))}
+              </ul>
+              {guard.kind === 'save' && (
+                <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => { void handleSave(true) }}>
+                  Save anyway
+                </Button>
+              )}
+            </div>
           )}
 
           <div className="rounded-md border border-border bg-card/50 p-3">
@@ -573,7 +649,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
               aria-invalid={jsonError !== null ? 'true' : undefined}
             />
             <FieldDescription>
-              Upload or create a JSON profile, then apply it from the dashboard’s “From equipment profile…” action.
+              Add a profile from the catalogue, upload one or create your own, then apply it from the dashboard’s “From equipment profile…” action.
             </FieldDescription>
           </Field>
 

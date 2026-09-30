@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 
 import {
   AlertDialog,
@@ -24,15 +24,15 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useEquipment } from '@/hooks/use-inventory'
+import { MaintenanceProfileJobDialog } from '@/components/inventory/maintenance-profile-job-dialog'
+import { ProcedureNoteField } from '@/components/inventory/maintenance-procedure-note-field'
 import {
-  createMaintenanceProcedureNote,
-  setMaintenanceRuleProcedureNote,
+  isProfileJob,
   MAINTENANCE_DEFAULT_DUE_SOON_HOURS,
   MAINTENANCE_DEFAULT_DUE_SOON_MONTHS,
   type MaintenanceRule,
   type MaintenanceRuleInput,
 } from '@/hooks/use-maintenance'
-import { documentViewerHref } from '@/lib/document-citation'
 
 // ADR 0138: create or edit a rule's own core fields (spec §1). A rule
 // belongs to one item, optionally none (a calendar-only certificate/expiry
@@ -85,12 +85,11 @@ function draftFromRule(rule: MaintenanceRule | undefined, presetEquipmentId?: st
   }
 }
 
-export function MaintenanceRuleDialog({ rule, presetEquipmentId, open, onCancel, onSave, onDelete, onRuleChanged }: MaintenanceRuleDialogProps) {
+function HandRuleDialog({ rule, presetEquipmentId, open, onCancel, onSave, onDelete, onRuleChanged }: MaintenanceRuleDialogProps) {
   const [draft, setDraft] = useState<MaintenanceRuleInput>(() => draftFromRule(rule ?? undefined, presetEquipmentId))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState(false)
-  const [procedureBusy, setProcedureBusy] = useState(false)
   const [liveRule, setLiveRule] = useState(rule ?? null)
 
   const { items } = useEquipment(open ? {} : null)
@@ -115,36 +114,6 @@ export function MaintenanceRuleDialog({ rule, presetEquipmentId, open, onCancel,
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleCreateProcedureNote = async () => {
-    if (!liveRule) return
-    setProcedureBusy(true)
-    setError(null)
-    try {
-      const result = await createMaintenanceProcedureNote(liveRule.id)
-      setLiveRule(result.rule)
-      onRuleChanged?.(result.rule)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setProcedureBusy(false)
-    }
-  }
-
-  const handleRemoveProcedureNote = async () => {
-    if (!liveRule) return
-    setProcedureBusy(true)
-    setError(null)
-    try {
-      const updated = await setMaintenanceRuleProcedureNote(liveRule.id, '')
-      setLiveRule(updated)
-      onRuleChanged?.(updated)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setProcedureBusy(false)
     }
   }
 
@@ -260,27 +229,11 @@ export function MaintenanceRuleDialog({ rule, presetEquipmentId, open, onCancel,
             </div>
 
             {isEditing && liveRule && (
-              <Field>
-                <FieldLabel>Procedure note</FieldLabel>
-                {liveRule.procedure_note_id ? (
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={documentViewerHref(liveRule.procedure_note_id)}
-                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-                    >
-                      <BookOpen className="h-4 w-4" aria-hidden="true" />
-                      Open procedure note
-                    </a>
-                    <Button type="button" variant="ghost" size="sm" disabled={procedureBusy} onClick={() => { void handleRemoveProcedureNote() }}>
-                      Remove
-                    </Button>
-                  </div>
-                ) : (
-                  <Button type="button" variant="outline" size="sm" className="self-start" disabled={procedureBusy} onClick={() => { void handleCreateProcedureNote() }}>
-                    {procedureBusy ? 'Creating...' : 'Create procedure note'}
-                  </Button>
-                )}
-              </Field>
+              <ProcedureNoteField
+                rule={liveRule}
+                onChanged={(updated) => { setLiveRule(updated); onRuleChanged?.(updated) }}
+                onError={setError}
+              />
             )}
           </FieldGroup>
 
@@ -329,4 +282,22 @@ export function MaintenanceRuleDialog({ rule, presetEquipmentId, open, onCancel,
       </AlertDialog>
     </>
   )
+}
+
+/** One entry point for both kinds of rule. A profile job (ADR 0148) is not
+ * edited like a hand rule: its definition belongs to the profile, so it gets
+ * the overrides dialog; everything else (and a brand new rule) keeps today's
+ * form. */
+export function MaintenanceRuleDialog(props: MaintenanceRuleDialogProps) {
+  if (props.rule && isProfileJob(props.rule)) {
+    return (
+      <MaintenanceProfileJobDialog
+        rule={props.rule}
+        open={props.open}
+        onCancel={props.onCancel}
+        onChanged={(rule) => props.onRuleChanged?.(rule)}
+      />
+    )
+  }
+  return <HandRuleDialog {...props} />
 }

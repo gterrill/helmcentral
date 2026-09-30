@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import type { MaintenanceRule } from '@/hooks/use-maintenance'
+import { ITEM_RULE_PROVENANCE, makeProfileJob } from './maintenance-fixtures'
 
 // ADR 0138: the Maintenance list's own grouping/sorting and its quick
 // actions (acknowledge, set last done, complete). Each test drives the
@@ -36,6 +37,7 @@ function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
     has_hour_meter_path: true,
     hours_as_of: null,
     current_hours: 1234,
+    ...ITEM_RULE_PROVENANCE,
     ...overrides,
   }
 }
@@ -166,6 +168,59 @@ describe('MaintenanceSection', () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/complete'))).toBe(true))
     await screen.findByText(/logged/i)
+  })
+
+  it('marks an overridden profile job, mutes a not-applicable one and lists both', async () => {
+    const rules = [
+      makeProfileJob({ id: 'job:eq-1:a', description: 'Oil change', status: 'ok', interval_hours: 100, overridden_fields: ['interval_hours'] }),
+      makeProfileJob({ id: 'job:eq-1:b', description: 'Impeller', status: 'not_applicable', not_applicable: true, overridden_fields: ['not_applicable'] }),
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    await screen.findByText('Oil change')
+
+    expect(screen.getAllByText('Edited')).toHaveLength(2)
+    expect(screen.getByText('Not applicable')).toBeInTheDocument()
+    expect(screen.getByText('Impeller').closest('tr')).toHaveClass('text-muted-foreground')
+    // Nothing to complete on a job that does not apply to this item.
+    const row = screen.getByText('Impeller').closest('tr')!
+    expect(within(row).queryByRole('button', { name: /complete/i })).not.toBeInTheDocument()
+  })
+
+  it('opens a profile job in the overrides dialog, not the hand-rule form', async () => {
+    const rules = [makeProfileJob({ status: 'ok' })]
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes('/api/inventory/equipment')) return jsonResponse(200, { items: [] })
+      if (u.includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Engine oil and filter' }))
+    expect(await screen.findByRole('heading', { name: 'Edit profile job' })).toBeInTheDocument()
+  })
+
+  it('warns, per item, when a profile is missing or invalid', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) {
+        return jsonResponse(200, {
+          rules: [],
+          removed: [],
+          schedule_errors: [{ equipment_id: 'eq-1', equipment_name: 'Main engine', profile_id: 'gone', error: 'profile not found' }],
+        })
+      }
+      return jsonResponse(200, {})
+    })
+    const onOpenEquipment = vi.fn()
+    render(<MaintenanceSection onOpenEquipment={onOpenEquipment} />)
+
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent(/a profile that is missing or invalid/i)
+    fireEvent.click(within(banner).getByRole('button', { name: 'Main engine' }))
+    expect(onOpenEquipment).toHaveBeenCalledWith('eq-1')
   })
 
   it('renders the CSV export as a download link to the export endpoint', async () => {

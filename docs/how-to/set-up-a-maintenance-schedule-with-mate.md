@@ -32,8 +32,9 @@ Each change is one line. Read them the way you'd read the Maintenance list:
 - A line naming a date and "(meter)" sets what was last done, or logs a job
   as done, at that reading.
 - **Acknowledge** lines carry your reason.
-- A line about copying entries adds the manufacturer's services that you
-  don't already have a rule for.
+- A **Change** line on a job from the item's profile changes it for this
+  item only, the same as editing it yourself. The profile and every other
+  item using it stay as they were.
 
 If a line is wrong, tap **Dismiss** and tell Mate what to change. Mate
 won't offer the same proposal again unless you ask.

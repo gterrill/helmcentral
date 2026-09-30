@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { MaintenanceAckDialog, MaintenanceLastDoneDialog } from '@/components/inventory/maintenance-quick-dialogs'
 import { MaintenanceCompleteDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
+import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { EQUIPMENT_SYSTEMS, EQUIPMENT_SYSTEM_LABELS, type EquipmentSystem } from '@/hooks/use-inventory'
 import {
@@ -57,7 +58,7 @@ function groupLabel(system: string): string {
 
 export function MaintenanceSection({ onOpenEquipment, canWrite = true }: MaintenanceSectionProps) {
   const [system, setSystem] = useState<EquipmentSystem | ''>('')
-  const { rules, loading, error, refresh } = useMaintenanceRules({ system })
+  const { rules, scheduleErrors, loading, error, refresh } = useMaintenanceRules({ system })
 
   const [creatingRule, setCreatingRule] = useState(false)
   const [editingRule, setEditingRule] = useState<MaintenanceRule | null>(null)
@@ -119,6 +120,25 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         </div>
       </div>
 
+      {scheduleErrors.length > 0 && (
+        <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p>
+            {scheduleErrors.length === 1 ? 'One item has' : `${scheduleErrors.length} items have`} a profile that is missing or
+            invalid, so {scheduleErrors.length === 1 ? 'its' : 'their'} service jobs are not listed:
+          </p>
+          <ul className="mt-1 flex flex-col gap-0.5 text-xs">
+            {scheduleErrors.map((e) => (
+              <li key={e.equipment_id} className="truncate">
+                <button type="button" onClick={() => onOpenEquipment(e.equipment_id)} className="font-medium underline">
+                  {e.equipment_name}
+                </button>
+                {e.profile_id ? ` (profile: ${e.profile_id})` : ''}: {e.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card">
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
@@ -129,8 +149,8 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <Wrench className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="max-w-md text-sm text-muted-foreground">
-              No maintenance rules yet. Add one by hand, or open an item with a profile and use
-              its service schedule.
+              No maintenance rules yet. Add one by hand, or give an item an equipment profile and
+              its service jobs appear here.
             </p>
             {canWrite && (
               <Button type="button" onClick={() => setCreatingRule(true)} className="mt-2 gap-2">
@@ -165,7 +185,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                     </TableCell>
                   </TableRow>
                   {group.rules.map((rule) => (
-                    <TableRow key={rule.id}>
+                    <TableRow key={rule.id} className={cn(rule.not_applicable && 'text-muted-foreground')}>
                       <TableCell className="max-w-0">
                         <div className="flex min-w-0 flex-col">
                           {rule.equipment_id ? (
@@ -179,13 +199,16 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                           ) : (
                             <span className="truncate text-xs font-medium text-muted-foreground">{groupLabel('')}</span>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => setEditingRule(rule)}
-                            className="truncate text-left font-medium hover:underline"
-                          >
-                            {rule.description}
-                          </button>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingRule(rule)}
+                              className={cn('truncate text-left hover:underline', rule.not_applicable ? 'font-normal' : 'font-medium')}
+                            >
+                              {rule.description}
+                            </button>
+                            <OverrideMarker rule={rule} />
+                          </div>
                           {rule.hours_unknown && (
                             <span className="truncate text-xs text-muted-foreground">
                               {rule.has_hour_meter_path ? 'Hours unknown' : 'No hour meter bound'}
@@ -227,7 +250,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        {canWrite && (
+                        {canWrite && !rule.not_applicable && (
                           <div className="flex justify-end gap-1">
                             {rule.status === 'never_recorded' && (
                               <Button type="button" variant="outline" size="sm" onClick={() => setSettingLastDoneRule(rule)}>

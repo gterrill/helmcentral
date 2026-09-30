@@ -217,6 +217,12 @@ func main() {
 		os.Exit(runMigrateDBCommand())
 	}
 
+	// convert-profile-rules is another one-off, operator-run subcommand: it
+	// moves the old profile files into the database.
+	if len(os.Args) > 1 && os.Args[1] == "convert-profile-rules" {
+		os.Exit(runConvertProfileRulesCommand(os.Args[2:]))
+	}
+
 	e := echo.New()
 	port := getEnv("PORT", "8080")
 
@@ -569,6 +575,19 @@ func main() {
 	loadAnchorPlacemarks()
 	loadRoutes()
 	loadDashboardPages()
+	// The built-in profile catalogue is compiled in; an invalid one is a
+	// build defect, so stop here rather than serve a broken catalogue.
+	if _, err := profileCatalogue(); err != nil {
+		log.Fatalf("startup: %v", err)
+	}
+	ps, err := newProfileStore(globalDocumentStore)
+	if err != nil {
+		log.Fatalf("profile store: %v", err)
+	}
+	if err := checkForLegacyProfileFiles(ps, legacyEngineProfilesDir()); err != nil {
+		log.Fatalf("startup: %v", err)
+	}
+	globalProfileStore = ps
 	loadEngineProfiles()
 	// Offers the anomaly-detection set (sensor health always, the rest as
 	// vessel.engines/house_bank are completed): unlike the sets above, this
@@ -763,6 +782,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
 		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
 		{http.MethodGet, "/api/equipment-profiles", tierRead, equipmentProfilesHandler},
+		{http.MethodGet, "/api/equipment-profiles/catalogue", tierRead, profileCatalogueHandler},
 		{http.MethodGet, "/api/equipment-profiles/:id", tierRead, getEquipmentProfileHandler},
 		{http.MethodGet, "/api/equipment-profiles/:id/download", tierRead, downloadEquipmentProfileHandler},
 		{http.MethodGet, "/api/engine-profiles", tierRead, engineProfilesHandler},
@@ -859,7 +879,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// Maintenance (ADR 0138): service rules and the log they're
 		// completed into, under /api/inventory/maintenance/ - a sub-family
 		// of Inventory's own routes just above, not a separate one.
-		// "export.csv" and copy-profile-schedule/meter-reset/meter-resets
+		// "export.csv" and profile-change-preview/meter-reset/meter-resets
 		// are static path segments ahead of "/:id" purely for readability -
 		// see the read-tier comment above the document library's own
 		// routes on why Echo's router never needs that ordering.
@@ -869,6 +889,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/inventory/maintenance/log/export.csv", tierRead, exportMaintenanceLogCSVHandler},
 		{http.MethodGet, "/api/inventory/maintenance/log/:id", tierRead, getMaintenanceLogEntryHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/meter-resets", tierRead, listHourMeterResetsHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/profile-change-preview", tierRead, maintenanceProfileChangePreviewHandler},
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
@@ -896,6 +917,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
 		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},
 		{http.MethodPost, "/api/equipment-profiles", tierWrite, createEquipmentProfileHandler},
+		{http.MethodPost, "/api/equipment-profiles/catalogue/:id", tierWrite, copyCatalogueProfileHandler},
 		{http.MethodDelete, "/api/equipment-profiles/:id", tierWrite, deleteEquipmentProfileHandler},
 		{http.MethodPut, "/api/equipment-profiles/:id", tierWrite, updateEquipmentProfileHandler},
 		{http.MethodPut, "/api/engine-profiles/:id", tierWrite, updateEngineProfileHandler},
@@ -994,12 +1016,13 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/inventory/maintenance/rules", tierWrite, createMaintenanceRuleHandler},
 		{http.MethodPut, "/api/inventory/maintenance/rules/:id", tierWrite, updateMaintenanceRuleHandler},
 		{http.MethodDelete, "/api/inventory/maintenance/rules/:id", tierWrite, deleteMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id/overrides", tierWrite, setMaintenanceRuleOverridesHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/rules/:id/overrides/:field", tierWrite, resetMaintenanceRuleOverrideHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/acknowledge", tierWrite, acknowledgeMaintenanceRuleHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/last-done", tierWrite, setMaintenanceRuleLastDoneHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/complete", tierWrite, completeMaintenanceRuleHandler},
 		{http.MethodPut, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, setMaintenanceRuleProcedureNoteHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, createMaintenanceProcedureNoteHandler},
-		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/copy-profile-schedule", tierWrite, copyMaintenanceProfileScheduleHandler},
 		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/meter-reset", tierWrite, recordHourMeterResetHandler},
 		{http.MethodPost, "/api/inventory/maintenance/log", tierWrite, createMaintenanceLogEntryHandler},
 		{http.MethodPut, "/api/inventory/maintenance/log/:id", tierWrite, updateMaintenanceLogEntryHandler},

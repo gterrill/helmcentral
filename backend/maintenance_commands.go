@@ -87,7 +87,16 @@ func cmdCreateMaintenanceRule(tx *sql.Tx, now time.Time, req maintenanceRuleRequ
 	return createMaintenanceRuleTx(tx, now, in)
 }
 
+// cmdUpdateMaintenanceRule replaces a hand rule's fields. A profile job has no
+// fields of its own to replace: its values come from the profile and an item
+// changes them with overrides, so a job id is refused.
 func cmdUpdateMaintenanceRule(tx *sql.Tx, now time.Time, id string, req maintenanceRuleRequest) (maintenanceRule, error) {
+	if isMaintenanceJobID(id) {
+		return maintenanceRule{}, &inventoryValidationError{
+			Field:   "id",
+			Message: "this job comes from the equipment profile and cannot be edited as a rule; change it for this item with PUT /api/inventory/maintenance/rules/:id/overrides",
+		}
+	}
 	in, verr := validateMaintenanceRuleInput(req)
 	if verr != nil {
 		return maintenanceRule{}, verr
@@ -111,11 +120,11 @@ func cmdSetMaintenanceRuleLastDone(tx *sql.Tx, now, today time.Time, id string, 
 		return maintenanceRule{}, verr
 	}
 
+	existingRule, err := prepareMaintenanceRuleWriteTx(tx, now, id)
+	if err != nil {
+		return maintenanceRule{}, err
+	}
 	if req.LastDoneHours != nil {
-		existingRule, err := maintenanceRuleByID(tx, id)
-		if err != nil {
-			return maintenanceRule{}, err
-		}
 		if existingRule.EquipmentID != nil {
 			atDate := today
 			if req.LastDoneAt != nil && *req.LastDoneAt != "" {
@@ -216,11 +225,13 @@ func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req mainte
 		return maintenanceRule{}, maintenanceLogEntry{}, verr
 	}
 
-	existingRule, err := maintenanceRuleByID(tx, id)
+	// The EFFECTIVE rule: a profile job's interval comes from its profile (and
+	// the item's overrides), never from the row.
+	existingRule, err := prepareMaintenanceRuleWriteTx(tx, now, id)
 	if err != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, err
 	}
-	newFixedDueDate, performedAt, err := planMaintenanceCompletion(existingRule, in, req.NewDueDate)
+	newFixedDueDate, performedAt, err := planMaintenanceCompletion(existingRule.maintenanceRule, in, req.NewDueDate)
 	if err != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, err
 	}
@@ -238,37 +249,4 @@ func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req mainte
 	}
 
 	return completeMaintenanceRuleTx(tx, now, id, in, newFixedDueDate)
-}
-
-// cmdCopyMaintenanceProfileSchedule copies the item's profile schedule into
-// rules, skipping entries already copied. A 409, not a 404, when the item has
-// no profile or its profile is no longer installed: the item exists, its
-// profile reference just does not resolve.
-func cmdCopyMaintenanceProfileSchedule(tx *sql.Tx, now time.Time, equipmentID string, profiles []engineProfile) ([]maintenanceRule, equipmentItem, error) {
-	item, err := equipmentByID(tx, equipmentID)
-	if err != nil {
-		return nil, equipmentItem{}, err
-	}
-	profile, cerr := profileForCopy(item, profiles)
-	if cerr != nil {
-		return nil, equipmentItem{}, cerr
-	}
-	created, err := copyProfileServiceEntriesTx(tx, now, equipmentID, profile.Service)
-	if err != nil {
-		return nil, equipmentItem{}, err
-	}
-	return created, item, nil
-}
-
-// profileForCopy finds item's profile among profiles, or a 409 refusal.
-func profileForCopy(item equipmentItem, profiles []engineProfile) (*engineProfile, *maintenanceCommandError) {
-	if item.ProfileID == "" {
-		return nil, &maintenanceCommandError{Status: http.StatusConflict, Message: "this item has no profile to copy a schedule from"}
-	}
-	for i := range profiles {
-		if profiles[i].ID == item.ProfileID {
-			return &profiles[i], nil
-		}
-	}
-	return nil, &maintenanceCommandError{Status: http.StatusConflict, Message: fmt.Sprintf("profile %q is no longer available", item.ProfileID)}
 }
