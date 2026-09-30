@@ -10,7 +10,7 @@ ADR 0138 §7's copy. Amends [ADR 0145](0145-mate-reads-the-maintenance-list.md)
 goes; `update_rule` on a profile job becomes an override). Supersedes
 [ADR 0053](0053-engine-profiles.md) and
 [ADR 0102](0102-equipment-profiles-and-the-duplicate-path.md) on where
-profiles are stored. ADR 0149, to follow, does the same for alarm thresholds.
+profiles are stored. ADR 0150, to follow, does the same for alarm thresholds.
 
 ## Context
 

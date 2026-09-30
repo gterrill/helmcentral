@@ -62,7 +62,7 @@ once, unlike the built-ins above:
 | --- | --- |
 | Gauge | Any single value the boat's instrument network publishes, as a number, radial dial, bar, lamp or trend. Coloured bands double as alarm rules. |
 | Gauge group | Several gauges clustered under one title, for duplicating onto a second engine or generator. See [Duplicate a gauge group](../how-to/duplicate-a-gauge-group.md). |
-| Engine cluster | A fixed layout of engine readings for one engine. |
+| Engine cluster | A fixed layout of engine readings for one engine. Fills the tile you give it, up to twice its usual size. |
 | Indicators | A row of status lamps, either pinned as the vessel-wide ribbon or placed on one page. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
 | Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile; layout mode still draws the frame so an embed is never impossible to reconfigure. |
 | Nearby map | Points of interest around the vessel. See [Add a Nearby map](../how-to/add-a-nearby-map.md) and [POI categories](poi-categories.md). |

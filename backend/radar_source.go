@@ -80,11 +80,12 @@ const radarObservationMaxAge = 60 * time.Second
 // (buildAutopilotPayload, backend/autopilot.go).
 //
 // This walks the delta-reassembled snapshot rather than calling the
-// plugin's own GET .../radars: that endpoint answers with a bare array
-// carrying no radar ids at all (measured 2026-08-29), while the ids exist
-// only as keys in the tree — vessels.self.radars.<id>.controls.* — which
-// Helmcentral already receives for free on its existing subscription
-// (context vessels.*, path *).
+// plugin's own GET .../radars. As of SignalK 2.31 (Radar API 3.4.0) that
+// endpoint answers with a versioned envelope, {"version", "radars": {<id>:
+// {name, brand, radarIpAddress}}}; before then it was a bare array with no ids
+// (measured 2026-08-29). The tree already carries the ids as keys —
+// vessels.self.radars.<id>.controls.* — on the existing subscription
+// (context vessels.*, path *), plus the control values the list does not.
 // radarPresenceMaxAge is how long a radar keeps counting as present after
 // its last control delta.
 //

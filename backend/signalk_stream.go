@@ -254,7 +254,7 @@ func (c *signalKStreamClient) dial(ctx context.Context, streamURL, httpBaseURL s
 	// Mirrors the write paths' retry-once idiom (route_activation.go): a
 	// rejected token is nearly always an expired one.
 	if token == "" || response == nil || response.StatusCode != http.StatusUnauthorized {
-		return nil, err
+		return nil, withDialStatus(err, response)
 	}
 
 	c.invalidateToken()
@@ -263,8 +263,18 @@ func (c *signalKStreamClient) dial(ctx context.Context, streamURL, httpBaseURL s
 		return nil, fmt.Errorf("signalk stream reauth failed: %w", tokenErr)
 	}
 
-	conn, _, err = dialSignalKStream(ctx, streamURL, token)
-	return conn, err
+	conn, response, err = dialSignalKStream(ctx, streamURL, token)
+	return conn, withDialStatus(err, response)
+}
+
+// withDialStatus adds the HTTP status of a refused upgrade to the dial error,
+// so a 429 from SignalK's per-IP connection limit or login rate limit shows in
+// the log instead of a bare "failed to WebSocket dial".
+func withDialStatus(err error, response *http.Response) error {
+	if err == nil || response == nil {
+		return err
+	}
+	return fmt.Errorf("%w (HTTP %d)", err, response.StatusCode)
 }
 
 func dialSignalKStream(ctx context.Context, streamURL, token string) (*websocket.Conn, *http.Response, error) {

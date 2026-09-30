@@ -1187,3 +1187,20 @@ func TestLatestContactsByName_RespectsLimit(t *testing.T) {
 		t.Fatalf("expected the limit of 2 to be respected even though 3 vessels match, got %d", len(results))
 	}
 }
+
+// TestBuildNearbyVesselsPayload_CarriesTheRangeLimit: the tile's empty state
+// names the distance it searched ("No vessels within 5 km"), and the limit
+// lives here, so the payload has to say it rather than the client guessing.
+func TestBuildNearbyVesselsPayload_CarriesTheRangeLimit(t *testing.T) {
+	t.Setenv("SETTINGS_FILE", filepath.Join(t.TempDir(), "absent.yaml"))
+
+	payload := buildNearbyVesselsPayload()
+
+	got, ok := payload["max_range_m"]
+	if !ok {
+		t.Fatalf("payload has no max_range_m: %+v", payload)
+	}
+	if got != nearbyMaxRangeMeters {
+		t.Fatalf("max_range_m = %v, want %v", got, nearbyMaxRangeMeters)
+	}
+}

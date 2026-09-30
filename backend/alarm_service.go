@@ -214,7 +214,11 @@ func attachLoggedOccurrenceTimes(statuses []alarmStatus) []alarmStatus {
 			continue
 		}
 		statuses[i].RaisedAt = entry.RaisedAt
-		if entry.AckedAt != nil {
+		// The server's own stamp (SignalK 2.31+) is when it was acknowledged,
+		// wherever that happened; the log row only knows when we noticed. An
+		// alarm that worsened after its acknowledgement is active again, and
+		// the log's old acknowledgement no longer applies to it.
+		if entry.AckedAt != nil && statuses[i].AckedAt.IsZero() && statuses[i].Phase == alarmPhaseAcknowledged {
 			statuses[i].AckedAt = *entry.AckedAt
 		}
 	}

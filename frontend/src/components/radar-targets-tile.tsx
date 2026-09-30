@@ -90,7 +90,7 @@ export const RadarTargetsTile = memo(function RadarTargetsTile({
   distanceUnits,
 }: RadarTargetsTileProps) {
   return (
-    <Tile title="Radar Targets" icon={<Radar className="h-3.5 w-3.5 text-gauge-secondary" />}>
+    <Tile title="Radar Targets" icon={<Radar className="h-3.5 w-3.5 text-gauge-secondary" />} shrinkToContent>
       <div className="mt-3 space-y-2">
         {source === 'disabled' ? (
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">--</div>

@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { severityBorderClass, severityFill, type ZoneState } from '@/lib/severity'
+import { useMeasureTileHeight } from '@/lib/tile-content-height'
 import { cn } from '@/lib/utils'
 
 interface TileProps {
@@ -30,6 +31,20 @@ interface TileProps {
    * the edge.
    */
   state?: ZoneState | null
+  /**
+   * Make the content a flex column with `min-h-0`, so a child with `flex-1`
+   * receives the tile's remaining height. Opt-in: turning every tile's content
+   * into a flex container would change the layout of the ones that rely on
+   * block flow.
+   */
+  fill?: boolean
+  /**
+   * The tile is a list of variable length. It tells the board the height its
+   * content needs, and the board may draw it that short when it is the bottom
+   * tile of its column (never while editing, and never saved). Leave it off
+   * for anything that is a fixed instrument or fills its space.
+   */
+  shrinkToContent?: boolean
   children: React.ReactNode
 }
 
@@ -42,8 +57,13 @@ export function Tile({
   stale = false,
   staleLabel,
   state = null,
+  fill = false,
+  shrinkToContent = false,
   children,
 }: TileProps) {
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  useMeasureTileHeight(contentRef, shrinkToContent)
+
   // `outside` stays out of this: a bundled engine profile with no warn/alarm
   // thresholds filled in (ADR 0054 §5a) puts every reading above its normal
   // band on `outside` all day on a healthy engine, and lighting the edge for
@@ -115,7 +135,21 @@ export function Tile({
           for a live one; it deliberately does not dim it further with opacity — a
           faded tile reads as "dim screen in the sun," not "this feed is dead," and
           this is the system's loudest state, not its quietest. */}
-      <CardContent className={cn('flex-1 px-3 sm:px-4', stale && 'grayscale')}>{children}</CardContent>
+      <CardContent className={cn('flex-1 px-3 sm:px-4', fill && 'flex min-h-0 flex-col',
+          // min-h-0 so the area is card minus chrome whatever the list needs.
+          // With the default min-height:auto a list taller than a shrunk card
+          // pushes the area out with it, the measurement collapses to the
+          // card's current height, and the tile could never grow back.
+          shrinkToContent && 'min-h-0',
+          stale && 'grayscale')}>
+        {shrinkToContent ? (
+          // flow-root so the list's own top margin stays inside the measured
+          // block; a plain div would let it collapse out and go uncounted.
+          <div ref={contentRef} className="flow-root">{children}</div>
+        ) : (
+          children
+        )}
+      </CardContent>
     </Card>
   )
 }
