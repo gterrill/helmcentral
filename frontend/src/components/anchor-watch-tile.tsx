@@ -13,7 +13,6 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { AnchorConfig } from '@/config/app-config'
-import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
@@ -38,8 +37,7 @@ function formatDistanceValue(meters: number, isImperial: boolean): { value: stri
 }
 
 /**
- * "38 m of 30 m" — the figure both the drag-alarm strips and the promoted
- * KPI stack below need: how far the vessel actually is, against the radius
+ * "38 m of 30 m" — the figure the drag-alarm strips below need: how far the vessel actually is, against the radius
  * it is meant to stay inside. Falls back to "past {radius}" on the rare
  * frame where an alarm is live but the tile has no live distance to hand
  * (e.g. the GPS fix just dropped) — never a bare dash on what is, by
@@ -103,12 +101,6 @@ interface AnchorWatchTileProps {
   // three surfaces in agreement.
   planningDepthM: number | null
   planningTideHeightFt: number | null
-  // The vessel's maximum design draft (ADR 0135), read from SignalK. Feeds
-  // the low-water clearance warning below alongside anchorConfig's own
-  // minClearanceAtLowM margin - null when SignalK publishes none, which
-  // reads as the warning's own "No draft from the boat" state rather than a
-  // silent zero-draft substitution.
-  vesselDraftM: number | null
   /**
    * False on the wall kiosk (ADR: kiosk maps are display-only) - passed
    * straight through to AnchorWatchMap, which then hides its own on-map
@@ -162,7 +154,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   selectedWindBandId,
   planningDepthM,
   planningTideHeightFt,
-  vesselDraftM,
   interactive = true,
   lastUpdateAgeS,
 }: AnchorWatchTileProps) {
@@ -192,8 +183,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   const { isAlarming, isSilenced, silence, unsilence } = useAnchorAlarm(findAnchorDragAlarm(alarms), acknowledge)
 
   // "38 m of 30 m" — how far the vessel actually is against the radius it's
-  // meant to stay inside. Shared by both drag-alarm strips below and, once
-  // anchored, the promoted distance KPI above the map.
+  // meant to stay inside. Shared by both drag-alarm strips below.
   const dragDistanceLabel = formatDragDistance(distanceMeters, radiusMeters, isImperial)
 
   const handleDropHere = useCallback(() => {
@@ -242,22 +232,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
       anchorConfig,
       selectedWindBandId,
     ],
-  )
-
-  // Anchor Watch's low-water clearance warning (ADR 0135): projects the
-  // depth at the boat's current position (the live sounder, not the
-  // resolved planning depth rodeResult above uses) forward to the next low
-  // tide and compares it against the operator's configured margin.
-  const lowWaterClearance = useMemo(
-    () =>
-      computeLowWaterClearance({
-        depthM: depthMeters,
-        tide,
-        draftM: vesselDraftM,
-        marginM: anchorConfig.minClearanceAtLowM,
-        now: new Date(),
-      }),
-    [depthMeters, tide, vesselDraftM, anchorConfig.minClearanceAtLowM],
   )
 
   return (
@@ -348,57 +322,9 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
         </div>
       )}
 
-      {/* Anchor Watch's low-water clearance warning (ADR 0135): the depth at
-          the boat's current position, projected to the next low tide,
-          against the operator's configured margin. A display warning, not
-          an alarm rule — quiet even when too_shallow, unlike the drag
-          strips above. */}
-      {lowWaterClearance.status === 'too_shallow' && (
-        <div
-          data-testid="low-water-clearance"
-          className="mt-2 truncate rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
-        >
-          Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at{' '}
-          {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-        </div>
-      )}
-      {lowWaterClearance.status === 'ok' && (
-        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-xs text-muted-foreground">
-          {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
-          {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-        </p>
-      )}
-      {lowWaterClearance.status === 'unknown' && (
-        <p data-testid="low-water-clearance" className="mt-2 truncate px-1 text-xs text-muted-foreground">
-          {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
-        </p>
-      )}
-
-      {/* Promoted out of the map (design critique item 4): the operator
-          answers "is the boat where I left it" from this hero readout, not
-          by parsing the map's own overlay panel. Suppressed with no anchor
-          set rather than rendering a dash at full visual weight — there is
-          nothing to promote yet. */}
-      {isAnchored && (
-        <div
-          data-testid="anchor-distance-kpi"
-          className="mt-2 flex items-baseline gap-3 rounded-md border bg-background/60 px-3 py-2"
-        >
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
-            <p className="font-display text-5xl leading-none tabular-nums text-gauge-primary">
-              {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).value : '—'}
-              <span className="ml-1 text-lg text-muted-foreground">
-                {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).unit : ''}
-              </span>
-            </p>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            of {formatDistanceValue(radiusMeters, isImperial).value} {formatDistanceValue(radiusMeters, isImperial).unit}
-          </p>
-        </div>
-      )}
-
+      {/* No distance KPI here (the map's own overlay already carries
+          distance) and no low-water clearance line, which lives on the
+          Anchor Watch page (the drawer). The tile stays a map. */}
       <div className="mt-2 rounded-xl border bg-background/70 lg:min-h-0 lg:flex-1">
         {vesselLat !== null && vesselLon !== null ? (
           // Fallback matches AnchorWatchMap's own className exactly, so the

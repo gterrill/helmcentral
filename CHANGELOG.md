@@ -95,6 +95,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   acknowledged, even if it was acknowledged at the chartplotter or before
   Helmcentral restarted. This needs SignalK 2.31 or later. On SignalK 2.33 an
   acknowledged alarm also comes back as active when it gets worse.
+- The Anchor Watch tile on a dashboard page is now just the map. The large
+  distance readout is gone (the map's own panel still shows distance), and
+  the water-under-the-keel-at-low-tide line, including its too-shallow
+  warning, now shows only on the full-page Anchor Watch view. The re-centre
+  button is back on the tile's map, under the zoom buttons.
 - Documents is rearranged to match the rest of Inventory. The page is titled
   with the folder you are in, with the path back up above it; **Upload** is
   the button at the top right, and **New folder** and **New note** moved

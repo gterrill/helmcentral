@@ -2249,7 +2249,6 @@ export function App() {
             planningDepthM={resolvedPlanningDepthM}
             planningTideHeightFt={resolvedPlanningTideHeightFt}
             interactive={!isDisplay}
-            vesselDraftM={vesselDraftM}
           />
         )
       case 'tanks':

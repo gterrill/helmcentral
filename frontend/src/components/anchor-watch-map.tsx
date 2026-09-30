@@ -2093,8 +2093,8 @@ export function AnchorWatchMap({
 
       {/* Zoom + Recenter controls. Design critique item 3: six buttons
           stacked in-tile clipped the bottom two at tile height. The
-          in-tile default (expandedControls unset) keeps only fullscreen and
-          zoom; satellite, radar and recentre move into this same stack
+          in-tile default (expandedControls unset) keeps fullscreen, zoom
+          and recentre; satellite and radar move into this same stack
           under expandedControls, which the fullscreen drawer opts into —
           same control, same code, just more room to show all of it.
 
@@ -2140,6 +2140,14 @@ export function AnchorWatchMap({
             >
               <Minus className="h-4 w-4" />
             </button>
+            <button
+              onClick={handleRecenter}
+              aria-label="Re-centre on anchor"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Crosshair className="h-4 w-4" />
+            </button>
             {expandedControls && (
               <>
                 <button
@@ -2167,14 +2175,6 @@ export function AnchorWatchMap({
                 >
                   <Radar className="h-4 w-4" />
                 </button>
-                <button
-                  onClick={handleRecenter}
-                  aria-label="Re-centre on anchor"
-                  className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-                  style={{ transition: 'background-color 150ms ease-out' }}
-                >
-                  <Crosshair className="h-4 w-4" />
-                </button>
               </>
             )}
         </>
@@ -2187,7 +2187,7 @@ export function AnchorWatchMap({
             Not gated on expandedControls: it belongs in every interactive
             host's stack, not only the fullscreen drawer's expanded set.
             Move, not Crosshair — Crosshair is already this same stack's
-            recentre icon a few buttons up (expandedControls), and reusing
+            recentre icon a few buttons up, and reusing
             it here would give two different actions the same glyph.
 
             aria-pressed and the active background (ADR 0143) mark the icon

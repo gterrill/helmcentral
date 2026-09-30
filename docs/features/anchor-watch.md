@@ -135,8 +135,8 @@ It takes the live depth reading at the boat's current position, projects it
 forward to the next low tide, and compares what is left under the keel
 against your vessel's draft and the margin you set in Settings → Anchor
 Watch (**Clearance at Low Water**, 0.5 m by default). When the water left at
-that point would be less than your margin, the tile and the full-page anchor
-watch view show a shallow-water warning naming the shortfall and the time of
+that point would be less than your margin, the full-page Anchor Watch view
+shows a shallow-water warning naming the shortfall and the time of
 the next low. When there is enough water, the same line quietly shows the
 clearance you can expect instead.
 
@@ -150,8 +150,8 @@ not after.
 
 If the tide feed goes quiet, the warning does not keep computing against
 whatever it last heard. Once a tide reading is more than half an hour old,
-or the low it was pointing at has already come and gone, the tile and the
-full-page view show **Tide forecast out of date** instead of a number, until
+or the low it was pointing at has already come and gone, the full-page view
+shows **Tide forecast out of date** instead of a number, until
 the next tide update lands.
 
 This is a running readout, not an alarm: it does not sound and needs no

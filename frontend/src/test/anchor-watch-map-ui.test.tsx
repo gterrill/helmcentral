@@ -148,11 +148,11 @@ function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Pa
 describe('AnchorWatchMap controls and AIS selection', () => {
   // Design critique item 3: six buttons stacked in-tile clipped the bottom
   // two at tile height. The default (no expandedControls) collapses the
-  // in-tile stack to fullscreen + zoom only; satellite, radar and recentre
+  // in-tile stack to fullscreen, zoom and recentre; satellite and radar
   // are only reachable via expandedControls, which the fullscreen drawer
   // passes (anchor-watch-drawer.tsx) — every control stays reachable, just
   // relocated rather than deleted.
-  it('collapses to fullscreen and zoom only when expandedControls is unset (the tile default)', () => {
+  it('collapses to fullscreen, zoom and recentre when expandedControls is unset (the tile default)', () => {
     renderMap()
 
     const controls = screen.getByTestId('anchor-watch-controls')
@@ -161,17 +161,19 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(within(controls).getByRole('button', { name: 'Zoom out' })).toBeInTheDocument()
     expect(within(controls).queryByRole('button', { name: 'Toggle satellite imagery' })).not.toBeInTheDocument()
     expect(within(controls).queryByRole('button', { name: 'Toggle radar echo overlay' })).not.toBeInTheDocument()
-    expect(within(controls).queryByRole('button', { name: 'Re-centre on anchor' })).not.toBeInTheDocument()
+    expect(within(controls).getByRole('button', { name: 'Re-centre on anchor' })).toBeInTheDocument()
   })
 
-  it('puts satellite below the zoom controls and removes control dividers, once expandedControls is set (the fullscreen drawer)', () => {
+  it('puts recentre then satellite below the zoom controls and removes control dividers, once expandedControls is set (the fullscreen drawer)', () => {
     renderMap(defaultAisVessels, { expandedControls: true })
 
     const controls = screen.getByTestId('anchor-watch-controls')
     const zoomOut = within(controls).getByRole('button', { name: 'Zoom out' })
+    const recentre = within(controls).getByRole('button', { name: 'Re-centre on anchor' })
     const satellite = within(controls).getByRole('button', { name: 'Toggle satellite imagery' })
 
-    expect(zoomOut.nextElementSibling).toBe(satellite)
+    expect(zoomOut.nextElementSibling).toBe(recentre)
+    expect(recentre.nextElementSibling).toBe(satellite)
     expect(within(controls).getByRole('button', { name: 'Toggle radar echo overlay' })).toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: 'Re-centre on anchor' })).toBeInTheDocument()
     expect(screen.getByTestId('anchor-watch-metrics').style.zIndex).toBe('2000')
