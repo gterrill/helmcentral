@@ -136,8 +136,17 @@ hours are unknown, the same way the list does. It won't put a figure in
 their place. A rule flagged that way can still read as fine on its calendar
 side alone, so treat "hours unknown" as a reason to read the meter yourself.
 
-Mate can't change anything. It will tell you what it would change, and you
-make the edit here.
+Mate can also propose changes to the schedule. Ask it to add a rule, change
+an interval, set what was last done, log a job as done, acknowledge a rule,
+or copy in an item's profile schedule, and it answers with a card listing
+each change in one line, such as "Generator · Oil and filter: every 250 h or
+12 mo, last done 9 Jan 2025 at 239 h (meter)". Nothing has changed at that
+point. Tap **Apply** and every change on the card is made together, or
+none of them is. Tap **Dismiss** to drop it and ask again with what you
+want different. If a rule was edited after Mate wrote the card, Apply
+refuses and says so, and Mate should be asked to redo it. Hours on the card
+are what the gauge shows, the same as the forms here. See
+[Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
 
 ## What this is not
 
@@ -146,6 +155,8 @@ make the edit here.
   reminder that follows you around the boat.
 - Not stock control. Parts used against a job are recorded for the history;
   quantities on hand aren't adjusted.
-- Not something Mate can change. Mate reads the schedule and the service
-  log, but adding a rule, setting a baseline or marking a job done is still
-  done here, in Inventory → Maintenance.
+- Not something Mate changes on its own. Mate can propose additions and
+  edits, but only your tap on **Apply** makes them. It can't delete a rule
+  or a log entry, edit an existing log entry, add photos or parts, record a
+  meter replacement or attach a procedure note; those are done here, in
+  Inventory → Maintenance.

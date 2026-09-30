@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type Keyboard
 import { toast } from 'sonner'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
+import { AssistantProposalCard } from '@/components/assistant-proposal-card'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
 import { DictateButton, DictationError, DictationStatus, useDictation } from '@/components/dictation'
@@ -412,6 +413,17 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 <AssistantMarkdown content={message.content} />
                               </BubbleContent>
                             </Bubble>
+                            {/* ADR 0146: a change Mate proposed to the
+                                maintenance schedule. Mate wrote nothing; the
+                                operator's Apply tap is what writes it. */}
+                            {message.proposals?.map((proposal) => (
+                              <AssistantProposalCard
+                                key={proposal.id}
+                                proposal={proposal}
+                                canWrite={canWrite}
+                                onChange={conversations.updateProposal}
+                              />
+                            ))}
                             <div className="flex items-center gap-2">
                               <MessageFooter
                                 className="tabular-nums"

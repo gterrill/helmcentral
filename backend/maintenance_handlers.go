@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -541,13 +542,14 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	in, verr := validateMaintenanceRuleInput(req)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
-	}
-	rule, err := globalDocumentStore.CreateMaintenanceRule(in)
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdCreateMaintenanceRule(tx, now, req)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
@@ -566,13 +568,14 @@ func updateMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	in, verr := validateMaintenanceRuleInput(req)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
-	}
-	rule, err := globalDocumentStore.UpdateMaintenanceRule(c.Param("id"), in)
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdUpdateMaintenanceRule(tx, now, c.Param("id"), req)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
@@ -606,9 +609,14 @@ func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	rule, err := globalDocumentStore.AcknowledgeMaintenanceRule(c.Param("id"), req.Reason)
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdAcknowledgeMaintenanceRule(tx, now, c.Param("id"), req.Reason)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
@@ -636,53 +644,14 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if req.LastDoneAt == nil && req.LastDoneHours == nil {
-		return writeInventoryValidationError(c, &inventoryValidationError{Field: "last_done_at", Message: "give a date and/or an hours reading"})
-	}
-	if req.LastDoneAt != nil {
-		trimmed := strings.TrimSpace(*req.LastDoneAt)
-		if trimmed != "" && !installDatePattern.MatchString(trimmed) {
-			return writeInventoryValidationError(c, &inventoryValidationError{Field: "last_done_at", Message: "last_done_at must be blank or YYYY-MM-DD"})
-		}
-		req.LastDoneAt = &trimmed
-	}
-	if req.LastDoneHours != nil && *req.LastDoneHours < 0 {
-		return writeInventoryValidationError(c, &inventoryValidationError{Field: "last_done_hours", Message: "last_done_hours cannot be negative"})
-	}
-
-	// The operator always types a GAUGE (raw meter) reading here too
-	// (2026-09-27 amendment) - converted to true hours with the offset in
-	// force on whichever date the reading is FROM: the date given, when
-	// there is one, otherwise today's (an hours-only Set-last-done, with no
-	// date at all, only ever means "this is the CURRENT reading" - there is
-	// no other date to convert it at).
-	if req.LastDoneHours != nil {
-		existingRule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
-		if err != nil {
-			return writeDocumentError(c, err)
-		}
-		if existingRule.EquipmentID != nil {
-			atDate := today
-			if req.LastDoneAt != nil && *req.LastDoneAt != "" {
-				parsed, parseErr := time.Parse("2006-01-02", *req.LastDoneAt)
-				if parseErr != nil {
-					// Already passed installDatePattern above; a failure
-					// here would be this code disagreeing with itself.
-					return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse last_done_at: %v", parseErr)})
-				}
-				atDate = parsed
-			}
-			trueHours, err := convertGaugeHoursToTrue(*existingRule.EquipmentID, *req.LastDoneHours, atDate)
-			if err != nil {
-				return writeDocumentError(c, err)
-			}
-			req.LastDoneHours = &trueHours
-		}
-	}
-
-	rule, err := globalDocumentStore.SetMaintenanceRuleLastDone(c.Param("id"), req.LastDoneAt, req.LastDoneHours)
+	var rule maintenanceRule
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, err = cmdSetMaintenanceRuleLastDone(tx, now, today, c.Param("id"), req)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
@@ -705,91 +674,15 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	in, verr := validateMaintenanceLogEntryCore(req)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
-	}
-
-	existingRule, err := globalDocumentStore.GetMaintenanceRule(c.Param("id"))
+	var rule maintenanceRule
+	var entry maintenanceLogEntry
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		rule, entry, err = cmdCompleteMaintenanceRule(tx, now, c.Param("id"), req)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
-	}
-	// An hours-interval rule can never sensibly complete without a
-	// reading - live when the item's meter is bound and fresh, typed in by
-	// hand from the gauge otherwise (spec: never guessed at). Refusing this
-	// here, before the store ever runs, also protects
-	// CompleteMaintenanceRule's own "blank hours leaves the baseline
-	// unchanged" rule (maintenance_store.go) from ever being asked to
-	// interpret a blank hours field for a rule that actually needs one.
-	if existingRule.IntervalHours != nil && in.Hours == nil {
-		return writeInventoryValidationError(c, &inventoryValidationError{
-			Field:   "hours",
-			Message: "hours is required to complete an hours-based rule - enter the current reading if it isn't filled in automatically",
-		})
-	}
-
-	// performed_at already passed installDatePattern in
-	// validateMaintenanceLogEntryCore; a parse failure here would be this
-	// code disagreeing with itself, not an operator mistake - surfaced
-	// rather than silently skipped. Parsed once, shared by the gauge
-	// conversion below and the fixed-due-date computation further down.
-	performedAt, parseErr := time.Parse("2006-01-02", in.PerformedAt)
-	if parseErr != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse performed_at: %v", parseErr)})
-	}
-
-	// The operator always types a GAUGE (raw meter) reading (2026-09-27
-	// amendment, docs/adr/0138) - convert to true hours here, using the
-	// offset that was in force on THIS COMPLETION'S OWN DATE, so a
-	// back-filled old service converts with the offset that actually
-	// applied then, never today's.
-	if in.Hours != nil && existingRule.EquipmentID != nil {
-		trueHours, err := convertGaugeHoursToTrue(*existingRule.EquipmentID, *in.Hours, performedAt)
-		if err != nil {
-			return writeDocumentError(c, err)
-		}
-		in.Hours = &trueHours
-	}
-
-	// A fixed-due-date rule (spec §7's certificates/expiries, or an
-	// ordinary item rule that happens to carry one) must not read overdue
-	// again the instant it's completed - its own due date has to advance.
-	// Two cases, mirroring maintenance_status.go's own "fixed date wins,
-	// interval_months is the fallback formula" shape:
-	//   - interval_months set: the next due date is computed here, from
-	//     THIS completion's own date, ignoring whatever new_due_date the
-	//     request happened to carry - a formula exists, so the operator
-	//     is never asked to do the arithmetic themselves.
-	//   - interval_months not set: there is no formula at all (a one-off
-	//     expiry), so the operator's own new_due_date is required - a
-	//     blank or malformed one is refused rather than silently leaving
-	//     the rule's due date exactly where it was.
-	newFixedDueDate := ""
-	if existingRule.FixedDueDate != "" {
-		if existingRule.IntervalMonths != nil {
-			newFixedDueDate = performedAt.AddDate(0, *existingRule.IntervalMonths, 0).Format("2006-01-02")
-		} else {
-			trimmed := strings.TrimSpace(req.NewDueDate)
-			if trimmed == "" || !installDatePattern.MatchString(trimmed) {
-				return writeInventoryValidationError(c, &inventoryValidationError{
-					Field:   "new_due_date",
-					Message: "new_due_date is required and must be YYYY-MM-DD to complete a fixed-date rule with no monthly interval",
-				})
-			}
-			newFixedDueDate = trimmed
-		}
-	}
-
-	if err := checkMaintenancePartsExist(in.Parts); err != nil {
-		if errors.Is(err, errEquipmentNotFound) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		}
-		return writeDocumentError(c, err)
-	}
-
-	rule, entry, err := globalDocumentStore.CompleteMaintenanceRule(c.Param("id"), in, newFixedDueDate)
-	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(rule, today)
 	if err != nil {
@@ -978,29 +871,16 @@ func copyMaintenanceProfileScheduleHandler(c echo.Context) error {
 		return writeInventoryValidationError(c, verr)
 	}
 	id := c.Param("id")
-	item, err := globalDocumentStore.GetEquipment(id)
-	if err != nil {
-		return writeDocumentError(c, err)
-	}
-	if item.ProfileID == "" {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "this item has no profile to copy a schedule from"})
-	}
-
 	profiles, _ := engineProfiles()
-	var profile *engineProfile
-	for i := range profiles {
-		if profiles[i].ID == item.ProfileID {
-			profile = &profiles[i]
-			break
-		}
-	}
-	if profile == nil {
-		return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("profile %q is no longer available", item.ProfileID)})
-	}
-
-	created, err := globalDocumentStore.CopyProfileServiceEntries(id, profile.Service)
+	var created []maintenanceRule
+	var item equipmentItem
+	err := globalDocumentStore.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+		var err error
+		created, item, err = cmdCopyMaintenanceProfileSchedule(tx, now, id, profiles)
+		return err
+	})
 	if err != nil {
-		return writeDocumentError(c, err)
+		return writeMaintenanceCommandError(c, err)
 	}
 
 	now := time.Now().UTC()

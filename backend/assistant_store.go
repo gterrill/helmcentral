@@ -45,6 +45,12 @@ type assistantMessage struct {
 	// row - only a user message can carry attachments (assistant_handlers.go
 	// validates and builds them on the POST path).
 	Attachments []assistantAttachment `json:"attachments,omitempty"`
+	// Proposals are the maintenance change cards Mate attached to this
+	// assistant message (ADR 0146), position-ordered, each with the status it
+	// has right now (pending, applied or dismissed). AppendMessage saves them
+	// in the same transaction as the row; ListMessages reads them back. Always
+	// empty on a user row.
+	Proposals []assistantProposal `json:"proposals,omitempty"`
 }
 
 // assistantAttachment is one row of message_attachments: a document (ADR
@@ -152,7 +158,7 @@ func createAssistantSchema(db *sql.DB) error {
 		return fmt.Errorf("index message_attachments table: %w", err)
 	}
 
-	return nil
+	return createAssistantProposalsSchema(db)
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at
@@ -372,6 +378,17 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		}
 	}
 
+	// Proposals (ADR 0146) ride in the same transaction as the assistant
+	// row that carries them.
+	if len(m.Proposals) > 0 {
+		if m.Role != "assistant" {
+			return assistantMessage{}, fmt.Errorf("insert message proposals: only an assistant message can carry them, got role %q", m.Role)
+		}
+		if err := insertAssistantProposalsTx(tx, m.ID, m.Proposals, now); err != nil {
+			return assistantMessage{}, err
+		}
+	}
+
 	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now.Unix(), m.ConversationID); err != nil {
 		return assistantMessage{}, fmt.Errorf("bump conversation updated_at: %w", err)
 	}
@@ -419,8 +436,13 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	if err != nil {
 		return nil, err
 	}
+	proposalsByMessage, err := proposalsForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i].Attachments = attachmentsByMessage[out[i].ID]
+		out[i].Proposals = proposalsByMessage[out[i].ID]
 	}
 
 	return out, nil

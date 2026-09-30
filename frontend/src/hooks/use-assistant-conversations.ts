@@ -18,6 +18,22 @@ interface MessageAttachmentApi {
   filename: string
 }
 
+export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale'
+
+interface ProposalOpApi {
+  op: string
+  summary: string
+}
+
+export interface ProposalApi {
+  id: string
+  message_id: string
+  status: AssistantProposalStatus
+  ops: ProposalOpApi[]
+  stale_reason?: string
+  resolved_at?: string
+}
+
 interface MessageApi {
   id: string
   conversation_id: string
@@ -31,6 +47,7 @@ interface MessageApi {
   tool_rounds?: number
   created_at: string
   attachments?: MessageAttachmentApi[]
+  proposals?: ProposalApi[]
 }
 
 export interface AssistantConversation {
@@ -43,6 +60,27 @@ export interface AssistantConversation {
 export interface AssistantMessageAttachment {
   documentId: string
   filename: string
+}
+
+/** One change on a proposal card. `summary` is the operator-words line the
+ * server wrote ("Generator · Oil and filter: every 250 h ..."); the client
+ * shows it as given and never rebuilds it. */
+export interface AssistantProposalOp {
+  op: string
+  summary: string
+}
+
+/** A maintenance change Mate proposed (ADR 0146). `status` is the stored
+ * one, so a reloaded thread shows applied and dismissed cards as they were
+ * left. Nothing in a proposal has been written until it is `applied`. */
+export interface AssistantProposal {
+  id: string
+  messageId: string
+  status: AssistantProposalStatus
+  ops: AssistantProposalOp[]
+  /** Why a `stale` proposal could not be applied, in the server's words. */
+  staleReason?: string
+  resolvedAt?: string
 }
 
 export interface AssistantMessage {
@@ -60,6 +98,19 @@ export interface AssistantMessage {
   /** Documents (ADR 0106) attached to this message - only ever present on a
    * user message; the backend never sets it on an assistant reply. */
   attachments?: AssistantMessageAttachment[]
+  /** Maintenance change cards (ADR 0146) - only ever on an assistant reply. */
+  proposals?: AssistantProposal[]
+}
+
+export function mapProposal(api: ProposalApi): AssistantProposal {
+  return {
+    id: api.id,
+    messageId: api.message_id,
+    status: api.status,
+    ops: api.ops.map((o) => ({ op: o.op, summary: o.summary })),
+    staleReason: api.stale_reason,
+    resolvedAt: api.resolved_at,
+  }
 }
 
 function mapConversation(api: ConversationApi): AssistantConversation {
@@ -80,6 +131,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     toolRounds: api.tool_rounds,
     createdAt: api.created_at,
     attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
+    proposals: api.proposals?.map(mapProposal),
   }
 }
 
@@ -342,6 +394,18 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setMessages((previous) => [...previous, message])
   }, [])
 
+  // Replaces one proposal's card state with what the server just answered
+  // (apply or dismiss), so the thread and a later reload agree.
+  const updateProposal = useCallback((proposal: AssistantProposal) => {
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.proposals?.some((p) => p.id === proposal.id)
+          ? { ...message, proposals: message.proposals.map((p) => (p.id === proposal.id ? proposal : p)) }
+          : message,
+      ),
+    )
+  }, [])
+
   const errorMessage = error !== null ? describeLoadError(error) : null
 
   return {
@@ -356,6 +420,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     startNew,
     remove,
     appendLocal,
+    updateProposal,
     refresh,
     reload,
   }

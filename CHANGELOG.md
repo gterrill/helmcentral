@@ -18,8 +18,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   engine's schedule is complete. For a review it compares your rules with
   the manufacturer's recommended services on the item's profile and with
   your manuals, and names the gaps. If an item's running hours aren't being
-  read, it says the hours are unknown instead of guessing. Mate only reads:
-  changes are still made in Inventory → Maintenance.
+  read, it says the hours are unknown instead of guessing.
+- Mate can propose changes to the maintenance schedule. Ask it to set up a
+  schedule from a manual, add a rule, change an interval, record when
+  something was last done, log a job as done, acknowledge a rule or copy in an
+  item's profile schedule, and it answers with a card listing each change in
+  one line. Nothing changes until you tap **Apply**, and then every line is
+  made together or none is. **Dismiss** drops the card. If a rule was edited
+  after Mate wrote the card, Apply refuses and says so, and you ask Mate to
+  redo it. A read-only session sees the card without the buttons. Mate can't
+  delete rules or log entries, edit past log entries, or add photos, parts or
+  meter replacements; those are still done in Inventory → Maintenance.
 - Mate keeps a trip or weather window you've been discussing in mind for the
   rest of the conversation. When a later question brings in a fresh forecast,
   such as asking about conditions after moving anchorage, it says whether the

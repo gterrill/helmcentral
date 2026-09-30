@@ -4,6 +4,9 @@ Get an item's service jobs into Helmcentral so the Maintenance list can
 tell you what's due, whether the boat already has years of history behind
 it or the item was fitted yesterday.
 
+Prefer to describe it and check a card? Mate can propose the rules for you;
+see [Set up a maintenance schedule with Mate](set-up-a-maintenance-schedule-with-mate.md).
+
 ## Copy a schedule from an equipment profile
 
 If the item was set up using a manufacturer's equipment profile, its

@@ -525,13 +525,20 @@ func TestBuildAssistantSystemPrompt_MaintenanceGuidance(t *testing.T) {
 		"say the hours are unknown",
 		"quote the meter reading",
 		"cumulative across meter replacements",
-		"You cannot change the maintenance schedule",
+		"propose_maintenance_changes",
+		"tap Apply",
+		"never say it is done",
+		"Hours in a proposal are meter readings",
+		"do not propose it again",
 		"(/inventory/maintenance)",
 		"(/inventory/equipment/<id>)",
 	} {
 		if !strings.Contains(stable, want) {
 			t.Errorf("expected the stable prefix to contain %q, got:\n%s", want, stable)
 		}
+	}
+	if strings.Contains(stable, "cannot change the maintenance schedule") {
+		t.Fatalf("expected cycle 1's \"cannot change yet\" wording to be gone, got:\n%s", stable)
 	}
 	if strings.Contains(live, "list_maintenance") {
 		t.Fatalf("expected the maintenance guidance only in the stable prefix, got:\n%s", live)

@@ -3,7 +3,7 @@ import { apiBaseUrl } from '@/config/api'
 import { readServerSentEvents } from '@/lib/sse-reader'
 import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
-import type { AssistantConversation, AssistantMessage } from '@/hooks/use-assistant-conversations'
+import { mapProposal, type AssistantConversation, type AssistantMessage, type ProposalApi } from '@/hooks/use-assistant-conversations'
 
 interface MessageAttachmentApi {
   document_id: string
@@ -23,6 +23,7 @@ interface MessageApi {
   tool_rounds?: number
   created_at: string
   attachments?: MessageAttachmentApi[]
+  proposals?: ProposalApi[]
 }
 
 interface ConversationApi {
@@ -46,6 +47,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     toolRounds: api.tool_rounds,
     createdAt: api.created_at,
     attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
+    proposals: api.proposals?.map(mapProposal),
   }
 }
 

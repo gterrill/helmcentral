@@ -47,6 +47,7 @@ function buildConversations(
     startNew: vi.fn(),
     remove: vi.fn(),
     appendLocal: vi.fn(),
+    updateProposal: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
     reload: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -897,5 +898,63 @@ describe('AssistantThread: save an answer as a note', () => {
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
     expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
+  })
+
+  describe('maintenance proposals (ADR 0146)', () => {
+    const proposedMessage = (status: 'pending' | 'applied' | 'dismissed' | 'stale') =>
+      assistantMessage({
+        proposals: [
+          {
+            id: 'p1',
+            messageId: 'm1',
+            status,
+            staleReason: status === 'stale' ? 'a rule changed since Mate proposed this' : undefined,
+            ops: [{ op: 'acknowledge', summary: 'Acknowledge Generator · Belts: parts on order' }],
+          },
+        ],
+      })
+
+    it('renders the card under the reply from the stored status, so it survives a reload', () => {
+      const applied = render(
+        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('applied')] })} chat={buildChat()} />,
+      )
+      expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'applied')
+      expect(screen.getByRole('link', { name: 'Acknowledge Generator · Belts: parts on order' })).toHaveAttribute(
+        'href',
+        '/inventory/maintenance',
+      )
+      applied.unmount()
+
+      render(
+        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('pending')] })} chat={buildChat()} />,
+      )
+      expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'pending')
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument()
+    })
+
+    it('renders a stored stale proposal with its reason and no Apply after a reload', () => {
+      render(
+        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('stale')] })} chat={buildChat()} />,
+      )
+
+      expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'stale')
+      expect(screen.getByRole('alert')).toHaveTextContent('a rule changed since Mate proposed this')
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+    })
+
+    it('hides Apply and Dismiss for a read-tier viewer but still shows the proposal', () => {
+      render(
+        <AssistantThread canWrite={false} conversations={buildConversations({ messages: [proposedMessage('pending')] })} chat={buildChat()} />,
+      )
+
+      expect(screen.getByText('Acknowledge Generator · Belts: parts on order')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+    })
+
+    it('shows no card on a reply with no proposals', () => {
+      render(<AssistantThread canWrite conversations={buildConversations({ messages: [assistantMessage()] })} chat={buildChat()} />)
+
+      expect(screen.queryByTestId('assistant-proposal-card')).not.toBeInTheDocument()
+    })
   })
 })

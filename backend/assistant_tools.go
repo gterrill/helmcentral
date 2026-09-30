@@ -652,6 +652,59 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "propose_maintenance_changes",
+				Description: "Propose changes to the maintenance schedule. This changes NOTHING: the operator sees your " +
+					"proposal as a card under your reply and taps Apply (or Dismiss). Use it only for a change the " +
+					"operator asked for or agreed to, and read the rules first (list_maintenance, find_equipment) so " +
+					"you have real ids. Give every change in one call as a list of ops; the card applies them all " +
+					"together or not at all. Ops: create_rule (equipment_id optional for a calendar-only rule; may " +
+					"also carry last_done_at and last_done_meter_reading), update_rule (rule_id plus only the fields " +
+					"that change; list interval fields to remove in clear), set_last_done (rule_id, last_done_at " +
+					"and/or last_done_meter_reading), complete_rule (rule_id, performed_at, meter_reading, and " +
+					"optionally description, who, cost, new_due_date), acknowledge (rule_id, reason), " +
+					"copy_profile_schedule (equipment_id; copies the profile's service entries that have no rule yet). " +
+					"Every hours figure here is a METER reading, what the operator's gauge shows, never cumulative " +
+					"engine hours. Dates are YYYY-MM-DD. A call that fails names the field to correct. Deleting rules " +
+					"or log entries, photos, parts, meter replacements and procedure notes cannot be proposed.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"ops": {
+							"type": "array",
+							"description": "The changes, in order (at most 20).",
+							"items": {
+								"type": "object",
+								"properties": {
+									"op": {"type": "string", "description": "create_rule, update_rule, set_last_done, complete_rule, acknowledge or copy_profile_schedule."},
+									"equipment_id": {"type": "string", "description": "create_rule (optional) and copy_profile_schedule: an id from find_equipment."},
+									"rule_id": {"type": "string", "description": "update_rule, set_last_done, complete_rule, acknowledge: an id from list_maintenance."},
+									"description": {"type": "string", "description": "create_rule/update_rule: the rule's description. complete_rule: what was done."},
+									"interval_hours": {"type": "number", "description": "Interval in meter hours."},
+									"interval_months": {"type": "integer", "description": "Interval in months."},
+									"due_soon_hours": {"type": "number", "description": "Warn this many meter hours before due."},
+									"due_soon_months": {"type": "integer", "description": "Warn this many months before due."},
+									"fixed_due_date": {"type": "string", "description": "A fixed due date, YYYY-MM-DD."},
+									"clear": {"type": "array", "items": {"type": "string"}, "description": "update_rule only: interval_hours, interval_months, due_soon_hours, due_soon_months or fixed_due_date to remove."},
+									"last_done_at": {"type": "string", "description": "create_rule/set_last_done: the date it was last done, YYYY-MM-DD."},
+									"last_done_meter_reading": {"type": "number", "description": "create_rule/set_last_done: the meter reading when it was last done."},
+									"performed_at": {"type": "string", "description": "complete_rule: the date it was done, YYYY-MM-DD."},
+									"meter_reading": {"type": "number", "description": "complete_rule: the meter reading when it was done (required for an hours-based rule)."},
+									"who": {"type": "string", "description": "complete_rule: who did it."},
+									"cost": {"type": "number", "description": "complete_rule: what it cost."},
+									"new_due_date": {"type": "string", "description": "complete_rule: the next fixed due date, only for a fixed-date rule with no monthly interval."},
+									"reason": {"type": "string", "description": "acknowledge: why the rule is being acknowledged."}
+								},
+								"required": ["op"]
+							}
+						}
+					},
+					"required": ["ops"]
+				}`),
+			},
+		},
 	}
 }
 
@@ -700,6 +753,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeListMaintenance(ctx, args)
 	case "get_maintenance_log":
 		return d.executeGetMaintenanceLog(ctx, args)
+	case assistantProposalToolTag:
+		return d.executeProposeMaintenanceChanges(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -826,6 +881,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Checking the maintenance list…"
 	case "get_maintenance_log":
 		return "Reading the maintenance log…"
+	case assistantProposalToolTag:
+		return "Preparing the maintenance changes…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

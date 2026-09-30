@@ -68,6 +68,8 @@ Steps for specific tasks.
   contents to confirm what's aboard.
 - [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md),
   copying a profile's service intervals or adding rules by hand.
+- [Set up a maintenance schedule with Mate](how-to/set-up-a-maintenance-schedule-with-mate.md),
+  asking Mate for a schedule and applying what it proposes.
 - [Log a service](how-to/log-a-service.md), completing a scheduled job or
   recording a repair or improvement.
 - [Development](how-to/development.md), running the stack, tests and release builds.
