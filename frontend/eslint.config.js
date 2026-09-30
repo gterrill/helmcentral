@@ -50,6 +50,40 @@ export default [
       // rules until that's actually on the roadmap.
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      // ADR 0142: a CRUD surface (an index or a details page) is built from
+      // components/patterns (Page/IndexTable/IndexFilters/...), not from
+      // ui/table directly - that's exactly the hand-rolled-per-page drift
+      // the pattern library exists to close. The override below lifts this
+      // for components/patterns itself (IndexTable is the one legitimate
+      // caller) and for the surfaces this cycle didn't migrate.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@/components/ui/table',
+              message: 'Build CRUD tables from components/patterns/index-table (IndexTable) instead of ui/table directly - see docs/adr/0142-crud-pattern-library.md.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Pending migration to components/patterns (ADR 0142's own migration
+    // order: Equipment done this cycle; Locations, Profiles, Maintenance,
+    // Wall displays, then Documents last). Remove an entry here as each
+    // surface migrates, rather than adding a compatibility exception that
+    // outlives the migration it was for.
+    files: [
+      'src/components/patterns/**/*.{ts,tsx}',
+      'src/components/display-editor-panel.tsx',
+      'src/components/documents-panel.tsx',
+      'src/components/inventory/maintenance-section.tsx',
+      'src/components/wall-displays-panel.tsx',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 ];

@@ -119,10 +119,6 @@ func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equ
 		return equipmentItem{}, &inventoryValidationError{Field: "name", Message: "name is required"}
 	}
 
-	if !validEquipmentCategories[req.Category] {
-		return equipmentItem{}, &inventoryValidationError{Field: "category", Message: "category must be mechanical or general"}
-	}
-
 	system := req.System
 	if system == "" {
 		system = "other"

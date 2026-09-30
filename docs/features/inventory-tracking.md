@@ -18,11 +18,6 @@ crawling into the compartment to read the data plate:
 
 - **What it is.** Name, manufacturer, model, serial number, and how many of
   it there are.
-- **Category.** *Mechanical* for anything driven by running hours - engines,
-  generators, transmissions, thrusters, stabilisers, watermakers. *General*
-  for everything else: navigation electronics, safety gear, plumbing, galley
-  appliances, deck hardware. The difference matters because mechanical gear
-  is serviced on hours and everything else on the calendar.
 - **System.** Propulsion, electrical, water, fuel, bilge, anchoring, safety,
   air conditioning, navigation, appliances, structure. This is how the list
   groups itself, so the electrical gear reads as one block.
@@ -32,10 +27,14 @@ crawling into the compartment to read the data plate:
 - **Status.** *Deployed* for gear in use, *stored* for a spare sitting in
   the lazarette. A spare impeller is a real record; marking it stored is
   what will keep it out of maintenance reminders when those arrive.
-- **Hour meter.** For mechanical gear, the engine-hours reading from the
-  vessel telemetry that this item's runtime comes from, picked from the live
-  instrument data your boat actually publishes. This is what future service
-  schedules will count against.
+- **Hour meter.** Optional. Gear with an engine-hours reading - engines,
+  generators, transmissions, thrusters, stabilisers, watermakers - takes it
+  from the vessel telemetry this item's runtime comes from, picked from the
+  live instrument data your boat actually publishes. Leave it blank for gear
+  with no hour meter: navigation electronics, safety gear, plumbing, galley
+  appliances, deck hardware. It sits at the top of the record's Maintenance
+  section. Service rules counted in hours need a meter; without one they
+  cannot count hours, and the Maintenance section says so.
 - **Aliases.** What the crew actually calls it. "Genset" finds the
   generator.
 - **Photos.** Any number, taken with the camera or picked from the library,
@@ -47,12 +46,26 @@ crawling into the compartment to read the data plate:
 Records are created by hand, from the New item button, or from a bin's own
 page - see Tags and photos.
 
+Tap a column heading - Name, Status, and so on - to sort the list by it, and
+tap again to reverse the order. Each row's own menu opens the record or
+removes it, the same choices as opening the record and using Delete there.
+On a phone, the list shows as a stack of cards instead of a table, so nothing
+gets too cramped to read.
+
 ### Documents
 
 An equipment record links to anything already in the document library: the
 operator manual, a parts catalogue, a schematic, the warranty certificate,
 the invoice from the last service, a photo of the data plate. Add them from
 the record's Documents list; search runs over the whole library.
+
+Each linked document shows as a line with a thumbnail (photos) or a file icon,
+its title, the date it was added to the library and a type label such as PDF,
+JPG or NOTE. Click a line, or choose **Open** from its menu, to read it in a
+panel that slides in from the right without leaving the item. **Download**
+saves the file to the device you are on. **Remove from item** takes the link
+off this item only; the document stays in the library, and the change waits
+for the save bar like any other edit.
 
 Links point at documents, they do not copy them. What a document *is*
 already comes from its tags, so a manual tagged "manual" reads as one
@@ -68,7 +81,7 @@ its alarm bands and its manufacturer service intervals. They used to live
 in Settings and now sit here, beside the gear that uses them.
 
 Pick a profile on an equipment record and the blank fields fill themselves
-in - manufacturer, model, and whether it is mechanical. The profile stays
+in - manufacturer and model. The profile stays
 shared and unchanged; the record just points at it. Gear with no profile is
 perfectly normal, and most of a boat will never have one.
 

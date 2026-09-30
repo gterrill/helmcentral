@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
-import { useEquipmentItem, InventoryValidationError, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
+import { deleteEquipment, useEquipmentItem, InventoryValidationError, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
 
 // ADR 0123: the equipment registry's write path. The one thing worth pinning
 // here is the shape of a rejected write. inventory_handlers.go answers a
@@ -21,7 +21,6 @@ afterEach(() => { vi.restoreAllMocks() })
 function equipmentInput(overrides: Partial<EquipmentInput> = {}): EquipmentInput {
   return {
     name: 'Generator',
-    category: 'mechanical',
     system: 'electrical',
     manufacturer: '',
     model: '',
@@ -142,6 +141,42 @@ describe('use-inventory writes', () => {
   })
 })
 
+// ADR 0142: the Equipment index's row action menu deletes without ever
+// opening the editor (no useEquipmentItem instance for the id), so it needs
+// its own standalone call rather than useEquipmentItem's own `remove`.
+describe('deleteEquipment', () => {
+  it('sends a plain DELETE with no query string by default', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(204, undefined))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteEquipment('eq-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/inventory\/equipment\/eq-1$/),
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('appends delete_photos=true when asked to also delete exclusive photos', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(204, undefined))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteEquipment('eq-1', true)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/inventory\/equipment\/eq-1\?delete_photos=true$/),
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('throws the server\'s own message on a rejected delete', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(409, { error: 'has linked maintenance rules' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteEquipment('eq-1')).rejects.toThrow('has linked maintenance rules')
+  })
+})
+
 // ADR 0127 review finding: the create-then-upload race. equipment-editor.
 // tsx's performSave POSTs a new draft, hands the created id to App.tsx
 // (which flips the `id` prop this hook is keyed on - the id-change GET
@@ -227,7 +262,7 @@ describe('useEquipmentItem: a write racing an in-flight GET', () => {
     const newerItem = equipmentItem({ id: 'eq-1', photo_ids: ['photo-1'] })
     act(() => { result.current.setItem(newerItem) })
 
-    const docs = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    const docs = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
     await act(async () => {
       resolveGet(jsonResponse(200, { item: equipmentItem({ id: 'eq-1' }), documents: docs }))
       await Promise.resolve()

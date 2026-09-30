@@ -326,6 +326,26 @@ describe('App: Open/Full item from outside the Equipment section', () => {
     expect(screen.queryByRole('heading', { name: 'LAZ-02' })).not.toBeInTheDocument()
   })
 
+  // Code-review finding: Discard on a brand new item called onBack while the
+  // editor still reported dirty, so the leave guard put up the very
+  // "Unsaved changes / Save and Continue" dialog the operator had just
+  // declined. Editor-level tests mock onBack and cannot see this.
+  it('Discard on a new item leaves without the unsaved-changes dialog', async () => {
+    window.history.replaceState({}, '', '/inventory/bins/LAZ-02')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'LAZ-02' }, { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Full item' }))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''), { timeout: 5000 })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Half-typed' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }))
+
+    await waitFor(() => expect(screen.queryByLabelText('Name')).not.toBeInTheDocument())
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save and Continue' })).not.toBeInTheDocument()
+  })
+
   it('Open from Stocktake\'s photo grid renders the equipment editor', async () => {
     window.history.replaceState({}, '', '/inventory/stocktake')
     render(<App />)

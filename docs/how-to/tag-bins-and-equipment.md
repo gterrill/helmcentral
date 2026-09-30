@@ -15,7 +15,8 @@ standard sticker to read poorly or not at all stuck straight onto one.
 
 1. Open the bin's page (tap its code in Locations, or create the bin first
    if it doesn't exist yet) or the item's own editor.
-2. Find the tag row near the top and press **Write tag**.
+2. Find the tag address - on the bin's page, or in the item's Location
+   section - and press **Write tag**.
 3. Hold the tag against the back of the phone when prompted, and hold it
    still until the button changes to **Written**.
 4. Stick the tag on the bin or the item. Tap it with any phone to confirm

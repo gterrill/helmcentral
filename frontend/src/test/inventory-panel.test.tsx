@@ -2,7 +2,6 @@ import { forwardRef, useImperativeHandle } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { InventoryPanel, type InventoryPanelHandle } from '@/components/inventory/inventory-panel'
-import { INVENTORY_HELP_TARGETS } from '@/lib/help-links'
 
 // InventoryPanel is a thin composition shell over four already-tested
 // children (equipment-index.test.tsx, equipment-editor.test.tsx,
@@ -91,6 +90,7 @@ function baseProps() {
     onCloseEditor: vi.fn(),
     onEquipmentCreated: vi.fn(),
     onEquipmentDeleted: vi.fn(),
+    onEquipmentDiscarded: vi.fn(),
     binCode: null,
     onOpenBin: vi.fn(),
     onCloseBin: vi.fn(),
@@ -220,13 +220,6 @@ describe('InventoryPanel', () => {
     render(<InventoryPanel {...baseProps()} equipmentEditId="eq-1" onDirtyChange={onDirtyChange} />)
     fireEvent.click(screen.getByText('make-dirty'))
     expect(onDirtyChange).toHaveBeenCalledWith(true)
-  })
-
-  it('opens help at the target for the active section', () => {
-    const onOpenHelp = vi.fn()
-    render(<InventoryPanel {...baseProps()} activeSectionId="locations" onOpenHelp={onOpenHelp} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open help for this section' }))
-    expect(onOpenHelp).toHaveBeenCalledWith(INVENTORY_HELP_TARGETS.locations)
   })
 
   it('exposes save() through the imperative handle, delegating to the mounted editor', async () => {

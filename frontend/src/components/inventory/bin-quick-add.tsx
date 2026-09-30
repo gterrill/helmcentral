@@ -122,7 +122,6 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
         ...BLANK_DRAFT,
         name: trimmedName,
         quantity,
-        category: 'general',
         status: 'stored',
         zone_id: zoneId,
         bin_id: binId,

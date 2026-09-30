@@ -216,6 +216,23 @@ describe('the in-app help (ADR 0095)', () => {
     await waitFor(() => expect(helpFetchCalls(fetchMock)).toContain('/api/help/features/forecast'))
   })
 
+  // helpTargetFor (lib/help-links.ts) branches Inventory off to
+  // INVENTORY_HELP_TARGETS by its OWN section, not the panel alone - the
+  // header ? used to build its AppLocation with only {panel, section}
+  // (section being Settings' own field), so on Inventory it always fell
+  // through to inventorySection's default ('equipment') no matter which
+  // section was actually open. Maintenance has its own help page
+  // (features/maintenance, not inventory-tracking) precisely so this test
+  // can tell "followed the section" apart from "fell back to Equipment".
+  it('the header ? follows the active Inventory section, not just Equipment', async () => {
+    const fetchMock = stubFetch()
+    window.history.replaceState({}, '', '/inventory/maintenance')
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
+    await waitFor(() => expect(helpFetchCalls(fetchMock)).toContain('/api/help/features/maintenance'))
+  })
+
   it('carries the title "Help for this screen" and the CircleHelp icon', () => {
     stubFetch()
     render(<App />)

@@ -33,7 +33,7 @@ due whichever comes first.
 For gear with a running-hours reading - an engine, a generator, a
 watermaker - Helmcentral reads the current hours straight from the boat's
 own instrument data, the same reading the equipment record's hour meter
-already uses. An hour meter only changes while the machine it's on is
+already uses (an item with no hour meter set can't have its hours-based rules counted; its record shows a warning until you set one). An hour meter only changes while the machine it's on is
 running, so the last reading it ever sent stays the current one for as
 long as the engine is off - at anchor, or mid-service - rather than
 showing as unknown; the Maintenance list and the Complete form show how

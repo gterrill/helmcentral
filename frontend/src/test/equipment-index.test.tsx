@@ -101,8 +101,58 @@ describe('EquipmentIndex', () => {
     const onOpenItem = vi.fn()
     render(<EquipmentIndex onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Generator' }))
+    fireEvent.click(await screen.findByText('Generator'))
     expect(onOpenItem).toHaveBeenCalledWith('eq-1')
+  })
+
+  it('opens the editor from the row\'s own action menu, without double-firing the row click', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (String(url).includes('/api/inventory/equipment')) {
+        return Promise.resolve({ ok: true, json: async () => ({ items: [makeItem({})] }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({}) })
+    })
+    const onOpenItem = vi.fn()
+    render(<EquipmentIndex onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
+
+    await screen.findByText('Generator')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Open' }))
+
+    expect(onOpenItem).toHaveBeenCalledTimes(1)
+    expect(onOpenItem).toHaveBeenCalledWith('eq-1')
+    // Let the menu finish closing before the test ends: unmounting mid-close
+    // left Base UI in a state where the NEXT test's first trigger click was
+    // swallowed (no open-change at all) - the flake in "deletes an item...".
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+  })
+
+  it('deletes an item from the row action menu, after confirming', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (init?.method === 'DELETE') return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
+      if (String(url).includes('/api/inventory/equipment')) {
+        return Promise.resolve({ ok: true, json: async () => ({ items: [makeItem({})] }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({}) })
+    })
+    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+
+    await screen.findByText('Generator')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
+    // The zones request landing re-renders the table; that used to remount
+    // the row menu and drop the click (fixed in IndexTable, see its test).
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/api\/inventory\/equipment\/eq-1$/),
+        expect.objectContaining({ method: 'DELETE' }),
+      )
+    })
   })
 
   it('calls onNewItem from the toolbar button', async () => {
@@ -148,21 +198,26 @@ describe('EquipmentIndex', () => {
     })
   })
 
-  it('sends the category filter as a query parameter', async () => {
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    fetchMock.mockClear()
-
-    fireEvent.click(screen.getByRole('combobox', { name: 'Filter by category' }))
-    const option = await screen.findByRole('option', { name: 'Mechanical' })
-    fireEvent.pointerDown(option)
-    fireEvent.pointerUp(option)
-    fireEvent.click(option)
-
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/inventory/equipment?'))
-      expect(call).toBeDefined()
-      expect(String(call?.[0])).toContain('category=mechanical')
+  // category is derived from the hour meter now, so the index neither shows
+  // nor filters on it.
+  it('has no category / "Serviced by" column or filter', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (String(url).includes('/api/inventory/equipment')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [makeItem({ id: 'a', name: 'Generator', category: 'mechanical' }), makeItem({ id: 'b', name: 'Flares', category: 'general' })] }),
+        })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({}) })
     })
+    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    await screen.findByText('Generator')
+
+    expect(screen.queryByRole('columnheader', { name: /serviced by|category/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: /serviced by|category/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('Running hours')).not.toBeInTheDocument()
+    expect(screen.queryByText('Calendar')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('category='))).toBe(false)
   })
 })

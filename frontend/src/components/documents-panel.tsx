@@ -1,6 +1,5 @@
 import {
   Download,
-  Eye,
   File,
   FileText,
   Folder,
@@ -8,12 +7,9 @@ import {
   Image as ImageIcon,
   Info,
   Library,
-  ListChecks,
   Loader2,
   MoreVertical,
   Pencil,
-  Pin,
-  PinOff,
   Plus,
   RefreshCw,
   Search,
@@ -66,7 +62,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -82,19 +77,17 @@ import {
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
-import { documentDisplayName, documentFailureMessage, formatBytes, mimeLabel } from '@/lib/document-display'
+import { downloadDocument } from '@/lib/document-download'
+import { documentDisplayName, documentFailureMessage, formatBytes } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
-import type { NoteLink } from '@/lib/note-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
 
-import { AskMateSelection } from './ask-mate-selection'
-import { ChecklistRunner } from './documents/checklist-runner'
+import { DocumentViewerSheet } from './documents/document-viewer-sheet'
 import { ManualFolderView } from './documents/manual-folder-view'
 import { NoteTypeIconButton } from './documents/note-type-icon-button'
 import { UnfiledNotesView } from './documents/unfiled-notes-view'
-import { NoteEditor, prefetchNoteEditor } from './note-editor'
-import { NoteMarkdown } from './note-markdown'
+import { prefetchNoteEditor } from './note-editor'
 
 // ADR 0121: this panel is now the ONLY place a note gets created - the
 // global header action and Alt+N shortcut ADR 0119 built are gone. Lazy
@@ -807,159 +800,11 @@ export function DocumentsPanel({
   }
 
   // ── viewer ───────────────────────────────────────────────────────────
+  // The viewer's own state (metadata, text, editing, checklist) lives in
+  // DocumentViewerSheet; the panel owns only WHICH document is open, because
+  // search results and note capture open it too. getNote/patchNote come from
+  // `unfiled` so a save or pin keeps the Unfiled list fresh.
   const [viewerId, setViewerId] = useState<string | null>(initialDocumentId)
-  const [viewerDoc, setViewerDoc] = useState<DocumentRecord | null>(null)
-  const [viewerText, setViewerText] = useState<string | null>(null)
-  const [viewerLoading, setViewerLoading] = useState(false)
-  useEffect(() => {
-    if (!viewerId) {
-      setViewerDoc(null)
-      setViewerText(null)
-      return
-    }
-    // A viewer target may not be in whatever folder is currently browsed -
-    // a Mate attachment chip can link to a document filed anywhere - so its
-    // own metadata is fetched directly rather than looked up in
-    // documents.documents.
-    const found = documents.documents.find((d) => d.id === viewerId)
-    if (found) {
-      setViewerDoc(found)
-    } else {
-      setViewerLoading(true)
-      void fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(viewerId)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setViewerDoc(data))
-        .finally(() => setViewerLoading(false))
-    }
-  }, [viewerId, documents.documents])
-
-  // Covers both reading a note and saving one - same banner either way.
-  const [viewerError, setViewerError] = useState<string | null>(null)
-  const { getNote: getViewerNote } = unfiled
-  useEffect(() => {
-    if (!viewerDoc || !viewerId) return
-    const isText = !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf'
-    if (!isText) { setViewerText(null); return }
-    setViewerLoading(true)
-
-    // A NOTE is read from its own bytes, never from /text.
-    //
-    // /text reassembles the indexed chunks, and splitMarkdownSections
-    // (documents_chunk.go) lifts each section's heading into its own
-    // column and strips it out of the chunk body - so a note read that
-    // way comes back with every "#" line missing, blank lines
-    // normalised, and, past documentTextChunkCharCap, simply truncated.
-    // Harmless for search, which is what chunks are for. Ruinous here,
-    // because this same string seeds NoteEditor, and Save replaces the
-    // note's whole body: one edit would delete every heading in it, and
-    // with them a manual's section structure.
-    //
-    // GET /api/notes/:id is readNoteBody straight off disk - the real
-    // bytes, which are the note's identity. It is also fresh regardless
-    // of whether the indexer has caught up, where chunks may still be
-    // stale or absent for a note captured seconds ago.
-    let cancelled = false
-    const load = viewerDoc.kind === 'note'
-      ? getViewerNote(viewerId).then((detail) => detail.body)
-      : fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(viewerId)}/text`)
-          .then((res) => (res.ok ? res.json() : { text: '' }))
-          .then((data) => data.text ?? '')
-
-    void load
-      .then((text) => { if (!cancelled) setViewerText(text) })
-      .catch((err) => {
-        // Fail loud (AGENTS.md): an unreadable note must not render as an
-        // empty one, which looks exactly like a note the operator emptied.
-        if (!cancelled) setViewerText(null)
-        if (!cancelled) setViewerError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => { if (!cancelled) setViewerLoading(false) })
-    return () => { cancelled = true }
-  }, [viewerDoc, viewerId, getViewerNote])
-
-  // ── editing a note from the general viewer (revision "one panel, not
-  // three") - the Edit toggle NoteEditor is reachable through, moved out of
-  // the deleted notes-panel.tsx's reader sheet. Opening a DIFFERENT
-  // document always lands back in the read-only view - an editing session
-  // belongs to the document that was open when it started.
-  const [viewerEditing, setViewerEditing] = useState(false)
-  useEffect(() => { setViewerEditing(false) }, [viewerId])
-  const { patchNote: patchViewerNote } = unfiled
-  const handleSaveViewerNote = useCallback(async (body: string) => {
-    if (!viewerId) return
-    try {
-      const updated = await patchViewerNote(viewerId, { body })
-      setViewerText(updated.body)
-      setViewerError(null)
-      setViewerEditing(false)
-    } catch (err) {
-      setViewerError(err instanceof Error ? err.message : String(err))
-      throw err // NoteEditor keeps its dirty flag on a failed save
-    }
-  }, [viewerId, patchViewerNote])
-
-  // ── pinning a note for Mate (plan §8) - "a control in the Documents UI
-  // where a note is read", so it lives beside Edit/Start checklist in this
-  // same viewer toolbar rather than as a new surface of its own. Without
-  // this, documents.pinned (already a real column, already on the wire)
-  // has no operator-facing way to ever become true, and the whole
-  // pinned-notes prompt feature is unreachable.
-  const handleTogglePin = useCallback(async () => {
-    if (!viewerDoc || viewerDoc.kind !== 'note') return
-    await runAction(async () => {
-      const updated = await patchViewerNote(viewerDoc.id, { pinned: !viewerDoc.pinned })
-      setViewerDoc((prev) => (prev && prev.id === updated.document.id ? { ...prev, pinned: updated.document.pinned } : prev))
-    })
-  }, [viewerDoc, patchViewerNote, runAction])
-
-  // ── running a checklist from the general viewer (plan §7, ADR 0118) - a
-  // MODE of this same Sheet, not a navigation elsewhere. viewerText above
-  // comes from the generic /api/documents/:id/text (any mime, any kind), so
-  // whether this document even HAS a checklist has to come from the notes-
-  // specific GET /api/notes/:id instead (its own `checklist` field) -
-  // fetched here rather than folded into the fetch above, since it's only
-  // ever relevant for kind='note'.
-  const [viewerHasChecklist, setViewerHasChecklist] = useState(false)
-  useEffect(() => {
-    if (!viewerDoc || viewerDoc.kind !== 'note') {
-      setViewerHasChecklist(false)
-      return
-    }
-    let cancelled = false
-    // Promise.resolve(...) rather than calling getViewerNote's own promise
-    // directly: it's a mocked jest-style fn in most of this file's own
-    // tests (vi.mock('@/hooks/use-notes')), and plenty of them never bother
-    // stubbing a resolved value for a getNote() call they aren't testing -
-    // this must degrade to "no checklist" rather than throw on a bare
-    // vi.fn()'s undefined return.
-    Promise.resolve(getViewerNote(viewerDoc.id))
-      .then((detail) => { if (!cancelled) setViewerHasChecklist((detail?.checklist?.length ?? 0) > 0) })
-      .catch(() => { if (!cancelled) setViewerHasChecklist(false) })
-    return () => { cancelled = true }
-  }, [viewerDoc, getViewerNote])
-
-  // Reset whenever a DIFFERENT document opens - a running checklist belongs
-  // to the document that was open when it started, the same rule
-  // viewerEditing's own reset above follows.
-  const [viewerChecklistRunning, setViewerChecklistRunning] = useState(false)
-  useEffect(() => { setViewerChecklistRunning(false) }, [viewerId])
-
-  // A link inside a rendered note's markdown (ADR 0116). GET /api/documents/:id
-  // and its /text sibling work on any document id regardless of kind, so
-  // both hc-note: and hc-doc: links resolve the same way here: switch the
-  // viewer to that id, reusing the exact fetches above rather than needing
-  // note-specific ones. An anchor scrolls within whatever is already
-  // rendered. `external`/`unsafe` never reach here - note-markdown-impl.tsx
-  // handles both itself.
-  const handleNoteNavigate = useCallback((link: NoteLink) => {
-    if (link.kind === 'note' || link.kind === 'document') {
-      setViewerId(link.id)
-      return
-    }
-    if (link.kind === 'anchor') {
-      document.getElementById(link.hash)?.scrollIntoView({ block: 'start' })
-    }
-  }, [])
 
   // ── upload ───────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1004,35 +849,6 @@ export function DocumentsPanel({
   // notes-only listing.
   const documentRows = documents.documents
   const allDocumentsSelected = documentRows.length > 0 && documentRows.every((d) => selectedIds.has(d.id))
-
-  const contentUrlFor = (id: string) => `${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/content`
-
-  // Fetches the file into a blob and saves it via a synthetic <a download>
-  // click, rather than navigating the tab there directly (review finding).
-  // A plain `window.location.href = contentUrlFor(id)` turned a 401 or the
-  // endpoint's own 500 "document file missing on disk"
-  // (documentContentHandler, backend/documents_handlers.go) into the SPA
-  // itself being replaced by raw JSON, with no way back short of a reload.
-  // A failure here throws instead, so runAction's existing catch routes it
-  // into actionError - the same banner rename/move/delete already share -
-  // and the app never leaves the page.
-  const downloadDocument = async (id: string, filename: string) => {
-    const response = await fetch(`${contentUrlFor(id)}?download=1`)
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null
-      throw new Error(body?.error && body.error !== '' ? body.error : `Download failed (HTTP ${response.status})`)
-    }
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    try {
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.click()
-    } finally {
-      URL.revokeObjectURL(url)
-    }
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -1697,127 +1513,17 @@ export function DocumentsPanel({
       </AlertDialog>
 
       {/* ── Viewer ─────────────────────────────────────────────────── */}
-      <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) setViewerId(null) }}>
-        <SheetContent side="right" className="flex h-full w-full flex-col gap-4 sm:max-w-2xl">
-          <SheetHeader>
-            <SheetTitle>{viewerDoc ? documentDisplayName(viewerDoc) : 'Loading…'}</SheetTitle>
-            {viewerDoc && <SheetDescription>{mimeLabel(viewerDoc.mime)} · {formatBytes(viewerDoc.size_bytes)}</SheetDescription>}
-          </SheetHeader>
-          {viewerDoc && (
-            <div className="flex items-center gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => { void runAction(() => downloadDocument(viewerDoc.id, viewerDoc.filename)) }}>
-                <Download className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                Download
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => onEditDocument?.(viewerDoc.id)}>
-                <Info className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                Details
-              </Button>
-              {/* Start checklist is a MODE of this same Sheet (plan §7,
-                  ADR 0118) - gated on kind='note' (a checklist only ever
-                  makes sense against a note's own body) and viewerHasChecklist
-                  (GET /api/notes/:id's own `checklist` field), and hidden
-                  while already editing or running - both would otherwise
-                  compete for the same content area below. */}
-              {viewerDoc.kind === 'note' && viewerHasChecklist && !viewerEditing && !viewerChecklistRunning && (
-                <Button type="button" size="sm" variant="outline" onClick={() => setViewerChecklistRunning(true)}>
-                  <ListChecks className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                  Start checklist
-                </Button>
-              )}
-              {/* Pin for Mate (plan §8) - gated on kind='note' the same way
-                  every note-only control here is; a pinned note rides in
-                  Mate's system prompt until unpinned, so the label always
-                  says which state a click leads TO, not which state is
-                  current. */}
-              {viewerDoc.kind === 'note' && (
-                <Button type="button" size="sm" variant="outline" aria-pressed={viewerDoc.pinned} onClick={() => { void handleTogglePin() }}>
-                  {viewerDoc.pinned ? (
-                    <>
-                      <PinOff className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                      Unpin
-                    </>
-                  ) : (
-                    <>
-                      <Pin className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                      Pin for Mate
-                    </>
-                  )}
-                </Button>
-              )}
-              {/* The Edit toggle NoteEditor is reachable through (moved out
-                  of the deleted notes-panel.tsx's reader sheet) - gated on
-                  kind='note', not just mime==='text/markdown': an uploaded
-                  .md FILE has the same mime but no PATCH /api/notes/:id
-                  route to save through (409 errNotANote). Hidden while a
-                  checklist is running - the same "one mode at a time" rule
-                  as Start checklist above. */}
-              {viewerDoc.kind === 'note' && !viewerChecklistRunning && (
-                <Button type="button" size="sm" variant="outline" onClick={() => setViewerEditing((prev) => !prev)}>
-                  {viewerEditing ? (
-                    <>
-                      <Eye className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                      Read
-                    </>
-                  ) : (
-                    <>
-                      <Pencil className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                      Edit
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-          )}
-          <div className="min-h-0 flex-1 overflow-auto rounded-md border">
-            {viewerLoading && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
-            {viewerError && <p role="alert" className="p-4 text-sm text-destructive">{viewerError}</p>}
-            {!viewerLoading && viewerDoc?.mime === 'application/pdf' && (
-              <iframe title={documentDisplayName(viewerDoc)} src={contentUrlFor(viewerDoc.id)} className="h-full min-h-[70vh] w-full" />
-            )}
-            {!viewerLoading && viewerDoc?.mime.startsWith('image/') && (
-              <img src={contentUrlFor(viewerDoc.id)} alt={documentDisplayName(viewerDoc)} className="max-w-full" />
-            )}
-            {/* ADR 0116: a filed note is a document with mime: 'text/markdown'.
-                Routed through the same NoteMarkdown the deleted
-                notes-panel.tsx's own reader used, so a note reads the same
-                way wherever it's opened from. text/plain, text/csv and
-                application/json stay literal text - a CSV or a JSON blob
-                rendered as markdown would be actively misleading, not an
-                upgrade. Swapped for NoteEditor (ADR 0117) while editing a
-                real note (kind='note'); an uploaded .md FILE has no editor
-                to swap to (see the Edit toggle's own comment above), so it
-                stays read-only regardless of viewerEditing. */}
-            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerChecklistRunning && (
-              <ChecklistRunner
-                noteId={viewerDoc.id}
-                noteTitle={documentDisplayName(viewerDoc)}
-                onExit={() => setViewerChecklistRunning(false)}
-              />
-            )}
-            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && viewerDoc.kind === 'note' && viewerEditing && !viewerChecklistRunning && (
-              <div className="p-1">
-                <NoteEditor key={viewerDoc.id} value={viewerText ?? ''} onSave={handleSaveViewerNote} />
-              </div>
-            )}
-            {!viewerLoading && viewerDoc?.mime === 'text/markdown' && !viewerChecklistRunning && !(viewerDoc.kind === 'note' && viewerEditing) && (
-              <div className="p-4">
-                <AskMateSelection
-                  noteId={viewerDoc.id}
-                  noteTitle={documentDisplayName(viewerDoc)}
-                  mateAvailable={mateAvailable}
-                  onAskMate={onAskMate}
-                >
-                  <NoteMarkdown content={viewerText ?? ''} onNavigate={handleNoteNavigate} />
-                </AskMateSelection>
-              </div>
-            )}
-            {!viewerLoading && viewerDoc && viewerDoc.mime !== 'text/markdown' && !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf' && (
-              <pre className="whitespace-pre-wrap p-4 text-sm">{viewerText ?? ''}</pre>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      <DocumentViewerSheet
+        documentId={viewerId}
+        onDocumentChange={setViewerId}
+        knownDocuments={documents.documents}
+        getNote={unfiled.getNote}
+        patchNote={unfiled.patchNote}
+        onEditDocument={onEditDocument}
+        mateAvailable={mateAvailable}
+        onAskMate={onAskMate}
+        runAction={runAction}
+      />
 
       {/* ADR 0121: the one capture sheet, now reached only through New →
           Note above. onCaptured opens the fresh note straight in the

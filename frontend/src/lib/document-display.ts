@@ -119,3 +119,45 @@ export function formatDocumentTime(iso: string | null | undefined): string | nul
   const mm = String(date.getMinutes()).padStart(2, '0')
   return `${day} ${month} ${year} ${hh}:${mm}`
 }
+
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif', 'bmp'])
+
+function extensionOf(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  return dot > 0 ? filename.slice(dot + 1).toLowerCase() : ''
+}
+
+/**
+ * True for an image. A document that carries no MIME type yet (one the
+ * operator has picked but not saved) is judged by its filename instead.
+ */
+export function documentIsImage(doc: { mime?: string; filename: string }): boolean {
+  if (doc.mime) return doc.mime.startsWith('image/')
+  return IMAGE_EXTENSIONS.has(extensionOf(doc.filename))
+}
+
+const MIME_BADGES: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'image/jpeg': 'JPG',
+  'image/png': 'PNG',
+  'image/gif': 'GIF',
+  'image/webp': 'WEBP',
+  'image/heic': 'HEIC',
+  'text/markdown': 'MD',
+  'text/csv': 'CSV',
+  'text/plain': 'TXT',
+  'application/json': 'JSON',
+}
+
+/**
+ * The short file-type label on a document row: PDF, JPG, NOTE... A note is a
+ * NOTE whatever its MIME type. Otherwise the MIME type names it, then the
+ * filename's extension, then plain FILE.
+ */
+export function documentTypeBadge(doc: { mime?: string; filename: string; kind: string }): string {
+  if (doc.kind === 'note') return 'NOTE'
+  if (doc.mime && MIME_BADGES[doc.mime]) return MIME_BADGES[doc.mime]
+  const ext = extensionOf(doc.filename)
+  if (ext) return ext.slice(0, 5).toUpperCase()
+  return 'FILE'
+}

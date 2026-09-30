@@ -8,9 +8,9 @@ item or on the spot while adding a new one from a bin.
 
 1. Open the item from Equipment, or tap its bin and press **Open** under
    its photo.
-2. In the Photos row at the top of the item, press **Take photo** to use
-   the camera directly, or **Add from library** to pick one or more already
-   on the phone.
+2. In the item's Photos section, press **Take photo** to use the camera
+   directly, or **Add from library** to pick one or more already on the
+   phone.
 3. Each photo appears as a thumbnail once it uploads. Press **Make cover**
    on the one that should show first everywhere the item is listed, and
    **Remove** on any you don't want kept.
