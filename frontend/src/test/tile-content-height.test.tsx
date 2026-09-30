@@ -73,3 +73,34 @@ describe('a shrinkToContent tile', () => {
     expect(report).not.toHaveBeenCalled()
   })
 })
+
+describe('a shrunk tile whose list outgrows it', () => {
+  // Lays out the way the browser does: the card keeps its grid height, and the
+  // content area is flex-1, so it is card minus chrome unless its min-height is
+  // auto, in which case it is pushed out to the content's own height.
+  function stubLayout(cardPx: number, chrome: number, contentPx: number) {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.slot === 'card') return cardPx
+      if (this.dataset.slot === 'card-content') {
+        const stretched = cardPx - chrome
+        return this.classList.contains('min-h-0') ? stretched : Math.max(stretched, contentPx)
+      }
+      if (this.classList.contains('flow-root')) return contentPx
+      return 0
+    })
+  }
+
+  it('reports the taller need so the tile can grow back', () => {
+    stubLayout(128, 50, 40)
+    const report = vi.fn()
+    render(
+      <TileHeightScope id="t" onReport={report}>
+        <Tile title="T" shrinkToContent><p>row</p></Tile>
+      </TileHeightScope>,
+    )
+    expect(report).toHaveBeenLastCalledWith('t', 90)
+    stubLayout(128, 50, 300)
+    observerCb?.()
+    expect(report).toHaveBeenLastCalledWith('t', 350)
+  })
+})

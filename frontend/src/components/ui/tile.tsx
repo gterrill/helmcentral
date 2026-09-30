@@ -135,7 +135,13 @@ export function Tile({
           for a live one; it deliberately does not dim it further with opacity — a
           faded tile reads as "dim screen in the sun," not "this feed is dead," and
           this is the system's loudest state, not its quietest. */}
-      <CardContent className={cn('flex-1 px-3 sm:px-4', fill && 'flex min-h-0 flex-col', stale && 'grayscale')}>
+      <CardContent className={cn('flex-1 px-3 sm:px-4', fill && 'flex min-h-0 flex-col',
+          // min-h-0 so the area is card minus chrome whatever the list needs.
+          // With the default min-height:auto a list taller than a shrunk card
+          // pushes the area out with it, the measurement collapses to the
+          // card's current height, and the tile could never grow back.
+          shrinkToContent && 'min-h-0',
+          stale && 'grayscale')}>
         {shrinkToContent ? (
           // flow-root so the list's own top margin stays inside the measured
           // block; a plain div would let it collapse out and go uncounted.
