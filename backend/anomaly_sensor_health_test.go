@@ -272,14 +272,150 @@ func TestSilentSourcesFiresForATightlyClusteredButStaleBurst(t *testing.T) {
 	}
 }
 
-func TestSilentSourcesExcludesEngineBoundSources(t *testing.T) {
+func TestSilentSourcesSkipsPluginOutputs(t *testing.T) {
 	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
 	sources := []sourceHealth{
-		{Source: "n2k.engine.port", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
+		{Source: "some-plugin", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200, Plugin: true},
 	}
-	excluded := map[string]bool{"n2k.engine.port": true}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a quiet plugin output never to be reported, got %v", got)
+	}
+}
+
+// A dotted source with no bus type, such as a GX's venus service, is
+// hardware and stays watched.
+func TestSilentSourcesStillReportsDottedSourceWithoutBusType(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	sources := []sourceHealth{
+		{Source: "gx.alternator.0", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
+	}
+	got := silentSources(sources, now, 2*time.Second, nil)
+	if len(got) != 1 || got[0] != "gx.alternator.0" {
+		t.Fatalf("silentSources: got %v, want [gx.alternator.0]", got)
+	}
+}
+
+func TestSilentSourcesSkipsEngineBoundSources(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200, EngineBound: true},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a quiet engine-bound source not to be reported, got %v", got)
+	}
+}
+
+func TestSilentSourcesExcludedSetStillApplies(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	sources := []sourceHealth{
+		{Source: "n2k.chartplotter", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
+	}
+	excluded := map[string]bool{"n2k.chartplotter": true}
 	if got := silentSources(sources, now, 2*time.Second, excluded); len(got) != 0 {
-		t.Fatalf("expected an excluded engine-bound source never to fire, got %v", got)
+		t.Fatalf("expected an ignored source never to fire, got %v", got)
+	}
+}
+
+func TestSilentSourcesExcusesDeviceThatWentQuietWithTheEngine(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	engineLast := now.Add(-5 * time.Minute)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-20 * time.Minute), Last: engineLast, Count: 200, EngineBound: true},
+		{Source: "n2k.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(-12 * time.Second), Count: 200},
+		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a device quiet within the key-off window of the engine not to be reported, got %v", got)
+	}
+}
+
+func TestSilentSourcesReportsDeviceThatWentQuietLongAfterTheEngine(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	engineLast := now.Add(-20 * time.Minute)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-40 * time.Minute), Last: engineLast, Count: 200, EngineBound: true},
+		{Source: "n2k.dcdc.1", First: now.Add(-40 * time.Minute), Last: engineLast.Add(10 * time.Minute), Count: 200},
+		{Source: "n2k.gps", First: now.Add(-40 * time.Minute), Last: now.Add(-1 * time.Second), Count: 2400},
+	}
+	got := silentSources(sources, now, 2*time.Second, nil)
+	if len(got) != 1 || got[0] != "n2k.dcdc.1" {
+		t.Fatalf("silentSources: got %v, want [n2k.dcdc.1]", got)
+	}
+}
+
+func TestSilentSourcesReportsDeviceQuietWhileTheEngineIsStillLive(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200, EngineBound: true},
+		{Source: "n2k.dcdc.1", First: now.Add(-20 * time.Minute), Last: now.Add(-5 * time.Minute), Count: 200},
+	}
+	got := silentSources(sources, now, 2*time.Second, nil)
+	if len(got) != 1 || got[0] != "n2k.dcdc.1" {
+		t.Fatalf("silentSources: got %v, want [n2k.dcdc.1]", got)
+	}
+}
+
+// A gateway that dies while the engines run takes the engine sources and
+// every device behind it quiet together. Nothing on the engine's connection
+// is alive, so that is a failure, not a key-off.
+func TestSilentSourcesReportsGatewayOutageAcrossEngineAndDevices(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	last := now.Add(-5 * time.Minute)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-20 * time.Minute), Last: last, Count: 200, EngineBound: true},
+		{Source: "n2k.depth", First: now.Add(-20 * time.Minute), Last: last, Count: 200},
+		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: last.Add(-12 * time.Second), Count: 200},
+	}
+	got := silentSources(sources, now, 2*time.Second, nil)
+	want := []string{"gx.dcdc.1", "n2k.depth", "n2k.engine.port"}
+	if len(got) != len(want) {
+		t.Fatalf("silentSources: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("silentSources: got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestSilentSourcesKeyOffWithConnectionAliveReportsNothing(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	engineLast := now.Add(-5 * time.Minute)
+	sources := []sourceHealth{
+		{Source: "n2k.engine.port", First: now.Add(-20 * time.Minute), Last: engineLast, Count: 200, EngineBound: true},
+		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
+		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(12 * time.Second), Count: 200},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a key-off with a live connection to report nothing, got %v", got)
+	}
+}
+
+// A connection that carries only engine sources cannot be told apart from a
+// key-off, so its silence is accepted.
+func TestSilentSourcesDedicatedEngineConnectionIsAcceptedAsKeyOff(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	sources := []sourceHealth{
+		{Source: "eng.port", First: now.Add(-20 * time.Minute), Last: now.Add(-5 * time.Minute), Count: 200, EngineBound: true},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected a dedicated engine connection going quiet not to be reported, got %v", got)
+	}
+}
+
+// A companion at the 120 s floor goes quiet before a slow-cadence engine
+// source reaches its own scaled threshold; it must still be excused.
+func TestSilentSourcesExcusesCompanionBeforeEngineSourceCountsAsQuiet(t *testing.T) {
+	now := time.Date(2026, 9, 25, 7, 0, 0, 0, time.UTC)
+	engineLast := now.Add(-200 * time.Second)
+	sources := []sourceHealth{
+		// ~31 s average gap: scaled threshold ~310 s, not yet reached.
+		{Source: "n2k.engine.port", First: engineLast.Add(-15 * time.Minute), Last: engineLast, Count: 30, EngineBound: true},
+		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
+		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(-12 * time.Second), Count: 200},
+	}
+	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+		t.Fatalf("expected the companion to be excused while the engine source is not yet quiet, got %v", got)
 	}
 }
 
