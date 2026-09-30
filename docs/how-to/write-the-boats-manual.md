@@ -11,7 +11,7 @@ enough to see the shape.
 
 ## 1. Capture as you go
 
-Open **Documents** and choose **New → Note**. The note opens straight into
+Open **Documents** and choose **More actions → New note**. The note opens straight into
 the full editor - headings, lists, tables and links are all there in the
 toolbar from the first word, not something added on a later pass. Write the
 note and press Ctrl+Enter, or Cmd+Enter on a Mac, or use the Capture button.
@@ -28,7 +28,7 @@ plain sentences like this one, and the toolbar can sit there unused.
 
 ## 2. Start a manual
 
-Open **Documents** and choose **New → Folder**. At the top level of the
+Open **Documents** and choose **More actions → New folder**. At the top level of the
 library it offers a **Manual** checkbox - check it, give the manual a name,
 and it opens empty. That is deliberate: a manual is assembled from notes you
 have already captured, not typed into a blank outline.

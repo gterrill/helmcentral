@@ -50,4 +50,28 @@ describe('Page', () => {
     render(<Page title="Generator">content</Page>)
     expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument()
   })
+
+  // Documents' "New note" carries a kind submenu (Auto, Procedure, ...).
+  it('a secondary action with a submenu opens it and runs the chosen entry', async () => {
+    const onAuto = vi.fn()
+    const onIntent = vi.fn()
+    render(
+      <Page
+        title="Documents"
+        secondaryActions={[
+          { label: 'New folder', onClick: vi.fn() },
+          { label: 'New note', onClick: vi.fn(), onIntent, submenu: [{ label: 'Auto', onClick: onAuto }, { label: 'Plain note', onClick: vi.fn() }] },
+        ]}
+      >
+        content
+      </Page>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    const trigger = await screen.findByRole('menuitem', { name: 'New note' })
+    fireEvent.pointerEnter(trigger)
+    expect(onIntent).toHaveBeenCalled()
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Auto' }))
+    expect(onAuto).toHaveBeenCalled()
+  })
 })
