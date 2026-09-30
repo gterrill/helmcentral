@@ -378,8 +378,10 @@ func TestDocumentStore_CreateEquipmentRoundTripsAliasesZoneAndBin(t *testing.T) 
 	if item.Status != "deployed" {
 		t.Fatalf("expected status to default to deployed, got %q", item.Status)
 	}
-	if item.Quantity != 1 {
-		t.Fatalf("expected quantity to default to 1, got %d", item.Quantity)
+	// The store keeps the quantity it is given (zero is a spare that has run
+	// out); the default of one for an omitted quantity is the handler's.
+	if item.Quantity != 0 {
+		t.Fatalf("expected the store to keep an unset quantity as given, got %d", item.Quantity)
 	}
 
 	got, err := store.GetEquipment(item.ID)

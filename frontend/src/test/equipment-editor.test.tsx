@@ -65,6 +65,8 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     model: '13.5 kW',
     serial: '',
     quantity: 1,
+    part_number: '',
+    required_quantity: null,
     status: 'deployed',
     zone_id: null,
     bin_id: null,
@@ -348,13 +350,13 @@ describe('EquipmentEditor', () => {
     expect(within(aside).getByText(`${window.location.origin}/inventory/equipment/eq-1`)).toBeInTheDocument()
   })
 
-  // ADR 0142: Manufacturer+Model and Serial+Quantity sit side by side (a
+  // ADR 0142: Manufacturer+Model and Part number+On hand sit side by side (a
   // container-query FormRow), not each on its own line.
-  it('lays Manufacturer+Model and Serial+Quantity out as FormRow pairs', async () => {
+  it('lays Manufacturer+Model and Part number+On hand out as FormRow pairs', async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    for (const [a, b] of [['Manufacturer', 'Model'], ['Serial', 'Quantity']]) {
+    for (const [a, b] of [['Manufacturer', 'Model'], ['Part number', 'On hand']]) {
       const row = screen.getByLabelText(a).closest('[data-slot="form-row"]')
       expect(row, `${a} is in a FormRow`).not.toBeNull()
       expect(row).toContainElement(screen.getByLabelText(b))

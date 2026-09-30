@@ -103,7 +103,12 @@ export interface EquipmentItem {
   manufacturer: string
   model: string
   serial: string
+  /** How many are on board. 0 is valid: a spare that has run out. */
   quantity: number
+  /** The supplier's part number for a spare; '' when none. */
+  part_number: string
+  /** How many the boat should carry; null when no target is set. */
+  required_quantity: number | null
   status: EquipmentStatus
   zone_id: string | null
   bin_id: string | null
@@ -147,6 +152,8 @@ export interface EquipmentInput {
   model: string
   serial: string
   quantity: number
+  part_number: string
+  required_quantity: number | null
   status: EquipmentStatus
   zone_id: string | null
   bin_id: string | null
@@ -173,6 +180,8 @@ export const BLANK_DRAFT: EquipmentInput = {
   model: '',
   serial: '',
   quantity: 1,
+  part_number: '',
+  required_quantity: null,
   status: 'deployed',
   zone_id: null,
   bin_id: null,
@@ -597,6 +606,8 @@ export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
     model: item.model,
     serial: item.serial,
     quantity: item.quantity,
+    part_number: item.part_number,
+    required_quantity: item.required_quantity,
     status: item.status,
     zone_id: item.zone_id,
     bin_id: item.bin_id,

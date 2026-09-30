@@ -12,8 +12,8 @@ import { initialRegularSettingsDraft } from '@/components/settings/settings-draf
 
 let vesselSettings = { engines: [] as unknown[], house_bank: null as unknown }
 const equipmentItems = [
-  { id: 'eq-1', name: 'Port engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
-  { id: 'eq-2', name: 'Starboard engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
+  { id: 'eq-1', name: 'Port engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '', required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
+  { id: 'eq-2', name: 'Starboard engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '', required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
 ]
 // A single dashboard page, mutated by the mock's PATCH handler exactly like
 // the real backend would -- lets "apply gauge zones" tests assert on

@@ -38,6 +38,8 @@ meets your needs.
   per system aboard, its documents, where it lives, and the profile it follows.
 - [Maintenance](features/maintenance.md), what's due on running hours, on the
   calendar, or both, and the service log it's completed into.
+- [Import](features/import.md), bringing equipment, spares, the service log,
+  notes and documents across from YachtWave.
 
 ## How-to guides
 
@@ -72,6 +74,8 @@ Steps for specific tasks.
   asking Mate for a schedule and applying what it proposes.
 - [Log a service](how-to/log-a-service.md), completing a scheduled job or
   recording a repair or improvement.
+- [Import from YachtWave](how-to/import-from-yachtwave.md), page by page
+  through the import wizard.
 - [Development](how-to/development.md), running the stack, tests and release builds.
 
 ## Reference
@@ -84,6 +88,8 @@ Lookup material: fields, formats, environment variables and file paths.
   format for engines, alternators and generators.
 - [Provider plugins](reference/plugins.md), the WASM sandbox and the per-category
   contracts.
+- [YachtWave import fields](reference/yachtwave-import.md), where each part
+  of a YachtWave export ends up.
 - [POI categories](reference/poi-categories.md), the eleven points-of-interest
   categories and each provider's coverage.
 

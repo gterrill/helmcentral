@@ -79,6 +79,7 @@ export const SETTINGS_HELP_TARGETS: Record<SettingsSectionId, HelpTarget> = {
   tiles: { page: 'reference/plugins' },
   security: { page: 'reference/configuration', heading: 'Security' },
   logs: HELP_INDEX,
+  import: { page: 'features/import' },
 }
 
 /** Every Inventory section's help target, keyed by InventorySectionId - ADR

@@ -324,6 +324,8 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusBadRequest, errEquipmentInvalidSystem.Error()
 	case errors.Is(err, errEquipmentInvalidStatus):
 		return http.StatusBadRequest, errEquipmentInvalidStatus.Error()
+	case errors.Is(err, errEquipmentQuantityInvalid):
+		return http.StatusBadRequest, errEquipmentQuantityInvalid.Error()
 	case errors.Is(err, errEquipmentLocationMismatch):
 		return http.StatusBadRequest, errEquipmentLocationMismatch.Error()
 	// ADR 0127's photo routes (inventory_store.go's own "equipment photos"
@@ -343,6 +345,16 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusNotFound, errMaintenanceLogEntryNotFound.Error()
 	case errors.Is(err, errMaintenanceLogPhotoNotFound):
 		return http.StatusNotFound, errMaintenanceLogPhotoNotFound.Error()
+	// Imports (import_store.go) share this mapping too: their errors carry
+	// their own explanatory text, so the message is the error's own.
+	case errors.Is(err, errImportRunNotFound):
+		return http.StatusNotFound, errImportRunNotFound.Error()
+	case errors.Is(err, errImportRunNotDraft):
+		return http.StatusConflict, errImportRunNotDraft.Error()
+	case errors.Is(err, errImportInvalid):
+		return http.StatusBadRequest, err.Error()
+	case errors.Is(err, errImportConflict):
+		return http.StatusConflict, err.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}

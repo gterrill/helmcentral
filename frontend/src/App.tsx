@@ -392,6 +392,9 @@ export function App() {
   // deliberately NOT reset when leaving Settings, so returning to Settings
   // later (without a section-specific deep link) lands back where it was.
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(initialLocation.section ?? 'general')
+  // The Import section's wizard run, `/settings/import/<runId>` ("new" is the
+  // upload page); null on the list. Cleared whenever the section changes.
+  const [settingsImportRunId, setSettingsImportRunId] = useState<string | null>(initialLocation.importRunId ?? null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
@@ -1171,6 +1174,7 @@ export function App() {
     }
     if (loc.panel === 'settings') {
       setSettingsSection(loc.section ?? 'general')
+      setSettingsImportRunId(loc.importRunId ?? null)
     }
     if (loc.panel === 'assistant') {
       setMatePanelConversationId(loc.conversationId ?? null)
@@ -1225,6 +1229,7 @@ export function App() {
       panel: activePanel,
       pageId: activePageId,
       section: settingsSection,
+      importRunId: activePanel === 'settings' ? settingsImportRunId : null,
       conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
       displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
       documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
@@ -1252,7 +1257,7 @@ export function App() {
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
   }, [
-    shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId,
+    shellVisible, isDisplay, activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId,
     documentsFolderId, documentsEditId, documentsSectionId, wallDisplaysSlug,
     inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
   ])
@@ -1340,6 +1345,7 @@ export function App() {
           panel: activePanel,
           pageId: activePageId,
           section: settingsSection,
+          importRunId: activePanel === 'settings' ? settingsImportRunId : null,
           conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
           displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
           documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
@@ -1354,7 +1360,7 @@ export function App() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [
     shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, requestWithinInventory, applyAppLocation,
-    activePanel, activePageId, settingsSection, matePanelConversationId, wallDisplaysSlug,
+    activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId, wallDisplaysSlug,
     documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
   ])
 
@@ -3014,7 +3020,9 @@ export function App() {
             ref={settingsPageRef}
             onDirtyChange={setSettingsDirty}
             activeSectionId={settingsSection}
-            onSectionChange={setSettingsSection}
+            onSectionChange={(id) => { setSettingsSection(id); setSettingsImportRunId(null) }}
+            importRunId={settingsImportRunId}
+            onImportRunChange={setSettingsImportRunId}
             onAskMate={openMate}
           />
         )

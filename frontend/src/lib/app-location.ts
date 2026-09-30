@@ -15,6 +15,9 @@ export interface AppLocation {
   panel: PanelId | null
   pageId?: string | null
   section?: SettingsSectionId
+  /** The Import section's wizard: `/settings/import/<runId>`, where "new" is the
+   * upload page. null on the bare `/settings/import` list; absent elsewhere. */
+  importRunId?: string | null
   conversationId?: string | null
   /** ADR 0106 F1: the Documents panel's current folder, null for the root.
    * Absent (undefined) on every other panel/location. */
@@ -148,6 +151,11 @@ export function parseAppLocation(pathname: string): AppLocation {
       section = 'assistant'
     } else if (second !== undefined && isSettingsSectionId(second)) {
       section = second
+    }
+    if (section === 'import') {
+      const runSegment = segments[2]
+      const importRunId = runSegment !== undefined ? decodeSegment(runSegment) : null
+      return { panel: 'settings', section, importRunId: importRunId || null }
     }
     return { panel: 'settings', section }
   }
@@ -327,6 +335,7 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
   if (loc.panel === 'settings') {
     const section = loc.section ?? 'general'
     if (section === 'assistant') return '/settings/mate'
+    if (section === 'import' && loc.importRunId) return `/settings/import/${encodeURIComponent(loc.importRunId)}`
     return section === 'general' ? '/settings' : `/settings/${section}`
   }
 

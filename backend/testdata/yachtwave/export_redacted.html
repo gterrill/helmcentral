@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Vessel Export: Pikorua</title>
+    <!-- [2026-09-21] Favicon: local copy of the yachtwave.com icon set (reports/img/). The old
+         https://www.yachtwave.com/favicon.ico link 404'd after the website moved its icons. -->
+    <link rel="icon" type="image/svg+xml" href="/v3/reports/img/favicon.svg">
+    <link rel="icon" type="image/png" sizes="96x96" href="/v3/reports/img/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/v3/reports/img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/v3/reports/img/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="/v3/reports/img/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/v3/reports/img/apple-touch-icon.png">
+    <link rel="stylesheet" href="/v3/reports/css/common.css?v=20260824c">
+    <!-- [2026-09-02] Created Vessel Export template (design approved via the 2026-09-02 mock artifact).
+         Skeleton follows the As Fitted template: a 1024px .main-container table whose DIRECT <tr>
+         children are the header, the identity card, the contents strip, one <tr> per section, and
+         the footer — so common.css's print pagination (sections may break, nested record rows stay
+         whole) applies unchanged. Print and Save-as-PDF are owned by common.css; the ONLY local
+         @media print rules below are for the two containers common.css cannot reach by its table
+         selectors (.vx-tbl-wrap, .vx-thumbs), mirroring what tasks.html does for its flex/grid.
+         [2026-09-05] Phone layout added (max-width 640px, screen only): data tables re-lay as
+         stacked label/value cards using the data-label / .vx-pri hooks _vxTable() emits. -->
+    <style>
+        /* ---- Identity card ---------------------------------------------------- */
+        .vx-subline { margin: 14px 0 0 0; padding-top: 12px; border-top: 1px solid #e5e9f2; font-size: 12px; color: #8492A6; line-height: 1.7; }
+        .vx-sub-item { display: inline-block; margin-right: 24px; white-space: nowrap; }
+        .vx-sub-item b { color: #1f2a37; font-weight: 600; }
+
+        /* ---- Contents strip: one tile per section, count + name --------------- */
+        .vx-contents { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+        .vx-tile { display: block; border: 1px solid #e5e9f2; border-bottom: 2px solid #e5e9f2; border-radius: 4px; padding: 10px 6px 8px 6px; text-align: center; text-decoration: none; color: #1f2a37; }
+        .vx-tile:hover, .vx-tile:focus { background: #f7fafd; border-bottom-color: #0478CC; }
+        .vx-tile-n { display: block; font-size: 22px; font-weight: 700; color: #0478CC; font-variant-numeric: tabular-nums; line-height: 1.1; }
+        .vx-tile-k { display: block; margin-top: 3px; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px; }
+        .vx-tile.empty .vx-tile-n { color: #c3ccda; }
+
+        /* ---- Sections ---------------------------------------------------------- */
+        .vx-section { padding: 20px 15px 0 15px; }
+        .vx-band { background-color: #2C3E50; padding: 9px 14px; border-radius: 4px 4px 0 0; }
+        .vx-band h2 { margin: 0; font-size: 13px; font-weight: 800; color: #ffffff; text-transform: uppercase; letter-spacing: 2px; }
+        .vx-band .vx-count { margin: 0; font-size: 12px; color: rgba(255,255,255,0.7); font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 12px; }
+        .vx-body { border: 1px solid #e5e9f2; border-top: 0; border-radius: 0 0 4px 4px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #1f2a37; line-height: 1.45; }
+        .vx-empty { margin: 0; padding: 18px 14px; font-size: 13px; color: #8492A6; }
+        .vx-grp { padding: 9px 14px 6px 14px; font-size: 11px; font-weight: 700; color: #2C3E50; text-transform: uppercase; letter-spacing: 0.6px; border-bottom: 1px solid #e5e9f2; background: #f7fafd; display: flex; justify-content: space-between; gap: 12px; }
+        .vx-grp span { font-weight: 400; color: #8492A6; text-transform: none; letter-spacing: 0; }
+        .vx-cap { margin: 0; padding: 10px 14px; font-size: 12px; color: #8492A6; border-top: 1px solid #e5e9f2; background: #fbfcfe; }
+
+        /* ---- Tables ------------------------------------------------------------ */
+        .vx-tbl-wrap { overflow-x: auto; }
+        table.vx-t { width: 100%; border-collapse: collapse; }
+        table.vx-t th { text-align: left; padding: 8px 12px; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e5e9f2; font-weight: 700; white-space: nowrap; background: #f4f4f4; }
+        table.vx-t td { padding: 8px 12px; border-bottom: 1px solid #e5e9f2; vertical-align: top; }
+        table.vx-t tbody tr:last-child td { border-bottom: 0; }
+        table.vx-t tbody tr:nth-child(even) td { background: #fbfcfe; }
+        table.vx-t td.num, table.vx-t th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        /* Date columns: values are a fixed short 'j M Y', so nowrap cannot widen the
+           table past the sheet — it only stops '9 Jan / 2012' splitting on A4. */
+        table.vx-t td.dt { white-space: nowrap; }
+        table.vx-t td b { font-weight: 600; }
+        table.vx-t tr.vx-total td { background: #f7fafd !important; border-top: 2px solid #e5e9f2; }
+        .vx-mono { font-family: "Courier New", Courier, monospace; font-size: 12px; white-space: nowrap; }
+        .vx-muted { color: #8492A6; }
+        .vx-sub { display: block; font-size: 11px; color: #8492A6; margin-top: 2px; font-weight: 400; }
+        /* [2026-09-21] Document file links (Documents section: name + File cell). */
+        a.vx-link { color: #0478CC; text-decoration: none; }
+        a.vx-link:hover { text-decoration: underline; }
+        /* [2026-09-21] Documents attached to an engine / equipment item, listed under its name. */
+        .vx-docs { display: block; margin-top: 6px; font-size: 11px; font-weight: 400; line-height: 1.5; }
+        .vx-docs-k { display: block; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #8492A6; }
+        .vx-doc { display: block; overflow-wrap: anywhere; }
+
+        /* ---- Particulars grid -------------------------------------------------- */
+        .vx-particulars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .vx-pf { padding: 10px 14px; border-bottom: 1px solid #e5e9f2; border-right: 1px solid #e5e9f2; min-width: 0; }
+        .vx-pf:nth-child(3n) { border-right: 0; }
+        .vx-pf:nth-last-child(-n+3) { border-bottom: 0; }
+        .vx-lbl { margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px; }
+        .vx-pv { margin: 0; font-size: 14px; font-weight: 600; color: #1f2a37; overflow-wrap: anywhere; }
+        .vx-pv.empty { color: #c3ccda; font-weight: 400; }
+        .vx-pv.mono { font-family: "Courier New", Courier, monospace; letter-spacing: 0.3px; }
+        .vx-desc { padding: 12px 14px; border-top: 1px solid #e5e9f2; }
+        .vx-desc p { margin: 4px 0 0 0; max-width: 72em; }
+
+        /* ---- Chips ------------------------------------------------------------- */
+        .vx-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; line-height: 1.5; white-space: nowrap; }
+        .vx-chip.ok { background: #e6f4ec; color: #2E8B57; }
+        .vx-chip.warn { background: #fbf3d9; color: #8a6400; }
+        .vx-chip.bad { background: #fbe7e7; color: #D64545; }
+        .vx-chip.neutral { background: #e5e9f2; color: #2C3E50; }
+        .vx-chip.wave { background: #e3f0fb; color: #0478CC; }
+
+        /* ---- Checklist progress ------------------------------------------------ */
+        .vx-bar { height: 6px; background: #e5e9f2; border-radius: 3px; overflow: hidden; width: 90px; display: inline-block; vertical-align: middle; margin-right: 8px; }
+        .vx-bar i { display: block; height: 100%; background: #0478CC; }
+
+        /* ---- Notes ------------------------------------------------------------- */
+        .vx-note { padding: 12px 14px; border-bottom: 1px solid #e5e9f2; }
+        .vx-note:last-child { border-bottom: 0; }
+        .vx-note-h { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+        .vx-note-h b { font-size: 14px; font-weight: 600; }
+        .vx-note p { margin: 6px 0 0 0; max-width: 78em; }
+
+        /* ---- Photos ------------------------------------------------------------ */
+        .vx-thumbs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
+        .vx-thumb { position: relative; aspect-ratio: 4 / 3; border-radius: 4px; overflow: hidden; background: #e5e9f2; }
+        .vx-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .vx-thumb span { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px; font-size: 10px; color: #ffffff; background: rgba(44,62,80,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* ---- Responsive (screen only — print must not match) ------------------ */
+        /* Tablet: two-up identity fields and particulars, four-up contents tiles.
+           Data tables keep their columns and scroll sideways inside .vx-tbl-wrap. */
+        @media only screen and (max-width: 900px) {
+            .hdr-table, .hdr-row { display: block !important; width: 100% !important; }
+            .hdr-field { display: inline-block !important; width: 48% !important; padding-right: 0 !important; padding-bottom: 14px !important; vertical-align: bottom !important; box-sizing: border-box !important; }
+            .vx-contents { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .vx-particulars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .vx-pf:nth-child(3n) { border-right: 1px solid #e5e9f2; }
+            .vx-pf:nth-child(2n) { border-right: 0; }
+            /* [2026-09-05] Two columns means the last ROW is two cells, not three:
+               restore the third-from-last cell's rule and clear only the last two. */
+            .vx-pf:nth-last-child(-n+3) { border-bottom: 1px solid #e5e9f2; }
+            .vx-pf:nth-last-child(-n+2) { border-bottom: 0; }
+            .vx-thumbs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+
+        /* [2026-09-05] Phone. The page was designed for 1024px; at phone widths the
+           sixteen data tables (four to seven columns each) could only scroll sideways
+           inside .vx-tbl-wrap, which on a 390px screen means every row is read a third at a
+           time. Below 640px each table is re-laid as a list of CARDS instead: <thead> is
+           hidden, each <tr> becomes a block, and each <td> becomes one "label / value" line
+           whose label is drawn from the data-label attribute _vxTable() puts on every cell.
+           The column that carries the row's identity (Name, Task, Work done… — the one
+           _vxTable() marks .vx-pri) is pulled to the top of the card as its title with no
+           label. Everything else (chips, sub-lines, progress bars) is unchanged markup and
+           renders inside the value column. Screen-only by the media query, so the print
+           path — which must stay a table for common.css's pagination — never sees any of
+           it, and a desktop is untouched. The two containers with inline padding on the
+           markup (outer page cell, identity card) are reached with :has(); a browser
+           without :has() simply keeps the 20px. */
+        @media only screen and (max-width: 640px) {
+            /* Page chrome: give the width back to the content */
+            body > table.print-bg > tbody > tr > td { padding: 8px !important; }
+            .main-container { border-radius: 4px !important; }
+            .responsive-padding { padding-left: 14px !important; padding-right: 14px !important; }
+            .print-header { padding-top: 14px !important; padding-bottom: 14px !important; }
+            .print-footer { padding-top: 16px !important; padding-bottom: 16px !important; }
+
+            /* Identity card: one field per line, sub-line as a two-column list */
+            td:has(> .hdr-table) { padding: 14px !important; }
+            .hdr-field { display: block !important; width: 100% !important; padding-bottom: 10px !important; }
+            .vx-subline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 12px; line-height: 1.5; }
+            .vx-sub-item { display: block; margin: 0; white-space: normal; overflow-wrap: anywhere; }
+
+            /* Contents strip: three-up, slightly smaller tiles */
+            .vx-contents { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+            .vx-tile { padding: 8px 4px 6px 4px; }
+            .vx-tile-n { font-size: 18px; }
+            .vx-tile-k { font-size: 9px; letter-spacing: 0.3px; overflow-wrap: anywhere; }
+
+            /* Sections: tighter gutters, band title and count stacked */
+            .vx-section { padding: 14px 8px 0 8px; }
+            .vx-band { padding: 8px 12px; }
+            .vx-band h2 { font-size: 12px; letter-spacing: 1px; }
+            .vx-band table td { display: block; text-align: left; }
+            .vx-band .vx-count { padding-left: 0; margin-top: 2px; white-space: normal; }
+            .vx-grp { padding: 8px 12px 6px 12px; flex-wrap: wrap; gap: 2px 12px; }
+            .vx-empty, .vx-cap, .vx-desc { padding-left: 12px; padding-right: 12px; }
+
+            /* Particulars: stays two-up from the tablet block; slightly tighter */
+            .vx-pf { padding: 8px 12px; }
+            .vx-pv { font-size: 13px; }
+
+            /* Data tables -> stacked cards */
+            .vx-tbl-wrap { overflow-x: visible; }
+            table.vx-t, table.vx-t tbody { display: block; width: 100%; }
+            table.vx-t thead { display: none; }
+            table.vx-t tbody tr { display: flex; flex-direction: column; padding: 9px 12px; border-bottom: 1px solid #e5e9f2; }
+            table.vx-t tbody tr:last-child { border-bottom: 0; }
+            table.vx-t tbody tr:nth-child(even) { background: #fbfcfe; }
+            table.vx-t tbody tr:nth-child(even) td { background: transparent; }
+            table.vx-t tr.vx-total { background: #f7fafd; border-top: 2px solid #e5e9f2; }
+            table.vx-t tr.vx-total td { background: transparent !important; border-top: 0; }
+            table.vx-t td { display: block; position: relative; padding: 3px 0 3px 40%; border-bottom: 0; min-height: 1.45em; overflow-wrap: anywhere; }
+            table.vx-t td::before { content: attr(data-label); position: absolute; left: 0; top: 5px; width: 37%; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            table.vx-t td.num, table.vx-t td.dt { text-align: left; white-space: normal; }
+            table.vx-t td.vx-pri { order: -1; padding: 0 0 4px 0; font-size: 14px; }
+            table.vx-t td.vx-pri::before { display: none; }
+            table.vx-t td:empty { display: none; }
+            .vx-mono { white-space: normal; }
+            .vx-bar { width: 70px; }
+
+            /* Notes and photos */
+            .vx-note { padding: 10px 12px; }
+            .vx-note-h { flex-wrap: wrap; gap: 2px 12px; }
+            .vx-thumbs { gap: 6px; padding: 10px 12px; }
+        }
+        /* Very narrow phones: particulars single-column, photos two-up */
+        @media only screen and (max-width: 340px) {
+            .vx-particulars { grid-template-columns: 1fr; }
+            .vx-pf { border-right: 0 !important; }
+            .vx-pf:nth-last-child(-n+2) { border-bottom: 1px solid #e5e9f2; }
+            .vx-pf:last-child { border-bottom: 0; }
+            .vx-thumbs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+
+        /* ---- Print: only what common.css cannot reach ------------------------- */
+        /* common.css un-clips .main-container tables and cells; these two are divs
+           (a scroll wrapper and the photo grid) and would otherwise clip on paper. */
+        @media print {
+            .vx-tbl-wrap { overflow: visible !important; }
+            .vx-thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .vx-tile, .vx-thumb { break-inside: avoid; }
+            /* Each section is one .main-container row holding a two-row wrapper table
+               (band, body). common.css §5 keeps every NESTED row whole, which is right
+               for the record rows of table.vx-t but wrong for the wrapper: a section
+               taller than the space left on the sheet was pushed whole to the next
+               page, leaving a blank tail. Let the wrapper rows fragment; the record
+               rows inside them keep common.css's `avoid`. */
+            .vx-section > table > tbody > tr,
+            .vx-section > table > tbody > tr > td {
+                break-inside: auto !important;
+                page-break-inside: auto !important;
+            }
+        }
+    </style>
+</head>
+<body class="print-bg" style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4;">
+    <table class="print-bg" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f4f4f4;">
+        <tr>
+            <td align="center" style="padding: 20px 20px;">
+
+                <!-- Main Container -->
+                <table class="main-container" role="presentation" width="1024" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; max-width: 1024px; width: 100%;">
+
+                    <!-- Header -->
+                    <tr>
+                        <td class="responsive-padding print-header" style="background-color: #0478CC; padding: 20px 20px;">
+                            <table class="header-table" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="vertical-align: middle;">
+                                        <img class="print-logo" src="https://yachtwave.com/logos/yachtwave-logo-horizontal-no-border-white.svg?v=20251215" alt="YACHTWAVE" style="height: 31px; display: block;">
+                                    </td>
+                                    <td align="right" style="vertical-align: middle;">
+                                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff;">Vessel Export</p>
+                                        <p class="header-date" style="margin: 4px 0 0 0; font-size: 14px; color: rgba(255,255,255,0.8);">Generated 30 Sep 2026, 19:28 UTC</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Identity card: Name / Model / Year / Builder / HIN, fitted to one line by fit-text.js -->
+                    <tr>
+                        <td style="padding: 15px 15px 5px 15px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border: 1px solid #e5e9f2; border-radius: 4px; overflow: hidden;">
+                                <tr>
+                                    <td style="padding: 20px;">
+                                        <table class="hdr-table fit-strip" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr class="hdr-row">
+                                                <td class="hdr-field" style="vertical-align: bottom; padding-right: 20px;">
+                                                    <p class="fit-t" style="margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px;">Name</p>
+                                                    <h1 class="notranslate fit-t" style="margin: 0; font-size: 22px; font-weight: bold; color: #0478CC;">Pikorua</h1>
+                                                </td>
+                                                <td class="hdr-field" style="vertical-align: bottom; padding-right: 20px;">
+                                                    <p class="fit-t" style="margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px;">Model</p>
+                                                    <h1 class="notranslate fit-t" style="margin: 0; font-size: 22px; font-weight: bold; color: #0478CC;">W-60</h1>
+                                                </td>
+                                                <td class="hdr-field" style="vertical-align: bottom; padding-right: 20px;">
+                                                    <p class="fit-t" style="margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px;">Year</p>
+                                                    <h1 class="fit-t" style="margin: 0; font-size: 22px; font-weight: bold; color: #0478CC;">2024</h1>
+                                                </td>
+                                                <td class="hdr-field" style="vertical-align: bottom; padding-right: 20px;">
+                                                    <p class="fit-t" style="margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px;">Builder</p>
+                                                    <h1 class="notranslate fit-t" style="margin: 0; font-size: 22px; font-weight: bold; color: #0478CC;">Granocean</h1>
+                                                </td>
+                                                <td class="hdr-field" style="vertical-align: bottom;">
+                                                    <p class="fit-t" style="margin: 0 0 2px 0; font-size: 10px; color: #8492A6; text-transform: uppercase; letter-spacing: 0.5px;">HIN</p>
+                                                    <h1 class="notranslate fit-t" style="margin: 0; font-size: 22px; font-weight: bold; color: #0478CC;">XXTST00001A000</h1>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <p class="vx-subline"><span class="vx-sub-item">Flag <b>Cook Islands</b></span><span class="vx-sub-item">Hailing port <b>Sydney, Australia</b></span><span class="vx-sub-item">Type <b>Catamaran (Power)</b></span><span class="vx-sub-item">Status <b>In Service</b></span><span class="vx-sub-item">Units <b>Metric</b></span><span class="vx-sub-item">Vessel ID <b>0000</b></span></p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Contents strip -->
+                    <tr>
+                        <td style="padding: 10px 15px 0 15px;">
+                            <nav class="vx-contents" aria-label="Sections"><a class="vx-tile" href="#particulars"><span class="vx-tile-n">13</span><span class="vx-tile-k">Particulars</span></a><a class="vx-tile" href="#crew"><span class="vx-tile-n">2</span><span class="vx-tile-k">Crew</span></a><a class="vx-tile" href="#engines"><span class="vx-tile-n">3</span><span class="vx-tile-k">Engines</span></a><a class="vx-tile" href="#equipment"><span class="vx-tile-n">11</span><span class="vx-tile-k">Equipment</span></a><a class="vx-tile" href="#inventory"><span class="vx-tile-n">36</span><span class="vx-tile-k">Inventory</span></a><a class="vx-tile empty" href="#services"><span class="vx-tile-n">0</span><span class="vx-tile-k">Service Schedules</span></a><a class="vx-tile" href="#maintenance"><span class="vx-tile-n">13</span><span class="vx-tile-k">Maintenance Log</span></a><a class="vx-tile empty" href="#cruises"><span class="vx-tile-n">0</span><span class="vx-tile-k">Cruise Log</span></a><a class="vx-tile empty" href="#general"><span class="vx-tile-n">0</span><span class="vx-tile-k">General Log</span></a><a class="vx-tile empty" href="#readings"><span class="vx-tile-n">0</span><span class="vx-tile-k">Readings</span></a><a class="vx-tile" href="#tasks"><span class="vx-tile-n">9</span><span class="vx-tile-k">Tasks</span></a><a class="vx-tile" href="#checklists"><span class="vx-tile-n">7</span><span class="vx-tile-k">Checklists</span></a><a class="vx-tile" href="#notes"><span class="vx-tile-n">13</span><span class="vx-tile-k">Notes</span></a><a class="vx-tile" href="#documents"><span class="vx-tile-n">4</span><span class="vx-tile-k">Documents</span></a><a class="vx-tile empty" href="#expenses"><span class="vx-tile-n">0</span><span class="vx-tile-k">Expenses</span></a><a class="vx-tile" href="#photos"><span class="vx-tile-n">3</span><span class="vx-tile-k">Photos</span></a></nav>
+                        </td>
+                    </tr>
+
+                    <!-- Sections (one <tr> each, generated) -->
+                    <tr>
+                        <td class="vx-section" id="particulars">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Vessel Particulars</h2></td>
+                                                <td align="right"><p class="vx-count">13 of 18 fields set</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-particulars"><div class="vx-pf"><p class="vx-lbl">Length overall</p><p class="vx-pv">17.9 m</p></div><div class="vx-pf"><p class="vx-lbl">Beam</p><p class="vx-pv">8.7 m</p></div><div class="vx-pf"><p class="vx-lbl">Draft</p><p class="vx-pv">1.2 m</p></div><div class="vx-pf"><p class="vx-lbl">Clearance</p><p class="vx-pv">5.64 m</p></div><div class="vx-pf"><p class="vx-lbl">Displacement</p><p class="vx-pv">32 kg</p></div><div class="vx-pf"><p class="vx-lbl">Hull type</p><p class="vx-pv">Catamaran</p></div><div class="vx-pf"><p class="vx-lbl">Hull material</p><p class="vx-pv">Fiberglass</p></div><div class="vx-pf"><p class="vx-lbl">Brand</p><p class="vx-pv">Granocean</p></div><div class="vx-pf"><p class="vx-lbl">Date acquired</p><p class="vx-pv empty">Not set</p></div><div class="vx-pf"><p class="vx-lbl">Hull ID (HIN)</p><p class="vx-pv mono">XXTST00001A000 <span class="vx-chip neutral">Unverified</span></p></div><div class="vx-pf"><p class="vx-lbl">USCG documentation no.</p><p class="vx-pv empty">Not set</p></div><div class="vx-pf"><p class="vx-lbl">Registration</p><p class="vx-pv empty">Not set</p></div><div class="vx-pf"><p class="vx-lbl">IMO</p><p class="vx-pv empty">Not set</p></div><div class="vx-pf"><p class="vx-lbl">MMSI</p><p class="vx-pv mono">123456789</p></div><div class="vx-pf"><p class="vx-lbl">Call sign</p><p class="vx-pv mono">XX1234</p></div><div class="vx-pf"><p class="vx-lbl">EPIRB beacon ID</p><p class="vx-pv empty">Not set</p></div><div class="vx-pf"><p class="vx-lbl">Shore power</p><p class="vx-pv">Dual × 125/250 volt | 30/50 amp</p></div><div class="vx-pf"><p class="vx-lbl">System voltage</p><p class="vx-pv">24v</p></div></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="crew">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Crew & Access</h2></td>
+                                                <td align="right"><p class="vx-count">2 people</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:34%">Name</th><th>Role</th><th>Status</th><th class="dt">Member since</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Name"><b>Alex Morgan</b></td><td data-label="Role">Owner</td><td data-label="Status"><span class="vx-chip ok">Accepted</span></td><td class="dt" data-label="Member since">27 Jan 2025</td></tr><tr><td class="vx-pri" data-label="Name"><b>Sam Rivers</b></td><td data-label="Role">Crew</td><td data-label="Status"><span class="vx-chip ok">Accepted</span></td><td class="dt" data-label="Member since">28 Jan 2025</td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="engines">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Engines</h2></td>
+                                                <td align="right"><p class="vx-count">3 engines · 2 inboard, 1 generator</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Engine</th><th>Type</th><th>Serial</th><th class="dt">Installed</th><th class="num">Hours</th><th class="dt">Last reading</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Engine"><b>Cummins QSB 6.7</b><span class="vx-sub">Port · 550 hp · Diesel</span></td><td data-label="Type">Inboard</td><td data-label="Serial"><span class="vx-mono">10000001</span></td><td class="dt" data-label="Installed">27 Jan 2025</td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td><td class="dt" data-label="Last reading"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Engine"><b>Cummins QSB 6.7</b><span class="vx-sub">STBD · 550 hp · Diesel</span></td><td data-label="Type">Inboard</td><td data-label="Serial"><span class="vx-mono">10000002</span></td><td class="dt" data-label="Installed">28 Jan 2025</td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td><td class="dt" data-label="Last reading"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Engine"><b>Cummins Onan</b><span class="vx-sub">STBD · Diesel</span></td><td data-label="Type">Generator</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">28 Jan 2025</td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td><td class="dt" data-label="Last reading"><span class="vx-muted">—</span></td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="equipment">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Equipment</h2></td>
+                                                <td align="right"><p class="vx-count">11 items · grouped by location</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-grp">Engine Room - Port<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>ZEN 100</b><span class="vx-sub">Water</span></td><td data-label="Type">Water (Maker)</td><td data-label="Manufacturer">Schenker Watermakers</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">1 Jan 2025</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Engine Room - Starboard<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>xys</b><span class="vx-sub">Water</span></td><td data-label="Type">Water (Maker)</td><td data-label="Manufacturer">Rainman Desalination</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">19 Jun 2026</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Flybridge<span>5 items</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>BR1 PRO 5G</b><span class="vx-sub">Electronics</span></td><td data-label="Type">Electronics (Satellite)</td><td data-label="Manufacturer">Peplink</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">17 Aug 2026</td><td data-label="Service"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>BR1-PRO 5G</b><span class="vx-sub">Other</span></td><td data-label="Type">Other</td><td data-label="Manufacturer">Other (Not Listed)</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">--</td><td data-label="Service"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>DRS4D-NX-E</b><span class="vx-sub">Flybridge · Electronics</span></td><td data-label="Type">Electronics (Radar)</td><td data-label="Manufacturer">Furuno</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">17 Jun 2024</td><td data-label="Service"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>TZT2BB</b><span class="vx-sub">Electronics</span></td><td data-label="Type">Electronics (Chartplotter)</td><td data-label="Manufacturer">Furuno</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">1 Jun 2024</td><td data-label="Service"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Vesper Cortex</b><span class="vx-sub">Communications</span></td><td data-label="Type">Radio (VHF)</td><td data-label="Manufacturer">Garmin</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">1 Jun 2024</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Lockers - Port<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>HBE5453UC</b><span class="vx-sub">Galley · Other</span></td><td data-label="Type">Other</td><td data-label="Manufacturer">Bosch</td><td data-label="Serial"><span class="vx-mono">000272</span></td><td class="dt" data-label="Installed">--</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Radar Arch<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>Gen2</b><span class="vx-sub">Communications</span></td><td data-label="Type">Antenna (Satellite TV)</td><td data-label="Manufacturer">Starlink</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">1 Nov 2024</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Salon<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>GlobalFix V5</b><span class="vx-sub">Safety &amp; Security</span></td><td data-label="Type">Beacon (EPIRB)</td><td data-label="Manufacturer">ACR Electronics</td><td data-label="Serial"><span class="vx-mono">EPIRB-REDACTED</span></td><td class="dt" data-label="Installed">1 Nov 2024</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div><div class="vx-grp">Salon - Starboard<span>1 item</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Item</th><th>Type</th><th>Manufacturer</th><th>Serial</th><th class="dt">Installed</th><th>Service</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>50UR761HOCA</b><span class="vx-sub">TV Cabinet · Audio/Visual (AV)</span></td><td data-label="Type">A/V (Television)</td><td data-label="Manufacturer">LG Electronics</td><td data-label="Serial"><span class="vx-mono">--</span></td><td class="dt" data-label="Installed">--</td><td data-label="Service"><span class="vx-muted">—</span></td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="inventory">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Inventory & Spares</h2></td>
+                                                <td align="right"><p class="vx-count">36 items · 1 below required</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:32%">Item</th><th>Part no.</th><th class="num">On board / required</th><th>Location</th><th>Type</th><th>State</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Item"><b>Hydraulic Oil - PTO and/or Crane</b><span class="vx-sub">Mobile DTE 10 Excel 32    Q/320585 MTC 314</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Engine Room - Port</td><td data-label="Type">Hydraulics</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Hydraulic Oil - Tenderlift</b><span class="vx-sub">Mobil DTE 25 ULTRA  Q/320585 MTC 314</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">1</td><td data-label="Location">Engine Room - Starboard</td><td data-label="Type">Hydraulics</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Air Filter - Cummins</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">Unknown</span></td><td class="num" data-label="On board / required">2 / 2</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>EPM 10 Carbon Block Filter Cartridge</b><span class="vx-sub">Flybridge Setee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">Pentair 155634-43</span></td><td class="num" data-label="On board / required">3 / 3</td><td data-label="Location">Flybridge</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>FB Lounge - Locker 1</b><span class="vx-sub">SS Nut Kit
+SS Screws
+Tape
+Hose Clamps
+Socket Set</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge</td><td data-label="Type">Tools</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>FB Lounge - Locker 2</b><span class="vx-sub">Hacksaw
+Mallet
+Heavy Wrench
+Cleaning pads
+Allen Keys</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge</td><td data-label="Type">Tools</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>FB Lounge - Locker 3</b><span class="vx-sub">Solar Controllers</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge</td><td data-label="Type">Hardware</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>FB Lounge - Locker 4</b><span class="vx-sub">Electrical Connectors
+Multi Meter
+Wire
+240 V Converter</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge</td><td data-label="Type">Tools</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Fuel Filter - Fleet Guard</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">395 9612</span></td><td class="num" data-label="On board / required">7 / 7</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Fuel Filter - Racor</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">2040 TM- OR</span></td><td class="num" data-label="On board / required">15 / 15</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Impeller Kit - Cummins</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">3974456</span></td><td class="num" data-label="On board / required">3 / 3</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Micro V Belt - Gates</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">8PK1525TR</span></td><td class="num" data-label="On board / required">2 / 2</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Oil Filter ZF</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">3213 308019</span></td><td class="num" data-label="On board / required">1 / 1</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>ONAN Fuel Filter</b><span class="vx-sub">Settee - Locker 2</span></td><td data-label="Part no."><span class="vx-mono">AO26K278</span></td><td class="num" data-label="On board / required">1 / 1</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>ONAN Oil Cartridge Filter</b><span class="vx-sub">Settee - Locker 2</span></td><td data-label="Part no."><span class="vx-mono">0185-5835</span></td><td class="num" data-label="On board / required">1 / 1</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Penoil Zinc Anode - Cummins</b><span class="vx-sub">Locker 2 - Under FB Dining Table · 0130-4434</span></td><td data-label="Part no."><span class="vx-mono">0130-4434</span></td><td class="num" data-label="On board / required">3</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Racor Seal Kit</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">21669</span></td><td class="num" data-label="On board / required">0 / 1</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-chip bad">Out of stock</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Service Kit Minor - Cummins</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">0541-1519</span></td><td class="num" data-label="On board / required">4 / 4</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Small Alternator Belt</b><span class="vx-sub">Locker 2 - Under FB Dining Table</span></td><td data-label="Part no."><span class="vx-mono">Unknown</span></td><td class="num" data-label="On board / required">2 / 2</td><td data-label="Location">Flybridge</td><td data-label="Type">Engine</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>EPM Micron Filter Sediment Filter</b><span class="vx-sub">Settee - Locker 1 · Need to double check the part number</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">3 / 3</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Grease Gun &amp; Grease</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Hardware</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Jumper Cables</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Hardware</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Oil Pump Extractor</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Hardware</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Silicone &amp; Liquid Nails</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Construction</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Spare Bilge - 2000GPH</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">1 / 1</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Tie Down Straps</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Hardware</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>US Shore Power Cable</b><span class="vx-sub">Settee - Locker 3</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">1</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">High Voltage</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Watermaker Schenker Cleaning 1 Bottle</b><span class="vx-sub">Settee - Locker 1 · Used when you plan to leave your watermaker unused for a long period of time.</span></td><td data-label="Part no."><span class="vx-mono">001-201-001-SC1</span></td><td class="num" data-label="On board / required">1</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Watermaker Schenker Cleaning 2 bottle</b><span class="vx-sub">Settee - Locker 1 · Unsure of use - check manual</span></td><td data-label="Part no."><span class="vx-mono">001-201-002-SC2</span></td><td class="num" data-label="On board / required">1</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Watermaker Separ filter</b><span class="vx-sub">Settee - Locker 1</span></td><td data-label="Part no."><span class="vx-mono">01030</span></td><td class="num" data-label="On board / required">10</td><td data-label="Location">Flybridge - Starboard</td><td data-label="Type">Plumbing</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Bridle</b><span class="vx-sub">Large Starboard Forward Locker · Bridle used for anchoring</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">Rigging and Sails</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Hazardous Chemicals (Cleaning)</b><span class="vx-sub">Large Forward Locker Starboard · Turpentine, mineral spirits, etc</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">Supplies</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Rags</b><span class="vx-sub">Large Starboard Forward Locker · Extra bag of rags</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">Supplies</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Rust Remover, Boat Wash, Mineral Turpentine, Metal Wax (Polish), Salt Remover, Window Cleaner</b><span class="vx-sub">Large Starboard Forward Locker · Rust Remover, Boat Wash, Mineral Turpentine, Metal Wax (Polish), Salt Remover, Window Cleaner</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">Supplies</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Soda Stream</b><span class="vx-sub">Large Starboard Forward Locker · Two cartons of soda stream - various flavours</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">Food (General)</td><td data-label="State"><span class="vx-muted">—</span></td></tr><tr><td class="vx-pri" data-label="Item"><b>Wet Vac</b><span class="vx-sub">Large Starboard Forward Locker · Wet Vac plus extra filter</span></td><td data-label="Part no."><span class="vx-mono">--</span></td><td class="num" data-label="On board / required">0</td><td data-label="Location">Lockers - Starboard</td><td data-label="Type">HVAC</td><td data-label="State"><span class="vx-muted">—</span></td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="services">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Service Schedules</h2></td>
+                                                <td align="right"><p class="vx-count">None</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><p class="vx-empty">None recorded.</p></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="maintenance">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Maintenance Log</h2></td>
+                                                <td align="right"><p class="vx-count">13 entries · most recent first</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th class="dt">Date</th><th style="width:36%">Work done</th><th>Type</th><th>Engine / equipment</th><th class="num">Hours</th></tr></thead><tbody><tr><td class="dt" data-label="Date">31 Aug 2026</td><td class="vx-pri" data-label="Work done"><b>Turn thru hole seacocks on and off</b></td><td data-label="Type">Mechanical (Other)</td><td data-label="Engine / equipment"><span class="vx-muted">—</span></td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">8 Jun 2026</td><td class="vx-pri" data-label="Work done"><b>Watermaker filter changed</b><span class="vx-sub">Changed carbon filter (White cannister) and orange sediment filter (Orange cannister).</span></td><td data-label="Type">Plumbing</td><td data-label="Engine / equipment"><span class="vx-muted">—</span></td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">26 Jan 2026</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">Generator service:
+- Replace generator oil.
+- Replace generator oil filter.
+- Replace primary fuel filter.
+- Replace secondary fuel filter.
+- Prime fuel system.
+- Inspect fuel lines, connections and clamps.
+- Clean sea strainer.
+- Replace raw water pump impeller and end plate gasket.
+- Replace sacrificial anode.
+- Inspect all raw water cooling system hoses, clamps and
+connections.
+- Inspect fresh water cooling system hoses, clamps and
+connections.
+- Inspect exhaust system.
+- Inspect generator mounts.
+Test run:
+- Carry out pre-start inspections.
+- Start generator.
+- Monitor and record all gauge readings at idle.
+- Run generator up to operating temperature and inspect
+generator with thermal imaging camera.
+- Inspect generator for any faults or running issues.
+- Apply load to generator and monitor.
+- Shut down generator.
+- Inspect generator for any leaks.
+
+Detail:
+- Clean bilge beneath generator and engine room surfaces.</span></td><td data-label="Type">Generator</td><td data-label="Engine / equipment">Cummins Onan</td><td class="num" data-label="Hours">467</td></tr><tr><td class="dt" data-label="Date">26 Jan 2026</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">Engine service:
+- Replace engine oil &amp; filter.
+- Replace primary fuel filter.
+- Replace secondary fuel filter.
+- Prime fuel system.
+- Inspect fuel lines, connections and clamps.
+- Clean sea strainer.
+- Remove raw water pump from engine, replace impeller and end plate gasket and refit to engine with new gasket.
+- Replace raw water pump inlet hose clamps.
+- Replace sacrificial anodes.
+- Inspect all raw water cooling system hoses, clamps and
+connections.
+- Inspect all fresh water cooling system hoses, clamps and
+connections.
+- Replace intake air filter.
+- Inspect exhaust system.
+- Inspect engine mounts.
+
+Test run:
+- Carry out pre-start inspections.
+- Start engine. Monitor and record all gauge readings at idle.
+- Run engine up to operating temperature and inspect
+engine and transmission with thermal imaging camera.
+- Inspect engine and transmission for any faults or running issues
+- Shut down engine.
+- Inspect engine for any leaks.</span></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">711</td></tr><tr><td class="dt" data-label="Date">26 Jan 2026</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">Engine service:
+- Replace engine oil &amp; filter.
+- Replace primary &amp; secondary fuel filter.
+- Prime fuel system.
+- Inspect fuel lines, connections and clamps.
+- Clean sea strainer.
+- Remove raw water pump from engine, replace impeller and end plate gasket, refit with new gasket.
+- Replace raw water pump inlet hose clamps.
+- Replace sacrificial anodes.
+- Inspect all raw water cooling system hoses, clamps and
+connections.
+- Inspect all fresh water cooling system hoses, clamps and
+connections.
+- Replace intake air filter.
+- Inspect exhaust system.
+- Inspect engine mounts.
+
+Test run:
+- Carry out pre-start inspections.
+- Start engine.
+- Monitor and record all gauge readings at idle.
+- Run engine up to operating temperature and inspect
+engine
+and transmission with thermal imaging camera.
+- Inspect engine and transmission for any faults or running
+issues.
+- Shut down engine.
+- Inspect engine for any leaks.
+Detail:
+- Clean bilge beneath engine and engine room surfaces</span></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">729</td></tr><tr><td class="dt" data-label="Date">18 Dec 2025</td><td class="vx-pri" data-label="Work done"><b>Air Conditioning Service</b><span class="vx-sub">AC units are in closets in staterooms, to the right of the console in the flybridge and in the ceiling for the main salon.</span></td><td data-label="Type">Appliance</td><td data-label="Engine / equipment"><span class="vx-muted">—</span></td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">27 Jun 2025</td><td class="vx-pri" data-label="Work done"><b>Watermaker Service</b><span class="vx-sub">Re mounted unit so it’s more ‘relaxed’ installation. Installed a new pressure pipe from the 5 micron filter to the unit, Installed a 3-way valve and T-piece to allow for easy chemical cleaning. We’ve left cleaning hoses coiled up next to the unit, Chemically cleaned the unit, Changed 5 micron filter and carbon filter, Changed the damaged pressure gauge, Changed the brine discharge hose and installed a hose-barb fitting onto the overboard discharge manifold.</span></td><td data-label="Type">Plumbing</td><td data-label="Engine / equipment">ZEN 100</td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">29 Mar 2025</td><td class="vx-pri" data-label="Work done"><b>Replace Blackwater Tank Charcoal Filter</b><span class="vx-sub">Suggested by shipwright to remove toilet smell</span></td><td data-label="Type">Plumbing</td><td data-label="Engine / equipment"><span class="vx-muted">—</span></td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">9 Jan 2025</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">- Remove and replace oil filter,fuel filters and anode with
+customer supplied parts.
+- Inspect raw water impellor,belts and pulleys.
+- Replace impellor.</span></td><td data-label="Type">Generator</td><td data-label="Engine / equipment"><span class="vx-muted">—</span></td><td class="num" data-label="Hours"><span class="vx-muted">—</span></td></tr><tr><td class="dt" data-label="Date">9 Jan 2025</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">- Found alternator bracket different from port engine
+causing belt to be slightly loose and intermittently
+slipping.Correct Bracket needs to be ordered and fitted.
+- Nil brackets available at time of servicing,customer
+representative aware.
+- Starboard oil recovery pump not operating,attempt to
+repair,unable to get operating,customer representative
+aware.
+- Technician used own pump to remove oils from engine
+and gearbox.</span></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">582</td></tr><tr><td class="dt" data-label="Date">9 Jan 2025</td><td class="vx-pri" data-label="Work done"><b>Complete Service</b><span class="vx-sub">Scheduled Engine Maintenance.
+Exhaust leak found on turbo outlet - repaired under warranty.</span></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">598</td></tr><tr><td class="dt" data-label="Date">16 Nov 2024</td><td class="vx-pri" data-label="Work done"><b>Service</b></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">50</td></tr><tr><td class="dt" data-label="Date">16 Nov 2024</td><td class="vx-pri" data-label="Work done"><b>Service</b></td><td data-label="Type">Engine</td><td data-label="Engine / equipment">Cummins QSB 6.7</td><td class="num" data-label="Hours">50</td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="cruises">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Cruise Log</h2></td>
+                                                <td align="right"><p class="vx-count">None</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><p class="vx-empty">None recorded.</p></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="general">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>General Log</h2></td>
+                                                <td align="right"><p class="vx-count">None</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><p class="vx-empty">None recorded.</p></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="readings">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Readings</h2></td>
+                                                <td align="right"><p class="vx-count">None</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><p class="vx-empty">None recorded.</p></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="tasks">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Tasks</h2></td>
+                                                <td align="right"><p class="vx-count">9 tasks · 6 open, 3 completed</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-grp">Open<span>6 tasks · 5 overdue</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:36%">Task</th><th>Priority</th><th>Assigned to</th><th class="dt">Due</th><th>Status</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Task"><b>Racor Filter valve</b></td><td data-label="Priority"><span class="vx-chip neutral">Low</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Due">31 Jul 2025</td><td data-label="Status"><span class="vx-chip bad">Overdue</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>LED light</b></td><td data-label="Priority"><span class="vx-chip neutral">Low</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Due">31 Aug 2025</td><td data-label="Status"><span class="vx-chip bad">Overdue</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>VLANs</b></td><td data-label="Priority"><span class="vx-chip warn">Medium</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Due">1 Sep 2025</td><td data-label="Status"><span class="vx-chip bad">Overdue</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>Change watermaker sediment filter - orange housing</b></td><td data-label="Priority"><span class="vx-chip neutral">Low</span></td><td data-label="Assigned to">Sam Rivers</td><td class="dt" data-label="Due">8 Jul 2026</td><td data-label="Status"><span class="vx-chip bad">Overdue</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>Service Lifejackets</b></td><td data-label="Priority"><span class="vx-chip warn">Medium</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Due">10 Sep 2026</td><td data-label="Status"><span class="vx-chip bad">Overdue</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>Change watermaker carbon filter - white cannister</b></td><td data-label="Priority"><span class="vx-chip warn">Medium</span></td><td data-label="Assigned to">Sam Rivers</td><td class="dt" data-label="Due">2 Feb 2027</td><td data-label="Status"><span class="vx-chip neutral">Open</span></td></tr></tbody></table></div><div class="vx-grp">Completed<span>3 tasks</span></div><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:36%">Task</th><th>Priority</th><th>Assigned to</th><th class="dt">Completed</th><th>Status</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Task"><b>Install Tailscale on Maretron MConnect</b></td><td data-label="Priority"><span class="vx-chip neutral">Low</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Completed">3 Mar 2026</td><td data-label="Status"><span class="vx-chip ok">Done</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>Install Rustdesk on Ship Computer</b></td><td data-label="Priority"><span class="vx-chip neutral">Low</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Completed">3 Mar 2026</td><td data-label="Status"><span class="vx-chip ok">Done</span></td></tr><tr><td class="vx-pri" data-label="Task"><b>Set up Venus OS Large</b></td><td data-label="Priority"><span class="vx-chip warn">Medium</span></td><td data-label="Assigned to">Alex Morgan</td><td class="dt" data-label="Completed">13 Jul 2025</td><td data-label="Status"><span class="vx-chip ok">Done</span></td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="checklists">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Checklists</h2></td>
+                                                <td align="right"><p class="vx-count">7 checklists</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:32%">Checklist</th><th>Progress</th><th class="num">Steps</th><th>State</th><th class="dt">Last activity</th><th>Created by</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Checklist"><b>Arrival (Power)</b><span class="vx-sub">Template · A boat (power) arrival checklist is a comprehensive list of tasks and items that need to be addressed when a boat arrives at a specific location, such as a marina, dock, or port. The checklist is designed to ensure that the arrival process is smooth, efficient, and complies with safety regulations.
+
+*NOTE: The specific items on the checklist may vary depending on the type and size of the boat, as well as the regulations of the particular location. Add, delete or modify the steps as needed for your particular situation.</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 14</td><td class="num" data-label="Steps">14</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">13 Mar 2026</td><td data-label="Created by">Sam R.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Arrival (Power)</b><span class="vx-sub">Template · A boat (power) arrival checklist is a comprehensive list of tasks and items that need to be addressed when a boat arrives at a specific location, such as a marina, dock, or port. The checklist is designed to ensure that the arrival process is smooth, efficient, and complies with safety regulations.
+
+*NOTE: The specific items on the checklist may vary depending on the type and size of the boat, as well as the regulations of the particular location. Add, delete or modify the steps as needed for your particular situation.</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 14</td><td class="num" data-label="Steps">14</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">13 Mar 2026</td><td data-label="Created by">Sam R.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Arrival (Power)</b><span class="vx-sub">A boat (power) arrival checklist is a comprehensive list of tasks and items that need to be addressed when a boat arrives at a specific location, such as a marina, dock, or port. The checklist is designed to ensure that the arrival process is smooth, efficient, and complies with safety regulations.
+
+*NOTE: The specific items on the checklist may vary depending on the type and size of the boat, as well as the regulations of the particular location. Add, delete or modify the steps as needed for your particular situation.</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 14</td><td class="num" data-label="Steps">14</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">13 Mar 2026</td><td data-label="Created by">Sam R.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Departure (Power)</b><span class="vx-sub">Template · A pre-departure checklist for a boat is a crucial tool to ensure the safety, readiness, and compliance of the vessel before setting sail. Going through a pre-departure checklist helps mitigate risks, prevent accidents, and enhance overall boating experiences.
+
+*NOTE: The specific items on the checklist may vary depending on the type and size of the boat, as well as the regulations of the particular location. Add, delete or modify the steps as needed for your particular situation.</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 44</td><td class="num" data-label="Steps">44</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">28 Apr 2026</td><td data-label="Created by">Alex M.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Departure (Power)</b><span class="vx-sub">A pre-departure checklist for a boat is a crucial tool to ensure the safety, readiness, and compliance of the vessel before setting sail. Going through a pre-departure checklist helps mitigate risks, prevent accidents, and enhance overall boating experiences.
+
+*NOTE: The specific items on the checklist may vary depending on the type and size of the boat, as well as the regulations of the particular location. Add, delete or modify the steps as needed for your particular situation.</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:93%"></i></span>41 / 44</td><td class="num" data-label="Steps">44</td><td data-label="State"><span class="vx-chip wave">In progress</span></td><td class="dt" data-label="Last activity">28 Apr 2026</td><td data-label="Created by">Sam R.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Engine Checks</b><span class="vx-sub">Template · Procedures to check the engines</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 5</td><td class="num" data-label="Steps">5</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">28 Apr 2026</td><td data-label="Created by">Sam R.</td></tr><tr><td class="vx-pri" data-label="Checklist"><b>Engine Checks</b><span class="vx-sub">Procedures to check the engines</span></td><td data-label="Progress"><span class="vx-bar"><i style="width:0%"></i></span>0 / 5</td><td class="num" data-label="Steps">5</td><td data-label="State"><span class="vx-chip neutral">Not started</span></td><td class="dt" data-label="Last activity">28 Apr 2026</td><td data-label="Created by">Sam R.</td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="notes">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Notes</h2></td>
+                                                <td align="right"><p class="vx-count">13 notes</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-note"><div class="vx-note-h"><b>Alternators</b><span class="vx-muted">14 Aug 2026</span></div><p>Port alternator part number is on the data plate. 24-volt, high output.</p></div><div class="vx-note"><div class="vx-note-h"><b>Haulout</b><span class="vx-muted">28 Apr 2026</span></div><p>- Close seacocks for AC, engine and generator when lifting<br />
+- Open fridge<br />
+- Flush water maker<br />
+- Shut off breakers in flybridge and main panel (except galley)</p></div><div class="vx-note"><div class="vx-note-h"><b>NMEA Devices</b><span class="vx-muted">7 Apr 2026</span></div><p>40: Depth transducer</p></div><div class="vx-note"><div class="vx-note-h"><b>Autopilot</b><span class="vx-muted">25 Mar 2026</span></div><p>1. Turn the engine keys on before the autopilot.<br />
+2. Turn the jog lever off before changing autopilot mode.<br />
+3. Sensor changes on the plotter carry over to the autopilot.</p></div><div class="vx-note"><div class="vx-note-h"><b>Solar Panels</b><span class="vx-muted">8 Feb 2026</span></div><p>https://example.com/solar-panels</p></div><div class="vx-note"><div class="vx-note-h"><b>CZone Config</b><span class="vx-muted">2 Feb 2026</span></div><p>1. Put the plotter in bypass before writing the config.<br />
+2. Update the favourites file after any change.</p></div><div class="vx-note"><div class="vx-note-h"><b>Hydraulic Manual Override</b><span class="vx-muted">18 Jan 2026</span></div><p>When the hydraulic electronics fail:<br />
+- Hold the override lever open.<br />
+- Thrusters and windlass then work from the lockers.</p></div><div class="vx-note"><div class="vx-note-h"><b>CZone Config</b><span class="vx-muted">18 Jan 2026</span></div><p>1. Update config<br />
+2. Update favourites<br />
+3. Update both units (via wifi or USB) - this turns everything off<br />
+4. Turn everything back on</p></div><div class="vx-note"><div class="vx-note-h"><b>AC Compressor Units</b><span class="vx-muted">14 Dec 2025</span></div><p>Flybridge: <br />
+- Behind the table<br />
+Salon:<br />
+- Behind the third panel</p></div><div class="vx-note"><div class="vx-note-h"><b>Handover Tips</b><span class="vx-muted">11 Dec 2025</span></div><p>Summary of handover notes:<br />
+ * **Engine:**<br />
+ * Check the bilge and strainers before starting.<br />
+ * **Passwords &amp; Controls:**<br />
+ * Computer login: `user@redacted.example`, Password: `hunter2-redacted`.</p></div><div class="vx-note"><div class="vx-note-h"><b>AC Panel Pushed In</b><span class="vx-muted">11 May 2025</span></div><p>Pop the panel off with a screwdriver and lift it out.</p></div><div class="vx-note"><div class="vx-note-h"><b>Windows Password</b><span class="vx-muted">11 May 2025</span></div><p>Password: `hunter2-redacted`</p></div><div class="vx-note"><div class="vx-note-h"><b>Wifi</b><span class="vx-muted">29 Jan 2025</span></div><p>Redacted1</p></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="documents">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Documents</h2></td>
+                                                <td align="right"><p class="vx-count">4 documents</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-tbl-wrap"><table class="vx-t" cellspacing="0" cellpadding="0" border="0"><thead><tr><th style="width:30%">Document</th><th>Type</th><th>Attached to</th><th class="dt">Added</th><th class="dt">Expires</th><th>State</th><th class="num">File</th></tr></thead><tbody><tr><td class="vx-pri" data-label="Document"><b><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000001.pdf" target="_blank" rel="noopener noreferrer">Mackay Marina</a></b></td><td data-label="Type">Receipt</td><td data-label="Attached to">Pikorua</td><td class="dt" data-label="Added">29 Jan 2025</td><td class="dt" data-label="Expires"><span class="vx-muted">—</span></td><td data-label="State"><span class="vx-chip neutral">Reference</span></td><td class="num" data-label="File"><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000001.pdf" target="_blank" rel="noopener noreferrer">103 KB PDF</a></td></tr><tr><td class="vx-pri" data-label="Document"><b><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000004.pdf" target="_blank" rel="noopener noreferrer">Receipt</a></b><span class="vx-sub">Receipt</span></td><td data-label="Type">Receipt</td><td data-label="Attached to">Log Maintenance</td><td class="dt" data-label="Added">28 Jan 2025</td><td class="dt" data-label="Expires"><span class="vx-muted">—</span></td><td data-label="State"><span class="vx-chip neutral">Reference</span></td><td class="num" data-label="File"><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000004.pdf" target="_blank" rel="noopener noreferrer">62 KB PDF</a></td></tr><tr><td class="vx-pri" data-label="Document"><b><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000003.pdf" target="_blank" rel="noopener noreferrer">Receipt</a></b></td><td data-label="Type">Receipt</td><td data-label="Attached to">Log Maintenance</td><td class="dt" data-label="Added">29 Jan 2025</td><td class="dt" data-label="Expires"><span class="vx-muted">—</span></td><td data-label="State"><span class="vx-chip neutral">Reference</span></td><td class="num" data-label="File"><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000003.pdf" target="_blank" rel="noopener noreferrer">63 KB PDF</a></td></tr><tr><td class="vx-pri" data-label="Document"><b><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000002.pdf" target="_blank" rel="noopener noreferrer">Receipt</a></b></td><td data-label="Type">Receipt</td><td data-label="Attached to">Log Maintenance</td><td class="dt" data-label="Added">29 Jan 2025</td><td class="dt" data-label="Expires"><span class="vx-muted">—</span></td><td data-label="State"><span class="vx-chip neutral">Reference</span></td><td class="num" data-label="File"><a class="vx-link" href="https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000002.pdf" target="_blank" rel="noopener noreferrer">62 KB PDF</a></td></tr></tbody></table></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="expenses">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Expenses</h2></td>
+                                                <td align="right"><p class="vx-count">None</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><p class="vx-empty">None recorded.</p></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="vx-section" id="photos">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td class="vx-band">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td><h2>Photos</h2></td>
+                                                <td align="right"><p class="vx-count">3 photos</p></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="vx-body"><div class="vx-thumbs"><div class="vx-thumb"><img src="https://images.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000007.jpe" alt="Inventory · 26 Feb 2025" loading="lazy"><span>Inventory · 26 Feb 2025</span></div><div class="vx-thumb"><img src="https://images.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000005.jpe" alt="Inventory · 26 Feb 2025" loading="lazy"><span>Inventory · 26 Feb 2025</span></div><div class="vx-thumb"><img src="https://images.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000006.jpe" alt="Pikorua · 26 Feb 2025" loading="lazy"><span>Pikorua · 26 Feb 2025</span></div></div></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+
+                    <!-- Spacer before footer -->
+                    <tr><td style="height: 20px;"></td></tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td class="responsive-padding print-footer" style="background-color: #8492A6; padding: 25px 40px;">
+                            <table class="footer-table" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td>
+                                        <p style="margin: 0; font-size: 12px; color: rgba(255,255,255,0.6);">Pikorua · Vessel Export · 30 Sep 2026</p>
+                                    </td>
+                                    <td class="footer-copyright" align="right">
+                                        <p style="margin: 0; font-size: 12px; color: rgba(255,255,255,0.6);">&copy; 2026 YACHTWAVE. All rights reserved.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- End Main Container -->
+
+            </td>
+        </tr>
+    </table>
+    <!-- Same-origin fit script (the vhost CSP has no 'unsafe-inline'): keeps the five
+         identity fields on one line on screen and on paper. Page is correct without it. -->
+    <script src="/v3/reports/js/fit-text.js?v=20260824" defer></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v0redactedredactedredactedredacted0000000000000" integrity="sha512-REDACTED" data-cf-beacon='{"version":"2024.11.0","token":"00000000000000000000000000000000","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

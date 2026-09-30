@@ -48,23 +48,27 @@ var installDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 // accept - a full replace on PUT, matching CreateEquipment/UpdateEquipment's
 // own whole-record contract (inventory_store.go).
 type equipmentRequest struct {
-	Name           string   `json:"name"`
-	Category       string   `json:"category"`
-	System         string   `json:"system"`
-	Manufacturer   string   `json:"manufacturer"`
-	Model          string   `json:"model"`
-	Serial         string   `json:"serial"`
-	Quantity       int      `json:"quantity"`
-	Status         string   `json:"status"`
-	ZoneID         *string  `json:"zone_id"`
-	BinID          *string  `json:"bin_id"`
-	LocationDetail string   `json:"location_detail"`
-	InstallDate    string   `json:"install_date"`
-	HourMeterPath  string   `json:"hour_meter_path"`
-	ProfileID      string   `json:"profile_id"`
-	Aliases        []string `json:"aliases"`
-	VerifiedAboard bool     `json:"verified_aboard"`
-	Notes          string   `json:"notes"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	System       string `json:"system"`
+	Manufacturer string `json:"manufacturer"`
+	Model        string `json:"model"`
+	Serial       string `json:"serial"`
+	PartNumber   string `json:"part_number"`
+	Quantity     *int   `json:"quantity"`
+	// RequiredQuantity is how many of a spare the boat should carry; null or
+	// absent when nobody has said.
+	RequiredQuantity *int     `json:"required_quantity"`
+	Status           string   `json:"status"`
+	ZoneID           *string  `json:"zone_id"`
+	BinID            *string  `json:"bin_id"`
+	LocationDetail   string   `json:"location_detail"`
+	InstallDate      string   `json:"install_date"`
+	HourMeterPath    string   `json:"hour_meter_path"`
+	ProfileID        string   `json:"profile_id"`
+	Aliases          []string `json:"aliases"`
+	VerifiedAboard   bool     `json:"verified_aboard"`
+	Notes            string   `json:"notes"`
 }
 
 // trimStringPtr trims *p and collapses it to nil when the result is blank -
@@ -160,29 +164,40 @@ func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equ
 		return equipmentItem{}, &inventoryValidationError{Field: "hour_meter_path", Message: "hour_meter_path cannot contain spaces"}
 	}
 
-	quantity := req.Quantity
-	if quantity <= 0 {
-		quantity = 1
+	// Omitted quantity is one (a new item is one of something); an explicit
+	// zero is a spare that has run out and is kept as zero. Only a negative
+	// is refused.
+	quantity := 1
+	if req.Quantity != nil {
+		quantity = *req.Quantity
+	}
+	if quantity < 0 {
+		return equipmentItem{}, &inventoryValidationError{Field: "quantity", Message: "quantity cannot be negative"}
+	}
+	if req.RequiredQuantity != nil && *req.RequiredQuantity < 0 {
+		return equipmentItem{}, &inventoryValidationError{Field: "required_quantity", Message: "required_quantity cannot be negative"}
 	}
 
 	return equipmentItem{
-		Name:           name,
-		Category:       req.Category,
-		System:         system,
-		Manufacturer:   strings.TrimSpace(req.Manufacturer),
-		Model:          strings.TrimSpace(req.Model),
-		Serial:         strings.TrimSpace(req.Serial),
-		Quantity:       quantity,
-		Status:         status,
-		ZoneID:         trimStringPtr(req.ZoneID),
-		BinID:          trimStringPtr(req.BinID),
-		LocationDetail: strings.TrimSpace(req.LocationDetail),
-		InstallDate:    installDate,
-		HourMeterPath:  hourMeterPath,
-		ProfileID:      profileID,
-		Aliases:        normalizeAliases(req.Aliases),
-		VerifiedAboard: req.VerifiedAboard,
-		Notes:          req.Notes,
+		Name:             name,
+		Category:         req.Category,
+		System:           system,
+		Manufacturer:     strings.TrimSpace(req.Manufacturer),
+		Model:            strings.TrimSpace(req.Model),
+		Serial:           strings.TrimSpace(req.Serial),
+		PartNumber:       strings.TrimSpace(req.PartNumber),
+		Quantity:         quantity,
+		RequiredQuantity: req.RequiredQuantity,
+		Status:           status,
+		ZoneID:           trimStringPtr(req.ZoneID),
+		BinID:            trimStringPtr(req.BinID),
+		LocationDetail:   strings.TrimSpace(req.LocationDetail),
+		InstallDate:      installDate,
+		HourMeterPath:    hourMeterPath,
+		ProfileID:        profileID,
+		Aliases:          normalizeAliases(req.Aliases),
+		VerifiedAboard:   req.VerifiedAboard,
+		Notes:            req.Notes,
 	}, nil
 }
 

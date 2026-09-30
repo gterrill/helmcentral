@@ -32,6 +32,15 @@ describe('SettingsNav', () => {
     expect(screen.queryByRole('button', { name: 'Equipment' })).not.toBeInTheDocument()
   })
 
+  it('renders an Import nav button under System', () => {
+    const onSelect = vi.fn()
+    render(<SettingsNav activeSectionId="signalk" onSelect={onSelect} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    expect(onSelect).toHaveBeenCalledWith('import')
+  })
+
   it('marks only the active section as current', () => {
     const { rerender } = render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 

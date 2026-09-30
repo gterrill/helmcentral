@@ -27,6 +27,10 @@ crawling into the compartment to read the data plate:
 - **Status.** *Deployed* for gear in use, *stored* for a spare sitting in
   the lazarette. A spare impeller is a real record; marking it stored is
   what will keep it out of maintenance reminders when those arrive.
+- **Spares stock.** A part number, how many are on board and how many you
+  mean to carry. On board can be zero: a Racor seal kit you've used and not
+  replaced is still a record, and it shows as below what you carry until
+  you restock it.
 - **Hour meter.** Optional. Gear with an engine-hours reading - engines,
   generators, transmissions, thrusters, stabilisers, watermakers - takes it
   from the vessel telemetry this item's runtime comes from, picked from the

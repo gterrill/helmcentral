@@ -12,6 +12,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
+import { EquipmentSparesFields } from '@/components/inventory/equipment-spares-fields'
 import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
 import { TagRow } from '@/components/inventory/tag-row'
@@ -81,6 +82,8 @@ function draftFromItem(item: EquipmentItem): EquipmentInput {
     model: item.model,
     serial: item.serial,
     quantity: item.quantity,
+    part_number: item.part_number,
+    required_quantity: item.required_quantity,
     status: item.status,
     zone_id: item.zone_id,
     bin_id: item.bin_id,
@@ -105,6 +108,8 @@ function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
     && a.model === b.model
     && a.serial === b.serial
     && a.quantity === b.quantity
+    && a.part_number === b.part_number
+    && a.required_quantity === b.required_quantity
     && a.status === b.status
     && a.zone_id === b.zone_id
     && a.bin_id === b.bin_id
@@ -1017,24 +1022,14 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               </Field>
             </FormRow>
 
-            <FormRow>
-              <Field>
-                <FieldLabel htmlFor="equipment-serial">Serial</FieldLabel>
-                <Input id="equipment-serial" value={draft.serial} onChange={(e) => setDraft((p) => ({ ...p, serial: e.target.value }))} />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="equipment-quantity">Quantity</FieldLabel>
-                <Input
-                  id="equipment-quantity"
-                  type="number"
-                  min={1}
-                  value={draft.quantity}
-                  onChange={(e) => setDraft((p) => ({ ...p, quantity: Math.max(1, Number(e.target.value) || 1) }))}
-                />
-              </Field>
-            </FormRow>
+            <Field>
+              <FieldLabel htmlFor="equipment-serial">Serial</FieldLabel>
+              <Input id="equipment-serial" value={draft.serial} onChange={(e) => setDraft((p) => ({ ...p, serial: e.target.value }))} />
+            </Field>
           </FieldGroup>
         </FormSection>
+
+        <EquipmentSparesFields draft={draft} onChange={(patch) => setDraft((p) => ({ ...p, ...patch }))} />
 
         <FormSection title="Photos">
           <PhotoStripEditor

@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | 'assistant'
   | 'security'
   | 'logs'
+  | 'import'
 
 // Grouped for the shared SectionNav (see its own doc comment): a page with
 // several sections of one job groups them by what they're for, not
@@ -52,6 +53,7 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
     items: [
       { id: 'security', label: 'Security' },
       { id: 'logs', label: 'Logs' },
+      { id: 'import', label: 'Import' },
     ],
   },
 ]

@@ -198,6 +198,18 @@ describe('parseAppLocation', () => {
   // 'equipment' is no longer a SettingsSectionId at all, so a stale
   // /settings/equipment bookmark degrades the same way any other unknown
   // section id does (falls back to General), rather than resolving.
+  it('parses the Import wizard route with its run id, and the list without one', () => {
+    expect(parseAppLocation('/settings/import')).toEqual({ panel: 'settings', section: 'import', importRunId: null })
+    expect(parseAppLocation('/settings/import/new')).toEqual({ panel: 'settings', section: 'import', importRunId: 'new' })
+    expect(parseAppLocation('/settings/import/9d3e-uuid')).toEqual({ panel: 'settings', section: 'import', importRunId: '9d3e-uuid' })
+  })
+
+  it('formats the Import wizard route back to the same path', () => {
+    const ctx = { firstPageId: null }
+    expect(formatAppLocation({ panel: 'settings', section: 'import' }, ctx)).toBe('/settings/import')
+    expect(formatAppLocation({ panel: 'settings', section: 'import', importRunId: 'run 1' }, ctx)).toBe('/settings/import/run%201')
+  })
+
   it('falls back to General for the retired /settings/equipment section id', () => {
     expect(parseAppLocation('/settings/equipment')).toEqual({ panel: 'settings', section: 'general' })
   })
