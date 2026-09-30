@@ -175,7 +175,6 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     selectedWindBandId: null,
     planningDepthM: null,
     planningTideHeightFt: null,
-    vesselDraftM: null,
     lastUpdateAgeS: null,
     ...overrides,
   }
@@ -569,11 +568,11 @@ describe('AnchorWatchTile', () => {
     })
   })
 
-  // Design critique item 4: the operator must be able to answer "is the
-  // boat where I left it" from a hero readout above the map, not by parsing
-  // the map's own overlay panel.
-  describe('distance KPI stack', () => {
-    it('promotes distance-vs-radius above the map once anchored', () => {
+  // The map's own overlay already carries distance, and the low-water
+  // clearance line belongs to the Anchor Watch page (the drawer), so the
+  // tile stays a map.
+  describe('page-only readouts', () => {
+    it('does not render the distance KPI stack even once anchored', () => {
       render(
         <AnchorWatchTile
           {...baseProps({
@@ -588,39 +587,23 @@ describe('AnchorWatchTile', () => {
         />,
       )
 
-      const kpi = screen.getByTestId('anchor-distance-kpi')
-      expect(kpi.textContent).toContain('Distance')
-      expect(kpi.textContent).toContain('12')
-      expect(kpi.textContent).toContain('20')
-    })
-
-    it('converts to feet when the host is set to imperial units', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            isImperial: true,
-            watch: baseWatch({
-              anchorState: 'set',
-              anchorLat: -25.1,
-              anchorLon: 152.9,
-              distanceMeters: 10,
-              radiusMeters: 20,
-            }),
-          })}
-        />,
-      )
-
-      const kpi = screen.getByTestId('anchor-distance-kpi')
-      // 10m -> 33ft, 20m -> 66ft (rounded).
-      expect(kpi.textContent).toContain('33')
-      expect(kpi.textContent).toContain('66')
-      expect(kpi.textContent).toContain('ft')
-    })
-
-    it('does not render the KPI stack — not even as dashes — when no anchor is set', () => {
-      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none' }) })} />)
-
       expect(screen.queryByTestId('anchor-distance-kpi')).toBeNull()
+    })
+
+    it('does not render the low water clearance line, quiet or warning', () => {
+      for (const depthMeters of [4, 2]) {
+        const { unmount } = render(
+          <AnchorWatchTile
+            {...baseProps({
+              depthMeters,
+              tide: makeTide(),
+              anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
+            })}
+          />,
+        )
+        expect(screen.queryByTestId('low-water-clearance')).toBeNull()
+        unmount()
+      }
     })
   })
 
@@ -642,84 +625,6 @@ describe('AnchorWatchTile', () => {
       render(<AnchorWatchTile {...baseProps({ lastUpdateAgeS: null })} />)
 
       expect(screen.queryByTestId('tile-stale-badge')).toBeNull()
-    })
-  })
-
-  // ADR 0135: the depth at the boat's current position, projected to the
-  // next low tide, against the operator's configured margin.
-  describe('low water clearance', () => {
-    it('names the missing input when draft is unavailable (the baseProps default)', () => {
-      // baseProps() ships vesselDraftM: null and tide: null; depth (5) is
-      // checked first and passes, so draft is the first thing found missing.
-      render(<AnchorWatchTile {...baseProps()} />)
-
-      const readout = screen.getByTestId('low-water-clearance')
-      expect(readout).toHaveTextContent('No draft from the boat')
-    })
-
-    it('names no_depth when there is no live depth reading', () => {
-      render(<AnchorWatchTile {...baseProps({ depthMeters: null, vesselDraftM: 1.2, tide: makeTide() })} />)
-
-      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No depth')
-    })
-
-    it('names no_tide when there is no tide station', () => {
-      render(<AnchorWatchTile {...baseProps({ depthMeters: 5, vesselDraftM: 1.2, tide: null })} />)
-
-      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No tide station')
-    })
-
-    it('shows a quiet clearance line when the depth at low water clears the margin', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 4,
-            vesselDraftM: 1.2,
-            tide: makeTide(),
-            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
-          })}
-        />,
-      )
-
-      const readout = screen.getByTestId('low-water-clearance')
-      expect(readout).toHaveTextContent('under keel at low water')
-      expect(readout).not.toHaveTextContent('Too shallow')
-    })
-
-    it('warns when the projected depth at low water is under the configured margin', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 2,
-            vesselDraftM: 1.2,
-            tide: makeTide(),
-            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
-          })}
-        />,
-      )
-
-      const readout = screen.getByTestId('low-water-clearance')
-      expect(readout).toHaveTextContent('Too shallow at low water')
-      // low_tide_time renders as a local clock time; asserting the whole
-      // sentence would be timezone-flaky, so this only pins the figure both
-      // the lib test and this warning must agree on.
-      expect(readout).toHaveTextContent('0.2 m under keel')
-    })
-
-    it('shows "Tide forecast out of date" when the tide reading is more than 30 minutes old', () => {
-      const staleTide = makeTide({ datetime: new Date(Date.now() - 40 * 60 * 1000).toISOString() })
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 4,
-            vesselDraftM: 1.2,
-            tide: staleTide,
-            anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
-          })}
-        />,
-      )
-
-      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('Tide forecast out of date')
     })
   })
 })
