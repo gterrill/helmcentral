@@ -779,15 +779,32 @@ func assistantDocumentLookup(id string) (document, error) {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	tools := assistantProductionToolDeps(settingsPath)
+	tools.today = today
 	return &assistantRunner{
 		doer:       openRouterHTTPClient,
 		apiKey:     apiKey,
 		model:      model,
 		autoRouter: autoRouter,
-		tools:      assistantProductionToolDeps(settingsPath),
+		tools:      tools,
 		emit:       emit,
 	}
+}
+
+// parseAssistantToday validates the message body's today field, the same
+// rule requireTodayParam applies to the maintenance endpoints: present and
+// YYYY-MM-DD, never a fallback to the server's own clock.
+func parseAssistantToday(raw string) (time.Time, *inventoryValidationError) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's"}
+	}
+	today, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today must be YYYY-MM-DD"}
+	}
+	return today, nil
 }
 
 // POST /api/assistant/conversations/:id/messages
@@ -832,6 +849,12 @@ func postAssistantMessageHandler(c echo.Context) error {
 		// globalDocumentStore below before readiness is even checked - see
 		// resolveAssistantMessageAttachments.
 		Attachments []string `json:"attachments"`
+		// Today is the operator's own local calendar date (YYYY-MM-DD,
+		// frontend lib/local-date.ts todayISO), required for the same
+		// reason the maintenance endpoints require ?today= (ADR 0138's
+		// "today" amendment): the maintenance tools compute due/overdue
+		// against it, and the server's own clock is not the boat's date.
+		Today string `json:"today"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -855,6 +878,11 @@ func postAssistantMessageHandler(c echo.Context) error {
 
 	if content == "" && len(attachments) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content is required"})
+	}
+
+	today, verr := parseAssistantToday(body.Today)
+	if verr != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": verr.Message, "field": verr.Field})
 	}
 
 	settingsPath := assistantSettingsPath()
@@ -931,7 +959,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, run.append)
+	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, today, run.append)
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
 	// drives, must outlive this one HTTP request (ADR 0105). Only

@@ -43,6 +43,34 @@ describe('AssistantMarkdown document citations', () => {
     expect(link.querySelector('svg')).not.toBeNull()
   })
 
+  // Conversation 7b4cda11: a help page cited as `/documents?document=?`.
+  // There is no document to look up, so the label shows as plain text and no
+  // link or lookup is made.
+  it('renders a document link with no real id as plain text, without a lookup', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantMarkdown content="See [Maintenance](/documents?document=?) for the schedule." />)
+
+    expect(await screen.findByText(/Maintenance/)).toBeInTheDocument()
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // The maintenance and equipment links Mate now writes are app paths, not
+  // documents: they navigate in the same tab, while external links still
+  // open a new one.
+  it('opens an in-app path in the same tab and an external link in a new one', async () => {
+    render(<AssistantMarkdown content="[Maintenance](/inventory/maintenance) and [Item](/inventory/equipment/abc) and [Site](https://example.com) and [Odd](//example.com/x)" />)
+
+    const maintenance = await screen.findByRole('link', { name: 'Maintenance' })
+    expect(maintenance).toHaveAttribute('href', '/inventory/maintenance')
+    expect(maintenance).not.toHaveAttribute('target', '_blank')
+    expect(screen.getByRole('link', { name: 'Item' })).not.toHaveAttribute('target', '_blank')
+    expect(screen.getByRole('link', { name: 'Site' })).toHaveAttribute('target', '_blank')
+    expect(screen.getByRole('link', { name: 'Odd' })).toHaveAttribute('target', '_blank')
+  })
+
   it('never opens a citation link in a new tab (in-app navigation, not external)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       id: 'doc-1', title: 'Manual', filename: 'manual.pdf', mime: 'application/pdf', kind: 'file',

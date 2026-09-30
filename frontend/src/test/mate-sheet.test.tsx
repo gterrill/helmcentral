@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 
 import { MateSheet } from '@/components/mate-sheet'
+import { todayISO } from '@/lib/local-date'
 
 // ADR 0093 voice phase: the Mate sheet owns its own conversations/chat hooks
 // (same fetch-router pattern as assistant-drawer.test.tsx) - a voice
@@ -235,7 +236,7 @@ describe('MateSheet', () => {
     )
 
     await waitFor(() => expect(postedCreateCalls).toBeGreaterThan(0))
-    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', spoken: true, screen: { panel: 'forecast' } }))
+    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', today: todayISO(), spoken: true, screen: { panel: 'forecast' } }))
   })
 
   it('Open the Mate page hands the active conversation to the panel and closes the sheet', async () => {
@@ -297,6 +298,7 @@ describe('MateSheet', () => {
 
     await waitFor(() => expect(sentBody).toEqual({
       content: 'How does tomorrow look?',
+      today: todayISO(),
       spoken: true,
       screen: { panel: 'forecast' },
     }))

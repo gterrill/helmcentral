@@ -199,7 +199,7 @@ func waitForBodyContains(t *testing.T, c *sseBodyCollector, substr string, timeo
 
 // swapAssistantRunner replaces newAssistantRunner for the duration of a
 // test, restoring the previous value on cleanup.
-func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace) {
+func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace) {
 	t.Helper()
 	prev := newAssistantRunner
 	newAssistantRunner = fn
@@ -911,7 +911,7 @@ func TestTrimmedAssistantScreenField_TrimsAndCapsAt80Runes(t *testing.T) {
 }
 
 func TestPostAssistantMessageHandler_BlankContentReturns400(t *testing.T) {
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/x/messages", `{"content":"   "}`, "x")
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/x/messages", `{"today":"2026-09-30","content":"   "}`, "x")
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -922,7 +922,7 @@ func TestPostAssistantMessageHandler_BlankContentReturns400(t *testing.T) {
 
 func TestPostAssistantMessageHandler_TooLongContentReturns400(t *testing.T) {
 	tooLong := strings.Repeat("a", assistantMaxMessageChars+1)
-	body, err := json.Marshal(map[string]string{"content": tooLong})
+	body, err := json.Marshal(map[string]string{"today": "2026-09-30", "content": tooLong})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -932,6 +932,54 @@ func TestPostAssistantMessageHandler_TooLongContentReturns400(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostAssistantMessageHandler_TodayRequiredAndValidated(t *testing.T) {
+	_, _, conv := postAssistantMessageTestSetup(t)
+
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+		t.Errorf("no run may start when today is missing or malformed")
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "x", Model: "openai/gpt-4o"}}
+	})
+
+	for name, body := range map[string]string{
+		"missing":   `{"content":"hi"}`,
+		"blank":     `{"today":"  ","content":"hi"}`,
+		"malformed": `{"today":"30/09/2026","content":"hi"}`,
+		"datetime":  `{"today":"2026-09-30T10:00:00Z","content":"hi"}`,
+	} {
+		c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+		if err := postAssistantMessageHandler(c); err != nil {
+			t.Fatalf("%s: handler returned error: %v", name, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d: %s", name, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "today") {
+			t.Fatalf("%s: expected the error to name the today field, got %s", name, rec.Body.String())
+		}
+	}
+}
+
+func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
+	_, _, conv := postAssistantMessageTestSetup(t)
+
+	var got time.Time
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+		got = today
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
+	})
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-10-03","content":"hi"}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got.Format("2006-01-02") != "2026-10-03" {
+		t.Fatalf("expected the runner to receive today=2026-10-03, got %v", got)
 	}
 }
 
@@ -945,7 +993,7 @@ func TestPostAssistantMessageHandler_UnconfiguredReturns503JSONNotEventStream(t 
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"hi"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -981,7 +1029,7 @@ func TestPostAssistantMessageHandler_UnknownConversationReturns404(t *testing.T)
 	withTestAssistantStore(t)
 	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/nope/messages", `{"content":"hi"}`, "nope")
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/nope/messages", `{"today":"2026-09-30","content":"hi"}`, "nope")
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1018,7 +1066,7 @@ func TestPostAssistantMessageHandler_UnknownAttachmentReturns400(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
 
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
-		`{"content":"see attached","attachments":["does-not-exist"]}`, conv.ID)
+		`{"today":"2026-09-30","content":"see attached","attachments":["does-not-exist"]}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1049,7 +1097,7 @@ func TestPostAssistantMessageHandler_DuplicateAttachmentReturns400(t *testing.T)
 		t.Fatalf("Insert: %v", err)
 	}
 
-	body := fmt.Sprintf(`{"content":"see attached","attachments":[%q,%q]}`, doc.ID, doc.ID)
+	body := fmt.Sprintf(`{"today":"2026-09-30","content":"see attached","attachments":[%q,%q]}`, doc.ID, doc.ID)
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -1082,7 +1130,7 @@ func TestPostAssistantMessageHandler_TooManyAttachmentsReturns400(t *testing.T) 
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	body := fmt.Sprintf(`{"content":"see attached","attachments":%s}`, idsJSON)
+	body := fmt.Sprintf(`{"today":"2026-09-30","content":"see attached","attachments":%s}`, idsJSON)
 
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
@@ -1100,11 +1148,11 @@ func TestPostAssistantMessageHandler_EmptyContentWithAttachmentAcceptedAndTitles
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Sure, here's what's in it.", Model: "openai/gpt-4o"}}
 	})
 
-	body := fmt.Sprintf(`{"content":"","attachments":[%q]}`, doc.ID)
+	body := fmt.Sprintf(`{"today":"2026-09-30","content":"","attachments":[%q]}`, doc.ID)
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -1143,11 +1191,11 @@ func TestPostAssistantMessageHandler_AttachmentsPersistedWithFilenameFromDocumen
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Noted.", Model: "openai/gpt-4o"}}
 	})
 
-	body := fmt.Sprintf(`{"content":"here's the receipt","attachments":[%q]}`, doc.ID)
+	body := fmt.Sprintf(`{"today":"2026-09-30","content":"here's the receipt","attachments":[%q]}`, doc.ID)
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -1183,7 +1231,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content:          "Tongue Bay first, on the rising tide.",
 			Model:            "openai/gpt-4o",
@@ -1196,7 +1244,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	})
 
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
-		`{"content":"Tongue Bay or Blue Pearl Bay first?"}`, conv.ID)
+		`{"today":"2026-09-30","content":"Tongue Bay or Blue Pearl Bay first?"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1257,7 +1305,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	// A POST with no spoken/screen fields (this test's body is bare
-	// {"content": ...}) must build byte-for-byte the same system prompt it
+	// {"today":"2026-09-30","content": ...}) must build byte-for-byte the same system prompt it
 	// did before those fields existed - neither addition present.
 	if runner == nil || runner.gotSystem == "" {
 		t.Fatalf("expected the runner to have recorded a system prompt")
@@ -1290,7 +1338,7 @@ func TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage(t *testing.
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{
 			emit:   emit,
 			deltas: []string{"Tongue Bay ", "first, on the rising tide."},
@@ -1302,7 +1350,7 @@ func TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage(t *testing.
 	})
 
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
-		`{"content":"Tongue Bay or Blue Pearl Bay first?"}`, conv.ID)
+		`{"today":"2026-09-30","content":"Tongue Bay or Blue Pearl Bay first?"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1363,7 +1411,7 @@ func TestPostAssistantMessageHandler_UsesSpokenSummaryAsConversationTitle(t *tes
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "## Spoken summary\n\nGloucester Island Anchorages\n\n## Passage plan\n\nWe should favour the north side.",
 			Model:   "openai/gpt-4o",
@@ -1371,7 +1419,7 @@ func TestPostAssistantMessageHandler_UsesSpokenSummaryAsConversationTitle(t *tes
 		return runner
 	})
 
-	body := `{"content":"What are recommended anchorages around Gloucester Island?"}`
+	body := `{"today":"2026-09-30","content":"What are recommended anchorages around Gloucester Island?"}`
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -1403,7 +1451,7 @@ func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "The upper atmosphere chart is the 500mb height and vorticity pattern.",
 			Model:   "openai/gpt-4o",
@@ -1411,7 +1459,7 @@ func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing
 		return runner
 	})
 
-	body := `{"content":"How does the upper atmosphere graph work?","spoken":true,"screen":{"panel":"forecast"}}`
+	body := `{"today":"2026-09-30","content":"How does the upper atmosphere graph work?","spoken":true,"screen":{"panel":"forecast"}}`
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -1444,11 +1492,11 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: fmt.Errorf("openrouter status 401: invalid api key")}
 	})
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"hi"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1497,11 +1545,11 @@ func TestPostAssistantMessageHandler_RunnerPanicYieldsErrorEventAndFreesTheRun(t
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &panicAssistantRunner{}
 	})
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"hi"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1543,7 +1591,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{started: started, proceed: proceed, reply: assistantReply{Content: "ok"}}
 	})
 
@@ -1551,7 +1599,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c1, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"first"}`, conv.ID)
+		c1, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"first"}`, conv.ID)
 		if err := postAssistantMessageHandler(c1); err != nil {
 			t.Errorf("first handler call returned error: %v", err)
 		}
@@ -1559,7 +1607,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 
 	<-started // the first request now holds the in-flight guard
 
-	c2, rec2 := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"second"}`, conv.ID)
+	c2, rec2 := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"second"}`, conv.ID)
 	if err := postAssistantMessageHandler(c2); err != nil {
 		t.Fatalf("second handler call returned error: %v", err)
 	}
@@ -1595,7 +1643,7 @@ func TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun(t *testin
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{
 			started: started,
 			proceed: proceed,
@@ -1611,7 +1659,7 @@ func TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun(t *testin
 	reqCtx, cancelRequest := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
 		server.URL+"/api/assistant/conversations/"+conv.ID+"/messages",
-		strings.NewReader(`{"content":"Tongue Bay or Blue Pearl Bay first?"}`))
+		strings.NewReader(`{"today":"2026-09-30","content":"Tongue Bay or Blue Pearl Bay first?"}`))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -1686,7 +1734,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 
 	started := make(chan struct{})
 	attach := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &scriptedAssistantRunner{
 			emit:    emit,
 			started: started,
@@ -1705,7 +1753,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 	t.Cleanup(cancelPost)
 	postReq, err := http.NewRequestWithContext(postCtx, http.MethodPost,
 		server.URL+"/api/assistant/conversations/"+conv.ID+"/messages",
-		strings.NewReader(`{"content":"Tongue Bay or Blue Pearl Bay first?"}`))
+		strings.NewReader(`{"today":"2026-09-30","content":"Tongue Bay or Blue Pearl Bay first?"}`))
 	if err != nil {
 		t.Fatalf("build POST request: %v", err)
 	}
@@ -1777,11 +1825,11 @@ func TestPostAssistantRunCancelHandler_CancelsRunAndEmitsStoppedError(t *testing
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &cancelAwareAssistantRunner{emit: emit, started: started}
 	})
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"hi"}`, conv.ID)
 	postDone := make(chan struct{})
 	go func() {
 		if err := postAssistantMessageHandler(c); err != nil {
@@ -1869,11 +1917,11 @@ func TestPostAssistantRunCancelHandler_RespondsOnlyOnceTheConversationIsFree(t *
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &slowTeardownAssistantRunner{started: started, teardown: 300 * time.Millisecond}
 	})
 
-	c, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	c, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-09-30","content":"hi"}`, conv.ID)
 	postDone := make(chan struct{})
 	go func() {
 		_ = postAssistantMessageHandler(c)

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
+import { todayISO } from '@/lib/local-date'
 import { getMateWatchSnapshot, removeMateWatch } from '@/lib/mate-watch-store'
 
 // ADR 0093: send() posts one message and reads the reply back as SSE
@@ -271,10 +272,10 @@ describe('useAssistantChat', () => {
     })
 
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
-    expect(sentBody).toEqual({ content: 'How does tomorrow look?', spoken: true, screen: { panel: 'forecast' } })
+    expect(sentBody).toEqual({ content: 'How does tomorrow look?', today: todayISO(), spoken: true, screen: { panel: 'forecast' } })
   })
 
-  it('omits spoken and screen from the request body when no options are given', async () => {
+  it('sends only content and today when no options are given', async () => {
     const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
     vi.stubGlobal('fetch', fetchMock)
@@ -286,7 +287,8 @@ describe('useAssistantChat', () => {
     })
 
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
-    expect(sentBody).toEqual({ content: 'hello' })
+    // today is the operator's local date, always sent (the maintenance tools need it).
+    expect(sentBody).toEqual({ content: 'hello', today: todayISO() })
   })
 
   // ADR 0105: delta/retract/message/error frames drive `draft`, rAF-batched.

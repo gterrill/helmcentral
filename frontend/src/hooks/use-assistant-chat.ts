@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { readServerSentEvents } from '@/lib/sse-reader'
+import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import type { AssistantConversation, AssistantMessage } from '@/hooks/use-assistant-conversations'
 
@@ -294,7 +295,10 @@ export function useAssistantChat() {
       // them - an ordinary panel send (no options at all) posts the same
       // `{ content }` body it always has, so the backend only sees a voice
       // question or a screen context when one genuinely applies.
-      const body: { content: string; spoken?: boolean; screen?: AssistantScreenContext; attachments?: string[] } = { content }
+      // `today` is always sent: the maintenance tools compute due/overdue
+      // against the operator's own local date, and the server refuses to
+      // guess one (400 naming the field).
+      const body: { content: string; today: string; spoken?: boolean; screen?: AssistantScreenContext; attachments?: string[] } = { content, today: todayISO() }
       if (options?.spoken !== undefined) body.spoken = options.spoken
       if (options?.screen !== undefined) body.screen = options.screen
       if (options?.attachments !== undefined) body.attachments = options.attachments

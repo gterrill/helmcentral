@@ -60,7 +60,32 @@ export function parseDocumentCitationHref(href: string): string | null {
   }
   if (url.pathname !== '/documents') return null
   const id = url.searchParams.get('document')
-  return id !== null && id.trim() !== '' ? id : null
+  return id !== null && DOCUMENT_ID_PATTERN.test(id) ? id : null
+}
+
+// A document id is a uuid (or a short slug in tests): letters, digits, `-`
+// and `_`. Anything else ("?", "<document_id>", a help page path) is Mate
+// writing a placeholder where it had no document, and a lookup for it can
+// only fail.
+const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
+/**
+ * True for a root-relative `/documents?document=...` href whose id is not a
+ * real document id (see DOCUMENT_ID_PATTERN) - a citation Mate wrote with no
+ * document behind it, most often for a help page. The markdown renderer
+ * shows the label as plain text rather than a link to nowhere.
+ */
+export function isMalformedDocumentCitationHref(href: string): boolean {
+  if (!href.startsWith('/') || href.startsWith('//')) return false
+  let url: URL
+  try {
+    url = new URL(href, 'http://citation.invalid')
+  } catch {
+    return false
+  }
+  if (url.pathname !== '/documents') return false
+  const id = url.searchParams.get('document')
+  return id !== null && !DOCUMENT_ID_PATTERN.test(id)
 }
 
 export type CitationIconKind = 'pdf' | 'spreadsheet' | 'image' | 'note' | 'file'

@@ -691,6 +691,32 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"e.g. `[Equipment List › Navigation](/documents?document=abc123)`. Use this link form instead of " +
 		"naming or describing a document in plain prose.\n\n")
 
+	// 2a-ii. Help pages are not documents. read_help returns a page id like
+	// "features/maintenance", not a document_id, so there is nothing to put in
+	// the citation link above - Mate used to write /documents?document=?
+	// (conversation 7b4cda11). Fixed wording, identical for every turn.
+	b.WriteString("A help page you read with read_help has no link: name the page in plain words and never write a " +
+		"/documents link for it.\n\n")
+
+	// 2a-iii. Maintenance (ADR 0145) - fixed wording, identical for every
+	// turn. The status of a rule is worked out by the host against the
+	// operator's own date; Mate reads it, never recomputes it.
+	b.WriteString("The boat's maintenance schedule lives in Helmcentral's Maintenance list. For any question about " +
+		"what is due, overdue or coming up, or how a schedule looks, call list_maintenance (get an equipment id " +
+		"from find_equipment first when the question names an item; use get_maintenance_log for what was actually " +
+		"done and when) and answer from what it returns, never from memory and never by working out a status " +
+		"yourself. When asked to review a schedule, compare the rules with the linked profile's service block " +
+		"(find_equipment) and with the manuals (search_documents), then name the gaps: a service the manufacturer " +
+		"lists that has no rule, a rule whose interval differs, a rule with no last-done baseline. When a rule's " +
+		"hours are unknown (hours_unknown is set, or there is no current_meter_reading), say the hours are unknown; never " +
+		"give a figure in their place, and note that a rule flagged this way may be judged on its calendar interval " +
+		"alone. When you tell the operator when a job falls due, quote the meter reading " +
+		"(next_due_meter_reading, with remaining_hours): that is what their gauge will show. Engine hours " +
+		"(last_done_engine_hours, engine_hours in the log) are cumulative across meter replacements and equal the " +
+		"meter only when no replacement is recorded. You cannot change the maintenance schedule: say what you would change and that the operator can " +
+		"make the edit in Inventory, Maintenance. Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
+		"and an item as `[Name](/inventory/equipment/<id>)`, using the link the tool returned.\n\n")
+
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that
