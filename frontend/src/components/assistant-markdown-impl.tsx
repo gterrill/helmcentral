@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDocumentCitation } from '@/hooks/use-document-citation'
-import { citationIconKind, parseDocumentCitationHref, type CitationIconKind } from '@/lib/document-citation'
+import { citationIconKind, isMalformedDocumentCitationHref, parseDocumentCitationHref, type CitationIconKind } from '@/lib/document-citation'
 
 // ADR 0093: assistant replies render as GFM markdown (a comparison table is
 // the whole point of the Hook Reef use case, plus lists and links) with no
@@ -153,6 +153,18 @@ export const assistantMarkdownComponents: Components = {
     const citationId = href ? parseDocumentCitationHref(href) : null
     if (citationId !== null && href) {
       return <DocumentCitationLink id={citationId} href={href} label={citationLinkText(children)} />
+    }
+    if (href && isMalformedDocumentCitationHref(href)) {
+      return <>{children}</>
+    }
+    // An app path (one leading slash, never `//`) navigates in this tab, like
+    // DocumentCitationLink; anything else is external and opens a new one.
+    if (href && href.startsWith('/') && !href.startsWith('//')) {
+      return (
+        <a href={href} className="text-primary underline underline-offset-2">
+          {children}
+        </a>
+      )
     }
     return (
       <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">

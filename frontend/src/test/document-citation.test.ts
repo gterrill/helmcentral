@@ -73,6 +73,15 @@ describe('parseDocumentCitationHref', () => {
     expect(parseDocumentCitationHref('documents?document=abc')).toBeNull()
   })
 
+  // Conversation 7b4cda11: Mate cited a help page (which has no document id)
+  // as `/documents?document=?`. "?" is not a document id, so the parser must
+  // not treat it as one - a citation lookup for it can only ever fail.
+  it('returns null for a placeholder that is not a document id', () => {
+    expect(parseDocumentCitationHref('/documents?document=?')).toBeNull()
+    expect(parseDocumentCitationHref('/documents?document=%3Cdocument_id%3E')).toBeNull()
+    expect(parseDocumentCitationHref('/documents?document=features/maintenance')).toBeNull()
+  })
+
   it('still extracts the id from the one valid root-relative form', () => {
     expect(parseDocumentCitationHref('/documents?document=abc')).toBe('abc')
   })
