@@ -13,6 +13,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Import from YachtWave, in **Settings → Import**. Upload YachtWave's Vessel
+  Export and go through it one page per topic: vessel particulars, locations,
+  equipment and spares, the service log, notes, then each document and photo.
+  Nothing is written until you confirm on the last page, and your choices are
+  kept if you stop halfway. Where the export can't say which engine a service
+  was on, you pick. Duplicates, placeholder names and figures that can't be
+  right are flagged, not corrected. YachtWave tasks come in as notes. Notes
+  that hold a password or wifi key are left behind. Checklists don't come
+  across, because the export doesn't include their steps. Documents and
+  photos stay on YachtWave's servers, so for each one you open its link,
+  save the file and paste it in, or skip it. Importing a later export brings
+  across only what's new.
+- Vessel particulars in **Settings → Vessel**: builder, model, year, HIN,
+  flag, hailing port, hull, displacement, shore power, system voltage,
+  registration, IMO, EPIRB id and date acquired. Name, MMSI, call sign,
+  length, beam, draft and air height still come from the boat's instruments.
+- Spares keep a part number and how many you mean to carry, and can be at
+  zero on board. An item with fewer on board than you carry shows as below
+  what you carry.
 - Mate can read your maintenance schedule and service log. Ask what's
   overdue, when the generator was last serviced, or whether the main
   engine's schedule is complete. For a review it compares your rules with

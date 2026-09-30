@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { EngineProfileDialog } from '@/components/engine-profile-dialog'
+import { VesselParticularsForm } from '@/components/settings/sections/vessel-particulars-form'
 import { EquipmentProfileLinker } from '@/components/settings/sections/equipment-profile-linker'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -47,6 +48,8 @@ export function BoatUiSection({ draft, onChange }: BoatUiSectionProps) {
           </Field>
         </div>
       </FieldSet>
+
+      <VesselParticularsForm />
 
       <VesselEnginesAndPowerSection />
     </div>

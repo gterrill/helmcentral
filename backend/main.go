@@ -875,6 +875,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/inventory/zones", tierRead, listZonesHandler},
 		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
+		// Vessel particulars: the facts about the boat SignalK does not
+		// publish (vessel_particulars, vessel_particulars.go). Not under
+		// "/api/vessel" itself, which is the admin-tier anomaly-detection
+		// settings block further down.
+		{http.MethodGet, "/api/vessel/particulars", tierRead, getVesselParticularsHandler},
 
 		// Maintenance (ADR 0138): service rules and the log they're
 		// completed into, under /api/inventory/maintenance/ - a sub-family
@@ -1024,6 +1029,20 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPut, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, setMaintenanceRuleProcedureNoteHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, createMaintenanceProcedureNoteHandler},
 		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/meter-reset", tierWrite, recordHourMeterResetHandler},
+		{http.MethodPut, "/api/vessel/particulars", tierWrite, putVesselParticularsHandler},
+
+		// Imports (import_handlers.go): a staged, reviewed import of another
+		// platform's export. Every route is write-tier, reads included: a run
+		// carries a whole export's worth of the boat's records and is only
+		// ever used by the operator working through the wizard. "/files/:key"
+		// and "/commit" are sub-resources of a run.
+		{http.MethodPost, "/api/import/runs", tierWrite, createImportRunHandler},
+		{http.MethodGet, "/api/import/runs/:id", tierWrite, getImportRunHandler},
+		{http.MethodPatch, "/api/import/runs/:id", tierWrite, patchImportRunHandler},
+		{http.MethodPost, "/api/import/runs/:id/files/:key", tierWrite, uploadImportFileHandler},
+		{http.MethodPost, "/api/import/runs/:id/commit", tierWrite, commitImportRunHandler},
+		{http.MethodDelete, "/api/import/runs/:id", tierWrite, deleteImportRunHandler},
+
 		{http.MethodPost, "/api/inventory/maintenance/log", tierWrite, createMaintenanceLogEntryHandler},
 		{http.MethodPut, "/api/inventory/maintenance/log/:id", tierWrite, updateMaintenanceLogEntryHandler},
 		{http.MethodDelete, "/api/inventory/maintenance/log/:id", tierWrite, deleteMaintenanceLogEntryHandler},

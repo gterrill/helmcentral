@@ -94,7 +94,13 @@ var (
 	// with something these checks missed - a real, loud failure rather than
 	// silently written bad data, never expected to actually fire.
 	errEquipmentInvalidSystem = errors.New("unknown equipment system")
-	errEquipmentInvalidStatus = errors.New("status must be deployed or stored")
+
+	// errEquipmentQuantityInvalid is returned when quantity or
+	// required_quantity is negative. Zero is valid for both: a spare that has
+	// run out is still a spare, and "out of stock" is derived from on hand
+	// below required, never stored.
+	errEquipmentQuantityInvalid = errors.New("quantity cannot be negative")
+	errEquipmentInvalidStatus   = errors.New("status must be deployed or stored")
 
 	// errEquipmentLocationMismatch is returned by validateEquipmentLocation
 	// when a caller supplies BOTH zone_id and bin_id and they disagree - the
@@ -176,26 +182,30 @@ type inventoryBin struct {
 // normalizeAliases - so it serialises as "[]" rather than "null" on a
 // record with none.
 type equipmentItem struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Category       string    `json:"category"`
-	System         string    `json:"system"`
-	Manufacturer   string    `json:"manufacturer"`
-	Model          string    `json:"model"`
-	Serial         string    `json:"serial"`
-	Quantity       int       `json:"quantity"`
-	Status         string    `json:"status"`
-	ZoneID         *string   `json:"zone_id"`
-	BinID          *string   `json:"bin_id"`
-	LocationDetail string    `json:"location_detail"`
-	InstallDate    string    `json:"install_date"`
-	HourMeterPath  string    `json:"hour_meter_path"`
-	ProfileID      string    `json:"profile_id"`
-	Aliases        []string  `json:"aliases"`
-	VerifiedAboard bool      `json:"verified_aboard"`
-	Notes          string    `json:"notes"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	System       string `json:"system"`
+	Manufacturer string `json:"manufacturer"`
+	Model        string `json:"model"`
+	Serial       string `json:"serial"`
+	PartNumber   string `json:"part_number"`
+	Quantity     int    `json:"quantity"`
+	// RequiredQuantity is how many of a spare the boat should carry; nil when
+	// nobody has said. On hand below it is "out of stock" for a spare.
+	RequiredQuantity *int      `json:"required_quantity"`
+	Status           string    `json:"status"`
+	ZoneID           *string   `json:"zone_id"`
+	BinID            *string   `json:"bin_id"`
+	LocationDetail   string    `json:"location_detail"`
+	InstallDate      string    `json:"install_date"`
+	HourMeterPath    string    `json:"hour_meter_path"`
+	ProfileID        string    `json:"profile_id"`
+	Aliases          []string  `json:"aliases"`
+	VerifiedAboard   bool      `json:"verified_aboard"`
+	Notes            string    `json:"notes"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 
 	// Joined, read-only. Always the zero value on a value CreateEquipment/
 	// UpdateEquipment haven't yet re-read after their own write.
@@ -782,7 +792,7 @@ func normalizeAliases(in []string) []string {
 // the same documentColumns/scanDocument split documents_store.go itself
 // uses, so a query built with this constant and scanEquipmentRow can never
 // drift apart from each other.
-const equipmentColumns = `e.id, e.name, e.category, e.system, e.manufacturer, e.model, e.serial, e.quantity, e.status,
+const equipmentColumns = `e.id, e.name, e.category, e.system, e.manufacturer, e.model, e.serial, e.part_number, e.quantity, e.required_quantity, e.status,
 	e.zone_id, e.bin_id, e.location_detail, e.install_date, e.hour_meter_path, e.profile_id, e.aliases_json,
 	e.verified_aboard, e.notes, e.created_at, e.updated_at,
 	z.name, b.code,
@@ -799,12 +809,13 @@ const equipmentFromClause = `equipment e
 func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	var it equipmentItem
 	var zoneID, binID, zoneName, binCode sql.NullString
+	var required sql.NullInt64
 	var aliasesJSON string
 	var verified int
 	var createdAt, updatedAt int64
 
 	if err := row.Scan(
-		&it.ID, &it.Name, &it.Category, &it.System, &it.Manufacturer, &it.Model, &it.Serial, &it.Quantity, &it.Status,
+		&it.ID, &it.Name, &it.Category, &it.System, &it.Manufacturer, &it.Model, &it.Serial, &it.PartNumber, &it.Quantity, &required, &it.Status,
 		&zoneID, &binID, &it.LocationDetail, &it.InstallDate, &it.HourMeterPath, &it.ProfileID, &aliasesJSON,
 		&verified, &it.Notes, &createdAt, &updatedAt,
 		&zoneName, &binCode, &it.LinkCount,
@@ -819,6 +830,10 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	if binID.Valid {
 		v := binID.String
 		it.BinID = &v
+	}
+	if required.Valid {
+		v := int(required.Int64)
+		it.RequiredQuantity = &v
 	}
 	it.ZoneName = zoneName.String
 	it.BinCode = binCode.String
@@ -1016,6 +1031,24 @@ func deriveEquipmentCategory(hourMeterPath string) string {
 	return "general"
 }
 
+// validateEquipmentQuantities checks the two stock figures and returns them
+// in the shape the INSERT/UPDATE binds: quantity as given (zero is a real
+// value, not "unset" - the handler applies the default of one before it gets
+// here), required as a nullable integer. A negative in either is refused; the
+// schema's CHECKs would refuse it too, this just says so in words first.
+func validateEquipmentQuantities(item equipmentItem) (quantity int, required any, err error) {
+	if item.Quantity < 0 {
+		return 0, nil, errEquipmentQuantityInvalid
+	}
+	if item.RequiredQuantity != nil {
+		if *item.RequiredQuantity < 0 {
+			return 0, nil, errEquipmentQuantityInvalid
+		}
+		required = *item.RequiredQuantity
+	}
+	return item.Quantity, required, nil
+}
+
 // CreateEquipment inserts a new equipment record. category is derived from
 // hour_meter_path (deriveEquipmentCategory); system and status
 // default to 'other'/'deployed' when left blank, then both are checked
@@ -1046,9 +1079,9 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 	if !validEquipmentStatuses[status] {
 		return equipmentItem{}, errEquipmentInvalidStatus
 	}
-	quantity := item.Quantity
-	if quantity <= 0 {
-		quantity = 1
+	quantity, required, err := validateEquipmentQuantities(item)
+	if err != nil {
+		return equipmentItem{}, err
 	}
 
 	tx, err := s.db.Begin()
@@ -1071,11 +1104,11 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 	id := uuid.NewString()
 	if _, err := tx.Exec(`
 		INSERT INTO equipment (
-			id, name, category, system, manufacturer, model, serial, quantity, status,
+			id, name, category, system, manufacturer, model, serial, part_number, quantity, required_quantity, status,
 			zone_id, bin_id, location_detail, install_date, hour_meter_path, profile_id,
 			aliases_json, verified_aboard, notes, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), quantity, status,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
 		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.HourMeterPath, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(), now.Unix(),
 	); err != nil {
@@ -1125,9 +1158,9 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 	if !validEquipmentStatuses[status] {
 		return equipmentItem{}, errEquipmentInvalidStatus
 	}
-	quantity := item.Quantity
-	if quantity <= 0 {
-		quantity = 1
+	quantity, required, err := validateEquipmentQuantities(item)
+	if err != nil {
+		return equipmentItem{}, err
 	}
 
 	tx, err := s.db.Begin()
@@ -1157,11 +1190,11 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 	now := s.now()
 	if _, err := tx.Exec(`
 		UPDATE equipment SET
-			name = ?, category = ?, system = ?, manufacturer = ?, model = ?, serial = ?, quantity = ?, status = ?,
+			name = ?, category = ?, system = ?, manufacturer = ?, model = ?, serial = ?, part_number = ?, quantity = ?, required_quantity = ?, status = ?,
 			zone_id = ?, bin_id = ?, location_detail = ?, install_date = ?, hour_meter_path = ?, profile_id = ?,
 			aliases_json = ?, verified_aboard = ?, notes = ?, updated_at = ?
 		WHERE id = ?`,
-		name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), quantity, status,
+		name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
 		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.HourMeterPath, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(),
 		id,

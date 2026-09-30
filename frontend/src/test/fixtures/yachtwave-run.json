@@ -1,0 +1,929 @@
+{
+  "id": "run-1",
+  "source": "yachtwave",
+  "source_label": "YachtWave export of Pikorua (Export_Pikorua.html, generated 30 Sep 2026, 19:28 UTC)",
+  "file_sha256": "65a2ad693e667aeb1fbcbee624d37ce9de2af547897dbf7781bdefe6c3fdc03b",
+  "status": "draft",
+  "staged": {
+    "source": "yachtwave",
+    "vessel": {
+      "name": "Pikorua",
+      "generated_at": "30 Sep 2026, 19:28 UTC"
+    },
+    "particulars": [
+      {
+        "key": "382d2e3dce73ab9c80ba",
+        "label": "Name",
+        "field": "",
+        "value": "Pikorua",
+        "signalk": true
+      },
+      {
+        "key": "27f32c7555b072422dd2",
+        "label": "Length overall",
+        "field": "",
+        "value": "17.9 m",
+        "signalk": true
+      },
+      {
+        "key": "08578c4c717e2c14b4b3",
+        "label": "Beam",
+        "field": "",
+        "value": "8.7 m",
+        "signalk": true
+      },
+      {
+        "key": "09f3e2f537a7bbb5e9d5",
+        "label": "Draft",
+        "field": "",
+        "value": "1.2 m",
+        "signalk": true
+      },
+      {
+        "key": "061a00704da40101a4cb",
+        "label": "Clearance",
+        "field": "",
+        "value": "5.64 m",
+        "signalk": true
+      },
+      {
+        "key": "7da598b1b31312989727",
+        "label": "Displacement",
+        "field": "displacement_kg",
+        "value": "32 kg",
+        "signalk": false
+      },
+      {
+        "key": "9cc18101a72d6001b802",
+        "label": "Hull type",
+        "field": "hull_type",
+        "value": "Catamaran",
+        "signalk": false
+      },
+      {
+        "key": "6e2a968425a6c4a8cffd",
+        "label": "Hull material",
+        "field": "hull_material",
+        "value": "Fiberglass",
+        "signalk": false
+      },
+      {
+        "key": "d556389f8a2400499b7d",
+        "label": "Brand",
+        "field": "builder",
+        "value": "Granocean",
+        "signalk": false
+      },
+      {
+        "key": "a335e88b99bb73611bc1",
+        "label": "Date acquired",
+        "field": "date_acquired",
+        "value": "",
+        "signalk": false
+      },
+      {
+        "key": "faf8b5683023175261a3",
+        "label": "Hull ID (HIN)",
+        "field": "hin",
+        "value": "XXTST00001A000",
+        "signalk": false
+      },
+      {
+        "key": "3693a06dbf8007411b4e",
+        "label": "USCG documentation no.",
+        "field": "",
+        "value": "",
+        "signalk": false
+      },
+      {
+        "key": "a759540de081cb1b8458",
+        "label": "Registration",
+        "field": "registration",
+        "value": "",
+        "signalk": false
+      },
+      {
+        "key": "43245d0adba325794f06",
+        "label": "IMO",
+        "field": "imo",
+        "value": "",
+        "signalk": false
+      },
+      {
+        "key": "a6223c5db88d10fcb159",
+        "label": "MMSI",
+        "field": "",
+        "value": "123456789",
+        "signalk": true
+      },
+      {
+        "key": "66817d53e1af7830ed2d",
+        "label": "Call sign",
+        "field": "",
+        "value": "XX1234",
+        "signalk": true
+      },
+      {
+        "key": "e1894155aceebbf03df0",
+        "label": "EPIRB beacon ID",
+        "field": "epirb_id",
+        "value": "",
+        "signalk": false
+      },
+      {
+        "key": "f34d8321b01ecda09d1c",
+        "label": "Shore power",
+        "field": "shore_power",
+        "value": "Dual × 125/250 volt | 30/50 amp",
+        "signalk": false
+      },
+      {
+        "key": "abbc1eb83e6642d5b6fe",
+        "label": "System voltage",
+        "field": "system_voltage",
+        "value": "24v",
+        "signalk": false
+      },
+      {
+        "key": "4edcdc209ce0728e0a88",
+        "label": "Model",
+        "field": "model",
+        "value": "W-60",
+        "signalk": false
+      },
+      {
+        "key": "f8920b6ffbdf52631c07",
+        "label": "Year",
+        "field": "year",
+        "value": "2024",
+        "signalk": false
+      },
+      {
+        "key": "c33a82d226b9107a5467",
+        "label": "Flag",
+        "field": "flag",
+        "value": "Cook Islands",
+        "signalk": false
+      },
+      {
+        "key": "d04a305d3d0fde4d43a5",
+        "label": "Hailing port",
+        "field": "hailing_port",
+        "value": "Sydney, Australia",
+        "signalk": false
+      }
+    ],
+    "locations": [
+      {
+        "key": "b6ab8c4e75c393a756cb",
+        "name": "Engine Room - Port",
+        "count": 2
+      },
+      {
+        "key": "7e2c009636566e6542a5",
+        "name": "Engine Room - Starboard",
+        "count": 2
+      },
+      {
+        "key": "bc2717e4653acd3d4dfc",
+        "name": "Flybridge",
+        "count": 22
+      },
+      {
+        "key": "1be7d23179168fc67ec8",
+        "name": "Lockers - Port",
+        "count": 1
+      },
+      {
+        "key": "83ee334748226be0c4de",
+        "name": "Radar Arch",
+        "count": 1
+      },
+      {
+        "key": "73c5bd4a812699132258",
+        "name": "Salon",
+        "count": 1
+      },
+      {
+        "key": "bbe151983cdf521b5551",
+        "name": "Salon - Starboard",
+        "count": 1
+      },
+      {
+        "key": "c3c4bb9f39e816c01ecd",
+        "name": "Flybridge - Starboard",
+        "count": 11
+      },
+      {
+        "key": "447c3f8679531fedfe3f",
+        "name": "Lockers - Starboard",
+        "count": 6
+      }
+    ],
+    "equipment": [
+      {
+        "key": "8cadfc253564151d29ec",
+        "kind": "engine",
+        "name": "Cummins QSB 6.7",
+        "type": "Inboard",
+        "category": "",
+        "manufacturer": "",
+        "serial": "10000001",
+        "installed": "2025-01-27",
+        "location": "",
+        "detail": "Port · 550 hp · Diesel",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "ef7faa642a07710f128b",
+        "kind": "engine",
+        "name": "Cummins QSB 6.7",
+        "type": "Inboard",
+        "category": "",
+        "manufacturer": "",
+        "serial": "10000002",
+        "installed": "2025-01-28",
+        "location": "",
+        "detail": "STBD · 550 hp · Diesel",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "f3981b04977f8f967669",
+        "kind": "engine",
+        "name": "Cummins Onan",
+        "type": "Generator",
+        "category": "",
+        "manufacturer": "",
+        "serial": "",
+        "installed": "2025-01-28",
+        "location": "",
+        "detail": "STBD · Diesel",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "c4be627ccde89e106bc9",
+        "kind": "equipment",
+        "name": "ZEN 100",
+        "type": "Water (Maker)",
+        "category": "Water",
+        "manufacturer": "Schenker Watermakers",
+        "serial": "",
+        "installed": "2025-01-01",
+        "location": "Engine Room - Port",
+        "detail": "",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "6fff8ad44c3ade252780",
+        "kind": "equipment",
+        "name": "xys",
+        "type": "Water (Maker)",
+        "category": "Water",
+        "manufacturer": "Rainman Desalination",
+        "serial": "",
+        "installed": "2026-06-19",
+        "location": "Engine Room - Starboard",
+        "detail": "",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "64121405bc1438c6d831",
+        "kind": "equipment",
+        "name": "BR1 PRO 5G",
+        "type": "Electronics (Satellite)",
+        "category": "Electronics",
+        "manufacturer": "Peplink",
+        "serial": "",
+        "installed": "2026-08-17",
+        "location": "Flybridge",
+        "detail": "",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "32f675e90f469d7ed342",
+        "kind": "equipment",
+        "name": "BR1-PRO 5G",
+        "type": "Other",
+        "category": "Other",
+        "manufacturer": "Other (Not Listed)",
+        "serial": "",
+        "installed": "",
+        "location": "Flybridge",
+        "detail": "",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "3512ebdf073880a997e9",
+        "kind": "equipment",
+        "name": "DRS4D-NX-E",
+        "type": "Electronics (Radar)",
+        "category": "Electronics",
+        "manufacturer": "Furuno",
+        "serial": "",
+        "installed": "2024-06-17",
+        "location": "Flybridge",
+        "detail": "Flybridge",
+        "notes": "",
+        "hours": ""
+      },
+      {
+        "key": "80aed403b1e193bf9660",
+        "kind": "equipment",
+        "name": "HBE5453UC",
+        "type": "Other",
+        "category": "Other",
+        "manufacturer": "Bosch",
+        "serial": "000272",
+        "installed": "",
+        "location": "Lockers - Port",
+        "detail": "Galley",
+        "notes": "",
+        "hours": ""
+      }
+    ],
+    "spares": [
+      {
+        "key": "a7abd9fe20de6b4d2a40",
+        "kind": "item",
+        "name": "Hydraulic Oil - PTO and/or Crane",
+        "part_number": "",
+        "on_hand": 0,
+        "required": null,
+        "location": "Engine Room - Port",
+        "detail": "Mobile DTE 10 Excel 32 Q/320585 MTC 314",
+        "notes": "",
+        "category": "Hydraulics",
+        "items": []
+      },
+      {
+        "key": "d8bfbe4cf2bd911c6619",
+        "kind": "item",
+        "name": "Air Filter - Cummins",
+        "part_number": "",
+        "on_hand": 2,
+        "required": 2,
+        "location": "Flybridge",
+        "detail": "Locker 2 - Under FB Dining Table",
+        "notes": "",
+        "category": "Engine",
+        "items": []
+      },
+      {
+        "key": "65e557a418a05b2c76da",
+        "kind": "item",
+        "name": "EPM 10 Carbon Block Filter Cartridge",
+        "part_number": "Pentair 155634-43",
+        "on_hand": 3,
+        "required": 3,
+        "location": "Flybridge",
+        "detail": "Flybridge Setee - Locker 1",
+        "notes": "",
+        "category": "Plumbing",
+        "items": []
+      },
+      {
+        "key": "0c710e5bb26f8b1b9b4d",
+        "kind": "bin",
+        "name": "FB Lounge - Locker 1",
+        "part_number": "",
+        "on_hand": 0,
+        "required": null,
+        "location": "Flybridge",
+        "detail": "",
+        "notes": "",
+        "category": "Tools",
+        "items": [
+          "SS Nut Kit",
+          "SS Screws",
+          "Tape",
+          "Hose Clamps",
+          "Socket Set"
+        ]
+      },
+      {
+        "key": "30011833b63e890ac8cd",
+        "kind": "item",
+        "name": "Racor Seal Kit",
+        "part_number": "21669",
+        "on_hand": 0,
+        "required": 1,
+        "location": "Flybridge",
+        "detail": "Locker 2 - Under FB Dining Table",
+        "notes": "",
+        "category": "Engine",
+        "items": []
+      }
+    ],
+    "log_entries": [
+      {
+        "key": "ad4e1417f4d280398df3",
+        "date": "2026-01-26",
+        "title": "Complete Service",
+        "body": "Generator service:\n- Replace generator oil.\n- Replace generator oil filter.\n- Replace primary fuel filter.\n- Replace secondary fuel filter.\n- Prime fuel system.\n- Inspect fuel lines, connections and clamps.\n- Clean sea strainer.\n- Replace raw water pump impeller and end plate gasket.\n- Replace sacrificial anode.\n- Inspect all raw water cooling system hoses, clamps and\nconnections.\n- Inspect fresh water cooling system hoses, clamps and\nconnections.\n- Inspect exhaust system.\n- Inspect generator mounts.\nTest run:\n- Carry out pre-start inspections.\n- Start generator.\n- Monitor and record all gauge readings at idle.\n- Run generator up to operating temperature and inspect\ngenerator with thermal imaging camera.\n- Inspect generator for any faults or running issues.\n- Apply load to generator and monitor.\n- Shut down generator.\n- Inspect generator for any leaks.\n\nDetail:\n- Clean bilge beneath generator and engine room surfaces.",
+        "type": "Generator",
+        "equipment_name": "Cummins Onan",
+        "equipment_key": "f3981b04977f8f967669",
+        "candidates": [],
+        "hours": 467
+      },
+      {
+        "key": "6d27894b69226f0f0964",
+        "date": "2026-01-26",
+        "title": "Complete Service",
+        "body": "Engine service:\n- Replace engine oil & filter.\n- Replace primary fuel filter.\n- Replace secondary fuel filter.\n- Prime fuel system.\n- Inspect fuel lines, connections and clamps.\n- Clean sea strainer.\n- Remove raw water pump from engine, replace impeller and end plate gasket and refit to engine with new gasket.\n- Replace raw water pump inlet hose clamps.\n- Replace sacrificial anodes.\n- Inspect all raw water cooling system hoses, clamps and\nconnections.\n- Inspect all fresh water cooling system hoses, clamps and\nconnections.\n- Replace intake air filter.\n- Inspect exhaust system.\n- Inspect engine mounts.\n\nTest run:\n- Carry out pre-start inspections.\n- Start engine. Monitor and record all gauge readings at idle.\n- Run engine up to operating temperature and inspect\nengine and transmission with thermal imaging camera.\n- Inspect engine and transmission for any faults or running issues\n- Shut down engine.\n- Inspect engine for any leaks.",
+        "type": "Engine",
+        "equipment_name": "Cummins QSB 6.7",
+        "equipment_key": "",
+        "candidates": [
+          "8cadfc253564151d29ec",
+          "ef7faa642a07710f128b"
+        ],
+        "hours": 711
+      },
+      {
+        "key": "54703285d516699cc728",
+        "date": "2026-01-26",
+        "title": "Complete Service",
+        "body": "Engine service:\n- Replace engine oil & filter.\n- Replace primary & secondary fuel filter.\n- Prime fuel system.\n- Inspect fuel lines, connections and clamps.\n- Clean sea strainer.\n- Remove raw water pump from engine, replace impeller and end plate gasket, refit with new gasket.\n- Replace raw water pump inlet hose clamps.\n- Replace sacrificial anodes.\n- Inspect all raw water cooling system hoses, clamps and\nconnections.\n- Inspect all fresh water cooling system hoses, clamps and\nconnections.\n- Replace intake air filter.\n- Inspect exhaust system.\n- Inspect engine mounts.\n\nTest run:\n- Carry out pre-start inspections.\n- Start engine.\n- Monitor and record all gauge readings at idle.\n- Run engine up to operating temperature and inspect\nengine\nand transmission with thermal imaging camera.\n- Inspect engine and transmission for any faults or running\nissues.\n- Shut down engine.\n- Inspect engine for any leaks.\nDetail:\n- Clean bilge beneath engine and engine room surfaces",
+        "type": "Engine",
+        "equipment_name": "Cummins QSB 6.7",
+        "equipment_key": "",
+        "candidates": [
+          "8cadfc253564151d29ec",
+          "ef7faa642a07710f128b"
+        ],
+        "hours": 729
+      },
+      {
+        "key": "5b049c9291072614bbf8",
+        "date": "2025-12-18",
+        "title": "Air Conditioning Service",
+        "body": "AC units are in closets in staterooms, to the right of the console in the flybridge and in the ceiling for the main salon.",
+        "type": "Appliance",
+        "equipment_name": "",
+        "equipment_key": "",
+        "candidates": [],
+        "hours": null
+      },
+      {
+        "key": "72b896a12b956346712a",
+        "date": "2024-11-16",
+        "title": "Service",
+        "body": "",
+        "type": "Engine",
+        "equipment_name": "Cummins QSB 6.7",
+        "equipment_key": "",
+        "candidates": [
+          "8cadfc253564151d29ec",
+          "ef7faa642a07710f128b"
+        ],
+        "hours": 50
+      }
+    ],
+    "notes": [
+      {
+        "key": "f5c8d73b617b67301f32",
+        "kind": "task",
+        "title": "Task: Racor Filter valve",
+        "date": "2025-07-31",
+        "body": "Priority: Low\nAssigned to: Alex Morgan\nDue: 2025-07-31\nStatus: Overdue",
+        "skip": false,
+        "skip_reason": ""
+      },
+      {
+        "key": "cc9739b47a47ae720961",
+        "kind": "note",
+        "title": "Alternators",
+        "date": "2026-08-14",
+        "body": "Port alternator part number is on the data plate. 24-volt, high output.",
+        "skip": false,
+        "skip_reason": ""
+      },
+      {
+        "key": "9bebb150e11aee6bc698",
+        "kind": "note",
+        "title": "Handover Tips",
+        "date": "2025-12-11",
+        "body": "",
+        "skip": true,
+        "skip_reason": "The note states a password. Helmcentral notes are not a place for secrets; it is not imported."
+      },
+      {
+        "key": "488f05b8c472a459d280",
+        "kind": "note",
+        "title": "Wifi",
+        "date": "2025-01-29",
+        "body": "",
+        "skip": true,
+        "skip_reason": "The note is titled like a stored password or wifi key and is short enough to be just the secret. Helmcentral notes are not a place for secrets; it is not imported."
+      }
+    ],
+    "files": [
+      {
+        "key": "7c8882c45fa937304add",
+        "kind": "document",
+        "label": "Mackay Marina",
+        "type": "Receipt",
+        "attached_to": "Pikorua",
+        "date": "2025-01-29",
+        "size": "103 KB PDF",
+        "url": "https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000001.pdf",
+        "equipment_key": ""
+      },
+      {
+        "key": "768ec06fda9651119423",
+        "kind": "document",
+        "label": "Receipt",
+        "type": "Receipt",
+        "attached_to": "Log Maintenance",
+        "date": "2025-01-28",
+        "size": "62 KB PDF",
+        "url": "https://documents.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000004.pdf",
+        "equipment_key": ""
+      },
+      {
+        "key": "061ac07af800715d6d0a",
+        "kind": "photo",
+        "label": "Inventory · 26 Feb 2025",
+        "type": "",
+        "attached_to": "Inventory",
+        "date": "2025-02-26",
+        "size": "",
+        "url": "https://images.yachtwave.com/00000000-0000-4000-8000-000000000000/00000000-0000-4000-8000-000000000007.jpe",
+        "equipment_key": ""
+      }
+    ],
+    "issues": [
+      {
+        "code": "implausible_value",
+        "severity": "warning",
+        "section": "Vessel Particulars",
+        "key": "7da598b1b31312989727",
+        "message": "Displacement is exported as \"32 kg\". No boat weighs that little; it is probably a wrong unit or a typo. It is imported exactly as exported unless you skip it."
+      },
+      {
+        "code": "junk_name",
+        "severity": "warning",
+        "section": "Equipment",
+        "key": "6fff8ad44c3ade252780",
+        "message": "\"xys\" looks like a test entry, not a real item."
+      },
+      {
+        "code": "duplicate",
+        "severity": "warning",
+        "section": "Equipment",
+        "key": "32f675e90f469d7ed342",
+        "message": "\"BR1-PRO 5G\" looks like the same item as \"BR1 PRO 5G\" listed earlier."
+      },
+      {
+        "code": "unknown_part_number",
+        "severity": "info",
+        "section": "Inventory & Spares",
+        "key": "d8bfbe4cf2bd911c6619",
+        "message": "\"Air Filter - Cummins\" has a part number of \"Unknown\"; imported with the part number blank."
+      },
+      {
+        "code": "duplicate",
+        "severity": "warning",
+        "section": "Maintenance Log",
+        "key": "72b896a12b956346712a",
+        "message": "\"Service\" on 16 Nov 2024 is listed more than once with the same details; this is copy 2."
+      },
+      {
+        "code": "password_note_skipped",
+        "severity": "warning",
+        "section": "Notes",
+        "key": "9bebb150e11aee6bc698",
+        "message": "\"Handover Tips\" was skipped: The note states a password."
+      },
+      {
+        "code": "password_note_skipped",
+        "severity": "warning",
+        "section": "Notes",
+        "key": "488f05b8c472a459d280",
+        "message": "\"Wifi\" was skipped: The note is titled like a stored password or wifi key and is short enough to be just the secret."
+      },
+      {
+        "code": "section_not_imported",
+        "severity": "info",
+        "section": "Crew & Access",
+        "key": "",
+        "message": "Crew & Access lists 2 records. This import does not bring them in."
+      },
+      {
+        "code": "empty_section",
+        "severity": "info",
+        "section": "Service Schedules",
+        "key": "",
+        "message": "Service Schedules has nothing in it."
+      },
+      {
+        "code": "empty_section",
+        "severity": "info",
+        "section": "Cruise Log",
+        "key": "",
+        "message": "Cruise Log has nothing in it."
+      },
+      {
+        "code": "empty_section",
+        "severity": "info",
+        "section": "General Log",
+        "key": "",
+        "message": "General Log has nothing in it."
+      },
+      {
+        "code": "empty_section",
+        "severity": "info",
+        "section": "Readings",
+        "key": "",
+        "message": "Readings has nothing in it."
+      },
+      {
+        "code": "empty_section",
+        "severity": "info",
+        "section": "Expenses",
+        "key": "",
+        "message": "Expenses has nothing in it."
+      },
+      {
+        "code": "ambiguous_equipment",
+        "severity": "warning",
+        "section": "Maintenance Log",
+        "key": "6d27894b69226f0f0964",
+        "message": "\"Complete Service\" on 2026-01-26 names \"Cummins QSB 6.7\", which matches 2 items. Choose the right one."
+      },
+      {
+        "code": "ambiguous_equipment",
+        "severity": "warning",
+        "section": "Maintenance Log",
+        "key": "54703285d516699cc728",
+        "message": "\"Complete Service\" on 2026-01-26 names \"Cummins QSB 6.7\", which matches 2 items. Choose the right one."
+      },
+      {
+        "code": "ambiguous_equipment",
+        "severity": "warning",
+        "section": "Maintenance Log",
+        "key": "72b896a12b956346712a",
+        "message": "\"Service\" on 2024-11-16 names \"Cummins QSB 6.7\", which matches 2 items. Choose the right one."
+      }
+    ],
+    "sections": [
+      {
+        "name": "Vessel Particulars",
+        "listed": 23,
+        "imported": 11
+      },
+      {
+        "name": "Crew & Access",
+        "listed": 2,
+        "imported": 0
+      },
+      {
+        "name": "Engines",
+        "listed": 3,
+        "imported": 3
+      },
+      {
+        "name": "Equipment",
+        "listed": 11,
+        "imported": 11
+      },
+      {
+        "name": "Inventory & Spares",
+        "listed": 36,
+        "imported": 36
+      },
+      {
+        "name": "Service Schedules",
+        "listed": 0,
+        "imported": 0
+      },
+      {
+        "name": "Maintenance Log",
+        "listed": 13,
+        "imported": 13
+      },
+      {
+        "name": "Cruise Log",
+        "listed": 0,
+        "imported": 0
+      },
+      {
+        "name": "General Log",
+        "listed": 0,
+        "imported": 0
+      },
+      {
+        "name": "Readings",
+        "listed": 0,
+        "imported": 0
+      },
+      {
+        "name": "Tasks",
+        "listed": 9,
+        "imported": 9
+      },
+      {
+        "name": "Checklists",
+        "listed": 7,
+        "imported": 0
+      },
+      {
+        "name": "Notes",
+        "listed": 13,
+        "imported": 10
+      },
+      {
+        "name": "Documents",
+        "listed": 4,
+        "imported": 4
+      },
+      {
+        "name": "Expenses",
+        "listed": 0,
+        "imported": 0
+      },
+      {
+        "name": "Photos",
+        "listed": 3,
+        "imported": 3
+      }
+    ]
+  },
+  "decisions": {
+    "particulars": {
+      "4edcdc209ce0728e0a88": "apply",
+      "6e2a968425a6c4a8cffd": "apply",
+      "7da598b1b31312989727": "apply",
+      "9cc18101a72d6001b802": "apply",
+      "abbc1eb83e6642d5b6fe": "apply",
+      "c33a82d226b9107a5467": "apply",
+      "d04a305d3d0fde4d43a5": "apply",
+      "d556389f8a2400499b7d": "apply",
+      "f34d8321b01ecda09d1c": "apply",
+      "f8920b6ffbdf52631c07": "apply",
+      "faf8b5683023175261a3": "apply"
+    },
+    "zones": {
+      "1be7d23179168fc67ec8": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "447c3f8679531fedfe3f": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "73c5bd4a812699132258": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "7e2c009636566e6542a5": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "83ee334748226be0c4de": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "b6ab8c4e75c393a756cb": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "bbe151983cdf521b5551": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "bc2717e4653acd3d4dfc": {
+        "action": "create",
+        "zone_id": ""
+      },
+      "c3c4bb9f39e816c01ecd": {
+        "action": "create",
+        "zone_id": ""
+      }
+    },
+    "records": {
+      "0c710e5bb26f8b1b9b4d": {
+        "action": "create",
+        "target_id": ""
+      },
+      "30011833b63e890ac8cd": {
+        "action": "create",
+        "target_id": ""
+      },
+      "32f675e90f469d7ed342": {
+        "action": "skip",
+        "target_id": ""
+      },
+      "3512ebdf073880a997e9": {
+        "action": "create",
+        "target_id": ""
+      },
+      "488f05b8c472a459d280": {
+        "action": "skip",
+        "target_id": ""
+      },
+      "54703285d516699cc728": {
+        "action": "create",
+        "target_id": ""
+      },
+      "5b049c9291072614bbf8": {
+        "action": "create",
+        "target_id": ""
+      },
+      "64121405bc1438c6d831": {
+        "action": "create",
+        "target_id": ""
+      },
+      "65e557a418a05b2c76da": {
+        "action": "create",
+        "target_id": ""
+      },
+      "6d27894b69226f0f0964": {
+        "action": "create",
+        "target_id": ""
+      },
+      "6fff8ad44c3ade252780": {
+        "action": "skip",
+        "target_id": ""
+      },
+      "72b896a12b956346712a": {
+        "action": "skip",
+        "target_id": ""
+      },
+      "80aed403b1e193bf9660": {
+        "action": "create",
+        "target_id": ""
+      },
+      "8cadfc253564151d29ec": {
+        "action": "create",
+        "target_id": ""
+      },
+      "9bebb150e11aee6bc698": {
+        "action": "skip",
+        "target_id": ""
+      },
+      "a7abd9fe20de6b4d2a40": {
+        "action": "create",
+        "target_id": ""
+      },
+      "ad4e1417f4d280398df3": {
+        "action": "create",
+        "target_id": ""
+      },
+      "c4be627ccde89e106bc9": {
+        "action": "create",
+        "target_id": ""
+      },
+      "cc9739b47a47ae720961": {
+        "action": "create",
+        "target_id": ""
+      },
+      "d8bfbe4cf2bd911c6619": {
+        "action": "create",
+        "target_id": ""
+      },
+      "ef7faa642a07710f128b": {
+        "action": "create",
+        "target_id": ""
+      },
+      "f3981b04977f8f967669": {
+        "action": "create",
+        "target_id": ""
+      },
+      "f5c8d73b617b67301f32": {
+        "action": "create",
+        "target_id": ""
+      }
+    },
+    "log_equipment": {},
+    "files": {
+      "061ac07af800715d6d0a": {
+        "document_id": "",
+        "skipped": false,
+        "equipment_key": ""
+      },
+      "768ec06fda9651119423": {
+        "document_id": "",
+        "skipped": false,
+        "equipment_key": ""
+      },
+      "7c8882c45fa937304add": {
+        "document_id": "",
+        "skipped": false,
+        "equipment_key": ""
+      }
+    }
+  },
+  "already_imported": [],
+  "created_at": "2026-10-01T05:00:00Z",
+  "updated_at": "2026-10-01T05:00:00Z",
+  "committed_at": null
+}

@@ -11,6 +11,8 @@ import { AlarmsSection } from '@/components/settings/sections/alarms-section'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
 import { AssistantSection } from '@/components/settings/sections/assistant-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
+import { ImportSection } from '@/components/settings/sections/import-section'
+import { ImportWizard } from '@/components/import/import-wizard'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
@@ -36,6 +38,9 @@ interface SettingsPageProps {
    */
   activeSectionId?: SettingsSectionId
   onSectionChange?: (id: SettingsSectionId) => void
+  /** The Import wizard's run ("new" for its upload page), mirrored to the URL by App.tsx. */
+  importRunId?: string | null
+  onImportRunChange?: (runId: string | null) => void
   onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
@@ -60,6 +65,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     onDirtyChange,
     activeSectionId: controlledSectionId,
     onSectionChange,
+    importRunId: controlledImportRunId,
+    onImportRunChange,
     onAskMate,
   },
   ref,
@@ -78,6 +85,13 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     setLocalSectionId(id)
     onSectionChange?.(id)
   }, [onSectionChange])
+  // Same controlled-or-local pairing for the Import wizard's run.
+  const [localImportRunId, setLocalImportRunId] = useState<string | null>(null)
+  const importRunId = controlledImportRunId !== undefined ? controlledImportRunId : localImportRunId
+  const handleImportRunChange = useCallback((runId: string | null) => {
+    setLocalImportRunId(runId)
+    onImportRunChange?.(runId)
+  }, [onImportRunChange])
   const [draft, setDraft] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
@@ -212,12 +226,26 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             onChange={handleDraftChange}
           />
         )
+      case 'import':
+        return <ImportSection onOpenImport={handleImportRunChange} />
       case 'logs':
         return <LogsSection onAskMate={(question, options) => onAskMate?.(question, options)} />
       default:
         return null
     }
   })()
+
+  // The wizard takes the whole page: no section nav, no Save Settings. It
+  // keeps its own draft on the server, so nothing here is left unsaved.
+  if (activeSectionId === 'import' && importRunId !== null) {
+    return (
+      <ImportWizard
+        runId={importRunId}
+        onRunChange={handleImportRunChange}
+        onExit={() => handleImportRunChange(null)}
+      />
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4 md:flex-row">

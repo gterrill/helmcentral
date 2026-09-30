@@ -285,6 +285,14 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err := rebuildEquipmentForSpares(db); err != nil {
+		return err
+	}
+
+	if err := createImportSchema(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -580,32 +588,11 @@ var documentStoreSchema = []string{
 	// (ListEquipment's own doc comment) rather than normalised into a second
 	// table - this cycle has no need to query "which equipment has alias X"
 	// independently of already having the equipment row in hand.
-	`CREATE TABLE IF NOT EXISTS equipment (
-		id              TEXT PRIMARY KEY,
-		name            TEXT NOT NULL,
-		category        TEXT NOT NULL CHECK (category IN ('mechanical','general')),
-		system          TEXT NOT NULL DEFAULT 'other' CHECK (system IN ('propulsion','electrical','water','fuel','bilge','anchoring','safety','hvac','navigation','appliances','structure','other')),
-		manufacturer    TEXT NOT NULL DEFAULT '',
-		model           TEXT NOT NULL DEFAULT '',
-		serial          TEXT NOT NULL DEFAULT '',
-		quantity        INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
-		status          TEXT NOT NULL DEFAULT 'deployed' CHECK (status IN ('deployed','stored')),
-		zone_id         TEXT REFERENCES inventory_zones(id) ON DELETE RESTRICT,
-		bin_id          TEXT REFERENCES inventory_bins(id) ON DELETE RESTRICT,
-		location_detail TEXT NOT NULL DEFAULT '',
-		install_date    TEXT NOT NULL DEFAULT '',
-		hour_meter_path TEXT NOT NULL DEFAULT '',
-		profile_id      TEXT NOT NULL DEFAULT '',
-		aliases_json    TEXT NOT NULL DEFAULT '[]',
-		verified_aboard INTEGER NOT NULL DEFAULT 0 CHECK (verified_aboard IN (0,1)),
-		notes           TEXT NOT NULL DEFAULT '',
-		created_at      INTEGER NOT NULL,
-		updated_at      INTEGER NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS equipment_system ON equipment (system)`,
-	`CREATE INDEX IF NOT EXISTS equipment_category ON equipment (category)`,
-	`CREATE INDEX IF NOT EXISTS equipment_zone_id ON equipment (zone_id)`,
-	`CREATE INDEX IF NOT EXISTS equipment_name ON equipment (lower(name))`,
+	`CREATE TABLE IF NOT EXISTS equipment ` + equipmentTableBody,
+	equipmentIndexes[0],
+	equipmentIndexes[1],
+	equipmentIndexes[2],
+	equipmentIndexes[3],
 
 	// equipment_documents links an equipment record to the documents that
 	// describe it (a manual, an invoice, a photo - document_tags already say

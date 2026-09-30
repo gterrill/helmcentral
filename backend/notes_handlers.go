@@ -250,11 +250,40 @@ func createNoteHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
+	inserted, err := createNoteDocument(req)
+	switch {
+	case errors.Is(err, errNoteTypeInvalid):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid note type"})
+	case errors.Is(err, errFolderNotFound):
+		// folder_id is part of the request body, not a path segment
+		// naming an existing resource - a bad value here is 400
+		// (malformed request), matching uploadDocumentHandler's
+		// identical folder_id handling rather than the 404
+		// documentErrorStatus maps errFolderNotFound to everywhere else.
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "folder not found"})
+	case err != nil:
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "body": req.Body})
+}
+
+// errNoteTypeInvalid is createNoteDocument's answer to a type the note
+// vocabulary does not contain.
+var errNoteTypeInvalid = errors.New("invalid note type")
+
+// createNoteDocument is the whole of creating a note - validate, render the
+// file, store the blob, insert the row, wake the indexer - shared by POST
+// /api/notes and the import commit (import_commit.go), so a note an import
+// writes is exactly the note the capture box would have written. Errors are
+// returned, never written to a response: errNoteBodyEmpty/TooLarge,
+// errNoteTypeInvalid and errFolderNotFound are the ones a caller maps to a
+// client error; anything else is a real failure.
+func createNoteDocument(req createNoteRequest) (document, error) {
 	if strings.TrimSpace(req.Body) == "" {
-		return writeDocumentError(c, errNoteBodyEmpty)
+		return document{}, errNoteBodyEmpty
 	}
 	if len(req.Body) > noteMaxBodyBytes {
-		return writeDocumentError(c, errNoteBodyTooLarge)
+		return document{}, errNoteBodyTooLarge
 	}
 
 	title := strings.TrimSpace(req.Title)
@@ -266,7 +295,7 @@ func createNoteHandler(c echo.Context) error {
 	noteTypeSource := "auto"
 	if noteType != "" {
 		if !validNoteType(noteType) {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid note type"})
+			return document{}, errNoteTypeInvalid
 		}
 		noteTypeSource = "operator"
 	} else {
@@ -277,7 +306,7 @@ func createNoteHandler(c echo.Context) error {
 	created := time.Now().UTC().Truncate(time.Second)
 	rendered := renderNoteFile(noteFileMeta{ID: id, Title: title, Type: noteType, Tags: req.Tags, Created: created}, req.Body)
 	if noteRenderedTooLarge(rendered) {
-		return writeDocumentError(c, errNoteBodyTooLarge)
+		return document{}, errNoteBodyTooLarge
 	}
 	sha := sha256Hex(rendered)
 
@@ -291,17 +320,17 @@ func createNoteHandler(c echo.Context) error {
 	// nothing on disk yet to clean up.
 	enrich, _, err := documentEnrichFlag("notes: create")
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return document{}, err
 	}
 
 	dir := documentsDirPath()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
+		return document{}, errors.New("failed to prepare document storage")
 	}
 
 	tmp, err := os.CreateTemp(dir, "upload-*.tmp")
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
+		return document{}, errors.New("failed to create temp file")
 	}
 	tmpPath := tmp.Name()
 	removeTemp := func() {
@@ -312,11 +341,11 @@ func createNoteHandler(c echo.Context) error {
 	if _, err := tmp.Write(rendered); err != nil {
 		tmp.Close()
 		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write note"})
+		return document{}, errors.New("failed to write note")
 	}
 	if err := tmp.Close(); err != nil {
 		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write note"})
+		return document{}, errors.New("failed to write note")
 	}
 
 	// Held across GetBySHA/rename/InsertNote - the same shape
@@ -333,16 +362,16 @@ func createNoteHandler(c echo.Context) error {
 
 	if existing, ok, err := globalDocumentStore.GetBySHA(sha); err != nil {
 		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return document{}, err
 	} else if ok {
 		removeTemp()
-		return writeDocumentError(c, fmt.Errorf("note collides with existing document %s: %w", existing.ID, errDocumentDuplicate))
+		return document{}, fmt.Errorf("note collides with existing document %s: %w", existing.ID, errDocumentDuplicate)
 	}
 
 	finalPath := filepath.Join(dir, sha)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		removeTemp()
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to store note"})
+		return document{}, errors.New("failed to store note")
 	}
 	tmpPath = "" // renamed into place; removeTemp must not touch it anymore
 
@@ -366,19 +395,11 @@ func createNoteHandler(c echo.Context) error {
 		// confirmed no row owned this hash, so finalPath can only be this
 		// attempt's own file.
 		os.Remove(finalPath)
-		if errors.Is(err, errFolderNotFound) {
-			// folder_id is part of the request body, not a path segment
-			// naming an existing resource - a bad value here is 400
-			// (malformed request), matching uploadDocumentHandler's
-			// identical folder_id handling rather than the 404
-			// documentErrorStatus maps errFolderNotFound to everywhere else.
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "folder not found"})
-		}
-		return writeDocumentError(c, err)
+		return document{}, err
 	}
 
 	wakeDocumentIndexer()
-	return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "body": req.Body})
+	return inserted, nil
 }
 
 // ── PATCH /api/notes/:id ─────────────────────────────────────────────────

@@ -13,6 +13,8 @@ function makeItem(overrides: Partial<EquipmentItem>): EquipmentItem {
     model: '13.5 kW',
     serial: '',
     quantity: 1,
+    part_number: '',
+    required_quantity: null,
     status: 'deployed',
     zone_id: 'z1',
     bin_id: null,
