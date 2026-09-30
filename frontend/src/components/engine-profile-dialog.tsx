@@ -161,8 +161,8 @@ export function EngineProfileDialog({
               {problems.length} profile{problems.length === 1 ? '' : 's'} failed to load
             </p>
             {problems.map((problem) => (
-              <p key={problem.file} className="truncate text-xs text-muted-foreground">
-                {problem.file}: {problem.error}
+              <p key={problem.id} className="truncate text-xs text-muted-foreground">
+                {problem.id}: {problem.error}
               </p>
             ))}
           </div>
@@ -177,7 +177,7 @@ export function EngineProfileDialog({
           </p>
         ) : !loading && profiles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No equipment profiles installed. Drop a .json profile into plugins/engine-profiles and restart.
+            No equipment profiles installed. Add one under Inventory, Profiles.
           </p>
         ) : (
           <div className="grid gap-3">

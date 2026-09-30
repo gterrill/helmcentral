@@ -57,7 +57,6 @@ func newProposalEnv(t *testing.T) *proposalEnv {
 	env.deps = assistantToolDeps{
 		documents: func() *documentStore { return docs },
 		today:     mustParseDate(t, "2026-09-30"),
-		profiles:  func() []engineProfile { return nil },
 	}
 	return env
 }
@@ -83,7 +82,7 @@ func (e *proposalEnv) saveOnMessage(t *testing.T, content string, proposals ...a
 }
 
 func (e *proposalEnv) apply(id string) (assistantProposal, error) {
-	return e.asst.ApplyProposal(id, e.deps.today, e.deps.profiles())
+	return e.asst.ApplyProposal(id, e.deps.today)
 }
 
 func (e *proposalEnv) equipment(t *testing.T, item equipmentItem) equipmentItem {
@@ -155,8 +154,6 @@ func TestDeleteConversation_RemovesItsProposals(t *testing.T) {
 
 func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 	env := newProposalEnv(t)
-	svc := []engineProfileService{{ID: "impeller", Description: "Impeller", IntervalHours: fptr(500)}}
-	env.deps.profiles = func() []engineProfile { return []engineProfile{{ID: "onan", Name: "Onan generator", Service: svc}} }
 	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan"})
 	// A meter replacement on 2025-06-01: old 1000, new 0, so a meter reading
 	// after it is 1000 h short of true engine hours.
@@ -172,8 +169,7 @@ func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 		{"op":"create_rule","equipment_id":%q,"description":"Coolant","interval_months":24,"last_done_at":"2025-09-01","last_done_meter_reading":39},
 		{"op":"update_rule","rule_id":%q,"interval_hours":300},
 		{"op":"complete_rule","rule_id":%q,"performed_at":"2025-10-01","meter_reading":45,"who":"Gavin","cost":120},
-		{"op":"acknowledge","rule_id":%q,"reason":"parts on order"},
-		{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID, oil.ID, belts.ID, anodes.ID, gen.ID))
+		{"op":"acknowledge","rule_id":%q,"reason":"parts on order"}]}`, gen.ID, oil.ID, belts.ID, anodes.ID))
 	before := env.counts(t)
 	env.advance()
 
@@ -186,25 +182,25 @@ func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 	}
 
 	after := env.counts(t)
-	// create_rule + copy (impeller) = 2 new rules; complete_rule = 1 log entry.
-	if after.rules != before.rules+2 || after.entries != before.entries+1 {
-		t.Fatalf("expected +2 rules and +1 log entry, got %+v -> %+v", before, after)
+	// create_rule = 1 new rule; complete_rule = 1 log entry.
+	if after.rules != before.rules+1 || after.entries != before.entries+1 {
+		t.Fatalf("expected +1 rule and +1 log entry, got %+v -> %+v", before, after)
 	}
 
-	updated, _ := env.docs.GetMaintenanceRule(oil.ID)
+	updated, _ := env.docs.GetMaintenanceRuleRow(oil.ID)
 	if updated.IntervalHours == nil || *updated.IntervalHours != 300 {
 		t.Fatalf("update_rule: expected 300 h, got %+v", updated.IntervalHours)
 	}
-	done, _ := env.docs.GetMaintenanceRule(belts.ID)
+	done, _ := env.docs.GetMaintenanceRuleRow(belts.ID)
 	if done.LastDoneAt != "2025-10-01" || done.LastDoneHours == nil || *done.LastDoneHours != 1045 {
 		t.Fatalf("complete_rule: expected last done 2025-10-01 at true 1045 h (meter 45 + 1000 offset), got %+v", done)
 	}
-	acked, _ := env.docs.GetMaintenanceRule(anodes.ID)
+	acked, _ := env.docs.GetMaintenanceRuleRow(anodes.ID)
 	if !acked.Acknowledged || acked.AckReason != "parts on order" {
 		t.Fatalf("acknowledge: got %+v", acked)
 	}
 
-	rules, _ := env.docs.ListMaintenanceRules(maintenanceRuleFilter{EquipmentID: gen.ID, IncludeStored: true})
+	rules, _ := env.docs.ListMaintenanceRuleRows(maintenanceRuleFilter{EquipmentID: gen.ID, IncludeStored: true})
 	var coolant *maintenanceRule
 	for i := range rules {
 		if rules[i].Description == "Coolant" {
@@ -245,7 +241,7 @@ func TestApplyProposal_StaleRuleIs409AndNothingIsWritten(t *testing.T) {
 	if got.Status != assistantProposalStale || !strings.Contains(got.StaleReason, "changed since Mate proposed") {
 		t.Fatalf("a stale proposal is stored as stale with its reason, got %q %q", got.Status, got.StaleReason)
 	}
-	stored, _ := env.docs.GetMaintenanceRule(rule.ID)
+	stored, _ := env.docs.GetMaintenanceRuleRow(rule.ID)
 	if stored.Acknowledged {
 		t.Fatal("the acknowledge must not have run")
 	}
@@ -597,7 +593,7 @@ func TestPropose_RejectsWhatAnEarlierOpInTheSameProposalMakesInvalid(t *testing.
 	if after := env.counts(t); after != before {
 		t.Fatalf("the dry run must roll back, rows %+v -> %+v", before, after)
 	}
-	stored, _ := env.docs.GetMaintenanceRule(rule.ID)
+	stored, _ := env.docs.GetMaintenanceRuleRow(rule.ID)
 	if stored.IntervalHours != nil {
 		t.Fatal("the dry run's update must not have been committed")
 	}
@@ -617,50 +613,9 @@ func TestPropose_CompletionSummaryShowsTheNewFixedDueDate(t *testing.T) {
 	if !strings.HasSuffix(p.Ops[1].Summary, ", next due 29 Sep 2028") {
 		t.Errorf("operator-supplied new_due_date, got %q", p.Ops[1].Summary)
 	}
-	stored, _ := env.docs.GetMaintenanceRule(cert.ID)
+	stored, _ := env.docs.GetMaintenanceRuleRow(cert.ID)
 	if stored.FixedDueDate != "2026-10-01" {
 		t.Fatal("the dry run must not move the due date")
-	}
-}
-
-func TestPropose_CopySummaryNamesWhatWouldBeCreated(t *testing.T) {
-	env := newProposalEnv(t)
-	env.deps.profiles = func() []engineProfile {
-		return []engineProfile{{ID: "onan", Name: "Onan generator", Service: []engineProfileService{
-			{ID: "oil", Description: "Oil", IntervalMonths: iptr(12)}, {ID: "belts", Description: "Belts", IntervalMonths: iptr(24)},
-		}}}
-	}
-	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan"})
-	mustToolRule(t, env.docs, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil", IntervalMonths: iptr(12), ProfileServiceID: "oil"})
-
-	p := runPropose(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID))
-	if got, want := p.Ops[0].Summary, "Generator: copy 1 entry from the Onan generator schedule (Belts)"; got != want {
-		t.Fatalf("summary %q, want %q", got, want)
-	}
-	if len(p.Ops[0].CopyServiceIDs) != 1 || p.Ops[0].CopyServiceIDs[0] != "belts" {
-		t.Fatalf("expected the snapshot to name belts, got %v", p.Ops[0].CopyServiceIDs)
-	}
-}
-
-func TestApplyProposal_ACopyDoneByHandBeforeApplyIsStaleAndWritesNothing(t *testing.T) {
-	env := newProposalEnv(t)
-	svc := []engineProfileService{{ID: "oil", Description: "Oil", IntervalMonths: iptr(12)}}
-	env.deps.profiles = func() []engineProfile { return []engineProfile{{ID: "onan", Name: "Onan generator", Service: svc}} }
-	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan"})
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"copy_profile_schedule","equipment_id":%q}]}`, gen.ID))
-
-	if _, err := env.docs.CopyProfileServiceEntries(gen.ID, svc); err != nil {
-		t.Fatalf("manual copy: %v", err)
-	}
-	before := env.counts(t)
-	if _, err := env.apply(p.ID); !errors.Is(err, errAssistantProposalStale) {
-		t.Fatalf("expected stale, got %v", err)
-	}
-	if after := env.counts(t); after != before {
-		t.Fatalf("nothing may be written, %+v -> %+v", before, after)
-	}
-	if got, _ := env.asst.GetProposal(p.ID); got.Status != assistantProposalStale {
-		t.Fatalf("expected status stale, got %q", got.Status)
 	}
 }
 
@@ -717,5 +672,197 @@ func TestApplyProposal_AStaleProposalCanNeitherBeAppliedNorDismissedAndHistoryTe
 	_ = dismissAssistantProposalHandler(c)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 dismissing a stale proposal, got %d", rec.Code)
+	}
+}
+
+// ── profile jobs (ADR 0148) ─────────────────────────────────────────────
+
+func TestProposal_UpdateOnAProfileJobAppliesAsAnOverride(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", HourMeterPath: "propulsion.main.runTime"})
+	job := maintenanceJobID(item.ID, "engine-oil")
+
+	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"interval_hours":500}]}`, job))
+	if got, want := p.Ops[0].Summary, "Change Main engine · Engine oil and filter for this item: now every 500 h or 12 mo"; got != want {
+		t.Fatalf("summary %q, want %q", got, want)
+	}
+	if n := env.counts(t).rules; n != 0 {
+		t.Fatalf("propose must not create the job's row, got %d rows", n)
+	}
+
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	eff, err := env.docs.ResolveMaintenanceRule(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.IntervalHours == nil || *eff.IntervalHours != 500 || strings.Join(eff.OverriddenFields, ",") != "interval_hours" {
+		t.Fatalf("expected a 500 h override, got %+v %v", eff.IntervalHours, eff.OverriddenFields)
+	}
+	if eff.IntervalMonths == nil || *eff.IntervalMonths != 12 {
+		t.Errorf("months must still follow the profile, got %+v", eff.IntervalMonths)
+	}
+}
+
+func TestProposal_UpdateOnAProfileJobRefusesWhatItCannotChange(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
+	job := maintenanceJobID(item.ID, "engine-oil")
+
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"clear":["description"]}]}`, job))
+	if !strings.Contains(msg, "clear") || !strings.Contains(msg, "profile job") {
+		t.Fatalf("got %q", msg)
+	}
+	msg = proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"interval_hours":250}]}`, job))
+	if !strings.Contains(msg, "exactly as it is") {
+		t.Fatalf("an override equal to the current values is no change, got %q", msg)
+	}
+}
+
+func TestProposal_CompletingAProfileJobUsesTheEffectiveInterval(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", HourMeterPath: "propulsion.main.runTime"})
+	oil := maintenanceJobID(item.ID, "engine-oil")
+	impeller := maintenanceJobID(item.ID, "impeller")
+
+	// The profile's interval is in hours, so a reading is needed though the
+	// job has no row.
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01"}]}`, oil))
+	if !strings.Contains(msg, "meter_reading") {
+		t.Fatalf("got %q", msg)
+	}
+	// A slot has no hours interval, so it completes without one.
+	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01"}]}`, impeller))
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	entries, err := env.docs.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: item.ID})
+	if err != nil || len(entries) != 1 || entries[0].RuleID == nil || *entries[0].RuleID != impeller {
+		t.Fatalf("expected one entry on the job, got %+v %v", entries, err)
+	}
+}
+
+func TestProposal_ATouchedJobMakesAnEarlierProposalStale(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
+	job := maintenanceJobID(item.ID, "impeller")
+
+	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"later"}]}`, job))
+	env.advance()
+	if _, err := env.docs.AcknowledgeMaintenanceRule(job, "someone else got there first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.apply(p.ID); !errors.Is(err, errAssistantProposalStale) {
+		t.Fatalf("expected stale, got %v", err)
+	}
+}
+
+func TestProposal_UpdateOnAProfileJobCanSetDueSoonAndFixedDate(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
+	job := maintenanceJobID(item.ID, "engine-oil")
+
+	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"due_soon_hours":20,"fixed_due_date":"2027-03-01"}]}`, job))
+	if !strings.Contains(p.Ops[0].Summary, "due 1 Mar 2027") || !strings.Contains(p.Ops[0].Summary, "due soon at 20 h") {
+		t.Fatalf("summary %q", p.Ops[0].Summary)
+	}
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	eff, err := env.docs.ResolveMaintenanceRule(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.DueSoonHours == nil || *eff.DueSoonHours != 20 || eff.FixedDueDate != "2027-03-01" || len(eff.OverriddenFields) != 0 {
+		t.Fatalf("got %+v", eff)
+	}
+	p = env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"clear":["fixed_due_date","due_soon_hours"]}]}`, job))
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply clear: %v", err)
+	}
+	eff, _ = env.docs.ResolveMaintenanceRule(job)
+	if eff.DueSoonHours != nil || eff.FixedDueDate != "" {
+		t.Fatalf("clear failed: %+v", eff)
+	}
+}
+
+func TestProposal_UpdateOnAProfileJobSetsAndClearsNotApplicable(t *testing.T) {
+	env := newProposalEnv(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
+	job := maintenanceJobID(item.ID, "impeller")
+
+	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, job))
+	if got, want := p.Ops[0].Summary, "Main engine · Raw water impeller: mark not applicable to this item"; got != want {
+		t.Fatalf("summary %q, want %q", got, want)
+	}
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	eff, err := env.docs.ResolveMaintenanceRule(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eff.NotApplicable || strings.Join(eff.OverriddenFields, ",") != "not_applicable" {
+		t.Fatalf("expected not applicable, got %+v", eff)
+	}
+
+	// Setting it again is no change; clearing it is.
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, job))
+	if !strings.Contains(msg, "exactly as it is") {
+		t.Fatalf("got %q", msg)
+	}
+	env.advance()
+	p = env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":false}]}`, job))
+	if got, want := p.Ops[0].Summary, "Main engine · Raw water impeller: applies to this item again"; got != want {
+		t.Fatalf("summary %q, want %q", got, want)
+	}
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	eff, err = env.docs.ResolveMaintenanceRule(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.NotApplicable || len(eff.OverriddenFields) != 0 {
+		t.Fatalf("expected the profile's own applicability, got %+v", eff)
+	}
+}
+
+func TestProposal_NotApplicableIsRefusedOnAHandRule(t *testing.T) {
+	env := newProposalEnv(t)
+	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical"})
+	rule := mustToolRule(t, env.docs, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Belts", IntervalMonths: iptr(12)})
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, rule.ID))
+	if !strings.Contains(msg, "not_applicable") {
+		t.Fatalf("got %q", msg)
+	}
+}
+
+func TestApplyProposal_ARemovedCopyProfileScheduleOpGoesStaleWithAReason(t *testing.T) {
+	env := newProposalEnv(t)
+	// A card stored before the op was removed: it must not 500 forever.
+	old := assistantProposal{ID: "p-copy", Ops: []assistantProposalOp{{Op: "copy_profile_schedule", Summary: "Copy the profile schedule"}}}
+	env.saveOnMessage(t, "Tap Apply.", old)
+
+	_, err := env.apply("p-copy")
+	if !errors.Is(err, errAssistantProposalStale) || !strings.Contains(err.Error(), "no longer does") {
+		t.Fatalf("expected a stale refusal with the reason, got %v", err)
+	}
+	got, _ := env.asst.GetProposal("p-copy")
+	if got.Status != assistantProposalStale || !strings.Contains(got.StaleReason, "profile jobs are already on its schedule") {
+		t.Fatalf("expected stored stale with the reason, got %q %q", got.Status, got.StaleReason)
 	}
 }

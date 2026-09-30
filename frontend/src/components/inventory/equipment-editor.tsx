@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -14,10 +14,20 @@ import { Textarea } from '@/components/ui/textarea'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
 import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
+import { ProfileChangeSummary, profileChangeIsEmpty } from '@/components/inventory/profile-change-summary'
 import { TagRow } from '@/components/inventory/tag-row'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
-import { useMaintenanceLogEntries, useMaintenanceRules } from '@/hooks/use-maintenance'
+import { previewProfileChange, useMaintenanceLogEntries, useMaintenanceRules, type MaintenanceProfileChangePreview } from '@/hooks/use-maintenance'
 import { photoFilename, usePhotoStaging, type FailedPhotoUpload, type LocalPhoto } from '@/hooks/use-photo-staging'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { formatAppLocation } from '@/lib/app-location'
@@ -159,6 +169,14 @@ interface EquipmentEditorProps {
   initialBinId?: string | null
 }
 
+/** The operator backed out of the profile-change confirmation. */
+class ProfileChangeDeclined extends Error {
+  constructor() {
+    super('Profile change not confirmed')
+    this.name = 'ProfileChangeDeclined'
+  }
+}
+
 export interface EquipmentEditorHandle {
   save: () => Promise<void>
 }
@@ -179,10 +197,24 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // here, independently of MaintenanceEquipmentBlock's own fetch of the
   // same data - this codebase's own "one hook instance per caller, no
   // shared cache" idiom (use-maintenance.ts's own header comment).
-  const { rules: maintenanceRules } = useMaintenanceRules(id !== null ? { equipment: id, includeStored: true } : null)
+  const { rules: scheduleRules, removed: removedJobs } = useMaintenanceRules(id !== null ? { equipment: id, includeStored: true } : null)
+  // Only what has a stored row goes with the item: a profile job nothing has
+  // been written to (created_at null) is just the profile, not this item's.
+  const maintenanceRules = [...scheduleRules.filter((r) => r.created_at !== null), ...removedJobs]
   const { entries: maintenanceLogEntries } = useMaintenanceLogEntries(id !== null ? { equipment: id } : null)
 
   const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
+  // ADR 0148: what a profile change would do to this item's service
+  // schedule, asked for the moment the select changes (saved items only) and
+  // confirmed before the save goes through.
+  const [profilePreview, setProfilePreview] = useState<MaintenanceProfileChangePreview | null>(null)
+  const [profilePreviewError, setProfilePreviewError] = useState<string | null>(null)
+  const [confirmingProfileChange, setConfirmingProfileChange] = useState(false)
+  const profilePreviewSeq = useRef(0)
+  const profilePreviewPending = useRef(false)
+  // The operator's answer to the confirmation, awaited by performSave so every
+  // save path (the Save bar, Save and Continue through the ref) passes it.
+  const profileDecision = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null)
   // 2026-09-25 refactor: the Documents tab's own PENDING diff - what the
   // operator has picked to add or removed, not yet saved. Replaces the
   // whole-set mirror (docEntries) the whole-set PUT used to require: now
@@ -407,7 +439,43 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // overwrites a value the operator has already typed (the plan's own
   // wording), the same "don't clobber an in-progress edit" rule this whole
   // page follows for everything else.
+  // Drops the profile change preview, its error, any in-flight preview
+  // request and an open confirmation. Called when a save lands by any path
+  // and when the editor moves to another item, so one item's preview and
+  // confirmation never reach the next.
+  const clearProfileChange = useCallback(() => {
+    profilePreviewSeq.current += 1
+    profilePreviewPending.current = false
+    setProfilePreview(null)
+    setProfilePreviewError(null)
+    setConfirmingProfileChange(false)
+    const pending = profileDecision.current
+    profileDecision.current = null
+    pending?.reject(new ProfileChangeDeclined())
+  }, [])
+  useEffect(() => { clearProfileChange() }, [id, clearProfileChange])
+
   const handleProfileChange = (profileId: string) => {
+    const seq = (profilePreviewSeq.current += 1)
+    if (profilePreviewError) setSaveError(null)
+    setProfilePreview(null)
+    setProfilePreviewError(null)
+    profilePreviewPending.current = false
+    if (id !== null && item && profileId !== item.profile_id) {
+      profilePreviewPending.current = true
+      previewProfileChange(id, profileId).then(
+        (preview) => {
+          if (seq !== profilePreviewSeq.current) return
+          profilePreviewPending.current = false
+          setProfilePreview(preview)
+        },
+        (err: unknown) => {
+          if (seq !== profilePreviewSeq.current) return
+          profilePreviewPending.current = false
+          setProfilePreviewError(err instanceof Error ? err.message : String(err))
+        },
+      )
+    }
     setDraft((prev) => {
       const profile = profiles.find((p) => p.id === profileId)
       const next: EquipmentInput = { ...prev, profile_id: profileId }
@@ -636,6 +704,23 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     setSaveError(null)
     setFieldErrors([])
     try {
+      // ADR 0148: a profile change is confirmed here, where every save path
+      // passes. A failed preview blocks the save (nothing is known about what
+      // it would do to the schedule); choosing the saved profile again clears it.
+      if (id !== null) {
+        if (profilePreviewError) {
+          throw new Error(`Couldn't check what this profile change does to the service schedule: ${profilePreviewError}`)
+        }
+        if (profilePreviewPending.current) {
+          throw new Error('Still checking what this profile change does to the service schedule. Try again in a moment.')
+        }
+        if (profilePreview && !profileChangeIsEmpty(profilePreview)) {
+          await new Promise<void>((resolve, reject) => {
+            profileDecision.current = { resolve, reject }
+            setConfirmingProfileChange(true)
+          })
+        }
+      }
       if (id === null) {
         const created = await createEquipment(draft)
         onCreated(created.id)
@@ -677,6 +762,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       }
       const sentDraft = draft
       const updated = await update(draft)
+      // The change is saved: whichever path got here (Save bar, Save and
+      // Continue), its preview and confirmation are spent.
+      clearProfileChange()
       // Re-seed the draft from the server's own normalised record (trimmed
       // strings, case-insensitively deduped aliases - backend/inventory_
       // handlers.go and inventory_store.go's normalizeAliases). The effect
@@ -715,15 +803,26 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
       throw err
     }
-  }, [id, draft, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated])
+  }, [id, draft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
+
+  const decideProfileChange = (confirmed: boolean) => {
+    const pending = profileDecision.current
+    profileDecision.current = null
+    setConfirmingProfileChange(false)
+    if (!pending) return
+    if (confirmed) pending.resolve()
+    else pending.reject(new ProfileChangeDeclined())
+  }
 
   const handleSave = async () => {
     setSaving(true)
     try {
       await performSave()
     } catch (err) {
+      // Declining the profile confirmation is a choice, not a failure.
+      if (err instanceof ProfileChangeDeclined) return
       // AGENTS.md fallback policy: the server's own message, draft left
       // exactly as typed.
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -746,6 +845,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       return
     }
     if (item) setDraft(draftFromItem(item))
+    clearProfileChange()
     setPendingAdds([])
     setPendingRemoves([])
     setSaveError(null)
@@ -947,7 +1047,16 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
                       {profiles.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                     </SelectPopup>
                   </Select>
-                  <FieldDescription>Fills in a blank manufacturer and model. Gear with no profile is normal.</FieldDescription>
+                  <FieldDescription>
+                    Fills in a blank manufacturer and model, and supplies the item's service schedule.
+                    Gear with no profile is normal.
+                  </FieldDescription>
+                  {profilePreviewError && (
+                    <p role="alert" className="text-sm text-destructive">
+                      Couldn't check what this changes in the service schedule: {profilePreviewError}
+                    </p>
+                  )}
+                  {profilePreview && <ProfileChangeSummary preview={profilePreview} />}
                 </Field>
 
                 <Field>
@@ -1138,7 +1247,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
           {id !== null && (
             <MaintenanceEquipmentBlock
               equipmentId={id}
-              profileId={draft.profile_id}
+              scheduleKey={item?.profile_id ?? ''}
               hourMeterPath={draft.hour_meter_path}
               canWrite={canWrite}
             />
@@ -1189,6 +1298,27 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         // one.
         excludeIds={displayedDocuments.map((d) => d.document_id)}
       />
+
+      <AlertDialog open={confirmingProfileChange} onOpenChange={(isOpen) => { if (!isOpen) decideProfileChange(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change this item's profile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its service schedule follows the profile, so this is what changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {profilePreview && <ProfileChangeSummary preview={profilePreview} />}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              onClick={() => decideProfileChange(true)}
+            >
+              Change profile
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ConfirmDelete
         open={pendingDelete}

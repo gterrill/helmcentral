@@ -67,7 +67,8 @@ Steps for specific tasks.
 - [Run a stocktake](how-to/run-a-stocktake.md), scanning a bin and its
   contents to confirm what's aboard.
 - [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md),
-  copying a profile's service intervals or adding rules by hand.
+  following a profile's service intervals, changing them for one item, or
+  adding rules by hand.
 - [Set up a maintenance schedule with Mate](how-to/set-up-a-maintenance-schedule-with-mate.md),
   asking Mate for a schedule and applying what it proposes.
 - [Log a service](how-to/log-a-service.md), completing a scheduled job or

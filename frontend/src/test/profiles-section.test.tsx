@@ -69,6 +69,20 @@ beforeEach(() => {
   vi.stubGlobal('open', openMock)
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/api/equipment-profiles/catalogue')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          entries: [
+            { source: 'helmcentral', id: 'cummins-qsb67-550', name: 'Cummins QSB 6.7 550', kind: 'engine', manufacturer: 'Cummins', model: 'QSB 6.7', sha256: 'a', added: true },
+            { source: 'helmcentral', id: 'cummins-5285862', name: 'Cummins 5285862 alternator', kind: 'alternator', manufacturer: 'Prestolite', model: '', sha256: 'b', added: false },
+          ],
+        }),
+      })
+    }
+    if (String(url).includes('/api/equipment-profiles/catalogue/') && init?.method === 'POST') {
+      return Promise.resolve({ ok: true, status: 201, json: async () => ({ profile }) })
+    }
     if (String(url).includes('/api/equipment-profiles') && (!init || init.method === undefined)) {
       return Promise.resolve({ ok: true, json: async () => ({ profiles: [profile, secondProfile], problems: [] }) })
     }
@@ -109,6 +123,27 @@ beforeEach(() => {
 })
 
 describe('ProfilesSection', () => {
+  it('adds a profile from the catalogue and disables ones already added', async () => {
+    render(<ProfilesSection />)
+    await waitForFirstProfile()
+
+    await clickWhenEnabled('Add from catalogue')
+
+    expect(await screen.findByRole('button', { name: 'Add Cummins QSB 6.7 550' })).toBeDisabled()
+    const addButton = screen.getByRole('button', { name: 'Add Cummins 5285862 alternator' })
+    expect(addButton).toBeEnabled()
+
+    fireEvent.click(addButton)
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/equipment-profiles/catalogue/cummins-5285862'),
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Cummins 5285862 alternator' })).toBeDisabled())
+  })
+
   it('lets the operator edit the selected profile', async () => {
     render(<ProfilesSection />)
 
@@ -320,6 +355,73 @@ describe('ProfilesSection', () => {
     fireEvent.change(uploadInput, { target: { files: [uploadFile] } })
 
     await screen.findByText('profile id already exists')
+  })
+
+  it('lists the items a save would strip jobs from, and saves anyway once confirmed', async () => {
+    const affected = [
+      { equipment_id: 'eq-1', equipment_name: 'Main engine', service_id: 'belt', description: 'Drive belt' },
+      { equipment_id: 'eq-2', equipment_name: 'Genset', service_id: 'belt', description: 'Drive belt' },
+    ]
+    const baseImpl = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/equipment-profiles/cummins-qsb67-550') && init?.method === 'PUT') {
+        if (String(url).includes('confirm_removed=1')) return Promise.resolve({ ok: true, json: async () => ({ profile }) })
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'this edit removes 2 maintenance job(s)', affected }),
+        })
+      }
+      return baseImpl(url, init)
+    })
+    render(<ProfilesSection />)
+    await waitForFirstProfile()
+
+    await clickWhenEnabled('Edit')
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Main engine')
+    expect(alert).toHaveTextContent('Genset')
+    expect(alert).toHaveTextContent('Drive belt')
+    expect(alert).not.toHaveTextContent('belt:')
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('confirm_removed'))).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save anyway' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/equipment-profiles/cummins-qsb67-550?confirm_removed=1'),
+      expect.objectContaining({ method: 'PUT' }),
+    ))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save anyway' })).not.toBeInTheDocument())
+  })
+
+  it('names the items still using a profile when deleting it is refused', async () => {
+    const baseImpl = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/equipment-profiles/') && init?.method === 'DELETE') {
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            error: '1 equipment item(s) still use this profile; change their profile first',
+            affected: [{ equipment_id: 'eq-1', equipment_name: 'Main engine' }],
+          }),
+        })
+      }
+      return baseImpl(url, init)
+    })
+    render(<ProfilesSection />)
+    await waitForFirstProfile()
+
+    await clickWhenEnabled('Delete equipment profile')
+    await screen.findByText('Delete "Cummins QSB 6.7 550"?')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/still use this profile/)
+    expect(alert).toHaveTextContent('Main engine')
+    expect(screen.queryByRole('button', { name: 'Save anyway' })).not.toBeInTheDocument()
   })
 
   it('renders schema validation path details returned on save', async () => {

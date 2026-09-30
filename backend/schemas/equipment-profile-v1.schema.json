@@ -165,7 +165,7 @@
       "additionalProperties": false,
       "required": ["id"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
         "description": { "type": "string" },
         "interval_hours": { "type": ["number", "null"] },
         "interval_months": { "type": ["integer", "null"] },

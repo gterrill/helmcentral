@@ -20,8 +20,7 @@ func applyAssistantProposalHandler(c echo.Context) error {
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	profiles, _ := engineProfiles()
-	p, err := globalAssistantStore.ApplyProposal(c.Param("id"), today, profiles)
+	p, err := globalAssistantStore.ApplyProposal(c.Param("id"), today)
 	if err != nil {
 		return writeAssistantProposalError(c, err)
 	}

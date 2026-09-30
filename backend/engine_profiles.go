@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,8 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,7 +21,11 @@ import (
 // the gauges it wants, the scales they run on, its advisory operating bands,
 // and its manufacturer service intervals.
 //
-// Plain JSON rather than a WASM plugin, unlike every other plugins/ directory.
+// Profiles are operator data stored in helmcentral.sqlite (profile_store.go);
+// the profiles Helmcentral ships are a read-only catalogue compiled into the
+// binary (profile_catalogue.go) that the operator copies from.
+//
+// Plain JSON rather than a WASM plugin, unlike every plugins/ directory.
 // The other categories fetch data over a network and the sandbox exists to run
 // untrusted code safely. A profile runs no code and fetches nothing — and since
 // ADR 0050 its numbers are alarm thresholds, so the property that matters is
@@ -144,11 +147,11 @@ type engineProfile struct {
 	ChargeHigh *batteryProfileThreshold `json:"charge_high,omitempty"`
 }
 
-// engineProfileProblem names a file that could not be loaded and why. A bad
-// drop-in file must not take the server down, and must not vanish silently
-// either — the Settings UI shows these.
+// engineProfileProblem names a stored profile that could not be loaded and
+// why. A bad row must not take the server down, and must not vanish silently
+// either.
 type engineProfileProblem struct {
-	File  string `json:"file"`
+	ID    string `json:"id"`
 	Error string `json:"error"`
 }
 
@@ -159,10 +162,6 @@ var (
 	validEngineZoneDirects = map[string]bool{"below": true, "above": true}
 	profileIDPattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 )
-
-func engineProfilesDir() string {
-	return cacheFilePath("ENGINE_PROFILES_DIR", "plugins/engine-profiles")
-}
 
 // validateEngineProfile reuses the gauge rules rather than restating them, so
 // a profile can never describe a gauge the dashboard would reject.
@@ -235,6 +234,9 @@ func validateEngineProfile(p engineProfile) error {
 			return fmt.Errorf("duplicate service item id %q", id)
 		}
 		seenService[id] = true
+		if !profileIDPattern.MatchString(id) {
+			return fmt.Errorf("service item id %q may only use lowercase letters, numbers, dots, underscores, and hyphens", id)
+		}
 		// Both intervals nil is a slot, the same idea as a nil zone threshold:
 		// the profile knows the engine *has* this service without knowing how
 		// often the manufacturer wants it. It names the item and leaves the
@@ -359,82 +361,69 @@ func validateEngineProfileGauge(gauge engineProfileGauge) error {
 	return nil
 }
 
-// loadEngineProfiles reads every *.json in the profiles directory. A file that
-// fails is skipped and recorded; the rest still load.
+// parseProfileDocument runs a raw profile document through the same
+// canonicalize, schema and semantic checks every entry point uses, and returns
+// the decoded profile.
+func parseProfileDocument(raw []byte) (engineProfile, error) {
+	canonical, err := canonicalizeProfileDocument(raw)
+	if err != nil {
+		return engineProfile{}, err
+	}
+	schemaErrors, err := validateProfileDocument(canonical)
+	if err != nil {
+		return engineProfile{}, err
+	}
+	if len(schemaErrors) > 0 {
+		parts := make([]string, 0, len(schemaErrors))
+		for _, issue := range schemaErrors {
+			if strings.TrimSpace(issue.Path) == "" {
+				parts = append(parts, issue.Message)
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", issue.Path, issue.Message))
+		}
+		return engineProfile{}, errors.New(strings.Join(parts, "; "))
+	}
+	var profile engineProfile
+	if err := json.Unmarshal(canonical, &profile); err != nil {
+		return engineProfile{}, err
+	}
+	if err := validateEngineProfile(profile); err != nil {
+		return engineProfile{}, err
+	}
+	return profile, nil
+}
+
+// loadEngineProfiles reads every stored profile and re-validates it. A row
+// that fails is skipped and recorded; the rest still load.
 func loadEngineProfiles() {
-	dir := engineProfilesDir()
+	if globalProfileStore == nil {
+		err := errors.New("profile store is not open")
+		log.Printf("engine-profiles: %v", err)
+		storeEngineProfiles(nil, []engineProfileProblem{{ID: "", Error: err.Error()}})
+		return
+	}
 
 	var loaded []engineProfile
 	var problems []engineProfileProblem
 
-	entries, err := os.ReadDir(dir)
+	rows, err := globalProfileStore.allRows()
 	if err != nil {
-		// No profiles directory at all is a normal state, not a failure.
-		if !os.IsNotExist(err) {
-			problems = append(problems, engineProfileProblem{File: dir, Error: err.Error()})
-			log.Printf("engine-profiles: cannot read %s: %v", dir, err)
-		}
-		storeEngineProfiles(loaded, problems)
+		log.Printf("engine-profiles: cannot read stored profiles: %v", err)
+		storeEngineProfiles(nil, []engineProfileProblem{{ID: "", Error: err.Error()}})
 		return
 	}
 
-	seen := map[string]string{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
-			continue
+	for _, row := range rows {
+		profile, err := parseProfileDocument([]byte(row.Body))
+		if err == nil && profile.ID != row.ID {
+			err = fmt.Errorf("stored under id %q but the document says %q", row.ID, profile.ID)
 		}
-
-		fail := func(err error) {
-			problems = append(problems, engineProfileProblem{File: name, Error: err.Error()})
-			log.Printf("engine-profiles: skipping %s: %v", name, err)
-		}
-
-		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
-			fail(err)
+			problems = append(problems, engineProfileProblem{ID: row.ID, Error: err.Error()})
+			log.Printf("engine-profiles: skipping %s: %v", row.ID, err)
 			continue
 		}
-
-		canonical, err := canonicalizeProfileDocument(data)
-		if err != nil {
-			fail(err)
-			continue
-		}
-
-		schemaErrors, err := validateProfileDocument(canonical)
-		if err != nil {
-			fail(err)
-			continue
-		}
-		if len(schemaErrors) > 0 {
-			parts := make([]string, 0, len(schemaErrors))
-			for _, issue := range schemaErrors {
-				if strings.TrimSpace(issue.Path) == "" {
-					parts = append(parts, issue.Message)
-					continue
-				}
-				parts = append(parts, fmt.Sprintf("%s: %s", issue.Path, issue.Message))
-			}
-			fail(errors.New(strings.Join(parts, "; ")))
-			continue
-		}
-
-		var profile engineProfile
-		if err := json.Unmarshal(canonical, &profile); err != nil {
-			fail(err)
-			continue
-		}
-		if err := validateEngineProfile(profile); err != nil {
-			fail(err)
-			continue
-		}
-		if other, dup := seen[profile.ID]; dup {
-			fail(fmt.Errorf("profile id %q is already defined by %s", profile.ID, other))
-			continue
-		}
-
-		seen[profile.ID] = name
 		loaded = append(loaded, profile)
 	}
 
@@ -453,46 +442,6 @@ func engineProfiles() ([]engineProfile, []engineProfileProblem) {
 	engineProfilesMu.RLock()
 	defer engineProfilesMu.RUnlock()
 	return engineProfilesState, engineProfileProblems
-}
-
-func engineProfileFileForID(id string) (string, error) {
-	dir := engineProfilesDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", os.ErrNotExist
-		}
-		return "", err
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
-			continue
-		}
-
-		path := filepath.Join(dir, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		canonical, err := canonicalizeProfileDocument(data)
-		if err != nil {
-			continue
-		}
-
-		var profile engineProfile
-		if err := json.Unmarshal(canonical, &profile); err != nil {
-			continue
-		}
-
-		if strings.TrimSpace(profile.ID) == id {
-			return path, nil
-		}
-	}
-
-	return "", os.ErrNotExist
 }
 
 func filteredEngineProfiles(profiles []engineProfile, kind string) []engineProfile {
@@ -520,11 +469,11 @@ func parseProfileID(raw string) (string, error) {
 	return id, nil
 }
 
-func profileFileName(id string) (string, error) {
+func validateProfileID(id string) error {
 	if !profileIDPattern.MatchString(id) {
-		return "", fmt.Errorf("profile id may only use lowercase letters, numbers, dots, underscores, and hyphens")
+		return fmt.Errorf("profile id may only use lowercase letters, numbers, dots, underscores, and hyphens")
 	}
-	return id + ".json", nil
+	return nil
 }
 
 func decodeProfileFromRequest(c echo.Context) (engineProfile, []profileValidationError, int, error) {
@@ -557,27 +506,19 @@ func decodeProfileFromRequest(c echo.Context) (engineProfile, []profileValidatio
 	return profile, nil, 0, nil
 }
 
+// readProfileByID reads one profile straight from the table, so a handler
+// never answers from a cache that a failed reload left stale.
 func readProfileByID(id string) (engineProfile, error) {
-	path, err := engineProfileFileForID(id)
-	if err != nil {
-		return engineProfile{}, err
+	if globalProfileStore == nil {
+		return engineProfile{}, errors.New("profile store is not open")
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return engineProfile{}, err
-	}
-
-	canonical, err := canonicalizeProfileDocument(data)
-	if err != nil {
-		return engineProfile{}, err
-	}
-
 	var profile engineProfile
-	if err := json.Unmarshal(canonical, &profile); err != nil {
-		return engineProfile{}, err
-	}
-	return profile, nil
+	err := globalProfileStore.inTx(func(tx *sql.Tx) error {
+		var err error
+		profile, _, err = getProfileTx(tx, id)
+		return err
+	})
+	return profile, err
 }
 
 // GET /api/equipment-profiles
@@ -630,15 +571,28 @@ func updateProfileHandler(c echo.Context, requiredKind string) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "payload kind does not match endpoint"})
 	}
 
-	path, err := engineProfileFileForID(id)
+	if globalProfileStore == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
+	}
+	confirmRemoved := c.QueryParam("confirm_removed") == "1"
+	err = globalProfileStore.inTx(func(tx *sql.Tx) error {
+		if _, _, err := getProfileTx(tx, id); errors.Is(err, errProfileNotFound) {
+			return err
+		}
+		if err := guardProfileUpdateTx(tx, profile, confirmRemoved); err != nil {
+			return err
+		}
+		return updateProfileTx(tx, profile)
+	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		var guard *profileGuardError
+		if errors.As(err, &guard) {
+			return writeProfileGuardError(c, guard)
+		}
+		if errors.Is(err, errProfileNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to locate profile"})
-	}
-
-	if err := writeJSONFileAtomic(path, profile); err != nil {
+		log.Printf("engine-profiles: update %s: %v", id, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save profile"})
 	}
 
@@ -683,24 +637,18 @@ func createEquipmentProfileHandler(c echo.Context) error {
 	}
 
 	id := strings.TrimSpace(profile.ID)
-	if _, err := engineProfileFileForID(id); err == nil {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "profile id already exists"})
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to inspect existing profiles"})
-	}
-
-	name, err := profileFileName(id)
-	if err != nil {
+	if err := validateProfileID(id); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	path := filepath.Join(engineProfilesDir(), name)
-	if _, err := os.Stat(path); err == nil {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "profile file already exists"})
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to inspect profile path"})
+	if globalProfileStore == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
 	}
-
-	if err := writeJSONFileAtomic(path, profile); err != nil {
+	err = globalProfileStore.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, profile, profileBasedOn{}) })
+	if err != nil {
+		if errors.Is(err, errProfileExists) {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "profile id already exists"})
+		}
+		log.Printf("engine-profiles: create %s: %v", id, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save profile"})
 	}
 
@@ -717,9 +665,10 @@ func getEquipmentProfileHandler(c echo.Context) error {
 
 	profile, err := readProfileByID(id)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, errProfileNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
 		}
+		log.Printf("engine-profiles: read %s: %v", id, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read profile"})
 	}
 
@@ -735,9 +684,10 @@ func downloadEquipmentProfileHandler(c echo.Context) error {
 
 	profile, err := readProfileByID(id)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, errProfileNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
 		}
+		log.Printf("engine-profiles: read %s: %v", id, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read profile"})
 	}
 
@@ -758,18 +708,24 @@ func deleteEquipmentProfileHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	path, err := engineProfileFileForID(id)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to locate profile"})
+	if globalProfileStore == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
 	}
-
-	if err := os.Remove(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	err = globalProfileStore.inTx(func(tx *sql.Tx) error {
+		if err := guardProfileDeleteTx(tx, id); err != nil {
+			return err
+		}
+		return deleteProfileTx(tx, id)
+	})
+	if err != nil {
+		var guard *profileGuardError
+		if errors.As(err, &guard) {
+			return writeProfileGuardError(c, guard)
+		}
+		if errors.Is(err, errProfileNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
 		}
+		log.Printf("engine-profiles: delete %s: %v", id, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to delete profile"})
 	}
 

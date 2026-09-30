@@ -1,11 +1,11 @@
 # Equipment profiles
 
-An equipment profile is a JSON file describing one piece of machinery: the
+An equipment profile describes one piece of machinery: the
 gauges it needs, their display scales, its normal operating ranges, and its
 service intervals. Applying one builds a configured tile in two clicks instead
 of typing a dozen paths and scales by hand.
 
-Three kinds of equipment are covered, set by the file's `kind` field:
+Three kinds of equipment are covered, set by the profile's `kind` field:
 
 | `kind` | Covers | Path suffixes |
 | --- | --- | --- |
@@ -13,23 +13,29 @@ Three kinds of equipment are covered, set by the file's `kind` field:
 | `alternator` | Engine-driven alternators | Anything except `phase.` or `total.` |
 | `generator` | AC gensets | Must start with `phase.` or `total.` |
 
-Profiles live in `plugins/engine-profiles/`. Drop a file in and restart, or
-manage them from **Inventory → Profiles**, which can upload, edit, download and
-delete without touching the filesystem. Either way they appear under **Add
+Your profiles are stored with the rest of your boat's records and are managed
+from **Inventory → Profiles**, which can add, edit, download and delete them.
+**Add from catalogue** there copies one of the profiles that ship with
+Helmcentral into your own list, where you can edit it freely; a profile already
+in your list is greyed out in the catalogue. Your profiles appear under **Add
 Tile → From equipment profile…**.
 
-Unlike the rest of `plugins/`, profiles are plain JSON rather than compiled
-modules. Because a profile can carry alarm thresholds, you have to be able to
-open the file and read the exact value at which an alarm will fire. A compiled
-module would add a build step to declarative data that runs no code.
+Because a profile can carry alarm thresholds, you can open it and read the exact
+value at which an alarm will fire.
+
+If you ran an earlier version that kept profiles as files in a folder, run
+`helmcentral convert-profile-rules` once to bring them across. It shows what it
+would import and changes nothing until you add `--apply`. Helmcentral will not
+start while profile files are waiting in the old folder and your profile list is
+empty, and its message names this command.
 
 ## What ships, and what does not
 
-A bundled profile may carry a working alarm threshold, but only where the
+A catalogue profile may carry a working alarm threshold, but only where the
 manufacturer publishes the figure and the profile says so. Every threshold in a
-bundled file cites its `source`, and a test refuses one that does not.
+catalogue profile cites its `source`, and a test refuses one that does not.
 
-That split is deliberate, and the three bundled profiles land on both sides of
+That split is deliberate, and the three catalogue profiles land on both sides of
 it:
 
 | Profile | Thresholds |
@@ -48,7 +54,7 @@ list. A number nobody can source is worse than no number.
 Where a figure is published, withholding it helps nobody, so the alternator
 ships its charging window, its sustained output limit and its thermal limit.
 
-Every bundled profile also carries **green advisory bands** where a published
+Every catalogue profile also carries **green advisory bands** where a published
 source exists, each citing it. Those colour the gauge and raise nothing.
 
 Check any shipped threshold against your own installation before relying on it.
@@ -63,7 +69,7 @@ are left alone.
 
 ## Filling in your thresholds
 
-Two ways, same result. Edit the JSON and restart, or apply the profile to a
+Two ways, same result. Edit the profile in **Inventory → Profiles**, or apply the profile to a
 tile and edit the zones on each gauge in the ordinary gauge configuration
 dialog. The dialog is easier to check against the gauge layout as you go.
 
@@ -123,7 +129,7 @@ From an alternator manual, the temperature limit and the output voltage window.
 anything else is refused rather than guessed at. `kind` is `engine`,
 `alternator` or `generator`, and it decides which path suffixes are legal. The
 apply dialog lists every kind together and shows each profile's kind beside its
-name. A file written before these fields existed still loads: it is read as a
+name. A profile written before these fields existed still loads: it is read as a
 version 1 engine profile.
 
 **`path_suffix`, not a full path.** You pick the instance prefix, such as
@@ -160,7 +166,7 @@ look it up, and it is left out of the saved configuration rather than being
 filled with a default nobody chose.
 
 **A threshold that is set must cite its `source`.** This is enforced for the
-bundled profiles by a test, not for your own files. It is worth following in
+catalogue profiles by a test, not for your own profiles. It is worth following in
 yours anyway: in a year you will want to know whether 100 came from the
 specification or from an afternoon's guess.
 
@@ -169,11 +175,11 @@ needs without inventing an interval for it.
 
 ## When a profile does not load
 
-A bad file is skipped, logged, and reported. The others still load, and the
-apply dialog names the file that failed and why. Common causes: an unknown
+A bad profile is skipped, logged, and reported. The others still load, and the
+apply dialog names the profile that failed and why. Common causes: an unknown
 `unit`, `quantity` or `display`; a zone whose `direction` is neither `below`
 nor `above`; `min` not below `max`; a zone with a threshold on a gauge that has
-no scale; two profiles sharing an `id`; a generator gauge whose suffix does not
+no scale; a service item whose `id` is not lowercase letters, numbers, dots, underscores and hyphens; a generator gauge whose suffix does not
 start with `phase.` or `total.`; or an engine or alternator gauge whose suffix
 does.
 
@@ -186,7 +192,9 @@ does.
 | `GET /api/equipment-profiles/:id/download` | The same, as a file attachment. |
 | `POST /api/equipment-profiles` | Create. Refuses an id that already exists. |
 | `PUT /api/equipment-profiles/:id` | Replace. |
-| `DELETE /api/equipment-profiles/:id` | Remove the file from disk. |
+| `DELETE /api/equipment-profiles/:id` | Remove the profile. |
+| `GET /api/equipment-profiles/catalogue` | The profiles that ship with Helmcentral, and whether each is already in your list. |
+| `POST /api/equipment-profiles/catalogue/:id` | Copy a catalogue profile into your list. Refuses an id that already exists; a body of `{"id": "new-id"}` saves the copy under another id. |
 
 Every write is validated against the JSON schema and then against the same
 rules the loader applies, so the API cannot store a profile the dashboard would
@@ -196,17 +204,25 @@ refuse. A rejected write comes back with the failing field paths, which is what
 `GET /api/engine-profiles` and `PUT /api/engine-profiles/:id` still work,
 filtered to `kind: engine`.
 
-An `id` used as a filename must be lowercase letters, numbers, dots,
+A profile `id` must be lowercase letters, numbers, dots,
 underscores and hyphens, starting with a letter or number.
 
 ## Service intervals
 
-The `service` block feeds **Inventory → Maintenance**: applying a profile to
-an equipment record, then choosing **Use profile schedule** on that record,
-copies every service entry into a maintenance rule in one action - an entry
-with no interval is copied too, showing as a rule whose interval isn't set
-yet rather than being skipped. The profile file itself is never changed;
-each rule is its own editable record from there. See
+The `service` block is the maintenance schedule of every equipment record
+that uses the profile. **Inventory → Maintenance** reads it live: change an
+interval here and every item using the profile follows at once. An entry
+with no interval shows as a job whose interval isn't set yet rather than
+being skipped. An item can change a job's description or intervals, or mark
+it not applicable, for itself only; those changes are marked on the item and
+reset to the profile's values.
+
+Each service `id` is how an item keeps its history for that job, so keep it
+stable. Renaming an id reads as removing one job and adding another: saving
+a profile that removes a job some item has history for asks you to confirm
+and names the items, and the old job's history stays on those items under
+**No longer in the profile**. `first_at_hours` and `supersedes` are shown as
+written but don't yet change when a job falls due. See
 [Maintenance](../features/maintenance.md) and
 [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 

@@ -21,8 +21,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   read, it says the hours are unknown instead of guessing.
 - Mate can propose changes to the maintenance schedule. Ask it to set up a
   schedule from a manual, add a rule, change an interval, record when
-  something was last done, log a job as done, acknowledge a rule or copy in an
-  item's profile schedule, and it answers with a card listing each change in
+  something was last done, log a job as done or acknowledge a rule, and it
+  answers with a card listing each change in
   one line. Nothing changes until you tap **Apply**, and then every line is
   made together or none is. **Dismiss** drops the card. If a rule was edited
   after Mate wrote the card, Apply refuses and says so, and you ask Mate to
@@ -37,6 +37,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Breaking
 
+- Run `helmcentral convert-profile-rules --apply` once after upgrading,
+  before starting Helmcentral (with Docker Compose:
+  `docker compose run --rm helmcentral /app/helmcentral convert-profile-rules --apply`). It
+  moves your equipment profiles out of the `plugins/engine-profiles` folder
+  and turns maintenance rules copied from a profile into live profile jobs,
+  keeping their history and any interval you had changed. Run it without
+  `--apply` first to see what it will do. Helmcentral refuses to start until
+  it has run. If an item points at a profile that no longer exists, the run
+  stops and names it: choose the right profile on the item, or add
+  `--detach-unresolved` to keep those rules as the item's own. After that
+  the `plugins/engine-profiles` folder is no longer read and can be deleted.
+- **Use profile schedule** is gone from an item's Maintenance block; the
+  profile's jobs are already there.
+
 - Reload the Helmcentral page in any browser tab or phone home-screen app
   that was open before you upgraded. An old tab can't tell Mate today's
   date, so its questions fail with an error naming the missing date until
@@ -44,6 +58,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- An item's maintenance schedule now follows its equipment profile live.
+  Correct an interval on the profile and every item using it follows at
+  once, instead of each item keeping the copy it took. An item's page lists
+  its profile's jobs apart from the ones you added for it. A unit that
+  differs can change a job's description or intervals for itself only, or
+  mark it not applicable; the change is marked and **Reset to profile** puts
+  it back. If an item's profile is missing or damaged, its profile jobs are
+  not shown and the Maintenance list says which item and why.
+- Choosing a different profile for an item first shows which jobs keep their
+  history, which leave and which arrive new. A job that leaves keeps its
+  history under **No longer in the profile** on the item's page. Saving a
+  profile that drops a job some item has history for asks you to confirm and
+  names the items, and a profile still in use can't be deleted.
+- Equipment profiles are now kept with the rest of your boat's records and
+  can be saved on the boat. The profiles that ship with Helmcentral are a
+  catalogue: **Add from catalogue** on **Inventory → Profiles** copies one in
+  as yours to edit. A profile's service job names must be lowercase letters,
+  numbers, dots, underscores and hyphens.
+- The service log export has a new last column saying whether each entry's
+  job came from the item's profile or was added for that item.
 - The Wind and Engine Cluster tiles now fill the tile you give them. Drag
   either one taller or wider and the dial and its readings grow with it, up to
   twice their usual size, centred in the tile. Wind no longer stops growing at

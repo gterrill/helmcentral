@@ -39,6 +39,10 @@ const (
 	maintenanceStatusNeverRecorded  maintenanceStatus = "never_recorded"
 	maintenanceStatusIntervalNotSet maintenanceStatus = "interval_not_set"
 	maintenanceStatusHoursUnknown   maintenanceStatus = "hours_unknown"
+	// maintenanceStatusNotApplicable is a profile job this item has marked not
+	// applicable (ADR 0148). It is set by the view builder, never computed
+	// here: the job stays listed and is never due.
+	maintenanceStatusNotApplicable maintenanceStatus = "not_applicable"
 )
 
 // maintenanceStatusRank orders the three "real due" states for the
@@ -51,6 +55,10 @@ func maintenanceStatusRank(s maintenanceStatus) int {
 		return 2
 	case maintenanceStatusDueSoon:
 		return 1
+	case maintenanceStatusIntervalNotSet, maintenanceStatusNotApplicable:
+		// A slot, or a job the item does not do: neither is due. Ranked with
+		// the other non-due states so it can never outrank a real one.
+		return 0
 	default:
 		return 0
 	}

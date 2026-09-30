@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,20 +12,54 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func writeProfile(t *testing.T, dir, name, body string) {
+// newTestProfileStore opens a fresh profile table and installs it as the
+// process-wide store for the duration of the test.
+func newTestProfileStore(t *testing.T) *profileStore {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatalf("failed to write %s: %v", name, err)
+	// Profiles live in the document store's database. A test that already
+	// installed a document store (withTestDocumentStore) shares it, so a test
+	// can seed equipment and rules next to profiles; otherwise one is opened.
+	ds := globalDocumentStore
+	if ds == nil {
+		ds = newTestDocumentStore(t)
+	}
+	store, err := newProfileStore(ds)
+	if err != nil {
+		t.Fatalf("newProfileStore: %v", err)
+	}
+	prev := globalProfileStore
+	globalProfileStore = store
+	t.Cleanup(func() {
+		globalProfileStore = prev
+		loadEngineProfiles()
+	})
+	return store
+}
+
+// seedRawProfileRow writes a row without validating it, so tests can store
+// documents the loader has to refuse.
+func seedRawProfileRow(t *testing.T, store *profileStore, id, body string) {
+	t.Helper()
+	if _, err := store.db.Exec(`INSERT INTO equipment_profiles (id, kind, body, created_at, updated_at) VALUES (?, 'engine', ?, 0, 0)`, id, body); err != nil {
+		t.Fatalf("seed %s: %v", id, err)
 	}
 }
 
+// setupEngineProfiles seeds one row per document. The map key names the row
+// unless the document carries its own id.
 func setupEngineProfiles(t *testing.T, files map[string]string) {
 	t.Helper()
-	dir := t.TempDir()
+	store := newTestProfileStore(t)
 	for name, body := range files {
-		writeProfile(t, dir, name, body)
+		id := strings.TrimSuffix(name, ".json")
+		var doc struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal([]byte(body), &doc) == nil && doc.ID != "" {
+			id = doc.ID
+		}
+		seedRawProfileRow(t, store, id, body)
 	}
-	t.Setenv("ENGINE_PROFILES_DIR", dir)
 	loadEngineProfiles()
 }
 
@@ -139,8 +172,8 @@ func TestLoadEngineProfilesReportsBadFilesWithoutLosingGoodOnes(t *testing.T) {
 		t.Fatalf("expected %d problems, got %d: %+v", len(cases)-1, len(problems), problems)
 	}
 	for _, problem := range problems {
-		if problem.File == "" || problem.Error == "" {
-			t.Fatalf("a problem must name the file and the reason, got %+v", problem)
+		if problem.ID == "" || problem.Error == "" {
+			t.Fatalf("a problem must name the profile and the reason, got %+v", problem)
 		}
 	}
 }
@@ -179,28 +212,24 @@ func TestLoadEngineProfilesAcceptsServiceSlots(t *testing.T) {
 	}
 }
 
-func TestLoadEngineProfilesRejectsDuplicateIDs(t *testing.T) {
-	setupEngineProfiles(t, map[string]string{
-		"a.json": goodProfile,
-		"b.json": goodProfile,
-	})
+func TestLoadEngineProfilesRejectsARowWhoseDocumentHasAnotherID(t *testing.T) {
+	store := newTestProfileStore(t)
+	seedRawProfileRow(t, store, "other-id", goodProfile)
+	loadEngineProfiles()
 
 	profiles, problems := engineProfiles()
-	if len(profiles) != 1 {
-		t.Fatalf("expected the duplicate to be refused, got %d profiles", len(profiles))
-	}
-	if len(problems) != 1 {
-		t.Fatalf("expected the duplicate to be reported, got %+v", problems)
+	if len(profiles) != 0 || len(problems) != 1 || problems[0].ID != "other-id" {
+		t.Fatalf("expected the mismatched row to be reported, got %+v / %+v", profiles, problems)
 	}
 }
 
-func TestLoadEngineProfilesToleratesAMissingDirectory(t *testing.T) {
-	t.Setenv("ENGINE_PROFILES_DIR", filepath.Join(t.TempDir(), "not-there"))
+func TestLoadEngineProfilesWithAnEmptyTable(t *testing.T) {
+	newTestProfileStore(t)
 	loadEngineProfiles()
 
 	profiles, problems := engineProfiles()
 	if len(profiles) != 0 || len(problems) != 0 {
-		t.Fatalf("no profiles directory is not an error, got %+v / %+v", profiles, problems)
+		t.Fatalf("an empty table is not an error, got %+v / %+v", profiles, problems)
 	}
 }
 
@@ -510,8 +539,9 @@ func TestCreateEquipmentProfileHandler(t *testing.T) {
 		t.Fatalf("expected two profiles after create, got %+v", profiles)
 	}
 
-	if _, err := os.Stat(filepath.Join(engineProfilesDir(), "new-generator.json")); err != nil {
-		t.Fatalf("expected created file on disk: %v", err)
+	stored, err := readProfileByID("new-generator")
+	if err != nil || stored.Name != "New Generator" {
+		t.Fatalf("expected the created profile in the table, got %+v (%v)", stored, err)
 	}
 }
 
@@ -661,16 +691,7 @@ manual, and that stays fine. An advisory (normal) zone was always required
 to cite its source, and still is.
 */
 func TestBundledThresholdsCiteTheirSource(t *testing.T) {
-	t.Setenv("ENGINE_PROFILES_DIR", "../plugins/engine-profiles")
-	loadEngineProfiles()
-
-	profiles, problems := engineProfiles()
-	if len(problems) != 0 {
-		t.Fatalf("bundled profiles must load clean, got %+v", problems)
-	}
-	if len(profiles) == 0 {
-		t.Fatal("expected at least one bundled profile")
-	}
+	profiles := catalogueProfiles(t)
 
 	for _, profile := range profiles {
 		for _, gauge := range profile.Gauges {
@@ -770,16 +791,7 @@ func TestBundledProfileSuffixesResolveAgainstTheVessel(t *testing.T) {
 		return out
 	}
 
-	t.Setenv("ENGINE_PROFILES_DIR", "../plugins/engine-profiles")
-	loadEngineProfiles()
-
-	profiles, problems := engineProfiles()
-	if len(problems) != 0 {
-		t.Fatalf("bundled profiles must load clean, got %+v", problems)
-	}
-	if len(profiles) == 0 {
-		t.Fatal("expected at least one bundled profile")
-	}
+	profiles := catalogueProfiles(t)
 
 	for _, profile := range profiles {
 		var shared map[string]bool
@@ -819,6 +831,39 @@ const goodBatteryProfile = `{
 	"charge_warn": {"value": 3.55, "source": "test datasheet"},
 	"charge_high": {"value": 3.65, "source": "test datasheet"}
 }`
+
+func catalogueProfiles(t *testing.T) []engineProfile {
+	t.Helper()
+	entries, err := profileCatalogue()
+	if err != nil {
+		t.Fatalf("the embedded catalogue must be valid: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one catalogue profile")
+	}
+	out := make([]engineProfile, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Profile)
+	}
+	return out
+}
+
+func TestValidateEngineProfileRejectsBadServiceIDs(t *testing.T) {
+	for _, id := range []string{"Engine Oil", "-oil", "oil/filter", "OIL"} {
+		p := engineProfile{ID: "p", Name: "P", Service: []engineProfileService{{ID: id}}}
+		if err := validateEngineProfile(p); err == nil {
+			t.Errorf("service id %q should be refused", id)
+		}
+		doc := `{"id":"p","name":"P","service":[{"id":"` + id + `"}]}`
+		if _, err := parseProfileDocument([]byte(doc)); err == nil {
+			t.Errorf("service id %q should fail the schema", id)
+		}
+	}
+	ok := engineProfile{ID: "p", Name: "P", Service: []engineProfileService{{ID: "engine-oil.2_x"}}}
+	if err := validateEngineProfile(ok); err != nil {
+		t.Fatalf("a well-formed service id must pass: %v", err)
+	}
+}
 
 func TestValidateEngineProfileAcceptsBatteryKind(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"battery.json": goodBatteryProfile})

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,7 +20,6 @@ func maintenanceToolDeps(t *testing.T) (assistantToolDeps, *documentStore) {
 	return assistantToolDeps{
 		documents: func() *documentStore { return store },
 		today:     mustParseDate(t, "2026-09-30"),
-		profiles:  func() []engineProfile { return nil },
 	}, store
 }
 
@@ -55,22 +55,31 @@ func runMaintenanceTool(t *testing.T, deps assistantToolDeps, name, args string)
 
 // ── find_equipment ──────────────────────────────────────────────────────
 
-func TestFindEquipment_ReportsHoursRuleCountAndProfileService(t *testing.T) {
+func TestFindEquipment_ReportsHoursAndEffectiveJobs(t *testing.T) {
 	deps, store := maintenanceToolDeps(t)
 	withGlobalSnapshot(t, snapshotWithSelfValues(map[string]any{"electrical.generator.0.runtime": 3600.0 * 239}))
-	oil := 250.0
-	deps.profiles = func() []engineProfile {
-		return []engineProfile{{ID: "onan-gen", Name: "Onan generator", Service: []engineProfileService{
-			{ID: "oil", Description: "Oil and filter", IntervalHours: &oil},
-		}}}
-	}
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
 
 	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", Manufacturer: "Onan", Model: "MDKBH", System: "electrical",
-		HourMeterPath: "electrical.generator.0.runtime", ProfileID: "onan-gen"})
+		HourMeterPath: "electrical.generator.0.runtime", ProfileID: "sched-a"})
 	mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion"})
-	mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil and filter", IntervalHours: &oil})
+	oil := maintenanceJobID(gen.ID, "engine-oil")
+	impeller := maintenanceJobID(gen.ID, "impeller")
+	mustScheduleTx(t, store, func(tx *sql.Tx, now time.Time) error {
+		if _, err := cmdSetMaintenanceRuleOverrides(tx, now, oil, maintenanceOverridesInput{
+			IntervalHours: &maintenanceIntervalHoursOverride{Value: f64(300)},
+		}); err != nil {
+			return err
+		}
+		na := true
+		_, err := cmdSetMaintenanceRuleOverrides(tx, now, impeller, maintenanceOverridesInput{NotApplicable: &na})
+		return err
+	})
 
 	raw := runMaintenanceTool(t, deps, "find_equipment", `{"query":"onan"}`)
+	if strings.Contains(raw, "profile_service") || strings.Contains(raw, "profile_missing") {
+		t.Fatalf("the raw profile service list is gone: %s", raw)
+	}
 	var result assistantFindEquipmentResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v (%s)", err, raw)
@@ -85,11 +94,21 @@ func TestFindEquipment_ReportsHoursRuleCountAndProfileService(t *testing.T) {
 	if !hit.HourMeterBound || !hit.HoursKnown || hit.CurrentMeterReading == nil || *hit.CurrentMeterReading != 239 {
 		t.Fatalf("expected a known 239 h reading, got %+v", hit)
 	}
-	if hit.RuleCount != 1 {
-		t.Fatalf("expected rule_count 1, got %d", hit.RuleCount)
+	if hit.RuleCount != 2 || hit.ProfileID != "sched-a" || len(hit.Rules) != 2 || len(hit.ScheduleErrors) != 0 {
+		t.Fatalf("expected the profile's two jobs, got %+v", hit)
 	}
-	if hit.ProfileID != "onan-gen" || len(hit.ProfileService) != 1 || hit.ProfileService[0].Description != "Oil and filter" {
-		t.Fatalf("expected the profile's service block, got %+v", hit)
+	byID := map[string]assistantEquipmentRule{}
+	for _, r := range hit.Rules {
+		byID[r.ID] = r
+	}
+	o := byID[oil]
+	if o.Description != "Engine oil and filter" || o.Source != "profile" || o.IntervalHours == nil || *o.IntervalHours != 300 ||
+		o.IntervalMonths == nil || *o.IntervalMonths != 12 || strings.Join(o.OverriddenFields, ",") != "interval_hours" || o.NotApplicable {
+		t.Fatalf("expected the effective oil job (300 h override, 12 mo from the profile), got %+v", o)
+	}
+	i := byID[impeller]
+	if !i.NotApplicable || strings.Join(i.OverriddenFields, ",") != "not_applicable" {
+		t.Fatalf("expected the impeller marked not applicable, got %+v", i)
 	}
 	if hit.Link != "/inventory/equipment/"+gen.ID {
 		t.Fatalf("expected the equipment editor link, got %q", hit.Link)
@@ -126,17 +145,32 @@ func TestFindEquipment_UnknownHoursAreReportedUnknownNeverZero(t *testing.T) {
 	}
 }
 
-func TestFindEquipment_MissingProfileIsSurfaced(t *testing.T) {
+func TestFindEquipment_UnavailableProfileIsAScheduleErrorNotAnEmptySchedule(t *testing.T) {
 	deps, store := maintenanceToolDeps(t)
-	mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "gone"})
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "gone"})
+	mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Belts", IntervalMonths: iptr(12)})
+	mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion"})
 
-	raw := runMaintenanceTool(t, deps, "find_equipment", `{"query":"generator"}`)
+	raw := runMaintenanceTool(t, deps, "find_equipment", `{}`)
 	var result assistantFindEquipmentResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(result.Equipment) != 1 || !result.Equipment[0].ProfileMissing || len(result.Equipment[0].ProfileService) != 0 {
-		t.Fatalf("expected profile_missing with no service block, got %+v", result.Equipment)
+	for _, hit := range result.Equipment {
+		switch hit.Name {
+		case "Generator":
+			if len(hit.ScheduleErrors) != 1 || hit.ScheduleErrors[0].EquipmentID != gen.ID || hit.ScheduleErrors[0].Error != "profile not found" {
+				t.Fatalf("expected the profile problem on the item, got %+v", hit.ScheduleErrors)
+			}
+			if len(hit.Rules) != 1 || hit.Rules[0].Source != "item" {
+				t.Fatalf("the hand rule still lists, got %+v", hit.Rules)
+			}
+		default:
+			if len(hit.ScheduleErrors) != 0 {
+				t.Fatalf("%s must carry no schedule error, got %+v", hit.Name, hit.ScheduleErrors)
+			}
+		}
 	}
 }
 
@@ -208,12 +242,12 @@ func TestListMaintenance_StatusIsTheViewsStatusAgainstTheGivenToday(t *testing.T
 		t.Fatalf("expected 4 rules, got %d: %+v", len(result.Rules), result.Rules)
 	}
 
-	rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{})
+	rules, err := store.ListMaintenanceRuleRows(maintenanceRuleFilter{})
 	if err != nil {
 		t.Fatalf("ListMaintenanceRules: %v", err)
 	}
 	for _, rule := range rules {
-		view, err := resolveMaintenanceRuleView(rule, deps.today)
+		view, err := resolveMaintenanceRuleView(rule.ID, deps.today)
 		if err != nil {
 			t.Fatalf("resolveMaintenanceRuleView: %v", err)
 		}
@@ -529,5 +563,29 @@ func TestDescribeAssistantToolCall_MaintenanceTools(t *testing.T) {
 		if got := describeAssistantToolCall(tc.name, json.RawMessage(tc.args)); got != tc.want {
 			t.Errorf("describeAssistantToolCall(%s, %s) = %q, want %q", tc.name, tc.args, got, tc.want)
 		}
+	}
+}
+
+func TestListMaintenance_ProfileJobsCarrySourceAndAnUnavailableProfileIsReported(t *testing.T) {
+	deps, store := maintenanceToolDeps(t)
+	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
+	item := mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
+	other := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "gone"})
+
+	var res assistantListMaintenanceResult
+	if err := json.Unmarshal([]byte(runMaintenanceTool(t, deps, "list_maintenance", `{}`)), &res); err != nil {
+		t.Fatal(err)
+	}
+	var oil *assistantMaintenanceRuleRow
+	for i := range res.Rules {
+		if res.Rules[i].ID == maintenanceJobID(item.ID, "engine-oil") {
+			oil = &res.Rules[i]
+		}
+	}
+	if oil == nil || oil.Source != "profile" || oil.Description != "Engine oil and filter" || oil.IntervalHours == nil || *oil.IntervalHours != 250 {
+		t.Fatalf("expected the profile job with effective values, got %+v", res.Rules)
+	}
+	if len(res.ScheduleErrors) != 1 || res.ScheduleErrors[0].EquipmentID != other.ID || res.ScheduleErrors[0].Error != "profile not found" {
+		t.Fatalf("an unavailable profile must be reported, got %+v", res.ScheduleErrors)
 	}
 }

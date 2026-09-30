@@ -30,7 +30,6 @@ const (
 	proposalOpCreateRule     = "create_rule"
 	proposalOpUpdateRule     = "update_rule"
 	proposalOpSetLastDone    = "set_last_done"
-	proposalOpCopyProfile    = "copy_profile_schedule"
 	proposalOpCompleteRule   = "complete_rule"
 	proposalOpAcknowledge    = "acknowledge"
 	assistantProposalMaxOps  = 20
@@ -56,6 +55,9 @@ type assistantProposalOp struct {
 	FixedDueDate   string   `json:"fixed_due_date,omitempty"`
 	// Clear names the interval fields update_rule removes.
 	Clear []string `json:"clear,omitempty"`
+	// NotApplicable is update_rule on a profile job only: true marks the job
+	// as not applying to this item, false makes it apply again.
+	NotApplicable *bool `json:"not_applicable,omitempty"`
 
 	LastDoneAt           string   `json:"last_done_at,omitempty"`
 	LastDoneMeterReading *float64 `json:"last_done_meter_reading,omitempty"`
@@ -74,11 +76,6 @@ type assistantProposalOp struct {
 	// existing rule to protect.
 	Summary       string `json:"summary"`
 	RuleUpdatedAt string `json:"rule_updated_at,omitempty"`
-	// CopyServiceIDs is, for copy_profile_schedule, the profile services the
-	// dry run found would get a rule. Apply refuses (stale) if the copy would
-	// now create a different set, so a copy the operator already did by hand
-	// cannot be "applied" as a no-op that the card claims created rules.
-	CopyServiceIDs []string `json:"copy_service_ids,omitempty"`
 }
 
 type assistantProposeArgs struct {
@@ -97,9 +94,8 @@ type assistantProposeResult struct {
 // proposed but that the card does not show is worse than a failed call.
 var proposalOpAllowedFields = map[string][]string{
 	proposalOpCreateRule:   {"equipment_id", "description", "interval_hours", "interval_months", "due_soon_hours", "due_soon_months", "fixed_due_date", "last_done_at", "last_done_meter_reading"},
-	proposalOpUpdateRule:   {"rule_id", "description", "interval_hours", "interval_months", "due_soon_hours", "due_soon_months", "fixed_due_date", "clear"},
+	proposalOpUpdateRule:   {"rule_id", "description", "interval_hours", "interval_months", "due_soon_hours", "due_soon_months", "fixed_due_date", "clear", "not_applicable"},
 	proposalOpSetLastDone:  {"rule_id", "last_done_at", "last_done_meter_reading"},
-	proposalOpCopyProfile:  {"equipment_id"},
 	proposalOpCompleteRule: {"rule_id", "performed_at", "meter_reading", "description", "who", "cost", "new_due_date"},
 	proposalOpAcknowledge:  {"rule_id", "reason"},
 }
@@ -121,6 +117,7 @@ func (op assistantProposalOp) setFields() []string {
 	add(op.DueSoonMonths != nil, "due_soon_months")
 	add(op.FixedDueDate != "", "fixed_due_date")
 	add(len(op.Clear) > 0, "clear")
+	add(op.NotApplicable != nil, "not_applicable")
 	add(op.LastDoneAt != "", "last_done_at")
 	add(op.LastDoneMeterReading != nil, "last_done_meter_reading")
 	add(op.PerformedAt != "", "performed_at")
@@ -214,15 +211,17 @@ var proposalClearable = map[string]bool{
 // replace, so an operation that named only the interval must not blank the
 // rest.
 func mergeRuleUpdate(rule maintenanceRule, op assistantProposalOp) (maintenanceRuleRequest, error) {
+	if op.NotApplicable != nil {
+		return maintenanceRuleRequest{}, fieldErr("not_applicable", "only a profile job (an id starting with job:) can be marked not applicable; %q is an item's own rule", rule.Description)
+	}
 	req := maintenanceRuleRequest{
-		EquipmentID:      rule.EquipmentID,
-		Description:      rule.Description,
-		IntervalHours:    rule.IntervalHours,
-		IntervalMonths:   rule.IntervalMonths,
-		DueSoonHours:     rule.DueSoonHours,
-		DueSoonMonths:    rule.DueSoonMonths,
-		FixedDueDate:     rule.FixedDueDate,
-		ProfileServiceID: rule.ProfileServiceID,
+		EquipmentID:    rule.EquipmentID,
+		Description:    rule.Description,
+		IntervalHours:  rule.IntervalHours,
+		IntervalMonths: rule.IntervalMonths,
+		DueSoonHours:   rule.DueSoonHours,
+		DueSoonMonths:  rule.DueSoonMonths,
+		FixedDueDate:   rule.FixedDueDate,
 	}
 	given := map[string]bool{
 		"interval_hours": op.IntervalHours != nil, "interval_months": op.IntervalMonths != nil,
@@ -290,6 +289,115 @@ func ruleUnchanged(rule maintenanceRule, req maintenanceRuleRequest) bool {
 		sameFloat(rule.IntervalHours, req.IntervalHours) && sameInt(rule.IntervalMonths, req.IntervalMonths) &&
 		sameFloat(rule.DueSoonHours, req.DueSoonHours) && sameInt(rule.DueSoonMonths, req.DueSoonMonths) &&
 		rule.FixedDueDate == strings.TrimSpace(req.FixedDueDate)
+}
+
+// jobOverridesFromOp turns an update_rule operation on a profile job into the
+// command input it means: description and the two intervals become overrides
+// of the profile; due_soon_hours, due_soon_months and fixed_due_date are plain
+// per-item state. All go through cmdSetMaintenanceRuleOverrides.
+func jobOverridesFromOp(rule maintenanceRule, op assistantProposalOp) (maintenanceOverridesInput, error) {
+	var in maintenanceOverridesInput
+	given := map[string]bool{
+		"interval_hours": op.IntervalHours != nil, "interval_months": op.IntervalMonths != nil,
+		"due_soon_hours": op.DueSoonHours != nil, "due_soon_months": op.DueSoonMonths != nil,
+		"fixed_due_date": op.FixedDueDate != "",
+	}
+	for _, name := range op.Clear {
+		if !proposalClearable[name] {
+			return in, fieldErr("clear", "cannot clear %q on a profile job; it can only name interval_hours, interval_months, due_soon_hours, due_soon_months or fixed_due_date", name)
+		}
+		if given[name] {
+			return in, fieldErr("clear", "%s is both set and cleared", name)
+		}
+		switch name {
+		case "interval_hours":
+			in.IntervalHours = &maintenanceIntervalHoursOverride{}
+		case "interval_months":
+			in.IntervalMonths = &maintenanceIntervalMonthsOverride{}
+		case "due_soon_hours":
+			in.DueSoonHours = &maintenanceNullableFloat{}
+		case "due_soon_months":
+			in.DueSoonMonths = &maintenanceNullableInt{}
+		case "fixed_due_date":
+			blank := ""
+			in.FixedDueDate = &blank
+		}
+	}
+	if d := strings.TrimSpace(op.Description); d != "" {
+		in.Description = &d
+	}
+	if op.IntervalHours != nil {
+		in.IntervalHours = &maintenanceIntervalHoursOverride{Value: op.IntervalHours}
+	}
+	if op.IntervalMonths != nil {
+		in.IntervalMonths = &maintenanceIntervalMonthsOverride{Value: op.IntervalMonths}
+	}
+	if op.DueSoonHours != nil {
+		in.DueSoonHours = &maintenanceNullableFloat{Value: op.DueSoonHours}
+	}
+	if op.DueSoonMonths != nil {
+		in.DueSoonMonths = &maintenanceNullableInt{Value: op.DueSoonMonths}
+	}
+	if op.FixedDueDate != "" {
+		d := op.FixedDueDate
+		in.FixedDueDate = &d
+	}
+	if op.NotApplicable != nil {
+		na := *op.NotApplicable
+		in.NotApplicable = &na
+	}
+	if in.Description == nil && in.IntervalHours == nil && in.IntervalMonths == nil && in.NotApplicable == nil &&
+		in.DueSoonHours == nil && in.DueSoonMonths == nil && in.FixedDueDate == nil {
+		return in, fieldErr("rule_id", "give a description, an interval, not_applicable, a due-soon window or a fixed due date to change")
+	}
+	// Same validation the overrides endpoint applies.
+	if in.IntervalHours != nil && in.IntervalHours.Value != nil && *in.IntervalHours.Value <= 0 {
+		return in, &inventoryValidationError{Field: "interval_hours", Message: "interval_hours must be greater than zero"}
+	}
+	if in.IntervalMonths != nil && in.IntervalMonths.Value != nil && *in.IntervalMonths.Value < 1 {
+		return in, &inventoryValidationError{Field: "interval_months", Message: "interval_months must be at least 1"}
+	}
+	if in.DueSoonHours != nil && in.DueSoonHours.Value != nil && *in.DueSoonHours.Value < 0 {
+		return in, &inventoryValidationError{Field: "due_soon_hours", Message: "due_soon_hours cannot be negative"}
+	}
+	if in.DueSoonMonths != nil && in.DueSoonMonths.Value != nil && *in.DueSoonMonths.Value < 0 {
+		return in, &inventoryValidationError{Field: "due_soon_months", Message: "due_soon_months cannot be negative"}
+	}
+	if in.FixedDueDate != nil && *in.FixedDueDate != "" && !installDatePattern.MatchString(*in.FixedDueDate) {
+		return in, &inventoryValidationError{Field: "fixed_due_date", Message: "fixed_due_date must be blank or YYYY-MM-DD"}
+	}
+	return in, nil
+}
+
+// describeJobOverride is what a job reads as once in is applied to rule (its
+// effective form), and whether that is no change at all.
+func describeJobOverride(rule maintenanceRule, in maintenanceOverridesInput) (after maintenanceRule, unchanged bool) {
+	after = rule
+	if in.Description != nil {
+		after.Description = *in.Description
+	}
+	if in.IntervalHours != nil {
+		after.IntervalHours = in.IntervalHours.Value
+	}
+	if in.IntervalMonths != nil {
+		after.IntervalMonths = in.IntervalMonths.Value
+	}
+	if in.NotApplicable != nil {
+		after.NotApplicable = *in.NotApplicable
+	}
+	if in.DueSoonHours != nil {
+		after.DueSoonHours = in.DueSoonHours.Value
+	}
+	if in.DueSoonMonths != nil {
+		after.DueSoonMonths = in.DueSoonMonths.Value
+	}
+	if in.FixedDueDate != nil {
+		after.FixedDueDate = *in.FixedDueDate
+	}
+	unchanged = after.Description == rule.Description && after.NotApplicable == rule.NotApplicable && sameFloat(after.IntervalHours, rule.IntervalHours) &&
+		sameInt(after.IntervalMonths, rule.IntervalMonths) && sameFloat(after.DueSoonHours, rule.DueSoonHours) &&
+		sameInt(after.DueSoonMonths, rule.DueSoonMonths) && after.FixedDueDate == rule.FixedDueDate
+	return after, unchanged
 }
 
 // ── summaries ───────────────────────────────────────────────────────────
@@ -389,23 +497,18 @@ func (d assistantToolDeps) executeProposeMaintenanceChanges(ctx context.Context,
 		return "", fmt.Errorf("%s: at most %d changes in one proposal, got %d", assistantProposalToolTag, assistantProposalMaxOps, len(args.Ops))
 	}
 
-	var profiles []engineProfile
-	if d.profiles != nil {
-		profiles = d.profiles()
-	}
-
 	ops := make([]assistantProposalOp, len(args.Ops))
 	for i, op := range args.Ops {
 		// Output-only fields are never taken from the model.
 		op.Summary, op.RuleUpdatedAt = "", ""
-		prepared, err := prepareProposalOp(store, profiles, op)
+		prepared, err := prepareProposalOp(store, op)
 		if err != nil {
 			return "", fmt.Errorf("%s: ops[%d] (%s): %w", assistantProposalToolTag, i, op.Op, asProposalError(err))
 		}
 		ops[i] = prepared
 	}
 
-	if err := dryRunProposal(store, d.today, profiles, ops); err != nil {
+	if err := dryRunProposal(store, d.today, ops); err != nil {
 		return "", fmt.Errorf("%s: %w", assistantProposalToolTag, err)
 	}
 
@@ -424,10 +527,10 @@ func (d assistantToolDeps) executeProposeMaintenanceChanges(ctx context.Context,
 // prepareProposalOp validates one operation with the commands' own
 // validators and read-only lookups, and returns it with its Summary and
 // RuleUpdatedAt filled in. It never writes.
-func prepareProposalOp(store *documentStore, profiles []engineProfile, op assistantProposalOp) (assistantProposalOp, error) {
+func prepareProposalOp(store *documentStore, op assistantProposalOp) (assistantProposalOp, error) {
 	allowed, ok := proposalOpAllowedFields[op.Op]
 	if !ok {
-		return op, fieldErr("op", "unknown op %q; valid ops are create_rule, update_rule, set_last_done, copy_profile_schedule, complete_rule and acknowledge", op.Op)
+		return op, fieldErr("op", "unknown op %q; valid ops are create_rule, update_rule, set_last_done, complete_rule and acknowledge", op.Op)
 	}
 	for _, f := range op.setFields() {
 		if !containsString(allowed, f) {
@@ -442,7 +545,10 @@ func prepareProposalOp(store *documentStore, profiles []engineProfile, op assist
 		if id == "" {
 			return maintenanceRule{}, "", fieldErr("rule_id", "is required (an id from list_maintenance)")
 		}
-		rule, err := store.GetMaintenanceRule(id)
+		// The EFFECTIVE rule: a profile job resolves by its job: id whether or
+		// not it has a row yet.
+		eff, err := store.ResolveMaintenanceRule(id)
+		rule := eff.maintenanceRule
 		if err != nil {
 			if errors.Is(err, errMaintenanceRuleNotFound) {
 				return maintenanceRule{}, "", fieldErr("rule_id", "no maintenance rule with id %q (find it with list_maintenance)", id)
@@ -513,6 +619,42 @@ func prepareProposalOp(store *documentStore, profiles []engineProfile, op assist
 		rule, itemName, err := ruleFor()
 		if err != nil {
 			return op, err
+		}
+		if isMaintenanceJobID(rule.ID) {
+			// A profile job: what this item changes is an override of the
+			// profile's own values (ADR 0148), applied with the same command
+			// as the overrides endpoint.
+			in, err := jobOverridesFromOp(rule, op)
+			if err != nil {
+				return op, err
+			}
+			after, unchanged := describeJobOverride(rule, in)
+			if unchanged {
+				return op, fieldErr("rule_id", "the change leaves %q exactly as it is; propose only what differs", rule.Description)
+			}
+			if in.NotApplicable != nil && in.Description == nil && in.IntervalHours == nil && in.IntervalMonths == nil &&
+				in.DueSoonHours == nil && in.DueSoonMonths == nil && in.FixedDueDate == nil {
+				if after.NotApplicable {
+					op.Summary = proposalRuleLabel(itemName, rule.Description) + ": mark not applicable to this item"
+				} else {
+					op.Summary = proposalRuleLabel(itemName, rule.Description) + ": applies to this item again"
+				}
+				break
+			}
+			summary := "Change " + proposalRuleLabel(itemName, rule.Description) + " for this item: "
+			if after.NotApplicable != rule.NotApplicable {
+				if after.NotApplicable {
+					summary += "mark not applicable, "
+				} else {
+					summary += "applies again, "
+				}
+			}
+			if after.Description != rule.Description {
+				summary += fmt.Sprintf("rename to %q, ", after.Description)
+			}
+			summary += "now " + proposalIntervalPhrase(after.IntervalHours, after.IntervalMonths, after.FixedDueDate, after.DueSoonHours, after.DueSoonMonths)
+			op.Summary = summary
+			break
 		}
 		req, err := mergeRuleUpdate(rule, op)
 		if err != nil {
@@ -592,35 +734,6 @@ func prepareProposalOp(store *documentStore, profiles []engineProfile, op assist
 		op.Reason = reason
 		op.Summary = "Acknowledge " + proposalRuleLabel(itemName, rule.Description) + ": " + reason
 
-	case proposalOpCopyProfile:
-		eq, err := equipmentFor()
-		if err != nil {
-			return op, err
-		}
-		profile, cerr := profileForCopy(eq, profiles)
-		if cerr != nil {
-			return op, fieldErr("equipment_id", "%s", cerr.Message)
-		}
-		rules, err := store.ListMaintenanceRules(maintenanceRuleFilter{EquipmentID: eq.ID, IncludeStored: true})
-		if err != nil {
-			return op, err
-		}
-		have := map[string]bool{}
-		for _, r := range rules {
-			if r.ProfileServiceID != "" {
-				have[r.ProfileServiceID] = true
-			}
-		}
-		missing := 0
-		for _, svc := range profile.Service {
-			if !have[svc.ID] {
-				missing++
-			}
-		}
-		if missing == 0 {
-			return op, fieldErr("equipment_id", "every entry in the %s schedule already has a rule on %s; there is nothing to copy", profile.Name, eq.Name)
-		}
-		op.Summary = fmt.Sprintf("%s: copy %d from the %s schedule", eq.Name, missing, profile.Name)
 	}
 	return op, nil
 }
@@ -633,13 +746,17 @@ func checkMaintenanceProposalFresh(q sqlQueryer, ops []assistantProposalOp) erro
 		if op.RuleUpdatedAt == "" {
 			continue
 		}
-		rule, err := maintenanceRuleByID(q, op.RuleID)
-		if errors.Is(err, errMaintenanceRuleNotFound) {
+		// Effective resolution: an untouched profile job has no row to read,
+		// and its zero updated_at is what propose recorded.
+		eff, err := effectiveRuleByID(q, currentMaintenanceProfiles(), op.RuleID)
+		var unavailable *maintenanceCommandError
+		if errors.Is(err, errMaintenanceRuleNotFound) || errors.As(err, &unavailable) {
 			return errAssistantProposalStale
 		}
 		if err != nil {
 			return err
 		}
+		rule := eff.maintenanceRule
 		if rule.UpdatedAt.UTC().Format(time.RFC3339) != op.RuleUpdatedAt {
 			return errAssistantProposalStale
 		}
@@ -649,7 +766,7 @@ func checkMaintenanceProposalFresh(q sqlQueryer, ops []assistantProposalOp) erro
 
 // applyMaintenanceProposalOp runs one operation with the same commands the
 // Maintenance handlers use, inside the caller's transaction.
-func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, profiles []engineProfile, op assistantProposalOp) (assistantProposalOpResult, error) {
+func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, op assistantProposalOp) (assistantProposalOpResult, error) {
 	res := assistantProposalOpResult{Op: op.Op}
 	switch op.Op {
 	case proposalOpCreateRule:
@@ -664,9 +781,21 @@ func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, profiles []eng
 		}
 		res.RuleIDs = []string{rule.ID}
 	case proposalOpUpdateRule:
-		rule, err := maintenanceRuleByID(tx, op.RuleID)
+		eff, err := effectiveRuleByID(tx, currentMaintenanceProfiles(), op.RuleID)
 		if err != nil {
 			return res, err
+		}
+		rule := eff.maintenanceRule
+		if isMaintenanceJobID(rule.ID) {
+			in, err := jobOverridesFromOp(rule, op)
+			if err != nil {
+				return res, asProposalError(err)
+			}
+			if _, err := cmdSetMaintenanceRuleOverrides(tx, now, op.RuleID, in); err != nil {
+				return res, err
+			}
+			res.RuleIDs = []string{op.RuleID}
+			break
 		}
 		req, err := mergeRuleUpdate(rule, op)
 		if err != nil {
@@ -682,10 +811,11 @@ func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, profiles []eng
 		}
 		res.RuleIDs = []string{op.RuleID}
 	case proposalOpCompleteRule:
-		before, err := maintenanceRuleByID(tx, op.RuleID)
+		beforeEff, err := effectiveRuleByID(tx, currentMaintenanceProfiles(), op.RuleID)
 		if err != nil {
 			return res, err
 		}
+		before := beforeEff.maintenanceRule
 		after, entry, err := cmdCompleteMaintenanceRule(tx, now, op.RuleID, op.completeRequest())
 		if err != nil {
 			return res, err
@@ -700,49 +830,13 @@ func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, profiles []eng
 			return res, err
 		}
 		res.RuleIDs = []string{op.RuleID}
-	case proposalOpCopyProfile:
-		created, _, err := cmdCopyMaintenanceProfileSchedule(tx, now, op.EquipmentID, profiles)
-		if err != nil {
-			return res, err
-		}
-		for _, r := range created {
-			res.RuleIDs = append(res.RuleIDs, r.ID)
-			res.CopiedServiceIDs = append(res.CopiedServiceIDs, r.ProfileServiceID)
-			res.CopiedNames = append(res.CopiedNames, r.Description)
-		}
-		if len(res.CopiedServiceIDs) == 0 {
-			if op.CopyServiceIDs != nil {
-				return res, errAssistantProposalStale
-			}
-			return res, fmt.Errorf("equipment_id: every entry in the profile's schedule already has a rule; there is nothing to copy")
-		}
-		// Dry run has no snapshot yet; a real Apply always does.
-		if op.CopyServiceIDs != nil && !sameStringSet(op.CopyServiceIDs, res.CopiedServiceIDs) {
-			return res, errAssistantProposalStale
-		}
+	case "copy_profile_schedule":
+		// Removed op kind: a card stored before it went is stale, not broken.
+		return res, &staleProposalError{reason: "this card asks to copy a profile schedule, which Helmcentral no longer does: an item's profile jobs are already on its schedule"}
 	default:
 		return res, fmt.Errorf("unknown op %q", op.Op)
 	}
 	return res, nil
-}
-
-func sameStringSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := map[string]int{}
-	for _, x := range a {
-		seen[x]++
-	}
-	for _, x := range b {
-		seen[x]--
-	}
-	for _, n := range seen {
-		if n != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // errProposalDryRunDone ends the dry run's transaction: RunMaintenanceTx
@@ -762,11 +856,11 @@ var errProposalDryRunDone = errors.New("dry run finished")
 // concurrent tool calls queue behind it rather than deadlock: the run waits on
 // nothing but the database file's write lock, which a competing Apply holds
 // only briefly and never while waiting on this mutex.
-func dryRunProposal(store *documentStore, today time.Time, profiles []engineProfile, ops []assistantProposalOp) error {
+func dryRunProposal(store *documentStore, today time.Time, ops []assistantProposalOp) error {
 	results := make([]assistantProposalOpResult, len(ops))
 	err := store.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
 		for i, op := range ops {
-			res, err := applyMaintenanceProposalOp(tx, now, today, profiles, op)
+			res, err := applyMaintenanceProposalOp(tx, now, today, op)
 			if err != nil {
 				return fmt.Errorf("ops[%d] (%s): %w", i, op.Op, asProposalError(err))
 			}
@@ -784,22 +878,12 @@ func dryRunProposal(store *documentStore, today time.Time, profiles []engineProf
 }
 
 // refineProposalSummary adds what only the dry run knows: the fixed due date a
-// completion moves a rule to, and the actual rules a profile copy creates.
+// completion moves a rule to.
 func refineProposalSummary(op *assistantProposalOp, res assistantProposalOpResult) {
 	switch op.Op {
 	case proposalOpCompleteRule:
 		if res.NewFixedDueDate != "" {
 			op.Summary += ", next due " + formatProposalDate(res.NewFixedDueDate)
 		}
-	case proposalOpCopyProfile:
-		op.CopyServiceIDs = res.CopiedServiceIDs
-		noun := "entries"
-		if len(res.CopiedNames) == 1 {
-			noun = "entry"
-		}
-		// op.Summary is "<item>: copy N from the <profile> schedule".
-		head := op.Summary[:strings.Index(op.Summary, ": copy ")]
-		profile := op.Summary[strings.Index(op.Summary, " from the "):]
-		op.Summary = fmt.Sprintf("%s: copy %d %s%s (%s)", head, len(res.CopiedNames), noun, profile, strings.Join(res.CopiedNames, ", "))
 	}
 }

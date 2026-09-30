@@ -304,6 +304,27 @@ func createDocumentsSchema(db *sql.DB) error {
 // now takes the form ADR 0141 describes (`.backup`/`VACUUM INTO`, or the
 // service stopped) rather than a plain copy of the file.
 func newDocumentStore(dbPath string) (*documentStore, error) {
+	ds, err := openDocumentStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	// Refuse to start on a schedule the job model cannot read (ADR 0148), and
+	// only then add the index that such rows could violate.
+	if err := checkForUnconvertedMaintenanceRules(ds.db); err != nil {
+		ds.db.Close()
+		return nil, err
+	}
+	if err := createMaintenanceJobIndex(ds.db); err != nil {
+		ds.db.Close()
+		return nil, err
+	}
+	return ds, nil
+}
+
+// openDocumentStore is newDocumentStore without the maintenance job checks:
+// what convert-profile-rules opens, since it is the command that repairs a
+// database those checks refuse.
+func openDocumentStore(dbPath string) (*documentStore, error) {
 	db, err := openHelmcentralDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -640,9 +661,9 @@ var documentStoreSchema = []string{
 	// cross-field rule SQLite can't express as a CHECK (same reasoning
 	// equipment.zone_id/bin_id's pairing invariant gives, inventory_store.go),
 	// enforced in Go instead (validateMaintenanceRuleInput,
-	// maintenance_handlers.go) - except for the one case that's
-	// deliberately allowed straight through: a profile schedule entry with
-	// both intervals null (spec's own "interval not set" rules), which is
+	// maintenance_handlers.go) - except for a profile job's row
+	// (id job:<equipment_id>:<service_id>, ADR 0148), whose interval columns
+	// hold a value only when overridden and are otherwise NULL, which is
 	// exactly why this can't be a NOT NULL CHECK either.
 	//
 	// fixed_due_date is the calendar-only alternative to interval_months
@@ -804,6 +825,13 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		// the table first) - single operator, no installed base, so a plain
 		// guarded ADD COLUMN is the whole of the migration story (AGENTS.md).
 		`ALTER TABLE equipment_documents ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0`,
+		// ADR 0148: a profile job's per-item state lives in a maintenance_rules
+		// row keyed job:<equipment_id>:<service_id>. overridden_fields is a
+		// comma list (description, interval_hours, interval_months,
+		// not_applicable) naming what this item overrides; the interval columns
+		// of a job row hold a value only for an overridden field.
+		`ALTER TABLE maintenance_rules ADD COLUMN overridden_fields TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE maintenance_rules ADD COLUMN not_applicable INTEGER NOT NULL DEFAULT 0 CHECK (not_applicable IN (0,1))`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
