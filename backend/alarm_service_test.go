@@ -670,8 +670,12 @@ func TestActiveAlarmsFillsRaisedAtForABusNotificationFromTheOpenLogOccurrence(t 
 	store.RecordRaised(alarmLogEntry{RuleID: ruleID, Label: "Arrival circle", RaisedAt: alarmNow})
 	store.MarkAcknowledged(ruleID, alarmNow.Add(30*time.Second))
 
+	// Acknowledged on the bus but carrying no acknowledgedAt, as a SignalK
+	// older than 2.31 sends it: the log's time is the only one there is.
+	acknowledged := liveNotificationStatus()
+	acknowledged["acknowledged"] = true
 	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
-		notificationWithStatus("alarm", liveNotificationStatus())))
+		notificationWithStatus("alarm", acknowledged)))
 
 	alarms := activeAlarms()
 	if len(alarms) != 1 {
@@ -772,5 +776,37 @@ func TestActiveAlarmsShowsARuleAlarmOnceWhenItsEchoIsOnTheBus(t *testing.T) {
 	}
 	if alarms[0].Label != "Barometer falling" {
 		t.Fatalf("label: got %q", alarms[0].Label)
+	}
+}
+
+// A bus alarm acknowledged earlier and then worsened comes back active: SignalK
+// 2.33 clears its acknowledged flag and acknowledgedAt, but the log row still
+// holds the old acknowledgement. The card must not read "acknowledged" then.
+func TestAttachLoggedOccurrenceTimesSkipsAckTimeOnAReArmedAlarm(t *testing.T) {
+	store := newTestAlarmLog(t)
+	original := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = original })
+
+	ruleID := "notifications:vessels.self.notifications.navigation.anchor"
+	raised := alarmNow.Add(-10 * time.Minute)
+	if _, err := store.RecordRaised(alarmLogEntry{RuleID: ruleID, Label: "Anchor", State: alarmStateWarn, Source: alarmSourceSignalK, RaisedAt: raised}); err != nil {
+		t.Fatalf("RecordRaised: %v", err)
+	}
+	if err := store.MarkAcknowledged(ruleID, alarmNow.Add(-5*time.Minute)); err != nil {
+		t.Fatalf("MarkAcknowledged: %v", err)
+	}
+
+	rearmed := attachLoggedOccurrenceTimes([]alarmStatus{{RuleID: ruleID, Phase: alarmPhaseActive, State: alarmStateAlarm}})
+	if !rearmed[0].AckedAt.IsZero() {
+		t.Fatalf("re-armed alarm: AckedAt got %v, want zero", rearmed[0].AckedAt)
+	}
+	if !rearmed[0].RaisedAt.Equal(raised) {
+		t.Fatalf("RaisedAt got %v, want %v", rearmed[0].RaisedAt, raised)
+	}
+
+	acked := attachLoggedOccurrenceTimes([]alarmStatus{{RuleID: ruleID, Phase: alarmPhaseAcknowledged, State: alarmStateWarn}})
+	if !acked[0].AckedAt.Equal(alarmNow.Add(-5 * time.Minute)) {
+		t.Fatalf("acknowledged alarm without a server stamp: AckedAt got %v, want the logged time", acked[0].AckedAt)
 	}
 }

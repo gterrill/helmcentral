@@ -309,3 +309,7 @@ This poll is not that. No delta carries radar targets, from the plugin or from a
 ### Still true, and still the open question
 
 Decision 7b stands untouched: the first live capture at Hamilton Island produced 21 targets tracing Front Street, the breakwater and Marina Walk, nine of them flagged dangerous, on a boat at anchor with nothing moving. Anchored later somewhere without a marina inside the guard zone, the same radar produced one. The clutter is location-dependent rather than inherent, which weakens the case for gating on `navigation.state` since both readings were taken anchored. Alarms still wait for a capture underway.
+
+## Amendment, 2026-10-01: the list endpoint and spokes through SignalK
+
+The 2026-08-29 measurements above describe SignalK 2.24 with the early plugin. As of SignalK 2.31 and Radar API 3.4.0, `GET .../radars` returns a versioned envelope (`{"version":"3.4.0","radars":{"<id>":{...}}}`) rather than a bare array, and the spoke stream is available through SignalK at `.../radars/{id}/spokes`, authenticated by the `JAUTHENTICATION` cookie, `?token=` or an Authorization header. The 404 in the table no longer holds. Helmcentral still takes presence from the delta tree and still dials mayara directly for spokes (ADR 0069).

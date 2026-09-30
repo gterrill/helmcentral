@@ -44,6 +44,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The alarms drawer now shows when an alarm from the boat's network was
+  acknowledged, even if it was acknowledged at the chartplotter or before
+  Helmcentral restarted. This needs SignalK 2.31 or later. On SignalK 2.33 an
+  acknowledged alarm also comes back as active when it gets worse.
 - Documents is rearranged to match the rest of Inventory. The page is titled
   with the folder you are in, with the path back up above it; **Upload** is
   the button at the top right, and **New folder** and **New note** moved
