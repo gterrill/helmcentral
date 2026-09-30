@@ -76,8 +76,9 @@ const TILE_CHROME_H = 8 + 24 + 8
  * tall the floor was 120px above what the tile needed, and the tile could not be
  * resized down at all.
  *
- * The canvas only ever scales down (see useFitScale), so its design height is
- * the tallest the tile ever gets and a wider column costs no extra rows.
+ * The canvas is drawn at design size at this floor and grows with the tile
+ * beyond it (see FitCanvas), so its design height is the shortest the tile
+ * can be and a wider column costs no extra rows.
  */
 const CLUSTER_WIDGET_CONSTRAINTS = {
   minW: 4,

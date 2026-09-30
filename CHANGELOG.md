@@ -44,6 +44,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Wind and Engine Cluster tiles now fill the tile you give them. Drag
+  either one taller or wider and the dial and its readings grow with it, up to
+  twice their usual size, centred in the tile. Wind no longer stops growing at
+  its old width. On a phone or narrow window they still fit to the screen
+  width.
+
 - Documents is rearranged to match the rest of Inventory. The page is titled
   with the folder you are in, with the path back up above it; **Upload** is
   the button at the top right, and **New folder** and **New note** moved

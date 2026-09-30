@@ -30,6 +30,13 @@ interface TileProps {
    * the edge.
    */
   state?: ZoneState | null
+  /**
+   * Make the content a flex column with `min-h-0`, so a child with `flex-1`
+   * receives the tile's remaining height. Opt-in: turning every tile's content
+   * into a flex container would change the layout of the ones that rely on
+   * block flow.
+   */
+  fill?: boolean
   children: React.ReactNode
 }
 
@@ -42,6 +49,7 @@ export function Tile({
   stale = false,
   staleLabel,
   state = null,
+  fill = false,
   children,
 }: TileProps) {
   // `outside` stays out of this: a bundled engine profile with no warn/alarm
@@ -115,7 +123,7 @@ export function Tile({
           for a live one; it deliberately does not dim it further with opacity — a
           faded tile reads as "dim screen in the sun," not "this feed is dead," and
           this is the system's loudest state, not its quietest. */}
-      <CardContent className={cn('flex-1 px-3 sm:px-4', stale && 'grayscale')}>{children}</CardContent>
+      <CardContent className={cn('flex-1 px-3 sm:px-4', fill && 'flex min-h-0 flex-col', stale && 'grayscale')}>{children}</CardContent>
     </Card>
   )
 }

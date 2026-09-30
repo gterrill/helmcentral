@@ -56,7 +56,7 @@ const SeaStateChart = lazy(() =>
 
 /**
  * Measures its own content box with a ref + ResizeObserver, the same
- * technique useFitScale (lib/cluster-canvas.ts) uses to fit the engine
+ * technique FitCanvas (components/fit-canvas.tsx) uses to fit the engine
  * cluster canvas - except this tile needs both dimensions, not just a scale
  * factor, since the sea-state chart is drawn at the tile's actual pixel size
  * rather than a fixed design size scaled down.

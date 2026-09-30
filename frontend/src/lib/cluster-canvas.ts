@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import type { CSSProperties } from 'react'
 
 /**
  * Fixed-canvas geometry for a ring-with-corner-cards tile (ADR 0054).
@@ -148,20 +148,31 @@ export function computeCornerMasks(cfg: ClusterCanvasConfig) {
   }
 }
 
-/** Scales a fixed-size design down (never up) to fit whatever width its column ends up with. */
-export function useFitScale(designWidth: number) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
+/** How far past its design size a fixed canvas may grow to fill a tile. */
+export const MAX_FIT_SCALE = 2
 
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => {
-      setScale(Math.min(1, entry.contentRect.width / designWidth))
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [designWidth])
+type FitInput = { availW: number; availH?: number; designW: number; designH: number }
 
-  return [ref, scale] as const
+/**
+ * The scale a fixed design canvas is drawn at inside a box of the given size.
+ * Width and height both limit it, and it may grow to MAX_FIT_SCALE. When the
+ * box reports no usable height (a stacked phone layout gives tiles a minimum
+ * height, not a height) only the width counts and the canvas never grows,
+ * which is the behaviour before tiles filled their boxes.
+ */
+export function fitScale({ availW, availH, designW, designH }: FitInput): number {
+  if (!(availW > 0)) return 0
+  const byWidth = availW / designW
+  if (availH === undefined || !(availH > 0)) return Math.min(1, byWidth)
+  return Math.min(byWidth, availH / designH, MAX_FIT_SCALE)
+}
+
+/**
+ * The height a fit box must always keep: the design scaled to the width with
+ * no growth. On a layout that gives the box no height of its own this is the
+ * box's whole height, so the result is the width-only fit. It depends only on
+ * the width, never on the scaled content, so measuring cannot feed back.
+ */
+export function fitMinHeight({ availW, designW, designH }: Omit<FitInput, 'availH'>): number {
+  return designH * Math.min(1, Math.max(0, availW) / designW)
 }

@@ -68,6 +68,12 @@ tile to **hero**: an enlarged, full-width row above the rest of the grid,
 useful for the one reading a page exists for, such as anchor distance on an
 anchorage page. Everything else keeps the position you gave it.
 
+The Wind and Engine Cluster tiles are drawn at a fixed proportion and fill
+whatever size you give them, centred in the tile, up to twice their usual
+size. Drag one larger and the dial and its readings grow with it; make it
+smaller and they shrink. On a phone or a narrow window they fit the width of
+the screen as before.
+
 Helmcentral saves everything on the box as you make each change, not in the
 browser, so a tablet at the helm and a phone in a bunk show the same
 arrangement and find it again next session. Page order is shared the same

@@ -8,7 +8,8 @@ import { DialRing, zoneColor } from '@/components/ui/dial-ring'
 import { Tile } from '@/components/ui/tile'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
 import { reading, zoneFor, zoneTextClass } from '@/lib/cluster-readings'
-import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks, useFitScale } from '@/lib/cluster-canvas'
+import { FitCanvas } from '@/components/fit-canvas'
+import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks } from '@/lib/cluster-canvas'
 import { FuelRail } from '@/components/ui/fuel-rail'
 import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
@@ -237,7 +238,6 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const bodyLeft = fuel?.side === 'left' ? CLUSTER_RAIL.width + CLUSTER_RAIL.gap : 0
   const railLeft = fuel?.side === 'left' ? 0 : CLUSTER_CANVAS.width + CLUSTER_RAIL.gap
 
-  const [ref, scale] = useFitScale(designWidth)
   const title = config.title.trim() || 'Engine'
 
   const ring = reading(config.ring, values, ages)
@@ -285,6 +285,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   return (
     <Tile
       title={title}
+      fill
       state={state}
       stale={tileStale}
       staleLabel={staleLabel}
@@ -297,29 +298,15 @@ export const EngineClusterTile = memo(function EngineClusterTile({
         ) : undefined
       }
     >
-      {/* The scaled canvas is taken out of flow by the transform, so the
-          wrapper is given its scaled height explicitly or the tile keeps a
-          gap the size of the unscaled design.
-          
-          items-start, not items-center: a transform scales paint but not
-          layout, so the child still occupies the full unscaled height here.
-          Centring it in the scaled-down wrapper pushed half the difference
-          out of the top of the tile, which is why the dial climbed out of
-          its own card at iPad width and below and stayed put above 520px,
-          where the scale is 1 and the two heights agree. */}
-      <div ref={ref} className="flex w-full items-start justify-center" style={{ height: canvasH * scale }}>
-        <div
-          data-cluster-canvas=""
-          // shrink-0 or the canvas is not the size it says it is. As a flex
-          // item it defaults to flex-shrink:1, so in any column narrower than
-          // the design its 520px collapsed to the column width while the
-          // corner cards kept their 520-space offsets, putting the right-hand
-          // pair outside the tile and the whole page into horizontal scroll.
-          // useFitScale is what handles narrow columns; the box itself must
-          // not also try to.
-          className="relative shrink-0"
-          style={{ width: designWidth, height: canvasH, transform: `scale(${scale})`, transformOrigin: 'top center' }}
-        >
+      {/* FitCanvas scales the design to whatever the tile gives it and centres
+          it. The canvas is a fixed designWidth x canvasH box (shrink-free, so
+          the corner cards keep the 520-space offsets their masks were cut
+          for); the scale is what handles both narrow and roomy tiles. */}
+      <FitCanvas
+        designWidth={designWidth}
+        designHeight={canvasH}
+        canvasProps={{ 'data-cluster-canvas': '' }}
+      >
           {fuel && (
             <div className="absolute" style={{ left: railLeft, top: 0 }}>
               <FuelRail config={fuel} values={values} height={canvasH} />
@@ -399,8 +386,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
             <CornerCard key={index} index={index} corner={corner} values={values} ages={ages} style={cardStyles[index]} />
           ))}
           </div>
-        </div>
-      </div>
+      </FitCanvas>
     </Tile>
   )
 })
