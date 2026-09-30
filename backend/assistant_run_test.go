@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1261,7 +1262,7 @@ func TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturni
 	if !strings.Contains(err.Error(), "deepseek/deepseek-chat") {
 		t.Fatalf("expected the error to name the model, got %q", err)
 	}
-	if reply != (assistantReply{}) {
+	if !reflect.DeepEqual(reply, assistantReply{}) {
 		t.Fatalf("expected a zero-value reply on error, got %+v", reply)
 	}
 }

@@ -713,8 +713,15 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"alone. When you tell the operator when a job falls due, quote the meter reading " +
 		"(next_due_meter_reading, with remaining_hours): that is what their gauge will show. Engine hours " +
 		"(last_done_engine_hours, engine_hours in the log) are cumulative across meter replacements and equal the " +
-		"meter only when no replacement is recorded. You cannot change the maintenance schedule: say what you would change and that the operator can " +
-		"make the edit in Inventory, Maintenance. Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
+		"meter only when no replacement is recorded. You never change the maintenance schedule yourself. To change it, call " +
+		"propose_maintenance_changes: the operator sees your proposal as a card under your reply and taps Apply. Propose only " +
+		"what the operator asked for or agreed to, read the rules first so you use real ids, and put every change in one call. " +
+		"After proposing, say that the proposal is waiting and they should tap Apply; never say it is done, added or changed. " +
+		"Hours in a proposal are meter readings, what their gauge shows, the same as the Maintenance form, never cumulative " +
+		"engine hours. If a change was dismissed, or went stale (its status line says why), do not propose it again " +
+		"unless the operator asks; if they do, read the rules again and make a fresh proposal. Earlier proposals appear in the conversation with their status (applied, dismissed, stale or " +
+		"waiting): go by that status when you talk about them. Deleting rules or log entries, photos, parts, meter " +
+		"replacements and procedure notes cannot be proposed: say the operator can do those in Inventory, Maintenance. Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
 		"and an item as `[Name](/inventory/equipment/<id>)`, using the link the tool returned.\n\n")
 
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's

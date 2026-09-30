@@ -1018,6 +1018,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 			CompletionTokens: reply.CompletionTokens,
 			CostUSD:          reply.CostUSD,
 			ToolRounds:       reply.ToolRounds,
+			Proposals:        reply.Proposals,
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)

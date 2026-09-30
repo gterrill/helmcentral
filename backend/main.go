@@ -918,7 +918,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
 		{http.MethodPost, "/api/assistant/conversations", tierWrite, createAssistantConversationHandler},
 		{http.MethodDelete, "/api/assistant/conversations/:id", tierWrite, deleteAssistantConversationHandler},
-		// Every tool the assistant can call is read-only, but this is write
+		// Every tool the assistant can call is read-only (a maintenance
+		// proposal is data until the operator applies it), but this is write
 		// tier anyway: it spends the operator's OpenRouter credit and stores
 		// state (a new message row), which a readonly session must not
 		// trigger (ADR 0093).
@@ -928,6 +929,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// spent the operator's OpenRouter credit, the same reasoning as the
 		// POST above.
 		{http.MethodPost, "/api/assistant/conversations/:id/run/cancel", tierWrite, postAssistantRunCancelHandler},
+		// The operator's Apply and Dismiss on a maintenance proposal card
+		// (ADR 0146). Apply is the one place Mate's maintenance changes are
+		// written, all in one transaction; write tier, since it edits the
+		// schedule exactly as the Maintenance forms do.
+		{http.MethodPost, "/api/assistant/proposals/:id/apply", tierWrite, applyAssistantProposalHandler},
+		{http.MethodPost, "/api/assistant/proposals/:id/dismiss", tierWrite, dismissAssistantProposalHandler},
 
 		// Document library writes (ADR 0106). "move" and "tags" ahead of the
 		// "/:id" routes purely for readability - see the read-tier comment

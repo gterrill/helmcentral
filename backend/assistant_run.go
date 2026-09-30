@@ -99,6 +99,11 @@ type assistantReply struct {
 	CompletionTokens int
 	CostUSD          float64
 	ToolRounds       int
+	// Proposals are the maintenance change proposals (ADR 0146) Mate's
+	// propose_maintenance_changes calls produced during this run, in call
+	// order. The handler saves them with the assistant message in one
+	// transaction, so a run that fails or is cancelled saves none.
+	Proposals []assistantProposal
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -786,6 +791,15 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if i < len(toolMessages) {
 				result = string(toolMessages[i].Content)
 			}
+			if call.Function.Name == assistantProposalToolTag {
+				proposal, perr := assistantProposalFromToolResult(result)
+				if perr != nil {
+					return assistantReply{}, perr
+				}
+				if proposal != nil {
+					reply.Proposals = append(reply.Proposals, *proposal)
+				}
+			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 				Name:   call.Function.Name,
 				Args:   string(call.Function.Arguments),
@@ -823,12 +837,26 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
 // get_tides, estimate_passage, read_help, search_documents, read_document,
 // get_nearby_vessels, check_signalk_paths, get_last_recorded,
-// get_path_history, find_equipment, list_maintenance, get_maintenance_log)
-// only reads: none of them writes to the conversation store, settings, the
-// document store, or any other shared state, so running a round's calls in
-// parallel needs no locking beyond r.emit's own and failures' own (see
-// assistantToolFailures's doc comment for why that one is not just guarded
-// by this round's local mu).
+// get_path_history, find_equipment, list_maintenance, get_maintenance_log,
+// propose_maintenance_changes) only reads: none of them writes to the
+// conversation store, settings, the document store, or any other shared
+// state, so running a round's calls in parallel needs no locking beyond
+// r.emit's own and failures' own (see assistantToolFailures's doc comment for
+// why that one is not just guarded by this round's local mu).
+//
+// propose_maintenance_changes is the one that looks like an exception and is
+// not (ADR 0146). It validates operations against the maintenance rules and
+// returns them as data: a proposal. To do that faithfully it dry-runs every
+// operation, in order, through the same commands Apply uses, inside a
+// transaction that is ALWAYS rolled back (dryRunProposal), so nothing is ever
+// committed. The transaction holds the document store's mutex, so a round's
+// concurrent calls queue behind it instead of deadlocking. The run collects the
+// proposal from the tool result after the round (see run), the handler saves
+// it with the assistant message in that message's own transaction, and the
+// operator's Apply tap on the card is what writes the maintenance schedule. A
+// retried, duplicated or cancelled tool call therefore produces at worst an
+// extra card, never an extra rule, and a run that fails or is cancelled saves
+// no proposal because it saves no message.
 //
 // This is a RULE, not an observation about the tools that happen to exist
 // today. A write-capable tool was designed and deliberately not built: the
@@ -838,7 +866,8 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // nothing; the operator's tap creates the note. A retried or cancelled
 // tool call would also have produced duplicate notes with no idempotency
 // key - something sha256 UNIQUE cannot catch, since two drafts of the same
-// text carry different UUIDs and so hash differently.
+// text carry different UUIDs and so hash differently. Maintenance follows
+// the same shape: propose, then the operator applies.
 //
 // If a future tool ever does need to mutate shared state, it must either
 // take its own lock or be called out here as one that has to run
@@ -1005,6 +1034,28 @@ func assistantFindPlacesLogSuffix(name, result string) string {
 	return fmt.Sprintf(" (search=%s, results=%d)", decoded.Search, len(decoded.Results))
 }
 
+// assistantProposalFromToolResult reads the proposal out of a successful
+// propose_maintenance_changes result. A failed call's result is the
+// {"error": ...} body every tool failure gets and carries no proposal, so it
+// yields nil. A result that claims to be a proposal but cannot be read is a
+// bug in this code, not something to skip: the operator would never see the
+// change Mate believes it proposed.
+func assistantProposalFromToolResult(result string) (*assistantProposal, error) {
+	var decoded struct {
+		Proposal *assistantProposal `json:"proposal"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		return nil, fmt.Errorf("read %s result: %w", assistantProposalToolTag, err)
+	}
+	if decoded.Proposal == nil {
+		return nil, nil
+	}
+	if decoded.Proposal.ID == "" || len(decoded.Proposal.Ops) == 0 {
+		return nil, fmt.Errorf("read %s result: proposal has no id or no operations", assistantProposalToolTag)
+	}
+	return decoded.Proposal, nil
+}
+
 // assistantAttachmentExcerptRunes bounds how much of an attached document's
 // markdown assistantAttachmentBlock quotes into the most recent user
 // message's preamble (ADR 0106). 4000 characters is enough to answer most
@@ -1058,9 +1109,40 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 			}
 			content = preamble.String()
 		}
+		// A maintenance proposal (ADR 0146) is part of what Mate said on this
+		// turn: replay each one with the status it has now, so Mate knows on
+		// the next turn whether the operator applied it, dismissed it, or has
+		// not decided.
+		for _, p := range m.Proposals {
+			content += assistantProposalHistoryBlock(p)
+		}
 		out = append(out, openRouterMessage{Role: m.Role, Content: openRouterContent(content)})
 	}
 	return out, nil
+}
+
+// assistantProposalHistoryBlock renders one proposal for the history: its
+// status in words, then one line per change. It is context for Mate, never
+// shown to the operator.
+func assistantProposalHistoryBlock(p assistantProposal) string {
+	var status string
+	switch p.Status {
+	case assistantProposalApplied:
+		status = "the operator tapped Apply: these changes ARE now in the maintenance schedule"
+	case assistantProposalDismissed:
+		status = "the operator dismissed it: NONE of these changes were made; do not propose them again unless asked"
+	case assistantProposalStale:
+		status = "it went stale and could NOT be applied: NONE of these changes were made (" + p.StaleReason +
+			"); do not propose them again unless the operator asks, and if they do, read the rules again and make a fresh proposal"
+	default:
+		status = "still waiting for the operator to tap Apply: NONE of these changes have been made yet"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\n[Maintenance proposal %s (%s)]", p.Status, status)
+	for _, op := range p.Ops {
+		b.WriteString("\n- " + op.Summary)
+	}
+	return b.String()
 }
 
 // assistantDocumentBlockOpen and assistantDocumentBlockClose delimit one
