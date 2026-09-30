@@ -117,8 +117,10 @@ history behind them. For a review it lines your rules up against the
 manufacturer's recommended services on the item's profile and against the
 manuals in your library, and names what's missing or different. If an item's
 running hours aren't being read, it says the hours are unknown rather than
-guess. It only reads: the changes are yours to make in
-[Maintenance](maintenance.md).
+guess. It can also propose changes to the schedule as a card under its
+reply. Nothing changes until you tap **Apply**; see
+[Maintenance](maintenance.md) and
+[Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
 
 Mate also knows two things about the app itself: what you're looking at when
 you ask, and how Helmcentral's own features work. A question asked from the
@@ -265,8 +267,9 @@ Traffic runs the other way too. When an answer is worth keeping - a
 procedure Mate has just walked you through, a figure it worked out - **Save
 as note** under that answer keeps it, without retyping. Mate does not write
 it: the note is created by your tap, lands unfiled like any other capture,
-and you file or edit it afterwards. Mate has no tool that can write
-anything, which is deliberate and explained below.
+and you file or edit it afterwards. Mate never writes anything itself,
+which is deliberate and explained below. The same goes for the maintenance
+schedule: Mate proposes, and your tap on **Apply** makes the change.
 
 Mate is also always told which manuals exist and, for each, the names of its
 top-level sections - "Operations Manual (Before Leaving, Getting Underway),
@@ -308,12 +311,15 @@ already approximations before a chat model summarises them.
 It needs internet. Without a connection, or with no key configured, or
 switched off, it says so plainly rather than pretending to work.
 
-It is read-only. It can look things up and it can explain how Helmcentral
-works; it cannot start anything, change a setting, or steer anything. There
-is nothing it can do to the boat, by typing or by voice.
+It can look things up and explain how Helmcentral works, and it can propose
+changes to the maintenance schedule, which you apply or dismiss. It cannot
+start anything, change a setting, or steer anything. There is nothing it can
+do to the boat, by typing or by voice, and nothing it proposes takes effect
+without your tap.
 
 Voice is a convenience on top of that, not a separate control path: Mate
-still only answers, whether you typed the question or said it.
+still only answers and proposes, whether you typed the question or said it.
+A proposal card is applied by tapping it, never by speaking.
 
 ## When it can't run, or can't listen
 

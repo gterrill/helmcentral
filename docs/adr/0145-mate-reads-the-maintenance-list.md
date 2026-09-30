@@ -121,6 +121,10 @@ with no lookup, rather than an icon that can only show "not found".
   before an upgrade will get a 400 naming the field until it is reloaded.
 - Mate still cannot change a rule or the log. That is the next cycle:
   a tool that builds a validated proposal the operator applies with a tap.
+  *Amended 2026-09-30: [ADR 0146](0146-mate-proposes-the-operator-applies.md)
+  adds `propose_maintenance_changes` and the Apply and Dismiss card. Mate
+  still writes nothing; the operator's tap does. The prompt's "cannot change
+  the schedule yet" is replaced by the propose-and-apply rules.*
 
 ## Alternatives considered
 
