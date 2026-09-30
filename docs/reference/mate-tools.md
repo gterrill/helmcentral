@@ -20,6 +20,7 @@ can't be done.
 | When a reading stopped | The last recorded time and value for a reading, and what it was doing (steady, dropping out, frozen on one value) before then | Your boat's own long-term telemetry history | InfluxDB | Says no history log is set up, or that nothing recorded matches what you asked about |
 | What you're looking at | Which panel or dashboard page the question was asked from | The screen you're on when you ask, from the sheet's context | Nothing extra | - |
 | Helmcentral's own features | How a feature works, quoting the actual page | The in-app help, the same pages the header's **?** opens | Nothing extra | - |
+| Equipment and maintenance | Items in the equipment registry with their hour-meter reading and manufacturer's recommended services; every maintenance rule with its status today, intervals, last-done baseline and procedure note; the service log with dates, hours, who, cost and parts | Inventory → Equipment and Maintenance, exactly as those pages show them, with status worked out against today's date at the helm | Nothing extra; see [Maintenance](../features/maintenance.md) | Says the maintenance data is unavailable. An item with no reading is reported as hours unknown, never as zero |
 | The document library | Manuals, receipts, notes, photos already in the library | An attached file, or a search across the whole library | See [Documents](../features/documents.md) | - |
 
 Place search uses the same plugin, and the same Overpass server setting when

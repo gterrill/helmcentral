@@ -821,7 +821,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // from inside a goroutine below is serialised through mu.
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
-// get_tides, estimate_passage, read_help, search_documents, read_document)
+// get_tides, estimate_passage, read_help, search_documents, read_document,
+// get_nearby_vessels, check_signalk_paths, get_last_recorded,
+// get_path_history, find_equipment, list_maintenance, get_maintenance_log)
 // only reads: none of them writes to the conversation store, settings, the
 // document store, or any other shared state, so running a round's calls in
 // parallel needs no locking beyond r.emit's own and failures' own (see

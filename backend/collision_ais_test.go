@@ -76,7 +76,7 @@ func TestCollisionNotificationsSurfaceFromATargetContext(t *testing.T) {
 		"vessels.urn:mrn:imo:mmsi:503016440": collisionNotification("warn", "TASHTEGO - CPA WARNING"),
 	})
 
-	if selfOnly := signalKNotifications(snapshot, ownsNothing); len(selfOnly) != 0 {
+	if selfOnly := signalKNotifications(snapshot, ownsNothing, alarmNow); len(selfOnly) != 0 {
 		t.Fatalf("the self walk must not see target notifications, got %+v", selfOnly)
 	}
 

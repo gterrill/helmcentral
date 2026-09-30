@@ -166,7 +166,7 @@ func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, globalAlarmEngine.active()...)
-	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate()))...)
+	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate(), time.Now().UTC()))...)
 
 	// The clock is read here rather than threaded through as a parameter
 	// because activeAlarms has no caller-supplied now to thread it from:

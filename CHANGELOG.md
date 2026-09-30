@@ -13,11 +13,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate can read your maintenance schedule and service log. Ask what's
+  overdue, when the generator was last serviced, or whether the main
+  engine's schedule is complete. For a review it compares your rules with
+  the manufacturer's recommended services on the item's profile and with
+  your manuals, and names the gaps. If an item's running hours aren't being
+  read, it says the hours are unknown instead of guessing. Mate only reads:
+  changes are still made in Inventory → Maintenance.
 - Mate keeps a trip or weather window you've been discussing in mind for the
   rest of the conversation. When a later question brings in a fresh forecast,
   such as asking about conditions after moving anchorage, it says whether the
   window has opened, closed or shifted, and tells you when an earlier call no
   longer holds.
+
+### Breaking
+
+- Reload the Helmcentral page in any browser tab or phone home-screen app
+  that was open before you upgraded. An old tab can't tell Mate today's
+  date, so its questions fail with an error naming the missing date until
+  the page is reloaded.
 
 ### Changed
 
@@ -27,6 +41,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   in a panel from the right without leaving the item. The menu also has
   Download, and Remove from item, which takes the link off this item only and
   waits for the save bar.
+- Mate no longer shows a broken document icon when it refers to a help page.
+  It names the page in words instead.
 - The forecast page's chart legends and data-source lines are bigger and
   easier to read at a glance, and now sit together at the bottom of each
   chart instead of split between the top and bottom. The cloud, wind and
@@ -57,12 +73,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   can't count hours until one is set. The Equipment list loses its
   "Serviced by" column and filter, and picking a profile no longer changes
   anything but the blank manufacturer and model.
+- Anchor Watch's Adjust mode no longer ties the alarm radius to the map's
+  zoom. Pinch or scroll to zoom in and look around while positioning the
+  anchor, the same as anywhere else on the chart, without changing the
+  radius. A small − / + control under the Adjust icon changes the radius
+  instead, and Cancel / Save now sit over the bottom of the map rather than
+  in a bar that used to take a chunk of it. Entering Adjust no longer changes
+  the zoom, resizes the map or hides the page around it: the data cards on
+  the left stay up and show distance and bearing from the new position as
+  you pan. The two
+  radius shortcuts ("Rode + LOA", "Planner swing") are gone; use the − / +
+  control, or the rode planner's own "Apply as alarm radius" button.
 
 ### Fixed
 
 - The header's `?` now opens the correct help page for the Inventory
   section you're actually on - Locations, Maintenance, Profiles and
   Stocktake, not just Equipment.
+- Arrival circle and waypoint perpendicular passed alarms from the plotter's
+  route no longer stay lit forever after the route is stopped or cancelled;
+  they now clear themselves within a few minutes of the plotter going quiet.
 
 ## [0.36.0] - 2026-09-28
 

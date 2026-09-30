@@ -118,6 +118,27 @@ entry stays there by name even if that spare is later removed from
 inventory - deleting the item never rewrites what was actually fitted on
 the day.
 
+## Asking Mate
+
+Mate can read the schedule, so you can ask it what's overdue, what's coming
+up on the generator, or when the raw water impeller was last done, and it
+answers from this list rather than from memory. The status it quotes is the
+one shown here, worked out against today's date at the helm.
+
+Ask it to review a schedule and it compares your rules with the
+manufacturer's recommended services on the item's profile and with the
+manuals in your document library, then names the gaps: a service the
+manufacturer lists that you have no rule for, an interval that differs from
+the book, a rule that has never had a last-done date.
+
+If an item's running hours aren't being read at the moment, Mate says the
+hours are unknown, the same way the list does. It won't put a figure in
+their place. A rule flagged that way can still read as fine on its calendar
+side alone, so treat "hours unknown" as a reason to read the meter yourself.
+
+Mate can't change anything. It will tell you what it would change, and you
+make the edit here.
+
 ## What this is not
 
 - Not an alarm. A rule going overdue doesn't raise a notification the way
@@ -125,5 +146,6 @@ the day.
   reminder that follows you around the boat.
 - Not stock control. Parts used against a job are recorded for the history;
   quantities on hand aren't adjusted.
-- Not a Mate skill yet. Mate can't currently answer "what's overdue on the
-  generator" - that's designed for a later cycle.
+- Not something Mate can change. Mate reads the schedule and the service
+  log, but adding a rule, setting a baseline or marking a job done is still
+  done here, in Inventory → Maintenance.

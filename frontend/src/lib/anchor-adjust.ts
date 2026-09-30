@@ -56,13 +56,15 @@ export function clampRadiusM(radiusM: number, bounds: AlarmRadiusBounds): number
 
 // ── Adjust mode geometry (part 2) ───────────────────────────────────────────
 //
-// The fixed-crosshair Adjust mode (impeccable shape round, 2026-09-26):
-// the camera centres on the anchor, the swing ring is a fixed-size screen
-// overlay, and panning/pinching the map moves the draft anchor and radius
-// underneath it. Every function below is pure geometry with no map instance
-// or DOM access, so the crosshair/pinch UI (anchor-watch-map.tsx) can be
-// driven from real MapLibre events while these stay unit-testable on their
-// own.
+// The fixed-crosshair Adjust mode (impeccable shape round, 2026-09-26;
+// decoupled from zoom, ADR 0143): the camera centres on the anchor and
+// panning the map moves the draft anchor underneath the fixed crosshair.
+// The draft radius is plain state (owned by the host, ADR 0143) stepped by a
+// small toolbar's own +/- rather than by pinch/zoom, and the swing circle is
+// drawn as a real geographic polygon so it always represents the true ground
+// radius regardless of zoom. Every function below is pure geometry with no
+// map instance or DOM access, so anchor-watch-map.tsx can be driven from
+// real MapLibre events while these stay unit-testable on their own.
 
 /**
  * MapLibre GL tiles the world in 512px tiles, not the 256px tiles most
@@ -70,9 +72,10 @@ export function clampRadiusM(radiusM: number, bounds: AlarmRadiusBounds): number
  * This is the same derivation and the same constant lib/anchor-view.ts's
  * fitRadiusZoom already uses and has shipped — duplicated rather than
  * imported so this module stays a standalone, dependency-free geometry
- * layer, but deliberately kept numerically identical: an anchor radius that
- * fits inside fitRadiusZoom's fit also fits inside this module's ring at the
- * same zoom.
+ * layer. Used by the map's own keyboard pan (metres -> pixels at the
+ * current zoom); ADR 0143 removed the zoom<->radius conversions this same
+ * constant used to back (zoomForRingRadius/radiusForZoom/adjustZoomBounds),
+ * since the draft radius no longer rides on zoom at all.
  */
 const MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 = 78271.51696402048
 
@@ -83,72 +86,12 @@ export function metersPerPixel(latDeg: number, zoom: number): number {
 }
 
 /**
- * The swing ring's fixed size (operator decision, 2026-09-26): 35% of the
- * map container's short side as its radius, so the ring's diameter — 70% of
- * the short side — sits comfortably inside the viewport at every aspect
- * ratio without ever being clipped.
- */
-export const ADJUST_RING_FRACTION = 0.35
-
-export function ringRadiusPx(shortSidePx: number): number {
-  return shortSidePx * ADJUST_RING_FRACTION
-}
-
-/** MapLibre never zooms in past this during Adjust — small radii accept overzoomed, blurry imagery rather than shrinking the ring (operator decision). */
-export const ADJUST_MAX_ZOOM = 22
-
-/** Safe fallback zoom for input that can't be computed (zero-size container, non-finite radius) — matches the map's own DEFAULT_ZOOM_BEFORE_FIT. */
-const ADJUST_FALLBACK_ZOOM = 14
-
-/**
- * The fractional MapLibre zoom at which a fixed screen-space ring of
- * `ringPx` radius, centred at `latDeg`, represents `radiusM` metres on the
- * ground — used both to jump to the current radius on Adjust entry and to
- * ease towards a stepped target radius while keeping the ring's own pixel
- * size fixed. The inverse of radiusForZoom below.
- */
-export function zoomForRingRadius(radiusM: number, latDeg: number, ringPx: number): number {
-  if (!(radiusM > 0) || !(ringPx > 0)) return ADJUST_FALLBACK_ZOOM
-  const targetMetersPerPixel = radiusM / ringPx
-  const latRad = (latDeg * Math.PI) / 180
-  const zoom = Math.log2((MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 * Math.cos(latRad)) / targetMetersPerPixel)
-  return Number.isFinite(zoom) ? zoom : ADJUST_FALLBACK_ZOOM
-}
-
-/** The ground radius (m) a fixed `ringPx` ring represents at `zoom` — the inverse of zoomForRingRadius. */
-export function radiusForZoom(zoom: number, latDeg: number, ringPx: number): number {
-  return ringPx * metersPerPixel(latDeg, zoom)
-}
-
-export interface AdjustZoomBounds {
-  minZoom: number
-  maxZoom: number
-}
-
-/**
- * The MapLibre zoom range Adjust mode locks pinch/scroll-wheel zoom to, so
- * the operator physically cannot zoom the ring past alarmRadiusBounds. A
- * larger radius needs a SMALLER zoom (more ground per pixel), so
- * `bounds.maxM` maps to the lower zoom bound and `bounds.minM` to the upper
- * one — computed both ways and sorted rather than assumed, so this holds
- * even if that relationship's direction ever changes. Clamped to
- * [0, ADJUST_MAX_ZOOM].
- */
-export function adjustZoomBounds(bounds: AlarmRadiusBounds, latDeg: number, ringPx: number): AdjustZoomBounds {
-  const zoomAtMaxRadius = zoomForRingRadius(bounds.maxM, latDeg, ringPx)
-  const zoomAtMinRadius = zoomForRingRadius(bounds.minM, latDeg, ringPx)
-  return {
-    minZoom: Math.max(0, Math.min(zoomAtMaxRadius, zoomAtMinRadius)),
-    maxZoom: Math.min(ADJUST_MAX_ZOOM, Math.max(zoomAtMaxRadius, zoomAtMinRadius)),
-  }
-}
-
-/**
  * The rounded whole-unit figure for a radius in the operator's display unit
  * — shared by formatRadiusDisplay below (which appends the unit suffix) and
- * the bottom bar's own bare-number readout (anchor-adjust-bar.tsx), so the
- * two can never disagree about the rounding (code-review finding: the bar
- * had grown its own copy of this exact rounding).
+ * the radius toolbar's own bare-number readout (anchor-adjust-radius-
+ * toolbar.tsx), so the two can never disagree about the rounding
+ * (code-review finding: the bar had grown its own copy of this exact
+ * rounding).
  */
 export function radiusDisplayValue(radiusM: number, isImperial: boolean): number {
   return Math.round(isImperial ? metersToFeet(radiusM) : radiusM)

@@ -23,7 +23,41 @@ type signalKSnapshot struct {
 	selfCtx     string                     // which context is this vessel, per the stream's hello frame
 	connected   bool
 	lastMessage time.Time
+
+	// sentenceSeen tracks, per NMEA 0183 sentence type ("APB", "RMC", ...),
+	// the receive time of the latest live (not cached-replay) update that
+	// both named that sentence in
+	// its source object AND carried at least one value outside the
+	// "notifications." tree -- see applyDelta's own comment for why the
+	// notifications-only case is deliberately excluded (ADR 0144). Not
+	// context-scoped: an NMEA 0183 gateway reports as this vessel, and the
+	// stale-notification check this feeds only ever asks about self.
+	sentenceSeen map[string]time.Time
+
+	// listenSince is when this process applied its first delta, i.e. began
+	// actually observing the bus -- construction happens once at process
+	// start, before the stream has necessarily connected at all, so it is not
+	// a good proxy for "how long have we actually been listening." The zero
+	// value means no delta has been applied yet. Used by the stale-sentence
+	// check (ADR 0144) to give a sentence type never yet seen a grace period
+	// before treating its absence as evidence of anything, rather than
+	// declaring every notification stale the instant the process starts.
+	listenSince time.Time
 }
+
+// signalKSentenceSeenMaxDistinct caps how many distinct sentence type strings
+// sentenceSeen may hold, the same "count cap survives a flood, ordinary boats
+// never approach it" reasoning signalKContextMaxDistinctSources documents
+// above, scaled down further: a real NMEA 0183 installation uses at most a
+// few dozen distinct sentence mnemonics (RMC, GGA, APB, VDM, HDG, MWV, ...),
+// so this is never reached in ordinary operation, while a malformed or
+// hostile delta stream varying update.Source["sentence"] cannot grow this map
+// without bound the way K-2 (backend security audit) found for sourceSeen.
+// Once at the cap, a brand new sentence type is simply not recorded rather
+// than evicting an older one -- there is no ordering reason to prefer a new
+// arrival over an established one here the way evictExcessPaths' "oldest
+// first" has for genuine path growth.
+const signalKSentenceSeenMaxDistinct = 200
 
 // sourceSeenEntry tracks one $source's publishing history within a context:
 // enough for the sensor-health "silent source" check (anomaly_sensor_health.go)
@@ -144,6 +178,12 @@ type signalKDelta struct {
 // signalKUpdate is an update within a delta message, containing timestamp,
 // source, and one or more values.
 type signalKUpdate struct {
+	// Source is the full source object signalk-server sends -- talker, type,
+	// label and, for an NMEA 0183-derived update, "sentence" (e.g. "APB",
+	// "RMC"), read by applyDelta for both the stale-notification check's
+	// sentenceSeen bookkeeping and the leaf's own copied "sentence" field
+	// (ADR 0144). SourceRef ($source) is the flattened id string most of this
+	// package reads instead; Source only matters for this one sub-field.
 	Source    map[string]any `json:"source,omitempty"`
 	SourceRef string         `json:"$source,omitempty"`
 	Timestamp string         `json:"timestamp,omitempty"`
@@ -159,9 +199,10 @@ type signalKValue struct {
 // newSignalKSnapshot creates a new empty snapshot.
 func newSignalKSnapshot() *signalKSnapshot {
 	return &signalKSnapshot{
-		contexts:   make(map[string]map[string]any),
-		pathSeen:   make(map[string]time.Time),
-		sourceSeen: make(map[string]sourceSeenEntry),
+		contexts:     make(map[string]map[string]any),
+		pathSeen:     make(map[string]time.Time),
+		sourceSeen:   make(map[string]sourceSeenEntry),
+		sentenceSeen: make(map[string]time.Time),
 	}
 }
 
@@ -186,6 +227,15 @@ func radarTargetDeltaPath(path string) bool {
 func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The first delta this process ever applies, across every context --
+	// construction happens at process start, before the stream has
+	// necessarily connected, so this is the earliest point "how long have we
+	// been listening" can honestly be measured from (ADR 0144's
+	// stale-sentence grace period, nmeaNotificationIsStale below).
+	if s.listenSince.IsZero() {
+		s.listenSince = now
+	}
 
 	if _, ok := s.contexts[d.Context]; !ok {
 		s.contexts[d.Context] = make(map[string]any)
@@ -228,6 +278,37 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 			entry.Count++
 			s.sourceSeen[key] = entry
+		}
+
+		// ADR 0144: record when this NMEA 0183 sentence type last carried
+		// vessel data, at the receive time, since staleness is measured
+		// against this process's clock and a SignalK host a little behind it
+		// must not age every live sentence by its skew. An update whose own
+		// timestamp is already older than the stale window is skipped
+		// instead: signalk-server replays cached values when a stream
+		// connects, and a replayed APB from when the route stopped is not
+		// evidence the route is still running.
+		//
+		// Updates that only touch notifications. don't count. The
+		// Notifications API re-emits a notification with its original APB
+		// source and a new timestamp whenever any client acknowledges or
+		// silences it, and that is not the plotter still sending the route.
+		if sentence, _ := update.Source["sentence"].(string); sentence != "" {
+			carriesRealData := false
+			for _, val := range update.Values {
+				if val.Path != notificationsRoot && !strings.HasPrefix(val.Path, notificationsRoot+".") {
+					carriesRealData = true
+					break
+				}
+			}
+			if carriesRealData {
+				ts, err := time.Parse(time.RFC3339Nano, update.Timestamp)
+				replayed := err == nil && now.Sub(ts) > nmeaNotificationStaleAfter
+				_, known := s.sentenceSeen[sentence]
+				if !replayed && (known || len(s.sentenceSeen) < signalKSentenceSeenMaxDistinct) {
+					s.sentenceSeen[sentence] = now
+				}
+			}
 		}
 
 		for _, val := range update.Values {
@@ -303,6 +384,18 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				}
 				if update.SourceRef != "" {
 					child["$source"] = update.SourceRef
+				}
+				// signalk-server's REST tree carries an NMEA 0183 leaf's
+				// sentence beside value/$source/timestamp, but the delta
+				// stream only has it inside the update's source object. The
+				// stale-notification check (ADR 0144) reads it off the leaf,
+				// so copy it across or a delta-fed leaf would never have one.
+				// An update with no sentence drops an earlier one: the tag
+				// must name whoever wrote the leaf last, not whoever once did.
+				if sentence, _ := update.Source["sentence"].(string); sentence != "" {
+					child["sentence"] = sentence
+				} else {
+					delete(child, "sentence")
 				}
 			}
 		}
@@ -606,6 +699,28 @@ func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.pathSeen[context+"|"+path]
+}
+
+// lastSentenceSeen reports when an NMEA 0183 sentence type was last observed
+// carrying real vessel data over the delta stream (receive time, with
+// cached-value replays skipped), and whether it
+// has ever been seen at all. Used by the stale-notification check (ADR 0144)
+// to tell a route the plotter has stopped steering from one still actively
+// reporting.
+func (s *signalKSnapshot) lastSentenceSeen(sentence string) (time.Time, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen, ok := s.sentenceSeen[sentence]
+	return seen, ok
+}
+
+// listeningSince reports when this process applied its first delta, or the
+// zero time if it never has -- see the field's own doc comment on the
+// struct for why construction time would be the wrong answer.
+func (s *signalKSnapshot) listeningSince() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.listenSince
 }
 
 // vesselContextStaleAfter is how long a non-self vessel context may go

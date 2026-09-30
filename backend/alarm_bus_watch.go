@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -43,13 +44,22 @@ type busNotificationWatcher struct {
 	snapshot *signalKSnapshot
 	dwell    time.Duration
 	tracked  map[string]*busNotificationState
+
+	// staleNMEALogged tracks, per notification label, whether the "set aside
+	// as stale" diagnostic (logStaleNMEATransitions, ADR 0144) has already
+	// been logged for the current stale spell -- so the log carries one line
+	// for the whole spell, not one every tick for as long as the plotter's
+	// route stays stopped, matching notificationSyncer's own failing-streak
+	// idiom (notification_sync.go).
+	staleNMEALogged map[string]bool
 }
 
 func newBusNotificationWatcher(snapshot *signalKSnapshot) *busNotificationWatcher {
 	return &busNotificationWatcher{
-		snapshot: snapshot,
-		dwell:    busNotificationDwell,
-		tracked:  map[string]*busNotificationState{},
+		snapshot:        snapshot,
+		dwell:           busNotificationDwell,
+		tracked:         map[string]*busNotificationState{},
+		staleNMEALogged: map[string]bool{},
 	}
 }
 
@@ -81,8 +91,18 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 	// does not (alarm_ownership.go), and this watcher must not re-raise that
 	// one either: disabling a rule does not retract what it already
 	// published.
-	busStatuses := signalKNotifications(w.snapshot, helmcentralOwnershipPredicate())
+	busStatuses := signalKNotifications(w.snapshot, helmcentralOwnershipPredicate(), now)
 	busStatuses = append(busStatuses, signalKCollisionNotifications(w.snapshot, now)...)
+
+	// signalKNotifications silently drops a notification it has set aside as
+	// stale (ADR 0144), with no trace of its own -- from this watcher's own
+	// live/raise/clear bookkeeping below, one going stale is indistinguishable
+	// from one that genuinely cleared, which is the point (a stale one leaving
+	// behaves exactly like a clear). This is only the diagnostic: it logs the
+	// transition so an operator watching the log can tell "the route really
+	// cleared" apart from "Helmcentral is quietly sitting on an old
+	// notification."
+	w.logStaleNMEATransitions(now)
 
 	live := map[string]alarmStatus{}
 	for _, status := range busStatuses {
@@ -180,6 +200,53 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 	}
 
 	return events
+}
+
+// logStaleNMEATransitions logs once when a live self notification is set
+// aside because its NMEA 0183 sentence has gone stale (nmeaNotificationIsStale,
+// ADR 0144), and once when it is no longer excluded -- not on every tick for
+// as long as the condition holds either way.
+func (w *busNotificationWatcher) logStaleNMEATransitions(now time.Time) {
+	if w.staleNMEALogged == nil {
+		w.staleNMEALogged = map[string]bool{}
+	}
+
+	root := w.snapshot.nodeAt(notificationsRoot)
+	stale := staleNMEANotificationLabels(w.snapshot, root, now)
+
+	for label, info := range stale {
+		if w.staleNMEALogged[label] {
+			continue
+		}
+		w.staleNMEALogged[label] = true
+		lastSeen := "not since Helmcentral started listening"
+		if info.EverSeen {
+			lastSeen = info.LastSeen.Format(time.RFC3339)
+		}
+		log.Printf("notifications.%s: no fresh %s sentence (last seen: %s), set aside rather than surfaced as an alarm",
+			label, info.Sentence, lastSeen)
+	}
+
+	var live []alarmStatus
+	if root != nil {
+		collectSignalKNotifications(root, nil, &live)
+	}
+	stillLive := map[string]bool{}
+	for _, status := range live {
+		stillLive[status.Label] = true
+	}
+
+	for label := range w.staleNMEALogged {
+		if _, stillStale := stale[label]; stillStale {
+			continue
+		}
+		delete(w.staleNMEALogged, label)
+		// A notification that cleared while set aside has gone, not come
+		// back; its clear needs no line of its own here.
+		if stillLive[label] {
+			log.Printf("notifications.%s: no longer set aside as stale", label)
+		}
+	}
 }
 
 // busNotificationEvent synthesizes a pseudo-rule for one notification status,

@@ -110,6 +110,16 @@ to when it stopped - flat-lined, dropping in and out, or just gone. Without
 a history log configured, Mate can still tell you what's live right now; it
 just can't look further back than that.
 
+Mate can read your maintenance schedule and service log. Ask "what's
+overdue", "when was the generator last serviced" or "is the schedule for the
+main engine complete" and it looks up the rules, their status today and the
+history behind them. For a review it lines your rules up against the
+manufacturer's recommended services on the item's profile and against the
+manuals in your library, and names what's missing or different. If an item's
+running hours aren't being read, it says the hours are unknown rather than
+guess. It only reads: the changes are yours to make in
+[Maintenance](maintenance.md).
+
 Mate also knows two things about the app itself: what you're looking at when
 you ask, and how Helmcentral's own features work. A question asked from the
 sheet over the Forecast panel arrives with that noted, so "explain how the

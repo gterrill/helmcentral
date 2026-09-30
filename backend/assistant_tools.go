@@ -170,6 +170,17 @@ type assistantToolDeps struct {
 	// see queryInfluxPathFirstLast's own doc comment (influx.go) for why the
 	// two are not the same timestamp. Production wires queryInfluxPathFirstLast.
 	influxPathHistoryFirstLast func(ctx context.Context, path, source string, start, stop time.Time) (first, last time.Time, found bool, err error)
+	// today is the operator's own local calendar date (YYYY-MM-DD at UTC
+	// midnight), taken from the message POST's required today field
+	// (postAssistantMessageHandler) - never the server's clock. The
+	// maintenance tools compute every rule status against it (ADR 0145). The
+	// zero value means "not supplied", and list_maintenance then fails
+	// rather than guess.
+	today time.Time
+	// profiles lists the installed equipment profiles, for find_equipment's
+	// view of the manufacturer's service block. Production returns
+	// engineProfiles(); nil (a test that never sets it) means none installed.
+	profiles func() []engineProfile
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -212,6 +223,10 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
+		profiles: func() []engineProfile {
+			profiles, _ := engineProfiles()
+			return profiles
+		},
 	}
 }
 
@@ -564,6 +579,79 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "find_equipment",
+				Description: "Find items in the boat's equipment registry by name, manufacturer, model or " +
+					"alias, optionally within one system. Returns each item's id, system, whether its hour " +
+					"meter is bound and reading right now (current_meter_reading is what the meter shows and " +
+					"is absent when the reading is unknown - never assume 0), how many maintenance rules it has, " +
+					"and the linked profile's service block (the manufacturer's recommended intervals) so you " +
+					"can compare the rules against it. Use it to get an equipment id for list_maintenance or " +
+					"get_maintenance_log.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Text to match against name, manufacturer, model and aliases, e.g. \"genset\" or \"yanmar\"."
+						},
+						"system": {
+							"type": "string",
+							"description": "Optional system: propulsion, electrical, water, fuel, bilge, anchoring, safety, hvac, navigation, appliances, structure or other."
+						},
+						"limit": {"type": "integer", "description": "Maximum items to return (default 10, maximum 20)."}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "list_maintenance",
+				Description: "List the boat's maintenance rules with each one's status (overdue, due_soon, ok, " +
+					"never_recorded, interval_not_set or hours_unknown) worked out right now against the " +
+					"operator's own date, plus intervals, last-done baseline, what is remaining, " +
+					"acknowledgement and any procedure note. Most urgent first. Use it for every due, overdue " +
+					"or schedule question; never work a status out yourself. A rule marked hours_unknown has an " +
+					"hours interval but its meter is not reading: say so, do not guess hours. When you tell the " +
+					"operator when a job falls due, quote next_due_meter_reading (what their meter will read) " +
+					"with remaining_hours; last_done_engine_hours is cumulative engine hours, which equals the " +
+					"meter only if no meter replacement is recorded. Stored items are left out unless " +
+					"include_stored is true.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"equipment_id": {"type": "string", "description": "Only this item's rules (an id from find_equipment)."},
+						"status": {"type": "string", "description": "Only rules with this status: overdue, due_soon, ok, never_recorded, interval_not_set or hours_unknown."},
+						"system": {"type": "string", "description": "Only rules for gear in this system, e.g. \"propulsion\"."},
+						"calendar_only": {"type": "boolean", "description": "Only rules with no equipment (certificates, renewals)."},
+						"include_stored": {"type": "boolean", "description": "Also include rules for items in storage (default false)."}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "get_maintenance_log",
+				Description: "Read the maintenance log, newest first: what was done, when, at what cumulative " +
+					"engine hours (engine_hours, which equals the meter only if no meter replacement is " +
+					"recorded), by whom, what it cost and which parts were used. Filter by equipment (an id from " +
+					"find_equipment), by rule (an id from list_maintenance) or by a since date. Use it to see " +
+					"when something was last serviced and how the actual history compares with the rule.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"equipment_id": {"type": "string", "description": "Only this item's entries."},
+						"rule_id": {"type": "string", "description": "Only entries written by completing this rule."},
+						"since": {"type": "string", "description": "Only entries performed on or after this date, YYYY-MM-DD."},
+						"limit": {"type": "integer", "description": "Maximum entries (default 20, maximum 50)."}
+					}
+				}`),
+			},
+		},
 	}
 }
 
@@ -606,6 +694,12 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetLastRecorded(ctx, args)
 	case "get_path_history":
 		return d.executeGetPathHistory(ctx, args)
+	case "find_equipment":
+		return d.executeFindEquipment(ctx, args)
+	case "list_maintenance":
+		return d.executeListMaintenance(ctx, args)
+	case "get_maintenance_log":
+		return d.executeGetMaintenanceLog(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -718,6 +812,20 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			path = "that path"
 		}
 		return fmt.Sprintf("Fetching history for %s…", path)
+	case "find_equipment":
+		var a assistantFindEquipmentArgs
+		query := ""
+		if json.Unmarshal(args, &a) == nil {
+			query = strings.TrimSpace(a.Query)
+		}
+		if query == "" {
+			return "Looking up equipment…"
+		}
+		return fmt.Sprintf("Looking up equipment %q…", query)
+	case "list_maintenance":
+		return "Checking the maintenance list…"
+	case "get_maintenance_log":
+		return "Reading the maintenance log…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

@@ -7,7 +7,10 @@ sheet ADR 0133 described (a bottom sheet/side panel with a "Place from bow"
 primary method and a draggable map handle for fine tuning) is replaced by the
 design below before any of it shipped. [ADR 0089](0089-kiosk-feed-is-a-page-flag.md)'s
 kiosk-is-display-only stance is unaffected: the kiosk never gets Adjust,
-gesture-based or otherwise.
+gesture-based or otherwise. Amended by
+[ADR 0143](0143-anchor-adjust-radius-is-a-toolbar.md): the radius is decoupled
+from zoom, and the bottom bar this ADR described is replaced by a corner
+toolbar and a floating Escape/Save.
 
 ## Context
 

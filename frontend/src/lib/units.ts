@@ -5,8 +5,8 @@ export function fahrenheitToCelsius(tempF: number): number {
 /**
  * The one copy of this ratio (code-review finding: anchor-adjust.ts,
  * low-water-clearance.ts, tide-estimate.ts, anchor-watch-drawer.tsx and
- * anchor-adjust-bar.tsx each grew their own local 3.28084 rather than
- * importing this). Exported (not just used internally by metersToFeet/
+ * anchor-adjust-radius-toolbar.tsx each grew their own local 3.28084 rather
+ * than importing this). Exported (not just used internally by metersToFeet/
  * feetToMeters below) for the rare caller that needs the bare ratio itself,
  * e.g. a step size given in feet that has to convert the other direction.
  */
