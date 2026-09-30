@@ -30,6 +30,9 @@ stays on the board until the value has recovered. Every alarm card shows its
 clearing condition in your selected units: "Falling 1.1 mb/hr. Clears once the
 fall eases to 0.7 mb/hr." An alarm raised by something else on the network,
 which has no rule behind it, says so and clears when its source clears it.
+If that kind of alarm gets worse after you acknowledge it, it comes back as
+active and needs a fresh acknowledgement. The card shows when it was acknowledged, even if
+you did it at the chartplotter.
 
 An alarm raised elsewhere on the network can also go stale the other way: the
 source clears it, or forgets it, without Helmcentral noticing, since Helmcentral

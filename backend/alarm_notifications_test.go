@@ -196,6 +196,56 @@ func TestSignalKNotificationsReadsAcknowledgedFromTheAPIStatus(t *testing.T) {
 	}
 }
 
+// SignalK 2.31 and later stamps status.acknowledgedAt when the alarm is
+// acknowledged, wherever that happened: the MFD, another client, or this
+// process before a restart. The shape is the one documented upstream
+// (notifications_api.md, v2.33.0); the boat had no acknowledged alarm to
+// capture one from when this was written.
+func TestSignalKNotificationsReadsAcknowledgedAtFromTheServer(t *testing.T) {
+	status := liveNotificationStatus()
+	status["acknowledged"] = true
+	status["acknowledgedAt"] = "2026-04-06T03:34:48.203Z"
+	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", status))
+
+	got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
+	want := time.Date(2026, 4, 6, 3, 34, 48, 203_000_000, time.UTC)
+	if !got.AckedAt.Equal(want) {
+		t.Fatalf("AckedAt: got %v, want %v", got.AckedAt, want)
+	}
+}
+
+func TestSignalKNotificationsLeavesAckedAtZeroWhenNotAcknowledged(t *testing.T) {
+	status := liveNotificationStatus()
+	// A stale stamp on an unacknowledged alarm is not an acknowledgement.
+	status["acknowledgedAt"] = "2026-04-06T03:34:48.203Z"
+	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", status))
+
+	got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
+	if !got.AckedAt.IsZero() {
+		t.Fatalf("AckedAt must stay zero for an unacknowledged alarm, got %v", got.AckedAt)
+	}
+}
+
+func TestSignalKNotificationsLeavesAckedAtZeroWhenTheServersStampIsMalformed(t *testing.T) {
+	for _, bad := range []any{"yesterday", "", 12345} {
+		status := liveNotificationStatus()
+		status["acknowledged"] = true
+		status["acknowledgedAt"] = bad
+		snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
+			notificationWithStatus("alarm", status))
+
+		got := signalKNotifications(snapshot, ownsNothing, alarmNow)[0]
+		if got.Phase != alarmPhaseAcknowledged {
+			t.Fatalf("%v: phase: got %q, want acknowledged", bad, got.Phase)
+		}
+		if !got.AckedAt.IsZero() {
+			t.Fatalf("%v: a malformed stamp must not be replaced by an invented time, got %v", bad, got.AckedAt)
+		}
+	}
+}
+
 // Silencing is not acknowledging: the alarm stops sounding but is still
 // demanding attention, so it stays active rather than dropping out of the
 // banner the way an acknowledged one does.

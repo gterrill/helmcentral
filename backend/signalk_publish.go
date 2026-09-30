@@ -99,9 +99,9 @@ func sendSignalKDelta(ctx context.Context, streamURL, token, path string, value 
 		options.HTTPHeader = http.Header{"Authorization": []string{"Bearer " + token}}
 	}
 
-	conn, _, err := websocket.Dial(ctx, streamURL, options)
+	conn, response, err := websocket.Dial(ctx, streamURL, options)
 	if err != nil {
-		return err
+		return withDialStatus(err, response)
 	}
 	defer conn.CloseNow()
 

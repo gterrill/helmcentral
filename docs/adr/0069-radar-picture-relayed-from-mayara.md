@@ -96,3 +96,9 @@ The anchor map now combines the radar picture, AIS contacts, radar targets, the 
 **Alignment against the plotter is unverified.** The echoes trace the coast and ring the boat plausibly, but plausible is not verified, and the antenna offset is now a real quantity rather than a cancelled one. Compare against the MFD at close range before trusting the overlay for anything navigational.
 
 **This is the first canvas, custom layer and image source in the codebase.** There is no in-repo precedent for its rendering cost, and it has not been profiled on the helm tablet. If performance requires adjustment, reduce the frame cap to 4 fps before reducing resolution to preserve picture detail.
+
+## Amendment, 2026-10-01: SignalK now carries spokes, and mayara 3.13 stands the radar down
+
+**Spokes through SignalK.** The 404 measured under "The plugin does not carry spokes" held for SignalK 2.24. As of SignalK 2.31 and Radar API 3.4.0 the stream is served at `.../radars/{id}/spokes`, with cookie, `?token=` or Authorization header auth. Helmcentral keeps dialling mayara directly; moving the relay onto SignalK's route has not been evaluated. The `GET .../radars` list is now a versioned envelope rather than a bare array.
+
+**Auto standby.** mayara 3.13.0 adds an Auto standby, default one minute, that stands a radar down when no spoke stream is open. The relay only holds a stream while the overlay is displayed, so with the picture off the radar would go to standby and ARPA targets would stop reaching Helmcentral (see ADR 0062 on standby data). To be decided before mayara is upgraded past 3.12: disable Auto standby, or keep a stream open.
