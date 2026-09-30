@@ -19,6 +19,7 @@ export type NearbyVessel = {
 
 type NearbyVesselsResponse = {
   vessels?: NearbyVessel[]
+  max_range_m?: unknown
 }
 
 export function useNearbyVessels() {
@@ -28,6 +29,9 @@ export function useNearbyVessels() {
   // own age_seconds. Null with no contacts: an empty horizon is not a
   // dead feed.
   const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
+  // How far the backend searches, in metres. Null until a payload carries it;
+  // the empty state then names no distance rather than inventing one.
+  const [maxRangeM, setMaxRangeM] = useState<number | null>(null)
 
   useEffect(() => {
     const applyNearbyVessels = (payload: unknown) => {
@@ -53,6 +57,7 @@ export function useNearbyVessels() {
             last_seen_at: typeof item.last_seen_at === 'string' ? item.last_seen_at : undefined,
           })),
         )
+        setMaxRangeM(typeof data.max_range_m === 'number' && Number.isFinite(data.max_range_m) && data.max_range_m > 0 ? data.max_range_m : null)
         setLastUpdateAgeS(ageFromPayload((data as { last_update_age_s?: unknown }).last_update_age_s))
       } catch (err) {
         console.error('Failed to fetch nearby vessels:', err)
@@ -66,5 +71,5 @@ export function useNearbyVessels() {
     })
   }, [])
 
-  return { vessels, loading, lastUpdateAgeS }
+  return { vessels, loading, lastUpdateAgeS, maxRangeM }
 }

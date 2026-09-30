@@ -32,3 +32,32 @@
     height: calc(100% / var(--hero-scale, 1.15));
   }
 }
+
+/*
+ * Height changes, set on purpose. A list tile at the bottom of its column
+ * follows its content (ADR 0149), so its height changes as targets come and
+ * go and should ease rather than jump. react-grid-layout's stylesheet already
+ * transitions left/top/width/height at 200ms; this restates that at 150ms for
+ * height only, and the narrow layout's floor the same way.
+ *
+ * Unlayered on purpose: the rules it overrides come from a third-party
+ * stylesheet outside any layer, and an unlayered rule beats a layered one
+ * whatever the specificity. Placement moves (drag, resize) keep RGL's own
+ * behaviour: its .resizing and dragging rules switch transitions off.
+ */
+.react-grid-item,
+.react-grid-layout {
+  transition-duration: 150ms;
+}
+
+.bento-stack-cell {
+  transition: min-height 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-item,
+  .react-grid-layout,
+  .bento-stack-cell {
+    transition: none;
+  }
+}

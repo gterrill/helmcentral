@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/legacy'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -7,37 +7,18 @@ import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
+import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 import { TileErrorBoundary } from '@/components/tile-error-boundary'
+import { effectiveRowsById } from '@/lib/list-tile-height'
+import { TileHeightScope } from '@/lib/tile-content-height'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
-// RGL's row geometry. Shared with the narrow CSS grid below, which derives each tile's
-// minimum height from the same numbers so a tile keeps roughly its authored proportions.
-const GRID_COLUMNS = 12
-export const GRID_ROW_HEIGHT = 32
-export const GRID_MARGIN = 16
-
-/**
- * The vertical margin a wall-display page uses instead of GRID_MARGIN. The
- * 1920x360 strip is one tile-row tall at the ordinary 48px step (32px row +
- * 16px margin), which gives a stacked pair of tiles seven rows to split
- * between them and no split that feeds both. At 8px the same strip holds
- * nine rows, which is what lets Forecast sit above Sea State without either
- * losing its content. Only pages flagged for the wall take it (App.tsx), so
- * the helm and nav boards keep the step they were authored against.
- */
-export const WALL_ROW_MARGIN = 8
-
-/** What a row count is worth in pixels: n rows and the n-1 margins between them. */
-export function gridPixelHeight(rows: number, rowMargin: number = GRID_MARGIN): number {
-  return rows * GRID_ROW_HEIGHT + Math.max(0, rows - 1) * rowMargin
-}
-
-/** The fewest whole rows that will hold a given height. */
-function rowsForHeight(px: number): number {
-  return Math.ceil((px + GRID_MARGIN) / (GRID_ROW_HEIGHT + GRID_MARGIN))
-}
+// RGL's row geometry lives in lib/grid-metrics (shared with the list-tile
+// shrink maths there); the narrow CSS grid below derives each tile's minimum
+// height from the same numbers so a tile keeps roughly its authored proportions.
+export { GRID_ROW_HEIGHT, GRID_MARGIN, WALL_ROW_MARGIN, gridPixelHeight }
 
 // At half the 12-column grid or wider, a tile was authored as a "big" one and stays
 // full-bleed in the two-column narrow layout instead of being squeezed into a half.
@@ -174,13 +155,36 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     [widgets, heroId],
   )
 
+  // What list tiles say their content needs (px), by widget id. Runtime only:
+  // nothing here is saved, and `widgets` keeps the operator's own heights.
+  const [neededPx, setNeededPx] = useState<Record<string, number>>({})
+  const reportNeededHeight = useCallback((id: string, px: number | null) => {
+    setNeededPx((prev) => {
+      if (px === null) {
+        if (!(id in prev)) return prev
+        const rest = { ...prev }
+        delete rest[id]
+        return rest
+      }
+      return prev[id] === px ? prev : { ...prev, [id]: px }
+    })
+  }, [])
+
+  // The rows each tile is drawn at: the saved height, except that a list tile
+  // at the bottom of its column may shrink to its content. Editing always
+  // gets the saved height, so a drag or resize commits the operator's own h.
+  const rows = useMemo(
+    () => effectiveRowsById({ widgets, needed: neededPx, editing, desktop: isDesktopGrid, rowMargin, heroId }),
+    [widgets, neededPx, editing, isDesktopGrid, rowMargin, heroId],
+  )
+
   const rglLayout = useMemo<LayoutItem[]>(
     () => widgets.map((w) => ({
       i: w.id,
       x: w.x,
       y: w.y,
       w: w.w,
-      h: w.h,
+      h: rows[w.id] ?? w.h,
       // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
       // compaction skips `static` items entirely (they neither move nor get
       // moved), so every other tile keeps exactly the position it was
@@ -202,7 +206,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               ? { ...POI_MAP_WIDGET_CONSTRAINTS, ...(w.poiMap?.layout === 'split' ? { minW: POI_MAP_SPLIT_MIN_W } : {}) }
               : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
     })),
-    [widgets, heroId],
+    [widgets, heroId, rows],
   )
 
   const commit = useCallback((layout: readonly LayoutItem[]) => {
@@ -321,15 +325,17 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               // that it scales down to fit, so without this the track grew to 520,
               // the whole grid overflowed the viewport and the tile never scaled
               // at all because the width it measured was already 520.
-              className={cn('min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
+              className={cn('bento-stack-cell min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
               // The operator's sizing intent as a floor, not a fixed height: text wraps
               // more at phone width, so a height copied straight from the desktop grid
               // would clip. Mirrors RGL's own row maths (rowHeight + margin).
-              style={{ minHeight: gridPixelHeight(w.h, rowMargin) }}
+              style={{ minHeight: gridPixelHeight(rows[w.id] ?? w.h, rowMargin) }}
             >
-              <TileErrorBoundary key={w.id} widget={w}>
-                {renderWidget(w)}
-              </TileErrorBoundary>
+              <TileHeightScope id={w.id} onReport={reportNeededHeight}>
+                <TileErrorBoundary key={w.id} widget={w}>
+                  {renderWidget(w)}
+                </TileErrorBoundary>
+              </TileHeightScope>
             </div>
           ))}
         </div>
@@ -367,9 +373,11 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
             ) : (
               <>
                 <div className="h-full *:h-full">
-                  <TileErrorBoundary key={w.id} widget={w}>
-                    {renderWidget(w)}
-                  </TileErrorBoundary>
+                  <TileHeightScope id={w.id} onReport={reportNeededHeight}>
+                    <TileErrorBoundary key={w.id} widget={w}>
+                      {renderWidget(w)}
+                    </TileErrorBoundary>
+                  </TileHeightScope>
                 </div>
                 {editing && (
                   <>

@@ -1467,7 +1467,7 @@ export function App() {
     () => buildCollisionTuningUrl(currentSettings.signalk?.address, currentSettings.signalk?.port),
     [currentSettings.signalk?.address, currentSettings.signalk?.port],
   )
-  const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS } = useNearbyVessels()
+  const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS, maxRangeM: nearbyVesselsMaxRangeM } = useNearbyVessels()
   const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
   const {
     tanks,
@@ -2282,6 +2282,7 @@ export function App() {
             distanceUnits={uiConfig.distanceUnits}
             lastUpdateAgeS={nearbyVesselsAgeS}
             aisCollisionAlarms={aisCollisionAlarms}
+            maxRangeM={nearbyVesselsMaxRangeM}
           />
         )
       case 'radar-targets':

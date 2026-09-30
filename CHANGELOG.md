@@ -49,6 +49,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   twice their usual size, centred in the tile. Wind no longer stops growing at
   its old width. On a phone or narrow window they still fit to the screen
   width.
+- Nearby Vessels and Radar Targets shrink to fit their list when they are the
+  lowest tile in their column. The tile is drawn only as tall as its contacts
+  need, never taller than the height you set, and eases to the new height as
+  contacts come and go. A tile with another tile below it keeps its height,
+  and layout mode always shows the height you set.
+- Nearby Vessels with nothing in range now says how far it looked, for example
+  "No vessels within 5 km" (or nautical miles, if your display is set to
+  imperial), in place of "No nearby targets".
 
 - Documents is rearranged to match the rest of Inventory. The page is titled
   with the folder you are in, with the path back up above it; **Upload** is
