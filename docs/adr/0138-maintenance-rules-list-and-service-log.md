@@ -254,6 +254,9 @@ route-per-format pattern the rest of the API already uses, just answering
   cycle. Mate cannot yet see a rule's own due status the way it can already
   see live telemetry; that is the natural next integration once this data
   exists to read.
+  *Amended 2026-09-30: [ADR 0145](0145-mate-reads-the-maintenance-list.md)
+  gives Mate read tools for the rules and the service log. Alarms, stock
+  decrement, other interval kinds and reminders remain out of scope.*
 - A photo linked to a log entry has no cover/reorder concept, unlike an
   equipment item's own photo strip - a log entry has no single "hero" image,
   so `AddMaintenanceLogPhoto` only ever appends, with no

@@ -13,14 +13,30 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate can read your maintenance schedule and service log. Ask what's
+  overdue, when the generator was last serviced, or whether the main
+  engine's schedule is complete. For a review it compares your rules with
+  the manufacturer's recommended services on the item's profile and with
+  your manuals, and names the gaps. If an item's running hours aren't being
+  read, it says the hours are unknown instead of guessing. Mate only reads:
+  changes are still made in Inventory → Maintenance.
 - Mate keeps a trip or weather window you've been discussing in mind for the
   rest of the conversation. When a later question brings in a fresh forecast,
   such as asking about conditions after moving anchorage, it says whether the
   window has opened, closed or shifted, and tells you when an earlier call no
   longer holds.
 
+### Breaking
+
+- Reload the Helmcentral page in any browser tab or phone home-screen app
+  that was open before you upgraded. An old tab can't tell Mate today's
+  date, so its questions fail with an error naming the missing date until
+  the page is reloaded.
+
 ### Changed
 
+- Mate no longer shows a broken document icon when it refers to a help page.
+  It names the page in words instead.
 - The forecast page's chart legends and data-source lines are bigger and
   easier to read at a glance, and now sit together at the bottom of each
   chart instead of split between the top and bottom. The cloud, wind and
