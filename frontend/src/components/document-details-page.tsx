@@ -7,11 +7,10 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useDocument, type DocumentRecord } from '@/hooks/use-documents'
@@ -175,6 +174,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
+  const pageClassName = 'h-full min-h-0 overflow-y-auto p-4'
   const breadcrumb = (
     <Breadcrumb>
       <BreadcrumbList>
@@ -183,35 +183,25 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
             Documents
           </BreadcrumbLink>
         </BreadcrumbItem>
-        {document && (
-          <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{documentDisplayName(document)}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </>
-        )}
       </BreadcrumbList>
     </Breadcrumb>
   )
 
   if (loading && !document) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-        {breadcrumb}
+      <Page title="Document" breadcrumb={breadcrumb} className={pageClassName}>
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
-      </div>
+      </Page>
     )
   }
 
   if (error) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-        {breadcrumb}
+      <Page title="Document" breadcrumb={breadcrumb} className={pageClassName}>
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
-      </div>
+      </Page>
     )
   }
 
@@ -221,12 +211,11 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
   // a document, not that the request failed.
   if (!document || !draft) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-        {breadcrumb}
+      <Page title="Document" breadcrumb={breadcrumb} className={pageClassName}>
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           This document could not be found.
         </div>
-      </div>
+      </Page>
     )
   }
 
@@ -271,94 +260,12 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     setSaveError(null)
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      {breadcrumb}
-
-      <FieldSet className="rounded-md border border-border bg-card p-4">
-        <FieldLegend variant="label">Details</FieldLegend>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="document-details-title">Title</FieldLabel>
-            <Input
-              id="document-details-title"
-              value={draft.title}
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-            />
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor="document-details-notes">Notes</FieldLabel>
-            <Textarea
-              id="document-details-notes"
-              value={draft.notes}
-              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-              rows={3}
-            />
-          </Field>
-
-          <Field>
-            <FieldLabel>Tags</FieldLabel>
-            <div className="flex flex-wrap gap-1.5">
-              {draft.tags.length === 0 && <span className="text-xs text-muted-foreground">No tags yet.</span>}
-              {draft.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="gap-1">
-                  {tag}
-                  <button type="button" aria-label={`Remove tag ${tag}`} onClick={() => removeTag(tag)}>
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <Input
-                aria-label="Add tag"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
-                className="max-w-48"
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addTag}>Add</Button>
-            </div>
-            {suggestedTags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Suggested by Mate</span>
-                {suggestedTags.map((tag) => (
-                  <Badge key={tag} variant="outline" className="gap-1">
-                    {tag}
-                    <button type="button" aria-label={`Keep tag ${tag}`} onClick={() => keepTag(tag)}>
-                      <Plus className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </Field>
-        </FieldGroup>
-
-        {saveError && (
-          <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {saveError}
-          </p>
-        )}
-
-        <div className="flex items-center gap-2">
-          <Button type="button" disabled={!dirty || saving} onClick={() => { void handleSave() }}>Save</Button>
-          <Button type="button" variant="outline" disabled={!dirty || saving} onClick={handleDiscard}>Discard</Button>
-        </div>
-      </FieldSet>
-
-      <FieldSet className="rounded-md border border-border bg-card p-4">
-        <FieldLegend variant="label">Indexing</FieldLegend>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
-          <dt className="text-muted-foreground">Status</dt>
-          <dd>
-            {statusLabel(document)}
-            {document.status === 'failed' && ` · ${documentFailureMessage(document)}`}
-          </dd>
-
+  const aside = (
+    <>
+      <FormSection title="About the file">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-muted-foreground">File</dt>
-          <dd>{document.filename}</dd>
+          <dd className="break-words">{document.filename}</dd>
 
           <dt className="text-muted-foreground">Type</dt>
           <dd>{mimeLabel(document.mime)}</dd>
@@ -368,6 +275,19 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
 
           <dt className="text-muted-foreground">Pages</dt>
           <dd>{document.page_count}</dd>
+
+          <dt className="text-muted-foreground">Uploaded</dt>
+          <dd>{formatDocumentTime(document.created_at) ?? '--'}</dd>
+        </dl>
+      </FormSection>
+
+      <FormSection title="Indexing">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+          <dt className="text-muted-foreground">Status</dt>
+          <dd>
+            {statusLabel(document)}
+            {document.status === 'failed' && ` · ${documentFailureMessage(document)}`}
+          </dd>
 
           <dt className="text-muted-foreground">Read by</dt>
           <dd>{readByLabel(document)}</dd>
@@ -385,9 +305,6 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
               What reading this document has cost so far, added up across every reindex.
             </p>
           </dd>
-
-          <dt className="text-muted-foreground">Uploaded</dt>
-          <dd>{formatDocumentTime(document.created_at) ?? '--'}</dd>
 
           <dt className="text-muted-foreground">Last indexed</dt>
           <dd>{formatDocumentTime(document.indexed_at) ?? 'Not yet'}</dd>
@@ -411,7 +328,79 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
             <p className="mt-1 text-xs break-words text-muted-foreground">{document.error}</p>
           </details>
         )}
-      </FieldSet>
-    </div>
+      </FormSection>
+    </>
+  )
+
+  return (
+    <Page title={documentDisplayName(document)} breadcrumb={breadcrumb} className={pageClassName}>
+      <DetailsLayout aside={aside}>
+        <FormSection title="Details">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="document-details-title">Title</FieldLabel>
+              <Input
+                id="document-details-title"
+                value={draft.title}
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="document-details-notes">Notes</FieldLabel>
+              <Textarea
+                id="document-details-notes"
+                value={draft.notes}
+                onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                rows={3}
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel>Tags</FieldLabel>
+              <div className="flex flex-wrap gap-1.5">
+                {draft.tags.length === 0 && <span className="text-xs text-muted-foreground">No tags yet.</span>}
+                {draft.tags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="gap-1">
+                    {tag}
+                    <button type="button" aria-label={`Remove tag ${tag}`} onClick={() => removeTag(tag)}>
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label="Add tag"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
+                  className="max-w-48"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addTag}>Add</Button>
+              </div>
+              {suggestedTags.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Suggested by Mate</span>
+                  {suggestedTags.map((tag) => (
+                    <Badge key={tag} variant="outline" className="gap-1">
+                      {tag}
+                      <button type="button" aria-label={`Keep tag ${tag}`} onClick={() => keepTag(tag)}>
+                        <Plus className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </Field>
+          </FieldGroup>
+        </FormSection>
+      </DetailsLayout>
+
+      {/* The header's save bar (SaveBarSlot): shown only while the draft
+          differs from what was loaded; a rejected save keeps it up, with the
+          server's message inline and the draft exactly as typed. */}
+      <SaveBar dirty={dirty} saving={saving} error={saveError} onSave={() => { void handleSave() }} onDiscard={handleDiscard} />
+    </Page>
   )
 })

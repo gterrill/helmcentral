@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -12,6 +12,7 @@ import {
 import { ArrowUpDown, ChevronDown, ChevronUp, MoreVertical } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -114,6 +115,15 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   return <ArrowUpDown className="h-3.5 w-3.5 opacity-50" aria-hidden="true" />
 }
 
+// A card line for a column whose accessor yields nothing for this row (a
+// folder's size, say) would print a label with no value, so it is omitted.
+// A column with no accessor at all (a pure render cell) is always shown.
+function hasCardValue(cell: { column: { accessorFn?: unknown }; getValue: () => unknown }): boolean {
+  if (typeof cell.column.accessorFn !== 'function') return true
+  const value = cell.getValue()
+  return !(value === '' || value === null || value === undefined)
+}
+
 function columnLabel<T>(column: { id: string; columnDef: ColumnDef<T, unknown> }): string {
   const header = column.columnDef.header
   return typeof header === 'string' ? header : column.id
@@ -142,6 +152,20 @@ export interface IndexTableProps<T> {
   /** Rendered in place of the table/card list when there are no rows and
    * nothing is loading or errored - an EmptyState, typically. */
   empty?: ReactNode
+  /** Polaris' bulk actions: a checkbox column (a checkbox per card on a
+   * phone), select-all for the visible rows, and a bar that shows "N
+   * selected" with `bulkActions` while anything is selected. Controlled:
+   * the caller owns `selectedIds` (row ids, as getRowId returns them). */
+  selectable?: boolean
+  selectedIds?: ReadonlySet<string>
+  onSelectionChange?: (ids: Set<string>) => void
+  /** Rows for which this returns false get no checkbox (and are skipped by
+   * select-all). Defaults to every row. */
+  isRowSelectable?: (row: T) => boolean
+  /** aria-label for a row's checkbox. Defaults to `Select ${getRowId(row)}`. */
+  rowSelectLabel?: (row: T) => string
+  /** Shown beside "N selected" while any row is selected. */
+  bulkActions?: ReactNode
   className?: string
 }
 
@@ -159,6 +183,12 @@ export function IndexTable<T>({
   error = null,
   onRetry,
   empty,
+  selectable = false,
+  selectedIds,
+  onSelectionChange,
+  isRowSelectable,
+  rowSelectLabel,
+  bulkActions,
   className,
 }: IndexTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([])
@@ -191,6 +221,16 @@ export function IndexTable<T>({
     getSortedRowModel: getSortedRowModel(),
   })
 
+  // The selection must never hold rows that are not in `rows`: a caller that
+  // filters its list would otherwise keep acting on ids the operator can no
+  // longer see. Whenever rows change, prune to the ids still present.
+  useEffect(() => {
+    if (!selectable || !selectedIds || selectedIds.size === 0 || !onSelectionChange) return
+    const present = new Set(rows.map((r) => getRowId(r)))
+    const kept = [...selectedIds].filter((id) => present.has(id))
+    if (kept.length !== selectedIds.size) onSelectionChange(new Set(kept))
+  }, [rows, selectable, selectedIds, onSelectionChange, getRowId])
+
   const wrapperClassName = cn('min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card', className)
 
   if (error) {
@@ -222,6 +262,57 @@ export function IndexTable<T>({
 
   const sortedRows = table.getRowModel().rows
 
+  // ── selection ──────────────────────────────────────────────────────────
+  // Only rows that are on screen count: a stale id left in selectedIds by a
+  // caller (a row that has since been filtered out) must neither inflate "N
+  // selected" nor be acted on silently, so every figure here is read against
+  // the rows actually rendered.
+  const canSelect = (row: T) => (isRowSelectable ? isRowSelectable(row) : true)
+  const selectableRows = selectable ? sortedRows.filter((r) => canSelect(r.original)) : []
+  const selectedVisible = selectableRows.filter((r) => selectedIds?.has(getRowId(r.original)))
+  const allSelected = selectableRows.length > 0 && selectedVisible.length === selectableRows.length
+  const someSelected = selectedVisible.length > 0 && !allSelected
+  const emitSelection = (next: Set<string>) => onSelectionChange?.(next)
+  const toggleRow = (row: T, checked: boolean) => {
+    const next = new Set(selectedIds ?? [])
+    if (checked) next.add(getRowId(row))
+    else next.delete(getRowId(row))
+    emitSelection(next)
+  }
+  const toggleAll = (checked: boolean) => {
+    const next = new Set(selectedIds ?? [])
+    for (const r of selectableRows) {
+      if (checked) next.add(getRowId(r.original))
+      else next.delete(getRowId(r.original))
+    }
+    emitSelection(next)
+  }
+  // Clear selection empties the whole selection, not only the rows on screen.
+  const clearSelection = () => emitSelection(new Set())
+  const bulkBar = selectable && selectedVisible.length > 0 ? (
+    <div data-slot="index-bulk-bar" className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
+      <span className="text-sm font-medium tabular-nums text-foreground">{selectedVisible.length} selected</span>
+      {bulkActions}
+      <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={clearSelection}>
+        Clear selection
+      </Button>
+    </div>
+  ) : null
+  const stopRowEvents = {
+    onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+    onKeyDown: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+  }
+  const rowCheckbox = (row: TanstackRow<T>) =>
+    selectable && canSelect(row.original) ? (
+      <span className="inline-flex" {...stopRowEvents}>
+        <Checkbox
+          aria-label={rowSelectLabel ? rowSelectLabel(row.original) : `Select ${getRowId(row.original)}`}
+          checked={!!selectedIds?.has(getRowId(row.original))}
+          onCheckedChange={(checked) => toggleRow(row.original, checked)}
+        />
+      </span>
+    ) : null
+
   if (sortedRows.length === 0) {
     return <div className={wrapperClassName}>{empty ?? null}</div>
   }
@@ -249,6 +340,7 @@ export function IndexTable<T>({
     return (
       <div
         key={row.id}
+        data-slot="index-card"
         role={onOpen ? 'button' : undefined}
         tabIndex={onOpen ? 0 : undefined}
         onClick={onOpen ? () => onOpen(row.original) : undefined}
@@ -267,6 +359,7 @@ export function IndexTable<T>({
         )}
       >
         <div className="flex items-start justify-between gap-2">
+          {rowCheckbox(row) && <span className="mt-0.5">{rowCheckbox(row)}</span>}
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {primary ? flexRender(primary.column.columnDef.cell, primary.getContext()) : null}
           </div>
@@ -278,7 +371,7 @@ export function IndexTable<T>({
             />
           )}
         </div>
-        {rest.map((cell) => (
+        {rest.filter(hasCardValue).map((cell) => (
           <div key={cell.id} className="flex items-baseline justify-between gap-2 text-xs">
             <span className="text-muted-foreground">{columnLabel(cell.column)}</span>
             <span className="min-w-0 truncate text-right text-foreground">
@@ -293,6 +386,7 @@ export function IndexTable<T>({
   if (isMobile) {
     return (
       <div className={cn('flex flex-col gap-3', className)}>
+        {bulkBar && <div className="overflow-hidden rounded-md border border-border">{bulkBar}</div>}
         {groups
           ? groups.map((group) => (
               <div key={group.key} className="flex flex-col gap-2">
@@ -324,6 +418,7 @@ export function IndexTable<T>({
         } : undefined}
         className={cn(onOpen && 'cursor-pointer')}
       >
+        {selectable && <TableCell className="w-10 pr-0">{rowCheckbox(row)}</TableCell>}
         {row.getVisibleCells().map((cell) => (
           <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
         ))}
@@ -333,10 +428,22 @@ export function IndexTable<T>({
 
   return (
     <div className={wrapperClassName}>
+      {bulkBar}
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id} className="hover:bg-transparent">
+              {selectable && (
+                <TableHead className="w-10 pr-0">
+                  <Checkbox
+                    aria-label="Select all"
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    disabled={selectableRows.length === 0}
+                    onCheckedChange={(checked) => toggleAll(checked)}
+                  />
+                </TableHead>
+              )}
               {headerGroup.headers.map((header) => {
                 const canSort = header.column.getCanSort()
                 const sortDir = header.column.getIsSorted()
@@ -368,7 +475,7 @@ export function IndexTable<T>({
             ? groups.flatMap((group) => [
                 <TableRow key={`group-${group.key}`} className="hover:bg-transparent">
                   <TableCell
-                    colSpan={mergedColumns.length}
+                    colSpan={mergedColumns.length + (selectable ? 1 : 0)}
                     className="bg-muted/40 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
                   >
                     {group.label}

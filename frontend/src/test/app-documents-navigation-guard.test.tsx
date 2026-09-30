@@ -355,9 +355,11 @@ function doc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
  */
 async function navigateToDirtyDocumentDetails() {
   fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
-  fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }))
-  fireEvent.click(screen.getByRole('menuitem', { name: /details/i }))
-  await screen.findByLabelText('Title')
+  // The panel is a lazy chunk (now carrying the pattern library and TanStack
+  // Table), so a cold first load can outlast findBy's default 1s.
+  fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }, { timeout: 5000 }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }))
+  await screen.findByLabelText('Title', {}, { timeout: 5000 })
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 }
 
@@ -383,7 +385,7 @@ describe('App navigation guard on a dirty Documents Details page', () => {
 
     // Still on the Details page - the Forecast panel content did not take over.
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
     expect(screen.getByText(/unsaved changes on the details page/i)).toBeInTheDocument()
   })
 
@@ -392,11 +394,11 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     await navigateToDirtyDocumentDetails()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
     })
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
   })
@@ -428,7 +430,7 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
     })
-    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
   })
 
   it('Save and Continue does NOT navigate away if the save fails', async () => {
@@ -465,7 +467,7 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     fireEvent.click(documentsLink!)
 
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
 
@@ -488,7 +490,7 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     window.history.replaceState({}, '', '/documents')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/documents/doc-1')
     // The modal dialog marks the rest of the tree inert, so this reads the
     // still-mounted Details page back with getByDisplayValue (unfiltered)

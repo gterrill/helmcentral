@@ -11,7 +11,11 @@ summary and a few suggested tags.
 The sidebar's **Documents** panel is where this happens day to day: browse
 folders, upload by button or drag-and-drop, search, and open, download,
 rename, move, reindex or edit the details of anything already in the
-library. A file can also be
+library. The page is titled with the folder you are in, with the path back
+up above it. **Upload** is the button at the top right; **New folder** and
+**New note** are under the menu beside it (**More actions**). Folders come
+first in the list, then documents, and each row has its own menu for the
+things you can do to it. A file can also be
 attached straight from Mate's composer - see
 [Documents](assistant.md#documents) on the Mate page - and a chip on a past
 message opens the same viewer this panel uses.
@@ -98,11 +102,12 @@ are edited after the fact. Fix a title the scan got wrong, write down where
 the paper original is filed, add the tag you'd actually search for. Tags
 you add show as your own; the ones Mate suggested sit beneath them under
 **Suggested by Mate**, each with a **Keep** that adopts it as yours.
-Nothing is written until you press **Save**, and **Discard** puts the page
-back the way you found it. **Rename** on the row menu is still there for
+Nothing is written until you press **Save**; the moment you change
+anything, a save bar takes over the top of the screen with **Save** and
+**Discard**, and **Discard** puts the page back the way you found it. **Rename** on the row menu is still there for
 when the title is all you want to change.
 
-The lower half of the page is the document itself, read-only: its status
+The column beside the form (below it on a phone) is the document itself, read-only: its status
 and, if it failed, why; the file's own name, type, size and page count;
 what read it and which model, if Mate did; when it was uploaded and last
 indexed; the summary; and the **Indexing cost**, what reading this one
@@ -122,8 +127,8 @@ text in it to search and nothing for Mate to read.
 
 ## Searching: words, and meaning
 
-**Search**, in the toolbar, opens a full-page search box over whatever
-you're looking at - press **⌘K** (**Ctrl+K** on Windows or Linux) from
+The **Search** field above the list opens a full-page search box over
+whatever you're looking at - click it, or start typing in it, or press **⌘K** (**Ctrl+K** on Windows or Linux) from
 anywhere on the page to open it just as fast. Open it with nothing typed
 yet and it offers your last five searches and your twelve most-used tags;
 click a tag to filter the library by it directly, or click a recent search
@@ -195,8 +200,10 @@ cost cap: a document that size is turned away the first time, with the
 page count and an estimated cost, and only proceeds once you've asked for
 it explicitly through Reindex.
 
-Select more than one document (the checkbox on each row) and the selection
-bar offers **Reindex…** alongside Move to… and Delete, reindexing every
+Select more than one document (the checkbox on each row, or **Select all**
+in the header to take everything listed) and a bar appears above the list
+saying how many are selected, with **Move to…**, **Reindex…** and
+**Delete** and a **Clear selection** button. Reindex covers every
 one you picked in one confirmation - useful after re-scanning a whole
 folder of receipts, or once Mate is finally switched on for a batch that
 was uploaded while it was off. The confirmation shows the combined page

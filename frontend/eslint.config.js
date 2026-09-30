@@ -71,14 +71,13 @@ export default [
   },
   {
     // Pending migration to components/patterns (ADR 0142's own migration
-    // order: Equipment done this cycle; Locations, Profiles, Maintenance,
-    // Wall displays, then Documents last). Remove an entry here as each
+    // order: Equipment and Documents done; Locations, Profiles, Maintenance,
+    // Wall displays remain). Remove an entry here as each
     // surface migrates, rather than adding a compatibility exception that
     // outlives the migration it was for.
     files: [
       'src/components/patterns/**/*.{ts,tsx}',
       'src/components/display-editor-panel.tsx',
-      'src/components/documents-panel.tsx',
       'src/components/inventory/maintenance-section.tsx',
       'src/components/wall-displays-panel.tsx',
     ],

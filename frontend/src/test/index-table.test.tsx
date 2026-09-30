@@ -231,4 +231,21 @@ describe('IndexTable', () => {
     expect(onOpen).toHaveBeenCalledWith(rows[1])
     setViewportWidth(1280)
   })
+
+  // A card lists "label: value" per column; a row whose accessor yields
+  // nothing (Documents' folders have no size or status) omits that line
+  // instead of printing an empty label.
+  it('cards skip a column whose value is empty for that row', () => {
+    setViewportWidth(390)
+    const cols: ColumnDef<Row, unknown>[] = [
+      { accessorKey: 'name', header: 'Name' },
+      { id: 'hours', header: 'Hours', accessorFn: (r) => (r.hours > 0 ? String(r.hours) : '') },
+    ]
+    render(<IndexTable columns={cols} rows={[{ id: 'a', name: 'Folder', system: '', hours: 0 }, { id: 'b', name: 'Pump', system: '', hours: 9 }]} getRowId={(r) => r.id} />)
+    const folder = screen.getByText('Folder').closest('[data-slot="index-card"]') as HTMLElement
+    const pump = screen.getByText('Pump').closest('[data-slot="index-card"]') as HTMLElement
+    expect(within(folder).queryByText('Hours')).not.toBeInTheDocument()
+    expect(within(pump).getByText('Hours')).toBeInTheDocument()
+    setViewportWidth(1280)
+  })
 })

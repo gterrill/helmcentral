@@ -17,7 +17,7 @@ alongside everything else in **Documents**.
 
 ## Capturing a note
 
-Open **Documents** and choose **New → Note**. Pick a type from the submenu if
+Open **Documents** and choose **More actions → New note**. Pick a type from the submenu if
 you already know it, or **Auto** if you do not - the submenu is one extra
 hover, not a real delay.
 
@@ -121,7 +121,7 @@ marked with a book icon in place of the ordinary folder icon. Open it the
 same way you would open any folder, and the listing becomes the ordered
 tree and reading pane instead of the table.
 
-Creating one starts the same way as any other folder: **New → Folder**
+Creating one starts the same way as any other folder: **More actions → New folder**
 offers a **Manual** checkbox when you are at the top level of the library
 (a manual can't sit inside another folder). Check it, name it, and it opens
 empty. An existing top-level folder can be turned into a manual, or back,

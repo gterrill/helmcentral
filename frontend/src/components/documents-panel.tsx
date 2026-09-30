@@ -8,9 +8,7 @@ import {
   Info,
   Library,
   Loader2,
-  MoreVertical,
   Pencil,
-  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -18,6 +16,7 @@ import {
   X,
   Sparkles,
 } from 'lucide-react'
+import type { ColumnDef } from '@tanstack/react-table'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -49,22 +48,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  ConfirmDelete,
+  EmptyState,
+  IndexFilters,
+  IndexTable,
+  Page,
+  ResourceItem,
+  ResourceList,
+  type IndexFilter,
+  type PageAction,
+  type RowAction,
+} from '@/components/patterns'
 import { apiBaseUrl } from '@/config/api'
 import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import {
@@ -230,6 +229,14 @@ interface MoveTarget {
   ids: string[]
   label: string
 }
+
+/** One line of the listing: a folder or a document, in one IndexTable. */
+type ListRow =
+  | { kind: 'folder'; folder: DocumentFolder }
+  | { kind: 'document'; doc: DocumentRecord }
+
+const rowName = (row: ListRow) => (row.kind === 'folder' ? row.folder.name : documentDisplayName(row.doc))
+const rowKey = (row: ListRow) => (row.kind === 'folder' ? row.folder.id : row.doc.id)
 
 /** A one-level-at-a-time folder browser embedded in the Move dialog. It
  * reuses useDocuments the same way the panel itself does - the picker is
@@ -676,13 +683,6 @@ export function DocumentsPanel({
   // ── selection ─────────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   useEffect(() => { setSelectedIds(new Set()) }, [folderId])
-  const toggleSelected = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
 
   // ── action feedback ──────────────────────────────────────────────────
   const [actionError, setActionError] = useState<string | null>(null)
@@ -753,12 +753,22 @@ export function DocumentsPanel({
   }
 
   // ── delete (folder, single document, or the whole bulk selection) ────
-  // All three go through the one AlertDialog below - a bulk delete is not
-  // exempt from the same "are you sure" every other delete gets here.
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  // All three go through the one ConfirmDelete below - a bulk delete is not
+  // exempt from the same "are you sure" every other delete gets here. The
+  // dialog stays open (and un-dismissable) while the delete is in flight, and
+  // a refusal (the 409 "folder is not empty") is shown inside it.
+  const [deleteTarget, setDeleteTargetState] = useState<DeleteTarget | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const setDeleteTarget = (target: DeleteTarget | null) => {
+    setDeleteTargetState(target)
+    setDeleteError(null)
+  }
   const submitDelete = async () => {
     if (!deleteTarget) return
-    await runAction(async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
       if (deleteTarget.kind === 'folder') {
         await documents.deleteFolder(deleteTarget.id)
       } else if (deleteTarget.kind === 'document') {
@@ -771,12 +781,24 @@ export function DocumentsPanel({
       } else {
         for (const id of deleteTarget.ids) {
           await documents.deleteDocument(id)
+          // Drop each one from the pending list and the selection the moment
+          // it is gone, so a retry after a later failure resumes with what is
+          // left instead of starting on an already-deleted document.
+          setDeleteTargetState((prev) => (prev?.kind === 'bulk' ? { ...prev, ids: prev.ids.filter((x) => x !== id) } : prev))
+          setSelectedIds((prev) => {
+            const next = new Set(prev)
+            next.delete(id)
+            return next
+          })
         }
-        setSelectedIds(new Set())
       }
       setDeleteTarget(null)
       void unfiled.refresh() // a deleted document may have been an unfiled note
-    })
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeleting(false)
+    }
   }
 
   // ── reindex ──────────────────────────────────────────────────────────
@@ -838,7 +860,6 @@ export function DocumentsPanel({
     }
   }, [uploads.items, uploads, documents])
 
-  const folderRows = useMemo(() => documents.folders, [documents.folders])
   // No note-type facet here. One was built and removed: a library folder
   // holds mostly kind='file' rows (PDFs, photos, the builder's handbook),
   // so a type filter is inapplicable to most of what is on screen and
@@ -848,21 +869,221 @@ export function DocumentsPanel({
   // Unfiled notes view already covers the one case that genuinely wanted a
   // notes-only listing.
   const documentRows = documents.documents
-  const allDocumentsSelected = documentRows.length > 0 && documentRows.every((d) => selectedIds.has(d.id))
+  // Belt and braces with IndexTable's own pruning: a bulk action only ever
+  // acts on documents that are on screen right now.
+  const visibleSelectedIds = () => documentRows.filter((d) => selectedIds.has(d.id)).map((d) => d.id)
+
+  // ── the listing: folders and documents in one IndexTable ───────────────
+  const listRows = useMemo<ListRow[]>(
+    () => [
+      ...documents.folders.map((folder): ListRow => ({ kind: 'folder', folder })),
+      ...documents.documents.map((doc): ListRow => ({ kind: 'document', doc })),
+    ],
+    [documents.folders, documents.documents],
+  )
+  const { patchNote: patchUnfiledNote } = unfiled
+  const columns = useMemo<ColumnDef<ListRow, unknown>[]>(() => [
+    {
+      id: 'name',
+      header: 'Name',
+      enableSorting: false,
+      accessorFn: rowName,
+      cell: ({ row }) => {
+        const item = row.original
+        if (item.kind === 'folder') {
+          return (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); navigate(item.folder.id) }}
+              className="flex items-center gap-2 text-left font-medium hover:underline"
+            >
+              {/* Library, not Folder, for a Manual-kind folder - the only way
+                  to see that from the OUTSIDE (browsing its parent) at all,
+                  since GET /api/document-folders never serialises
+                  document_folders.role. */}
+              {manualFolderIds.has(item.folder.id) ? (
+                <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
+              {item.folder.name}
+            </button>
+          )
+        }
+        const doc = item.doc
+        const MimeIcon = rowIcon(doc.mime)
+        return (
+          <div className="flex items-center gap-2">
+            {/* The pre-attentive type icon column (revision "Note types as a
+                facet") - a note row's icon is its own hit target opening a
+                type-override menu, same gesture as the Unfiled notes view's
+                rows (unfiled.patchNote works on any note id regardless of
+                filing state). A plain kind='file' row keeps the ordinary
+                mime-based icon, inert. The wrapper keeps the menu's clicks
+                from also opening the row. */}
+            {doc.kind === 'note' ? (
+              <span className="inline-flex" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                <NoteTypeIconButton noteType={doc.note_type} onSetType={(type) => { void runAction(() => patchUnfiledNote(doc.id, { type })) }} />
+              </span>
+            ) : (
+              <MimeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setViewerId(doc.id) }}
+              className="flex min-w-0 flex-col items-start gap-0.5 text-left"
+            >
+              <span className="font-medium hover:underline">{documentDisplayName(doc)}</span>
+              {doc.status === 'failed' && doc.error && (
+                // The operator-facing sentence, not the raw stored error (an
+                // internal storage path, the word "panic", a library's own
+                // error text) - that stays available in the title attribute,
+                // and in full on the Details page's "Error details"
+                // disclosure.
+                <span className="w-full truncate text-xs text-destructive" title={doc.error}>
+                  {documentFailureMessage(doc)}
+                </span>
+              )}
+            </button>
+          </div>
+        )
+      },
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      enableSorting: false,
+      accessorFn: (item) => (item.kind === 'document' ? item.doc.status : ''),
+      cell: ({ row }) => (row.original.kind === 'document' ? statusBadge(row.original.doc) : null),
+    },
+    {
+      id: 'tags',
+      header: 'Tags',
+      enableSorting: false,
+      accessorFn: (item) => (item.kind === 'document' ? item.doc.tags.map((t) => t.tag).join(', ') : ''),
+      cell: ({ row }) =>
+        row.original.kind === 'document' ? (
+          <div className="flex flex-wrap gap-1">
+            {row.original.doc.tags.map((t) => (
+              <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'}>
+                {t.tag}
+              </Badge>
+            ))}
+          </div>
+        ) : null,
+    },
+    {
+      id: 'size',
+      header: 'Size',
+      enableSorting: false,
+      accessorFn: (item) => (item.kind === 'document' ? formatBytes(item.doc.size_bytes) : ''),
+      cell: ({ getValue }) => getValue<string>(),
+    },
+  ], [manualFolderIds, navigate, runAction, patchUnfiledNote])
+
+  // The current row menus, unchanged in what they offer (the old
+  // DocumentRowMenu / FolderRowMenu): a document can be opened, downloaded,
+  // renamed, detailed, moved, reindexed or deleted; a folder renamed, moved,
+  // promoted to / demoted from a manual, or deleted.
+  const rowActions = (item: ListRow): RowAction<ListRow>[] => {
+    if (item.kind === 'folder') {
+      const folder = item.folder
+      const isManual = manualFolderIds.has(folder.id)
+      return [
+        { label: 'Rename', icon: <Pencil className="h-4 w-4" aria-hidden="true" />, onSelect: () => { setRenameTarget({ kind: 'folder', id: folder.id, name: folder.name }); setRenameValue(folder.name) } },
+        { label: 'Move…', onSelect: () => setMoveTarget({ ids: [folder.id], label: folder.name }) },
+        // Promote/demote: a folder's kind, not a destructive act either way -
+        // "moves and deletes nothing" (POST/DELETE /api/manuals), so this is a
+        // direct toggle like Rename/Move, not a confirmation like Delete.
+        // Only a top-level folder can ever become a manual (backend's own
+        // errManualNotTopLevel) - true exactly when browsing the root.
+        ...(isManual
+          ? [{ label: 'Stop treating as manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(() => manualsList.clearManual(folder.id)) } }]
+          : folderId === null
+            ? [{ label: 'Treat as a manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(() => manualsList.flagManual(folder.id)) } }]
+            : []),
+        { label: 'Delete', icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: () => setDeleteTarget({ kind: 'folder', id: folder.id, name: folder.name }) },
+      ]
+    }
+    const doc = item.doc
+    const name = documentDisplayName(doc)
+    return [
+      { label: 'Open', onSelect: () => setViewerId(doc.id) },
+      { label: 'Download', icon: <Download className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(() => downloadDocument(doc.id, doc.filename)) } },
+      { label: 'Rename', icon: <Pencil className="h-4 w-4" aria-hidden="true" />, onSelect: () => { setRenameTarget({ kind: 'document', id: doc.id, name }); setRenameValue(name) } },
+      // Rename stays the fast path for a title-only fix (ADR 0115 §3);
+      // Details… is the slower path onto the full metadata page - notes,
+      // tags, the read-only indexing facts - so it sits right after Rename.
+      { label: 'Details…', icon: <Info className="h-4 w-4" aria-hidden="true" />, onSelect: () => onEditDocument?.(doc.id) },
+      { label: 'Move…', onSelect: () => setMoveTarget({ ids: [doc.id], label: name }) },
+      { label: 'Reindex…', icon: <RefreshCw className="h-4 w-4" aria-hidden="true" />, onSelect: () => setReindexTarget({ kind: 'single', id: doc.id, name, pageCount: doc.page_count, mime: doc.mime }) },
+      { label: 'Delete', icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: () => setDeleteTarget({ kind: 'document', id: doc.id, name }) },
+    ]
+  }
+
+  // ── page chrome ────────────────────────────────────────────────────────
+  const currentFolder = documents.path.length > 0 ? documents.path[documents.path.length - 1] : null
+  const openSearch = (seed?: string) => {
+    setSearchOpen(true)
+    if (seed) setQuery(seed)
+  }
+  // ONE New menu's contents, now in the page's overflow menu: Folder first
+  // (Manual is a checkbox inside its dialog when browsing the root) and Note
+  // carrying its kinds in a submenu. Auto leads that submenu, and picking it
+  // sends no `type` at all so the Go classifier answers (ADR 0116). ADR 0121
+  // made this the only path in for a note: a note is a document, and this is
+  // where every other document this panel creates already starts.
+  const secondaryActions: PageAction[] = [
+    { label: 'New folder', icon: <FolderPlus className="h-4 w-4" aria-hidden="true" />, onClick: () => setNewFolderOpen(true) },
+    {
+      label: 'New note',
+      icon: <Pencil className="h-4 w-4" aria-hidden="true" />,
+      // ADR 0124: hovering or focusing this is the earliest signal that the
+      // operator is about to open the editor - warms note-editor-impl.tsx's
+      // chunk (and the capture sheet's own) right away rather than waiting
+      // for the click. prefetchNoteEditor() is memoised, so a hover that
+      // never leads to a click costs nothing beyond the one fetch every other
+      // path already pays for eventually.
+      onIntent: () => prefetchNoteEditor(),
+      onClick: () => openCapture(),
+      submenu: [
+        { label: 'Auto', icon: <Sparkles className="h-4 w-4 text-muted-foreground" aria-hidden="true" />, onClick: () => openCapture() },
+        ...NOTE_TYPE_ORDER.map((type) => {
+          const meta = NOTE_TYPE_META[type]
+          const Icon = meta.icon
+          // The catch-all kind is labelled "Note" everywhere else, which is
+          // fine when the question is "what kind of note is this". Here it
+          // would read New note > Note, so it says "Plain note" in this one
+          // menu. The stored value is 'note' either way.
+          return { label: type === 'note' ? 'Plain note' : meta.label, icon: <Icon className={cn('h-4 w-4', meta.className)} aria-hidden="true" />, onClick: () => openCapture(type) }
+        }),
+      ],
+    },
+  ]
+  const tagFilters: IndexFilter[] = tagFilterOptions.length > 0
+    ? [{
+        id: 'tag',
+        label: 'Filter by tag',
+        value: documents.selectedTag ?? '',
+        allLabel: 'All tags',
+        options: tagFilterOptions.map((t) => ({ value: t.tag, label: `${t.tag} (${t.count})` })),
+        onChange: (value) => documents.setSelectedTag(value === '' ? null : value),
+      }]
+    : []
+
+  const bordered = 'min-h-0 flex-1 overflow-auto rounded-md border border-border bg-card'
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <Page
+      className="h-full min-h-0 p-4"
+      title={currentFolder ? currentFolder.name : 'Documents'}
+      breadcrumb={documents.path.length > 0 ? (
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              {documents.path.length === 0 ? (
-                <BreadcrumbPage>Documents</BreadcrumbPage>
-              ) : (
-                <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); navigate(null) }}>
-                  Documents
-                </BreadcrumbLink>
-              )}
+              <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); navigate(null) }}>
+                Documents
+              </BreadcrumbLink>
             </BreadcrumbItem>
             {documents.path.map((folder, index) => (
               <span key={folder.id} className="contents">
@@ -880,112 +1101,36 @@ export function DocumentsPanel({
             ))}
           </BreadcrumbList>
         </Breadcrumb>
-        <div className="flex items-center gap-2">
-          {/* Revision "one panel, not three": ONE New menu, replacing the
-              old plain "New folder" button and, briefly, a separate Add
-              Note split button beside it. Two adjacent create controls in
-              one toolbar was the wrong shape - everything this panel
-              creates now hangs off a single verb, with Folder first
-              (Manual is a checkbox inside its dialog when browsing the
-              root) and Note carrying its kinds in a submenu.
+      ) : undefined}
+      primaryAction={{
+        label: 'Upload',
+        icon: <UploadIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />,
+        onClick: () => fileInputRef.current?.click(),
+      }}
+      secondaryActions={secondaryActions}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFilesSelected}
+        data-testid="documents-file-input"
+      />
 
-              Auto leads that submenu, and picking it sends no `type` at
-              all so the Go classifier answers (ADR 0116). ADR 0119 once
-              also gave capture a global header button and an Alt+N
-              shortcut reachable from any screen; ADR 0121 removed both -
-              a note is a document, and this is where every other document
-              this panel creates already starts, so this menu is now the
-              only path in, not just the discoverable one. */}
-          {/* Search trigger, immediately left of New (shadcn.io
-              "navbar-search-overlay") - aria-label carries the accessible
-              name so it matches the overlay's own input regardless of the
-              "Search" + kbd hint shown on screen. */}
-          <Button type="button" variant="outline" size="sm" aria-label="Search documents" onClick={() => setSearchOpen(true)}>
-            <Search className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            Search
-            <kbd className="ml-1 text-xs text-muted-foreground">{isApplePlatform() ? '⌘K' : 'Ctrl K'}</kbd>
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button type="button" variant="outline" size="sm">
-                  <Plus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                  New
-                </Button>
-              }
-            />
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setNewFolderOpen(true)}>
-                <FolderPlus className="h-4 w-4" aria-hidden="true" /> Folder
-              </DropdownMenuItem>
-              <DropdownMenuSub>
-                {/* ADR 0124: hovering or focusing this is the earliest
-                    signal that the operator is about to open the editor -
-                    warms note-editor-impl.tsx's chunk (and the capture
-                    sheet's own) right away rather than waiting for the
-                    click, the same "prefetch on hover/focus" App.tsx's own
-                    idle prefetch complements. prefetchNoteEditor() is
-                    memoised, so a hover that never leads to a click costs
-                    nothing beyond the one fetch every other path already
-                    pays for eventually. */}
-                <DropdownMenuSubTrigger onPointerEnter={() => prefetchNoteEditor()} onFocus={() => prefetchNoteEditor()}>
-                  <Pencil className="h-4 w-4" aria-hidden="true" /> Note
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => openCapture()}>
-                    <Sparkles className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> Auto
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {NOTE_TYPE_ORDER.map((type) => {
-                    const meta = NOTE_TYPE_META[type]
-                    const Icon = meta.icon
-                    // The catch-all kind is labelled "Note" everywhere else,
-                    // which is fine when the question is "what kind of note
-                    // is this". Here it would read New > Note > Note, so it
-                    // says "Plain note" in this one menu. The stored value
-                    // is 'note' either way - this is a label, not a type.
-                    const label = type === 'note' ? 'Plain note' : meta.label
-                    return (
-                      <DropdownMenuItem key={type} onClick={() => openCapture(type)}>
-                        <Icon className={cn('h-4 w-4', meta.className)} aria-hidden="true" /> {label}
-                      </DropdownMenuItem>
-                    )
-                  })}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button type="button" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <UploadIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            Upload
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFilesSelected}
-            data-testid="documents-file-input"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        {tagFilterOptions.length > 0 && (
-          <ToggleGroup
-            aria-label="Filter by tag"
-            value={documents.selectedTag ? [documents.selectedTag] : []}
-            onValueChange={(value: string[]) => documents.setSelectedTag(value[value.length - 1] ?? null)}
-            variant="outline"
-            size="sm"
-          >
-            {tagFilterOptions.map((t) => (
-              <ToggleGroupItem key={t.tag} value={t.tag}>
-                {t.tag} ({t.count})
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        )}
+      <div className="flex flex-wrap items-end gap-3">
+        {/* The search field is the trigger for the ⌘K overlay below, not a
+            second search: see IndexFilters' onSearchActivate. */}
+        <IndexFilters
+          className="min-w-0 flex-1"
+          searchValue=""
+          onSearchChange={() => {}}
+          searchLabel="Search"
+          searchPlaceholder={`Search documents (${isApplePlatform() ? '⌘K' : 'Ctrl K'})`}
+          onSearchActivate={openSearch}
+          filters={tagFilters}
+          onClearAll={() => documents.setSelectedTag(null)}
+        />
         {/* "Unfiled notes" as a saved view, not a place (revision) -
             kind='note' AND folder_id IS NULL, preserving the deleted
             notes-panel.tsx's drain-the-inbox loop and its visible count
@@ -993,9 +1138,8 @@ export function DocumentsPanel({
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          className={cn('h-9', view === 'unfiled' && 'border-primary/40 bg-primary/10 text-primary')}
           aria-pressed={view === 'unfiled'}
-          className={cn(view === 'unfiled' && 'border-primary/40 bg-primary/10 text-primary')}
           onClick={() => setView((prev) => (prev === 'unfiled' ? 'browse' : 'unfiled'))}
         >
           Unfiled notes ({unfiled.notes.length})
@@ -1004,22 +1148,21 @@ export function DocumentsPanel({
       </div>
 
       {uploads.items.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" data-testid="documents-upload-items">
-          {uploads.items.map((item) => (
-            <div
-              key={item.key}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
-                item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
-              )}
-            >
-              {item.status === 'uploading' && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />}
-              <span className="max-w-40 truncate" title={item.filename}>{item.filename}</span>
-              <span className={cn('tabular-nums', item.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>
-                {stagedUploadStatusLabel(item)}
-              </span>
-            </div>
-          ))}
+        <div data-testid="documents-upload-items">
+          <ResourceList label="Uploads" header="Uploading" count={uploads.items.length}>
+            {uploads.items.map((item) => (
+              <ResourceItem
+                key={item.key}
+                item={item}
+                media={item.status === 'uploading'
+                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  : <FileText className="h-4 w-4" aria-hidden="true" />}
+                title={<span title={item.filename}>{item.filename}</span>}
+                meta={<span className={cn('tabular-nums', item.status === 'failed' && 'text-destructive')}>{stagedUploadStatusLabel(item)}</span>}
+                className={item.status === 'failed' ? 'bg-destructive/10' : undefined}
+              />
+            ))}
+          </ResourceList>
         </div>
       )}
 
@@ -1035,217 +1178,86 @@ export function DocumentsPanel({
       )}
       {documents.error && <p role="alert" className="text-sm text-destructive">{documents.error}</p>}
 
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-          <span className="font-medium">{selectedIds.size} selected</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setMoveTarget({ ids: Array.from(selectedIds), label: `${selectedIds.size} document(s)` })}
-          >
-            Move to…
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const ids = Array.from(selectedIds)
-              const selectedDocs = documentRows.filter((d) => selectedIds.has(d.id))
-              const totalPages = selectedDocs.reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
-              const ocrPages = selectedDocs
-                .filter((d) => d.mime === 'application/pdf' || d.mime.startsWith('image/'))
-                .reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
-              setReindexTarget({ kind: 'bulk', ids, totalPages, ocrPages })
-            }}
-          >
-            <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            Reindex…
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setDeleteTarget({ kind: 'bulk', ids: Array.from(selectedIds) })}>
-            Delete
-          </Button>
-        </div>
-      )}
-
       <div
-        className={cn('flex-1 min-h-0 overflow-auto rounded-md border', dragOver && 'ring-2 ring-primary')}
+        className={cn('flex min-h-0 flex-1 flex-col rounded-md', dragOver && 'ring-2 ring-primary')}
         data-testid="documents-dropzone"
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
         {view === 'unfiled' ? (
-          <UnfiledNotesView
-            notes={unfiled.notes}
-            loading={unfiled.loading}
-            onOpen={setViewerId}
-            onSetType={(id, type) => { void runAction(() => unfiled.patchNote(id, { type })) }}
-            onFile={(id, title) => setMoveTarget({ ids: [id], label: title })}
-          />
+          <div className={bordered}>
+            <UnfiledNotesView
+              notes={unfiled.notes}
+              loading={unfiled.loading}
+              onOpen={setViewerId}
+              onSetType={(id, type) => { void runAction(() => unfiled.patchNote(id, { type })) }}
+              onFile={(id, title) => setMoveTarget({ ids: [id], label: title })}
+            />
+          </div>
         ) : isCurrentFolderManual && folderId !== null ? (
-          <ManualFolderView
-            folderId={folderId}
-            sectionId={sectionId}
-            onSectionChange={setSectionId}
-            onDemoted={() => { void manualsList.refreshManuals() }}
-            onNavigateDocument={setViewerId}
-            mateAvailable={mateAvailable}
-            onAskMate={onAskMate}
-          />
+          <div className={bordered}>
+            <ManualFolderView
+              folderId={folderId}
+              sectionId={sectionId}
+              onSectionChange={setSectionId}
+              onDemoted={() => { void manualsList.refreshManuals() }}
+              onNavigateDocument={setViewerId}
+              mateAvailable={mateAvailable}
+              onAskMate={onAskMate}
+            />
+          </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    aria-label="Select all documents"
-                    checked={allDocumentsSelected}
-                    onCheckedChange={(checked) => {
-                      setSelectedIds(checked ? new Set(documentRows.map((d) => d.id)) : new Set())
-                    }}
-                  />
-                </TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {folderRows.length === 0 && documentRows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-                    Nothing here yet. Upload a file or create a folder.
-                  </TableCell>
-                </TableRow>
-              )}
-              {folderRows.map((folder) => {
-                const isManual = manualFolderIds.has(folder.id)
-                return (
-                  <TableRow key={folder.id}>
-                    <TableCell />
-                    <TableCell>
-                      <button
-                        type="button"
-                        onClick={() => navigate(folder.id)}
-                        className="flex items-center gap-2 text-left font-medium hover:underline"
-                      >
-                        {/* Library, not Folder, for a Manual-kind folder -
-                            the only way to see that from the OUTSIDE
-                            (browsing its parent) at all, since
-                            GET /api/document-folders never serialises
-                            document_folders.role. */}
-                        {isManual ? (
-                          <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        ) : (
-                          <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        )}
-                        {folder.name}
-                      </button>
-                    </TableCell>
-                    {/* Status, Tags and Size are document-only columns - a
-                        folder row still needs a placeholder cell for each
-                        of the header's six columns, or the actions cell
-                        below shifts left under "Size" and the real w-10
-                        actions column sits empty (review finding). */}
-                    <TableCell />
-                    <TableCell />
-                    <TableCell />
-                    <TableCell>
-                      <FolderRowMenu
-                        folder={folder}
-                        isManual={isManual}
-                        canPromote={folderId === null}
-                        onRename={() => { setRenameTarget({ kind: 'folder', id: folder.id, name: folder.name }); setRenameValue(folder.name) }}
-                        onMove={() => setMoveTarget({ ids: [folder.id], label: folder.name })}
-                        onDelete={() => setDeleteTarget({ kind: 'folder', id: folder.id, name: folder.name })}
-                        onPromote={() => { void runAction(() => manualsList.flagManual(folder.id)) }}
-                        onDemote={() => { void runAction(() => manualsList.clearManual(folder.id)) }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-              {documentRows.map((doc) => {
-                const name = documentDisplayName(doc)
-                const MimeIcon = rowIcon(doc.mime)
-                return (
-                  <TableRow key={doc.id}>
-                    <TableCell>
-                      <Checkbox
-                        aria-label={`Select ${name}`}
-                        checked={selectedIds.has(doc.id)}
-                        onCheckedChange={() => toggleSelected(doc.id)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {/* The pre-attentive type icon column (revision
-                            "Note types as a facet") - a note row's icon is
-                            its own hit target opening a type-override menu,
-                            same gesture as the Unfiled notes view's rows
-                            (unfiled.patchNote works on any note id
-                            regardless of filing state). A plain kind='file'
-                            row keeps the ordinary mime-based icon, inert. */}
-                        {doc.kind === 'note' ? (
-                          <NoteTypeIconButton noteType={doc.note_type} onSetType={(type) => { void runAction(() => unfiled.patchNote(doc.id, { type })) }} />
-                        ) : (
-                          <MimeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setViewerId(doc.id)}
-                          className="flex min-w-0 flex-col items-start gap-0.5 text-left"
-                        >
-                          <span className="font-medium hover:underline">{name}</span>
-                          {doc.status === 'failed' && doc.error && (
-                            // The operator-facing sentence, not the raw
-                            // stored error (an internal storage path, the
-                            // word "panic", a library's own error text) -
-                            // that stays available in the title attribute,
-                            // and in full on the Details page's "Error
-                            // details" disclosure.
-                            <span
-                              className="w-full truncate text-xs text-destructive"
-                              title={doc.error}
-                            >
-                              {documentFailureMessage(doc)}
-                            </span>
-                          )}
-                        </button>
-                      </div>
-                    </TableCell>
-                    <TableCell>{statusBadge(doc)}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {doc.tags.map((t) => (
-                          <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'}>
-                            {t.tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>{formatBytes(doc.size_bytes)}</TableCell>
-                    <TableCell>
-                      <DocumentRowMenu
-                        doc={doc}
-                        onOpen={() => setViewerId(doc.id)}
-                        onDownload={() => { void runAction(() => downloadDocument(doc.id, doc.filename)) }}
-                        onRename={() => { setRenameTarget({ kind: 'document', id: doc.id, name }); setRenameValue(name) }}
-                        onDetails={() => onEditDocument?.(doc.id)}
-                        onMove={() => setMoveTarget({ ids: [doc.id], label: name })}
-                        onReindex={() => setReindexTarget({ kind: 'single', id: doc.id, name, pageCount: doc.page_count, mime: doc.mime })}
-                        onDelete={() => setDeleteTarget({ kind: 'document', id: doc.id, name })}
-                      />
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+          <IndexTable
+            columns={columns}
+            rows={listRows}
+            getRowId={rowKey}
+            onOpen={(item) => { if (item.kind === 'folder') navigate(item.folder.id); else setViewerId(item.doc.id) }}
+            rowActions={rowActions}
+            rowActionsLabel={(item) => `Actions for ${rowName(item)}`}
+            groupBy={(item) => (item.kind === 'folder' ? 'folders' : 'documents')}
+            groupOrder={['folders', 'documents']}
+            groupLabel={(key) => (key === 'folders' ? 'Folders' : 'Documents')}
+            selectable
+            isRowSelectable={(item) => item.kind === 'document'}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            rowSelectLabel={(item) => `Select ${rowName(item)}`}
+            bulkActions={(
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { const ids = visibleSelectedIds(); setMoveTarget({ ids, label: `${ids.length} document(s)` }) }}
+                >
+                  Move to…
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const ids = visibleSelectedIds()
+                    const selectedDocs = documentRows.filter((d) => selectedIds.has(d.id))
+                    const totalPages = selectedDocs.reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
+                    const ocrPages = selectedDocs
+                      .filter((d) => d.mime === 'application/pdf' || d.mime.startsWith('image/'))
+                      .reduce((sum, d) => sum + Math.max(1, d.page_count), 0)
+                    setReindexTarget({ kind: 'bulk', ids, totalPages, ocrPages })
+                  }}
+                >
+                  <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                  Reindex…
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setDeleteTarget({ kind: 'bulk', ids: visibleSelectedIds() })}>
+                  Delete
+                </Button>
+              </>
+            )}
+            loading={documents.loading && listRows.length === 0}
+            empty={<EmptyState title="Nothing here yet" description="Upload a file or create a folder." />}
+          />
         )}
       </div>
 
@@ -1455,29 +1467,18 @@ export function DocumentsPanel({
       </Dialog>
 
       {/* ── Delete confirmation ────────────────────────────────────── */}
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deleteTarget?.kind === 'bulk' ? `Delete ${deleteTarget.ids.length} documents?` : `Delete "${deleteTarget?.name}"?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget?.kind === 'folder'
-                ? "This removes the folder. It has to be empty first."
-                : "This removes the file(s). It can't be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { void submitDelete() }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDelete
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title={deleteTarget?.kind === 'bulk' ? `Delete ${deleteTarget.ids.length} ${deleteTarget.ids.length === 1 ? 'document' : 'documents'}?` : `Delete "${deleteTarget?.name}"?`}
+        description={deleteTarget?.kind === 'folder'
+          ? 'This removes the folder. It has to be empty first.'
+          : "This removes the file(s). It can't be undone."}
+        deleting={deleting}
+        onConfirm={() => { void submitDelete() }}
+      >
+        {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+      </ConfirmDelete>
 
       {/* ── Reindex confirmation (single row menu, or the bulk selection
           bar's own "Reindex…") ────────────────────────────────────── */}
@@ -1485,7 +1486,7 @@ export function DocumentsPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {reindexTarget?.kind === 'bulk' ? `Reindex ${reindexTarget.ids.length} documents?` : `Reindex "${reindexTarget?.name}"?`}
+              {reindexTarget?.kind === 'bulk' ? `Reindex ${reindexTarget.ids.length} ${reindexTarget.ids.length === 1 ? 'document' : 'documents'}?` : `Reindex "${reindexTarget?.name}"?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {reindexTarget?.kind === 'bulk' ? (
@@ -1546,7 +1547,7 @@ export function DocumentsPanel({
           />
         </Suspense>
       )}
-    </div>
+    </Page>
   )
 }
 
@@ -1630,122 +1631,5 @@ function SearchResultsTable({
         </li>
       ))}
     </ul>
-  )
-}
-
-function DocumentRowMenu({
-  doc,
-  onOpen,
-  onDownload,
-  onRename,
-  onDetails,
-  onMove,
-  onReindex,
-  onDelete,
-}: {
-  doc: DocumentRecord
-  onOpen: () => void
-  onDownload: () => void
-  onRename: () => void
-  onDetails: () => void
-  onMove: () => void
-  onReindex: () => void
-  onDelete: () => void
-}) {
-  const name = documentDisplayName(doc)
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon" aria-label={`Actions for ${name}`}>
-            <MoreVertical className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent>
-        <DropdownMenuItem onClick={onOpen}>Open</DropdownMenuItem>
-        <DropdownMenuItem onClick={onDownload}>
-          <Download className="h-4 w-4" aria-hidden="true" /> Download
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onRename}>
-          <Pencil className="h-4 w-4" aria-hidden="true" /> Rename
-        </DropdownMenuItem>
-        {/* Rename stays the fast path for a title-only fix (ADR 0115 §3);
-            Details… is the slower path onto the full metadata page - notes,
-            tags, the read-only indexing facts - so it sits right after
-            Rename rather than buried past Move/Reindex. */}
-        <DropdownMenuItem onClick={onDetails}>
-          <Info className="h-4 w-4" aria-hidden="true" /> Details…
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onMove}>Move…</DropdownMenuItem>
-        <DropdownMenuItem onClick={onReindex}>
-          <RefreshCw className="h-4 w-4" aria-hidden="true" /> Reindex…
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function FolderRowMenu({
-  folder,
-  isManual,
-  canPromote,
-  onRename,
-  onMove,
-  onDelete,
-  onPromote,
-  onDemote,
-}: {
-  folder: DocumentFolder
-  /** Whether this folder already carries document_folders.role='manual' -
-   * decides Promote vs. Demote (revision "one panel, not three"). */
-  isManual: boolean
-  /** Only a top-level folder can ever become a manual (backend's own
-   * errManualNotTopLevel) - true exactly when this row is being browsed at
-   * the root, since every folder listed there IS top-level by definition. */
-  canPromote: boolean
-  onRename: () => void
-  onMove: () => void
-  onDelete: () => void
-  onPromote: () => void
-  onDemote: () => void
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon" aria-label={`Actions for ${folder.name}`}>
-            <MoreVertical className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent>
-        <DropdownMenuItem onClick={onRename}>
-          <Pencil className="h-4 w-4" aria-hidden="true" /> Rename
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onMove}>Move…</DropdownMenuItem>
-        {/* Promote/demote: a folder's kind, not a destructive act either
-            way - "moves and deletes nothing" (POST/DELETE /api/manuals),
-            so this is a direct toggle like Rename/Move above, not a
-            confirmation dialog like Delete below. */}
-        {isManual ? (
-          <DropdownMenuItem onClick={onDemote}>
-            <Library className="h-4 w-4" aria-hidden="true" /> Stop treating as manual
-          </DropdownMenuItem>
-        ) : canPromote ? (
-          <DropdownMenuItem onClick={onPromote}>
-            <Library className="h-4 w-4" aria-hidden="true" /> Treat as a manual
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }

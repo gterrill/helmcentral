@@ -44,6 +44,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Documents is rearranged to match the rest of Inventory. The page is titled
+  with the folder you are in, with the path back up above it; **Upload** is
+  the button at the top right, and **New folder** and **New note** moved
+  into the menu beside it (**More actions**). Folders and documents share
+  one list, folders first. Tick the boxes (or **Select all**) and a bar shows
+  how many are selected with **Move to…**, **Reindex…** and **Delete**. The
+  tag filter is now a drop-down, the **Search** field opens the same
+  full-page search as before (you can also start typing in it), and files
+  being uploaded show as a list above the table. A document's Details page
+  keeps its editable fields on the left and the file and indexing facts in a
+  column beside them, with Save and Discard in the save bar at the top of the
+  screen while you have changes.
 - The Documents list on an equipment item now shows each document with a
   thumbnail or file icon, its title, the date it was added and a type label
   such as PDF, JPG or NOTE. Click one, or choose Open from its menu, to read it

@@ -74,4 +74,35 @@ describe('IndexFilters', () => {
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
     expect(onClearAll).toHaveBeenCalled()
   })
+
+  // Documents: search is a separate overlay, so the field only announces
+  // intent (click, or starting to type) and never holds text of its own.
+  describe('as a search trigger', () => {
+    it('opens on click and holds no text', () => {
+      const onSearchActivate = vi.fn()
+      render(<IndexFilters searchValue="" onSearchChange={vi.fn()} onSearchActivate={onSearchActivate} searchLabel="Search" />)
+      const field = screen.getByLabelText('Search')
+      expect(field).toHaveAttribute('readonly')
+      fireEvent.click(field)
+      expect(onSearchActivate).toHaveBeenCalledWith(undefined)
+    })
+
+    it('opens on Enter, and on a typed character which it hands over as the seed', () => {
+      const onSearchActivate = vi.fn()
+      render(<IndexFilters searchValue="" onSearchChange={vi.fn()} onSearchActivate={onSearchActivate} searchLabel="Search" />)
+      const field = screen.getByLabelText('Search')
+      fireEvent.keyDown(field, { key: 'Enter' })
+      expect(onSearchActivate).toHaveBeenLastCalledWith(undefined)
+      fireEvent.keyDown(field, { key: 'g' })
+      expect(onSearchActivate).toHaveBeenLastCalledWith('g')
+    })
+
+    it('does not open on focus alone (focus returns here when the overlay closes)', () => {
+      const onSearchActivate = vi.fn()
+      render(<IndexFilters searchValue="" onSearchChange={vi.fn()} onSearchActivate={onSearchActivate} searchLabel="Search" />)
+      fireEvent.focus(screen.getByLabelText('Search'))
+      fireEvent.keyDown(screen.getByLabelText('Search'), { key: 'Tab' })
+      expect(onSearchActivate).not.toHaveBeenCalled()
+    })
+  })
 })
