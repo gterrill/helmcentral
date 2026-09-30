@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"sort"
@@ -308,6 +309,11 @@ func notificationStatus(value map[string]any, prefix []string) (alarmStatus, boo
 	emergency := state == alarmStateEmergency
 	silenced = silenced || acknowledged
 
+	var ackedAt time.Time
+	if acknowledged {
+		ackedAt = notificationAcknowledgedAt(value, path)
+	}
+
 	return alarmStatus{
 		// Namespaced so an inbound notification can never collide with a
 		// locally configured rule id.
@@ -317,10 +323,34 @@ func notificationStatus(value map[string]any, prefix []string) (alarmStatus, boo
 		Phase:          phase,
 		State:          state,
 		Message:        message,
+		AckedAt:        ackedAt,
 		Silenced:       silenced,
 		CanSilence:     canSilence && !silenced && !emergency,
 		CanAcknowledge: canAcknowledge && !acknowledged && !emergency,
 	}, true
+}
+
+// notificationAcknowledgedAt reads status.acknowledgedAt, which SignalK 2.31
+// and later stamps when an alarm is acknowledged, from any client, and removes
+// when the alarm clears or worsens. Older servers omit it, leaving the time
+// zero. A stamp that does not parse is logged and left zero rather than
+// replaced with a guess.
+func notificationAcknowledgedAt(value map[string]any, path string) time.Time {
+	status, ok := value["status"].(map[string]any)
+	if !ok {
+		return time.Time{}
+	}
+	raw, present := status["acknowledgedAt"]
+	if !present {
+		return time.Time{}
+	}
+	text, _ := raw.(string)
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		log.Printf("alarm notifications: %s has an unreadable status.acknowledgedAt %v", path, raw)
+		return time.Time{}
+	}
+	return at.UTC()
 }
 
 // notificationAlertState reports whether a notification has been acknowledged
@@ -446,7 +476,9 @@ func actOnSignalKNotification(snapshot *signalKSnapshot, path, action string, no
 	}
 
 	// The state just committed, not a re-read: the change has to travel back
-	// through the delta stream before the snapshot reflects it.
+	// through the delta stream before the snapshot reflects it. now stands in
+	// for the server's acknowledgedAt until that arrives, and the next status
+	// read replaces it with the server's own stamp.
 	status.Silenced = true
 	status.CanSilence = false
 	if action == notificationActionAcknowledge {

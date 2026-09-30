@@ -590,10 +590,10 @@ func main() {
 	// fed by radarPoller (radar_source.go), which polls the plugin's proxied
 	// REST endpoint through the already-configured SignalK connection —
 	// there is no separate mayara host/port, and no push path through
-	// SignalK to subscribe to instead. Initialised unconditionally, same as
-	// the SignalK snapshot below — an absent or unreachable plugin is a live
-	// "disabled"/"mayara-unreachable" source in the telemetry payload, not
-	// an absent store.
+	// SignalK to subscribe to instead for targets. Initialised
+	// unconditionally, same as the SignalK snapshot below — an absent or
+	// unreachable plugin is a live "disabled"/"mayara-unreachable" source in
+	// the telemetry payload, not an absent store.
 	globalRadarTargetStore = newRadarTargetStore()
 
 	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
@@ -716,8 +716,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// the delta stream (radar_capabilities.go).
 		{http.MethodGet, "/api/radar/capabilities", tierRead, radarCapabilitiesHandler},
 		// The radar picture overlay's spoke stream: mayara-server itself, not
-		// the SignalK plugin (which 404s for spokes — plan: "Why the backend
-		// relays rather than the browser connecting direct"). Upgraded to
+		// the SignalK plugin. SignalK 2.31+ does serve .../spokes, but the
+		// relay keeps dialling mayara directly (ADR 0069). Upgraded to
 		// WebSocket inside the handler rather than declared as one here,
 		// same tier as the REST radar routes above since it is equally
 		// read-only (radar_spoke_relay.go).

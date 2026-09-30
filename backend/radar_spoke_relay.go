@@ -19,9 +19,10 @@ import (
 // rather than through the SignalK connection: unlike
 // mayaraCapabilitiesAPIPathTemplate (radar_capabilities.go) and
 // mayaraTargetsAPIPathTemplate (radar_source.go), which are the SignalK
-// plugin's REST proxy, the plugin returns 404 for spokes (see the plan's
-// "Why the backend relays rather than the browser connecting direct"). %s is
-// the radar id, e.g. "fur6424A".
+// plugin's REST proxy. SignalK 2.31+ (Radar API 3.4.0) also serves this path
+// on its own port, authenticated by cookie, ?token= or Authorization header;
+// the relay deliberately keeps dialling mayara (ADR 0069). %s is the radar
+// id, e.g. "fur6424A".
 const radarSpokeUpstreamPathTemplate = "/signalk/v2/api/vessels/self/radars/%s/spokes"
 
 // radarSpokeReadLimit bounds one upstream WebSocket message. Measured spoke
