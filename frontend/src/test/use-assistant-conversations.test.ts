@@ -490,4 +490,51 @@ describe('describeLoadError', () => {
   it('describes a network failure that never got a status code at all', () => {
     expect(describeLoadError('Failed to fetch')).toBe("Mate's conversations could not be loaded. The server did not answer.")
   })
+
+  // ADR 0146: a reloaded thread carries each reply's maintenance proposals
+  // with the status they have now.
+  it('maps a message\'s proposals, with their stored status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/assistant/conversations') {
+          return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            conversation: conversationApi(),
+            messages: [
+              messageApi({
+                id: 'm2',
+                role: 'assistant',
+                proposals: [
+                  { id: 'p1', message_id: 'm2', status: 'stale', stale_reason: 'a rule changed', ops: [{ op: 'acknowledge', summary: 'Acknowledge Belts: later' }], resolved_at: '2026-09-30T00:00:00Z' },
+                ],
+              }),
+            ],
+          }),
+        }
+      }),
+    )
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'c1' }))
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+    expect(result.current.messages[0].proposals).toEqual([
+      {
+        id: 'p1',
+        messageId: 'm2',
+        status: 'stale',
+        ops: [{ op: 'acknowledge', summary: 'Acknowledge Belts: later' }],
+        staleReason: 'a rule changed',
+        resolvedAt: '2026-09-30T00:00:00Z',
+      },
+    ])
+
+    act(() => {
+      result.current.updateProposal({ ...result.current.messages[0].proposals![0], status: 'dismissed' })
+    })
+    expect(result.current.messages[0].proposals![0].status).toBe('dismissed')
+  })
 })
