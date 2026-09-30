@@ -111,6 +111,11 @@ export function MaintenanceEquipmentBlock({ equipmentId, profileId, hourMeterPat
           </div>
         )}
       </div>
+      {hourMeterPath.trim() === '' && rules.some((rule) => rule.interval_hours !== null) && (
+        <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+          Rules counted in hours can't count hours until an hour meter is set above.
+        </p>
+      )}
       {copyError && <p role="alert" className="text-sm text-destructive">{copyError}</p>}
       {rulesError && <p role="alert" className="text-sm text-destructive">{rulesError}</p>}
 

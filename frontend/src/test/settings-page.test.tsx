@@ -251,27 +251,3 @@ describe('SettingsPage imperative save handle', () => {
     await expect(ref.current!.save()).rejects.toThrow('boom')
   })
 })
-
-// ADR 0095: one Help button per section, calling back with that section's
-// help target rather than each section rendering its own.
-describe('SettingsPage Help button', () => {
-  it('calls onOpenHelp with the active section\'s help target', () => {
-    const onOpenHelp = vi.fn()
-    render(
-      <SettingsPage
-        onOpenHelp={onOpenHelp}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Alarms' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open help for this section' }))
-
-    expect(onOpenHelp).toHaveBeenCalledWith({ page: 'features/alarms', heading: 'Getting told' })
-  })
-
-  it('renders no Help button when onOpenHelp is not passed - existing callers are untouched', () => {
-    render(<SettingsPage />)
-
-    expect(screen.queryByRole('button', { name: 'Open help for this section' })).not.toBeInTheDocument()
-  })
-})

@@ -68,4 +68,41 @@ describe('MaintenanceEquipmentBlock', () => {
     await waitFor(() => expect(screen.getByText(/no maintenance rules/i)).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /use profile schedule/i })).not.toBeInTheDocument()
   })
+
+  // Rules counted in hours cannot count without a meter: say so, in the
+  // block (amber alert semantics), keyed to the meter the editor currently
+  // holds - including an unsaved edit.
+  describe('missing hour meter warning', () => {
+    function mockRules(rules: MaintenanceRule[]) {
+      fetchMock.mockImplementation((url: string) => {
+        const u = String(url)
+        if (u.includes('/maintenance/rules')) return jsonResponse(200, { rules })
+        if (u.includes('/maintenance/log')) return jsonResponse(200, { entries: [] })
+        if (u.includes('/maintenance/meter-resets')) return jsonResponse(200, { resets: [] })
+        return jsonResponse(200, {})
+      })
+    }
+
+    it('warns when a rule counts hours and the item has no hour meter', async () => {
+      mockRules([makeRule({ interval_hours: 250, interval_months: null })])
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" profileId="" hourMeterPath="" />)
+      const warning = await screen.findByRole('status')
+      expect(warning).toHaveTextContent("can't count hours until an hour meter is set")
+      expect(warning).toHaveClass('text-amber-700')
+    })
+
+    it('does not warn when the item has an hour meter', async () => {
+      mockRules([makeRule({ interval_hours: 250 })])
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" profileId="" hourMeterPath="propulsion.main.runTime" />)
+      await screen.findByText('Engine oil and filter')
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+
+    it('does not warn when no rule has an hours interval', async () => {
+      mockRules([makeRule({ interval_hours: null, interval_months: 12 })])
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" profileId="" hourMeterPath="" />)
+      await screen.findByText('Engine oil and filter')
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+  })
 })

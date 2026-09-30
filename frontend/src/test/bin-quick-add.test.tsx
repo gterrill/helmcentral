@@ -72,7 +72,9 @@ describe('BinQuickAdd', () => {
         String(url).endsWith('/api/inventory/equipment') && (init as RequestInit | undefined)?.method === 'POST')
       expect(call).toBeDefined()
       const body = JSON.parse(String((call?.[1] as RequestInit).body))
-      expect(body).toMatchObject({ name: 'Gaffer tape', category: 'general', status: 'stored', zone_id: 'z1', bin_id: 'b1' })
+      expect(body).toMatchObject({ name: 'Gaffer tape', status: 'stored', zone_id: 'z1', bin_id: 'b1' })
+      // category is derived server-side from the hour meter; not sent.
+      expect(body).not.toHaveProperty('category')
     })
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg']))
     await waitFor(() => expect(onCreated).toHaveBeenCalled())

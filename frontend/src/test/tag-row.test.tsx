@@ -20,6 +20,29 @@ describe('TagRow', () => {
     expect(screen.getByText(`${window.location.origin}/inventory/bins/LAZ-02`)).toBeInTheDocument()
   })
 
+  it('carries the full URL in a title attribute, for the truncated cases', () => {
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    expect(screen.getByText(`${window.location.origin}/inventory/bins/LAZ-02`))
+      .toHaveAttribute('title', `${window.location.origin}/inventory/bins/LAZ-02`)
+  })
+
+  it('keeps the URL and its buttons on one row by default (layout="inline") - existing callers (bin-page) are unchanged', () => {
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    const url = screen.getByText(`${window.location.origin}/inventory/bins/LAZ-02`)
+    expect(url.parentElement).toHaveClass('items-center')
+    expect(url.parentElement).not.toHaveClass('flex-col')
+  })
+
+  // ADR 0142: the Equipment editor's aside is only 20rem wide - the URL row
+  // and the button row must each stand on their own to avoid the horizontal
+  // overflow AGENTS.md's own layout-resiliency rule forbids.
+  it('stacks the URL above its own button row with layout="stacked", for a narrow container', () => {
+    render(<TagRow path="/inventory/bins/LAZ-02" layout="stacked" />)
+    const url = screen.getByText(`${window.location.origin}/inventory/bins/LAZ-02`)
+    expect(url.parentElement).toHaveClass('flex-col')
+    expect(url).toHaveClass('min-w-0', 'truncate')
+  })
+
   it('copies the URL to the clipboard', async () => {
     render(<TagRow path="/inventory/bins/LAZ-02" />)
     fireEvent.click(screen.getByRole('button', { name: /copy/i }))

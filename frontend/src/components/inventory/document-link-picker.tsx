@@ -18,6 +18,12 @@ export interface DocumentLinkPickerResult {
   document_id: string
   title: string
   filename: string
+  /** From the document's own record, read at pick time: the search list
+   * carries none of these, and the Documents list needs them to show NOTE,
+   * a type badge and a date before the link is saved. */
+  kind: string
+  mime: string
+  created_at: string
 }
 
 interface DocumentLinkPickerProps {
@@ -85,9 +91,44 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
 
   const visibleResults = results.filter((r) => !excludeIds.includes(r.document_id))
 
-  const pick = (result: DocumentSearchResult) => {
-    onPick({ document_id: result.document_id, title: result.title || result.filename, filename: result.filename })
-    onOpenChange(false)
+  // Which pick (if any) is waiting on its record, and whether the picker is
+  // still open: a pick that resolves after Cancel/Escape must be dropped, not
+  // added, and a second pick must not start while one is in flight.
+  const [pickingId, setPickingId] = useState<string | null>(null)
+  const pickSeq = useRef(0)
+  useEffect(() => {
+    if (!open) { pickSeq.current += 1; setPickingId(null) }
+  }, [open])
+
+  const pick = async (result: DocumentSearchResult) => {
+    if (pickingId !== null) return
+    const seq = (pickSeq.current += 1)
+    setPickingId(result.document_id)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(result.document_id)}`)
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? `HTTP ${res.status}`)
+      }
+      const record = (await res.json()) as { kind: string; mime: string; created_at: string }
+      if (seq !== pickSeq.current) return
+      onPick({
+        document_id: result.document_id,
+        title: result.title || result.filename,
+        filename: result.filename,
+        kind: record.kind,
+        mime: record.mime,
+        created_at: record.created_at,
+      })
+      onOpenChange(false)
+    } catch (err) {
+      if (seq !== pickSeq.current) return
+      // Fail loud: linking a document whose record cannot be read would put
+      // a row with a guessed type in the list.
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (seq === pickSeq.current) setPickingId(null)
+    }
   }
 
   return (
@@ -121,8 +162,9 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
             <button
               key={result.document_id}
               type="button"
-              onClick={() => pick(result)}
-              className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              disabled={pickingId !== null}
+              onClick={() => { void pick(result) }}
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             >
               <span className="text-sm font-medium">{result.title || result.filename}</span>
               <span className="text-xs text-muted-foreground">{result.filename}</span>

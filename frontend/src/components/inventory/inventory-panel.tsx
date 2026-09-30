@@ -1,7 +1,5 @@
-import { BookOpen } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 
-import { Button } from '@/components/ui/button'
 import { BinPage } from '@/components/inventory/bin-page'
 import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
@@ -10,13 +8,20 @@ import { LocationsSection } from '@/components/inventory/locations-section'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
-import { INVENTORY_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
 
 // ADR 0123: InventoryNav plus whichever section is active - the Settings
 // page shape (settings-page.tsx) exactly: App owns the active section (and,
 // here, the Equipment index/editor split) and mirrors it to the URL (ADR
 // 0074); this component is a thin composition shell with no fetches or
 // navigation state of its own.
+//
+// No Help button of its own (removed - it used to duplicate the header's `?`,
+// and worse, App.tsx's own `?` handler didn't pass inventorySection at all,
+// so it always opened Equipment's help page regardless of which section was
+// actually open, which is why this one existed in the first place. The
+// header ? now reads inventorySection and follows the active section -
+// see lib/help-links.ts's helpTargetFor and ADR 0142's CRUD Pattern Library
+// note in AGENTS.md).
 //
 // Equipment's index and its editor are the SAME section, not two nav
 // entries - which one shows is `equipmentEditId`/`creatingEquipment`, the
@@ -61,6 +66,9 @@ interface InventoryPanelProps {
    * warning about a photo file/document that could not be removed
    * afterward - the item is gone either way. */
   onEquipmentDeleted: (message?: string) => void
+  /** Discard on a new item: leave the editor with no guard, like a create or
+   * delete that already succeeded. */
+  onEquipmentDiscarded: () => void
   onDirtyChange?: (dirty: boolean) => void
   /** Release-fixes code-review finding: forwarded to Stocktake's own
    * onHasWorkChange and the bin page's quick-add onHasWorkChange - never
@@ -70,7 +78,6 @@ interface InventoryPanelProps {
    * BinQuickAdd's own doc comment on its identical prop explains when it
    * passes one. */
   onHasWorkChange?: (hasWork: boolean, detail?: string) => void
-  onOpenHelp?: (target: HelpTarget) => void
   canWrite?: boolean
   /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
    * null is the ordinary Locations index; a non-null code shows that bin's
@@ -107,9 +114,9 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onCloseEditor,
     onEquipmentCreated,
     onEquipmentDeleted,
+    onEquipmentDiscarded,
     onDirtyChange,
     onHasWorkChange,
-    onOpenHelp,
     canWrite = true,
     binCode,
     onOpenBin,
@@ -140,6 +147,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onBack={onCloseEditor}
             onCreated={onEquipmentCreated}
             onDeleted={onEquipmentDeleted}
+            onDiscarded={onEquipmentDiscarded}
             onDirtyChange={onDirtyChange}
             onHasWorkChange={onHasWorkChange}
             canWrite={canWrite}
@@ -189,19 +197,6 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       <InventoryNav activeSectionId={activeSectionId} onSelect={onSectionChange} />
 
       <div className="min-w-0 flex-1 space-y-4">
-        {onOpenHelp && (
-          <div className="mx-auto flex max-w-3xl justify-end">
-            <Button
-              variant="ghost"
-              className="h-10 gap-2 text-primary"
-              aria-label="Open help for this section"
-              onClick={() => onOpenHelp(INVENTORY_HELP_TARGETS[activeSectionId])}
-            >
-              <BookOpen className="h-4 w-4" />
-              Help
-            </Button>
-          </div>
-        )}
         {activeSection}
       </div>
     </div>

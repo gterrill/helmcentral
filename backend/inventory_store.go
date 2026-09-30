@@ -84,19 +84,17 @@ var (
 	// trimming, is empty.
 	errEquipmentNameRequired = errors.New("equipment name is required")
 
-	// errEquipmentInvalidCategory/System/Status are returned when a caller
-	// supplies a value outside the schema's own CHECK-constrained enum.
-	// category has no default (a record has to say which kind it is), so a
-	// blank value is rejected the same as a bogus one; system and status DO
-	// have a default (applied by CreateEquipment/UpdateEquipment before this
-	// check ever runs), so only a genuinely bogus non-blank value reaches
-	// this sentinel for them. The schema's own CHECK constraints are the
+	// errEquipmentInvalidSystem/Status are returned when a caller supplies a
+	// value outside the schema's own CHECK-constrained enum. (category is not
+	// validated: it is derived from hour_meter_path, see
+	// deriveEquipmentCategory.) system and status have a default (applied by
+	// CreateEquipment/UpdateEquipment before this check ever runs), so only a
+	// genuinely bogus non-blank value reaches these sentinels. The schema's own CHECK constraints are the
 	// last line of defense if a caller somehow reaches the INSERT/UPDATE
 	// with something these checks missed - a real, loud failure rather than
 	// silently written bad data, never expected to actually fire.
-	errEquipmentInvalidCategory = errors.New("category must be mechanical or general")
-	errEquipmentInvalidSystem   = errors.New("unknown equipment system")
-	errEquipmentInvalidStatus   = errors.New("status must be deployed or stored")
+	errEquipmentInvalidSystem = errors.New("unknown equipment system")
+	errEquipmentInvalidStatus = errors.New("status must be deployed or stored")
 
 	// errEquipmentLocationMismatch is returned by validateEquipmentLocation
 	// when a caller supplies BOTH zone_id and bin_id and they disagree - the
@@ -256,6 +254,11 @@ type equipmentDocument struct {
 	NoteType   string `json:"note_type"`
 	Source     string `json:"source"`
 	SortIndex  int    `json:"sort_index"`
+	// MIME and CreatedAt let the Documents list show a type badge, decide
+	// on an image thumbnail and print the upload date without a fetch per
+	// document.
+	MIME      string    `json:"mime"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // equipmentFilter is ListEquipment's input: every field blank means no
@@ -280,8 +283,7 @@ type equipmentFilter struct {
 // validateEquipmentInput (inventory_handlers.go) so the two never drift
 // apart on what counts as a legal value.
 var (
-	validEquipmentCategories = map[string]bool{"mechanical": true, "general": true}
-	validEquipmentSystems    = map[string]bool{
+	validEquipmentSystems = map[string]bool{
 		"propulsion": true, "electrical": true, "water": true, "fuel": true,
 		"bilge": true, "anchoring": true, "safety": true, "hvac": true,
 		"navigation": true, "appliances": true, "structure": true, "other": true,
@@ -1003,8 +1005,19 @@ func equipmentByID(q sqlQueryer, id string) (equipmentItem, error) {
 	return it, nil
 }
 
-// CreateEquipment inserts a new equipment record. category is required
-// (no default - a record has to say which kind it is); system and status
+// deriveEquipmentCategory is the only place category is decided: an item
+// with an hour meter is 'mechanical', one without is 'general'. Whatever a
+// client sends is ignored (old clients and bin quick-add still send one), so
+// the stored value can never disagree with the meter.
+func deriveEquipmentCategory(hourMeterPath string) string {
+	if strings.TrimSpace(hourMeterPath) != "" {
+		return "mechanical"
+	}
+	return "general"
+}
+
+// CreateEquipment inserts a new equipment record. category is derived from
+// hour_meter_path (deriveEquipmentCategory); system and status
 // default to 'other'/'deployed' when left blank, then both are checked
 // against their own valid* set the same as a non-blank value would be -
 // same treatment, just with a default value substituted first. zone_id/
@@ -1018,9 +1031,7 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
 	}
-	if !validEquipmentCategories[item.Category] {
-		return equipmentItem{}, errEquipmentInvalidCategory
-	}
+	item.Category = deriveEquipmentCategory(item.HourMeterPath)
 	system := item.System
 	if system == "" {
 		system = "other"
@@ -1099,9 +1110,7 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
 	}
-	if !validEquipmentCategories[item.Category] {
-		return equipmentItem{}, errEquipmentInvalidCategory
-	}
+	item.Category = deriveEquipmentCategory(item.HourMeterPath)
 	system := item.System
 	if system == "" {
 		system = "other"
@@ -1420,7 +1429,7 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	}
 
 	rows, err := s.db.Query(`
-		SELECT ed.document_id, d.title, d.filename, d.kind, d.note_type, ed.source, ed.sort_index
+		SELECT ed.document_id, d.title, d.filename, d.kind, d.note_type, ed.source, ed.sort_index, d.mime, d.created_at
 		FROM equipment_documents ed
 		JOIN documents d ON d.id = ed.document_id
 		WHERE ed.equipment_id = ?
@@ -1433,9 +1442,11 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	out := []equipmentDocument{}
 	for rows.Next() {
 		var ed equipmentDocument
-		if err := rows.Scan(&ed.DocumentID, &ed.Title, &ed.Filename, &ed.Kind, &ed.NoteType, &ed.Source, &ed.SortIndex); err != nil {
+		var createdAt int64
+		if err := rows.Scan(&ed.DocumentID, &ed.Title, &ed.Filename, &ed.Kind, &ed.NoteType, &ed.Source, &ed.SortIndex, &ed.MIME, &createdAt); err != nil {
 			return nil, fmt.Errorf("equipment documents: scan: %w", err)
 		}
+		ed.CreatedAt = time.Unix(createdAt, 0).UTC()
 		out = append(out, ed)
 	}
 	if err := rows.Err(); err != nil {

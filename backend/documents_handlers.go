@@ -320,8 +320,6 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusNotFound, errEquipmentNotFound.Error()
 	case errors.Is(err, errEquipmentNameRequired):
 		return http.StatusBadRequest, errEquipmentNameRequired.Error()
-	case errors.Is(err, errEquipmentInvalidCategory):
-		return http.StatusBadRequest, errEquipmentInvalidCategory.Error()
 	case errors.Is(err, errEquipmentInvalidSystem):
 		return http.StatusBadRequest, errEquipmentInvalidSystem.Error()
 	case errors.Is(err, errEquipmentInvalidStatus):

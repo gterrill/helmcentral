@@ -64,6 +64,10 @@ export interface EquipmentDocument {
   /** ADR 0127: orders a link within its OWN item's photo strip - meaningless
    * for a non-photo link, where the server leaves it at 0. */
   sort_index: number
+  /** The document's MIME type and upload time, for the Documents list's type
+   * badge, image thumbnail and date. */
+  mime: string
+  created_at: string
 }
 
 /** inventoryBin, backend/inventory_store.go - a numbered container within
@@ -138,7 +142,6 @@ export interface EquipmentItem {
  * bin_code, link_count, created_at, updated_at). */
 export interface EquipmentInput {
   name: string
-  category: EquipmentCategory
   system: EquipmentSystem
   manufacturer: string
   model: string
@@ -161,11 +164,10 @@ export interface EquipmentInput {
  * status 'deployed') wherever one applies. Shared by the Equipment editor's
  * own "New item" draft and the bin page's quick-add form (bin-quick-add.tsx),
  * which spreads this and overrides only the handful of fields it actually
- * collects (name, quantity, category, status, zone_id, bin_id) rather than
+ * collects (name, quantity, status, zone_id, bin_id) rather than
  * spelling out every field of its own. */
 export const BLANK_DRAFT: EquipmentInput = {
   name: '',
-  category: 'general',
   system: 'other',
   manufacturer: '',
   model: '',
@@ -184,7 +186,6 @@ export const BLANK_DRAFT: EquipmentInput = {
 }
 
 export interface EquipmentFilter {
-  category?: EquipmentCategory | ''
   system?: EquipmentSystem | ''
   status?: EquipmentStatus | ''
   zone?: string
@@ -295,7 +296,7 @@ export function useEquipment(filter: EquipmentFilter | null) {
   // the request from refiring every render for no filter change at all.
   const filterKey = filter === null
     ? null
-    : JSON.stringify([filter.category ?? '', filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
+    : JSON.stringify([filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
 
   const refresh = useCallback(async () => {
     if (filter === null) {
@@ -309,7 +310,6 @@ export function useEquipment(filter: EquipmentFilter | null) {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (filter.category) params.set('category', filter.category)
       if (filter.system) params.set('system', filter.system)
       if (filter.status) params.set('status', filter.status)
       if (filter.zone) params.set('zone', filter.zone)
@@ -592,7 +592,6 @@ export async function fetchEquipment(id: string): Promise<EquipmentItem> {
 export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
   return {
     name: item.name,
-    category: item.category,
     system: item.system,
     manufacturer: item.manufacturer,
     model: item.model,
@@ -616,6 +615,16 @@ export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
 export async function updateEquipment(id: string, input: EquipmentInput): Promise<EquipmentItem> {
   const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
   return data.item
+}
+
+/** DELETE /api/inventory/equipment/:id - standalone, for a caller with no
+ * useEquipmentItem instance open on this id, e.g. the Equipment index's own
+ * row action menu (ADR 0142). Same route and deletePhotos semantics as
+ * useEquipmentItem's own `remove` (equipment-editor.tsx's delete confirm),
+ * just without requiring the record to already be loaded into that hook. */
+export async function deleteEquipment(id: string, deletePhotos = false): Promise<void> {
+  const qs = deletePhotos ? '?delete_photos=true' : ''
+  await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
 }
 
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────

@@ -317,24 +317,30 @@ func TestCreateEquipmentHandler_MissingNameReturns400WithFieldShape(t *testing.T
 	}
 }
 
-func TestCreateEquipmentHandler_InvalidCategoryReturns400WithFieldShape(t *testing.T) {
+func TestCreateEquipmentHandler_IgnoresClientCategoryAndDerivesIt(t *testing.T) {
 	withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment", `{"name":"X","category":"bogus"}`, "")
-	if err := createEquipmentHandler(c); err != nil {
-		t.Fatalf("createEquipmentHandler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Field string `json:"field"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.Field != "category" {
-		t.Fatalf("expected field=category, got %+v", resp)
+	for _, tc := range []struct{ body, want string }{
+		{`{"name":"X","category":"bogus"}`, "general"},
+		{`{"name":"X"}`, "general"},
+		{`{"name":"X","category":"general","hour_meter_path":"propulsion.main.runTime"}`, "mechanical"},
+	} {
+		c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment", tc.body, "")
+		if err := createEquipmentHandler(c); err != nil {
+			t.Fatalf("createEquipmentHandler returned error: %v", err)
+		}
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s: expected 201, got %d: %s", tc.body, rec.Code, rec.Body.String())
+		}
+		var wrapped struct {
+			Item equipmentItem `json:"item"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &wrapped); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if wrapped.Item.Category != tc.want {
+			t.Fatalf("%s: expected category %q, got %q", tc.body, tc.want, wrapped.Item.Category)
+		}
 	}
 }
 
@@ -510,7 +516,7 @@ func TestCreateEquipmentHandler_LocationMismatchReturns400(t *testing.T) {
 func TestListEquipmentHandler_FiltersByQueryParams(t *testing.T) {
 	withTestDocumentStore(t)
 
-	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical", System: "electrical"}); err != nil {
+	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", System: "electrical", HourMeterPath: "electrical.generator.0.runTime"}); err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Spare impeller", Category: "general", System: "propulsion"}); err != nil {

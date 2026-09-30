@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
+import { downloadDocument } from '@/lib/document-download'
 
 // ADR 0127: the photo row runs every picked file through downscaleImage
 // before it ever reaches the network (canvas/createImageBitmap aren't
@@ -20,13 +21,35 @@ vi.mock('@/lib/image-downscale', () => ({
 // small fetch, covered by document-link-picker's own tests) - just enough
 // to drive `onPick` with a fixed result so this file's own save-error test
 // can pin what happens when the server refuses that pick.
+// The viewer drawer has its own tests (documents-panel's viewer); here only
+// which document the editor asks it to open matters.
+vi.mock('@/components/documents/document-viewer-sheet', () => ({
+  DocumentViewerSheet: ({ documentId }: { documentId: string | null }) => (
+    documentId ? <div data-testid="viewer-stub">viewing {documentId}</div> : null
+  ),
+}))
+vi.mock('@/lib/document-download', () => ({
+  documentContentUrl: (id: string) => `/api/documents/${id}/content`,
+  downloadDocument: vi.fn(async () => {}),
+}))
+
+async function removeFromItem(title: string) {
+  fireEvent.click(screen.getByRole('button', { name: `Actions for ${title}` }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from item' }))
+}
+
 vi.mock('@/components/inventory/document-link-picker', () => ({
-  DocumentLinkPicker: ({ open, onPick }: { open: boolean; onPick: (doc: { document_id: string; title: string; filename: string }) => void }) => (
+  DocumentLinkPicker: ({ open, onPick }: { open: boolean; onPick: (doc: { document_id: string; title: string; filename: string; kind: string; mime: string; created_at: string }) => void }) => (
     open
       ? (
-          <button type="button" onClick={() => onPick({ document_id: 'picked-doc', title: '', filename: 'engine.jpg' })}>
-            Pick document
-          </button>
+          <>
+            <button type="button" onClick={() => onPick({ document_id: 'picked-doc', title: '', filename: 'engine.jpg', kind: 'file', mime: 'image/jpeg', created_at: '2026-02-03T10:00:00Z' })}>
+              Pick document
+            </button>
+            <button type="button" onClick={() => onPick({ document_id: 'picked-note', title: 'Service notes', filename: 'service-notes.md', kind: 'note', mime: 'text/markdown', created_at: '2026-02-04T10:00:00Z' })}>
+              Pick note
+            </button>
+          </>
         )
       : null
   ),
@@ -136,7 +159,7 @@ function stubFetch() {
         ...currentDocuments.filter((d) => !body.remove.includes(d.document_id)),
         ...body.add
           .filter((docId) => !currentDocuments.some((d) => d.document_id === docId))
-          .map((docId) => ({ document_id: docId, title: '', filename: 'engine.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 })),
+          .map((docId) => ({ document_id: docId, title: '', filename: 'engine.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' })),
       ]
       currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((id) => !body.remove.includes(id)) }
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
@@ -203,7 +226,7 @@ function stubFetch() {
         // through a whole-item refresh() for some unrelated reason.
         currentDocuments = [
           ...currentDocuments,
-          { document_id: photoId, title: '', filename: file.name, kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+          { document_id: photoId, title: '', filename: file.name, kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' },
         ]
       }
       return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: currentItem }) })
@@ -243,7 +266,20 @@ function stubFetch() {
   vi.stubGlobal('fetch', fetchMock)
 }
 
+// ADR 0142: the save bar portals into the app header's SaveBarSlot. The
+// editor is rendered here without the app shell, so stand in a header with
+// the same slot (App.tsx mounts exactly this inside its <header>).
+let headerHost: HTMLElement
+
 beforeEach(() => {
+  headerHost = document.createElement('header')
+  headerHost.setAttribute('data-testid', 'app-header')
+  headerHost.className = 'relative'
+  const slot = document.createElement('div')
+  slot.id = 'save-bar-slot'
+  headerHost.appendChild(slot)
+  document.body.appendChild(headerHost)
+
   fetchMock.mockReset()
   currentItem = makeItem()
   currentDocuments = []
@@ -256,13 +292,252 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 
+afterEach(() => { headerHost.remove() })
+
 async function waitForLoaded() {
   await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Generator'))
 }
 
+// ADR 0142: Delete moved from its own always-visible button into Page's
+// overflow "More actions" menu (Page's secondaryActions slot, the Polaris
+// details-header convention this pattern library follows) - opening the
+// confirm dialog now takes two clicks instead of one.
+async function openDeleteDialog() {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete equipment' }))
+}
+
 describe('EquipmentEditor', () => {
+  // ADR 0142: the Polaris "Details" template - editable content in the main
+  // column, scannable status/organisation/location in the aside. Status is
+  // the one thing an operator glances at first ("is this thing deployed?"),
+  // Location says where it is without being edited at length, and
+  // Organisation (profile/aliases/install date) is
+  // reference detail, not something typed into on every visit - none of the
+  // three belongs beside Name/System in the main editing flow.
+  it('puts Status, Location and Organisation in the aside, and the rest of the form in the main column', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const aside = screen.getByRole('complementary')
+    expect(within(aside).getByLabelText('Status')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Verified aboard')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Zone')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Bin')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Location detail')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Profile')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Add alias')).toBeInTheDocument()
+    expect(within(aside).getByLabelText('Install date')).toBeInTheDocument()
+
+    // Specifications fields stay in the main column, not the aside.
+    expect(within(aside).queryByLabelText('Name')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).not.toBe(within(aside).queryByLabelText('Name'))
+  })
+
+  // ADR 0142 follow-up: the tag address used to sit at the top of the main
+  // column - moved into the aside's own Location section (after the
+  // zone/bin/detail fields, which is where it lives conceptually: it names
+  // WHERE this record is) rather than above the form the operator actually
+  // edits.
+  it("puts the tag address (TagRow) in the aside's own Location section, not the main column", async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const aside = screen.getByRole('complementary')
+    expect(within(aside).getByText('Location')).toBeInTheDocument()
+    expect(within(aside).getByText(`${window.location.origin}/inventory/equipment/eq-1`)).toBeInTheDocument()
+  })
+
+  // ADR 0142: Manufacturer+Model and Serial+Quantity sit side by side (a
+  // container-query FormRow), not each on its own line.
+  it('lays Manufacturer+Model and Serial+Quantity out as FormRow pairs', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    for (const [a, b] of [['Manufacturer', 'Model'], ['Serial', 'Quantity']]) {
+      const row = screen.getByLabelText(a).closest('[data-slot="form-row"]')
+      expect(row, `${a} is in a FormRow`).not.toBeNull()
+      expect(row).toContainElement(screen.getByLabelText(b))
+    }
+    // Name stands alone on its line.
+    expect(screen.getByLabelText('Name').closest('[data-slot="form-row"]')).toBeNull()
+  })
+
+  // category is derived on the server from the hour meter, so the editor has
+  // no such choice - just an optional Hour meter, always visible.
+  it('has no Serviced by / Category choice', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    expect(screen.queryByRole('combobox', { name: 'Serviced by' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Category')).not.toBeInTheDocument()
+    expect(screen.queryByText('Running hours')).not.toBeInTheDocument()
+  })
+
+  it('shows Hour meter as an ordinary optional field at the top of Maintenance, with its help text', async () => {
+    currentItem = makeItem({ hour_meter_path: 'electrical.generator.0.runTime' })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const maintenance = screen.getByText('Maintenance').closest('[data-slot="card"]') as HTMLElement
+    expect(within(maintenance).getByLabelText('Hour meter')).toHaveValue('electrical.generator.0.runTime')
+    expect(within(maintenance).getByText('Leave blank if this item has no hour meter. Rules counted in hours need one.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Hour-meter path')).not.toBeInTheDocument()
+  })
+
+  it('shows Hour meter even when blank, and on a new item', async () => {
+    currentItem = makeItem({ hour_meter_path: '' })
+    const { unmount } = render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    expect(screen.getByLabelText('Hour meter')).toHaveValue('')
+    unmount()
+
+    render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+    const maintenance = screen.getByText('Maintenance').closest('[data-slot="card"]') as HTMLElement
+    expect(within(maintenance).getByLabelText('Hour meter')).toBeInTheDocument()
+    // The parts that need a saved record stay hidden.
+    expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
+  })
+
+  it('does not send category on save (create or update)', async () => {
+    currentItem = makeItem({ hour_meter_path: 'electrical.generator.0.runTime' })
+    const { unmount } = render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    fireEvent.change(screen.getByLabelText('Hour meter'), { target: { value: 'electrical.generator.1.runTime' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body))
+      expect(body).not.toHaveProperty('category')
+      expect(body.hour_meter_path).toBe('electrical.generator.1.runTime')
+    })
+    unmount()
+
+    const onCreated = vi.fn()
+    render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={onCreated} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare alternator' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('eq-new'))
+    const post = fetchMock.mock.calls.find(([url, init]) =>
+      String(url).endsWith('/api/inventory/equipment') && (init as RequestInit | undefined)?.method === 'POST')
+    expect(JSON.parse(String((post?.[1] as RequestInit).body))).not.toHaveProperty('category')
+  })
+
+  it('takes over the app header with the save bar while dirty, and leaves the page body alone', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    expect(within(headerHost).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Manufacturer'), { target: { value: 'Kohler' } })
+
+    expect(within(headerHost).getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(within(headerHost).getByText('Unsaved changes')).toBeInTheDocument()
+  })
+
+  it('shows the save bar once a field is edited, and Discard restores the loaded value', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Manufacturer'), { target: { value: 'Kohler' } })
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Manufacturer')).toHaveValue('Onan')
+  })
+
+  it("shows the server's save error in the save bar", async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'PUT') {
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'name already in use' }) })
+      }
+      throw new Error(`unexpected fetch in this test: ${method} ${u}`)
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const saveBarError = await screen.findByRole('alert')
+    expect(saveBarError).toHaveTextContent('name already in use')
+    // Still dirty - the failed save must not have closed the bar.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+  })
+
+  it('New item: Discard leaves through onDiscarded (unguarded), not onBack and not by resetting the blank draft in place', async () => {
+    const onBack = vi.fn()
+    const onDiscarded = vi.fn()
+    render(<EquipmentEditor id={null} onBack={onBack} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={onDiscarded} />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+
+    expect(onDiscarded).toHaveBeenCalled()
+    expect(onBack).not.toHaveBeenCalled()
+  })
+
+  it('wraps the loading state in Page, with a working Back', () => {
+    fetchMock.mockImplementation(() => new Promise(() => {}))
+    const onBack = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={onBack} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('wraps the load-failure state in Page, with a working Back and Retry', async () => {
+    failItemGetsWith = 'database is locked'
+    const onBack = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={onBack} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+
+    await screen.findByText('database is locked')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(onBack).toHaveBeenCalled()
+
+    failItemGetsWith = null
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitForLoaded()
+  })
+
+  it('wraps the not-found state in Page, with a working Back', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url)
+      const method = init?.method ?? 'GET'
+      if (u.match(/\/api\/inventory\/equipment\/eq-1$/) && method === 'GET') {
+        return Promise.resolve({ ok: true, json: async () => ({ item: null, documents: [] }) })
+      }
+      if (u.includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.includes('/api/equipment-profiles')) return Promise.resolve({ ok: true, json: async () => ({ profiles, problems: [] }) })
+      if (u.includes('/api/signalk/paths')) return Promise.resolve({ ok: true, json: async () => ({ paths: [] }) })
+      if (u.includes('/api/inventory/maintenance/rules')) return Promise.resolve({ ok: true, json: async () => ({ rules: [] }) })
+      if (u.includes('/api/inventory/maintenance/log')) return Promise.resolve({ ok: true, json: async () => ({ entries: [] }) })
+      if (u.includes('/maintenance/meter-resets')) return Promise.resolve({ ok: true, json: async () => ({ resets: [] }) })
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+    const onBack = vi.fn()
+    render(<EquipmentEditor id="eq-1" onBack={onBack} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+
+    await screen.findByText('This equipment record could not be found.')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(onBack).toHaveBeenCalled()
+  })
+
   it('sends the edited draft fields in the PUT body on Save', async () => {
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Onan Generator' } })
@@ -279,7 +554,7 @@ describe('EquipmentEditor', () => {
 
   it('POSTs a new item and calls onCreated with the new id', async () => {
     const onCreated = vi.fn()
-    render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={onCreated} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={onCreated} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Spare impeller' } })
@@ -291,9 +566,9 @@ describe('EquipmentEditor', () => {
     expect(postCall).toBeDefined()
   })
 
-  it('prefills blank manufacturer/model and sets category to mechanical when a profile is chosen', async () => {
-    currentItem = makeItem({ manufacturer: '', model: '', category: 'general' })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+  it('prefills blank manufacturer/model when a profile is chosen', async () => {
+    currentItem = makeItem({ manufacturer: '', model: '' })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByRole('combobox', { name: 'Profile' }))
@@ -307,8 +582,8 @@ describe('EquipmentEditor', () => {
   })
 
   it('never overwrites a manufacturer the operator already typed when picking a profile', async () => {
-    currentItem = makeItem({ manufacturer: 'Kohler', model: '', category: 'general' })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    currentItem = makeItem({ manufacturer: 'Kohler', model: '' })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('Kohler')
 
@@ -325,7 +600,7 @@ describe('EquipmentEditor', () => {
 
   it('constrains the bin select to the chosen zone\'s bins', async () => {
     currentItem = makeItem({ zone_id: 'z1', zone_name: 'Engine room (stbd)' })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByRole('combobox', { name: 'Bin' }))
@@ -335,7 +610,7 @@ describe('EquipmentEditor', () => {
 
   it('setting a bin with no zone chosen sets the zone from that bin', async () => {
     currentItem = makeItem({ zone_id: null, bin_id: null })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByRole('combobox', { name: 'Bin' }))
@@ -348,7 +623,7 @@ describe('EquipmentEditor', () => {
   })
 
   it('adds and removes alias chips', async () => {
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.change(screen.getByLabelText('Add alias'), { target: { value: 'genset' } })
@@ -361,7 +636,7 @@ describe('EquipmentEditor', () => {
 
   it('re-seeds the draft from the saved item after a successful save, so server-side trimming does not leave it dirty forever', async () => {
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
     onDirtyChange.mockClear()
 
@@ -378,7 +653,7 @@ describe('EquipmentEditor', () => {
 
   it('keeps a newer edit typed while a save is in flight instead of the server echo overwriting it, and dirty stays true', async () => {
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Onan Generator' } })
@@ -415,7 +690,7 @@ describe('EquipmentEditor', () => {
 
   it('addAlias dedupes case-insensitively, matching the server\'s normalizeAliases', async () => {
     currentItem = makeItem({ aliases: ['Genset'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     expect(screen.getByText('Genset')).toBeInTheDocument()
 
@@ -429,7 +704,7 @@ describe('EquipmentEditor', () => {
 
   it('reports dirty as soon as a field changes and clears it after a successful save', async () => {
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
     onDirtyChange.mockClear()
 
@@ -441,8 +716,8 @@ describe('EquipmentEditor', () => {
   })
 
   it('does not PATCH the documents link set when it was not touched', async () => {
-    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
 
@@ -456,12 +731,12 @@ describe('EquipmentEditor', () => {
   })
 
   it('PATCHes remove with the dropped id once a linked document is removed', async () => {
-    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    await removeFromItem('Manual')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
@@ -478,7 +753,7 @@ describe('EquipmentEditor', () => {
   // document (whatever its own MIME type) is linked as an ordinary document
   // through the picker, with no refusal.
   it('links a document picked through the picker on Save', async () => {
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
@@ -498,10 +773,10 @@ describe('EquipmentEditor', () => {
 
   it('asks for confirmation before deleting and calls onDeleted once accepted', async () => {
     const onDeleted = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     expect(screen.getByText('Delete "Generator"?')).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
 
@@ -536,18 +811,18 @@ describe('EquipmentEditor', () => {
       return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
     })
 
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     await screen.findByText(/2 maintenance rules and 1 service log entry/)
   })
 
   it('says nothing about a cascade when the item has no maintenance rules or log entries', async () => {
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     expect(screen.getByText("This removes the equipment record. It can't be undone.")).toBeInTheDocument()
   })
 
@@ -563,10 +838,10 @@ describe('EquipmentEditor', () => {
   it('is not dirty when opening a saved item that has one photo and nothing else changes', async () => {
     currentItem = makeItem({ photo_ids: ['photo-1'] })
     currentDocuments = [
-      { document_id: 'photo-1', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+      { document_id: 'photo-1', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' },
     ]
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
     await screen.findByText('Remove')
 
@@ -590,17 +865,17 @@ describe('EquipmentEditor', () => {
   it('keeps a removed photo out of the Documents tab and off the next document save', async () => {
     currentItem = makeItem({ photo_ids: ['p1'] })
     currentDocuments = [
-      { document_id: 'p1', title: '', filename: 'cover.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
-      { document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 },
+      { document_id: 'p1', title: '', filename: 'cover.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' },
+      { document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' },
     ]
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Manual')
     // The photo IS in the Documents tab to begin with - it's an ordinary
     // linked document too, the strip is just a view over the same links.
     // (Two matches: the doc entry's title falls back to its filename, and
     // the filename shows again underneath it.)
-    expect(screen.getAllByText('cover.jpg')).toHaveLength(2)
+    expect(screen.getAllByText('cover.jpg')).toHaveLength(1)
 
     fireEvent.click(screen.getByText('Remove'))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
@@ -615,7 +890,7 @@ describe('EquipmentEditor', () => {
     // Touch the link set (remove the genuinely-linked Manual) and save - the
     // PATCH must name only Manual in remove, never the already-unlinked
     // photo (which this diff-based call never has to mention at all).
-    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    await removeFromItem('Manual')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
@@ -629,7 +904,7 @@ describe('EquipmentEditor', () => {
   })
 
   it("POSTs a saved item's Take photo pick to /photos", async () => {
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const file = new File(['data'], 'impeller.jpg', { type: 'image/jpeg' })
@@ -644,7 +919,7 @@ describe('EquipmentEditor', () => {
 
   it('PUTs the reordered ids when Make cover is clicked', async () => {
     currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     // p1 is the cover already - its own "Make cover" is disabled - so the
@@ -662,7 +937,7 @@ describe('EquipmentEditor', () => {
 
   it('DELETEs a photo when Remove is clicked', async () => {
     currentItem = makeItem({ photo_ids: ['p1'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     fireEvent.click(screen.getByText('Remove'))
@@ -685,7 +960,7 @@ describe('EquipmentEditor', () => {
   // Make cover still does not.
   it('applies the server response directly on Make cover, and only Remove triggers a documents-only refetch', async () => {
     currentItem = makeItem({ photo_ids: ['p1', 'p2'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     fetchMock.mockClear()
 
@@ -728,7 +1003,7 @@ describe('EquipmentEditor', () => {
   it('tries every file when adding several photos to a saved item, queuing only the failure for Retry', async () => {
     currentItem = makeItem({ photo_ids: [] })
     failingPhotoUploadNames.add('b.jpg')
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -757,7 +1032,7 @@ describe('EquipmentEditor', () => {
   it('keeps a failed photo upload with its own item: another item neither shows it nor retries it', async () => {
     currentItem = makeItem({ photo_ids: [] })
     failingPhotoUploadNames.add('b.jpg')
-    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn(), onDiscarded: vi.fn() }
     const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
     await waitForLoaded()
 
@@ -779,7 +1054,7 @@ describe('EquipmentEditor', () => {
     currentItem = makeItem({ photo_ids: [] })
     failingPhotoUploadNames.add('a.jpg')
     failingPhotoUploadNames.add('b.jpg')
-    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn(), onDiscarded: vi.fn() }
     const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
     await waitForLoaded()
     fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
@@ -866,7 +1141,7 @@ describe('EquipmentEditor', () => {
         id={id}
         onBack={vi.fn()}
         onCreated={(newId) => { onCreatedSpy(newId); setId(newId) }}
-        onDeleted={vi.fn()}
+        onDeleted={vi.fn()} onDiscarded={vi.fn()}
       />
     )
   }
@@ -894,7 +1169,7 @@ describe('EquipmentEditor', () => {
   // like a fresh upload would, no notice and no Retry queue involved.
   it('a duplicate upload links successfully with no refusal notice', async () => {
     currentItem = makeItem({ photo_ids: [] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -941,7 +1216,7 @@ describe('EquipmentEditor', () => {
         id={null}
         onBack={vi.fn()}
         onCreated={vi.fn()}
-        onDeleted={vi.fn()}
+        onDeleted={vi.fn()} onDiscarded={vi.fn()}
         onDirtyChange={onDirtyChange}
         initialZoneId="z1"
         initialBinId="b1"
@@ -961,7 +1236,7 @@ describe('EquipmentEditor', () => {
   it('reports a failed photo upload on the open item as hasWork, with Leave/Stay wording', async () => {
     failingPhotoUploadNames.add('a.jpg')
     const onHasWorkChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onHasWorkChange={onHasWorkChange} />)
     await waitForLoaded()
     onHasWorkChange.mockClear()
 
@@ -986,7 +1261,7 @@ describe('EquipmentEditor', () => {
     vi.mocked(downscaleAll).mockImplementationOnce(async (files: File[]) =>
       files.map((file) => ({ file, result: { ok: false, error: 'canvas failed' } })))
 
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1015,7 +1290,7 @@ describe('EquipmentEditor', () => {
       files.map((file) => ({ file, result: { ok: false, error: 'canvas failed' } })))
     vi.mocked(downscaleImage).mockRejectedValueOnce(new Error('still cannot downscale'))
 
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1032,19 +1307,19 @@ describe('EquipmentEditor', () => {
 
   it('shows no "Also delete" checkbox when the item has no exclusive photos', async () => {
     currentItem = makeItem({ photo_ids: [], exclusive_photo_ids: [] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     expect(screen.queryByText(/Also delete/)).not.toBeInTheDocument()
   })
 
   it('shows the "Also delete N photos" checkbox, off by default, when the item has exclusive photos', async () => {
     currentItem = makeItem({ photo_ids: ['p1', 'p2'], exclusive_photo_ids: ['p1'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     expect(screen.getByText('Also delete 1 photo only this item uses')).toBeInTheDocument()
     expect(screen.getByRole('checkbox')).not.toBeChecked()
   })
@@ -1052,10 +1327,10 @@ describe('EquipmentEditor', () => {
   it('sends delete_photos=true only when the checkbox is checked', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
     const onDeleted = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     // The Checkbox component (Base UI) exposes role="checkbox" on a
     // non-form <span> and drives the actual toggle through a real, visually
     // hidden <input type="checkbox"> sibling - that hidden input is what a
@@ -1082,10 +1357,10 @@ describe('EquipmentEditor', () => {
   it('does not send delete_photos when the checkbox is left unchecked', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
     const onDeleted = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={onDeleted} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())
@@ -1099,10 +1374,10 @@ describe('EquipmentEditor', () => {
   // confirming a delete that takes them along with the item.
   it('shows a thumbnail for each exclusive photo once the "Also delete" checkbox is ticked', async () => {
     currentItem = makeItem({ photo_ids: ['p1', 'p2'], exclusive_photo_ids: ['p1', 'p2'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment' }))
+    await openDeleteDialog()
     // No thumbnails before the box is ticked.
     expect(screen.queryByRole('img', { name: /photo to delete/i })).not.toBeInTheDocument()
 
@@ -1124,11 +1399,11 @@ describe('EquipmentEditor', () => {
   // change, so the editor read unsaved with nothing left to save.
   it('is not left unsaved when a photo staged for removal is then removed from the strip', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
-    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' }]
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove document Pump label' }))
+    await removeFromItem('Pump label')
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
 
     fireEvent.click(screen.getByText('Remove'))
@@ -1139,8 +1414,8 @@ describe('EquipmentEditor', () => {
   // swallowed its failures, leaving a removed photo listed with no error.
   it('shows an error when the documents list cannot be reloaded after a photo write', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
-    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' }]
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Remove')
 
@@ -1152,7 +1427,7 @@ describe('EquipmentEditor', () => {
 
   it('offers only a plain Remove for a photo that is not exclusive', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Remove')
 
@@ -1171,7 +1446,7 @@ describe('EquipmentEditor', () => {
   it('keeps an earlier-uploaded photo linked when the Documents tab is saved afterward', async () => {
     currentItem = makeItem({ photo_ids: [] })
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1238,7 +1513,7 @@ describe('EquipmentEditor', () => {
   it('PATCHes remove when an uploaded photo is removed from the Documents tab (not the photo strip), and clears dirty', async () => {
     currentItem = makeItem({ photo_ids: [] })
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1247,10 +1522,10 @@ describe('EquipmentEditor', () => {
     // Wait for the documents-only refetch to land, so the photo shows in
     // the Documents tab (title falls back to filename, twice - the entry's
     // own title line and the filename line beneath it).
-    await waitFor(() => expect(screen.getAllByText('a.jpg')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByText('a.jpg')).toHaveLength(1))
 
     onDirtyChange.mockClear()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove document a.jpg' }))
+    await removeFromItem('a.jpg')
     expect(onDirtyChange).toHaveBeenLastCalledWith(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -1268,7 +1543,7 @@ describe('EquipmentEditor', () => {
 
   it('is not dirty when the editor mounts fresh on a saved item', async () => {
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
@@ -1278,30 +1553,45 @@ describe('EquipmentEditor', () => {
   // editor switched ids without remounting. The render-time reset
   // (`pendingForId !== id`) is what this proves - it lands in the SAME
   // commit as the id change, not a later effect.
-  it('clears pending document adds/removes staged on one item when switching to a different item', async () => {
-    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
-    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+  //
+  // ADR 0142 amendment: this used to prove the negative (no leaked PATCH) by
+  // Saving a completely undirtied B - which only worked because Save was a
+  // plain, always-rendered button. Now that Save lives in the dirty-gated
+  // SaveBar, the STRONGER property is available and checked first: B isn't
+  // dirty at all once the switch lands, so the bar isn't even there to
+  // click. The original PATCH-leak assertion still runs afterward, on a
+  // field dirtied deliberately, so a save that DOES happen from here is
+  // still proven clean.
+  it('clears pending document adds/removes staged on one item when switching to a different item, leaving the new item undirtied', async () => {
+    currentDocuments = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn(), onDiscarded: vi.fn() }
     const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
     await waitForLoaded()
     await screen.findByText('Manual')
 
     // Stage a remove and an add on item A, but never save either.
-    fireEvent.click(screen.getByRole('button', { name: 'Remove document Manual' }))
+    await removeFromItem('Manual')
     fireEvent.click(screen.getByRole('button', { name: 'Add document' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pick document' }))
-    await waitFor(() => expect(screen.getAllByText('engine.jpg')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByText('engine.jpg')).toHaveLength(1))
 
     currentItem = makeItem({ id: 'eq-2', name: 'Item B' })
-    currentDocuments = [{ document_id: 'd2', title: 'Spec sheet', filename: 'spec.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    currentDocuments = [{ document_id: 'd2', title: 'Spec sheet', filename: 'spec.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
     rerender(<EquipmentEditor id="eq-2" {...props} />)
     await screen.findByDisplayValue('Item B')
     await screen.findByText('Spec sheet')
 
     // Neither A's pending add nor its pending (but never saved) removal of
-    // Manual leaked onto B - B shows only its own actual document.
+    // Manual leaked onto B - B shows only its own actual document...
     expect(screen.queryByText('engine.jpg')).not.toBeInTheDocument()
     expect(screen.queryByText('Manual')).not.toBeInTheDocument()
+    // ...and the stronger property: B reads completely undirtied by A's
+    // staged-but-unsaved changes, so the save bar isn't even showing.
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
 
+    // A save that DOES happen from here - one field dirtied on B, deliberately
+    // this time - still carries nothing stale in its documents PATCH.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item B renamed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
       String(url).endsWith('/api/inventory/equipment/eq-2') && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
@@ -1314,7 +1604,11 @@ describe('EquipmentEditor', () => {
   // remounting) - refreshDocuments' own idRef guard (mirroring setItem's)
   // must drop that late response rather than write A's document onto B's
   // open record.
-  it('drops a documents-only refetch for an item the operator has since switched away from', async () => {
+  //
+  // ADR 0142 amendment: same stronger-property rewrite as the test above -
+  // proves B isn't dirty (no save bar) before proving a deliberate save
+  // from there still carries nothing stale.
+  it('drops a documents-only refetch for an item the operator has since switched away from, leaving the new item undirtied', async () => {
     const itemA = makeItem({ id: 'eq-1', name: 'Item A', photo_ids: [] })
     const itemB = makeItem({ id: 'eq-2', name: 'Item B', photo_ids: [] })
     const itemsById: Record<string, EquipmentItem> = { 'eq-1': itemA, 'eq-2': itemB }
@@ -1336,7 +1630,7 @@ describe('EquipmentEditor', () => {
       return withoutRace(url, init)
     })
 
-    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn() }
+    const props = { onBack: vi.fn(), onCreated: vi.fn(), onDeleted: vi.fn(), onDiscarded: vi.fn() }
     const { rerender } = render(<EquipmentEditor id="eq-1" {...props} />)
     await screen.findByDisplayValue('Item A')
 
@@ -1350,14 +1644,20 @@ describe('EquipmentEditor', () => {
     const getsBeforeResolve = getCallsForA().length
 
     itemsById['eq-1'] = { ...itemA, photo_ids: ['photo-a'] }
-    docsByItem['eq-1'] = [{ document_id: 'photo-a', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0 }]
+    docsByItem['eq-1'] = [{ document_id: 'photo-a', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' }]
     resolveUpload({ ok: true, status: 201, json: async () => ({ item: itemsById['eq-1'] }) })
 
     await waitFor(() => expect(getCallsForA().length).toBeGreaterThan(getsBeforeResolve))
 
-    // B's Documents tab must never show A's photo.
+    // B's Documents tab must never show A's photo...
     expect(screen.queryByText('a.jpg')).not.toBeInTheDocument()
+    // ...and the stronger property: B reads completely undirtied by the
+    // race, so the save bar isn't even showing.
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
 
+    // A save that DOES happen from here - one field dirtied on B, deliberately
+    // this time - still carries nothing stale in its documents PATCH.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Item B renamed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
       String(url).endsWith('/api/inventory/equipment/eq-2') && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
@@ -1368,7 +1668,7 @@ describe('EquipmentEditor', () => {
   it('uploading a photo alone does not make the editor dirty', async () => {
     currentItem = makeItem({ photo_ids: [] })
     const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDirtyChange={onDirtyChange} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
     await waitForLoaded()
     onDirtyChange.mockClear()
 
@@ -1381,7 +1681,7 @@ describe('EquipmentEditor', () => {
 
   it('offers "Remove and delete" alongside Remove for an exclusive photo, and it sends ?delete=true', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: ['p1'] })
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} />)
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
     await screen.findByText('Remove and delete')
 
@@ -1394,4 +1694,121 @@ describe('EquipmentEditor', () => {
       expect(String(call?.[0])).toContain('delete=true')
     })
   })
+
+  // Documents section as a ResourceList (ADR 0142): media, title, date, type
+  // badge and a menu, with the viewer drawer behind Open.
+  describe('Documents list', () => {
+    const pdf = { document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T12:00:00Z' }
+    const image = { document_id: 'p1', title: '', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-13T12:00:00Z' }
+
+    it('lists each linked document with title, upload date and a type badge', async () => {
+      currentDocuments = [pdf, image]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      const list = await screen.findByRole('list', { name: 'Documents' })
+      const items = within(list).getAllByRole('listitem')
+      expect(items).toHaveLength(2)
+      const manual = items.find((li) => within(li).queryByText('Manual'))!
+      expect(within(manual).getByText('PDF')).toBeInTheDocument()
+      expect(within(manual).getByText(/Jan 2026/)).toBeInTheDocument()
+      // No title: falls back to the filename.
+      const photo = items.find((li) => within(li).queryByText('pump.jpg'))!
+      expect(within(photo).getByText('JPG')).toBeInTheDocument()
+    })
+
+    it('shows a lazy thumbnail for an image and a file icon for anything else', async () => {
+      currentDocuments = [pdf, image]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      const list = await screen.findByRole('list', { name: 'Documents' })
+      const imgs = Array.from(list.querySelectorAll('img'))
+      expect(imgs).toHaveLength(1)
+      expect(imgs[0]).toHaveAttribute('src', expect.stringContaining('/api/documents/p1/content'))
+      expect(imgs[0]).toHaveAttribute('loading', 'lazy')
+      expect(imgs[0]).toHaveClass('object-cover')
+    })
+
+    it('the menu offers Open, Download and Remove from item', async () => {
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Manual' }))
+      expect(await screen.findByRole('menuitem', { name: 'Open' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: 'Download' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: 'Remove from item' })).toBeInTheDocument()
+    })
+
+    it('clicking a document, or choosing Open, opens it in the viewer drawer', async () => {
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByText('Manual'))
+      expect(screen.getByTestId('viewer-stub')).toHaveTextContent('viewing d1')
+    })
+
+    it('Open from the menu opens the viewer without dirtying the form', async () => {
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Manual' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Open' }))
+      expect(screen.getByTestId('viewer-stub')).toHaveTextContent('viewing d1')
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    })
+
+    it('Download saves the file through the existing content route', async () => {
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Manual' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Download' }))
+      await waitFor(() => expect(downloadDocument).toHaveBeenCalledWith('d1', 'manual.pdf'))
+    })
+
+    it('a failed download is reported, not swallowed', async () => {
+      vi.mocked(downloadDocument).mockRejectedValueOnce(new Error('document file missing on disk'))
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Manual' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Download' }))
+      expect(await screen.findByText('document file missing on disk')).toBeInTheDocument()
+    })
+
+    it('Remove from item only stages the unlink: dirty, nothing deleted, list drops it', async () => {
+      currentDocuments = [pdf]
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      await screen.findByText('Manual')
+      await removeFromItem('Manual')
+      expect(screen.queryByRole('list', { name: 'Documents' })).not.toBeInTheDocument()
+      expect(screen.getByText('No documents linked yet.')).toBeInTheDocument()
+      expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+      expect(fetchMock.mock.calls.some(([url, init]) =>
+        String(url).includes('/documents') && (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    })
+
+    it('a picked document shows its real type and date before it is saved', async () => {
+      currentDocuments = []
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Add document' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Pick document' }))
+      const list = await screen.findByRole('list', { name: 'Documents' })
+      expect(within(list).getByText('JPG')).toBeInTheDocument()
+      expect(within(list).getByText(/Feb 2026/)).toBeInTheDocument()
+    })
+
+    it('a picked note shows the NOTE badge before it is saved', async () => {
+      currentDocuments = []
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      fireEvent.click(await screen.findByRole('button', { name: 'Add document' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Pick note' }))
+      const list = await screen.findByRole('list', { name: 'Documents' })
+      expect(within(list).getByText('NOTE')).toBeInTheDocument()
+      expect(within(list).queryByText('MD')).not.toBeInTheDocument()
+    })
+  })
+
 })

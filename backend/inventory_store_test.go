@@ -461,10 +461,68 @@ func TestDocumentStore_CreateEquipmentRequiresName(t *testing.T) {
 	}
 }
 
-func TestDocumentStore_CreateEquipmentRejectsInvalidCategory(t *testing.T) {
+// category is derived, never chosen: an item with an hour meter is
+// 'mechanical', one without is 'general'. A client-sent value is ignored
+// (old clients and bin quick-add still send one).
+func TestDocumentStore_CreateEquipmentDerivesCategoryFromHourMeter(t *testing.T) {
 	store := newTestDocumentStore(t)
-	if _, err := store.CreateEquipment(equipmentItem{Name: "X", Category: "bogus"}); !errors.Is(err, errEquipmentInvalidCategory) {
-		t.Fatalf("expected errEquipmentInvalidCategory, got %v", err)
+	with, err := store.CreateEquipment(equipmentItem{Name: "Genset", Category: "general", HourMeterPath: "electrical.generator.0.runTime"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	if with.Category != "mechanical" {
+		t.Fatalf("hour meter set: expected mechanical, got %q", with.Category)
+	}
+	without, err := store.CreateEquipment(equipmentItem{Name: "Torch", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	if without.Category != "general" {
+		t.Fatalf("no hour meter: expected general, got %q", without.Category)
+	}
+	blank, err := store.CreateEquipment(equipmentItem{Name: "Blank", Category: "mechanical", HourMeterPath: "   "})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	if blank.Category != "general" {
+		t.Fatalf("blank hour meter: expected general, got %q", blank.Category)
+	}
+}
+
+func TestDocumentStore_CreateEquipmentIgnoresAnUnknownClientCategory(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "X", Category: "bogus"})
+	if err != nil {
+		t.Fatalf("an unknown client category must be ignored, got %v", err)
+	}
+	if item.Category != "general" {
+		t.Fatalf("expected general, got %q", item.Category)
+	}
+}
+
+func TestDocumentStore_UpdateEquipmentRederivesCategoryFromHourMeter(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Genset"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	item.HourMeterPath = "electrical.generator.0.runTime"
+	item.Category = "general" // client says general; the meter wins
+	updated, err := store.UpdateEquipment(item.ID, item)
+	if err != nil {
+		t.Fatalf("UpdateEquipment: %v", err)
+	}
+	if updated.Category != "mechanical" {
+		t.Fatalf("meter added: expected mechanical, got %q", updated.Category)
+	}
+	updated.HourMeterPath = ""
+	updated.Category = "mechanical"
+	cleared, err := store.UpdateEquipment(item.ID, updated)
+	if err != nil {
+		t.Fatalf("UpdateEquipment: %v", err)
+	}
+	if cleared.Category != "general" {
+		t.Fatalf("meter cleared: expected general, got %q", cleared.Category)
 	}
 }
 
@@ -659,8 +717,8 @@ func TestDocumentStore_ListEquipmentFiltersByCategorySystemStatusZoneAndQuery(t 
 		t.Fatalf("CreateZone: %v", err)
 	}
 	generator, err := store.CreateEquipment(equipmentItem{
-		Name: "Generator", Category: "mechanical", System: "electrical", Status: "deployed",
-		ZoneID: &zone.ID, Aliases: []string{"genset"},
+		Name: "Generator", System: "electrical", Status: "deployed",
+		ZoneID: &zone.ID, Aliases: []string{"genset"}, HourMeterPath: "electrical.generator.0.runTime",
 	})
 	if err != nil {
 		t.Fatalf("CreateEquipment (generator): %v", err)
@@ -1611,3 +1669,25 @@ func TestDocumentStore_ListEquipmentLeavesExclusivePhotoIDsEmpty(t *testing.T) {
 // TestDocumentStore_DocumentDeletableAsOrphanPhoto and
 // TestDocumentStore_DocumentDeletableAsOrphanPhotoExcludesFiledAndNotes
 // above (finding 3: the renamed helper also covers folder_id/kind).
+
+// The Equipment editor's Documents list shows a type badge, a thumbnail for
+// images and the upload date, so the linked-document payload carries the
+// document's MIME type and creation time.
+func TestDocumentStore_EquipmentDocumentsCarryMIMEAndCreatedAt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Generator", Category: "mechanical"})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	doc := mustInsertDocument(t, store, "sha-meta", "manual.pdf", nil)
+	if err := store.PatchEquipmentDocuments(item.ID, []string{doc.ID}, nil); err != nil {
+		t.Fatalf("PatchEquipmentDocuments: %v", err)
+	}
+	docs, err := store.EquipmentDocuments(item.ID)
+	if err != nil {
+		t.Fatalf("EquipmentDocuments: %v", err)
+	}
+	if len(docs) != 1 || docs[0].MIME != "application/pdf" || docs[0].CreatedAt.IsZero() {
+		t.Fatalf("expected mime and created_at on the linked document, got %+v", docs)
+	}
+}

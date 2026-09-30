@@ -67,7 +67,7 @@ export function EquipmentProfileLinker({
     if (!name) return
     setBusy(true)
     try {
-      const created = await createEquipment({ ...BLANK_DRAFT, name, category: 'mechanical', system: defaultSystem })
+      const created = await createEquipment({ ...BLANK_DRAFT, name, system: defaultSystem })
       setNewName('')
       setCreating(false)
       onEquipmentIdChange(created.id)

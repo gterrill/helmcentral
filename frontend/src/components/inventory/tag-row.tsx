@@ -3,22 +3,32 @@ import { Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { nfcSupported, writeUrlTag } from '@/lib/nfc'
+import { cn } from '@/lib/utils'
 
 // ADR 0127 §1/§4: what a tag holds (a plain NDEF URL record, this row's own
 // `url`) and who can write one (Web NFC exists only in Chrome on Android -
 // everywhere else this row offers Copy and says why, never a broken or
 // silently-degraded "Write tag" button). Appears on the bin page
-// (bin-page.tsx) and in the equipment editor for a saved item.
+// (bin-page.tsx) and, in the aside's own "Inventory" section (ADR 0142), the
+// equipment editor for a saved item.
 
 interface TagRowProps {
   /** The app-relative path this tag should open, e.g. `/inventory/bins/LAZ-02`. */
   path: string
+  /** 'inline' (default) keeps the URL and its buttons on one row - the bin
+   * page's own width, unchanged since ADR 0127. 'stacked' puts the URL on
+   * its own line above its own button row instead, for a narrow container
+   * (the Equipment editor's aside, `DetailsLayout`'s 20rem column) where an
+   * inline row would either overflow or truncate the URL down to nothing
+   * usable next to two buttons. */
+  layout?: 'inline' | 'stacked'
 }
 
 type WriteState = 'idle' | 'writing' | 'written' | 'error'
 
-export function TagRow({ path }: TagRowProps) {
+export function TagRow({ path, layout = 'inline' }: TagRowProps) {
   const url = new URL(path, window.location.origin).toString()
+  const stacked = layout === 'stacked'
   const [copied, setCopied] = useState(false)
   const [writeState, setWriteState] = useState<WriteState>('idle')
   const [writeError, setWriteError] = useState<string | null>(null)
@@ -92,41 +102,52 @@ export function TagRow({ path }: TagRowProps) {
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-sm">{url}</span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0 gap-1.5"
-          onClick={() => { void handleCopy() }}
+      <div className={cn('flex min-w-0 gap-2', stacked ? 'flex-col' : 'items-center')}>
+        <span
+          className={cn('min-w-0 truncate font-mono text-sm', !stacked && 'flex-1')}
+          title={url}
         >
-          {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
-        {nfcSupported() && writeState === 'writing' && (
+          {url}
+        </span>
+        {/* flex-wrap so Copy/Cancel/Write tag together never force a row
+            wider than the container - the inline case never needs to wrap
+            in practice (bin-page.tsx's own width), the stacked case (the
+            Equipment editor's 20rem aside) sometimes does. */}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="shrink-0"
-            onClick={handleCancel}
+            className="shrink-0 gap-1.5"
+            onClick={() => { void handleCopy() }}
           >
-            Cancel
+            {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+            {copied ? 'Copied' : 'Copy'}
           </Button>
-        )}
-        {nfcSupported() && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            disabled={writeState === 'writing'}
-            onClick={() => { void handleWrite() }}
-          >
-            {writeState === 'writing' ? 'Hold the phone to the tag' : writeState === 'written' ? 'Written' : 'Write tag'}
-          </Button>
-        )}
+          {nfcSupported() && writeState === 'writing' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={handleCancel}
+            >
+              Cancel
+            </Button>
+          )}
+          {nfcSupported() && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={writeState === 'writing'}
+              onClick={() => { void handleWrite() }}
+            >
+              {writeState === 'writing' ? 'Hold the phone to the tag' : writeState === 'written' ? 'Written' : 'Write tag'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {!nfcSupported() && (

@@ -1,4 +1,3 @@
-import { BookOpen } from 'lucide-react'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -26,8 +25,6 @@ import {
   initialRegularSettingsDraft,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
-import { SETTINGS_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
-
 interface SettingsPageProps {
   onDirtyChange?: (dirty: boolean) => void
   /**
@@ -39,13 +36,6 @@ interface SettingsPageProps {
    */
   activeSectionId?: SettingsSectionId
   onSectionChange?: (id: SettingsSectionId) => void
-  /**
-   * ADR 0095: one Help button above the active section, rather than each
-   * of the ten sections growing its own. Optional for the same reason
-   * `activeSectionId` is - omitted, no button renders, so every existing
-   * caller and test is untouched.
-   */
-  onOpenHelp?: (target: HelpTarget) => void
   onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
@@ -70,7 +60,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     onDirtyChange,
     activeSectionId: controlledSectionId,
     onSectionChange,
-    onOpenHelp,
     onAskMate,
   },
   ref,
@@ -234,20 +223,13 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     <div className="flex flex-col gap-4 md:flex-row">
       <SettingsNav activeSectionId={activeSectionId} onSelect={handleSectionSelect} />
 
+      {/* No Help button of its own (removed - it duplicated the header's `?`,
+          and only existed because App.tsx's own `?` handler didn't pass
+          inventorySection through helpTargetFor for the Inventory panel; it
+          passed settingsSection correctly for this page all along. See
+          inventory-panel.tsx's identical note and ADR 0142's CRUD Pattern
+          Library note in AGENTS.md). */}
       <div className="min-w-0 flex-1 space-y-4">
-        {onOpenHelp && (
-          <div className="mx-auto flex max-w-3xl justify-end">
-            <Button
-              variant="ghost"
-              className="h-10 gap-2 text-primary"
-              aria-label="Open help for this section"
-              onClick={() => onOpenHelp(SETTINGS_HELP_TARGETS[activeSectionId])}
-            >
-              <BookOpen className="h-4 w-4" />
-              Help
-            </Button>
-          </div>
-        )}
         {activeSection}
 
         <div className="mx-auto flex max-w-3xl items-center justify-end">

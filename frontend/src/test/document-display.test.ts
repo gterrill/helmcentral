@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { documentFailureMessage, formatDocumentTime } from '@/lib/document-display'
+import { documentFailureMessage, documentIsImage, documentTypeBadge, formatDocumentTime } from '@/lib/document-display'
 
 // ADR 0115: the Details page's Uploaded/Last indexed rows need a date, not
 // just a time - formatAlarmTime (alarm-display.ts) is built for "raised a
@@ -95,5 +95,27 @@ describe('documentFailureMessage', () => {
         error: 'No document model is configured. Set one in Settings → Assistant.',
       }),
     ).toBe('No document model is configured. Set one in Settings → Assistant.')
+  })
+})
+
+describe('documentTypeBadge / documentIsImage', () => {
+  it('names a document by its MIME type, then its extension', () => {
+    expect(documentTypeBadge({ mime: 'application/pdf', filename: 'a.pdf', kind: 'file' })).toBe('PDF')
+    expect(documentTypeBadge({ mime: 'image/jpeg', filename: 'a.jpeg', kind: 'file' })).toBe('JPG')
+    expect(documentTypeBadge({ mime: 'image/png', filename: 'a.png', kind: 'file' })).toBe('PNG')
+    expect(documentTypeBadge({ mime: 'text/markdown', filename: 'a.md', kind: 'file' })).toBe('MD')
+    expect(documentTypeBadge({ mime: '', filename: 'notes.docx', kind: 'file' })).toBe('DOCX')
+    expect(documentTypeBadge({ mime: '', filename: 'noext', kind: 'file' })).toBe('FILE')
+  })
+
+  it('calls a note a NOTE whatever its MIME type', () => {
+    expect(documentTypeBadge({ mime: 'text/markdown', filename: 'x.md', kind: 'note' })).toBe('NOTE')
+  })
+
+  it('knows an image from MIME, or from the extension when the MIME is unknown', () => {
+    expect(documentIsImage({ mime: 'image/webp', filename: 'a' })).toBe(true)
+    expect(documentIsImage({ mime: '', filename: 'a.JPG' })).toBe(true)
+    expect(documentIsImage({ mime: 'application/pdf', filename: 'a.jpg' })).toBe(false)
+    expect(documentIsImage({ mime: '', filename: 'a.pdf' })).toBe(false)
   })
 })

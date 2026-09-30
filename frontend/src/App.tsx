@@ -66,6 +66,12 @@ const SettingsPage = lazy(() => import('@/components/settings/settings-page').th
 // from Documents' own New → Note menu.
 const MateSheet = lazy(() => import('@/components/mate-sheet').then((mod) => ({ default: mod.MateSheet })))
 const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ default: mod.HelpSheet })))
+// ADR 0142: the CRUD pattern library's dev-only tour, reachable only at
+// /patterns and only when import.meta.env.DEV (see patternsGalleryRequested
+// below) - lazy like every panel above so its fixtures never reach the
+// entry chunk, and additionally never even requested in a production build
+// since the render path that names it is dead code once DEV is false.
+const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import {
   AlertDialog,
   AlertDialogAction,
@@ -222,6 +228,9 @@ import {
 } from '@/lib/app-location'
 import { screenContextFor } from '@/lib/mate-screen'
 import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
+// Its own module, not the patterns barrel: the barrel would drag TanStack
+// Table into the entry chunk for the sake of one empty div.
+import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { cn } from '@/lib/utils'
 
 /**
@@ -367,6 +376,16 @@ export function App() {
   // starts rewriting the bar to match in-app navigation).
   const [initialLocation] = useState<AppLocation>(() =>
     parseAppLocation((globalThis.location?.pathname ?? '/') + (globalThis.location?.search ?? '')))
+  // ADR 0142: /patterns is deliberately NOT a PanelId - it never needs
+  // parseAppLocation/formatAppLocation's own canonical-path or dirty-
+  // navigation-guard machinery, so it reads the raw pathname directly
+  // rather than growing AppLocation a shape none of that machinery would
+  // ever act on. import.meta.env.DEV is statically replaced at build time,
+  // so this is `false` (and the PatternsGallery branch below dead code) in
+  // a production build - see that branch's own comment for what this
+  // guards, beyond the lazy-loading gallery.tsx already gets on its own.
+  const [patternsGalleryRequested] = useState(() =>
+    import.meta.env.DEV && (globalThis.location?.pathname ?? '').replace(/\/+$/, '') === '/patterns')
   const [activePanel, setActivePanel] = useState<PanelId | null>(initialLocation.panel)
   // Lives in App, not in SettingsPage/SettingsNav, because App is the one
   // place that also writes it to the URL (`/settings/<id>`) — and it is
@@ -2953,12 +2972,19 @@ export function App() {
               // the editor open on a record that no longer exists.
               if (message) toast.error(message)
             }}
+            // Discard on a new item: nothing left to protect, and the editor
+            // is still reporting dirty when it fires, so the guard would ask
+            // about the changes the operator just threw away.
+            onEquipmentDiscarded={() => {
+              setInventoryDirty(false)
+              setInventoryEquipmentEditId(null)
+              setInventoryCreatingEquipment(false)
+            }}
             onDirtyChange={setInventoryDirty}
             onHasWorkChange={(work, detail) => {
               setInventoryHasWork(work)
               setInventoryWorkDetail(detail ?? null)
             }}
-            onOpenHelp={openHelp}
             canWrite={canWrite}
             binCode={inventoryBinCode}
             // Opening a bin, like opening an equipment item, never discards
@@ -2989,7 +3015,6 @@ export function App() {
             onDirtyChange={setSettingsDirty}
             activeSectionId={settingsSection}
             onSectionChange={setSettingsSection}
-            onOpenHelp={openHelp}
             onAskMate={openMate}
           />
         )
@@ -3121,6 +3146,29 @@ export function App() {
 
   if (auth.mode === 'signalk' && auth.user === null) {
     return <LoginScreen onLogin={auth.login} error={auth.error} />
+  }
+
+  // ADR 0142: the CRUD pattern library's dev-only gallery - reuses the
+  // ordinary auth gates above (a boat running signalk auth still needs to
+  // sign in to reach it) but bypasses the whole dashboard shell below
+  // (sidebar, header, panel routing) entirely, the same "reuse dashboardGrid
+  // directly" reasoning the wall display's own early return just below
+  // uses for the opposite reason. patternsGalleryRequested is `false` in a
+  // production build (import.meta.env.DEV statically replaced), so this
+  // branch - and the dynamic import() PatternsGallery names - never runs
+  // there.
+  if (patternsGalleryRequested) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+            Loading patterns…
+          </div>
+        }
+      >
+        <PatternsGallery />
+      </Suspense>
+    )
   }
 
   // The wall display (ADR 0110, superseding ADR 0089) reuses dashboardGrid
@@ -3310,8 +3358,13 @@ export function App() {
             gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
             The breadcrumb is the designated slack absorber, so it truncates while the
             clock and controls keep their size. */}
+        {/* ADR 0142: the window scrolls, so a dirty form's SaveBar (portalled into this
+            header) would scroll away with it the moment the operator edits a field
+            lower down the page. While - and only while - a save bar is showing, the
+            header sticks to the top; :has() keeps every other page's header exactly
+            as it was. */}
         {!isFullscreenDashboard && (
-        <header className="relative z-60 flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
+        <header className="relative z-60 flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16 has-[[data-slot=save-bar]]:sticky has-[[data-slot=save-bar]]:top-0 has-[[data-slot=save-bar]]:bg-background">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 hidden h-4 sm:block" />
@@ -3449,7 +3502,7 @@ export function App() {
               size="icon"
               aria-label="Open help"
               title="Help for this screen"
-              onClick={() => openHelp(helpTargetFor({ panel: activePanel, section: settingsSection }))}
+              onClick={() => openHelp(helpTargetFor({ panel: activePanel, section: settingsSection, inventorySection }))}
             >
               <CircleHelp className="h-4 w-4" />
             </Button>
@@ -3517,6 +3570,11 @@ export function App() {
               onLogout={auth.mode === 'signalk' ? () => { void auth.logout() } : undefined}
             />
           </div>
+          {/* ADR 0142: a dirty form's SaveBar portals in here and covers the
+              header (Polaris' contextual save bar) - the header is `relative`,
+              so the slot's absolute inset-0 is exactly its box. Empty (and
+              display:none) whenever nothing is dirty. */}
+          <SaveBarSlot />
         </header>
         )}
         {/* Full screen, touch-first exit affordance: the header (and its

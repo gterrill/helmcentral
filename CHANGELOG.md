@@ -21,12 +21,48 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Documents list on an equipment item now shows each document with a
+  thumbnail or file icon, its title, the date it was added and a type label
+  such as PDF, JPG or NOTE. Click one, or choose Open from its menu, to read it
+  in a panel from the right without leaving the item. The menu also has
+  Download, and Remove from item, which takes the link off this item only and
+  waits for the save bar.
 - The forecast page's chart legends and data-source lines are bigger and
   easier to read at a glance, and now sit together at the bottom of each
   chart instead of split between the top and bottom. The cloud, wind and
   wave keys sit beside their chart's title. Rain and sun, and wave height
   and the largest wave you're likely to meet, now read as one sentence each
   instead of two.
+- The Equipment page's list can now be sorted by tapping a column heading,
+  such as Name or Status, tapping again to reverse the order. Each row
+  carries its own menu for opening or deleting that item, alongside the
+  existing tap-to-open. On a phone, the list shows as a stack of cards
+  instead of a cramped table.
+- The duplicate Help button above the Inventory and Settings sections is
+  gone. Use the `?` in the header - it opens the right page for whichever
+  section you're looking at.
+- The Equipment page now shows status, location and organisation details -
+  deployed or stored, verified aboard, zone, bin, location detail, the tag
+  address, the profile, aliases, install date and hour-meter path - in a
+  side column next to the record, instead of mixed in with the rest of the
+  form. A save bar replaces the header while you have unsaved changes,
+  with Save and Discard, and gives the header back once you save or
+  discard. Short fields such as manufacturer and model, or serial and
+  quantity, now sit side by side where there is room.
+- Equipment no longer has a Category or "Serviced by" choice. An item either
+  has an hour meter or it doesn't: the Maintenance section now opens with an
+  optional Hour meter field, shown for every item including a new one. Leave
+  it blank for gear with no hour meter. If an item has service rules counted
+  in hours and no hour meter, the Maintenance section warns that those rules
+  can't count hours until one is set. The Equipment list loses its
+  "Serviced by" column and filter, and picking a profile no longer changes
+  anything but the blank manufacturer and model.
+
+### Fixed
+
+- The header's `?` now opens the correct help page for the Inventory
+  section you're actually on - Locations, Maintenance, Profiles and
+  Stocktake, not just Equipment.
 
 ## [0.36.0] - 2026-09-28
 

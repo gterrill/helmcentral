@@ -1,21 +1,13 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
+import { DocumentViewerSheet } from '@/components/documents/document-viewer-sheet'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -39,14 +31,16 @@ import {
   setEquipmentPhotoOrder,
   useEquipmentItem,
   useInventoryZones,
-  type EquipmentCategory,
   type EquipmentInput,
   type EquipmentItem,
   type EquipmentStatus,
   type EquipmentSystem,
   type InventoryFieldError,
 } from '@/hooks/use-inventory'
+import { documentIsImage, documentTypeBadge, formatDocumentTime } from '@/lib/document-display'
+import { documentContentUrl, downloadDocument } from '@/lib/document-download'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
+import { fetchNote, saveNote } from '@/lib/note-api'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft (App.tsx's
@@ -56,6 +50,24 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 // App.tsx's navigation guard (the same Settings/Details dirty-save contract,
 // generalized a third time), and the aliases chips are the same
 // add/remove/Enter-to-add interaction as that page's own tags editor.
+//
+// ADR 0142: the chrome around all of that - the outer shell, each section's
+// card, the delete confirmation - is now Page/DetailsLayout/FormSection/
+// ConfirmDelete from components/patterns, the CRUD pattern library's pilot.
+// None of the state or the write paths above changed; Save stayed a plain,
+// always-rendered button rather than SaveBar - see that ADR's Consequences
+// for why a dirty-gated Save doesn't fit this page.
+
+/** A row in the Documents list: a saved link or a pick staged for the next
+ * Save - both carry kind, MIME type and upload time (the picker reads them
+ * from the document's record). */
+type DisplayedDocument = DocumentLinkPickerResult
+
+function DocumentTypeIcon({ doc }: { doc: DisplayedDocument }) {
+  if (doc.kind === 'note') return <StickyNote className="h-5 w-5" aria-hidden="true" />
+  if (doc.mime === 'application/pdf' || doc.mime?.startsWith('text/')) return <FileText className="h-5 w-5" aria-hidden="true" />
+  return <FileIcon className="h-5 w-5" aria-hidden="true" />
+}
 
 const NO_ZONE_VALUE = '__no_zone__'
 const NO_BIN_VALUE = '__no_bin__'
@@ -64,7 +76,6 @@ const NO_PROFILE_VALUE = '__no_profile__'
 function draftFromItem(item: EquipmentItem): EquipmentInput {
   return {
     name: item.name,
-    category: item.category,
     system: item.system,
     manufacturer: item.manufacturer,
     model: item.model,
@@ -89,7 +100,6 @@ function sameStringArray(a: string[], b: string[]): boolean {
 
 function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
   return a.name === b.name
-    && a.category === b.category
     && a.system === b.system
     && a.manufacturer === b.manufacturer
     && a.model === b.model
@@ -105,12 +115,6 @@ function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
     && a.verified_aboard === b.verified_aboard
     && a.notes === b.notes
     && sameStringArray(a.aliases, b.aliases)
-}
-
-interface DocEntry {
-  document_id: string
-  title: string
-  filename: string
 }
 
 /** One item's photos waiting for Retry, and the notice shown for them. */
@@ -135,6 +139,11 @@ interface EquipmentEditorProps {
    * the message on the destination rather than leaving the editor open on
    * a record that no longer exists. */
   onDeleted: (message?: string) => void
+  /** Discard on a brand new item: the draft is abandoned, so this leaves the
+   * editor WITHOUT the unsaved-changes guard that onBack goes through (the
+   * editor is still reporting dirty at this moment, and the operator has just
+   * declined to keep the changes). */
+  onDiscarded: () => void
   onDirtyChange?: (dirty: boolean) => void
   /** 2026-09-25 amendment (finding 8): photos still waiting for Retry on
    * the open item are unsaved work for the SAME leave guard bin-quick-add's
@@ -155,7 +164,7 @@ export interface EquipmentEditorHandle {
 }
 
 export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditorProps>(function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
+  { id, onBack, onCreated, onDeleted, onDiscarded, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
   const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
@@ -181,7 +190,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   // to say what IT changed, never restate `documents` itself (the server's
   // current truth, including a link some other code path - a photo upload -
   // just added, which this tab never has to know or care about).
-  const [pendingAdds, setPendingAdds] = useState<DocEntry[]>([])
+  const [pendingAdds, setPendingAdds] = useState<DocumentLinkPickerResult[]>([])
   // After a photo write, reloads the Documents list for the item it touched.
   // A failure is shown, not swallowed: the write itself succeeded, but a
   // stale list would still show a removed photo as linked.
@@ -208,6 +217,19 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }
   const [aliasInput, setAliasInput] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Which linked document the right-hand viewer drawer is showing, and the
+  // last Download failure (fail loud: a missing file must not look like a
+  // click that did nothing).
+  const [viewerDocumentId, setViewerDocumentId] = useState<string | null>(null)
+  const [documentError, setDocumentError] = useState<string | null>(null)
+  const handleDownloadDocument = async (doc: DisplayedDocument) => {
+    try {
+      await downloadDocument(doc.document_id, doc.filename)
+      setDocumentError(null)
+    } catch (err) {
+      setDocumentError(err instanceof Error ? err.message : String(err))
+    }
+  }
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<InventoryFieldError[]>([])
@@ -312,9 +334,9 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const linkedIds = useMemo(() => new Set(documents.map((d) => d.document_id)), [documents])
   const effectiveRemoves = useMemo(() => pendingRemoves.filter((docId) => linkedIds.has(docId)), [pendingRemoves, linkedIds])
   const effectiveAdds = useMemo(() => pendingAdds.filter((d) => !linkedIds.has(d.document_id)), [pendingAdds, linkedIds])
-  const displayedDocuments = useMemo(
+  const displayedDocuments = useMemo<DisplayedDocument[]>(
     () => [
-      ...documents.filter((d) => !effectiveRemoves.includes(d.document_id)).map((d) => ({ document_id: d.document_id, title: d.title, filename: d.filename })),
+      ...documents.filter((d) => !effectiveRemoves.includes(d.document_id)),
       ...effectiveAdds,
     ],
     [documents, effectiveRemoves, effectiveAdds],
@@ -381,8 +403,7 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     })
   }
 
-  // Picking a profile prefills BLANK manufacturer/model only, and only sets
-  // category to mechanical for an engine/alternator/generator kind - never
+  // Picking a profile prefills BLANK manufacturer/model only - never
   // overwrites a value the operator has already typed (the plan's own
   // wording), the same "don't clobber an in-progress edit" rule this whole
   // page follows for everything else.
@@ -393,9 +414,6 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       if (profile) {
         if (!next.manufacturer.trim() && profile.manufacturer) next.manufacturer = profile.manufacturer
         if (!next.model.trim() && profile.model) next.model = profile.model
-        if (profile.kind === 'engine' || profile.kind === 'generator' || profile.kind === 'alternator') {
-          next.category = 'mechanical'
-        }
       }
       return next
     })
@@ -714,6 +732,26 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     }
   }
 
+  // ADR 0142: SaveBar's own Discard. For a saved record, this reverts to
+  // the loaded baseline (the draft AND any staged document link changes) -
+  // the operator stays on the same record, just with nothing left unsaved.
+  // For a brand new draft there IS no loaded baseline to revert to, so
+  // Discard instead abandons the draft entirely via the same `onBack` the
+  // Page back arrow already uses - "returns to the index via the existing
+  // close path" rather than resetting the form in place and leaving the
+  // operator sitting on a blank "New item" they didn't ask to keep.
+  const handleDiscard = () => {
+    if (id === null) {
+      onDiscarded()
+      return
+    }
+    if (item) setDraft(draftFromItem(item))
+    setPendingAdds([])
+    setPendingRemoves([])
+    setSaveError(null)
+    setFieldErrors([])
+  }
+
   const handleConfirmDelete = async () => {
     setPendingDelete(false)
     setDeleting(true)
@@ -739,21 +777,36 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     }
   }
 
+  // ADR 0142: Page wraps every state, not just the loaded form - a
+  // consistent frame (title, working Back) regardless of where loading
+  // this record currently stands, rather than a bare message with no way
+  // out except the browser's own Back.
   if (id !== null && loading && !item) {
-    return <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">Loading...</div>
+    return (
+      <Page title="Equipment" onBack={onBack}>
+        <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">Loading...</div>
+      </Page>
+    )
   }
   if (id !== null && error) {
     return (
-      <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-        {error}
-      </p>
+      <Page title="Equipment" onBack={onBack}>
+        <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-center">
+          <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => { void refresh() }}>Retry</Button>
+        </div>
+      </Page>
     )
   }
   if (id !== null && !item) {
     return (
-      <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">
-        This equipment record could not be found.
-      </div>
+      <Page title="Equipment" onBack={onBack}>
+        <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+          This equipment record could not be found.
+        </div>
+      </Page>
     )
   }
 
@@ -773,70 +826,172 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     : ''
 
   return (
-    <div className="flex flex-col gap-4">
-      <FieldSet className="rounded-md border border-border bg-card p-4">
-        <FieldLegend variant="label">Photos</FieldLegend>
-        <PhotoStripEditor
-          photos={photoStripPhotos}
-          canWrite={canWrite}
-          onFilesPicked={(files) => {
-            if (id === null) { void addLocalPhotos(files) } else { void uploadPhotosToSavedItem(id, files) }
-          }}
-          onMakeCover={(photoId) => {
-            if (id === null) { makeCoverLocal(photoId) } else { void makeCoverSaved(photoId) }
-          }}
-          onRemove={(photoId, deletePhoto) => {
-            // A draft's local photos have no exclusivity to speak of yet -
-            // nothing is linked or shared until Save - so deletePhoto is
-            // never offered (exclusivePhotoIds is omitted below) and this
-            // branch never receives true for one.
-            if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId, deletePhoto) }
-          }}
-          exclusivePhotoIds={id === null ? undefined : item?.exclusive_photo_ids}
-        />
-        {photoNotice && (
-          <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
-            <span>{photoNotice}</span>
-            {/* Review finding: a 409 refusal never populates
-                failedPhotoUploads (it's dropped, not queued) - Retry has
-                nothing to re-send for a notice that's ONLY a 409, so the
-                button is withheld rather than offering a retry that can
-                only ever repeat the same refusal. */}
-            {failedPhotoUploads.length > 0 && (
-              <Button type="button" variant="outline" size="sm" disabled={retryingPhotos} onClick={() => { void retryFailedPhotoUploads() }}>
-                {retryingPhotos ? 'Retrying...' : 'Retry'}
-              </Button>
-            )}
-          </div>
-        )}
-      </FieldSet>
+    <Page
+      title={id === null ? 'New item' : (item?.name ?? 'Equipment')}
+      onBack={onBack}
+      secondaryActions={
+        id !== null
+          ? [
+              {
+                label: 'Delete equipment',
+                icon: <Trash2 className="h-4 w-4" aria-hidden="true" />,
+                destructive: true,
+                disabled: deleting || !canWrite,
+                onClick: () => { setDeletePhotosOnDelete(false); setPendingDelete(true) },
+              },
+            ]
+          : undefined
+      }
+    >
+      {/* ADR 0142: the Polaris "Details" template - editable content in the
+          main column, scannable status/organisation in the aside.
+          asidePosition="start" bumps Status ahead of the main column below
+          `lg`, where the grid collapses to one - it's the one thing an
+          operator glances at first ("is this deployed?"), not something to
+          scroll a whole form past to reach. */}
+      <DetailsLayout
+        asidePosition="start"
+        aside={
+          <>
+            <FormSection title="Status">
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="equipment-status">Status</FieldLabel>
+                  <Select value={draft.status} onValueChange={(v) => { if (v) setDraft((p) => ({ ...p, status: v as EquipmentStatus })) }}>
+                    <SelectTrigger id="equipment-status" aria-label="Status">
+                      <SelectValue>{(v: string) => (v === 'deployed' ? 'Deployed' : 'Stored')}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="deployed">Deployed</SelectItem>
+                      <SelectItem value="stored">Stored</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </Field>
+                <Field orientation="horizontal">
+                  <Switch checked={draft.verified_aboard} onCheckedChange={(checked) => setDraft((p) => ({ ...p, verified_aboard: checked }))} aria-label="Verified aboard" />
+                  <FieldLabel>Verified aboard</FieldLabel>
+                </Field>
+              </FieldGroup>
+            </FormSection>
 
-      {/* formatAppLocation (not raw interpolation) - same reasoning as
-          bin-page.tsx's own Tag row, so this path is encoded exactly the
-          way the app's own /inventory/equipment/<id> URLs are. */}
-      {id !== null && <TagRow path={formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })} />}
+            {/* ADR 0142 follow-up: moved from the main column - reference
+                detail (where something is) belongs beside Status and
+                Organisation, not mixed into the form the operator edits at
+                length. The tag address (TagRow) moved here with it rather
+                than into a section of its own - it names WHERE this record
+                is, the same thing the zone/bin/detail fields above it do. */}
+            <FormSection title="Location">
+              <FieldGroup>
+                <FormRow>
+                  <Field>
+                    <FieldLabel htmlFor="equipment-zone">Zone</FieldLabel>
+                    <Select value={draft.zone_id ?? NO_ZONE_VALUE} onValueChange={(v) => handleZoneChange(v === NO_ZONE_VALUE ? null : (v ?? null))}>
+                      <SelectTrigger id="equipment-zone" aria-label="Zone">
+                        <SelectValue>{(v: string) => (v === NO_ZONE_VALUE ? 'No zone' : zones.find((z) => z.id === v)?.name ?? v)}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        <SelectItem value={NO_ZONE_VALUE}>No zone</SelectItem>
+                        {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                      </SelectPopup>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="equipment-bin">Bin</FieldLabel>
+                    <Select value={draft.bin_id ?? NO_BIN_VALUE} onValueChange={(v) => handleBinChange(v === NO_BIN_VALUE ? null : (v ?? null))}>
+                      <SelectTrigger id="equipment-bin" aria-label="Bin">
+                        <SelectValue>{(v: string) => (v === NO_BIN_VALUE ? 'No bin' : availableBins.find((b) => b.id === v)?.code ?? v)}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        <SelectItem value={NO_BIN_VALUE}>No bin</SelectItem>
+                        {availableBins.map((b) => <SelectItem key={b.id} value={b.id}>{b.code}</SelectItem>)}
+                      </SelectPopup>
+                    </Select>
+                  </Field>
+                </FormRow>
 
-      <FieldSet className="rounded-md border border-border bg-card p-4">
-        <FieldLegend variant="label">{id === null ? 'New item' : 'Specifications & IDs'}</FieldLegend>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="equipment-name">Name</FieldLabel>
-            <Input id="equipment-name" value={draft.name} onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))} />
-          </Field>
+                <Field>
+                  <FieldLabel htmlFor="equipment-location-detail">Location detail</FieldLabel>
+                  <Input id="equipment-location-detail" value={draft.location_detail} onChange={(e) => setDraft((p) => ({ ...p, location_detail: e.target.value }))} />
+                  <FieldDescription>The part a bin code cannot carry - "outboard side, behind the raw water strainer".</FieldDescription>
+                </Field>
 
-          <Field orientation="responsive">
+                {id !== null && (
+                  <>
+                    <FieldSeparator />
+                    {/* formatAppLocation (not raw interpolation) - same
+                        reasoning as bin-page.tsx's own Tag row, so this path
+                        is encoded exactly the way the app's own
+                        /inventory/equipment/<id> URLs are. layout="stacked" -
+                        the aside is DetailsLayout's 20rem column, too narrow
+                        for the URL and its buttons on one row (TagRow's own
+                        default, still used unchanged on bin-page.tsx). */}
+                    <TagRow
+                      layout="stacked"
+                      path={formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })}
+                    />
+                  </>
+                )}
+              </FieldGroup>
+            </FormSection>
+
+            <FormSection title="Organisation">
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="equipment-profile">Profile</FieldLabel>
+                  <Select value={draft.profile_id || NO_PROFILE_VALUE} onValueChange={(v) => handleProfileChange(v === NO_PROFILE_VALUE ? '' : (v ?? ''))}>
+                    <SelectTrigger id="equipment-profile" aria-label="Profile">
+                      <SelectValue>{(v: string) => (v === NO_PROFILE_VALUE ? 'No profile' : profiles.find((p) => p.id === v)?.name ?? v)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value={NO_PROFILE_VALUE}>No profile</SelectItem>
+                      {profiles.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                    </SelectPopup>
+                  </Select>
+                  <FieldDescription>Fills in a blank manufacturer and model. Gear with no profile is normal.</FieldDescription>
+                </Field>
+
+                <Field>
+                  <FieldLabel>Aliases</FieldLabel>
+                  <div className="flex flex-wrap gap-1.5">
+                    {draft.aliases.length === 0 && <span className="text-xs text-muted-foreground">No aliases yet.</span>}
+                    {draft.aliases.map((alias) => (
+                      <Badge key={alias} variant="secondary" className="gap-1">
+                        {alias}
+                        <button type="button" aria-label={`Remove alias ${alias}`} onClick={() => removeAlias(alias)}>
+                          <X className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      aria-label="Add alias"
+                      value={aliasInput}
+                      onChange={(e) => setAliasInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
+                      className="max-w-48"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={addAlias}>Add</Button>
+                  </div>
+                  <FieldDescription>What the crew actually calls it - "genset" finds the generator.</FieldDescription>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="equipment-install-date">Install date</FieldLabel>
+                  <Input id="equipment-install-date" type="date" value={draft.install_date} onChange={(e) => setDraft((p) => ({ ...p, install_date: e.target.value }))} />
+                </Field>
+              </FieldGroup>
+            </FormSection>
+          </>
+        }
+      >
+        <FormSection title="Specifications">
+          <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="equipment-category">Category</FieldLabel>
-              <Select value={draft.category} onValueChange={(v) => { if (v) setDraft((p) => ({ ...p, category: v as EquipmentCategory })) }}>
-                <SelectTrigger id="equipment-category" aria-label="Category">
-                  <SelectValue>{(v: string) => (v === 'mechanical' ? 'Mechanical' : 'General')}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="mechanical">Mechanical</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectPopup>
-              </Select>
+              <FieldLabel htmlFor="equipment-name">Name</FieldLabel>
+              <Input id="equipment-name" value={draft.name} onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))} />
             </Field>
+
             <Field>
               <FieldLabel htmlFor="equipment-system">System</FieldLabel>
               <Select value={draft.system} onValueChange={(v) => { if (v) setDraft((p) => ({ ...p, system: v as EquipmentSystem })) }}>
@@ -850,89 +1005,123 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
                 </SelectPopup>
               </Select>
             </Field>
-          </Field>
 
-          <Field orientation="responsive">
-            <Field>
-              <FieldLabel htmlFor="equipment-manufacturer">Manufacturer</FieldLabel>
-              <Input id="equipment-manufacturer" value={draft.manufacturer} onChange={(e) => setDraft((p) => ({ ...p, manufacturer: e.target.value }))} />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="equipment-model">Model</FieldLabel>
-              <Input id="equipment-model" value={draft.model} onChange={(e) => setDraft((p) => ({ ...p, model: e.target.value }))} />
-            </Field>
-          </Field>
+            <FormRow>
+              <Field>
+                <FieldLabel htmlFor="equipment-manufacturer">Manufacturer</FieldLabel>
+                <Input id="equipment-manufacturer" value={draft.manufacturer} onChange={(e) => setDraft((p) => ({ ...p, manufacturer: e.target.value }))} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="equipment-model">Model</FieldLabel>
+                <Input id="equipment-model" value={draft.model} onChange={(e) => setDraft((p) => ({ ...p, model: e.target.value }))} />
+              </Field>
+            </FormRow>
 
-          <Field orientation="responsive">
-            <Field>
-              <FieldLabel htmlFor="equipment-serial">Serial</FieldLabel>
-              <Input id="equipment-serial" value={draft.serial} onChange={(e) => setDraft((p) => ({ ...p, serial: e.target.value }))} />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="equipment-quantity">Quantity</FieldLabel>
-              <Input
-                id="equipment-quantity"
-                type="number"
-                min={1}
-                value={draft.quantity}
-                onChange={(e) => setDraft((p) => ({ ...p, quantity: Math.max(1, Number(e.target.value) || 1) }))}
-              />
-            </Field>
-          </Field>
+            <FormRow>
+              <Field>
+                <FieldLabel htmlFor="equipment-serial">Serial</FieldLabel>
+                <Input id="equipment-serial" value={draft.serial} onChange={(e) => setDraft((p) => ({ ...p, serial: e.target.value }))} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="equipment-quantity">Quantity</FieldLabel>
+                <Input
+                  id="equipment-quantity"
+                  type="number"
+                  min={1}
+                  value={draft.quantity}
+                  onChange={(e) => setDraft((p) => ({ ...p, quantity: Math.max(1, Number(e.target.value) || 1) }))}
+                />
+              </Field>
+            </FormRow>
+          </FieldGroup>
+        </FormSection>
 
-          <Field>
-            <FieldLabel htmlFor="equipment-status">Status</FieldLabel>
-            <Select value={draft.status} onValueChange={(v) => { if (v) setDraft((p) => ({ ...p, status: v as EquipmentStatus })) }}>
-              <SelectTrigger id="equipment-status" aria-label="Status">
-                <SelectValue>{(v: string) => (v === 'deployed' ? 'Deployed' : 'Stored')}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value="deployed">Deployed</SelectItem>
-                <SelectItem value="stored">Stored</SelectItem>
-              </SelectPopup>
-            </Select>
-          </Field>
+        <FormSection title="Photos">
+          <PhotoStripEditor
+            photos={photoStripPhotos}
+            canWrite={canWrite}
+            onFilesPicked={(files) => {
+              if (id === null) { void addLocalPhotos(files) } else { void uploadPhotosToSavedItem(id, files) }
+            }}
+            onMakeCover={(photoId) => {
+              if (id === null) { makeCoverLocal(photoId) } else { void makeCoverSaved(photoId) }
+            }}
+            onRemove={(photoId, deletePhoto) => {
+              // A draft's local photos have no exclusivity to speak of yet -
+              // nothing is linked or shared until Save - so deletePhoto is
+              // never offered (exclusivePhotoIds is omitted below) and this
+              // branch never receives true for one.
+              if (id === null) { removeLocalPhoto(photoId) } else { void removeSavedPhoto(photoId, deletePhoto) }
+            }}
+            exclusivePhotoIds={id === null ? undefined : item?.exclusive_photo_ids}
+          />
+          {photoNotice && (
+            <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+              <span>{photoNotice}</span>
+              {/* Review finding: a 409 refusal never populates
+                  failedPhotoUploads (it's dropped, not queued) - Retry has
+                  nothing to re-send for a notice that's ONLY a 409, so the
+                  button is withheld rather than offering a retry that can
+                  only ever repeat the same refusal. */}
+              {failedPhotoUploads.length > 0 && (
+                <Button type="button" variant="outline" size="sm" disabled={retryingPhotos} onClick={() => { void retryFailedPhotoUploads() }}>
+                  {retryingPhotos ? 'Retrying...' : 'Retry'}
+                </Button>
+              )}
+            </div>
+          )}
+        </FormSection>
 
-          <Field orientation="responsive">
-            <Field>
-              <FieldLabel htmlFor="equipment-zone">Zone</FieldLabel>
-              <Select value={draft.zone_id ?? NO_ZONE_VALUE} onValueChange={(v) => handleZoneChange(v === NO_ZONE_VALUE ? null : (v ?? null))}>
-                <SelectTrigger id="equipment-zone" aria-label="Zone">
-                  <SelectValue>{(v: string) => (v === NO_ZONE_VALUE ? 'No zone' : zones.find((z) => z.id === v)?.name ?? v)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value={NO_ZONE_VALUE}>No zone</SelectItem>
-                  {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
-                </SelectPopup>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="equipment-bin">Bin</FieldLabel>
-              <Select value={draft.bin_id ?? NO_BIN_VALUE} onValueChange={(v) => handleBinChange(v === NO_BIN_VALUE ? null : (v ?? null))}>
-                <SelectTrigger id="equipment-bin" aria-label="Bin">
-                  <SelectValue>{(v: string) => (v === NO_BIN_VALUE ? 'No bin' : availableBins.find((b) => b.id === v)?.code ?? v)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value={NO_BIN_VALUE}>No bin</SelectItem>
-                  {availableBins.map((b) => <SelectItem key={b.id} value={b.id}>{b.code}</SelectItem>)}
-                </SelectPopup>
-              </Select>
-            </Field>
-          </Field>
+        {id !== null && (
+          <FormSection
+            title="Documents"
+            action={canWrite ? (
+              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setPickerOpen(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Add document
+              </Button>
+            ) : undefined}
+          >
+            <ResourceList
+              label="Documents"
+              empty={<p className="text-sm text-muted-foreground">No documents linked yet.</p>}
+            >
+              {displayedDocuments.map((doc) => {
+                const name = doc.title || doc.filename
+                const date = formatDocumentTime(doc.created_at)
+                return (
+                  <ResourceItem
+                    key={doc.document_id}
+                    item={doc}
+                    media={documentIsImage(doc)
+                      ? <img src={documentContentUrl(doc.document_id)} alt="" loading="lazy" className="size-full object-cover" />
+                      : <DocumentTypeIcon doc={doc} />}
+                    title={name}
+                    meta={date ?? '--'}
+                    badge={<Badge variant="outline">{documentTypeBadge(doc)}</Badge>}
+                    onOpen={(d) => setViewerDocumentId(d.document_id)}
+                    actionsLabel={`Actions for ${name}`}
+                    actions={[
+                      { label: 'Open', icon: <ExternalLink className="h-4 w-4" aria-hidden="true" />, onSelect: (d) => setViewerDocumentId(d.document_id) },
+                      { label: 'Download', icon: <Download className="h-4 w-4" aria-hidden="true" />, onSelect: (d) => { void handleDownloadDocument(d) } },
+                      ...(canWrite ? [{ label: 'Remove from item', icon: <Unlink className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: (d: DisplayedDocument) => removeDocument(d.document_id) }] : []),
+                    ]}
+                  />
+                )
+              })}
+            </ResourceList>
+            {documentError && <p role="alert" className="text-sm text-destructive">{documentError}</p>}
+          </FormSection>
+        )}
 
-          <Field>
-            <FieldLabel htmlFor="equipment-location-detail">Location detail</FieldLabel>
-            <Input id="equipment-location-detail" value={draft.location_detail} onChange={(e) => setDraft((p) => ({ ...p, location_detail: e.target.value }))} />
-            <FieldDescription>The part a bin code cannot carry - "outboard side, behind the raw water strainer".</FieldDescription>
-          </Field>
-
-          <Field orientation="responsive">
+        {/* An item has an hour meter or it doesn't. The stored `category`
+            (mechanical | general) is derived from it by the server and is
+            no longer a choice here (ADR 0142 §7). Shown for a new item too;
+            the rules/log block below needs a saved record. */}
+        <FormSection title="Maintenance">
+          <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="equipment-install-date">Install date</FieldLabel>
-              <Input id="equipment-install-date" type="date" value={draft.install_date} onChange={(e) => setDraft((p) => ({ ...p, install_date: e.target.value }))} />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="equipment-hour-meter-path">Hour-meter path</FieldLabel>
+              <FieldLabel htmlFor="equipment-hour-meter-path">Hour meter</FieldLabel>
               <Input
                 id="equipment-hour-meter-path"
                 list="equipment-hour-meter-paths"
@@ -942,138 +1131,53 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
               <datalist id="equipment-hour-meter-paths">
                 {hourMeterPaths.map((p) => <option key={p.path} value={p.path} />)}
               </datalist>
-              <FieldDescription>For mechanical gear - the SignalK path its runtime is published on.</FieldDescription>
+              <FieldDescription>Leave blank if this item has no hour meter. Rules counted in hours need one.</FieldDescription>
             </Field>
-          </Field>
+          </FieldGroup>
 
-          <Field>
-            <FieldLabel htmlFor="equipment-profile">Profile</FieldLabel>
-            <Select value={draft.profile_id || NO_PROFILE_VALUE} onValueChange={(v) => handleProfileChange(v === NO_PROFILE_VALUE ? '' : (v ?? ''))}>
-              <SelectTrigger id="equipment-profile" aria-label="Profile">
-                <SelectValue>{(v: string) => (v === NO_PROFILE_VALUE ? 'No profile' : profiles.find((p) => p.id === v)?.name ?? v)}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value={NO_PROFILE_VALUE}>No profile</SelectItem>
-                {profiles.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectPopup>
-            </Select>
-            <FieldDescription>Fills in blank manufacturer, model and category. Gear with no profile is normal.</FieldDescription>
-          </Field>
-
-          <Field>
-            <FieldLabel>Aliases</FieldLabel>
-            <div className="flex flex-wrap gap-1.5">
-              {draft.aliases.length === 0 && <span className="text-xs text-muted-foreground">No aliases yet.</span>}
-              {draft.aliases.map((alias) => (
-                <Badge key={alias} variant="secondary" className="gap-1">
-                  {alias}
-                  <button type="button" aria-label={`Remove alias ${alias}`} onClick={() => removeAlias(alias)}>
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <Input
-                aria-label="Add alias"
-                value={aliasInput}
-                onChange={(e) => setAliasInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
-                className="max-w-48"
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addAlias}>Add</Button>
-            </div>
-            <FieldDescription>What the crew actually calls it - "genset" finds the generator.</FieldDescription>
-          </Field>
-
-          <Field orientation="horizontal">
-            <Switch checked={draft.verified_aboard} onCheckedChange={(checked) => setDraft((p) => ({ ...p, verified_aboard: checked }))} aria-label="Verified aboard" />
-            <FieldLabel>Verified aboard</FieldLabel>
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor="equipment-notes">Notes</FieldLabel>
-            <Textarea id="equipment-notes" value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} />
-          </Field>
-        </FieldGroup>
-
-        {fieldErrors.length > 0 && (
-          <FieldError
-            className="rounded-md border border-destructive/40 bg-destructive/10 p-2"
-            errors={fieldErrors.map((f) => ({ message: `${f.field}: ${f.message}` }))}
-          />
-        )}
-        {saveError && (
-          <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {saveError}
-          </p>
-        )}
-
-        <div className="flex items-center gap-2">
-          <Button type="button" onClick={() => { void handleSave() }} disabled={saving || !canWrite}>
-            {saving ? 'Saving...' : 'Save'}
-          </Button>
-          <Button type="button" variant="outline" onClick={onBack}>Back</Button>
           {id !== null && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="ml-auto gap-2 text-destructive"
-              aria-label="Delete equipment"
-              onClick={() => { setDeletePhotosOnDelete(false); setPendingDelete(true) }}
-              disabled={deleting || !canWrite}
-            >
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
-              Delete
-            </Button>
+            <MaintenanceEquipmentBlock
+              equipmentId={id}
+              profileId={draft.profile_id}
+              hourMeterPath={draft.hour_meter_path}
+              canWrite={canWrite}
+            />
           )}
-        </div>
-      </FieldSet>
+        </FormSection>
 
-      {id !== null && (
-        <FieldSet className="rounded-md border border-border bg-card p-4">
-          <FieldLegend variant="label">Documents</FieldLegend>
-          <div className="flex flex-col gap-2">
-            {displayedDocuments.length === 0 && <p className="text-sm text-muted-foreground">No documents linked yet.</p>}
-            {displayedDocuments.map((doc) => (
-              <div key={doc.document_id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{doc.title || doc.filename}</p>
-                  <p className="truncate text-xs text-muted-foreground">{doc.filename}</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Remove document ${doc.title || doc.filename}`}
-                  onClick={() => removeDocument(doc.document_id)}
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </Button>
-              </div>
-            ))}
-            {canWrite && (
-              <Button type="button" variant="outline" size="sm" className="self-start gap-2" onClick={() => setPickerOpen(true)}>
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                Add document
-              </Button>
-            )}
-          </div>
-        </FieldSet>
+        <FormSection title="Notes">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="equipment-notes">Notes</FieldLabel>
+              <Textarea id="equipment-notes" value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} />
+            </Field>
+          </FieldGroup>
+        </FormSection>
+      </DetailsLayout>
+
+      {fieldErrors.length > 0 && (
+        <FieldError
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-3"
+          errors={fieldErrors.map((f) => ({ message: `${f.field}: ${f.message}` }))}
+        />
+      )}
+      {/* Only shown while NOT dirty - a save-triggered failure keeps the
+          draft dirty (it was never persisted), so it shows in SaveBar's own
+          `error` slot instead, right beside the button that caused it. A
+          failure with nothing dirty (e.g. the documents list not reloading
+          after a photo write) has no save bar to show in, so it lands here. */}
+      {saveError && !dirty && (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {saveError}
+        </p>
       )}
 
-      {id !== null && (
-        <FieldSet className="rounded-md border border-border bg-card p-4">
-          <FieldLegend variant="label">Maintenance</FieldLegend>
-          <MaintenanceEquipmentBlock
-            equipmentId={id}
-            profileId={draft.profile_id}
-            hourMeterPath={draft.hour_meter_path}
-            canWrite={canWrite}
-          />
-        </FieldSet>
-      )}
-
+      <DocumentViewerSheet
+        documentId={viewerDocumentId}
+        onDocumentChange={setViewerDocumentId}
+        getNote={fetchNote}
+        patchNote={saveNote}
+      />
       <DocumentLinkPicker
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -1086,55 +1190,64 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         excludeIds={displayedDocuments.map((d) => d.document_id)}
       />
 
-      <AlertDialog open={pendingDelete} onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete &quot;{item?.name}&quot;?</AlertDialogTitle>
-            <AlertDialogDescription>This removes the equipment record.{deleteCascadeNote} It can&apos;t be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          {/* 2026-09-25 amendment: only shown when N > 0 - an item with no
-              exclusive photos has nothing this checkbox could offer to
-              delete, and showing it anyway would ask about a choice that
-              doesn't exist. Off by default: the operator's own decision
-              that a delete never destroys a document without being asked. */}
-          {(item?.exclusive_photo_ids.length ?? 0) > 0 && (
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={deletePhotosOnDelete}
-                  onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
-                />
-                Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
-              </label>
-              {/* Finding 3 (review): small thumbnails of exactly the photos
-                  this checkbox would delete - a bare count gives the
-                  operator nothing to actually recognise before confirming a
-                  delete that takes them along with the item. */}
-              {deletePhotosOnDelete && (
-                <div className="flex flex-wrap gap-1.5 pl-6">
-                  {(item?.exclusive_photo_ids ?? []).map((photoId) => (
-                    <img
-                      key={photoId}
-                      src={`${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`}
-                      alt="Photo to delete"
-                      className="h-12 w-12 shrink-0 rounded-md border border-border object-cover"
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { void handleConfirmDelete() }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      <ConfirmDelete
+        open={pendingDelete}
+        onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}
+        title={`Delete "${item?.name}"?`}
+        description={`This removes the equipment record.${deleteCascadeNote} It can't be undone.`}
+        deleting={deleting}
+        onConfirm={() => { void handleConfirmDelete() }}
+      >
+        {/* 2026-09-25 amendment: only shown when N > 0 - an item with no
+            exclusive photos has nothing this checkbox could offer to
+            delete, and showing it anyway would ask about a choice that
+            doesn't exist. Off by default: the operator's own decision
+            that a delete never destroys a document without being asked. */}
+        {(item?.exclusive_photo_ids.length ?? 0) > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={deletePhotosOnDelete}
+                onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
+              />
+              Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
+            </label>
+            {/* Finding 3 (review): small thumbnails of exactly the photos
+                this checkbox would delete - a bare count gives the
+                operator nothing to actually recognise before confirming a
+                delete that takes them along with the item. */}
+            {deletePhotosOnDelete && (
+              <div className="flex flex-wrap gap-1.5 pl-6">
+                {(item?.exclusive_photo_ids ?? []).map((photoId) => (
+                  <img
+                    key={photoId}
+                    src={`${apiBaseUrl}/api/documents/${encodeURIComponent(photoId)}/content`}
+                    alt="Photo to delete"
+                    className="h-12 w-12 shrink-0 rounded-md border border-border object-cover"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </ConfirmDelete>
+
+      {/* ADR 0142: SaveBar, not a plain always-rendered button - hidden
+          until `dirty`, which the two cross-item PATCH-leak regression tests
+          now assert directly (the bar is absent right after switching to an
+          undirtied record) rather than relying on a harmless-but-confusing
+          Save-with-nothing-changed click to prove the same thing. It renders
+          into the app header's slot (taking the header over while dirty), so
+          it takes no room on the page and needs no bottom padding here. */}
+      {canWrite && (
+        <SaveBar
+          dirty={dirty}
+          saving={saving}
+          error={saveError}
+          onSave={() => { void handleSave() }}
+          onDiscard={handleDiscard}
+        />
+      )}
+    </Page>
   )
 })
