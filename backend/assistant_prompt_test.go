@@ -499,6 +499,45 @@ func TestBuildAssistantSystemPrompt_CitesDocumentsAsStructuredLinks(t *testing.T
 	}
 }
 
+// A help page has no document id, so citing one as /documents?document=<...>
+// produced `/documents?document=?` (conversation 7b4cda11). The prompt has to
+// say help pages are named in plain words, never linked.
+func TestBuildAssistantSystemPrompt_HelpPagesAreNotCitedAsDocuments(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	if !strings.Contains(stable, "A help page you read with read_help has no link") {
+		t.Fatalf("expected the stable prefix to say help pages are not linked, got:\n%s", stable)
+	}
+	if strings.Contains(live, "has no link") {
+		t.Fatalf("expected the help-citation rule only in the stable prefix, got:\n%s", live)
+	}
+}
+
+// ADR 0145: Mate reads the maintenance list through tools and says so.
+func TestBuildAssistantSystemPrompt_MaintenanceGuidance(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{
+		"list_maintenance",
+		"find_equipment",
+		"get_maintenance_log",
+		"never from memory",
+		"compare the rules with the linked profile's service block",
+		"search_documents",
+		"say the hours are unknown",
+		"quote the meter reading",
+		"cumulative across meter replacements",
+		"You cannot change the maintenance schedule",
+		"(/inventory/maintenance)",
+		"(/inventory/equipment/<id>)",
+	} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prefix to contain %q, got:\n%s", want, stable)
+		}
+	}
+	if strings.Contains(live, "list_maintenance") {
+		t.Fatalf("expected the maintenance guidance only in the stable prefix, got:\n%s", live)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_DocumentLibraryLiveLineOmittedWhenNoDocuments(t *testing.T) {
 	pc := basePromptContext()
 	pc.DocumentCount = 0
