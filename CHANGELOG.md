@@ -50,6 +50,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   in a panel from the right without leaving the item. The menu also has
   Download, and Remove from item, which takes the link off this item only and
   waits for the save bar.
+- The silent sensor source warning no longer goes off when you turn the
+  engines off. Engine computers, equipment that switches off with them
+  (alternator regulators, DC-DC chargers) and SignalK plugin status are left
+  out of it. A device that dies while an engine is running, or long after one
+  stopped, is still raised, and so is a whole network gateway failing.
+  Ignore this sensor remains the answer for something you switch off by
+  hand. An engine computer that drops out while the engine is running is not
+  raised by this warning; the engine tiles show dashes.
 - Mate no longer shows a broken document icon when it refers to a help page.
   It names the page in words instead.
 - The forecast page's chart legends and data-source lines are bigger and

@@ -72,10 +72,20 @@ const signalKSentenceSeenMaxDistinct = 200
 // its own falls back to arrival time, the same "arrival is all the evidence
 // there is" contract pathAge/signalKPathSampleAge already use
 // (signalk_paths.go).
+//
+// EngineBound and BusTyped classify the source for the silent-source check
+// and are sticky: once any update sets one, it stays set. EngineBound means
+// an update carried a propulsion.<id>.* path, so the source is an engine
+// computer (or a gateway relaying one) that loses power at key-off. BusTyped
+// means an update's source object carried a "type" (NMEA2000, NMEA0183),
+// which only hardware bus inputs do; a bare-id $source that never had one is
+// a server plugin's own output.
 type sourceSeenEntry struct {
-	First time.Time
-	Last  time.Time
-	Count int
+	First       time.Time
+	Last        time.Time
+	Count       int
+	EngineBound bool
+	BusTyped    bool
 }
 
 // vesselContextPrefix separates vessel contexts from the other trees a
@@ -277,6 +287,17 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				entry.Last = eventAt
 			}
 			entry.Count++
+			if t, _ := update.Source["type"].(string); t != "" {
+				entry.BusTyped = true
+			}
+			if !entry.EngineBound {
+				for _, val := range update.Values {
+					if strings.HasPrefix(val.Path, "propulsion.") {
+						entry.EngineBound = true
+						break
+					}
+				}
+			}
 			s.sourceSeen[key] = entry
 		}
 

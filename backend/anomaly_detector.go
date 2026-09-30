@@ -958,7 +958,16 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	sources := snapshot.sourcesFor(self)
 	health := make([]sourceHealth, 0, len(sources))
 	for source, entry := range sources {
-		health = append(health, sourceHealth{Source: source, First: entry.First, Last: entry.Last, Count: entry.Count})
+		health = append(health, sourceHealth{
+			Source:      source,
+			First:       entry.First,
+			Last:        entry.Last,
+			Count:       entry.Count,
+			EngineBound: entry.EngineBound,
+			// A server plugin publishes under its bare id with no bus type;
+			// hardware inputs are dotted or carry a source.type.
+			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
+		})
 	}
 	_, lastMessage := snapshot.status()
 	silent := silentSources(health, now, now.Sub(lastMessage), ignored)
@@ -1036,9 +1045,13 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	for _, p := range frozenPaths {
 		frozenNow[p] = true
 	}
-	silentSourceNow := make(map[string]bool, len(silent))
-	for _, s := range silent {
-		silentSourceNow[s] = true
+	// Every quiet source gates the paths it feeds, including the engine
+	// computers, plugins and key-off devices silentSources does not raise:
+	// a quiet source's readings are stale however the operator is told.
+	quiet := quietSources(health, now, now.Sub(lastMessage), ignored)
+	silentSourceNow := make(map[string]bool, len(quiet))
+	for _, s := range quiet {
+		silentSourceNow[s.Source] = true
 	}
 	valid := func(path string) bool {
 		if !inputValidity(snapshot, path, now) {

@@ -3,6 +3,7 @@ package main
 import (
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -230,30 +231,42 @@ type sourceHealth struct {
 	First  time.Time
 	Last   time.Time
 	Count  int
+	// EngineBound is true when the source ever published a propulsion.<id>.*
+	// path: an engine computer, which loses power with the ignition.
+	EngineBound bool
+	// Plugin is true for a SignalK server plugin's own output (a bare
+	// $source id that never carried a bus type). Plugins report on events,
+	// not on a schedule, and are software rather than devices.
+	Plugin bool
 }
 
-// silentSources reports which of sources have gone silent: watched (per
-// silentSourceWatchAfter/-MinUpdates) and quiet for over this source's own
-// threshold, evaluated as of now. That threshold is silentSourceQuietFor's
-// 120s floor, scaled up to silentSourceCadenceMultiple times the source's
-// own observed average gap (First-to-Last spread divided by update count)
-// when that is slower -- a source watched long enough to judge at all has
-// at least silentSourceMinUpdates updates, so this average is never
+// silentSourceKeyOffWindow is how close to a quiet engine source's last
+// update another source's last update must fall for it to be read as
+// switching off with the engine (key-off) rather than failing on its own.
+const silentSourceKeyOffWindow = 60 * time.Second
+
+// quietSources reports every source that is watched (per
+// silentSourceWatchAfter/-MinUpdates) and quiet for over its own threshold,
+// evaluated as of now, whatever kind of source it is. That threshold is
+// silentSourceQuietFor's 120s floor, scaled up to silentSourceCadenceMultiple
+// times the source's own observed average gap (First-to-Last spread divided by
+// update count) when that is slower -- a source watched long enough to judge
+// at all has at least silentSourceMinUpdates updates, so this average is never
 // computed from too few samples to mean anything. streamAge is the overall
 // snapshot's own staleness (now minus its last received message, any
-// source); when streamAge itself exceeds silentSourceStreamMaxAge, nothing
-// fires -- the whole feed is down, not this one source. excluded drops
-// engine-bound sources the frozen check already accounts for, or any source
-// the operator has ignored.
+// source); when streamAge itself exceeds silentSourceStreamMaxAge, nothing is
+// quiet -- the whole feed is down, not this one source. excluded drops any
+// source the operator has ignored.
 //
-// The result is sorted by source id, so it is deterministic for a golden-text
-// caller the way anomaly_battery.go's evidence formatter already is.
-func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duration, excluded map[string]bool) []string {
+// This is the set the detectors use to stop trusting a path whose source has
+// gone quiet (anomaly_detector.go's valid closure); silentSources narrows it
+// to what is worth telling the operator about.
+func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration, excluded map[string]bool) []sourceHealth {
 	if streamAge > silentSourceStreamMaxAge {
 		return nil
 	}
 
-	var out []string
+	var out []sourceHealth
 	for _, s := range sources {
 		if excluded[s.Source] {
 			continue
@@ -270,6 +283,91 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 		}
 
 		if now.Sub(s.Last) > threshold {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// sourceConnection is the part of a $source id before its first ".": the
+// connection (a bus gateway, a GX) the source arrives through. A bare id is
+// its own connection.
+func sourceConnection(source string) string {
+	conn, _, _ := strings.Cut(source, ".")
+	return conn
+}
+
+// engineKeyOff reports whether engine-bound source e going quiet can be read
+// as the engines being turned off, rather than its connection failing. That
+// holds when its connection is alive: some non-engine-bound source on the same
+// connection published within silentSourceQuietFor of now. It also holds when
+// the connection carries no non-engine-bound source at all (a dedicated engine
+// connection), which cannot be told apart from a key-off and is accepted, as
+// is an engine computer dropping out while running. sources is the full list,
+// not just the quiet ones.
+func engineKeyOff(e sourceHealth, sources []sourceHealth, now time.Time) bool {
+	conn := sourceConnection(e.Source)
+	others := false
+	for _, s := range sources {
+		if s.EngineBound || sourceConnection(s.Source) != conn {
+			continue
+		}
+		others = true
+		if now.Sub(s.Last) <= silentSourceQuietFor {
+			return true
+		}
+	}
+	return !others
+}
+
+// silentSources reports which quietSources are worth raising to the operator.
+// Beyond the operator's own excluded (ignored) set, it leaves out:
+//   - Plugin outputs: software, not a device on the network.
+//   - Quiet EngineBound sources whose silence reads as a key-off
+//     (engineKeyOff): turning an engine off powers its computer down, which
+//     rpm or speed cannot tell from a fault. If instead the engine's whole
+//     connection has gone quiet (a gateway failing), the engine source is
+//     reported like any other.
+//   - Devices whose last update falls within silentSourceKeyOffWindow of the
+//     last update of any engine-bound source whose silence reads as a
+//     key-off, whether or not that source has yet passed its own quiet
+//     threshold: they share the ignition circuit and went down with it. A
+//     live engine source's last update is about now, so it never matches a
+//     device that is already quiet.
+//
+// The result is sorted by source id, so it is deterministic for a golden-text
+// caller the way anomaly_battery.go's evidence formatter already is.
+func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duration, excluded map[string]bool) []string {
+	quiet := quietSources(sources, now, streamAge, excluded)
+
+	var keyOffAt []time.Time
+	keyOff := map[string]bool{}
+	for _, s := range sources {
+		if s.EngineBound && engineKeyOff(s, sources, now) {
+			keyOff[s.Source] = true
+			keyOffAt = append(keyOffAt, s.Last)
+		}
+	}
+
+	var out []string
+	for _, s := range quiet {
+		if s.Plugin {
+			continue
+		}
+		if s.EngineBound {
+			if !keyOff[s.Source] {
+				out = append(out, s.Source)
+			}
+			continue
+		}
+		withEngine := false
+		for _, off := range keyOffAt {
+			if d := s.Last.Sub(off); d >= -silentSourceKeyOffWindow && d <= silentSourceKeyOffWindow {
+				withEngine = true
+				break
+			}
+		}
+		if !withEngine {
 			out = append(out, s.Source)
 		}
 	}
