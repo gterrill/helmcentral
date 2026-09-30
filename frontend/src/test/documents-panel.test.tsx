@@ -257,7 +257,9 @@ function docNode(overrides: Partial<ManualTreeNode> = {}): ManualTreeNode {
  * "navbar-search-overlay"), not an always-on input in the filter row - every
  * test that drives a search has to open it first. */
 function openSearchOverlay() {
-  fireEvent.click(screen.getByRole('button', { name: /search documents/i }))
+  // The filter row's search field is the overlay's trigger (IndexFilters'
+  // onSearchActivate), not a second search.
+  fireEvent.click(screen.getByRole('textbox', { name: 'Search' }))
 }
 
 beforeEach(() => {
@@ -670,7 +672,9 @@ describe('DocumentsPanel', () => {
     // URL and hands it back down as a prop, without remounting the panel.
     rerender(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
     expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
-    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).queryByText('Manuals')).not.toBeInTheDocument()
+    // At the root there is no trail to show: the page title is "Documents".
+    expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Documents' })).toBeInTheDocument()
 
     // Forward: back to f1.
     rerender(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
@@ -689,6 +693,9 @@ describe('DocumentsPanel', () => {
 
     const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i })
     expect(within(breadcrumb).getByText('Manuals')).toBeInTheDocument()
+    // The page title is the current folder, its trail above it.
+    expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
+    expect(within(breadcrumb).getByRole('link', { name: 'Documents' })).toBeInTheDocument()
   })
 
   it('uploads into the current folder', () => {
@@ -1326,16 +1333,16 @@ describe('DocumentsPanel', () => {
   // ADR 0121: capture is no longer a global action - DocumentsPanel owns
   // NoteCaptureSheet entirely now, with no onCaptureNote prop for App.tsx
   // (or a test) to reach in from outside. New → Note is the only door in.
-  describe('capture: New → Note', () => {
+  describe('capture: More actions → New note', () => {
     // One New menu, Folder first, Note carrying its kinds in a submenu.
     // Auto leads that submenu and must pass NO kind, so the backend's own
     // classifier answers rather than the menu guessing on the operator's
     // behalf (ADR 0116).
-    it('New → Note → Auto opens the capture sheet on Auto, with no onCaptureNote prop anywhere', async () => {
+    it('New note → Auto opens the capture sheet on Auto, with no onCaptureNote prop anywhere', async () => {
       render(<DocumentsPanel />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Auto' }))
 
       // A longer timeout than findByRole's default 1s: this is a
@@ -1346,11 +1353,11 @@ describe('DocumentsPanel', () => {
       expect(screen.getByRole('combobox', { name: 'Note type' })).toHaveTextContent('Auto')
     })
 
-    it('New → Note → a kind opens the sheet already on that kind', async () => {
+    it('New note → a kind opens the sheet already on that kind', async () => {
       render(<DocumentsPanel />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Quirk' }))
 
       expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
@@ -1360,26 +1367,26 @@ describe('DocumentsPanel', () => {
     it('offers every kind the classifier can produce, Auto first', async () => {
       render(<DocumentsPanel />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(await screen.findByRole('menuitem', { name: 'Note' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
 
       for (const label of ['Auto', 'Contact', 'Procedure', 'Spec', 'Quirk', 'Recipe', 'Plain note']) {
         expect(await screen.findByRole('menuitem', { name: label })).toBeInTheDocument()
       }
     })
 
-    it('has no second create control beside New', () => {
+    it('has no second create control beside the page menu', () => {
       render(<DocumentsPanel />)
 
       expect(screen.queryByRole('button', { name: 'Add Note' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Choose note type' })).not.toBeInTheDocument()
     })
 
-    it('New → Folder still opens the ordinary new-folder dialog', () => {
+    it('New folder still opens the ordinary new-folder dialog', () => {
       render(<DocumentsPanel />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
 
       expect(screen.getByRole('dialog')).toHaveTextContent('New folder')
     })
@@ -1556,8 +1563,8 @@ describe('DocumentsPanel', () => {
       mockedUseManuals.mockReturnValue(makeManualsMock({ flagManual }))
 
       render(<DocumentsPanel />)
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
 
       fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Crew Training' } })
       fireEvent.click(screen.getByRole('checkbox', { name: /manual/i }))
@@ -1569,8 +1576,8 @@ describe('DocumentsPanel', () => {
 
     it('does not offer the Manual checkbox when creating a folder inside another folder', () => {
       render(<DocumentsPanel initialFolderId="parent-1" />)
-      fireEvent.click(screen.getByRole('button', { name: 'New' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Folder' }))
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
 
       expect(screen.queryByRole('checkbox', { name: /manual/i })).not.toBeInTheDocument()
     })
@@ -1802,20 +1809,20 @@ describe('DocumentsPanel', () => {
   // re-enriched and the count dropped. selectedTag persists either way, so
   // the active filter must stay visible and clearable even without a chip
   // of its own in the freshly fetched list.
-  describe('tag filter chip row', () => {
-    it('renders a chip for every tag the hook reports', () => {
+  describe('tag filter', () => {
+    it('offers every tag the hook reports in the tag filter', async () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         tags: [{ tag: 'engine', count: 3 }, { tag: 'receipts', count: 2 }],
       }))
 
       render(<DocumentsPanel />)
 
-      const group = screen.getByRole('group', { name: 'Filter by tag' })
-      expect(within(group).getByRole('button', { name: 'engine (3)' })).toBeInTheDocument()
-      expect(within(group).getByRole('button', { name: 'receipts (2)' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by tag' }))
+      expect(await screen.findByRole('option', { name: 'engine (3)' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'receipts (2)' })).toBeInTheDocument()
     })
 
-    it('keeps the active filter visible and clearable when it drops out of the chip list', () => {
+    it('keeps the active filter visible and clearable when it drops out of the tag list', () => {
       const setSelectedTag = vi.fn()
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         // 'solo-suggested' no longer qualifies for the chip list (now used
@@ -1829,11 +1836,10 @@ describe('DocumentsPanel', () => {
 
       render(<DocumentsPanel />)
 
-      const group = screen.getByRole('group', { name: 'Filter by tag' })
-      const orphan = within(group).getByRole('button', { name: /solo-suggested/ })
-      expect(orphan).toHaveAttribute('aria-pressed', 'true')
-
-      fireEvent.click(orphan)
+      // The active filter is still the select's value, and stays clearable.
+      const filter = screen.getByRole('combobox', { name: 'Filter by tag' })
+      expect(filter).toHaveTextContent('solo-suggested')
+      fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
       expect(setSelectedTag).toHaveBeenCalledWith(null)
     })
   })
@@ -1883,7 +1889,7 @@ describe('DocumentsPanel', () => {
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select log.txt' }))
       fireEvent.click(screen.getByRole('button', { name: /reindex/i }))
 
-      expect(screen.getByRole('heading', { name: 'Reindex 1 documents?' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Reindex 1 document?' })).toBeInTheDocument()
       expect(screen.queryByText(/estimated cost/)).not.toBeInTheDocument()
     })
 
@@ -1907,6 +1913,157 @@ describe('DocumentsPanel', () => {
 
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('reindex failed: disk full'))
       expect(reindexDocument).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // ADR 0142 (Documents migration): the listing is Page + IndexFilters +
+  // IndexTable, with bulk selection and ConfirmDelete.
+  describe('on the pattern library', () => {
+    it('titles the page with the current folder, Upload as the primary action and creation in the overflow', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }] }))
+      render(<DocumentsPanel initialFolderId="f1" />)
+      expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'New' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /search documents/i })).not.toBeInTheDocument()
+    })
+
+    it('Upload opens the file picker', () => {
+      render(<DocumentsPanel />)
+      const input = screen.getByTestId('documents-file-input') as HTMLInputElement
+      const click = vi.spyOn(input, 'click')
+      fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+      expect(click).toHaveBeenCalled()
+    })
+
+    it('lists Folders, then Documents, in one table under group headings', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
+        documents: [doc({ filename: 'receipt.pdf' })],
+      }))
+      render(<DocumentsPanel />)
+      const cells = screen.getAllByRole('cell').map((c) => c.textContent)
+      const folders = cells.findIndex((t) => t === 'Folders')
+      const documents = cells.findIndex((t) => t === 'Documents')
+      expect(folders).toBeGreaterThanOrEqual(0)
+      expect(documents).toBeGreaterThan(folders)
+      expect(cells.findIndex((t) => t?.includes('Manuals'))).toBeLessThan(cells.findIndex((t) => t?.includes('receipt.pdf')))
+    })
+
+    it('clicking a folder row opens the folder; clicking a document row opens the viewer', async () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
+        documents: [doc({ id: 'doc-1', filename: 'receipt.pdf', mime: 'text/plain' })],
+      }))
+      const onFolderChange = vi.fn()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ text: 'body' }) }))
+      render(<DocumentsPanel onFolderChange={onFolderChange} />)
+      const folderRow = screen.getByRole('button', { name: 'Manuals' }).closest('tr') as HTMLElement
+      fireEvent.click(within(folderRow).getAllByRole('cell')[3])
+      expect(onFolderChange).toHaveBeenCalledWith('f1')
+      expect(onFolderChange).toHaveBeenCalledTimes(1)
+      fireEvent.click(screen.getByText('receipt.pdf'))
+      expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('an empty folder shows the empty state', () => {
+      render(<DocumentsPanel />)
+      expect(screen.getByText('Nothing here yet')).toBeInTheDocument()
+      expect(screen.getByText('Upload a file or create a folder.')).toBeInTheDocument()
+    })
+
+    it('folders are not selectable; documents are, with the bulk bar naming the count', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
+        documents: [doc({ id: 'doc-1', filename: 'a.pdf' }), doc({ id: 'doc-2', filename: 'b.pdf' })],
+      }))
+      render(<DocumentsPanel />)
+      expect(screen.queryByRole('checkbox', { name: 'Select Manuals' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }))
+      expect(screen.getByText('2 selected')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Move to…' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Reindex…' })).toBeInTheDocument()
+    })
+
+    it('typing into the search field opens the overlay seeded with that character', () => {
+      render(<DocumentsPanel />)
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Search' }), { key: 'g' })
+      expect(screen.getByRole('searchbox', { name: /search documents/i })).toHaveValue('g')
+    })
+
+    it('a delete in flight keeps the dialog open and locked, and a refusal shows inside it', async () => {
+      let reject!: (e: Error) => void
+      const deleteFolder = vi.fn().mockReturnValue(new Promise((_, r) => { reject = r }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ folders: [{ id: 'f1', name: 'Manuals', parent_id: null }], deleteFolder }))
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: /actions for manuals/i }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /delete/i }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+      expect(await screen.findByRole('button', { name: 'Deleting…' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+
+      await act(async () => { reject(new Error('folder is not empty')) })
+      const dialog = screen.getByRole('alertdialog')
+      expect(within(dialog).getByRole('alert')).toHaveTextContent('folder is not empty')
+      expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    })
+
+    it('filtering away selected documents drops them from the selection: Delete acts on what is visible only', async () => {
+      const deleteDocument = vi.fn().mockResolvedValue(undefined)
+      const all = [doc({ id: 'doc-1', filename: 'a.pdf' }), doc({ id: 'doc-2', filename: 'b.pdf' }), doc({ id: 'doc-3', filename: 'c.pdf' })]
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: all, deleteDocument }))
+      const { rerender } = render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }))
+      expect(screen.getByText('3 selected')).toBeInTheDocument()
+
+      // The tag filter narrows the listing to a.pdf.
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [all[0]], deleteDocument }))
+      rerender(<DocumentsPanel />)
+      expect(await screen.findByText('1 selected')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+      expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete 1 document?')
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(deleteDocument).toHaveBeenCalledTimes(1))
+      expect(deleteDocument).toHaveBeenCalledWith('doc-1')
+    })
+
+    it('a partly failed bulk delete resumes with what is left, never retrying one already deleted', async () => {
+      let failB = true
+      const deleteDocument = vi.fn(async (id: string) => {
+        if (id === 'doc-2' && failB) throw new Error('b is locked')
+      })
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'doc-1', filename: 'a.pdf' }), doc({ id: 'doc-2', filename: 'b.pdf' }), doc({ id: 'doc-3', filename: 'c.pdf' })],
+        deleteDocument,
+      }))
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+
+      const dialog = await screen.findByRole('alertdialog')
+      await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('b is locked'))
+      expect(deleteDocument.mock.calls.map(([id]) => id)).toEqual(['doc-1', 'doc-2'])
+      // a.pdf is gone from the pending list: the dialog counts what remains.
+      expect(dialog).toHaveTextContent('Delete 2 documents?')
+
+      failB = false
+      deleteDocument.mockClear()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(deleteDocument.mock.calls.map(([id]) => id)).toEqual(['doc-2', 'doc-3']))
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    })
+
+    it('staged uploads list as a labelled ResourceList above the table', () => {
+      mockedUseDocumentUploads.mockReturnValue(makeUploadsMock({
+        items: [{ key: 'k1', filename: 'receipt.pdf', size: 1, status: 'failed', progress: 0, documentId: null, error: 'too big', duplicate: false }],
+      }))
+      render(<DocumentsPanel />)
+      const list = screen.getByRole('list', { name: 'Uploads' })
+      expect(within(list).getByText('receipt.pdf')).toBeInTheDocument()
+      expect(within(list).getByText('too big')).toBeInTheDocument()
     })
   })
 })

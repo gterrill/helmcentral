@@ -48,12 +48,32 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   acknowledged, even if it was acknowledged at the chartplotter or before
   Helmcentral restarted. This needs SignalK 2.31 or later. On SignalK 2.33 an
   acknowledged alarm also comes back as active when it gets worse.
+- Documents is rearranged to match the rest of Inventory. The page is titled
+  with the folder you are in, with the path back up above it; **Upload** is
+  the button at the top right, and **New folder** and **New note** moved
+  into the menu beside it (**More actions**). Folders and documents share
+  one list, folders first. Tick the boxes (or **Select all**) and a bar shows
+  how many are selected with **Move to…**, **Reindex…** and **Delete**. The
+  tag filter is now a drop-down, the **Search** field opens the same
+  full-page search as before (you can also start typing in it), and files
+  being uploaded show as a list above the table. A document's Details page
+  keeps its editable fields on the left and the file and indexing facts in a
+  column beside them, with Save and Discard in the save bar at the top of the
+  screen while you have changes.
 - The Documents list on an equipment item now shows each document with a
   thumbnail or file icon, its title, the date it was added and a type label
   such as PDF, JPG or NOTE. Click one, or choose Open from its menu, to read it
   in a panel from the right without leaving the item. The menu also has
   Download, and Remove from item, which takes the link off this item only and
   waits for the save bar.
+- The silent sensor source warning no longer goes off when you turn the
+  engines off. Engine computers, equipment that switches off with them
+  (alternator regulators, DC-DC chargers) and SignalK plugin status are left
+  out of it. A device that dies while an engine is running, or long after one
+  stopped, is still raised, and so is a whole network gateway failing.
+  Ignore this sensor remains the answer for something you switch off by
+  hand. An engine computer that drops out while the engine is running is not
+  raised by this warning; the engine tiles show dashes.
 - Mate no longer shows a broken document icon when it refers to a help page.
   It names the page in words instead.
 - The forecast page's chart legends and data-source lines are bigger and

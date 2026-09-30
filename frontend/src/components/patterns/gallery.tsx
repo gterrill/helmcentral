@@ -82,6 +82,7 @@ function GallerySection({ title, description, children }: { title: string; descr
 }
 
 export function PatternsGallery() {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [system, setSystem] = useState('')
   const [status, setStatus] = useState('')
@@ -147,7 +148,7 @@ export function PatternsGallery() {
 
       <Separator />
 
-      <GallerySection title="IndexFilters + IndexTable" description="Search, filter selects, sortable columns, row actions, grouping.">
+      <GallerySection title="IndexFilters + IndexTable" description="Search, filter selects, sortable columns, row actions, grouping, and bulk selection (tick a row or Select all: a bar with the count and the bulk actions appears; on a phone each card carries its own checkbox).">
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={showLoading} onChange={(e) => setShowLoading(e.target.checked)} />
@@ -185,6 +186,16 @@ export function PatternsGallery() {
             groupBy={(row) => row.system}
             groupOrder={GALLERY_SYSTEM_ORDER}
             groupLabel={(key) => GALLERY_SYSTEM_LABELS[key] ?? key}
+            selectable
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            rowSelectLabel={(row) => `Select ${row.name}`}
+            bulkActions={
+              <>
+                <Button type="button" size="sm" variant="outline" onClick={() => window.alert(`Move ${selectedIds.size}`)}>Move to…</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setConfirmOpen(true)}>Delete</Button>
+              </>
+            }
             loading={showLoading}
             error={showError ? 'Could not load the fixture list.' : null}
             onRetry={() => setShowError(false)}

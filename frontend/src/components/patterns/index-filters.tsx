@@ -1,3 +1,4 @@
+import type * as React from 'react'
 import { Search } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +40,12 @@ export interface IndexFiltersProps {
   onSearchChange: (value: string) => void
   searchLabel?: string
   searchPlaceholder?: string
+  /** Makes the field a trigger for a separate search surface (Documents'
+   * overlay) rather than a filter of its own: it holds no text, and opens on
+   * click, on Enter, or on the first printable key (handed over as `seed`).
+   * Focus alone does not open it - focus returns here when the overlay
+   * closes, which would reopen it. */
+  onSearchActivate?: (seed?: string) => void
   filters?: IndexFilter[]
   onClearAll?: () => void
   clearAllLabel?: string
@@ -50,6 +57,7 @@ export function IndexFilters({
   onSearchChange,
   searchLabel = 'Search',
   searchPlaceholder,
+  onSearchActivate,
   filters = [],
   onClearAll,
   clearAllLabel = 'Clear all',
@@ -59,7 +67,7 @@ export function IndexFilters({
 
   return (
     <div className={cn('flex flex-wrap items-end gap-2', className)}>
-      <div className="flex min-w-40 flex-col gap-1">
+      <div className={cn('flex min-w-40 flex-col gap-1', onSearchActivate && 'w-full sm:w-72')}>
         <label
           htmlFor={`index-filters-search-${searchLabel}`}
           className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground"
@@ -74,8 +82,24 @@ export function IndexFilters({
             id={`index-filters-search-${searchLabel}`}
             aria-label={searchLabel}
             placeholder={searchPlaceholder}
-            value={searchValue}
+            value={onSearchActivate ? '' : searchValue}
             onChange={(e) => onSearchChange(e.target.value)}
+            {...(onSearchActivate
+              ? {
+                  readOnly: true,
+                  onClick: () => onSearchActivate(undefined),
+                  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.metaKey || e.ctrlKey || e.altKey) return
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      onSearchActivate(undefined)
+                    } else if (e.key.length === 1) {
+                      e.preventDefault()
+                      onSearchActivate(e.key)
+                    }
+                  },
+                }
+              : {})}
           />
         </InputGroup>
       </div>

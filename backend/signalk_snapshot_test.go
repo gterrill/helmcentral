@@ -665,6 +665,53 @@ func TestApplyDeltaTracksSourceSeen(t *testing.T) {
 	}
 }
 
+// TestApplyDeltaRecordsEngineBoundAndBusType covers the two flags the
+// silent-source check classifies on: a propulsion.<id>.* value marks its
+// source engine-bound, a source.type marks it a bus input, and a bare id
+// that never carried either is left looking like a plugin.
+func TestApplyDeltaRecordsEngineBoundAndBusType(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	now := time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{
+			{
+				SourceRef: "n2k.engine.port",
+				Source:    map[string]any{"type": "NMEA2000", "label": "n2k"},
+				Values:    []signalKValue{{Path: "propulsion.port.revolutions", Value: 20.0}},
+			},
+			{
+				SourceRef: "n2k.dcdc.1",
+				Source:    map[string]any{"type": "NMEA2000"},
+				Values:    []signalKValue{{Path: "electrical.dcdc.1.voltage", Value: 13.5}},
+			},
+			{
+				SourceRef: "some-plugin",
+				Values:    []signalKValue{{Path: "environment.derived.thing", Value: 1.0}},
+			},
+			{
+				SourceRef: "gx.alternator.0",
+				Values:    []signalKValue{{Path: "electrical.alternators.0.current", Value: 5.0}},
+			},
+		},
+	}, now)
+
+	sources := snapshot.sourcesFor("vessels.self")
+	if e := sources["n2k.engine.port"]; !e.EngineBound || !e.BusTyped {
+		t.Fatalf("n2k.engine.port: got %+v, want EngineBound and BusTyped", e)
+	}
+	if e := sources["n2k.dcdc.1"]; e.EngineBound || !e.BusTyped {
+		t.Fatalf("n2k.dcdc.1: got %+v, want BusTyped only", e)
+	}
+	if e := sources["some-plugin"]; e.EngineBound || e.BusTyped {
+		t.Fatalf("some-plugin: got %+v, want neither flag", e)
+	}
+	if e := sources["gx.alternator.0"]; e.EngineBound || e.BusTyped {
+		t.Fatalf("gx.alternator.0: got %+v, want neither flag", e)
+	}
+}
+
 // TestApplyDeltaSourceSeenIsPerContext verifies sourcesFor only returns
 // entries for the requested context, the same isolation pathSeen already
 // gives per-path.

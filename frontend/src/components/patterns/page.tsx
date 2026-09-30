@@ -6,6 +6,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
@@ -22,6 +25,12 @@ export interface PageAction {
   icon?: ReactNode
   destructive?: boolean
   disabled?: boolean
+  /** Turns the entry into a submenu (Documents' "New note" and its kinds).
+   * The parent's own onClick is not used then. */
+  submenu?: PageAction[]
+  /** Fires on hover or focus of a submenu trigger - for warming a lazy chunk
+   * the entry is about to need. */
+  onIntent?: () => void
 }
 
 export interface PageProps {
@@ -74,17 +83,43 @@ export function Page({
               }
             />
             <DropdownMenuContent align="end">
-              {secondaryActions.map((action) => (
-                <DropdownMenuItem
-                  key={action.label}
-                  variant={action.destructive ? 'destructive' : 'default'}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
-                  {action.icon}
-                  {action.label}
-                </DropdownMenuItem>
-              ))}
+              {secondaryActions.map((action) =>
+                action.submenu ? (
+                  <DropdownMenuSub key={action.label}>
+                    <DropdownMenuSubTrigger
+                      disabled={action.disabled}
+                      onPointerEnter={action.onIntent}
+                      onFocus={action.onIntent}
+                    >
+                      {action.icon}
+                      {action.label}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {action.submenu.map((entry) => (
+                        <DropdownMenuItem
+                          key={entry.label}
+                          variant={entry.destructive ? 'destructive' : 'default'}
+                          disabled={entry.disabled}
+                          onClick={entry.onClick}
+                        >
+                          {entry.icon}
+                          {entry.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : (
+                  <DropdownMenuItem
+                    key={action.label}
+                    variant={action.destructive ? 'destructive' : 'default'}
+                    disabled={action.disabled}
+                    onClick={action.onClick}
+                  >
+                    {action.icon}
+                    {action.label}
+                  </DropdownMenuItem>
+                ),
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

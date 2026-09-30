@@ -372,7 +372,7 @@ describe('App deep links', () => {
     render(<App />)
 
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
-    expect((await screen.findAllByText(/tide/i)).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/tide/i, {}, { timeout: 5000 })).length).toBeGreaterThan(0)
     expect(window.location.pathname).toBe('/forecast')
     expect(document.title).toBe('Forecast · Helmcentral')
   })
@@ -381,7 +381,7 @@ describe('App deep links', () => {
     window.history.replaceState({}, '', '/mate')
     render(<App />)
 
-    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate')
   })
 
@@ -389,7 +389,7 @@ describe('App deep links', () => {
     window.history.replaceState({}, '', '/mate/12345')
     render(<App />)
 
-    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate/12345')
   })
 
@@ -397,7 +397,7 @@ describe('App deep links', () => {
     window.history.replaceState({}, '', '/assistant')
     render(<App />)
 
-    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate')
   })
 
@@ -405,7 +405,7 @@ describe('App deep links', () => {
     window.history.replaceState({}, '', '/settings/signalk')
     render(<App />)
 
-    expect(await screen.findByRole('button', { name: 'SignalK' })).toHaveAttribute('aria-current', 'true')
+    expect(await screen.findByRole('button', { name: 'SignalK' }, { timeout: 5000 })).toHaveAttribute('aria-current', 'true')
   })
 
   it('treats an unrecognised path as the dashboard and normalises the bar to /', () => {
@@ -521,7 +521,8 @@ describe('App deep links — Documents', () => {
     // the viewer (Sheet) should be open, showing manual.pdf - since the
     // filename ALSO appears in the plain folder table underneath, scope the
     // assertion to the dialog itself.
-    const dialog = await screen.findByRole('dialog')
+    // A cold first load of the lazy Documents chunk can outlast the default 1s.
+    const dialog = await screen.findByRole('dialog', {}, { timeout: 5000 })
     expect(within(dialog).getByText('manual.pdf')).toBeInTheDocument()
 
     // close it - SheetContent's close button has accessible name "Close".

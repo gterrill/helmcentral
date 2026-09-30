@@ -253,12 +253,82 @@ guard would ask about the changes the operator had just thrown away.
 
 ### 8. Migration order
 
-Equipment (this cycle) → Locations → Profiles → Maintenance → Wall displays
-→ Documents last. Documents is deliberately last: `documents-panel.tsx`'s
-folder tree has no equivalent in `IndexTable`'s flat-or-grouped row model,
-and migrating it will likely need a tree variant of `IndexTable` (or a
-sibling pattern) that the four flat migrations before it should inform
-first, rather than guessing its shape now against a single caller.
+Equipment → Locations → Profiles → Maintenance → Wall displays → Documents
+last. Documents was deliberately last because `documents-panel.tsx`'s folder
+tree looked as if it would need a tree variant of `IndexTable`. Equipment,
+and then Documents, are done (see "Documents migration" below); the flat
+migrations in between have not happened yet and Documents did not wait for
+them, because its folder browsing turned out not to be a tree at all.
+
+## Documents migration
+
+`documents-panel.tsx` and `document-details-page.tsx` moved onto the
+pattern library. What that took, and what was decided:
+
+**Folders are not a tree in this view.** The panel only ever shows one folder
+level at a time (navigating a folder replaces the list; the path is a
+breadcrumb), so folders and documents are two groups of one flat
+`IndexTable` - `groupBy` with "Folders" then "Documents" - and the tree variant
+this section used to predict was never needed. The tree-shaped surfaces
+(`manual-folder-view`, the Unfiled notes list, the checklist runner and the
+note capture sheet) are reading and writing surfaces, not indexes, and stayed
+as they are.
+
+**Bulk actions.** `IndexTable` gained Polaris' bulk selection: `selectable`,
+controlled `selectedIds` / `onSelectionChange`, `isRowSelectable` (folders get
+no checkbox, only documents do), `rowSelectLabel`, and a `bulkActions` slot.
+While anything is selected a bar above the list reads "N selected", shows the
+slot, and offers Clear selection; the header checkbox selects every
+selectable row on screen and goes indeterminate for some. Counts are read
+against the rows actually rendered, so an id a caller left behind after a
+filter cannot inflate them. On a phone each card carries its own checkbox and
+the same bar sits above the cards. Cards also now leave out a "label: value"
+line whose accessor yields nothing, so a folder card does not print an empty
+Size.
+
+**Page chrome.** The page title is the current folder (the path above it as a
+breadcrumb; the root has none). Upload is the primary action. New folder and
+New note - which carries the note kinds as a submenu - sit in the overflow
+menu, which meant `Page`'s secondary actions gained an optional `submenu` and
+an `onIntent` hook (hover or focus on the trigger, used to warm the note
+editor chunk exactly as the old New menu did).
+
+**Search stays one overlay.** The ⌘K overlay is unchanged - its input, "All
+folders" switch, recent searches, tag suggestions, keyboard navigation and
+semantic-problem notice. `IndexFilters`' search field became its trigger, not
+a second search: with `onSearchActivate` it is read-only, opens the overlay on
+click or Enter, and on the first printable key opens it seeded with that
+character. It deliberately does not open on focus alone: closing the overlay
+returns focus to the field, which would reopen it. The overlay's result list
+(snippets, a highlighted row moved by the arrow keys, page and folder path)
+is a command-palette list rather than a table of records, so it did not move
+to `IndexTable`.
+
+**Filters.** The tag toggle group became an `IndexFilters` select. "Unfiled
+notes" is a saved view rather than a filter, so it stays a button beside the
+filters, with the Mate failure line.
+
+**Deleting.** All three deletes (a folder, a document, the bulk selection) use
+`ConfirmDelete`. The dialog stays open and cannot be dismissed while the
+delete is in flight, and a refusal - the 409 "folder is not empty" - shows
+inside it instead of as a page banner behind the overlay.
+
+**Uploads.** Staged uploads are a `ResourceList` above the table, with the
+same progress and failure text as before.
+
+**The Details page** is `Page` + `DetailsLayout`. The editable fields
+(title, notes, tags) are the main column; what the file is and how it was
+indexed are read-only cards in the aside; Save and Discard are the header
+`SaveBar`. The `onDirtyChange` / `save()` contract with the navigation guard
+is unchanged. The folder is not among the facts: the record carries only a
+folder id and showing its name would mean a second fetch for a line nothing
+asked for.
+
+**Left bespoke, and why.** `FolderPicker` (the Move dialog's folder browser
+with create-here), `SearchResultsTable`, `manual-folder-view`,
+`unfiled-notes-view`, `checklist-runner`, `note-capture-sheet` and the viewer
+sheet: each is a purpose-built interaction, not a list of records to open,
+filter and act on.
 
 ## Rejected
 

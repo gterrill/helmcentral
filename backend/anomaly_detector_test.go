@@ -867,6 +867,49 @@ func TestComputeAnomalyReadingSilentSourceEvidenceNamesTheSource(t *testing.T) {
 	}
 }
 
+// TestComputeAnomalyReadingSilentSourceEvidenceLeavesOutEngineGroupAndPlugins
+// feeds a quiet engine source, a device that went quiet with it, a quiet
+// plugin and an unrelated quiet device, and expects only the last to be named.
+func TestComputeAnomalyReadingSilentSourceEvidenceLeavesOutEngineGroupAndPlugins(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	settingsPath := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+
+	feed := func(source string, bus bool, path string, stop time.Time) {
+		for i := 0; i < 40; i++ {
+			at := stop.Add(-time.Duration(40-i) * 10 * time.Second)
+			update := signalKUpdate{SourceRef: source, Timestamp: at.Format(time.RFC3339), Values: []signalKValue{{Path: path, Value: 1.0}}}
+			if bus {
+				update.Source = map[string]any{"type": "NMEA2000"}
+			}
+			snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{update}}, at)
+		}
+	}
+	engineStop := anomalyDetectorTestNow.Add(-10 * time.Minute)
+	feed("n2k.engine.port", true, "propulsion.port.revolutions", engineStop)
+	feed("n2k.dcdc.1", true, "electrical.dcdc.1.voltage", engineStop.Add(-12*time.Second))
+	feed("some-plugin", false, "environment.derived.thing", anomalyDetectorTestNow.Add(-8*time.Minute))
+	feed("n2k.depth.1", true, "environment.depth.belowTransducer", anomalyDetectorTestNow.Add(-4*time.Minute))
+	// A live source on the engine's connection: the gateway is up, so the
+	// engine going quiet reads as a key-off.
+	feed("n2k.gps.1", true, "navigation.position", anomalyDetectorTestNow)
+	applyNumeric(snapshot, "vessels.self", "navigation.speedOverGround", 5, anomalyDetectorTestNow)
+
+	reading := computeAnomalyReading(snapshot, settingsPath, newAnomalyTrackers(), &twinSteadinessTrackers{}, anomalyDetectorTestNow)
+
+	evidence := reading.Evidence[anomalySensorSilentSourceCountPath]
+	if !strings.Contains(evidence, "n2k.depth.1") {
+		t.Fatalf("expected the unrelated quiet device to be named, got %q", evidence)
+	}
+	for _, unwanted := range []string{"n2k.engine.port", "n2k.dcdc.1", "some-plugin"} {
+		if strings.Contains(evidence, unwanted) {
+			t.Fatalf("evidence %q should not name %s", evidence, unwanted)
+		}
+	}
+	if reading.Values[anomalySensorSilentSourceCountPath] != 1 {
+		t.Fatalf("expected exactly one silent source, got %v", reading.Values[anomalySensorSilentSourceCountPath])
+	}
+}
+
 // --- Voltage history: dV/dt for full-bank charging level 2 -----------------
 
 // tickVoltageHistory feeds tr one sample a second, starting at start, using
