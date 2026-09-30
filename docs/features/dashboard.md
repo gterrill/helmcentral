@@ -68,6 +68,21 @@ tile to **hero**: an enlarged, full-width row above the rest of the grid,
 useful for the one reading a page exists for, such as anchor distance on an
 anchorage page. Everything else keeps the position you gave it.
 
+The Wind and Engine Cluster tiles are drawn at a fixed proportion and fill
+whatever size you give them, centred in the tile, up to twice their usual
+size. Drag one larger and the dial and its readings grow with it; make it
+smaller and they shrink. On a phone or a narrow window they fit the width of
+the screen as before.
+
+Nearby Vessels and Radar Targets are lists that grow and shrink as contacts
+come and go. When one of them is the lowest tile in its column, with nothing
+below it, it is drawn only as tall as its list needs, down to a header and one
+line, and never taller than the height you set. The space below it is left
+empty rather than padded. A tile with another tile under it keeps the height
+you gave it, so nothing on the page shifts as a contact appears or leaves. In
+layout mode every tile shows the height you set, so dragging and resizing
+work on your own numbers.
+
 Helmcentral saves everything on the box as you make each change, not in the
 browser, so a tablet at the helm and a phone in a bunk show the same
 arrangement and find it again next session. Page order is shared the same

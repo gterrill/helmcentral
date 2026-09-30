@@ -44,6 +44,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Wind and Engine Cluster tiles now fill the tile you give them. Drag
+  either one taller or wider and the dial and its readings grow with it, up to
+  twice their usual size, centred in the tile. Wind no longer stops growing at
+  its old width. On a phone or narrow window they still fit to the screen
+  width.
+- Nearby Vessels and Radar Targets shrink to fit their list when they are the
+  lowest tile in their column. The tile is drawn only as tall as its contacts
+  need, never taller than the height you set, and eases to the new height as
+  contacts come and go. A tile with another tile below it keeps its height,
+  and layout mode always shows the height you set.
+- Nearby Vessels with nothing in range now says how far it looked, for example
+  "No vessels within 5 km" (or nautical miles, if your display is set to
+  imperial), in place of "No nearby targets".
 - The alarms drawer now shows when an alarm from the boat's network was
   acknowledged, even if it was acknowledged at the chartplotter or before
   Helmcentral restarted. This needs SignalK 2.31 or later. On SignalK 2.33 an

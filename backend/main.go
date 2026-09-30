@@ -1660,6 +1660,10 @@ func buildNearbyVesselsPayload() map[string]any {
 		// age_seconds. Zero vessels in range stays -1 (unknown), never 0:
 		// silence is not evidence the feed died (ADR 0068).
 		"last_update_age_s": nearbyVesselsFeedAge(vessels),
+		// The search radius behind the list, so the empty state can say how
+		// far it looked rather than the client repeating a number it was
+		// never told.
+		"max_range_m": nearbyMaxRangeMeters,
 	}
 }
 func nearbyVessels(c echo.Context) error {

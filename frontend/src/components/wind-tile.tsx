@@ -1,7 +1,8 @@
 import { ArrowLeftRight, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
-import { computeCornerMasks, useFitScale, type ClusterCanvasConfig } from '@/lib/cluster-canvas'
+import { FitCanvas } from '@/components/fit-canvas'
+import { computeCornerMasks, type ClusterCanvasConfig } from '@/lib/cluster-canvas'
 import { Tile } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
@@ -81,8 +82,8 @@ function WindMetricCard({ title, titleChip, value, align = 'left', className = '
 }
 
 // Canvas sizes: mobile has no competing grid columns so it can afford a bigger
-// compass than desktop's narrow lg column. Each scales down via useFitScale if
-// its column ends up narrower than its design width.
+// compass than desktop's narrow lg column. Each is fitted to its tile by FitCanvas: down
+// when the tile is smaller than the design, up to twice the design when larger.
 const WIND_MOBILE_CFG: ClusterCanvasConfig = { width: 475, height: 363, ringBox: 295, topCardW: 195, bottomCardW: 224, cardH: 80, gap: 20 }
 const WIND_DESKTOP_CFG: ClusterCanvasConfig = { width: 440, height: 225, ringBox: 198, topCardW: 170, bottomCardW: 203, cardH: 72, gap: 20 }
 
@@ -124,18 +125,8 @@ function WindGaugeCluster({
   currentColorClass,
   ringRotationDeg, bowRotationDeg, arrowAngleDeg, windSide, windAngleRelativeDeg, windSpeedKts, windKind,
 }: WindGaugeClusterProps) {
-  const [fitRef, scale] = useFitScale(cfg.width)
-
   return (
-    <div
-      ref={fitRef}
-      className={`relative mx-auto ${visibilityClassName}`}
-      style={{ maxWidth: cfg.width, height: cfg.height * scale }}
-    >
-      <div
-        className="absolute left-0 top-0 origin-top-left"
-        style={{ width: cfg.width, height: cfg.height, transform: `scale(${scale})` }}
-      >
+    <FitCanvas designWidth={cfg.width} designHeight={cfg.height} className={visibilityClassName}>
         <div className="grid h-full w-full grid-cols-2 grid-rows-2">
           <div className="self-start justify-self-start">
             <WindMetricCard
@@ -182,8 +173,7 @@ function WindGaugeCluster({
             />
           </div>
         </div>
-      </div>
-    </div>
+    </FitCanvas>
   )
 }
 
@@ -477,7 +467,7 @@ export const WindTile = memo(function WindTile({
   )
 
   return (
-    <Tile title="Wind" className="@container" titleExtra={titleExtra} stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
+    <Tile title="Wind" className="@container" fill titleExtra={titleExtra} stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
       <WindGaugeCluster
         cfg={WIND_MOBILE_CFG}
         masks={WIND_MOBILE_MASKS}

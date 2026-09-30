@@ -29,9 +29,9 @@ describe('grid row maths', () => {
 
 describe('the engine cluster resize floor', () => {
   /**
-   * Measured in the browser at scale 1, which is the tallest the tile ever
-   * gets: useFitScale only ever shrinks the canvas, so a wider column costs no
-   * extra height. 32px of tile header and top padding, 228.4px of canvas,
+   * Measured in the browser at scale 1, which is the shortest the tile can
+   * be: the canvas only grows past this, so a wider column costs no extra
+   * height. 32px of tile header and top padding, 228.4px of canvas,
    * 8px of bottom padding.
    */
   const MEASURED_TILE_HEIGHT = 32 + 228.4 + 8

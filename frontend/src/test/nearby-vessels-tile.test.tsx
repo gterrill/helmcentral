@@ -296,4 +296,33 @@ describe('NearbyVesselsTile collision alarms', () => {
     expect(screen.queryByText(/Collision/)).not.toBeInTheDocument()
     expect(vesselNames()).toEqual(['NEAR BOAT', 'ALARM BOAT', 'EMERGENCY BOAT'])
   })
+
+  describe('empty state', () => {
+    const empty = (props: Partial<React.ComponentProps<typeof NearbyVesselsTile>>) =>
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} vessels={[]} {...props} />)
+
+    it('names the range the backend searched, in metric', () => {
+      empty({ maxRangeM: 5000 })
+      expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
+    })
+
+    it('names it in nautical miles for imperial operators', () => {
+      empty({ maxRangeM: 5000, distanceUnits: 'imperial' })
+      expect(screen.getByText('No vessels within 2.7 nm')).toBeInTheDocument()
+    })
+
+    it('keeps a fractional range and uses metres under a kilometre', () => {
+      const { unmount } = empty({ maxRangeM: 2500 })
+      expect(screen.getByText('No vessels within 2.5 km')).toBeInTheDocument()
+      unmount()
+      empty({ maxRangeM: 800 })
+      expect(screen.getByText('No vessels within 800 m')).toBeInTheDocument()
+    })
+
+    it('does not invent a range when the backend sent none', () => {
+      empty({ maxRangeM: null })
+      expect(screen.getByText('No vessels in range')).toBeInTheDocument()
+      expect(screen.queryByText(/5 km/)).toBeNull()
+    })
+  })
 })

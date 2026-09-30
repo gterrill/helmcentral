@@ -191,6 +191,13 @@ type NearbyVesselsTileProps = {
    * prop existed.
    */
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
+  /**
+   * How far the backend searches, in metres, from the nearby-vessels payload.
+   * Null when the payload did not carry it, in which case the empty state says
+   * "in range" and names no distance: a figure the tile guessed would go stale
+   * the day the backend's limit moved.
+   */
+  maxRangeM?: number | null
 }
 
 function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
@@ -200,7 +207,16 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   return `${Math.round(rangeMeters)} m`
 }
 
-export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms }: NearbyVesselsTileProps) {
+// A search radius, in the units used for marine ranges elsewhere on the board:
+// km and nm (as the Nearby map tile does), metres under a kilometre.
+function formatSearchRange(rangeMeters: number, distanceUnits: DistanceUnits) {
+  const trim = (n: number) => String(Number(n.toFixed(1)))
+  if (distanceUnits === 'imperial') return `${trim(rangeMeters / 1852)} nm`
+  if (rangeMeters < 1000) return `${Math.round(rangeMeters)} m`
+  return `${trim(rangeMeters / 1000)} km`
+}
+
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null }: NearbyVesselsTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   const sortedVessels = useMemo(() => sortByCollisionAlarm(vessels, aisCollisionAlarms), [vessels, aisCollisionAlarms])
 
@@ -210,6 +226,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
       icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}
       stale={feedStale}
       staleLabel={formatDataAge(lastUpdateAgeS)}
+      shrinkToContent
     >
       <div className="mt-3 space-y-2">
         {sortedVessels.map((vessel) => {
@@ -252,7 +269,9 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
         })}
 
         {!loading && vessels.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">No nearby targets</div>
+          <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">
+            {maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(maxRangeM, distanceUnits)}`}
+          </div>
         ) : null}
 
         {loading ? (
