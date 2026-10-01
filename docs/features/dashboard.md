@@ -231,9 +231,12 @@ but never zooms in tighter than the range. In the map-and-list layout one row
 at a time is highlighted, moving to the next match every few seconds and back
 to the first once it reaches the end, and that match's marker gets a ring. Its
 description shows too when it has one - many points of interest, especially
-from OpenStreetMap, don't. The map flies in to the highlighted match, holds
-there, then flies back out to the view centred on the boat before the next
-one. An active route shows as a line, with the leg
+from OpenStreetMap, don't. The map dives in to the first match and tilts, holds
+there, then flies straight on to each next one in a high arc that rises far
+enough to show the boat and the whole area on the way. After the last match it
+pulls back out to the view centred on the boat and rests on it before starting
+again. A longer Summary cycle, 15 to 20 seconds, gives each
+place a longer hold. An active route shows as a line, with the leg
 you're on drawn brighter.
 
 See [Add a Nearby map](../how-to/add-a-nearby-map.md) for setup, and [POI

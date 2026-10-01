@@ -11,7 +11,7 @@ import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { fitCameraAroundPoint, formatBearing, POI_MAP_MAX_ZOOM, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -92,13 +92,73 @@ const RANKED_LIST_SIZE = 5
 const FOLLOW_THROTTLE_MS = 2000
 const FOLLOW_EASE_DURATION_MS = 500
 
-// Each highlighted place gets a fly-in at this many zoom levels closer than
-// the overview, held there, then a fly-back to the boat-centred overview.
-// The fly-back starts at this share of the cycle period so the overview is
-// on screen before the next place is highlighted.
-const PLACE_ZOOM_STEP = 2
-const PLACE_FLY_DURATION_MS = 1500
-const PLACE_HOLD_SHARE_OF_CYCLE = 0.6
+// The camera tours the ranked places. The first place is a dive from the
+// overview (a long eased flight that ends tilted); each later place is a hop
+// straight from the previous one, a single high arc whose peak is the
+// overview altitude so the boat and the whole area are in view mid-flight.
+// Only after the last place does the camera pull out to the boat-centred
+// overview and pause there before the cycle wraps to the first place. The
+// wall display is the only home of this tile, so the motion is wanted.
+// flyTo keeps MapLibre's default arc (curve 1.42: zoom out, travel, zoom in).
+// The place zoom is a fixed street-level close-up, never less than two levels
+// in from the overview. POI_MAP_MAX_ZOOM caps only the overview fit; the
+// overview never passes 16, so this tops out at 18, which both the basemap
+// and OpenSeaMap still draw.
+const PLACE_ZOOM = 17
+const PLACE_ZOOM_MIN_STEP = 2
+const PLACE_PITCH_DEG = 30
+const DIVE_TARGET_MS = 2800
+const HOP_TARGET_MS = 3500
+const PULL_OUT_TARGET_MS = 2500
+const OVERVIEW_PAUSE_TARGET_MS = 1500
+// The moves of the busiest cycle (a hop that is also the last place: hop,
+// pull-out, pause) may take at most this share of a cycle; a short cycle
+// scales every move down together so no hold is negative.
+const TOUR_MOVES_MAX_SHARE_OF_CYCLE = 0.85
+
+export interface PlaceTourTimings {
+  diveMs: number
+  // Hold after a dive that is also the last place (single place, or a tour
+  // restarted on the last one): up to the pull-out.
+  holdMs: number
+  // From the highlight change to the start of the pull-out. Counted back from
+  // the end of the cycle, so it is the same whichever flight brought the
+  // camera to the last place.
+  pullOutStartMs: number
+  pullOutMs: number
+  pauseMs: number
+  hopMs: number
+  // Hold after a hop to a place that is not the last: the rest of the cycle.
+  hopHoldMs: number
+}
+
+// The last place of a tour has dive-or-hop + hold + pull-out + pause adding
+// up to the cycle; any other place has dive-or-hop + hold. Moves keep their
+// target length unless the busiest cycle would exceed 85% of T, in which case
+// all of them shrink by the same factor; a longer cycle only lengthens holds.
+export function placeTourTimings(cycleSeconds: number): PlaceTourTimings {
+  const cycleMs = cycleSeconds * 1000
+  const busiestMs = HOP_TARGET_MS + PULL_OUT_TARGET_MS + OVERVIEW_PAUSE_TARGET_MS
+  const scale = Math.min(1, (cycleMs * TOUR_MOVES_MAX_SHARE_OF_CYCLE) / busiestMs)
+  const diveMs = DIVE_TARGET_MS * scale
+  const hopMs = HOP_TARGET_MS * scale
+  const pullOutMs = PULL_OUT_TARGET_MS * scale
+  const pauseMs = OVERVIEW_PAUSE_TARGET_MS * scale
+  const pullOutStartMs = cycleMs - pullOutMs - pauseMs
+  return { diveMs, holdMs: pullOutStartMs - diveMs, pullOutStartMs, pullOutMs, pauseMs, hopMs, hopHoldMs: cycleMs - hopMs }
+}
+
+// Jump under reduced motion, otherwise an eased flight; minZoom is the arc's
+// zenith for a hop between places.
+function travelTo(map: MapRef, reduced: boolean, center: MapPoint, zoom: number, pitch: number, duration: number, minZoom?: number) {
+  const view = { center: [center.lon, center.lat] as [number, number], zoom, pitch, bearing: 0 }
+  if (reduced) map.jumpTo(view)
+  else map.flyTo({ ...view, duration, easing: easeInOutCubic, ...(minZoom === undefined ? {} : { minZoom }) })
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function'
@@ -275,8 +335,9 @@ export default function PoiMapTileImpl({
 
   const hasCenteredRef = useRef(false)
   const lastEaseAtRef = useRef(0)
-  // True from a place's fly-in until its fly-back starts, so the follow
-  // effect doesn't ease the camera back to the boat mid-hold.
+  // True from the first dive until the pull-out after the last place ends
+  // (or the highlight clears), so the follow effect doesn't ease the camera
+  // back to the boat while it is on, or flying between, places.
   const holdingPlaceRef = useRef(false)
 
   // Follow the vessel-centred fit: first fix jumps straight there,
@@ -286,6 +347,8 @@ export default function PoiMapTileImpl({
   // position sentinel. This runs regardless of `interactive`: it drives the
   // camera imperatively (map.jumpTo/easeTo), not through one of maplibre's
   // own gesture handlers, so the kiosk's non-interactive map still follows.
+  // Always level: following only happens on the overview, and a tour that
+  // stopped mid-dive or mid-pull-out would otherwise leave the tilt behind.
   useEffect(() => {
     if (gnssCriticalAlert) return
     if (!cameraTarget) return
@@ -298,59 +361,115 @@ export default function PoiMapTileImpl({
     if (!hasCenteredRef.current) {
       hasCenteredRef.current = true
       lastEaseAtRef.current = Date.now()
-      map.jumpTo({ center: [center.lon, center.lat], zoom })
+      map.jumpTo({ center: [center.lon, center.lat], zoom, pitch: 0 })
       return
     }
 
     const now = Date.now()
     if (now - lastEaseAtRef.current < FOLLOW_THROTTLE_MS) return
     lastEaseAtRef.current = now
-    map.easeTo({ center: [center.lon, center.lat], zoom, duration: FOLLOW_EASE_DURATION_MS })
+    map.easeTo({ center: [center.lon, center.lat], zoom, pitch: 0, duration: FOLLOW_EASE_DURATION_MS })
   }, [cameraTarget, gnssCriticalAlert])
 
-  // Fly in, hold, fly back: when the highlight moves to a place the camera
-  // flies to it, then returns to the boat-centred overview at a share of the
-  // cycle period so the overview is up before the next place. The highlight
-  // already showing at mount is skipped (the first fix jumps to the overview
-  // instead). A lone place never advances the cycle, so it flies in and back
-  // once. Held still under gnssCriticalAlert, like the follow effect, and
-  // runs regardless of `interactive`. Split layout only: with no list
-  // beside it, a map-only tile has nothing that says where it flew or why. The latest inputs are read through a
-  // ref so only a change of highlight restarts the excursion.
+  // Tour the places: when the highlight moves to a place the camera dives to
+  // it from the overview, or hops to it from the previous place through the
+  // overview altitude, and tilts. After the last ranked place it holds, pulls
+  // out to the boat-centred overview and rests there until the cycle wraps
+  // (see placeTourTimings). The highlight already showing at mount is skipped
+  // (the first fix jumps to the overview instead). A lone place never
+  // advances the cycle, so it dives and pulls out once. Held still under
+  // gnssCriticalAlert, like the follow effect, and runs regardless of
+  // `interactive`. Split layout only: with no list beside it, a map-only tile
+  // has nothing that says where it flew or why. The latest inputs are read
+  // through a ref so only a change of highlight restarts a flight. The hold on
+  // the follow effect is deliberately not released by this effect's cleanup,
+  // since the next place continues the tour; only the pull-out, a cleared
+  // highlight or an unmount ends it. Reduced motion jumps and never tilts.
   const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout })
   latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout }
   const previousHighlightRef = useRef(expandedPoiId)
+  // True while the camera is left tilted by a dive or hop, so a path that
+  // skips the pull-out can still level it.
+  const tiltedRef = useRef(false)
+  // Set when a highlight change just flew, so the pull-out effect times from
+  // the highlight change rather than from a mid-hold change of the list.
+  const freshFlightRef = useRef(false)
+  useEffect(() => () => { holdingPlaceRef.current = false }, [])
   useEffect(() => {
     const previous = previousHighlightRef.current
     previousHighlightRef.current = expandedPoiId
-    if (expandedPoiId === null || expandedPoiId === previous) return
+    if (expandedPoiId === null) {
+      holdingPlaceRef.current = false
+      return
+    }
+    if (expandedPoiId === previous) return
     const { cameraTarget: overview, rankedList: places, gnssCriticalAlert: gnss, summaryCycleSeconds: cycle, layout } = latestRef.current
-    if (layout !== 'split' || gnss || !overview || !hasCenteredRef.current) return
-    const place = places.find((f) => f.id === expandedPoiId)
     const map = mapRef.current
-    if (!place || !map) return
+    const level = () => {
+      holdingPlaceRef.current = false
+      if (!tiltedRef.current || !map) return
+      tiltedRef.current = false
+      map.jumpTo({ pitch: 0 })
+    }
+    if (layout !== 'split' || gnss || !overview || !hasCenteredRef.current) { level(); return }
+    const place = places.find((f) => f.id === expandedPoiId)
+    if (!place || !map) { level(); return }
 
     const reduced = prefersReducedMotion()
-    const travel = (center: MapPoint, zoom: number) => {
-      const view = { center: [center.lon, center.lat] as [number, number], zoom }
-      if (reduced) map.jumpTo(view)
-      else map.flyTo({ ...view, duration: PLACE_FLY_DURATION_MS })
-    }
-
+    const timings = placeTourTimings(cycle)
+    // Already on, or flying between, places: hop with the arc. Otherwise the
+    // camera is on the overview, so dive.
+    const hopping = holdingPlaceRef.current
     holdingPlaceRef.current = true
-    travel(place, Math.min(POI_MAP_MAX_ZOOM, overview.zoom + PLACE_ZOOM_STEP))
-    const timer = setTimeout(() => {
-      holdingPlaceRef.current = false
-      const latest = latestRef.current
-      if (latest.gnssCriticalAlert || !latest.cameraTarget) return
-      lastEaseAtRef.current = Date.now()
-      travel(latest.cameraTarget.center, latest.cameraTarget.zoom)
-    }, cycle * 1000 * PLACE_HOLD_SHARE_OF_CYCLE)
-    return () => {
-      clearTimeout(timer)
-      holdingPlaceRef.current = false
-    }
+    tiltedRef.current = !reduced
+    const placeZoom = Math.max(PLACE_ZOOM, overview.zoom + PLACE_ZOOM_MIN_STEP)
+    travelTo(
+      map, reduced, place, placeZoom, reduced ? 0 : PLACE_PITCH_DEG,
+      hopping ? timings.hopMs : timings.diveMs,
+      hopping ? overview.zoom : undefined,
+    )
+    freshFlightRef.current = true
   }, [expandedPoiId])
+
+  // The pull-out after the last place. Keyed on whether the highlighted place
+  // is the last of the current list as well as on the highlight, so a list
+  // that changes shape while the camera is held re-decides it without
+  // re-flying: a place dropping out makes the held one the last (pull out
+  // after a hold from now), a place appearing after it cancels the pull-out
+  // and the camera hops onward when the highlight moves. The follow effect
+  // stays off through the pull-out too: an easeTo mid-flight would cancel it
+  // and carry the tilt.
+  const isLastPlace = rankedList[rankedList.length - 1]?.id === expandedPoiId
+  useEffect(() => {
+    const fresh = freshFlightRef.current
+    freshFlightRef.current = false
+    if (!isLastPlace || !holdingPlaceRef.current) return
+    const map = mapRef.current
+    if (!map) return
+    const timings = placeTourTimings(latestRef.current.summaryCycleSeconds)
+    const pullOutTimer = setTimeout(() => {
+      const latest = latestRef.current
+      if (latest.gnssCriticalAlert || !latest.cameraTarget) {
+        holdingPlaceRef.current = false
+        if (tiltedRef.current) {
+          tiltedRef.current = false
+          map.jumpTo({ pitch: 0 })
+        }
+        return
+      }
+      lastEaseAtRef.current = Date.now()
+      tiltedRef.current = false
+      travelTo(map, prefersReducedMotion(), latest.cameraTarget.center, latest.cameraTarget.zoom, 0, timings.pullOutMs)
+    }, fresh ? timings.pullOutStartMs : timings.holdMs)
+    const releaseTimer = setTimeout(() => {
+      holdingPlaceRef.current = false
+      lastEaseAtRef.current = Date.now()
+    }, (fresh ? timings.pullOutStartMs : timings.holdMs) + timings.pullOutMs)
+    return () => {
+      clearTimeout(pullOutTimer)
+      clearTimeout(releaseTimer)
+    }
+  }, [expandedPoiId, isLastPlace])
 
   // Declutter POI marker labels on move-end, priority by rank then distance
   // (an unranked feature always yields to a ranked one, matching the ranked
