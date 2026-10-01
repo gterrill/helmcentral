@@ -291,9 +291,9 @@ export function WindCompass({
         </text>
 
         <text
-          x={CX} y={CY + 44}
+          x={CX} y={CY + 50}
           textAnchor="middle" dominantBaseline="central"
-          fontSize="12" letterSpacing="3"
+          fontSize="20" letterSpacing="3"
           fill="hsl(var(--muted-foreground))"
           fontFamily="ui-sans-serif, system-ui, sans-serif"
         >

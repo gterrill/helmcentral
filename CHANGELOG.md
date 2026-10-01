@@ -13,6 +13,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Wind tile's gust and Drift readouts show the number alone, without
+  "kts". The unit under the wind speed in the middle of the dial is larger.
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
   the Anchor Watch page, so a stray touch on a dashboard tile can't end it.
 
