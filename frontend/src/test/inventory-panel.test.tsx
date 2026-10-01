@@ -5,7 +5,7 @@ import { InventoryPanel, type InventoryPanelHandle } from '@/components/inventor
 
 // InventoryPanel is a thin composition shell over four already-tested
 // children (equipment-index.test.tsx, equipment-editor.test.tsx,
-// profiles-section.test.tsx, locations-section.test.tsx each cover their own
+// profiles-section.test.tsx, locations-index.test.tsx and location-editor.test.tsx each cover their own
 // fetches/behaviour) - mocked here so this file only exercises InventoryPanel's
 // own job: which one renders for a given (section, equipmentEditId,
 // creatingEquipment) combination, and that its callback props are wired to
@@ -50,9 +50,20 @@ vi.mock('@/components/inventory/profiles-section', () => ({
   ProfilesSection: () => <div data-testid="profiles-section" />,
 }))
 
-vi.mock('@/components/inventory/locations-section', () => ({
-  LocationsSection: (props: { onOpenBin?: (code: string) => void }) => (
-    <div data-testid="locations-section">
+vi.mock('@/components/inventory/locations-index', () => ({
+  LocationsIndex: (props: { onOpenLocation: (id: string) => void }) => (
+    <div data-testid="locations-index">
+      <button type="button" onClick={() => props.onOpenLocation('z1')}>open-location-z1</button>
+    </div>
+  ),
+}))
+
+vi.mock('@/components/inventory/location-editor', () => ({
+  LocationEditor: (props: { id: string; onBack: () => void; onDeleted: () => void; onOpenBin?: (code: string) => void }) => (
+    <div data-testid="location-editor">
+      {props.id}
+      <button type="button" onClick={props.onBack}>location-back</button>
+      <button type="button" onClick={props.onDeleted}>location-deleted</button>
       <button type="button" onClick={() => props.onOpenBin?.('LAZ-02')}>open-bin-LAZ-02</button>
     </div>
   ),
@@ -63,10 +74,10 @@ vi.mock('@/components/inventory/locations-section', () => ({
 // file only exercises InventoryPanel's own job of choosing which one to
 // render and wiring its callback props through.
 vi.mock('@/components/inventory/bin-page', () => ({
-  BinPage: (props: { code: string; onClose: () => void }) => (
+  BinPage: (props: { code: string; onClose: (zoneId?: string) => void }) => (
     <div data-testid="bin-page">
       {props.code}
-      <button type="button" onClick={props.onClose}>bin-page-back</button>
+      <button type="button" onClick={() => props.onClose('z1')}>bin-page-back</button>
     </div>
   ),
 }))
@@ -94,6 +105,10 @@ function baseProps() {
     binCode: null,
     onOpenBin: vi.fn(),
     onCloseBin: vi.fn(),
+    locationEditId: null,
+    onOpenLocation: vi.fn(),
+    onCloseLocation: vi.fn(),
+    onLocationDeleted: vi.fn(),
     newEquipmentPreset: null,
   }
 }
@@ -165,22 +180,42 @@ describe('InventoryPanel', () => {
     expect(screen.getByTestId('profiles-section')).toBeInTheDocument()
   })
 
-  it('renders LocationsSection for the locations section', () => {
+  it('renders the Locations index for the locations section', () => {
     render(<InventoryPanel {...baseProps()} activeSectionId="locations" />)
-    expect(screen.getByTestId('locations-section')).toBeInTheDocument()
+    expect(screen.getByTestId('locations-index')).toBeInTheDocument()
+  })
+
+  it('renders the location page instead of the index when locationEditId is set', () => {
+    render(<InventoryPanel {...baseProps()} activeSectionId="locations" locationEditId="z1" />)
+    expect(screen.getByTestId('location-editor')).toHaveTextContent('z1')
+    expect(screen.queryByTestId('locations-index')).not.toBeInTheDocument()
+  })
+
+  it('reports an index row click, and the location page\'s Back and delete, through its own callbacks', () => {
+    const props = baseProps()
+    const { unmount } = render(<InventoryPanel {...props} activeSectionId="locations" />)
+    fireEvent.click(screen.getByText('open-location-z1'))
+    expect(props.onOpenLocation).toHaveBeenCalledWith('z1')
+    unmount()
+
+    render(<InventoryPanel {...props} activeSectionId="locations" locationEditId="z1" />)
+    fireEvent.click(screen.getByText('location-back'))
+    expect(props.onCloseLocation).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('location-deleted'))
+    expect(props.onLocationDeleted).toHaveBeenCalled()
   })
 
   // ADR 0127: the bin page is the SAME section as Locations, split by
   // binCode the same way Equipment is split by equipmentEditId.
-  it('renders BinPage instead of LocationsSection when binCode is set', () => {
+  it('renders BinPage instead of the Locations index when binCode is set', () => {
     render(<InventoryPanel {...baseProps()} activeSectionId="locations" binCode="LAZ-02" />)
     expect(screen.getByTestId('bin-page')).toHaveTextContent('LAZ-02')
-    expect(screen.queryByTestId('locations-section')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('locations-index')).not.toBeInTheDocument()
   })
 
-  it('reports a Locations-section bin click through onOpenBin', () => {
+  it('reports a location-page bin click through onOpenBin', () => {
     const props = baseProps()
-    render(<InventoryPanel {...props} activeSectionId="locations" />)
+    render(<InventoryPanel {...props} activeSectionId="locations" locationEditId="z1" />)
     fireEvent.click(screen.getByText('open-bin-LAZ-02'))
     expect(props.onOpenBin).toHaveBeenCalledWith('LAZ-02')
   })
@@ -189,7 +224,7 @@ describe('InventoryPanel', () => {
     const props = baseProps()
     render(<InventoryPanel {...props} activeSectionId="locations" binCode="LAZ-02" />)
     fireEvent.click(screen.getByText('bin-page-back'))
-    expect(props.onCloseBin).toHaveBeenCalled()
+    expect(props.onCloseBin).toHaveBeenCalledWith('z1')
   })
 
   it('renders StocktakeSection for the stocktake section', () => {

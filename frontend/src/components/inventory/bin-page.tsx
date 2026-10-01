@@ -20,7 +20,10 @@ import { formatAppLocation } from '@/lib/app-location'
 
 interface BinPageProps {
   code: string
-  onClose: () => void
+  /** Back is "up": a resolved bin passes its location's id so the caller can
+   * open that location's page; the not-found and load-error states pass
+   * nothing, which means the Locations index. */
+  onClose: (zoneId?: string) => void
   onOpenEquipment: (id: string) => void
   /** Full item (below) - pre-sets a brand new draft's location. */
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
@@ -75,7 +78,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
   if (zonesError) {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
-        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => onClose()}>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Locations
         </Button>
@@ -107,7 +110,7 @@ function BinNotFound({
   zones: InventoryZone[]
   createZone: (name: string) => Promise<InventoryZone>
   createBin: (zoneId: string, code: string, name: string) => Promise<InventoryBin>
-  onClose: () => void
+  onClose: (zoneId?: string) => void
   canWrite: boolean
 }) {
   const [creating, setCreating] = useState(false)
@@ -156,7 +159,7 @@ function BinNotFound({
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => onClose()}>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         Locations
       </Button>
@@ -305,7 +308,7 @@ function BinContents({
 }: {
   zone: InventoryZone
   bin: InventoryBin
-  onClose: () => void
+  onClose: (zoneId?: string) => void
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
@@ -319,9 +322,9 @@ function BinContents({
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={onClose}>
+      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => onClose(zone.id)}>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Locations
+        {zone.name}
       </Button>
 
       <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-4">

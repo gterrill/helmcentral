@@ -85,6 +85,35 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
 })
 
+describe('BinPage Back', () => {
+  it('is labelled with the bin\'s location and goes up to it by id', async () => {
+    const onClose = vi.fn()
+    render(<BinPage code="LAZ-02" onClose={onClose} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    const back = await screen.findByRole('button', { name: 'Lazarette' })
+    fireEvent.click(back)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith('z1')
+  })
+
+  it('goes to the Locations index, with no id, when the bin is not found', async () => {
+    const onClose = vi.fn()
+    render(<BinPage code="NOPE" onClose={onClose} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    await screen.findByText('No bin')
+    fireEvent.click(screen.getByRole('button', { name: 'Locations' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith()
+  })
+
+  it('goes to the Locations index, with no id, when the zone list failed to load', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }))
+    const onClose = vi.fn()
+    render(<BinPage code="LAZ-02" onClose={onClose} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    await screen.findByText('boom')
+    fireEvent.click(screen.getByRole('button', { name: 'Locations' }))
+    expect(onClose).toHaveBeenCalledWith()
+  })
+})
+
 describe('BinPage', () => {
   it('resolves a bin code case-insensitively', async () => {
     render(<BinPage code="laz-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
