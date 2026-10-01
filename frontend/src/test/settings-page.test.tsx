@@ -329,6 +329,24 @@ describe('SettingsPage Save bar', () => {
     expect(saveBar().queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('Discard after a partial save keeps what the settings request already saved', async () => {
+    saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
+    mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    const input = screen.getByLabelText('Vessel prefix') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'S/V Test' } })
+
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
+    await saveBar().findByRole('alert')
+    fireEvent.click(saveBar().getByRole('button', { name: 'Discard' }))
+
+    // The settings request succeeded, so the server holds 'S/V Test'. Discard
+    // must not roll the form back behind it.
+    await waitFor(() => expect(resetTouchedMock).toHaveBeenCalled())
+    expect(input.value).toBe('S/V Test')
+  })
+
   it('combines secrets save failures into the bar', async () => {
     saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
     mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }

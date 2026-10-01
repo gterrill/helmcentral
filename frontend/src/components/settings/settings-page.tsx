@@ -153,7 +153,10 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // Continue" navigation-guard action — can each decide how to react.
   const performSave = useCallback(async () => {
     await Promise.all([
-      save(buildRegularSettingsPatch(draft)).catch((err: unknown) => {
+      // The snapshot moves as soon as THIS request lands, not once all three
+      // have: if a sibling fails, Discard must not roll the form back behind
+      // what the server already holds (the next save would then write it).
+      save(buildRegularSettingsPatch(draft)).then(() => setSavedDraftSnapshot(draft), (err: unknown) => {
         setSettingsSaveError(err instanceof Error ? err.message : 'Unable to save settings')
         throw err
       }),
@@ -166,7 +169,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         throw err
       }),
     ])
-    setSavedDraftSnapshot(draft)
 
     // Re-read auth after every save. If this save turned authentication on,
     // App.tsx's gate drops this tab to the login screen, rather than leaving it
