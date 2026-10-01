@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Wall displays now check themselves against the screen they run on. Open a
+  display's address on its screen once and its page under **Wall displays**
+  shows "Measured on this screen", the size that screen's browser really
+  reports. If the canvas times the magnification is bigger than that, the page
+  says how many pixels are cut off at the right and bottom and offers **Fit to
+  screen**, which sets the magnification to the largest value that fits. The
+  Wall displays list flags the same problem, and the wall itself shows a small
+  note when its page is larger than the screen. Magnification now takes two
+  decimals. The display probe page also prints the reported viewport size
+  large at the top.
 - Import from YachtWave, in **Settings → Import**. Upload YachtWave's Vessel
   Export and go through it one page per topic: vessel particulars, locations,
   equipment and spares, the service log, notes, then each document and photo.

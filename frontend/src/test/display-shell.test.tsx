@@ -39,8 +39,58 @@ function display(overrides: Partial<Display> = {}): Display {
   }
 }
 
+function setViewport(w: number, h: number) {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true })
+  Object.defineProperty(window, 'innerHeight', { value: h, configurable: true })
+}
+
+describe('DisplayShell fit notice', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    mockPixelShift.mockReturnValue({ dx: 0, dy: 0 })
+    mockWakeLock.mockReturnValue({ status: 'off' })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  test('says so when the canvas is larger than the screen', () => {
+    setViewport(1536, 856)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ name: 'Salon TV', width: 1920, height: 1080, scale: 1 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(getByTestId('display-overflow-notice')).toHaveTextContent(
+      'This page is larger than the screen. Open Wall displays › Salon TV to fit it.',
+    )
+  })
+
+  test('is absent when the canvas fits', () => {
+    setViewport(1920, 1080)
+    const { queryByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 360 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(queryByTestId('display-overflow-notice')).toBeNull()
+  })
+
+  test('is absent for a full-viewport canvas', () => {
+    setViewport(800, 600)
+    const { queryByTestId } = render(
+      <DisplayShell display={display({ width: 0, height: 0, scale: 0 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(queryByTestId('display-overflow-notice')).toBeNull()
+  })
+})
+
 describe('DisplayShell', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    setViewport(1920, 1080)
     mockPixelShift.mockReturnValue({ dx: 0, dy: 0 })
     mockWakeLock.mockReturnValue({ status: 'off' })
   })
@@ -49,6 +99,7 @@ describe('DisplayShell', () => {
     document.documentElement.style.cursor = ''
     document.body.style.overflow = ''
     vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   test('renders its children inside the inner canvas', () => {

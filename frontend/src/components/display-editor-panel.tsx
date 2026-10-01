@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSeparator, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { DISPLAY_MIN_SCALE, displayFit } from '@/lib/displays'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -53,7 +54,6 @@ const DISPLAY_SLUG_MAX_LEN = 32
 const DISPLAY_MIN_PX = 200
 const DISPLAY_MAX_WIDTH_PX = 7680
 const DISPLAY_MAX_HEIGHT_PX = 4320
-const DISPLAY_MIN_SCALE = 0.5
 const DISPLAY_MAX_SCALE = 4.0
 const DISPLAY_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -271,7 +271,7 @@ function CanvasMagnificationFields({ display, onUpdate, canWrite }: { display: D
           id={`display-${display.id}-scale`}
           key={`${display.id}-scale-${display.scale}`}
           type="number"
-          step={0.1}
+          step={0.01}
           aria-label={`Scale for ${display.name}`}
           defaultValue={display.scale || 1}
           disabled={!canWrite}
@@ -282,6 +282,63 @@ function CanvasMagnificationFields({ display, onUpdate, canWrite }: { display: D
       </Field>
     </>
   )
+}
+
+/** Shows what the wall's own browser last reported, and when the configured
+ * canvas times its magnification does not fit inside that, says by how much
+ * and offers the one change that fixes it. Says nothing about a canvas that
+ * is smaller than the screen: a strip in a bigger window is deliberate. */
+function MeasuredScreen({ display, onUpdate, canWrite }: { display: Display; onUpdate: DisplayEditorPanelProps['onUpdate']; canWrite: boolean }) {
+  const viewport = display.viewport
+  if (!viewport) {
+    return (
+      <p data-testid="display-measured" className="order-last basis-full text-xs text-muted-foreground">
+        Not measured yet. Open /display/{display.slug} on this screen and its size shows up here.
+      </p>
+    )
+  }
+  const fit = displayFit(display, viewport)
+  const seen = new Date(viewport.measured_at).toLocaleString()
+  return (
+    <div data-testid="display-measured" className="order-last flex basis-full flex-col gap-1.5 text-xs">
+      <p className="text-muted-foreground">
+        Measured on this screen: <span className="font-mono tabular-nums text-foreground">{viewport.w} × {viewport.h}</span>
+        {' '}(last seen {seen})
+      </p>
+      {fit.status === 'overflow' && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-600 dark:text-amber-500"
+        >
+          <span>
+            {fit.fitScale === null
+              ? `This canvas is too large for this screen, even at the ${DISPLAY_MIN_SCALE}× minimum magnification. Use a smaller canvas.`
+              : 'This canvas is larger than the screen, so the edge is cut off.'}
+            {' '}It runs {overflowText(fit.overW, fit.overH)}.
+          </span>
+          {fit.fitScale !== null && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!canWrite}
+              onClick={() => void onUpdate(display.id, { scale: fit.fitScale as number })}
+            >
+              Fit to screen ({fit.fitScale}×)
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** "384 px past the right edge and 224 px past the bottom". */
+function overflowText(overW: number, overH: number): string {
+  const parts: string[] = []
+  if (overW > 0) parts.push(`${overW} px past the right edge`)
+  if (overH > 0) parts.push(`${overH} px past the bottom`)
+  return parts.join(' and ')
 }
 
 export function DisplayEditorPanel({
@@ -473,6 +530,7 @@ export function DisplayEditorPanel({
         </Field>
 
         <CanvasMagnificationFields display={display} onUpdate={onUpdate} canWrite={canWrite} />
+        <MeasuredScreen display={display} onUpdate={onUpdate} canWrite={canWrite} />
 
         <Field className="w-36">
           <FieldLabel htmlFor={`display-${display.id}-rotate`}>Rotation</FieldLabel>

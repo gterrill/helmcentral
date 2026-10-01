@@ -136,4 +136,18 @@ describe('WallDisplaysPanel', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
   })
+
+  describe('overflow flag', () => {
+    const viewport = { w: 1536, h: 856, measured_at: '2026-10-02T01:00:00Z' }
+
+    it('flags a canvas larger than the measured screen', () => {
+      render(<WallDisplaysPanel {...baseProps({ displays: [makeDisplay({ width: 1920, height: 1080, scale: 1, viewport })] })} />)
+      expect(screen.getByTestId('display-overflow-flybridge')).toHaveTextContent('Larger than the screen (1536 × 856)')
+    })
+
+    it('stays quiet for a strip smaller than the screen and for an unmeasured display', () => {
+      render(<WallDisplaysPanel {...baseProps({ displays: [makeDisplay({ width: 1920, height: 360, viewport: { ...viewport, w: 1920, h: 1080 } })] })} />)
+      expect(screen.queryByTestId('display-overflow-flybridge')).toBeNull()
+    })
+  })
 })

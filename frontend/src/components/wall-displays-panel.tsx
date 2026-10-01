@@ -10,7 +10,7 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { displayScale, type Display } from '@/lib/displays'
+import { displayFit, displayScale, type Display } from '@/lib/displays'
 import type { HelpTarget } from '@/lib/help-links'
 import { cn } from '@/lib/utils'
 
@@ -220,6 +220,14 @@ export function WallDisplaysPanel({
                       >
                         {formatCanvas(display)}
                       </span>
+                      {displayFit(display, display.viewport).status === 'overflow' && (
+                        <span
+                          data-testid={`display-overflow-${display.slug}`}
+                          className="mt-0.5 block text-xs text-amber-600 dark:text-amber-500"
+                        >
+                          Larger than the screen ({display.viewport?.w} × {display.viewport?.h})
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <span className="font-mono text-xs tabular-nums text-muted-foreground">{formatRotation(display)}</span>

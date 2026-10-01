@@ -2,7 +2,8 @@ import { createContext, useEffect, useMemo, useState, type CSSProperties, type R
 import { DisplayStatusBadge } from '@/components/display-status-badge'
 import { usePixelShift } from '@/hooks/use-pixel-shift'
 import { useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
-import { displayScale, type Display } from '@/lib/displays'
+import { useDisplayViewport } from '@/hooks/use-display-viewport'
+import { displayFit, displayScale, type Display } from '@/lib/displays'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 
 interface DisplayShellProps {
@@ -111,6 +112,11 @@ const CURSOR_IDLE_MS = 3000
 export function DisplayShell({ display, alarms, children, overlay }: DisplayShellProps) {
   const { dx, dy } = usePixelShift(display.pixel_shift)
   const { status: wakeLockStatus } = useScreenWakeLock(display.wake_lock)
+
+  // Reports this screen's window to the backend for the editor, and gives
+  // the notice below the live size to compare against (ADR 0153).
+  const viewport = useDisplayViewport(display.id)
+  const overflows = displayFit(display, viewport).status === 'overflow'
 
   const isFullViewport = display.width === 0 && display.height === 0
   const scale = isFullViewport ? 1 : displayScale(display)
@@ -225,6 +231,16 @@ export function DisplayShell({ display, alarms, children, overlay }: DisplayShel
         <div className="relative p-1" style={innerStyle}>
           <DisplayStatusBadge alarms={alarms} wakeLockStatus={wakeLockStatus} />
           {overlay}
+          {overflows && (
+            // At the top left because that is the part of an oversized canvas
+            // the screen still shows. Amber is the project's warning colour.
+            <p
+              data-testid="display-overflow-notice"
+              className="absolute left-2 top-2 z-10 max-w-[60%] rounded-md border border-amber-500/40 bg-card px-2 py-1 text-xs font-semibold text-amber-500"
+            >
+              This page is larger than the screen. Open Wall displays › {display.name} to fit it.
+            </p>
+          )}
         </div>
       </div>
     </>

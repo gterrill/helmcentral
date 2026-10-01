@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"sort"
@@ -41,8 +42,22 @@ type displayData struct {
 	PixelShift bool `json:"pixel_shift,omitempty"`
 	WakeLock   bool `json:"wake_lock,omitempty"`
 
+	// What the screen's own browser last reported, kept apart from the
+	// configured canvas above and never used to change it (ADR 0153). Nil
+	// until the wall page has loaded once on this display.
+	Viewport *displayViewport `json:"viewport,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// displayViewport is a measurement, not a setting: the window size the wall
+// browser reported, when, and from which browser.
+type displayViewport struct {
+	W          int       `json:"w"`
+	H          int       `json:"h"`
+	MeasuredAt time.Time `json:"measured_at"`
+	UserAgent  string    `json:"user_agent,omitempty"`
 }
 
 // displaysState is guarded by dashboardPagesMu, the same lock that guards
@@ -87,6 +102,11 @@ const (
 	displayMinPx       = 200
 	displayMaxWidthPx  = 7680
 	displayMaxHeightPx = 4320
+
+	displayViewportMinPx           = 100
+	displayViewportMaxPx           = 10000
+	displayViewportUserAgentMaxLen = 200
+	displayViewportMaxBodyBytes    = 2048
 
 	displayMinScale = 0.5
 	displayMaxScale = 4.0
@@ -180,6 +200,52 @@ func listDisplaysHandler(c echo.Context) error {
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 	return c.JSON(http.StatusOK, map[string][]*displayData{"displays": orderedDisplaysLocked()})
+}
+
+// PUT /api/displays/:id/viewport records what the wall browser reports for
+// its own window (ADR 0153). It sits on the read tier because the wall
+// browser holds no more than a read session, and it can touch nothing but
+// the measurement: the configured canvas is changed only through PATCH.
+// updated_at is left alone, since a measurement is not an edit.
+func putDisplayViewportHandler(c echo.Context) error {
+	id := c.Param("id")
+
+	var body struct {
+		W         *int   `json:"w"`
+		H         *int   `json:"h"`
+		UserAgent string `json:"user_agent"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, displayViewportMaxBodyBytes))
+	if err := dec.Decode(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	}
+	if body.W == nil || body.H == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "w and h are required"})
+	}
+	if *body.W < displayViewportMinPx || *body.W > displayViewportMaxPx ||
+		*body.H < displayViewportMinPx || *body.H > displayViewportMaxPx {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "viewport out of range"})
+	}
+	ua := body.UserAgent
+	if len(ua) > displayViewportUserAgentMaxLen {
+		ua = ua[:displayViewportUserAgentMaxLen]
+	}
+
+	dashboardPagesMu.Lock()
+	defer dashboardPagesMu.Unlock()
+
+	current, ok := displaysState[id]
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "display not found"})
+	}
+	updated := *current
+	updated.Viewport = &displayViewport{W: *body.W, H: *body.H, MeasuredAt: time.Now().UTC(), UserAgent: ua}
+	displaysState[id] = &updated
+	if err := saveDashboardPagesLocked(); err != nil {
+		displaysState[id] = current
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
+	}
+	return c.JSON(http.StatusOK, &updated)
 }
 
 // POST /api/displays

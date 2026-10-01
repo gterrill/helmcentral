@@ -12,6 +12,7 @@ import {
   displayFeed,
   nextDisplayIndex,
   prevDisplayIndex,
+  displayFit,
   type Display,
   type DisplayEligiblePage,
 } from '@/lib/displays'
@@ -215,5 +216,46 @@ describe('prevDisplayIndex', () => {
 
   it('returns -1 for an empty feed', () => {
     expect(prevDisplayIndex([], 'a')).toBe(-1)
+  })
+})
+
+describe('displayFit', () => {
+  const tv = { width: 1920, height: 1080, scale: 1 }
+
+  it('suggests 0.79 for 1920x1080 on a 1536x856 viewport and reports the overflow', () => {
+    const fit = displayFit(display(tv), { w: 1536, h: 856 })
+    expect(fit).toEqual({ status: 'overflow', overW: 384, overH: 224, fitScale: 0.79 })
+  })
+
+  it('floors rather than rounds', () => {
+    // 1000/1920 = 0.5208 -> 0.52, and 0.58 must not come out as 0.57 from float error.
+    expect(displayFit(display({ width: 1000, height: 1000, scale: 2 }), { w: 580, h: 900 }))
+      .toMatchObject({ status: 'overflow', fitScale: 0.58 })
+  })
+
+  it('says nothing when a strip is smaller than the viewport', () => {
+    expect(displayFit(display({ width: 1920, height: 360, scale: 1 }), { w: 1920, h: 1080 })).toEqual({ status: 'fits' })
+  })
+
+  it('fits when size times magnification lands exactly on the viewport', () => {
+    expect(displayFit(display({ width: 1280, height: 720, scale: 1.5 }), { w: 1920, h: 1080 })).toEqual({ status: 'fits' })
+  })
+
+  it('flags an overflow in one axis only', () => {
+    expect(displayFit(display({ width: 1920, height: 1080, scale: 1 }), { w: 1920, h: 1000 }))
+      .toMatchObject({ status: 'overflow', overW: 0, overH: 80, fitScale: 0.92 })
+  })
+
+  it('offers no fit below the 0.5 minimum', () => {
+    expect(displayFit(display({ width: 3840, height: 2160, scale: 1 }), { w: 1536, h: 856 }))
+      .toEqual({ status: 'overflow', overW: 2304, overH: 1304, fitScale: null })
+  })
+
+  it('treats a zero canvas as fitting', () => {
+    expect(displayFit(display({ width: 0, height: 0, scale: 0 }), { w: 1536, h: 856 })).toEqual({ status: 'fits' })
+  })
+
+  it('is unknown without a measurement', () => {
+    expect(displayFit(display(tv), undefined)).toEqual({ status: 'unmeasured' })
   })
 })

@@ -171,8 +171,9 @@ rate or tank level that stopped being true.
 | --- | --- |
 | Name | What you call the screen. "Flybridge", "Saloon TV". |
 | Address | The last part of the screen's web address, so `flybridge` gives `/display/flybridge`. |
-| Screen size | The size the screen's own browser reports, which is not always the panel's actual size. |
-| Magnification | How much larger to draw everything: more for a television read across a room, less for a strip read at arm's length. |
+| Canvas | The width and height pages are laid out against. Start from the size the screen's own browser reports, which is not always the panel's actual size. |
+| Magnification | How much larger to draw everything: more for a television read across a room, less for a strip read at arm's length. Canvas times magnification has to fit what the screen's browser reports, or the right and bottom are cut off. Takes two decimals. |
+| Measured on this screen | Read-only. The size the screen's browser last reported when the display's address was open on it, with a warning and a **Fit to screen** button when the canvas is too big. |
 | Upside down | For a panel mounted inverted. |
 | OLED panel | Shifts the image a few pixels on a slow cycle, so a board left up all season does not burn in. |
 | Keep awake | Asks the screen not to sleep. Cannot override the set's own power-saving menu. |
