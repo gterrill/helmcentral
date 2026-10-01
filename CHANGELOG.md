@@ -11,6 +11,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The Wind tile's gust and Drift readouts show the number alone, without
+  "kts". The unit under the wind speed in the middle of the dial is larger.
+
 ## [0.37.0] - 2026-10-01
 
 ### Added
