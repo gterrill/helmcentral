@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-01
+
 ### Added
 
 - Import from YachtWave, in **Settings → Import**. Upload YachtWave's Vessel
@@ -668,7 +670,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/gterrill/helmcentral/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/gterrill/helmcentral/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/gterrill/helmcentral/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/gterrill/helmcentral/compare/v0.33.0...v0.34.0
