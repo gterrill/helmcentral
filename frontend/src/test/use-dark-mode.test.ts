@@ -3,6 +3,7 @@ import { renderHook, act } from '@testing-library/react'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 
 const DARK_MODE_KEY = 'ui.darkMode'
+const AUTO_LAST_KEY = 'ui.darkMode.autoLast'
 
 function stubMatchMedia(prefersDark: boolean) {
   vi.stubGlobal(
@@ -159,6 +160,43 @@ describe('useDarkMode', () => {
       expect(result.current[0]).toBe(false)
 
       act(() => { vi.advanceTimersByTime(60_000) })
+      expect(result.current[0]).toBe(true)
+    })
+
+    it('writes the resolved theme to storage so a reload can keep it', () => {
+      vi.setSystemTime(at(22, 0))
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      renderHook(() => useDarkMode(sun))
+      expect(localStorage.getItem(AUTO_LAST_KEY)).toBe('true')
+
+      vi.setSystemTime(at(12, 0))
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      renderHook(() => useDarkMode(sun))
+      expect(localStorage.getItem(AUTO_LAST_KEY)).toBe('false')
+    })
+
+    it('reloads in Auto with no sun times and keeps the last resolved night over a light system', () => {
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      localStorage.setItem(AUTO_LAST_KEY, 'true')
+      stubMatchMedia(false)
+      const { result } = renderHook(() => useDarkMode({ sunriseTime: null, sunsetTime: null, timeZone: TZ }))
+      expect(result.current[0]).toBe(true)
+      expect(result.current[2].autoUntil).toBeNull()
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+    })
+
+    it('reloads in Auto with last resolved day over a dark system', () => {
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      localStorage.setItem(AUTO_LAST_KEY, 'false')
+      stubMatchMedia(true)
+      const { result } = renderHook(() => useDarkMode())
+      expect(result.current[0]).toBe(false)
+    })
+
+    it('falls back to the system preference only when Auto has never resolved', () => {
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      stubMatchMedia(true)
+      const { result } = renderHook(() => useDarkMode())
       expect(result.current[0]).toBe(true)
     })
 

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { resolveAutoTheme } from '@/lib/auto-theme'
 
 const DARK_MODE_KEY = 'ui.darkMode'
+const AUTO_LAST_KEY = 'ui.darkMode.autoLast'
 const AUTO_RECHECK_MS = 60_000
 
 export type ThemeMode = 'day' | 'night' | 'auto'
@@ -39,6 +40,12 @@ function readStoredMode(): ThemeMode | null {
   return stored === 'true' ? 'night' : 'day'
 }
 
+/** The theme Auto last resolved from sunrise and sunset in this browser, if any. */
+function readAutoLast(): boolean | null {
+  const stored = globalThis.localStorage?.getItem(AUTO_LAST_KEY)
+  return stored === 'true' ? true : stored === 'false' ? false : null
+}
+
 const NEXT_MODE: Record<ThemeMode, ThemeMode> = { day: 'night', night: 'auto', auto: 'day' }
 const STORED_VALUE: Record<ThemeMode, string> = { day: 'false', night: 'true', auto: 'auto' }
 
@@ -54,7 +61,10 @@ export function useDarkMode(sun?: AutoThemeSun): [boolean, () => void, ThemeStat
   const [mode, setMode] = useState<ThemeMode | null>(readStoredMode)
   const [, setRecheck] = useState(0)
   const held = useRef<boolean>(
-    mode === 'day' ? false : mode === 'night' ? true : systemPrefersDark(),
+    mode === 'day' ? false
+      : mode === 'night' ? true
+      : mode === 'auto' ? (readAutoLast() ?? systemPrefersDark())
+      : systemPrefersDark(),
   )
 
   useEffect(() => {
@@ -75,6 +85,14 @@ export function useDarkMode(sun?: AutoThemeSun): [boolean, () => void, ThemeStat
   useEffect(() => {
     held.current = isDark
   }, [isDark])
+
+  const resolvedDark = resolved?.isDark
+  useEffect(() => {
+    // Remember what Auto decided so a reload without sun times keeps it.
+    if (resolvedDark !== undefined) {
+      globalThis.localStorage?.setItem(AUTO_LAST_KEY, String(resolvedDark))
+    }
+  }, [resolvedDark])
 
   useEffect(() => {
     // Initial paint for the stored or system theme. Later changes are applied
