@@ -327,15 +327,16 @@ describe('App full screen', () => {
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
   })
 
-  // [P1 finding] The floating exit button used to be `fixed right-2 top-2`,
-  // the same top-right corner the live alarm banner's own View/Acknowledge
-  // buttons land in once the header is gone (AlarmBanner's action row is
-  // always the trailing, right-aligned child of its row) - a tap meant for
-  // "View" landed on the exit button instead. happy-dom does no real CSS
-  // layout, so this can't assert actual pixel overlap; it checks the
-  // Tailwind position classes directly instead, the same way test/helpers/
-  // z-ladder.tsx checks z-index classes without a real layout engine.
-  it('does not float in the same top-right corner as the live alarm banner\'s own View/Acknowledge buttons', () => {
+  // [P1 finding] The floating exit button sits top-right, the same corner
+  // the live alarm banner's own View/Acknowledge buttons land in once the
+  // header is gone (AlarmBanner's action row is always the trailing,
+  // right-aligned child of its row). Unpadded, a tap meant for "View" landed
+  // on the exit button instead, so the banner stack reserves the button's
+  // width on its right while full screen. happy-dom does no real CSS layout,
+  // so this can't assert actual pixel overlap; it checks the Tailwind
+  // classes directly instead, the same way test/helpers/z-ladder.tsx checks
+  // z-index classes without a real layout engine.
+  it('floats top-right with the live alarm banner padded clear of it', () => {
     stubFullscreenEnabled(true)
     render(<App />)
 
@@ -348,7 +349,8 @@ describe('App full screen', () => {
     const exitButton = screen.getByRole('button', { name: 'Exit full screen' })
     expect(exitButton.className).toMatch(/\bfixed\b/)
     expect(exitButton.className).toMatch(/\btop-2\b/)
-    expect(exitButton.className).not.toMatch(/\bright-2\b/)
+    expect(exitButton.className).toMatch(/\bright-2\b/)
+    expect(screen.getByTestId('alarm-banner-stack').className).toMatch(/\bpr-12\b/)
   })
 
   it('clicking "Exit full screen" calls document.exitFullscreen()', () => {
