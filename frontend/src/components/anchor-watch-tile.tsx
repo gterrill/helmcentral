@@ -23,7 +23,7 @@ import { formatDataAge, isStale } from '@/lib/staleness'
 // route, including /kiosk pages with no anchor-watch tile on them. Same lazy
 // -split pattern as assistant-markdown.tsx/help-markdown.tsx, just with
 // the boundary drawn inside this component instead of a matching *-impl
-// file: the tile's own chrome (alarm strips, distance KPI, Drop/Raise) stays
+// file: the tile's own chrome (alarm strips, distance KPI, Drop) stays
 // eager, and only the map slot below waits on the dynamic import.
 const AnchorWatchMap = lazy(() =>
   import('@/components/anchor-watch-map').then((m) => ({ default: m.AnchorWatchMap })),
@@ -243,7 +243,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     >
       {/* At lg+ the dashboard grid hands this tile a fixed height (RGL wraps
           widgets in h-full), so the content is a flex column and the map is the
-          one row that gives — otherwise the rode readout and Drop/Raise button
+          one row that gives — otherwise the rode readout and Drop button
           overflow the card. Below lg the persisted height is only a floor
           (dashboard-bento-grid.tsx) and the map keeps its fixed h-64. */}
       <div className="flex h-full min-h-0 flex-col">
@@ -386,27 +386,15 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
         )}
       </div>
 
-      {/* The footer holds the current state's primary action. Idle, that is
-          Drop: full width, at the moment it matters. With a watch active the
-          tile is a monitor and has no primary action, so Raise — a once-per-
-          anchorage departure chore whose accidental press the confirm dialog
-          exists to guard — sits compact at the trailing edge instead of
-          dominating the tile for the life of the watch (matching the
-          drawer's footer). */}
-      {anchorState === 'none' ? (
+      {/* Idle, the footer holds Drop: full width, at the moment it matters.
+          With a watch active the tile is a monitor only. Raise lives on the
+          Anchor Watch page, so a stray touch on a dashboard tile can't end
+          the watch. */}
+      {anchorState === 'none' && (
         <div className="mt-2 shrink-0">
           <AnchorDropRaiseButton
             className="w-full"
             anchorActive={false}
-            canDrop={lat !== null && lon !== null}
-            onDrop={handleDropHere}
-            onRaise={clearAnchor}
-          />
-        </div>
-      ) : (
-        <div className="mt-2 flex shrink-0 justify-end">
-          <AnchorDropRaiseButton
-            anchorActive
             canDrop={lat !== null && lon !== null}
             onDrop={handleDropHere}
             onRaise={clearAnchor}

@@ -80,8 +80,10 @@ usually simpler than adjusting a long way.
 
 ## Raise the watch
 
-Choose **Raise** and confirm. This clears the watch, the trail and any pins
-placed in the rode planner for this anchoring.
+Open the Anchor Watch page, choose **Raise** and confirm. This clears the
+watch, the trail and any pins placed in the rode planner for this anchoring.
+The Anchor Watch tile on a dashboard page has no Raise, so a stray touch on
+the tile can't end the watch.
 
 To have this happen on its own when you motor away, turn on **Auto-raise
 anchor watch when under way** under **Settings → Anchor Watch** (on a tablet or
