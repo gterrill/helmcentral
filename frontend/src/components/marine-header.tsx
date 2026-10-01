@@ -9,7 +9,7 @@ export function MarineHeader() {
   const vesselModelLabel = boatModel ?? 'MODEL NOT SET'
 
   return (
-    <Tile title="Vessel" className="py-2">
+    <Tile title="Vessel">
       <div className="flex min-w-0 shrink flex-col">
         {/* An unset name is a placeholder, not data: DESIGN.md's zero-state
             rule bars styling the two the same way. A real name gets the hero

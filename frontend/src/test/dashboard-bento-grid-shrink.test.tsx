@@ -8,6 +8,7 @@ import { fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { DashboardBentoGrid, gridPixelHeight } from '@/components/dashboard-bento-grid'
+import { TILE_INSET_H } from '@/lib/grid-metrics'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import { useReportTileHeight } from '@/lib/tile-content-height'
 import { setViewportWidth } from './viewport'
@@ -42,14 +43,26 @@ const itemHeight = (container: HTMLElement, id: string) => {
   return el.style.height
 }
 
+// A tile reports the height of its card; the board adds the TILE_INSET_H strip
+// the card is inset by inside its cell, so 3 rows of card (128px) needs 136px
+// of cell, which is 4 rows.
+const shrunkRows = 4
+
+describe('inset', () => {
+  it('is the 8px that clears the title pill below the tile above', () => {
+    expect(TILE_INSET_H).toBe(8)
+  })
+})
+
 describe('at helm width', () => {
   it('shrinks a bottom tile to its content and leaves the others alone', () => {
     setViewportWidth(1280)
     const { container } = renderGrid()
-    // nearby-vessels has nothing under it: 9 rows down to the 3 it needs.
-    expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(3)}px`)
-    // solar is bottom of its column too, and needs 3 of its 4 rows.
-    expect(itemHeight(container, 'solar')).toBe(`${gridPixelHeight(3)}px`)
+    // nearby-vessels has nothing under it: 9 rows down to what its card plus
+    // the top inset needs.
+    expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(shrunkRows)}px`)
+    // solar is bottom of its column too; with the inset it needs all 4 of its rows.
+    expect(itemHeight(container, 'solar')).toBe(`${gridPixelHeight(shrunkRows)}px`)
     // wind has solar beneath it, so it keeps all six.
     expect(itemHeight(container, 'wind')).toBe(`${gridPixelHeight(6)}px`)
   })
@@ -74,7 +87,7 @@ describe('at helm width', () => {
   it('restores the full height when edit mode is entered', () => {
     setViewportWidth(1280)
     const { container, rerender } = renderGrid()
-    expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(3)}px`)
+    expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(shrunkRows)}px`)
     rerender(
       <DashboardBentoGrid
         widgets={widgets}
@@ -97,6 +110,25 @@ describe('at phone width', () => {
     // Stack order is (y, x): wind, nearby-vessels, solar. Solar is last.
     expect(floor('wind')).toBe(`${gridPixelHeight(6)}px`)
     expect(floor('nearby-vessels')).toBe(`${gridPixelHeight(9)}px`)
-    expect(floor('solar')).toBe(`${gridPixelHeight(3)}px`)
+    expect(floor('solar')).toBe(`${gridPixelHeight(shrunkRows)}px`)
+  })
+})
+
+describe('tile inset', () => {
+  it('insets the tile 8px inside its grid cell at helm width and puts edit controls on the card corners', () => {
+    setViewportWidth(1280)
+    const { container, getByLabelText } = renderGrid({ editing: true })
+    const inner = container.querySelector<HTMLElement>('[data-testid="widget-wind"]')!.closest<HTMLElement>('.pt-2')
+    expect(inner).not.toBeNull()
+    expect(getByLabelText(/Remove Wind tile/i).className).toContain('top-5')
+    expect(getByLabelText(/Remove Wind tile/i).className).not.toContain('-top-2')
+    expect(getByLabelText(/Drag handle for the Wind tile/i).className).toContain('top-5')
+  })
+
+  it('insets the tile 8px inside its stack cell at phone width', () => {
+    setViewportWidth(375)
+    const { container } = renderGrid()
+    const cell = container.querySelector<HTMLElement>('[data-testid="widget-wind"]')!.closest<HTMLElement>('.bento-stack-cell')!
+    expect(cell.className).toContain('pt-2')
   })
 })

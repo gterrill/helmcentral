@@ -26,6 +26,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Tile titles now sit in a pill on the tile's top edge, with the state dot at
+  the right end of the same edge, instead of in a row of their own. A tile's
+  controls, such as the gear shown while editing or the Wind tile's toggles,
+  sit on the same edge at the right as matching pills, and turn amber or red
+  with the tile's edge. Tiles stacked in a column sit a little further apart
+  so each title clears the tile above it.
 - The Wind tile's gust and Drift readouts show the number alone, without
   "kts". The unit under the wind speed in the middle of the dial is larger.
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from

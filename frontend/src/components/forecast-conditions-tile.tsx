@@ -32,8 +32,8 @@ const START_DAY = 1
 // gridPixelHeight(WIDGET_CONSTRAINTS['forecast-conditions'].minH) is 272px
 // (6 rows at GRID_ROW_HEIGHT=32, GRID_MARGIN=16 - dashboard-bento-grid.tsx);
 // this box only covers the chart's own flex-1 slot below the card row, so
-// the fallback height is that budget minus the Tile chrome (~40px, see
-// TILE_CHROME_H in dashboard-bento-grid.tsx) and the card row above it
+// the fallback height is that budget minus the Tile chrome (~40px: the 8px
+// inset plus card padding, see TILE_CHROME_H in dashboard-bento-grid.tsx) and the card row above it
 // (~96px: an mt-2, then each card's own padding, label, icon and temp
 // line) - comfortably legible without ever claiming more height than this
 // tile is allowed at its own minH. Not imported directly from

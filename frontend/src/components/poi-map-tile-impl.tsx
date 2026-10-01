@@ -5,8 +5,7 @@ import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
 import { MapPin, Settings2, Ship } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
@@ -538,15 +537,9 @@ export default function PoiMapTileImpl({
       staleLabel={positionLastUpdateAgeS !== null ? formatDataAge(positionLastUpdateAgeS) : undefined}
       titleExtra={
         editing && onConfigure ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground"
-            onClick={onConfigure}
-            aria-label={`Configure nearby map: ${title}`}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </Button>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure nearby map: ${title}`}>
+            <Settings2 className="size-3.5" />
+          </button>
         ) : undefined
       }
     >

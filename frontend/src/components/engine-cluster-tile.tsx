@@ -3,9 +3,8 @@ import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
 import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
 import { memo, type CSSProperties } from 'react'
 
-import { Button } from '@/components/ui/button'
 import { DialRing, zoneColor } from '@/components/ui/dial-ring'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
 import { reading, zoneFor, zoneTextClass } from '@/lib/cluster-readings'
 import { FitCanvas } from '@/components/fit-canvas'
@@ -292,9 +291,9 @@ export const EngineClusterTile = memo(function EngineClusterTile({
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
-          <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
             <Settings2 className="size-3.5" />
-          </Button>
+          </button>
         ) : undefined
       }
     >

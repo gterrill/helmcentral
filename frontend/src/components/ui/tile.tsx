@@ -1,9 +1,29 @@
 import * as React from 'react'
 
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { severityBorderClass, severityFill, type ZoneState } from '@/lib/severity'
 import { useMeasureTileHeight } from '@/lib/tile-content-height'
 import { cn } from '@/lib/utils'
+
+/**
+ * The look shared by the tile title and every control on the tile's top edge:
+ * a 24px pill whose outline inherits the card's border colour, so title and
+ * controls turn amber or red together with the tile edge. One string, so they
+ * cannot drift apart.
+ */
+export const tilePillClass =
+  'relative inline-flex h-6 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full border bg-card px-2.5 [border-color:inherit] font-display text-xs font-normal uppercase leading-none tracking-[0.14em] text-muted-foreground sm:tracking-[0.22em]'
+
+/**
+ * A pill that is a button. The pill stays 24px tall, but DESIGN.md sets a 40px
+ * control floor for a moving boat, so an invisible pseudo-element grows the hit
+ * area 8px on every side. Tiles are 16px apart, so 8px is the most a hit area
+ * can grow without overlapping the neighbouring tile's controls.
+ */
+export const tilePillButtonClass = cn(
+  tilePillClass,
+  "cursor-pointer transition-colors after:absolute after:-inset-2 after:content-[''] hover:text-foreground ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+)
 
 interface TileProps {
   title: string
@@ -76,7 +96,7 @@ export function Tile({
   return (
     <Card
       className={cn(
-        'h-full gap-0 py-2',
+        'relative h-full gap-0 pb-2 pt-6',
         stale && 'border-amber-500 dark:border-amber-400',
         showState && severityBorderClass(state),
         className,
@@ -84,14 +104,20 @@ export function Tile({
       data-stale={stale ? 'true' : undefined}
       data-state={showState ? state : undefined}
     >
-      {/* Padding and letter-spacing tighten before anything else at phone width. The
-          0.22em tracking costs more width than the horizontal padding does, so it is
-          the first thing to give. */}
-      <CardHeader className="flex flex-row items-center gap-2 space-y-0 px-3 pb-2 sm:px-4">
+      {/* The legend sits across the card's top border, fieldset style: the header
+          is out of flow, centred on the border line, and the title's bg-card masks
+          the line behind it. The title is a pill whose outline inherits the card's
+          border colour, so it turns amber or red with the tile edge. Padding and
+          letter-spacing tighten before anything else at phone width. */}
+      <div
+        data-slot="card-header"
+        className="absolute inset-x-3 top-0 z-10 flex -translate-y-1/2 items-center gap-2 [border-color:inherit] sm:inset-x-4"
+      >
         <CardTitle
           as="h2"
           className={cn(
-            'inline-flex min-w-0 items-center gap-1 font-display text-xs font-normal uppercase tracking-[0.14em] text-muted-foreground sm:tracking-[0.22em]',
+            tilePillClass,
+            'shrink',
             titleClassName,
           )}
         >
@@ -99,8 +125,6 @@ export function Tile({
           {/* Truncates rather than stretching the card: an operator-supplied embed
               title is arbitrary length and used to have no way to yield. */}
           <span className="truncate">{title}</span>
-          {/* Inside the title rather than a sibling of it: CardHeader is a grid,
-              and a direct child would stretch into a full-width band. */}
           {stale && (
             <span
               data-testid="tile-stale-badge"
@@ -111,25 +135,23 @@ export function Tile({
             </span>
           )}
         </CardTitle>
-        {/* The rule and the state dot are one flex item, not two siblings of
-            the header. Only this wrapper carries flex-1, so it is the item
-            that grows to fill the space between the title and titleExtra;
-            the rule inside it takes that room and the dot, sized to its own
-            content, sits flush at the rule's trailing end instead of
-            picking up the header's own gap-2 spacing before it. */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="h-px flex-1 bg-border/70" />
-          {showState && (
+        {showState && (
+          <span className="-mr-1 ml-auto shrink-0 rounded-full bg-card p-1">
             <span
               data-testid="tile-state-dot"
               aria-label={`State: ${state}`}
-              className="h-2 w-2 shrink-0 rounded-full"
+              className="block h-2 w-2 rounded-full"
               style={{ background: severityFill(state) }}
             />
-          )}
-        </div>
-        {titleExtra && <CardAction className="static shrink-0">{titleExtra}</CardAction>}
-      </CardHeader>
+          </span>
+        )}
+        {/* Controls sit on the same border at the right end, as pills. */}
+        {titleExtra && (
+          <div data-slot="card-action" className={cn('flex shrink-0 items-center gap-1.5 [border-color:inherit]', !showState && 'ml-auto')}>
+            {titleExtra}
+          </div>
+        )}
+      </div>
 
       {/* Grayscale drains the colour out of a dead reading so it can't be mistaken
           for a live one; it deliberately does not dim it further with opacity — a

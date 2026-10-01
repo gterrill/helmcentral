@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensorIdentifiers } from '@/lib/alarm-display'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { groupRulesByDomain } from '@/lib/alarm-rules-view'
@@ -366,9 +366,9 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
         title="Rules"
         icon={<TriangleAlert className="h-3.5 w-3.5 text-gauge-secondary" />}
         titleExtra={
-          <Button size="sm" variant="outline" onClick={startCreate}>
+          <button type="button" className={tilePillButtonClass} onClick={startCreate}>
             <Plus className="size-3.5" /> Add Rule
-          </Button>
+          </button>
         }
       >
         {error && <p className="mb-2 text-xs text-destructive">{error}</p>}

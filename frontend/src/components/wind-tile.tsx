@@ -3,7 +3,7 @@ import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'r
 
 import { FitCanvas } from '@/components/fit-canvas'
 import { computeCornerMasks, type ClusterCanvasConfig } from '@/lib/cluster-canvas'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
 import { GUST_WINDOW_LABELS, GUST_WINDOW_SPOKEN, nextGustWindow, parseGustWindow, type GustWindow } from '@/lib/gust-windows'
@@ -279,7 +279,7 @@ function WindToggleChip({ testId, ariaLabel, onClick, active, labelA, labelB, sh
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
-      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm border border-border bg-card px-1.5 text-[10px] font-medium uppercase leading-none tracking-[0.16em] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 @max-[20rem]:tracking-[0.08em]"
+      className={cn(tilePillButtonClass, 'px-2 @max-[20rem]:tracking-[0.08em]')}
     >
       <ArrowLeftRight className="size-3 shrink-0 @max-[20rem]:hidden" aria-hidden="true" />
       <span className="inline-grid justify-items-start @max-[20rem]:hidden">

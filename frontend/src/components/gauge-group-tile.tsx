@@ -1,9 +1,8 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
 import { memo } from 'react'
 
-import { Button } from '@/components/ui/button'
 import { GaugeBody } from '@/components/gauge-tile'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { reading } from '@/lib/cluster-readings'
 import { GAUGE_GROUP_MAX_COLUMNS, type GaugeGroupWidgetConfig } from '@/lib/dashboard-widgets'
 import { worstZoneState } from '@/lib/severity'
@@ -69,9 +68,9 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
-          <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
             <Settings2 className="size-3.5" />
-          </Button>
+          </button>
         ) : undefined
       }
     >

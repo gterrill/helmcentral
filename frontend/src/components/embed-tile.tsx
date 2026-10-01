@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom'
 
 import { DisplayTransformContext } from '@/components/display-shell'
 import { Button } from '@/components/ui/button'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { useInView } from '@/hooks/use-in-view'
 import { isValidEmbedUrl, type EmbedWidgetConfig } from '@/lib/dashboard-widgets'
 import { cn } from '@/lib/utils'
@@ -388,15 +388,9 @@ export const EmbedTile = memo(function EmbedTile({
       icon={<Globe className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing && onConfigure ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground"
-            onClick={onConfigure}
-            aria-label={`Configure embed: ${title}`}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </Button>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure embed: ${title}`}>
+            <Settings2 className="size-3.5" />
+          </button>
         ) : undefined
       }
     >

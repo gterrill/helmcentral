@@ -15,6 +15,16 @@ export const GRID_MARGIN = 16
  */
 export const WALL_ROW_MARGIN = 8
 
+/**
+ * How far each tile is inset from the top of its grid cell. The title pill is
+ * centred on the card's top border, so it overhangs the card by 12px; the
+ * inset (pt-2 on the wrapper that holds the tile) moves the card down 8px so
+ * the pill clears the tile above by margin + 8 - 12: 12px on the 16px board,
+ * 4px on a wall page's 8px margin. Row pitch is unchanged, so saved layouts
+ * do not move.
+ */
+export const TILE_INSET_H = 8
+
 /** What a row count is worth in pixels: n rows and the n-1 margins between them. */
 export function gridPixelHeight(rows: number, rowMargin: number = GRID_MARGIN): number {
   return rows * GRID_ROW_HEIGHT + Math.max(0, rows - 1) * rowMargin

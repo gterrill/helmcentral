@@ -1,7 +1,7 @@
 import { Compass } from 'lucide-react'
 import { memo, useCallback, useRef, useState } from 'react'
 
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillClass } from '@/components/ui/tile'
 import type { AutopilotSide, AutopilotState } from '@/hooks/use-autopilot'
 import { cn } from '@/lib/utils'
 
@@ -163,7 +163,7 @@ export const AutopilotTile = memo(function AutopilotTile({
   const modeBadge = state.present ? (state.mode ?? state.state ?? '').toUpperCase() : ''
 
   const titleExtra = state.present && modeBadge ? (
-    <span className="truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+    <span className={cn(tilePillClass, 'truncate')}>
       {modeBadge}
     </span>
   ) : null

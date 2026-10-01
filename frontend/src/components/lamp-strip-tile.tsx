@@ -1,8 +1,7 @@
 import { LampCeiling, Settings2 } from 'lucide-react'
 import { memo } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import type { LampConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import { severityFill } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
@@ -100,9 +99,9 @@ export const LampStripTile = memo(function LampStripTile({
       icon={<LampCeiling className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
-          <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
             <Settings2 className="size-3.5" />
-          </Button>
+          </button>
         ) : undefined
       }
     >

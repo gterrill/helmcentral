@@ -79,7 +79,7 @@ test('shows the update age inside the badge itself, not only behind a hover tool
 // still applied. The header rendered as a two-row grid instead of one flex row.
 // Only a bare `flex` is in the same tailwind-merge group as `grid` and can
 // actually replace it.
-test('resolves the header to a flex row, not a grid, so the title and rule sit on one line', () => {
+test('resolves the header to a flex row, not a grid, so the title and state dot sit on one line', () => {
   const { container } = render(
     <Tile title="Depth">
       <p>content</p>
@@ -91,7 +91,7 @@ test('resolves the header to a flex row, not a grid, so the title and rule sit o
   expect(header?.className.split(/\s+/)).not.toContain('grid')
 })
 
-test('carries the tightened card and header padding, not the old wider defaults', () => {
+test('carries the tightened card padding, with the title out of flow on the border', () => {
   const { container } = render(
     <Tile title="Depth">
       <p>content</p>
@@ -99,10 +99,9 @@ test('carries the tightened card and header padding, not the old wider defaults'
   )
 
   const card = container.querySelector('[data-slot="card"]')
-  expect(card).toHaveClass('py-2')
+  expect(card).toHaveClass('pt-6', 'pb-2')
   expect(card?.className.split(/\s+/)).not.toContain('py-4')
 
   const header = container.querySelector('[data-slot="card-header"]')
-  expect(header).toHaveClass('pb-2')
-  expect(header?.className.split(/\s+/)).not.toContain('pb-3')
+  expect(header).toHaveClass('absolute', 'top-0', '-translate-y-1/2')
 })
