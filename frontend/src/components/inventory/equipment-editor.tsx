@@ -16,6 +16,7 @@ import { EquipmentSparesFields } from '@/components/inventory/equipment-spares-f
 import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
 import { ProfileChangeSummary, profileChangeIsEmpty } from '@/components/inventory/profile-change-summary'
+import { PrintLabelButton } from '@/components/inventory/label-print'
 import { TagRow } from '@/components/inventory/tag-row'
 import {
   AlertDialog,
@@ -31,7 +32,7 @@ import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { previewProfileChange, useMaintenanceLogEntries, useMaintenanceRules, type MaintenanceProfileChangePreview } from '@/hooks/use-maintenance'
 import { photoFilename, usePhotoStaging, type FailedPhotoUpload, type LocalPhoto } from '@/hooks/use-photo-staging'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
-import { formatAppLocation } from '@/lib/app-location'
+import { equipmentTagPath } from '@/lib/tag-url'
 import {
   BLANK_DRAFT,
   EQUIPMENT_SYSTEMS,
@@ -1032,7 +1033,12 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
                         default, still used unchanged on bin-page.tsx). */}
                     <TagRow
                       layout="stacked"
-                      path={formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })}
+                      path={equipmentTagPath(id)}
+                    />
+                    <PrintLabelButton
+                      path={equipmentTagPath(id)}
+                      code={draft.name.trim() || 'Equipment'}
+                      caption={[draft.manufacturer, draft.model].map((v) => v.trim()).filter(Boolean).join(' ') || undefined}
                     />
                   </>
                 )}

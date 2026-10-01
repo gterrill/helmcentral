@@ -6,10 +6,11 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
+import { PrintLabelButton } from '@/components/inventory/label-print'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { findBinByCode, useEquipment, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
-import { formatAppLocation } from '@/lib/app-location'
+import { binTagPath } from '@/lib/tag-url'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
 // case-insensitively against the zone/bin tree (useInventoryZones) - there
@@ -386,7 +387,8 @@ function BinContents({
           URLs are - a bin code with a space or another reserved character
           would otherwise produce a path the app itself wouldn't parse back
           the same way. */}
-      <TagRow path={formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: bin.code }, { firstPageId: null })} />
+      <TagRow path={binTagPath(bin.code)} />
+      <PrintLabelButton path={binTagPath(bin.code)} code={bin.code} caption={zone.name} />
     </div>
   )
 }

@@ -35,6 +35,7 @@
     "lucide-react": "^0.469.0",
     "maplibre-gl": "^5.24.0",
     "platejs": "^53.3.14",
+    "qrcode-generator": "^2.0.4",
     "react": "^19.2",
     "react-dom": "^19.2",
     "react-grid-layout": "^2.2.3",

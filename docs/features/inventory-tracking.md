@@ -134,6 +134,11 @@ moment you're looking into it rather than typing it up later at a desk.
   combination that can write a physical tag today. On any other phone or
   computer, the bin's page offers the address to copy instead, ready to
   paste into a separate NFC-writing app.
+- **A printed QR label works on any phone.** Print label on a bin's page or
+  an item's editor gives a label with a QR code and the bin code or item
+  name in large type. Print bin labels in the Locations menu does every bin
+  on one sheet. An iPhone camera reads it, no tag writing needed. Like a tag,
+  it opens the page only for a phone that can reach the boat.
 - **On metal, use anti-metal tags, and seal tags in the engine room.** A
   standard sticker will not read reliably stuck straight to a metal
   surface; anti-metal tags cost a little more and solve it. Heat, damp and

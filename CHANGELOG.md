@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Print QR labels for bins and equipment. **Print label** on a bin's page or an
+  item's editor shows a label with a QR code and the bin code or item name
+  printed large beneath it. **Print bin labels** in the Locations page menu
+  prints every bin on one sheet, three across, to cut out. Any phone camera
+  reads the code, and it opens the same page an NFC tag does, so the phone
+  needs to reach the boat.
 - Import from YachtWave, in **Settings → Import**. Upload YachtWave's Vessel
   Export and go through it one page per topic: vessel particulars, locations,
   equipment and spares, the service log, notes, then each document and photo.
