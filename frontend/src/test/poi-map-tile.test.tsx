@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PoiMapTile } from '@/components/poi-map-tile'
 import { POI_MAP_FIT_PADDING_PX } from '@/components/poi-map-tile-impl'
 import type { PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
-import { fitCameraAroundPoint, zoomForRangeNm, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, POI_MAP_MAX_ZOOM, zoomForRangeNm, type PoiFeature } from '@/lib/poi'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { UsePoiResult } from '@/hooks/use-poi'
 
@@ -20,6 +20,7 @@ vi.mock('@/lib/webgl', () => ({
 
 const easeToMock = vi.fn()
 const jumpToMock = vi.fn()
+const flyToMock = vi.fn()
 // Distinct-per-marker projection so two markers can be made to "overlap" on
 // screen for the label-declutter test without touching the real projector.
 let projectImpl: (lngLat: [number, number]) => { x: number; y: number } = ([lng, lat]) => ({ x: lng, y: lat })
@@ -47,6 +48,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           getZoom: () => 12,
           easeTo: easeToMock,
           jumpTo: jumpToMock,
+          flyTo: flyToMock,
           project: (lngLat: [number, number]) => projectImpl(lngLat),
         }))
         React.useEffect(() => { onLoad?.() }, [onLoad])
@@ -559,25 +561,171 @@ describe('PoiMapTile', () => {
       expect(call.center).toEqual([148.94, -20.27])
       expect(call.zoom).toBeCloseTo(rangeFloor, 6)
     })
+  })
 
-    it('does not move the camera when only the cycling index changes', async () => {
-      const features = [
-        feature({ id: 'a', name: 'A', detail: 'About A.' }),
-        feature({ id: 'b', name: 'B', detail: 'About B.' }),
-      ]
-      usePoiMock.mockReturnValue(poiResult({ features }))
-      const { rerender } = await renderTile({ config: config({ layout: 'split' }) })
-
-      expect(jumpToMock).toHaveBeenCalledTimes(1)
-      expect(easeToMock).not.toHaveBeenCalled()
-
+  // Fly in, hold, fly back: each time the highlight moves to a place the
+  // camera flies to it, then returns to the boat-centred overview at 60% of
+  // the cycle period (default cycle 10 s, so 6 s) before the next place.
+  describe('highlight fly-in and fly-back', () => {
+    const vessel = { lat: -20.27, lon: 148.94 }
+    const features = [
+      feature({ id: 'a', name: 'A', lat: -20.27, lon: 148.96 }),
+      feature({ id: 'b', name: 'B', lat: -20.26, lon: 148.97 }),
+    ]
+    const tile = (props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}) => (
+      <PoiMapTile {...renderTileDefaultProps} config={config()} {...props} />
+    )
+    const overviewZoom = () => (jumpToMock.mock.calls[0][0] as { zoom: number }).zoom
+    const moveHighlightToB = (rerender: (ui: React.ReactElement) => void, props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}) => {
       useCyclingIndexMock.mockReturnValue(1)
-      act(() => {
-        rerender(<PoiMapTile {...renderTileDefaultProps} config={config({ layout: 'split' })} />)
-      })
+      act(() => { rerender(tile(props)) })
+    }
+
+    it('flies to the highlighted place at a closer zoom when the highlight changes', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile()
+      const zoom = overviewZoom()
+
+      moveHighlightToB(rerender)
+
+      expect(flyToMock).toHaveBeenCalledTimes(1)
+      const call = flyToMock.mock.calls[0][0] as { center: [number, number]; zoom: number; duration: number }
+      expect(call.center).toEqual([148.97, -20.26])
+      expect(call.zoom).toBeCloseTo(Math.min(POI_MAP_MAX_ZOOM, zoom + 2), 6)
+      expect(call.duration).toBeGreaterThan(0)
+    })
+
+    it('flies back to the boat-centred overview at 60% of the cycle, and not before', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile()
+      const overview = jumpToMock.mock.calls[0][0] as { center: [number, number]; zoom: number }
+      vi.useFakeTimers()
+
+      moveHighlightToB(rerender)
+      expect(flyToMock).toHaveBeenCalledTimes(1)
+
+      act(() => { vi.advanceTimersByTime(5900) })
+      expect(flyToMock).toHaveBeenCalledTimes(1)
+
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+      const back = flyToMock.mock.calls[1][0] as { center: [number, number]; zoom: number }
+      expect(back.center).toEqual(overview.center)
+      expect(back.center).toEqual([vessel.lon, vessel.lat])
+      expect(back.zoom).toBeCloseTo(overview.zoom, 6)
+
+      // One place only flies back once: nothing loops.
+      act(() => { vi.advanceTimersByTime(60000) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('uses the configured cycle for the fly-back time', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile({ config: config({ summaryCycleSeconds: 20 }) })
+      vi.useFakeTimers()
+
+      moveHighlightToB(rerender, { config: config({ summaryCycleSeconds: 20 }) })
+      act(() => { vi.advanceTimersByTime(11900) })
+      expect(flyToMock).toHaveBeenCalledTimes(1)
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not ease back to the boat while a place is held, and follows again after the fly-back', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile()
+      vi.useFakeTimers()
+
+      moveHighlightToB(rerender)
+      act(() => { vi.advanceTimersByTime(3000) })
+      moveHighlightToB(rerender, { latitude: -20.271, longitude: 148.941 })
+      expect(easeToMock).not.toHaveBeenCalled()
+
+      act(() => { vi.advanceTimersByTime(3100) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+      const back = flyToMock.mock.calls[1][0] as { center: [number, number] }
+      // The fly-back goes to where the boat is now, not where it was.
+      expect(back.center[0]).toBeCloseTo(148.941, 6)
+
+      act(() => { vi.advanceTimersByTime(2000) })
+      act(() => { rerender(tile({ latitude: -20.272, longitude: 148.942 })) })
+      expect(easeToMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not fly in for the highlight already showing at mount', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      await renderTile()
 
       expect(jumpToMock).toHaveBeenCalledTimes(1)
+      expect(flyToMock).not.toHaveBeenCalled()
+    })
+
+    it('flies in once and back once for a single place that appears after mount', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features: [] }))
+      const { rerender } = await renderTile()
+      vi.useFakeTimers()
+
+      usePoiMock.mockReturnValue(poiResult({ features: [features[0]] }))
+      act(() => { rerender(tile()) })
+      expect(flyToMock).toHaveBeenCalledTimes(1)
+
+      act(() => { vi.advanceTimersByTime(60000) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('does nothing while gnssCriticalAlert is set', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile({ gnssCriticalAlert: true })
+      vi.useFakeTimers()
+
+      moveHighlightToB(rerender, { gnssCriticalAlert: true })
+      act(() => { vi.advanceTimersByTime(60000) })
+
+      expect(flyToMock).not.toHaveBeenCalled()
+      expect(jumpToMock).not.toHaveBeenCalled()
       expect(easeToMock).not.toHaveBeenCalled()
+    })
+
+    it('jumps instead of flying under prefers-reduced-motion', async () => {
+      const original = window.matchMedia
+      window.matchMedia = ((query: string) => ({
+        matches: query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as unknown as typeof window.matchMedia
+      try {
+        usePoiMock.mockReturnValue(poiResult({ features }))
+        const { rerender } = await renderTile()
+        vi.useFakeTimers()
+
+        moveHighlightToB(rerender)
+        expect(flyToMock).not.toHaveBeenCalled()
+        expect(jumpToMock).toHaveBeenCalledTimes(2)
+        expect((jumpToMock.mock.calls[1][0] as { center: [number, number] }).center).toEqual([148.97, -20.26])
+
+        act(() => { vi.advanceTimersByTime(6100) })
+        expect(flyToMock).not.toHaveBeenCalled()
+        expect(jumpToMock).toHaveBeenCalledTimes(3)
+        expect((jumpToMock.mock.calls[2][0] as { center: [number, number] }).center).toEqual([vessel.lon, vessel.lat])
+      } finally {
+        window.matchMedia = original
+      }
+    })
+
+    it('does not fly in the Map only layout, where no list shows which place is highlighted', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const mapOnly = { config: config({ layout: 'map' }) }
+      const { rerender } = await renderTile(mapOnly)
+      moveHighlightToB(rerender, mapOnly)
+      expect(flyToMock).not.toHaveBeenCalled()
+    })
+
+    it('flies for a non-interactive (kiosk) map too', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile({ interactive: false })
+      moveHighlightToB(rerender, { interactive: false })
+      expect(flyToMock).toHaveBeenCalledTimes(1)
     })
   })
 

@@ -6,16 +6,19 @@ With write access, in layout mode:
 2. Choose **Add Tile**, then **Nearby map…**.
 3. Give it a title, or leave it blank for "Nearby".
 4. Set the range, 0.5 to 25 nautical miles. This is the radius searched
-   around the vessel; the map itself zooms to keep the vessel and the
-   nearest matches in view, never tighter than this range.
+   around the vessel; the map keeps the boat at the centre and zooms out to
+   keep the nearest matches in view, never tighter than this range.
 5. Choose a layout: **Map only** fills the tile with the map; **Map and
    list** adds the ranked list of the five nearest matches beside it, so it
    needs a wider tile to read comfortably.
 6. With **Map and list**, set **Summary cycle** to how many seconds each
    match stays highlighted, with a ring on its marker, before the list moves
    to the next one - 3 to 120 seconds, 10 by default. Its description shows
-   too if it has one; many points of interest don't. Leave this alone if
-   you'd rather not think about it.
+   too if it has one; many points of interest don't. The map flies in to each
+   highlighted match, holds there, then flies back out to the view centred on
+   the boat before the next one. With reduced motion set on the display it
+   jumps instead of flying. Leave this alone if you'd rather not think about
+   it.
 7. Tick the categories you want: anchorages, bays, islands, marinas, fuel,
    boat ramps, moorings, historic landmarks, lookouts, dive and snorkel
    spots, and walking trails. At least one is required.

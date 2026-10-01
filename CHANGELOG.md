@@ -219,6 +219,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - With Google Places selected, the Nearby tile now shows Google's AI-written
   overview, or its summary of reviews, for places that have no description of
   their own. These are marked as summarized by Google.
+- The Nearby map now flies in to each highlighted place, holds there, then
+  flies back out to the view centred on the boat before the next place.
 
 ### Fixed
 

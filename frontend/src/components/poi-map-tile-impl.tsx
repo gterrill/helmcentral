@@ -11,7 +11,7 @@ import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { fitCameraAroundPoint, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, formatBearing, POI_MAP_MAX_ZOOM, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -91,6 +91,19 @@ const RANKED_LIST_SIZE = 5
 // fight the operator's own pan/zoom or animate constantly.
 const FOLLOW_THROTTLE_MS = 2000
 const FOLLOW_EASE_DURATION_MS = 500
+
+// Each highlighted place gets a fly-in at this many zoom levels closer than
+// the overview, held there, then a fly-back to the boat-centred overview.
+// The fly-back starts at this share of the cycle period so the overview is
+// on screen before the next place is highlighted.
+const PLACE_ZOOM_STEP = 2
+const PLACE_FLY_DURATION_MS = 1500
+const PLACE_HOLD_SHARE_OF_CYCLE = 0.6
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 
 // Clearance kept around the farthest ranked POI in the vessel-centred fit, in
 // screen pixels, so a marker (h-9 w-9, 36px) plus its name label doesn't sit
@@ -248,9 +261,9 @@ export default function PoiMapTileImpl({
   // nothing ranked yet (feed still loading, or "map" layout content aside,
   // topPoi is layout-independent). Never tighter than rangeZoomFloor, so a
   // single close POI doesn't zoom in past what the configured range implies.
-  // Deliberately excludes cycleIndex/expandedPoiId from its own inputs: the
-  // summary cycle changes which row is expanded, not where anything is, and
-  // must never move the camera.
+  // Deliberately excludes cycleIndex/expandedPoiId from its own inputs: this
+  // is the boat-centred overview the camera returns to between places. The
+  // fly-in to the highlighted place below is a separate, timed excursion.
   const cameraTarget = useMemo((): { center: MapPoint; zoom: number } | null => {
     if (latitude === null || longitude === null) return null
     const vessel: MapPoint = { lat: latitude, lon: longitude }
@@ -262,6 +275,9 @@ export default function PoiMapTileImpl({
 
   const hasCenteredRef = useRef(false)
   const lastEaseAtRef = useRef(0)
+  // True from a place's fly-in until its fly-back starts, so the follow
+  // effect doesn't ease the camera back to the boat mid-hold.
+  const holdingPlaceRef = useRef(false)
 
   // Follow the vessel-centred fit: first fix jumps straight there,
   // later fixes ease in, throttled to at most one per FOLLOW_THROTTLE_MS.
@@ -273,6 +289,7 @@ export default function PoiMapTileImpl({
   useEffect(() => {
     if (gnssCriticalAlert) return
     if (!cameraTarget) return
+    if (holdingPlaceRef.current) return
     const map = mapRef.current
     if (!map) return
 
@@ -290,6 +307,50 @@ export default function PoiMapTileImpl({
     lastEaseAtRef.current = now
     map.easeTo({ center: [center.lon, center.lat], zoom, duration: FOLLOW_EASE_DURATION_MS })
   }, [cameraTarget, gnssCriticalAlert])
+
+  // Fly in, hold, fly back: when the highlight moves to a place the camera
+  // flies to it, then returns to the boat-centred overview at a share of the
+  // cycle period so the overview is up before the next place. The highlight
+  // already showing at mount is skipped (the first fix jumps to the overview
+  // instead). A lone place never advances the cycle, so it flies in and back
+  // once. Held still under gnssCriticalAlert, like the follow effect, and
+  // runs regardless of `interactive`. Split layout only: with no list
+  // beside it, a map-only tile has nothing that says where it flew or why. The latest inputs are read through a
+  // ref so only a change of highlight restarts the excursion.
+  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout })
+  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout }
+  const previousHighlightRef = useRef(expandedPoiId)
+  useEffect(() => {
+    const previous = previousHighlightRef.current
+    previousHighlightRef.current = expandedPoiId
+    if (expandedPoiId === null || expandedPoiId === previous) return
+    const { cameraTarget: overview, rankedList: places, gnssCriticalAlert: gnss, summaryCycleSeconds: cycle, layout } = latestRef.current
+    if (layout !== 'split' || gnss || !overview || !hasCenteredRef.current) return
+    const place = places.find((f) => f.id === expandedPoiId)
+    const map = mapRef.current
+    if (!place || !map) return
+
+    const reduced = prefersReducedMotion()
+    const travel = (center: MapPoint, zoom: number) => {
+      const view = { center: [center.lon, center.lat] as [number, number], zoom }
+      if (reduced) map.jumpTo(view)
+      else map.flyTo({ ...view, duration: PLACE_FLY_DURATION_MS })
+    }
+
+    holdingPlaceRef.current = true
+    travel(place, Math.min(POI_MAP_MAX_ZOOM, overview.zoom + PLACE_ZOOM_STEP))
+    const timer = setTimeout(() => {
+      holdingPlaceRef.current = false
+      const latest = latestRef.current
+      if (latest.gnssCriticalAlert || !latest.cameraTarget) return
+      lastEaseAtRef.current = Date.now()
+      travel(latest.cameraTarget.center, latest.cameraTarget.zoom)
+    }, cycle * 1000 * PLACE_HOLD_SHARE_OF_CYCLE)
+    return () => {
+      clearTimeout(timer)
+      holdingPlaceRef.current = false
+    }
+  }, [expandedPoiId])
 
   // Declutter POI marker labels on move-end, priority by rank then distance
   // (an unranked feature always yields to a ranked one, matching the ranked

@@ -226,12 +226,14 @@ control nearby AIS traffic and your own vessel's trail, and a footer names
 the current data provider and how old its answer is, aging visibly rather
 than going blank when a fetch fails.
 
-The map keeps the vessel and the five nearest matches in view, but never
-zooms in tighter than the range. In the map-and-list layout one row at a time
-is highlighted, moving to the next match every few seconds and back to the
-first once it reaches the end, and that match's marker gets a ring. Its
+The map keeps the vessel at the centre with the five nearest matches in view,
+but never zooms in tighter than the range. In the map-and-list layout one row
+at a time is highlighted, moving to the next match every few seconds and back
+to the first once it reaches the end, and that match's marker gets a ring. Its
 description shows too when it has one - many points of interest, especially
-from OpenStreetMap, don't. An active route shows as a line, with the leg
+from OpenStreetMap, don't. The map flies in to the highlighted match, holds
+there, then flies back out to the view centred on the boat before the next
+one. An active route shows as a line, with the leg
 you're on drawn brighter.
 
 See [Add a Nearby map](../how-to/add-a-nearby-map.md) for setup, and [POI

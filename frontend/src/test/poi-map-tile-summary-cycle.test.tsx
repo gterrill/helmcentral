@@ -30,6 +30,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           getZoom: () => 12,
           easeTo: vi.fn(),
           jumpTo: vi.fn(),
+          flyTo: vi.fn(),
           project: ([lng, lat]: [number, number]) => ({ x: lng, y: lat }),
         }))
         React.useEffect(() => { onLoad?.() }, [onLoad])
