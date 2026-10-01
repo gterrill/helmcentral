@@ -31,6 +31,13 @@ describe('useDisplayViewport', () => {
     expect(JSON.parse(init.body)).toMatchObject({ w: 1536, h: 856 })
   })
 
+  test('reports nothing when disabled (a preview)', () => {
+    const { result } = renderHook(() => useDisplayViewport('d1', false))
+    act(() => { setViewport(1000, 700); window.dispatchEvent(new Event('resize')); vi.advanceTimersByTime(VIEWPORT_REPORT_DEBOUNCE_MS) })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.current).toEqual({ w: 1000, h: 700 })
+  })
+
   test('debounces resizes into one report and returns the live size', () => {
     const { result } = renderHook(() => useDisplayViewport('d1'))
     fetchMock.mockClear()

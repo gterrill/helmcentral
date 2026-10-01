@@ -122,7 +122,7 @@ describe('WallDisplaysPanel', () => {
     it('the preview action opens /display/<slug> in a new tab, safely', () => {
       render(<WallDisplaysPanel {...baseProps()} />)
       const preview = screen.getByRole('link', { name: /Preview Flybridge/i })
-      expect(preview).toHaveAttribute('href', '/display/flybridge')
+      expect(preview).toHaveAttribute('href', '/display/flybridge?preview=1')
       expect(preview).toHaveAttribute('target', '_blank')
       expect(preview).toHaveAttribute('rel', expect.stringContaining('noopener'))
       expect(preview).toHaveAttribute('rel', expect.stringContaining('noreferrer'))

@@ -2,6 +2,7 @@ import { createContext, useEffect, useMemo, useState, type CSSProperties, type R
 import { DisplayStatusBadge } from '@/components/display-status-badge'
 import { usePixelShift } from '@/hooks/use-pixel-shift'
 import { useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
+import { cn } from '@/lib/utils'
 import { useDisplayViewport } from '@/hooks/use-display-viewport'
 import { displayFit, displayScale, type Display } from '@/lib/displays'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
@@ -16,6 +17,9 @@ interface DisplayShellProps {
    * iframe rather than trapped behind it. App.tsx passes DisplayRemoteToast
    * this way; DisplayStatusBadge lives there unconditionally, below. */
   overlay?: ReactNode
+  /** Opened from the in-app Preview link: draw as usual but never report
+   * this browser's window as the wall's measured size. */
+  preview?: boolean
 }
 
 /** This shell's own rotation/scale/pixel-shift, as DisplayTransformContext
@@ -109,13 +113,13 @@ const CURSOR_IDLE_MS = 3000
  * rejects a non-1.0 scale on a zero canvas, but this component doesn't lean
  * on that invariant holding for a record it didn't itself validate.
  */
-export function DisplayShell({ display, alarms, children, overlay }: DisplayShellProps) {
+export function DisplayShell({ display, alarms, children, overlay, preview = false }: DisplayShellProps) {
   const { dx, dy } = usePixelShift(display.pixel_shift)
   const { status: wakeLockStatus } = useScreenWakeLock(display.wake_lock)
 
   // Reports this screen's window to the backend for the editor, and gives
   // the notice below the live size to compare against (ADR 0153).
-  const viewport = useDisplayViewport(display.id)
+  const viewport = useDisplayViewport(display.id, !preview)
   const overflows = displayFit(display, viewport).status === 'overflow'
 
   const isFullViewport = display.width === 0 && display.height === 0
@@ -232,11 +236,17 @@ export function DisplayShell({ display, alarms, children, overlay }: DisplayShel
           <DisplayStatusBadge alarms={alarms} wakeLockStatus={wakeLockStatus} />
           {overlay}
           {overflows && (
-            // At the top left because that is the part of an oversized canvas
-            // the screen still shows. Amber is the project's warning colour.
+            // The screen shows the top left of an oversized canvas, but the
+            // outer box rotates about its centre: at 180 degrees the canvas
+            // top left lands at the bottom right of the clipped footprint, so
+            // the notice anchors bottom right there and lands at the screen's
+            // top left. Amber is the project's warning colour.
             <p
               data-testid="display-overflow-notice"
-              className="absolute left-2 top-2 z-10 max-w-[60%] rounded-md border border-amber-500/40 bg-card px-2 py-1 text-xs font-semibold text-amber-500"
+              className={cn(
+                'absolute z-10 max-w-[60%] rounded-md border border-amber-500/40 bg-card px-2 py-1 text-xs font-semibold text-amber-500',
+                display.rotate === 180 ? 'bottom-2 right-2' : 'left-2 top-2',
+              )}
             >
               This page is larger than the screen. Open Wall displays › {display.name} to fit it.
             </p>

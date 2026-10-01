@@ -20,7 +20,7 @@ function readViewport(): ViewportSize {
  * hidden: the wall keeps drawing, but the operator's "measured on this
  * screen" line would otherwise go stale with no trace of why.
  */
-export function useDisplayViewport(displayId: string): ViewportSize {
+export function useDisplayViewport(displayId: string, reporting = true): ViewportSize {
   const [size, setSize] = useState<ViewportSize>(readViewport)
   const lastSent = useRef<string | null>(null)
 
@@ -28,6 +28,7 @@ export function useDisplayViewport(displayId: string): ViewportSize {
     let timer: ReturnType<typeof setTimeout> | null = null
 
     function report(next: ViewportSize) {
+      if (!reporting) return
       const key = `${displayId}:${next.w}x${next.h}`
       if (lastSent.current === key) return
       lastSent.current = key
@@ -58,7 +59,7 @@ export function useDisplayViewport(displayId: string): ViewportSize {
       window.removeEventListener('resize', handleResize)
       if (timer !== null) clearTimeout(timer)
     }
-  }, [displayId])
+  }, [displayId, reporting])
 
   return size
 }

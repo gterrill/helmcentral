@@ -65,16 +65,18 @@ describe('displayRowsThatFit', () => {
 
 describe('parseDisplayOptions', () => {
   it('defaults to no pinned page', () => {
-    expect(parseDisplayOptions('')).toEqual({ pageId: null })
+    expect(parseDisplayOptions('')).toEqual({ pageId: null, preview: false })
   })
 
   it('pins a page from ?page=', () => {
-    expect(parseDisplayOptions('?page=abc-123')).toEqual({ pageId: 'abc-123' })
+    expect(parseDisplayOptions('?page=abc-123')).toEqual({ pageId: 'abc-123', preview: false })
+    expect(parseDisplayOptions('?preview=1').preview).toBe(true)
+    expect(parseDisplayOptions('?preview=0').preview).toBe(false)
   })
 
   it('no longer parses rotate or height - they moved onto the display record', () => {
     const result = parseDisplayOptions('?rotate=180&height=360&page=abc-123') as unknown as Record<string, unknown>
-    expect(result).toEqual({ pageId: 'abc-123' })
+    expect(result).toEqual({ pageId: 'abc-123', preview: false })
     expect(result.rotate).toBeUndefined()
     expect(result.height).toBeUndefined()
   })

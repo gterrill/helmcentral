@@ -141,7 +141,7 @@ describe('DisplayEditorPanel', () => {
   it('Preview opens /display/<slug> in a new tab, safely', () => {
     render(<DisplayEditorPanel {...baseProps()} />)
     const preview = screen.getByRole('link', { name: /Preview/i })
-    expect(preview).toHaveAttribute('href', '/display/flybridge')
+    expect(preview).toHaveAttribute('href', '/display/flybridge?preview=1')
     expect(preview).toHaveAttribute('target', '_blank')
     expect(preview).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
@@ -350,6 +350,12 @@ describe('DisplayEditorPanel', () => {
       render(<DisplayEditorPanel {...baseProps({ display, displays: [display] })} />)
       expect(screen.getByRole('alert')).toHaveTextContent(/too large for this screen/i)
       expect(screen.queryByRole('button', { name: /fit to screen/i })).toBeNull()
+    })
+
+    it('names the browser that reported, so a wrong device is recognisable', () => {
+      const display = makeDisplay({ viewport: { ...viewport, user_agent: 'Mozilla/5.0 NetCast SmartTV/10.0' } })
+      render(<DisplayEditorPanel {...baseProps({ display, displays: [display] })} />)
+      expect(screen.getByTestId('display-measured')).toHaveTextContent('Mozilla/5.0 NetCast SmartTV/10.0')
     })
 
     it('steps magnification by 0.01', () => {

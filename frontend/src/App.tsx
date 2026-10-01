@@ -3278,6 +3278,7 @@ export function App() {
       <DisplayShell
         display={wallDisplay}
         alarms={alarms}
+        preview={displayOptions.preview}
         overlay={
           <DisplayRemoteToast
             announcementId={remoteAnnouncementId}

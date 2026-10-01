@@ -304,6 +304,9 @@ function MeasuredScreen({ display, onUpdate, canWrite }: { display: Display; onU
       <p className="text-muted-foreground">
         Measured on this screen: <span className="font-mono tabular-nums text-foreground">{viewport.w} × {viewport.h}</span>
         {' '}(last seen {seen})
+        {viewport.user_agent && (
+          <span className="block truncate" title={viewport.user_agent}>Reported by {viewport.user_agent}</span>
+        )}
       </p>
       {fit.status === 'overflow' && (
         <div
@@ -469,7 +472,7 @@ export function DisplayEditorPanel({
           sit above the settings rather than stranded inside them. */}
       <div data-testid="display-editor-toolbar" className="flex w-fit flex-wrap items-center gap-2">
         <a
-          href={`/display/${display.slug}`}
+          href={`/display/${display.slug}?preview=1`}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

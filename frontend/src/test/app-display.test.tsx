@@ -568,7 +568,7 @@ describe('App at / (dashboard authoring)', () => {
     // The preview opens the wall itself, which is a separate unattended
     // screen rather than somewhere this session navigates to and back from.
     const preview = screen.getByRole('link', { name: /preview flybridge/i })
-    expect(preview).toHaveAttribute('href', '/display/flybridge')
+    expect(preview).toHaveAttribute('href', '/display/flybridge?preview=1')
     expect(preview).toHaveAttribute('target', '_blank')
   })
 

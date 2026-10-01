@@ -157,12 +157,15 @@ export interface DisplayOptions {
    * and viewport height moved onto the display record (ADR 0110) and have
    * no back-compat shim here. */
   pageId: string | null
+  /** `?preview=1`: the in-app Preview link. A preview runs in the operator's
+   * own browser, so it must not report that window as the wall's size. */
+  preview: boolean
 }
 
 /** Parses the wall display route's own query string. Never throws on a malformed value. */
 export function parseDisplayOptions(search: string): DisplayOptions {
   const params = new URLSearchParams(search)
-  return { pageId: params.get('page') }
+  return { pageId: params.get('page'), preview: params.get('preview') === '1' }
 }
 
 /** The subset of DashboardPage that displayFeed needs — kept minimal and

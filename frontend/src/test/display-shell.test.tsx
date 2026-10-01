@@ -66,6 +66,34 @@ describe('DisplayShell fit notice', () => {
     )
   })
 
+  test('sits at the canvas top left upright and bottom right when rotated 180', () => {
+    setViewport(1536, 856)
+    const upright = render(
+      <DisplayShell display={display({ width: 1920, height: 1080, rotate: 0 })} alarms={[]}><div /></DisplayShell>,
+    )
+    const upClass = upright.getByTestId('display-overflow-notice').className
+    expect(upClass).toContain('left-2')
+    expect(upClass).toContain('top-2')
+    upright.unmount()
+    const flipped = render(
+      <DisplayShell display={display({ width: 1920, height: 1080, rotate: 180 })} alarms={[]}><div /></DisplayShell>,
+    )
+    const downClass = flipped.getByTestId('display-overflow-notice').className
+    expect(downClass).toContain('right-2')
+    expect(downClass).toContain('bottom-2')
+  })
+
+  test('still shows in preview, but a preview never reports its size', () => {
+    setViewport(1536, 856)
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 1080 })} alarms={[]} preview><div /></DisplayShell>,
+    )
+    expect(getByTestId('display-overflow-notice')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   test('is absent when the canvas fits', () => {
     setViewport(1920, 1080)
     const { queryByTestId } = render(

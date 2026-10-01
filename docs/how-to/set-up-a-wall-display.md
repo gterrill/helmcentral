@@ -103,7 +103,11 @@ Open the display's address (step 4) once on the screen itself. The wall page
 then tells Helmcentral what size the browser really reports, and the display's
 page under **Wall displays** shows it under the canvas: **Measured on this
 screen: 1536 × 856**, with when it was last seen. If you change the TV's
-picture scaling later, open the address again and the number follows.
+picture scaling later, open the address again and the number follows. The line
+also names the browser that reported it, so if it shows your laptop instead of
+the TV, you know the number is not the screen's. The **Preview** links in the
+app do not report, so looking at a display from your own browser never
+overwrites what the wall measured.
 
 If the canvas times the magnification is bigger than that, the same place
 shows a warning that says how many pixels run past the right edge and the

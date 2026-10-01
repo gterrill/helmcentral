@@ -243,7 +243,7 @@ export function WallDisplaysPanel({
                     </TableCell>
                     <TableCell>
                       <a
-                        href={`/display/${display.slug}`}
+                        href={`/display/${display.slug}?preview=1`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`Preview ${display.name}`}
