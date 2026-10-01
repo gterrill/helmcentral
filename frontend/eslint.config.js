@@ -71,7 +71,7 @@ export default [
   },
   {
     // Pending migration to components/patterns (ADR 0142's own migration
-    // order: Equipment and Documents done; Locations, Profiles, Maintenance,
+    // order: Equipment, Locations and Documents done; Profiles, Maintenance,
     // Wall displays remain). Remove an entry here as each
     // surface migrates, rather than adding a compatibility exception that
     // outlives the migration it was for.

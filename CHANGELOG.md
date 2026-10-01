@@ -53,6 +53,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   such as asking about conditions after moving anchorage, it says whether the
   window has opened, closed or shifted, and tells you when an earlier call no
   longer holds.
+- **Settings → Mate**: Choose a model takes a model ID typed in directly, for
+  OpenRouter models the catalog doesn't list, such as routers.
+- **Settings → Mate**: a new Document indexing section lets you choose the
+  model that reads and labels your documents and photos.
 
 ### Breaking
 
@@ -87,6 +91,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Switching a data provider under **Settings > Tiles** now tells you when the
   change could not be saved, instead of leaving the old provider selected
   without a word.
+- Inventory → Locations is now a list of your locations with how many bins
+  each holds, searchable by name. Press **New location** to add one, or tap a
+  location to open its own page, where you rename it, add and remove its bins,
+  or delete it. Bin codes and names still edit in place. Back from a bin's
+  page returns to its location.
 - An item's maintenance schedule now follows its equipment profile live.
   Correct an interval on the profile and every item using it follows at
   once, instead of each item keeping the copy it took. An item's page lists
@@ -198,6 +207,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   you pan. The two
   radius shortcuts ("Rode + LOA", "Planner swing") are gone; use the − / +
   control, or the rode planner's own "Apply as alarm radius" button.
+- **Settings → Mate**: with OpenRouter Auto on, allowed and excluded models
+  show as chips you can remove one at a time, and the Clear buttons are gone.
+  The cost tier is now "Cost cap", sits below them, and reads "No cost cap"
+  when unset. Add models from **Manage…**.
 
 ### Fixed
 

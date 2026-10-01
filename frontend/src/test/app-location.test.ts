@@ -281,6 +281,24 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/inventory/bins')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
   })
 
+  it('parses /inventory/locations/<id> as the Locations section with a locationEditId', () => {
+    expect(parseAppLocation('/inventory/locations/z1')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', locationEditId: 'z1',
+    })
+  })
+
+  it('decodes a percent-encoded location id', () => {
+    expect(parseAppLocation('/inventory/locations/a%20b')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', locationEditId: 'a b',
+    })
+  })
+
+  it('keeps /inventory/bins/<code> a bin page, not a location page', () => {
+    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02',
+    })
+  })
+
   it('parses /inventory/stocktake as the Stocktake section', () => {
     expect(parseAppLocation('/inventory/stocktake')).toEqual({ panel: 'inventory', inventorySection: 'stocktake' })
   })
@@ -446,6 +464,19 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', binCode: 'LAZ-02' }, ctx)).toBe('/inventory')
   })
 
+  it('formats a locationEditId as /inventory/locations/<id>', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationEditId: 'z1' }, ctx)).toBe(
+      '/inventory/locations/z1',
+    )
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationEditId: 'a b' }, ctx)).toBe(
+      '/inventory/locations/a%20b',
+    )
+  })
+
+  it('drops a locationEditId outside the Locations section', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', locationEditId: 'z1' }, ctx)).toBe('/inventory')
+  })
+
   it('formats the Stocktake section as /inventory/stocktake', () => {
     expect(formatAppLocation({ panel: 'inventory', inventorySection: 'stocktake' }, ctx)).toBe('/inventory/stocktake')
   })
@@ -461,7 +492,7 @@ describe('parse/format fixed point', () => {
     '/documents?folder=f1&section=s1',
     '/documents/doc-1', '/documents/doc-1?folder=f1',
     '/inventory', '/inventory/equipment/eq-1', '/inventory/profiles', '/inventory/locations',
-    '/inventory/bins/LAZ-02', '/inventory/stocktake',
+    '/inventory/bins/LAZ-02', '/inventory/locations/z1', '/inventory/stocktake',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -590,6 +621,23 @@ describe('inventoryEditorClosedBy', () => {
       { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
       at('/inventory/bins/LAZ-02'),
     )).toBe(true)
+  })
+})
+
+describe('inventoryEditorClosedBy for a location page', () => {
+  const at = (path: string) => parseAppLocation(path)
+  const open = { section: 'locations' as const, equipmentEditId: null, creating: false, locationEditId: 'z1' }
+
+  it('says no when the target is the same location', () => {
+    expect(inventoryEditorClosedBy(open, at('/inventory/locations/z1'))).toBe(false)
+  })
+
+  it('says yes for the index, another location, a bin page or another section', () => {
+    expect(inventoryEditorClosedBy(open, at('/inventory/locations'))).toBe(true)
+    expect(inventoryEditorClosedBy(open, at('/inventory/locations/z2'))).toBe(true)
+    expect(inventoryEditorClosedBy(open, at('/inventory/bins/LAZ-02'))).toBe(true)
+    expect(inventoryEditorClosedBy(open, at('/inventory'))).toBe(true)
+    expect(inventoryEditorClosedBy(open, at('/documents'))).toBe(true)
   })
 })
 

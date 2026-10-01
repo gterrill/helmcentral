@@ -190,7 +190,8 @@ configuration:
 - `enabled`
 - `model`
 - `document_model` (separate model the document library's indexer uses for
-  OCR and suggested title/summary/tags; blank falls back to a default)
+  OCR and suggested title/summary/tags; blank falls back to a default. Also
+  set in Settings → Mate → Document indexing)
 - `embedding_model` (separate model the document library's indexer uses for
   semantic search, vectorising every chunk of a consented document; blank
   turns semantic search off entirely, leaving keyword search as the

@@ -24,6 +24,14 @@ const noCostTierValue = '__none__'
 const chooseNewModelValue = '__choose_new_model__'
 const recentModelStorageKey = 'assistant.recent-models'
 const modelSearchDebounceMs = 300
+const costTierLabels: Record<string, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'XHigh',
+  max: 'Max',
+}
+const customModelIDPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i
 
 type AssistantModelsSortKey = 'popular' | 'newest' | 'throughput' | 'latency' | 'price'
 
@@ -92,6 +100,57 @@ function withoutValue(values: string[], value: string): string[] {
   return values.filter((item) => item !== value)
 }
 
+function shortModelName(id: string): string {
+  const slash = id.lastIndexOf('/')
+  return slash >= 0 && slash < id.length - 1 ? id.slice(slash + 1) : id
+}
+
+function ModelChipRow({
+  label,
+  listLabel,
+  removeNoun,
+  values,
+  emptyText,
+  onRemove,
+}: {
+  label: string
+  listLabel: string
+  removeNoun: string
+  values: string[]
+  emptyText: string
+  onRemove: (id: string) => void
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-16 shrink-0 pt-1 text-xs text-muted-foreground">{label}</span>
+      <ul role="list" aria-label={listLabel} className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+        {values.length === 0 ? (
+          <li className="pt-1 text-xs text-muted-foreground">{emptyText}</li>
+        ) : (
+          values.map((id) => (
+            <li
+              key={id}
+              className="flex min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-muted py-0.5 pl-2 pr-1 text-xs text-foreground"
+            >
+              <span className="min-w-0 truncate" title={id}>
+                {shortModelName(id)}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded-sm px-1 text-muted-foreground hover:text-foreground"
+                aria-label={`Remove ${id} from ${removeNoun} models`}
+                onClick={() => onRemove(id)}
+              >
+                ×
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+    </div>
+  )
+}
+
 // ADR 0093: onboard assistant over OpenRouter (BYOK). Off by default,
 // operator-triggered, key read from the encrypted secrets store, never
 // via LoadIntoEnv, and standing notes injected verbatim into every system
@@ -108,6 +167,8 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
   const [tableOrder, setTableOrder] = useState<'asc' | 'desc'>('desc')
   const [tableQueryInput, setTableQueryInput] = useState('')
   const [tableQuery, setTableQuery] = useState('')
+  const [customModelID, setCustomModelID] = useState('')
+  const [customModelError, setCustomModelError] = useState(false)
 
   useEffect(() => {
     const timeoutID = window.setTimeout(() => {
@@ -155,6 +216,19 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
     if (!trimmed) return
     const updated = [trimmed, ...recentModels.filter((value) => value !== trimmed)].slice(0, 6)
     persistRecentModels(updated)
+  }
+
+  const submitCustomModel = () => {
+    const id = customModelID.trim()
+    if (!customModelIDPattern.test(id)) {
+      setCustomModelError(true)
+      return
+    }
+    onChange({ assistantModel: id })
+    pushRecentModel(id)
+    setCustomModelID('')
+    setCustomModelError(false)
+    setDialogOpen(false)
   }
 
   useEffect(() => {
@@ -283,24 +357,47 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
         <FieldSet>
           <FieldLegend variant="label">Auto</FieldLegend>
           <FieldGroup>
-            <Field>
+            <div className="flex items-center justify-between gap-2">
               <FieldLabel htmlFor="assistant-auto-model-manager">Model filters</FieldLabel>
               <Button
                 id="assistant-auto-model-manager"
+                type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => {
                   setTablePage(1)
                   setDialogOpen(true)
                 }}
                 aria-label="Manage Auto model filters"
               >
-                Manage allowed and excluded models
+                Manage…
               </Button>
-              <FieldDescription>Use the model catalog to include or exclude models without typing IDs.</FieldDescription>
-            </Field>
+            </div>
+
+            <ModelChipRow
+              label="Allowed"
+              listLabel="Mate allowed models"
+              removeNoun="allowed"
+              values={draft.assistantAllowedModels}
+              emptyText="Any tool-capable model"
+              onRemove={(id) =>
+                onChange({ assistantAllowedModels: withoutValue(draft.assistantAllowedModels, id) })
+              }
+            />
+
+            <ModelChipRow
+              label="Excluded"
+              listLabel="Mate excluded models"
+              removeNoun="excluded"
+              values={draft.assistantExcludedModels}
+              emptyText="None"
+              onRemove={(id) =>
+                onChange({ assistantExcludedModels: withoutValue(draft.assistantExcludedModels, id) })
+              }
+            />
 
             <Field>
-              <FieldLabel htmlFor="assistant-cost-tier">Auto cost tier</FieldLabel>
+              <FieldLabel htmlFor="assistant-cost-tier">Cost cap</FieldLabel>
               <Select
                 value={draft.assistantCostTier === '' ? noCostTierValue : draft.assistantCostTier}
                 onValueChange={(value) =>
@@ -310,69 +407,45 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                 }
               >
                 <SelectTrigger id="assistant-cost-tier" aria-label="Mate Auto cost tier">
-                  <SelectValue />
+                  <SelectValue>{(value: string) => (value === noCostTierValue ? 'No cost cap' : (costTierLabels[value] ?? value))}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
                   <SelectItem value={noCostTierValue}>No cost cap</SelectItem>
-                  <SelectItem value="low">low</SelectItem>
-                  <SelectItem value="medium">medium</SelectItem>
-                  <SelectItem value="high">high</SelectItem>
-                  <SelectItem value="xhigh">xhigh</SelectItem>
-                  <SelectItem value="max">max</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="xhigh">XHigh</SelectItem>
+                  <SelectItem value="max">Max</SelectItem>
                 </SelectPopup>
               </Select>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="assistant-allowed-models">Allowed models</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="assistant-allowed-models"
-                  value={draft.assistantAllowedModels.join(', ')}
-                  aria-label="Mate allowed models"
-                  readOnly
-                  aria-readonly="true"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-label="Clear allowed models"
-                  disabled={draft.assistantAllowedModels.length === 0}
-                  onClick={() => onChange({ assistantAllowedModels: [] })}
-                >
-                  Clear
-                </Button>
-              </div>
-              <FieldDescription>Managed from the model catalog below (read-only).</FieldDescription>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="assistant-excluded-models">Excluded models</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="assistant-excluded-models"
-                  value={draft.assistantExcludedModels.join(', ')}
-                  aria-label="Mate excluded models"
-                  readOnly
-                  aria-readonly="true"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-label="Clear excluded models"
-                  disabled={draft.assistantExcludedModels.length === 0}
-                  onClick={() => onChange({ assistantExcludedModels: [] })}
-                >
-                  Clear
-                </Button>
-              </div>
-              <FieldDescription>Managed from the model catalog below (read-only).</FieldDescription>
             </Field>
           </FieldGroup>
         </FieldSet>
       ) : null}
+
+      <FieldSet>
+        <FieldLegend variant="label">Document indexing</FieldLegend>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="assistant-document-model">Model</FieldLabel>
+            <Input
+              id="assistant-document-model"
+              aria-label="Document indexing model"
+              placeholder="google/gemini-2.5-flash"
+              value={draft.assistantDocumentModel}
+              onChange={(e) => onChange({ assistantDocumentModel: e.target.value })}
+            />
+            {draft.assistantDocumentModel.trim() !== '' && !customModelIDPattern.test(draft.assistantDocumentModel.trim()) ? (
+              <p className="text-xs text-destructive">Enter an OpenRouter model ID like provider/model.</p>
+            ) : null}
+            <FieldDescription>
+              Reads every document and photo you add, including text in scans, and suggests its title, summary and
+              tags. It runs on its own over the whole library, so pick a cheap model that can read images. It doesn't
+              need to be the model Mate answers with.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
+      </FieldSet>
 
       <FieldSet>
         <FieldLegend variant="label">OpenRouter API key</FieldLegend>
@@ -465,6 +538,36 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                 : 'Tool-capable models with server-side sorting and pagination.'}
             </DialogDescription>
           </DialogHeader>
+
+          {!isAutoModel ? (
+            <form
+              className="flex flex-col gap-1"
+              onSubmit={(e) => {
+                e.preventDefault()
+                submitCustomModel()
+              }}
+            >
+              <FieldLabel htmlFor="assistant-custom-model-id">Use a model ID</FieldLabel>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="assistant-custom-model-id"
+                  aria-label="Model ID"
+                  placeholder="provider/model, e.g. typesafe/jev-router"
+                  value={customModelID}
+                  onChange={(e) => {
+                    setCustomModelID(e.target.value)
+                    setCustomModelError(false)
+                  }}
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={customModelID.trim() === ''}>
+                  Use
+                </Button>
+              </div>
+              {customModelError ? (
+                <p className="text-xs text-destructive">Enter an OpenRouter model ID like provider/model.</p>
+              ) : null}
+            </form>
+          ) : null}
 
           <FieldGroup className="grid grid-cols-4 items-end gap-3">
             <Field className="col-span-3 min-w-0">

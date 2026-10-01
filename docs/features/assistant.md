@@ -236,6 +236,11 @@ Settings now supports two routing modes:
 Auto routing only applies when the model is set to OpenRouter Auto; for any
 other model id, those routing constraints are ignored.
 
+Documents are read and labelled by a separate model, set under Settings →
+Mate → Document indexing. It runs unattended over the whole library, so pick a
+cheap model that can read images; it doesn't have to be the one Mate answers
+with. Left blank, it uses the built-in default.
+
 ## Standing notes
 
 Settings → Mate has a notes field that gets sent with every question, word
