@@ -1,10 +1,9 @@
-import { Send } from 'lucide-react'
 import { memo } from 'react'
 
+import { FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Tile } from '@/components/ui/tile'
 import { WebPushSection } from '@/components/web-push-section'
 import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 
@@ -23,7 +22,7 @@ function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean
  *
  * Presentation only: the draft, the entered secrets and the save all belong
  * to AlarmTransportsProvider, so this panel is saved by the settings page's
- * own "Save Settings" button along with every other section. "Send Test" is
+ * own Save bar along with every other section. "Send Test" is
  * the one action it still owns, because probing a transport is not a save.
  */
 export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
@@ -32,26 +31,25 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
 
   if (loading) {
     return (
-      <Tile title="Notifications" icon={<Send className="h-3.5 w-3.5 text-gauge-secondary" />}>
+      <FormSection title="Notifications">
         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
-      </Tile>
+      </FormSection>
     )
   }
 
   return (
-    <Tile
+    <FormSection
       title="Notifications"
-      icon={<Send className="h-3.5 w-3.5 text-gauge-secondary" />}
-      titleExtra={
+      action={
         <Button size="sm" variant="outline" onClick={() => void test()} disabled={testing}>
           {testing ? 'Sending…' : 'Send Test'}
         </Button>
       }
     >
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       {testResults && (
-        <div className="mb-3 rounded-md border bg-background/60 px-3 py-2">
+        <div className="rounded-md border bg-background/60 px-3 py-2">
           {Object.entries(testResults).map(([transport, result]) => (
             <p key={transport} className="truncate text-xs">
               <span className="uppercase tracking-[0.16em] text-muted-foreground">{transport}</span>{' '}
@@ -177,6 +175,6 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
           </div>
         </section>
       </div>
-    </Tile>
+    </FormSection>
   )
 })

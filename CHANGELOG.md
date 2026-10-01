@@ -81,6 +81,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Settings pages now show a save bar across the top of the screen as soon as
+  you have unsaved changes, with **Save** and **Discard**. It replaces the
+  **Save Settings** button at the foot of each page, and **Discard** puts every
+  field, including passwords and notification settings you have typed in, back
+  to what was saved. The bar goes away when there is nothing to save. Each
+  settings page is now one column of headed sections, with secondary actions
+  such as clearing the logs gathered under **Tools** at the bottom.
+- Switching a data provider under **Settings > Tiles** now tells you when the
+  change could not be saved, instead of leaving the old provider selected
+  without a word.
 - Inventory → Locations is now a list of your locations with how many bins
   each holds, searchable by name. Press **New location** to add one, or tap a
   location to open its own page, where you rename it, add and remove its bins,

@@ -9,10 +9,24 @@
  */
 import { createRef } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import { SECRET_KEYS, type SecretKey } from '@/hooks/use-secrets-status'
 
+// ADR 0142: the page's Save bar portals into the app header's SaveBarSlot, so
+// every render carries a stand-in header with the same slot App.tsx mounts.
+function render(ui: ReactElement) {
+  return rtlRender(
+    <div>
+      <header data-testid="header" className="relative"><div id="save-bar-slot" /></header>
+      {ui}
+    </div>,
+  )
+}
+const saveBar = () => within(screen.getByTestId('header'))
+
+const resetTouchedMock = vi.fn()
 const saveMock = vi.fn(async (patch: unknown) => {
   void patch
   return {}
@@ -57,6 +71,7 @@ vi.mock('@/hooks/use-secrets-status', async () => {
       setFieldValue: vi.fn(),
       saveTouchedKeys: saveTouchedKeysMock,
       clearKey: vi.fn(),
+      resetTouched: resetTouchedMock,
     }),
   }
 })
@@ -81,6 +96,7 @@ vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
 
 beforeEach(() => {
   mockTouched = emptyTouched()
+  resetTouchedMock.mockReset()
   saveMock.mockReset().mockResolvedValue({})
   saveTouchedKeysMock.mockReset().mockResolvedValue({})
 })
@@ -106,7 +122,7 @@ describe('SettingsPage dirty tracking', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
 
     onDirtyChange.mockClear()
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
     expect(saveMock).toHaveBeenCalledTimes(1)
@@ -187,7 +203,7 @@ describe('SettingsPage Anchor scope method', () => {
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
 
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const patch = saveMock.mock.calls[0][0] as { anchor?: { scope_method?: string } }
@@ -219,7 +235,7 @@ describe('SettingsPage Anchor auto-raise setting', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
     expect(toggle).toHaveAttribute('data-unchecked')
 
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const patch = saveMock.mock.calls[0][0] as { anchor?: { auto_raise_on_motoring?: boolean } }
@@ -249,5 +265,93 @@ describe('SettingsPage imperative save handle', () => {
     )
 
     await expect(ref.current!.save()).rejects.toThrow('boom')
+  })
+})
+
+describe('SettingsPage Save bar', () => {
+  it('shows no Save bar while clean, and no Save Settings button anywhere', () => {
+    render(<SettingsPage />)
+    expect(saveBar().queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save settings/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the bar in the header slot once a field is edited, and Save runs the save path', async () => {
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
+
+    expect(await saveBar().findByText('Unsaved changes')).toBeInTheDocument()
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(saveBar().queryByText('Unsaved changes')).not.toBeInTheDocument())
+  })
+
+  it('Discard restores the original value, clears touched secrets and hides the bar', async () => {
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    const input = screen.getByLabelText('Vessel prefix') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'S/V Test' } })
+
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Discard' }))
+
+    await waitFor(() => expect(input.value).toBe(''))
+    expect(resetTouchedMock).toHaveBeenCalledTimes(1)
+    expect(saveBar().queryByText('Unsaved changes')).not.toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it('shows a settings save error in the bar and keeps it open', async () => {
+    saveMock.mockRejectedValueOnce(new Error('boom'))
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
+
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
+
+    expect(await saveBar().findByRole('alert')).toHaveTextContent('boom')
+    expect(saveBar().getByText('Unsaved changes')).toBeInTheDocument()
+  })
+
+  it('Discard clears a failed save, so the next edit opens a bar with no stale error', async () => {
+    saveMock.mockRejectedValueOnce(new Error('boom'))
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    const input = screen.getByLabelText('Vessel prefix')
+    fireEvent.change(input, { target: { value: 'S/V Test' } })
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
+    await saveBar().findByRole('alert')
+
+    fireEvent.click(saveBar().getByRole('button', { name: 'Discard' }))
+    fireEvent.change(input, { target: { value: 'M/V Other' } })
+
+    expect(await saveBar().findByText('Unsaved changes')).toBeInTheDocument()
+    expect(saveBar().queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('Discard after a partial save keeps what the settings request already saved', async () => {
+    saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
+    mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    const input = screen.getByLabelText('Vessel prefix') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'S/V Test' } })
+
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
+    await saveBar().findByRole('alert')
+    fireEvent.click(saveBar().getByRole('button', { name: 'Discard' }))
+
+    // The settings request succeeded, so the server holds 'S/V Test'. Discard
+    // must not roll the form back behind it.
+    await waitFor(() => expect(resetTouchedMock).toHaveBeenCalled())
+    expect(input.value).toBe('S/V Test')
+  })
+
+  it('combines secrets save failures into the bar', async () => {
+    saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
+    mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }
+    render(<SettingsPage />)
+    fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
+    expect(await saveBar().findByRole('alert')).toHaveTextContent('secrets down')
   })
 })

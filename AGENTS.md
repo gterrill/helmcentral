@@ -181,14 +181,17 @@ Do not rewrite them.
 Equipment, Locations, Profiles, Maintenance, Wall displays and Documents are
 record-keeping surfaces (an index, a details/edit page), not dashboard
 tiles. Build and extend them from `frontend/src/components/patterns`
-(`Page`, `IndexTable`, `IndexFilters`, `DetailsLayout`, `FormSection`,
-`SaveBar`, `EmptyState`, `ConfirmDelete`) rather than reaching for
+(`Page`, `IndexTable`, `IndexFilters`, `DetailsLayout`, `SettingsLayout`,
+`FormSection`, `SaveBar`, `EmptyState`, `ConfirmDelete`) rather than reaching for
 `components/ui/table` or hand-rolling a toolbar - an ESLint rule enforces
 this for `ui/table` already, with a shrinking allowlist for surfaces not yet
 migrated. The "Do not introduce new primitives" rule under High-Density
 Tailwind UI/UX above is about dashboard tiles specifically (no shared
 `MetricTile`/`StatCard`); it does not apply to these CRUD pages, which are
-exactly what `components/patterns` exists to share. `Page` carries no help
+exactly what `components/patterns` exists to share. Every settings section
+page (`components/settings/sections`) is built from `SettingsLayout` and
+`FormSection`, and the settings page saves through `SaveBar`, with no Save
+button of its own. `Page` carries no help
 action of its own - section help is the header `?`, which already follows
 the active section. See [ADR 0142](docs/adr/0142-crud-pattern-library.md)
 for why, and the dev-only `/patterns` gallery for what each pattern looks

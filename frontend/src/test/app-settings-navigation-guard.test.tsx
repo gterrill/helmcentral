@@ -8,7 +8,7 @@
  * reached and its dirty state driven directly from the test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { App } from '../App'
 import { SECRET_KEYS, type SecretKey } from '@/hooks/use-secrets-status'
 
@@ -282,6 +282,7 @@ vi.mock('@/hooks/use-secrets-status', async () => {
       setFieldValue: vi.fn(),
       saveTouchedKeys: saveTouchedKeysMock,
       clearKey: vi.fn(),
+      resetTouched: vi.fn(),
     }),
   }
 })
@@ -338,7 +339,7 @@ describe('App navigation guard on dirty Settings', () => {
 
     // Still on Settings — the Forecast panel content did not take over.
     expect(screen.getByLabelText('Vessel prefix')).toBeInTheDocument()
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(within(screen.getByRole('alertdialog')).getByText('Unsaved changes')).toBeInTheDocument()
   })
 
   it('Cancel closes the dialog and stays on Settings', async () => {
@@ -346,11 +347,11 @@ describe('App navigation guard on dirty Settings', () => {
     await navigateToDirtySettings()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(within(screen.getByRole('alertdialog')).getByText('Unsaved changes')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
     expect(screen.getByLabelText('Vessel prefix')).toBeInTheDocument()
   })
@@ -381,7 +382,7 @@ describe('App navigation guard on dirty Settings', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('Vessel prefix')).not.toBeInTheDocument()
     })
-    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   })
 
   it('Save and Continue does NOT navigate away if the save fails', async () => {
@@ -429,7 +430,7 @@ describe('App navigation guard on dirty Settings', () => {
     window.history.replaceState({}, '', '/')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(within(screen.getByRole('alertdialog')).getByText('Unsaved changes')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/settings')
     // Settings itself is still the panel on screen, not the dashboard — the
     // modal dialog marks the rest of the tree inert, so this reads it back
@@ -457,7 +458,7 @@ describe('App navigation guard on dirty Settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
     expect(window.location.pathname).toBe('/settings')
   })

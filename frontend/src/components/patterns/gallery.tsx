@@ -19,6 +19,7 @@ import {
   ResourceList,
   SaveBar,
   SaveBarSlot,
+  SettingsLayout,
   type IndexFilter,
   type RowAction,
 } from '@/components/patterns'
@@ -81,7 +82,12 @@ function GallerySection({ title, description, children }: { title: string; descr
   )
 }
 
+const SETTINGS_FIXTURE = { vesselName: 'Fixture Vessel', distanceUnits: 'metric', autoRaise: true }
+
 export function PatternsGallery() {
+  const [settingsDraft, setSettingsDraft] = useState(SETTINGS_FIXTURE)
+  const [settingsSaved, setSettingsSaved] = useState(SETTINGS_FIXTURE)
+  const settingsDirty = JSON.stringify(settingsDraft) !== JSON.stringify(settingsSaved)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [system, setSystem] = useState('')
@@ -284,6 +290,60 @@ export function PatternsGallery() {
       <Separator />
 
       <GallerySection
+        title="SettingsLayout"
+        description="The Settings template (Polaris' settings pattern): a heading over one narrow, centred column of headed sections, with a trailing Tools group for secondary and destructive actions. Edit a field and the Save bar takes over the stand-in header; Discard puts the fixture back."
+      >
+        <SettingsLayout
+          title="Fixture settings"
+          description="Every settings page is built from this."
+          tools={
+            <>
+              <Button type="button" variant="outline" onClick={() => window.alert('Export')}>Export settings</Button>
+              <Button type="button" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setSettingsDraft(SETTINGS_FIXTURE)}>Reset to defaults</Button>
+            </>
+          }
+        >
+          <FormSection title="Vessel" description="Shown on the boat page and in exports.">
+            <FormRow>
+              <label className="flex flex-col gap-1 text-sm">
+                Vessel name
+                <Input
+                  value={settingsDraft.vesselName}
+                  onChange={(e) => setSettingsDraft({ ...settingsDraft, vesselName: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Units
+                <Input
+                  value={settingsDraft.distanceUnits}
+                  onChange={(e) => setSettingsDraft({ ...settingsDraft, distanceUnits: e.target.value })}
+                />
+              </label>
+            </FormRow>
+          </FormSection>
+          <FormSection title="Anchor watch">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={settingsDraft.autoRaise}
+                onChange={(e) => setSettingsDraft({ ...settingsDraft, autoRaise: e.target.checked })}
+              />
+              Auto-raise when under way
+            </label>
+          </FormSection>
+        </SettingsLayout>
+        {/* Two SaveBars would fight over the one header slot, so the plain
+            SaveBar demo below stands down while this draft is dirty. */}
+        <SaveBar
+          dirty={settingsDirty}
+          onSave={() => setSettingsSaved(settingsDraft)}
+          onDiscard={() => setSettingsDraft(settingsSaved)}
+        />
+      </GallerySection>
+
+      <Separator />
+
+      <GallerySection
         title="SaveBar"
         description="Appears only while dirty, and takes over the app header (Polaris' contextual save bar) - toggle dirty and look at the stand-in header at the top of this page, not here. Save/Discard disable while saving."
       >
@@ -292,7 +352,7 @@ export function PatternsGallery() {
           dirty
         </label>
         <SaveBar
-          dirty={dirty}
+          dirty={dirty && !settingsDirty}
           saving={saving}
           onSave={() => { setSaving(true); setTimeout(() => { setSaving(false); setDirty(false) }, 600) }}
           onDiscard={() => setDirty(false)}

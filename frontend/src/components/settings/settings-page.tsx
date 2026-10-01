@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
-import { Button } from '@/components/ui/button'
+import { SaveBar } from '@/components/patterns'
 import { SettingsFormProvider, useSettingsFormContext } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider, useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
@@ -71,8 +71,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   },
   ref,
 ) {
-  const { settings, loading, error, save } = useSettingsFormContext()
-  const { touched, saveTouchedKeys } = useSecretsStatusContext()
+  const { settings, loading, save } = useSettingsFormContext()
+  const { touched, saveTouchedKeys, resetTouched } = useSecretsStatusContext()
   const transports = useAlarmTransportsFormContext()
   // Uncontrolled fallback for callers that don't pass activeSectionId (e.g.
   // settings-page.test.tsx, settings-alarms-section.test.tsx) — App.tsx
@@ -94,12 +94,13 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   }, [onImportRunChange])
   const [draft, setDraft] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
-  // `error` (above) is owned by useSettingsFormContext's useSettingsForm
-  // hook and only ever set inside its own save()'s catch block — it can't
-  // be set externally without changing that hook's API, which is out of
-  // scope here. saveTouchedKeys (a sibling call hitting an independent
-  // endpoint) needs its own error slot rendered in the same visual style.
+  // Each request inside one save gets its own error slot, all shown in the
+  // Save bar. The settings one is the page's own copy, not the form hook's
+  // `error`: that is also set by a Tiles provider change (which saves on its
+  // own and reports its own failure), and Discard cannot clear it, so showing
+  // it here would bring back a stale refusal. saveTouchedKeys hits an
+  // independent endpoint, so it needs its own slot too.
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null)
   const [secretsSaveError, setSecretsSaveError] = useState<string | null>(null)
   // Same reasoning for the transports POST: it is a third independent
   // endpoint inside one save (ADR 0038 §2 keeps transport config out of
@@ -147,13 +148,18 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // Saves the regular-settings draft AND every touched secret across the
   // whole page (not just the three inline-section keys) — a provider modal
   // (e.g. WeatherKit) may have touched-but-unsaved fields even while
-  // closed, and those must not be silently dropped by the pinned "Save
-  // Settings" button. Throws/rejects on failure (does not swallow) so
+  // closed, and those must not be silently dropped by the Save bar. Throws/rejects on failure (does not swallow) so
   // callers — the page's own button handler, and App.tsx's "Save and
   // Continue" navigation-guard action — can each decide how to react.
   const performSave = useCallback(async () => {
     await Promise.all([
-      save(buildRegularSettingsPatch(draft)),
+      // The snapshot moves as soon as THIS request lands, not once all three
+      // have: if a sibling fails, Discard must not roll the form back behind
+      // what the server already holds (the next save would then write it).
+      save(buildRegularSettingsPatch(draft)).then(() => setSavedDraftSnapshot(draft), (err: unknown) => {
+        setSettingsSaveError(err instanceof Error ? err.message : 'Unable to save settings')
+        throw err
+      }),
       saveTouchedKeys(SECRET_KEYS).catch((err: unknown) => {
         setSecretsSaveError(err instanceof Error ? err.message : 'Unable to save secrets')
         throw err
@@ -163,7 +169,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         throw err
       }),
     ])
-    setSavedDraftSnapshot(draft)
 
     // Re-read auth after every save. If this save turned authentication on,
     // App.tsx's gate drops this tab to the login screen, rather than leaving it
@@ -182,22 +187,34 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
   const handleSaveSettings = async () => {
-    setSaveSuccess(null)
+    setSettingsSaveError(null)
     setSecretsSaveError(null)
     setTransportsSaveError(null)
     setIsSavingSettings(true)
     try {
       await performSave()
-      setSaveSuccess('Settings saved')
     } catch {
-      // save()'s own failure is surfaced via the shared `error` state
-      // below; saveTouchedKeys's failure is captured above into
-      // secretsSaveError. Both requests were attempted regardless of which
-      // one rejected first.
+      // Each request's failure is already captured into its own slot by
+      // performSave. All were attempted regardless of which rejected first.
     } finally {
       setIsSavingSettings(false)
     }
   }
+
+  // Discard puts all three stores back to what was last saved: the regular
+  // draft, every in-progress secret edit, and the alarm-transports draft.
+  // Nothing is written, and any failed-save message goes with the edits.
+  const transportsReset = transports.reset
+  const handleDiscard = useCallback(() => {
+    setDraft(savedDraftSnapshot)
+    resetTouched()
+    transportsReset()
+    setSettingsSaveError(null)
+    setSecretsSaveError(null)
+    setTransportsSaveError(null)
+  }, [savedDraftSnapshot, resetTouched, transportsReset])
+
+  const saveBarError = [settingsSaveError, secretsSaveError, transportsSaveError].filter(Boolean).join('. ') || null
 
   const activeSection = (() => {
     switch (activeSectionId) {
@@ -235,7 +252,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     }
   })()
 
-  // The wizard takes the whole page: no section nav, no Save Settings. It
+  // The wizard takes the whole page: no section nav, no Save bar. It
   // keeps its own draft on the server, so nothing here is left unsaved.
   if (activeSectionId === 'import' && importRunId !== null) {
     return (
@@ -260,37 +277,13 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
       <div className="min-w-0 flex-1 space-y-4">
         {activeSection}
 
-        <div className="mx-auto flex max-w-3xl items-center justify-end">
-          <Button
-            variant="outline"
-            className="h-10 whitespace-nowrap border-primary/55 px-4 font-display text-xs tracking-[0.14em] text-primary"
-            onClick={handleSaveSettings}
-            disabled={isSavingSettings}
-          >
-            {isSavingSettings ? 'Saving' : 'Save Settings'}
-          </Button>
-        </div>
-
-        {error && (
-          <div className="mx-auto max-w-3xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-            {error}
-          </div>
-        )}
-        {secretsSaveError && (
-          <div className="mx-auto max-w-3xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-            {secretsSaveError}
-          </div>
-        )}
-        {transportsSaveError && (
-          <div className="mx-auto max-w-3xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-            {transportsSaveError}
-          </div>
-        )}
-        {saveSuccess && (
-          <div className="mx-auto max-w-3xl rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.08em] text-emerald-600">
-            {saveSuccess}
-          </div>
-        )}
+        <SaveBar
+          dirty={dirty}
+          saving={isSavingSettings}
+          error={saveBarError}
+          onSave={() => void handleSaveSettings()}
+          onDiscard={handleDiscard}
+        />
       </div>
     </div>
   )

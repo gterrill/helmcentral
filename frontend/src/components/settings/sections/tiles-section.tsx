@@ -1,4 +1,5 @@
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -25,9 +26,8 @@ export function TilesSection({ draft, onChange }: TilesSectionProps) {
   const { providers: placeNameProviders } = usePlaceNameProviders()
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Tiles</FieldLegend>
+    <SettingsLayout title="Tiles">
+      <FormSection title="Data sources">
 
         <Tabs defaultValue="tide">
           <TabsList>
@@ -40,7 +40,7 @@ export function TilesSection({ draft, onChange }: TilesSectionProps) {
           </TabsList>
 
           <TabsContent value="tide" className="space-y-3">
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="tide-station-id">Tide Station Id</FieldLabel>
                 <Input
@@ -93,7 +93,7 @@ export function TilesSection({ draft, onChange }: TilesSectionProps) {
             <ProviderGroup type="forecast-warnings" providers={forecastWarningsProviders} />
           </TabsContent>
         </Tabs>
-      </FieldSet>
-    </div>
+      </FormSection>
+    </SettingsLayout>
   )
 }

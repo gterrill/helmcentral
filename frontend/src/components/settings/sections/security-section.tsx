@@ -1,4 +1,5 @@
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Switch } from '@/components/ui/switch'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 
@@ -19,10 +20,8 @@ export function SecuritySection({ draft, onChange }: SecuritySectionProps) {
   const enabled = draft.authMode === 'signalk'
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Authentication</FieldLegend>
-        <div className="mt-3 space-y-3">
+    <SettingsLayout title="Security">
+      <FormSection title="Authentication">
           <Field orientation="horizontal">
             <Switch
               checked={enabled}
@@ -42,8 +41,7 @@ export function SecuritySection({ draft, onChange }: SecuritySectionProps) {
             SignalK's own security must already be enabled (Server → Security). Saving is refused if it is not,
             since requiring a login against a server that has none would lock you out of this page.
           </FieldDescription>
-        </div>
-      </FieldSet>
-    </div>
+      </FormSection>
+    </SettingsLayout>
   )
 }

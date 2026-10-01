@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { FormSection, SettingsLayout } from '@/components/patterns'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { Button } from '@/components/ui/button'
@@ -9,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -293,9 +294,18 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
   }, [dialogOpen, tableSort, tableOrder, tablePage, tableQuery])
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Mate</FieldLegend>
+    <SettingsLayout
+      title="Mate"
+      description={
+        <>
+          Every question sends your position, the question itself, and forecast and tide excerpts to OpenRouter and whichever
+          model provider you choose. Mate also reads your documents and notes to answer questions, and once it&apos;s on it
+          summarises and indexes them for search on its own, no separate prompt per item. All of that text goes to OpenRouter
+          too, billed to your key. Every reply shows its cost.
+        </>
+      }
+    >
+      <FormSection title="Model">
         <FieldGroup>
           <Field orientation="horizontal">
             <Switch
@@ -351,11 +361,10 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </Field>
           ) : null}
         </FieldGroup>
-      </FieldSet>
+      </FormSection>
 
       {isAutoModel ? (
-        <FieldSet>
-          <FieldLegend variant="label">Auto</FieldLegend>
+        <FormSection title="Auto">
           <FieldGroup>
             <div className="flex items-center justify-between gap-2">
               <FieldLabel htmlFor="assistant-auto-model-manager">Model filters</FieldLabel>
@@ -420,11 +429,10 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
               </Select>
             </Field>
           </FieldGroup>
-        </FieldSet>
+        </FormSection>
       ) : null}
 
-      <FieldSet>
-        <FieldLegend variant="label">Document indexing</FieldLegend>
+      <FormSection title="Document indexing">
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="assistant-document-model">Model</FieldLabel>
@@ -445,15 +453,13 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </FieldDescription>
           </Field>
         </FieldGroup>
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">OpenRouter API key</FieldLegend>
+      <FormSection title="OpenRouter API key">
         <SecretFieldGroup fields={[{ key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' }]} />
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">Standing notes</FieldLegend>
+      <FormSection title="Standing notes">
         <FieldGroup>
           <Field>
             <Textarea
@@ -469,14 +475,13 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </FieldDescription>
           </Field>
         </FieldGroup>
-      </FieldSet>
+      </FormSection>
 
       {/* ADR 0093 voice phase: push-to-talk input, reading the spoken summary
           back aloud, and the always-listening "Hey Mate" wake word - each its
           own switch since each has its own cost (an https requirement, a
           voice interrupting the cabin, battery and a cloud-speech vendor). */}
-      <FieldSet>
-        <FieldLegend variant="label">Voice</FieldLegend>
+      <FormSection title="Voice">
         <FieldGroup>
           <Field orientation="horizontal">
             <Switch
@@ -519,14 +524,8 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </FieldContent>
           </Field>
         </FieldGroup>
-      </FieldSet>
+      </FormSection>
 
-      <FieldDescription>
-        Every question sends your position, the question itself, and forecast and tide excerpts to OpenRouter and whichever
-        model provider you choose. Mate also reads your documents and notes to answer questions, and once it&apos;s on it
-        summarises and indexes them for search on its own, no separate prompt per item. All of that text goes to OpenRouter
-        too, billed to your key. Every reply shows its cost.
-      </FieldDescription>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-5xl">
@@ -749,6 +748,6 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsLayout>
   )
 }

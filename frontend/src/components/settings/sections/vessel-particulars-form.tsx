@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormRow, FormSection } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
 import { useVesselState } from '@/hooks/use-vessel-state'
@@ -85,12 +86,11 @@ export function VesselParticularsForm() {
   ]
 
   return (
-    <FieldSet>
-      <FieldLegend variant="label">Particulars</FieldLegend>
-      <p className="text-xs text-muted-foreground">
-        Name, call sign, MMSI and the main dimensions come from the boat&apos;s live instrument data and are not edited here.
-      </p>
-      <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <FormSection
+      title="Particulars"
+      description="Name, call sign, MMSI and the main dimensions come from the boat's live instrument data and are not edited here."
+    >
+      <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {live.map(([label, value]) => (
           <div key={label} className="min-w-0 rounded-md border border-border/60 px-2.5 py-1.5">
             <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</dt>
@@ -98,7 +98,7 @@ export function VesselParticularsForm() {
           </div>
         ))}
       </dl>
-      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+      <FormRow>
         {TEXT_FIELDS.map(({ id, label }) => (
           <Field key={id}>
             <FieldLabel htmlFor={`particulars-${id}`}>{label}</FieldLabel>
@@ -137,14 +137,14 @@ export function VesselParticularsForm() {
             onChange={(e) => update({ date_acquired: e.target.value })}
           />
         </Field>
-      </div>
-      <div className="mt-3 flex items-center gap-3">
+      </FormRow>
+      <div className="flex items-center gap-3">
         <Button type="button" variant="outline" onClick={() => void handleSave()} disabled={saving}>
           {saving ? 'Saving' : 'Save particulars'}
         </Button>
         {saved && <span role="status" className="text-xs text-muted-foreground">Particulars saved</span>}
       </div>
-      {saveError !== null && <p role="alert" className="mt-2 text-sm text-destructive">{saveError}</p>}
-    </FieldSet>
+      {saveError !== null && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
+    </FormSection>
   )
 }

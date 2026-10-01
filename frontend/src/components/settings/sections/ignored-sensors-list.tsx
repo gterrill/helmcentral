@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection } from '@/components/patterns'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 
 /**
@@ -29,13 +29,11 @@ export function IgnoredSensorsList() {
   }
 
   return (
-    <FieldSet>
-      <FieldLegend variant="label">Ignored sensors</FieldLegend>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Sensors excluded from the frozen, impossible-reading and silent-source checks, added from each alarm
-        card&apos;s own &quot;Ignore this sensor&quot; action.
-      </p>
-      <div className="mt-3 flex flex-col gap-1.5">
+    <FormSection
+      title="Ignored sensors"
+      description={'Sensors excluded from the frozen, impossible-reading and silent-source checks, added from each alarm card\'s own "Ignore this sensor" action.'}
+    >
+      <div className="flex flex-col gap-1.5">
         {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {!loading && error && <p className="text-sm text-destructive" role="alert">{error}</p>}
         {!loading && !error && identifiers.length === 0 && (
@@ -56,6 +54,6 @@ export function IgnoredSensorsList() {
           </div>
         ))}
       </div>
-    </FieldSet>
+    </FormSection>
   )
 }

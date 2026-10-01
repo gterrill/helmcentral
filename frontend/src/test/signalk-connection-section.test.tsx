@@ -173,7 +173,7 @@ describe('SignalKConnectionSection', () => {
       expect(latestDraft().signalkPort).toBe('3000')
 
       // Consistent with the rest of this page: picking populates the form,
-      // "Save Settings" persists. Nothing here writes on click.
+      // the Save bar persists. Nothing here writes on click.
       const saves = fetchMock.mock.calls.filter(
         ([url, init]) =>
           (init as RequestInit | undefined)?.method === 'POST' && !String(url).includes('/api/signalk/discover'),
