@@ -384,10 +384,10 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                     </TileErrorBoundary>
                   </TileHeightScope>
                 </div>
-                {/* Controls sit on the card's corners, below the title pill that
-                    straddles its top edge: the card starts TILE_INSET_H (8px) down
-                    the cell, so top-5 (20px) is 12px below the card's top, just under
-                    the pill's lower edge. Duplicate stacks beneath remove. */}
+                {/* Remove and duplicate sit low on the right edge, clear of the title and
+                    gear pills that straddle the card's top edge: those pills' 8px hit
+                    areas reach 28px down the cell, so anything at top-5 steals their
+                    touches. Duplicate stacks above remove. */}
                 {editing && (
                   <>
                     <button
@@ -396,7 +396,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                         e.stopPropagation()
                         onRemoveWidget(w.id)
                       }}
-                      className="absolute -right-2 top-5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
+                      className="absolute -right-2 bottom-5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                       aria-label={`Remove ${widgetDisplayName(w)} tile`}
                     >
                       <X className="h-3.5 w-3.5" />
@@ -408,7 +408,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                           e.stopPropagation()
                           onDuplicateWidget(w.id)
                         }}
-                        className="absolute -right-2 top-12 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
+                        className="absolute -right-2 bottom-12 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                         aria-label={`Duplicate ${widgetDisplayName(w)} tile`}
                       >
                         <Copy className="h-3 w-3" />

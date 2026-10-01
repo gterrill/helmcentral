@@ -73,3 +73,14 @@ describe('duplicate affordance', () => {
     expect(screen.queryAllByLabelText(/^Duplicate /)).toHaveLength(0)
   })
 })
+
+describe('edit-mode corner buttons', () => {
+  it('keep Remove and Duplicate off the top edge, where the title and gear pills live', () => {
+    renderGrid(true)
+    for (const label of ['Remove Port tile', 'Duplicate Port tile']) {
+      const cls = screen.getByLabelText(label).className
+      expect(cls).toMatch(/\bbottom-\d+\b/)
+      expect(cls).not.toMatch(/\btop-\d+\b/)
+    }
+  })
+})

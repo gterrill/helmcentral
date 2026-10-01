@@ -48,6 +48,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   sit on the same edge at the right as matching pills, and turn amber or red
   with the tile's edge. Tiles stacked in a column sit a little further apart
   so each title clears the tile above it.
+- In layout mode, a tile's **Remove** and **Duplicate** buttons sit at its
+  bottom right corner, clear of the title and the gear on the top edge.
 - The Wind tile's gust and Drift readouts show the number alone, without
   "kts". The unit under the wind speed in the middle of the dial is larger.
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
