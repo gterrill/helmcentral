@@ -81,6 +81,16 @@ vi.mock('@/hooks/use-secrets-status', async () => {
 // real hook would fire its /api/alarm-transports GET into jsdom. Stub it the
 // same way useSettingsForm/useSecretsStatus are stubbed above. `config` is
 // built once so its identity is stable across renders.
+// The page mounts VesselParticularsProvider for the whole page, so the real
+// hook would fire its /api/vessel/particulars GET into jsdom. Stub the read.
+vi.mock('@/hooks/use-vessel-particulars', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-vessel-particulars')>()
+  return {
+    ...actual,
+    useVesselParticulars: () => ({ particulars: null, error: null, reload: vi.fn() }),
+  }
+})
+
 vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/use-alarm-transports')>()
   const config = actual.emptyTransportConfig()

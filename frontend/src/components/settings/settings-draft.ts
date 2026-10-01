@@ -1,4 +1,9 @@
 import type { DeepPartial, SettingsPayload } from '@/hooks/use-settings-form'
+import {
+  titleCaseInstance,
+  type VesselEngineSetting,
+  type VesselHouseBankSetting,
+} from '@/lib/vessel-settings'
 
 export const defaultTankLabelIds = [
   'blackWater.1',
@@ -16,6 +21,58 @@ export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 export type ScopeMethod = 'catenary' | 'ratio'
 
 export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** One editable engine row, keyed by SignalK propulsion instance in VesselDraft. */
+export interface VesselEngineRowDraft {
+  name: string
+  equipmentId: string
+  included: boolean
+}
+
+/**
+ * The Vessel section's engines and house bank. Rows exist for every instance
+ * the operator has touched, ticked or not, so a name typed against an unticked
+ * engine survives ticking it; only ticked rows are saved.
+ */
+export interface VesselDraft {
+  engineRows: Record<string, VesselEngineRowDraft>
+  houseBank: VesselHouseBankSetting | null
+}
+
+/** The engines a draft saves: ticked rows only, in instance order, names defaulted. */
+export function vesselEnginesFromDraft(vessel: VesselDraft): VesselEngineSetting[] {
+  return Object.keys(vessel.engineRows)
+    .filter((instance) => vessel.engineRows[instance].included)
+    .sort()
+    .map((instance) => ({
+      instance,
+      name: vessel.engineRows[instance].name.trim() || titleCaseInstance(instance),
+      equipment_id: vessel.engineRows[instance].equipmentId,
+    }))
+}
+
+function houseBanksEqual(a: VesselHouseBankSetting | null, b: VesselHouseBankSetting | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.path === b.path
+    && a.equipment_id === b.equipment_id
+    && a.capacity_ah === b.capacity_ah
+    && a.cells === b.cells
+    && (a.warn_voltage ?? 0) === (b.warn_voltage ?? 0)
+    && (a.high_voltage ?? 0) === (b.high_voltage ?? 0)
+}
+
+// Equal when they would save the same thing: an edit to an unticked row, or
+// a name cleared back to its default, is not an unsaved change.
+function vesselDraftsEqual(a: VesselDraft | null, b: VesselDraft | null): boolean {
+  if (a === null || b === null) return a === b
+  const ea = vesselEnginesFromDraft(a)
+  const eb = vesselEnginesFromDraft(b)
+  if (ea.length !== eb.length) return false
+  for (let i = 0; i < ea.length; i++) {
+    if (ea[i].instance !== eb[i].instance || ea[i].name !== eb[i].name || ea[i].equipment_id !== eb[i].equipment_id) return false
+  }
+  return houseBanksEqual(a.houseBank, b.houseBank)
+}
 
 /**
  * Local-form mirror of every field owned by the "regular" settings
@@ -70,6 +127,12 @@ export interface RegularSettingsDraft {
   assistantVoiceInput: boolean
   assistantReadAloud: boolean
   assistantWakeWord: boolean
+  /**
+   * null until the server's vessel block has been read. It stays null if the
+   * settings fetch fell back without one, and the patch then omits `vessel`
+   * so a save cannot wipe a setup this page never saw.
+   */
+  vessel: VesselDraft | null
 }
 
 export const initialRegularSettingsDraft: RegularSettingsDraft = {
@@ -116,6 +179,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantVoiceInput: false,
   assistantReadAloud: false,
   assistantWakeWord: false,
+  vessel: null,
 }
 
 function normalizeModelPatterns(values: string[] | undefined): string[] {
@@ -213,6 +277,14 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
   if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
 
+  if (settings.vessel) {
+    const engineRows: Record<string, VesselEngineRowDraft> = {}
+    for (const e of Array.isArray(settings.vessel.engines) ? settings.vessel.engines : []) {
+      engineRows[e.instance] = { name: e.name || titleCaseInstance(e.instance), equipmentId: e.equipment_id, included: true }
+    }
+    draft.vessel = { engineRows, houseBank: settings.vessel.house_bank ?? null }
+  }
+
   return draft
 }
 
@@ -271,6 +343,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
   if (a.assistantReadAloud !== b.assistantReadAloud) return false
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
+
+  if (!vesselDraftsEqual(a.vessel, b.vessel)) return false
 
   if (a.assistantAllowedModels.length !== b.assistantAllowedModels.length) return false
   for (let i = 0; i < a.assistantAllowedModels.length; i++) {
@@ -362,5 +436,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       read_aloud: draft.assistantReadAloud,
       wake_word: draft.assistantWakeWord,
     },
+    // Omitted while the vessel block was never read (see the draft field).
+    ...(draft.vessel === null
+      ? {}
+      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank } }),
   }
 }

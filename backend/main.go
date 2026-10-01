@@ -876,9 +876,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
 		// Vessel particulars: the facts about the boat SignalK does not
-		// publish (vessel_particulars, vessel_particulars.go). Not under
-		// "/api/vessel" itself, which is the admin-tier anomaly-detection
-		// settings block further down.
+		// publish (vessel_particulars, vessel_particulars.go). Separate from
+		// the engines and house bank, which are part of /api/settings.
 		{http.MethodGet, "/api/vessel/particulars", tierRead, getVesselParticularsHandler},
 
 		// Maintenance (ADR 0138): service rules and the log they're
@@ -1053,11 +1052,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
 		{http.MethodPost, "/api/settings", tierAdmin, updateSettingsHandler},
 		// Settings -> Vessel (anomaly detection): candidates is a pure read
-		// of live instances for the picker; GET/POST the vessel.* block
-		// itself, admin-tiered alongside settings since it is one.
+		// of live instances for the picker. The vessel.* block itself
+		// loads and saves through /api/settings.
 		{http.MethodGet, "/api/vessel/candidates", tierAdmin, getVesselCandidatesHandler},
-		{http.MethodGet, "/api/vessel", tierAdmin, getVesselSettingsHandler},
-		{http.MethodPost, "/api/vessel", tierAdmin, postVesselSettingsHandler},
 		{http.MethodGet, "/api/settings/signalk", tierAdmin, getSignalKSettingsHandler},
 		// Probe only — persisting the address is POST /api/settings' job
 		// alone (ADR 0028). There is deliberately no POST /api/settings/signalk.

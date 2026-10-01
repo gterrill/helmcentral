@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -144,65 +143,5 @@ func TestGetVesselCandidatesHandler(t *testing.T) {
 	}
 	if len(body.Engines) != 2 {
 		t.Fatalf("expected 2 engines in the handler response, got %+v", body.Engines)
-	}
-}
-
-func TestGetAndPostVesselSettingsHandlers(t *testing.T) {
-	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	t.Setenv("SETTINGS_FILE", settingsPath)
-	withTempAlarmRules(t)
-
-	e := echo.New()
-
-	// GET on a fresh install: the zero value, not an error.
-	getReq := httptest.NewRequest(http.MethodGet, "/api/vessel", nil)
-	getRec := httptest.NewRecorder()
-	if err := getVesselSettingsHandler(e.NewContext(getReq, getRec)); err != nil {
-		t.Fatalf("get handler error: %v", err)
-	}
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on a fresh install, got %d: %s", getRec.Code, getRec.Body.String())
-	}
-	var fresh vesselSettings
-	if err := json.Unmarshal(getRec.Body.Bytes(), &fresh); err != nil {
-		t.Fatalf("decoding fresh response: %v", err)
-	}
-	if len(fresh.Engines) != 0 || fresh.HouseBank != nil {
-		t.Fatalf("expected a fresh install to report unset, got %+v", fresh)
-	}
-
-	// POST saves it.
-	payload := vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	postReq := httptest.NewRequest(http.MethodPost, "/api/vessel", bytes.NewReader(body))
-	postReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	postRec := httptest.NewRecorder()
-	if err := postVesselSettingsHandler(e.NewContext(postReq, postRec)); err != nil {
-		t.Fatalf("post handler error: %v", err)
-	}
-	if postRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 saving, got %d: %s", postRec.Code, postRec.Body.String())
-	}
-
-	saved, err := loadVesselSettings(settingsPath)
-	if err != nil {
-		t.Fatalf("loadVesselSettings after save: %v", err)
-	}
-	if len(saved.Engines) != 1 || saved.Engines[0].Instance != "port" {
-		t.Fatalf("expected the save to persist, got %+v", saved)
-	}
-
-	// And the save re-seeds anomaly rules for the newly-configured engine.
-	var found bool
-	for _, rule := range listAlarmRules() {
-		if rule.Path == anomalySensorFrozenCountPath {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected saving vessel settings to seed the frozen rule now that an engine is configured")
 	}
 }

@@ -30,9 +30,18 @@ export interface VesselParticulars {
 // else with {"error"}. Both are written for the operator, so they are shown
 // as they came; a bare status code is the last resort for a body that is
 // neither.
-async function failure(res: Response): Promise<Error> {
-  const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
-  return new Error(body.message ?? body.error ?? `HTTP ${res.status}`)
+export class ParticularsSaveError extends Error {
+  /** The record field the server refused, when it named one. */
+  readonly field: string | null
+  constructor(message: string, field: string | null) {
+    super(message)
+    this.field = field
+  }
+}
+
+async function failure(res: Response): Promise<ParticularsSaveError> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string; field?: string }
+  return new ParticularsSaveError(body.message ?? body.error ?? `HTTP ${res.status}`, body.field ?? null)
 }
 
 export async function fetchVesselParticulars(): Promise<VesselParticulars> {
@@ -66,11 +75,5 @@ export function useVesselParticulars() {
 
   useEffect(() => { void load() }, [load])
 
-  const save = useCallback(async (next: VesselParticulars) => {
-    const saved = await saveVesselParticulars(next)
-    setParticulars(saved)
-    return saved
-  }, [])
-
-  return { particulars, error, save, reload: load }
+  return { particulars, error, reload: load }
 }

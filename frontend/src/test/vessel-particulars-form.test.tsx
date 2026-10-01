@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 
 import { VesselParticularsForm } from '@/components/settings/sections/vessel-particulars-form'
+import { VesselParticularsProvider } from '@/components/settings/vessel-particulars-context'
 
 // Live vessel data rides a telemetry stream; the form only reads two values
 // from it, so a fixed stand-in is enough.
@@ -20,6 +21,10 @@ const stored = {
 
 const fetchMock = vi.fn()
 
+function renderForm() {
+  return render(<VesselParticularsProvider><VesselParticularsForm /></VesselParticularsProvider>)
+}
+
 beforeEach(() => {
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
@@ -28,7 +33,7 @@ beforeEach(() => {
 describe('VesselParticularsForm', () => {
   it('shows the stored particulars and the live values beside them', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => stored })
-    render(<VesselParticularsForm />)
+    renderForm()
 
     expect(await screen.findByLabelText('Builder')).toHaveValue('Granocean')
     expect(screen.getByLabelText('Displacement (kg)')).toHaveValue(24500)
@@ -36,37 +41,19 @@ describe('VesselParticularsForm', () => {
     expect(screen.getByText('17.9 m')).toBeInTheDocument()
   })
 
-  it('saves the whole record with a PUT', async () => {
-    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.method === 'PUT') {
-        return Promise.resolve({ ok: true, json: async () => ({ ...JSON.parse(String(init.body)), updated_at: '2026-10-01T06:00:00Z' }) })
-      }
-      return Promise.resolve({ ok: true, json: async () => stored })
-    })
-    render(<VesselParticularsForm />)
+  it('has no Save button of its own: the page Save bar owns it', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => stored })
+    renderForm()
 
-    fireEvent.change(await screen.findByLabelText('Flag'), { target: { value: 'Australia' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save particulars' }))
-
-    await screen.findByText('Particulars saved')
-    const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
-    expect(put[0]).toBe('/api/vessel/particulars')
-    expect(JSON.parse(String((put[1] as RequestInit).body))).toMatchObject({ flag: 'Australia', builder: 'Granocean', year: 2024, displacement_kg: 24500 })
+    await screen.findByLabelText('Builder')
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
   })
 
-  it('shows the server message when a value is refused', async () => {
-    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.method === 'PUT') {
-        return Promise.resolve({ ok: false, status: 400, json: async () => ({ field: 'year', message: 'year must be between 1800 and 2200' }) })
-      }
-      return Promise.resolve({ ok: true, json: async () => stored })
-    })
-    render(<VesselParticularsForm />)
+  it('shows the load failure instead of an empty form', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'database is locked' }) })
+    renderForm()
 
-    fireEvent.change(await screen.findByLabelText('Year built'), { target: { value: '3000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save particulars' }))
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('year must be between 1800 and 2200'))
-    expect(screen.queryByText('Particulars saved')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('database is locked'))
+    expect(screen.queryByLabelText('Builder')).toBeNull()
   })
 })
