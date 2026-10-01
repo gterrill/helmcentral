@@ -3,6 +3,7 @@ import { Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { nfcSupported, writeUrlTag } from '@/lib/nfc'
+import { tagUrl } from '@/lib/tag-url'
 import { cn } from '@/lib/utils'
 
 // ADR 0127 §1/§4: what a tag holds (a plain NDEF URL record, this row's own
@@ -27,7 +28,7 @@ interface TagRowProps {
 type WriteState = 'idle' | 'writing' | 'written' | 'error'
 
 export function TagRow({ path, layout = 'inline' }: TagRowProps) {
-  const url = new URL(path, window.location.origin).toString()
+  const url = tagUrl(path)
   const stacked = layout === 'stacked'
   const [copied, setCopied] = useState(false)
   const [writeState, setWriteState] = useState<WriteState>('idle')

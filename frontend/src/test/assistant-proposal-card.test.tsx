@@ -72,6 +72,20 @@ describe('AssistantProposalCard', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/dismiss', { method: 'POST' })
   })
 
+  it('Apply refused with 409 because the proposal was dismissed shows as dismissed, not out of date', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respond(409, { error: 'this proposal was dismissed and can no longer be applied', proposal_status: 'dismissed' }),
+    )
+    const onChange = vi.fn()
+    render(<AssistantProposalCard proposal={proposal()} canWrite onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'dismissed' })))
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'stale' }))
+  })
+
   it('applied: each line links to the Maintenance list and there are no buttons', () => {
     render(<AssistantProposalCard proposal={proposal({ status: 'applied' })} canWrite onChange={vi.fn()} />)
 

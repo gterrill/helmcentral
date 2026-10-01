@@ -69,8 +69,14 @@ func trimParticulars(v vesselParticulars) vesselParticulars {
 	return v
 }
 
+// The years a vessel record accepts.
+const (
+	vesselYearMin = 1800
+	vesselYearMax = 2200
+)
+
 func validateParticulars(v vesselParticulars) *vesselParticularsError {
-	if v.Year != nil && (*v.Year < 1800 || *v.Year > 2200) {
+	if v.Year != nil && (*v.Year < vesselYearMin || *v.Year > vesselYearMax) {
 		return &vesselParticularsError{Field: "year", Message: "year must be between 1800 and 2200"}
 	}
 	if v.DisplacementKG != nil && *v.DisplacementKG < 0 {

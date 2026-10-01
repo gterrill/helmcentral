@@ -367,18 +367,8 @@ export const WindTile = memo(function WindTile({
   const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
   const currentColorClass = currentFavorable === null ? '' : currentFavorable ? 'text-gauge-secondary' : 'text-amber-600'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
-  const driftLabel = currentDriftKts !== null ? (
-    <>
-      {currentDriftKts.toFixed(1)}
-      <span className="ml-1 text-xl text-muted-foreground">kts</span>
-    </>
-  ) : '—'
-  const formatGustValue = (kts: number | null): ReactNode => kts !== null ? (
-    <>
-      {kts.toFixed(1)}
-      <span className="ml-1 text-xl text-muted-foreground">kts</span>
-    </>
-  ) : '—'
+  const driftLabel = currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—'
+  const formatGustValue = (kts: number | null): ReactNode => kts !== null ? kts.toFixed(1) : '—'
 
   // Everything the compass centre and the MAX GUST cards read follows the
   // active mode — apparent stays exactly today's behaviour; true reads its

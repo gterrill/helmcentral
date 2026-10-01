@@ -41,7 +41,18 @@ func dismissAssistantProposalHandler(c echo.Context) error {
 // validation or refusal, or the maintenance sentinels' usual mapping.
 func writeAssistantProposalError(c echo.Context, err error) error {
 	if status, ok := assistantProposalErrorStatus(err); ok {
-		return c.JSON(status, map[string]string{"error": err.Error()})
+		body := map[string]string{"error": err.Error()}
+		// A 409 is three different refusals; the card must tell a dismissed
+		// proposal from one that went out of date.
+		switch {
+		case errors.Is(err, errAssistantProposalDismissed):
+			body["proposal_status"] = assistantProposalDismissed
+		case errors.Is(err, errAssistantProposalApplied):
+			body["proposal_status"] = assistantProposalApplied
+		case errors.Is(err, errAssistantProposalStale):
+			body["proposal_status"] = assistantProposalStale
+		}
+		return c.JSON(status, body)
 	}
 	var verr *inventoryValidationError
 	if errors.As(err, &verr) {

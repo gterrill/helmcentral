@@ -15,11 +15,15 @@ import { todayISO } from '@/lib/local-date'
  * verbatim. */
 export class ProposalActionError extends Error {
   readonly status: number
+  /** On a 409, which stored status the server refused for: 'stale',
+   * 'dismissed' or 'applied'. */
+  readonly proposalStatus: string | undefined
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, proposalStatus?: string) {
     super(message)
     this.name = 'ProposalActionError'
     this.status = status
+    this.proposalStatus = proposalStatus
   }
 }
 
@@ -27,13 +31,15 @@ async function post(path: string): Promise<AssistantProposal> {
   const response = await fetch(`${apiBaseUrl}${path}`, { method: 'POST' })
   if (!response.ok) {
     let message = `HTTP ${response.status}`
+    let proposalStatus: string | undefined
     try {
-      const body = (await response.json()) as { error?: string; message?: string }
+      const body = (await response.json()) as { error?: string; message?: string; proposal_status?: string }
       message = body.message ?? body.error ?? message
+      proposalStatus = body.proposal_status
     } catch {
       // Not JSON: keep the status line.
     }
-    throw new ProposalActionError(response.status, message)
+    throw new ProposalActionError(response.status, message, proposalStatus)
   }
   const body = (await response.json()) as { proposal: ProposalApi }
   return mapProposal(body.proposal)

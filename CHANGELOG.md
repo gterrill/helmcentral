@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The Wind tile's gust and Drift readouts show the number alone, without
+  "kts". The unit under the wind speed in the middle of the dial is larger.
+- The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
+  the Anchor Watch page, so a stray touch on a dashboard tile can't end it.
+
+## [0.37.0] - 2026-10-01
+
 ### Added
 
 - Wall displays now check themselves against the screen they run on. Open a
@@ -23,6 +32,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   note when its page is larger than the screen. Magnification now takes two
   decimals. The display probe page also prints the reported viewport size
   large at the top.
+- Print QR labels for bins and equipment. **Print label** on a bin's page or an
+  item's editor shows a label with a QR code and the bin code or item name
+  printed large beneath it. **Print bin labels** in the Locations page menu
+  prints every bin on one sheet, three across, to cut out. Any phone camera
+  reads the code, and it opens the same page an NFC tag does, so the phone
+  needs to reach the boat.
 - Import from YachtWave, in **Settings → Import**. Upload YachtWave's Vessel
   Export and go through it one page per topic: vessel particulars, locations,
   equipment and spares, the service log, notes, then each document and photo.
@@ -678,7 +693,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/gterrill/helmcentral/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/gterrill/helmcentral/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/gterrill/helmcentral/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/gterrill/helmcentral/compare/v0.33.0...v0.34.0
