@@ -7,7 +7,7 @@ import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
-import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
+import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, TILE_INSET_H, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 import { TileErrorBoundary } from '@/components/tile-error-boundary'
 import { effectiveRowsById } from '@/lib/list-tile-height'
@@ -43,12 +43,12 @@ const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
 export const POI_MAP_WIDGET_CONSTRAINTS = { minW: 4, minH: 6 }
 export const POI_MAP_SPLIT_MIN_W = 8
 
-// Tile header, its top padding, and the card's bottom padding: everything the
-// cluster canvas sits inside. Measured rather than derived, since it comes out
-// of the Card and CardHeader utility classes rather than a number this file
-// could import. 8px card padding-top + 24px header (including its own 8px
-// bottom padding) + 8px card padding-bottom.
-const TILE_CHROME_H = 8 + 24 + 8
+// Everything the cluster canvas sits inside, in the grid cell: the 8px inset
+// above the card (TILE_INSET_H), then the card's own padding. The title sits on
+// the card's border and takes no height. Measured rather than derived, since
+// the padding comes out of Card utility classes rather than a number this file
+// could import. 8px inset + 24px card padding-top + 8px card padding-bottom.
+const TILE_CHROME_H = TILE_INSET_H + 24 + 8
 
 /**
  * Derived from the canvas rather than written down beside it. The number here
@@ -166,7 +166,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
         delete rest[id]
         return rest
       }
-      return prev[id] === px ? prev : { ...prev, [id]: px }
+      // The tile reports its card's height; the cell is TILE_INSET_H taller.
+      const cell = px + TILE_INSET_H
+      return prev[id] === cell ? prev : { ...prev, [id]: cell }
     })
   }, [])
 
@@ -264,7 +266,10 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       )}
       style={{ height: gridPixelHeight(heroWidget.h) * HERO_SCALE, '--hero-scale': HERO_SCALE } as React.CSSProperties}
     >
-      <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl">
+      {/* pt-4 leaves room for the tile title, which sits across the tile's top
+          border and would otherwise be cut off by the frame's overflow clamp. It
+          hangs 12px above the card, about 14px once HERO_SCALE enlarges it. */}
+      <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl pt-4">
         <div className="bento-hero-scale *:h-full">
           <TileErrorBoundary key={heroWidget.id} widget={heroWidget}>
             {renderWidget(heroWidget)}
@@ -325,7 +330,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               // that it scales down to fit, so without this the track grew to 520,
               // the whole grid overflowed the viewport and the tile never scaled
               // at all because the width it measured was already 520.
-              className={cn('bento-stack-cell min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
+              className={cn('bento-stack-cell min-w-0 pt-2', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
               // The operator's sizing intent as a floor, not a fixed height: text wraps
               // more at phone width, so a height copied straight from the desktop grid
               // would clip. Mirrors RGL's own row maths (rowHeight + margin).
@@ -372,13 +377,17 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               <div aria-hidden="true" className="h-full w-full" />
             ) : (
               <>
-                <div className="h-full *:h-full">
+                <div className="h-full pt-2 *:h-full">
                   <TileHeightScope id={w.id} onReport={reportNeededHeight}>
                     <TileErrorBoundary key={w.id} widget={w}>
                       {renderWidget(w)}
                     </TileErrorBoundary>
                   </TileHeightScope>
                 </div>
+                {/* Controls sit on the card's corners, below the title pill that
+                    straddles its top edge: the card starts TILE_INSET_H (8px) down
+                    the cell, so top-5 (20px) is 12px below the card's top, just under
+                    the pill's lower edge. Duplicate stacks beneath remove. */}
                 {editing && (
                   <>
                     <button
@@ -387,7 +396,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                         e.stopPropagation()
                         onRemoveWidget(w.id)
                       }}
-                      className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
+                      className="absolute -right-2 top-5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                       aria-label={`Remove ${widgetDisplayName(w)} tile`}
                     >
                       <X className="h-3.5 w-3.5" />
@@ -399,14 +408,14 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                           e.stopPropagation()
                           onDuplicateWidget(w.id)
                         }}
-                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
+                        className="absolute -right-2 top-12 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                         aria-label={`Duplicate ${widgetDisplayName(w)} tile`}
                       >
                         <Copy className="h-3 w-3" />
                       </button>
                     )}
                     <div
-                      className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
+                      className="bento-drag-handle absolute -left-2 top-5 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
                       role="button"
                       tabIndex={0}
                       aria-label={`Drag handle for the ${widgetDisplayName(w)} tile. Use arrow keys to reposition, or drag with a pointer.`}

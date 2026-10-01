@@ -105,3 +105,49 @@ describe('Tile state', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument()
   })
 })
+
+describe('Tile legend', () => {
+  test('title is an h2 masking the top border and the card does not clip it', () => {
+    const { container } = render(
+      <Tile title="Engine">
+        <p>content</p>
+      </Tile>,
+    )
+    const h2 = screen.getByRole('heading', { level: 2, name: 'Engine' })
+    expect(h2).toHaveClass('bg-card')
+    const card = container.querySelector('[data-slot="card"]')!
+    expect(card.className).not.toContain('overflow-hidden')
+    expect(container.querySelector('.h-px.flex-1')).toBeNull()
+  })
+
+  test('titleExtra renders in the header on the border; nothing without it', () => {
+    const { container, rerender } = render(
+      <Tile title="Engine">
+        <p>content</p>
+      </Tile>,
+    )
+    expect(container.querySelector('[data-slot="card-action"]')).toBeNull()
+    rerender(
+      <Tile title="Engine" titleExtra={<button>Configure</button>}>
+        <p>content</p>
+      </Tile>,
+    )
+    const action = container.querySelector('[data-slot="card-action"]')!
+    expect(action).toContainElement(screen.getByRole('button', { name: 'Configure' }))
+    expect(container.querySelector('[data-slot="card-header"]')).toContainElement(action as HTMLElement)
+  })
+
+  // The control pills take their outline colour by inheritance, so every box
+  // between the card and the pill has to pass the card's border colour down,
+  // or a stale or alarming tile turns its edge and title amber but leaves the
+  // controls grey.
+  it('passes the card border colour down to the controls on the top edge', () => {
+    const { container } = render(
+      <Tile title="Wind" stale titleExtra={<button>Apparent</button>}>
+        <p>content</p>
+      </Tile>,
+    )
+    expect(container.querySelector('[data-slot="card-header"]')).toHaveClass('[border-color:inherit]')
+    expect(container.querySelector('[data-slot="card-action"]')).toHaveClass('[border-color:inherit]')
+  })
+})

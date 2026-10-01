@@ -1,8 +1,7 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
 import { memo, useId } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { Tile } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { DialRing } from '@/components/ui/dial-ring'
 import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
@@ -110,9 +109,9 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
-          <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
+          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
             <Settings2 className="size-3.5" />
-          </Button>
+          </button>
         ) : undefined
       }
     >

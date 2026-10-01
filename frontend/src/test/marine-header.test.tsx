@@ -27,6 +27,14 @@ describe('MarineHeader', () => {
     expect(name).toHaveClass('text-primary')
   })
 
+  // The tile title sits on the card's top border and hangs into the card, so
+  // the tile's own top padding is what keeps it off the vessel name.
+  it('keeps the tile top padding that clears the title on the border', () => {
+    mockUseVesselIdentity.mockReturnValue({ vesselStatus: 'At Anchor', boatName: 'M/V Pikorua', boatModel: null })
+    const { container } = render(<MarineHeader />)
+    expect(container.querySelector('[data-slot="card"]')).toHaveClass('pt-6')
+  })
+
   it('renders an unset vessel name as a muted placeholder, not the hero display type', () => {
     mockUseVesselIdentity.mockReturnValue({
       vesselStatus: 'At Anchor',
