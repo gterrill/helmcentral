@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { FormRow, FormSection, SettingsLayout } from '@/components/patterns'
@@ -10,12 +10,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
-import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { useSettingsFormContext } from '@/components/settings/settings-form-context'
+import type { RegularSettingsDraft, VesselDraft, VesselEngineRowDraft } from '@/components/settings/settings-draft'
 import { readErrorMessage } from '@/lib/api-error'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
-import { useVesselSettings } from '@/hooks/use-vessel-settings'
+import { useVesselCandidates } from '@/hooks/use-vessel-candidates'
 import { newGaugeGroupWidgetId, type GaugeWidgetConfig } from '@/lib/dashboard-widgets'
-import { titleCaseInstance, type VesselEngineSetting, type VesselHouseBankSetting } from '@/lib/vessel-settings'
+import { titleCaseInstance, type VesselHouseBankSetting } from '@/lib/vessel-settings'
 
 interface BoatUiSectionProps {
   draft: RegularSettingsDraft
@@ -51,19 +52,12 @@ export function BoatUiSection({ draft, onChange }: BoatUiSectionProps) {
 
       <VesselParticularsForm />
 
-      <VesselEnginesAndPowerSection />
+      <VesselEnginesAndPowerSection vessel={draft.vessel} onChange={onChange} />
     </SettingsLayout>
   )
 }
 
 // --- Anomaly detection: Engines + Power -------------------------------------
-
-/** One editable engine row's state, keyed by SignalK propulsion instance. */
-interface EngineRowDraft {
-  name: string
-  equipmentId: string
-  included: boolean
-}
 
 function detectorLine(label: string, status: { ready: boolean; missing?: string } | undefined) {
   const ready = status?.ready === true
@@ -79,38 +73,33 @@ function detectorLine(label: string, status: { ready: boolean; missing?: string 
   )
 }
 
+interface VesselEnginesAndPowerSectionProps {
+  vessel: VesselDraft | null
+  onChange: (patch: Partial<RegularSettingsDraft>) => void
+}
+
 /**
  * Settings -> Vessel: which engines and which house bank the anomaly
  * detectors (sensor health, full-bank charging, engine differentials)
- * watch. Its own save button and its own API (GET/POST /api/vessel) -
- * separate from the pinned "Save Settings" button above, the same "owned
- * exclusively by its own immediate save()" pattern the Widgets provider
- * cards already use (see settings-draft.ts's own comment on that split).
+ * watch. The choices are part of the settings draft and save with the page's
+ * Save bar; the live candidates beside them are a separate read. "Apply gauge
+ * zones" is the exception: it adds a tile to a dashboard page straight away,
+ * as its own action, and needs nothing from the draft but the linked item's
+ * profile, which the linker has already written to the inventory item.
  */
-function VesselEnginesAndPowerSection() {
-  const { settings, candidates, loading, error, saving, save } = useVesselSettings()
+function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowerSectionProps) {
+  const { settings: savedSettings, loading: settingsLoading } = useSettingsFormContext()
+  // The detector lines are computed from the saved block, so a save landing
+  // (which replaces the shared settings) is what re-reads them.
+  const { candidates, loading, error } = useVesselCandidates(savedSettings.vessel)
   const { pages, updatePage } = useDashboardPages()
 
-  const [engineRows, setEngineRows] = useState<Record<string, EngineRowDraft>>({})
-  const [houseBank, setHouseBank] = useState<VesselHouseBankSetting | null>(null)
-  const [hydrated, setHydrated] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-
-  // Seeds the editable draft from the server exactly once, the moment the
-  // first fetch lands - not on every settings change, or the operator's own
-  // in-progress edits would be clobbered by the next background refresh
-  // (the save button itself triggers one, see useVesselSettings.save).
-  useEffect(() => {
-    if (hydrated || loading) return
-    setHydrated(true)
-    const rows: Record<string, EngineRowDraft> = {}
-    for (const e of settings.engines) {
-      rows[e.instance] = { name: e.name || titleCaseInstance(e.instance), equipmentId: e.equipment_id, included: true }
-    }
-    setEngineRows(rows)
-    setHouseBank(settings.house_bank)
-  }, [hydrated, loading, settings])
+  const engineRows = useMemo(() => vessel?.engineRows ?? {}, [vessel])
+  const houseBank = vessel?.houseBank ?? null
+  const setHouseBank = (next: VesselHouseBankSetting | null) => {
+    if (vessel === null) return
+    onChange({ vessel: { ...vessel, houseBank: next } })
+  }
 
   // Every instance the boat is currently publishing, plus every instance
   // already configured (even one that has gone quiet since) - an operator
@@ -128,16 +117,22 @@ function VesselEnginesAndPowerSection() {
     [candidates.engines],
   )
 
-  const setRow = (instance: string, patch: Partial<EngineRowDraft>) => {
-    setEngineRows((prev) => ({
-      ...prev,
-      [instance]: {
-        name: prev[instance]?.name ?? titleCaseInstance(instance),
-        equipmentId: prev[instance]?.equipmentId ?? '',
-        included: prev[instance]?.included ?? false,
-        ...patch,
+  const setRow = (instance: string, patch: Partial<VesselEngineRowDraft>) => {
+    if (vessel === null) return
+    onChange({
+      vessel: {
+        ...vessel,
+        engineRows: {
+          ...vessel.engineRows,
+          [instance]: {
+            name: vessel.engineRows[instance]?.name ?? titleCaseInstance(instance),
+            equipmentId: vessel.engineRows[instance]?.equipmentId ?? '',
+            included: vessel.engineRows[instance]?.included ?? false,
+            ...patch,
+          },
+        },
       },
-    }))
+    })
   }
 
   // "Apply gauge zones" (the plan: reuse EngineProfileDialog, instance
@@ -185,28 +180,28 @@ function VesselEnginesAndPowerSection() {
     if (saved) toast.success(`Added "${title}" tile`)
   }
 
-  const handleSave = async () => {
-    setSaveError(null)
-    setSaved(false)
-    const engines: VesselEngineSetting[] = instances
-      .filter((instance) => engineRows[instance]?.included)
-      .map((instance) => ({
-        instance,
-        name: engineRows[instance].name.trim() || titleCaseInstance(instance),
-        equipment_id: engineRows[instance].equipmentId,
-      }))
-    try {
-      await save({ engines, house_bank: houseBank })
-      setSaved(true)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  if (loading && !hydrated) {
+  if (settingsLoading || (loading && vessel !== null)) {
     return (
       <FormSection title="Vessel: Engines and House Bank">
         <p className="text-sm text-muted-foreground">Loading…</p>
+      </FormSection>
+    )
+  }
+
+  // The server named a problem with the stored block. The draft stays null,
+  // so a save leaves the block alone, and the operator is told why. Only this
+  // explicit error raises the alert: a null draft with no error is just the
+  // page hydrating a render after settings arrive.
+  if (vessel === null) {
+    return (
+      <FormSection title="Vessel: Engines and House Bank">
+        {savedSettings.vessel_error ? (
+          <p role="alert" className="text-sm text-destructive">
+            Engines and house bank could not be read: {savedSettings.vessel_error}. They are not shown and will not be changed by a save.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        )}
       </FormSection>
     )
   }
@@ -222,7 +217,7 @@ function VesselEnginesAndPowerSection() {
             <p className="text-sm text-muted-foreground">No propulsion instances published yet.</p>
           )}
           {instances.map((instance) => {
-            const row = engineRows[instance] ?? { name: titleCaseInstance(instance), equipmentId: '', included: false }
+            const row: VesselEngineRowDraft = engineRows[instance] ?? { name: titleCaseInstance(instance), equipmentId: '', included: false }
             const live = candidateByInstance.get(instance)
             return (
               <EngineRow
@@ -255,15 +250,7 @@ function VesselEnginesAndPowerSection() {
         {detectorLine('Engine differential check', candidates.detectors.engines)}
       </FormSection>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Vessel Settings'}
-        </Button>
-        {saved && !saveError && <span className="text-xs text-muted-foreground">Saved.</span>}
-        {(saveError ?? error) && (
-          <span className="text-xs text-destructive" role="alert">{saveError ?? error}</span>
-        )}
-      </div>
+      {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
 
       <EngineProfileDialog
         open={applyDialog !== null}
@@ -279,7 +266,7 @@ function VesselEnginesAndPowerSection() {
 
 interface EngineRowProps {
   instance: string
-  row: EngineRowDraft
+  row: VesselEngineRowDraft
   rpm: number | null
   coolantC: number | null
   onToggle: (included: boolean) => void

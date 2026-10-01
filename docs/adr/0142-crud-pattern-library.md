@@ -450,3 +450,6 @@ saved copy (`reset` on `AlarmTransportsProvider`). The "Settings saved" banner
 is gone: the bar disappearing is the confirmation. The Vessel section's own
 Save buttons (particulars, engines and house bank) stay, because they write to
 their own endpoints and are not part of the page draft.
+
+Amended by ADR 0151: the particulars, engines and house bank now save through
+this bar as well.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { apiBaseUrl } from '@/config/api'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
+import type { VesselSettings } from '@/lib/vessel-settings'
 
 export type SettingsPayload = {
   signalk?: {
@@ -72,6 +73,12 @@ export type SettingsPayload = {
     read_aloud?: boolean
     wake_word?: boolean
   }
+  // The engines and house bank the anomaly detectors watch. Saved with the
+  // rest of Settings. A payload that omits it leaves the stored block alone
+  // on the server; null house_bank is an explicit "no house bank".
+  vessel?: VesselSettings
+  // Set by the server instead of `vessel` when the stored block cannot be read.
+  vessel_error?: string
   units?: string
 }
 

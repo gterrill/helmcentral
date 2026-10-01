@@ -53,6 +53,16 @@ vi.mock('@/hooks/use-secrets-status', async (importOriginal) => {
 // test can mutate it (the factory is hoisted above plain top-level `let`s).
 const transportsState = vi.hoisted(() => ({ loaded: true, loadError: null as string | null }))
 
+// The page mounts VesselParticularsProvider for the whole page, so the real
+// hook would fire its /api/vessel/particulars GET into jsdom. Stub the read.
+vi.mock('@/hooks/use-vessel-particulars', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-vessel-particulars')>()
+  return {
+    ...actual,
+    useVesselParticulars: () => ({ particulars: null, error: null, reload: vi.fn() }),
+  }
+})
+
 vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/use-alarm-transports')>()
   const config = actual.emptyTransportConfig()

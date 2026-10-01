@@ -1,16 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
-import { initialRegularSettingsDraft } from '@/components/settings/settings-draft'
+import { SettingsFormProvider } from '@/components/settings/settings-form-context'
+import { VesselParticularsProvider } from '@/components/settings/vessel-particulars-context'
+import {
+  buildRegularSettingsPatch,
+  hydrateDraftFromSettings,
+  type RegularSettingsDraft,
+} from '@/components/settings/settings-draft'
 
-// Settings -> Vessel's Engines/Power UI (round 2): the fieldsets that turn
-// GET /api/vessel/candidates and GET/POST /api/vessel into something an
-// operator can actually use. Every dependent fetch (candidates, vessel
+// Settings -> Vessel's Engines/Power UI: the fieldsets that turn
+// GET /api/vessel/candidates and the settings payload's vessel block into
+// something an operator can actually use. The choices live in the page's
+// draft and save with the Save bar (settings-vessel-save.test.tsx covers the
+// bar); here the draft is read back to see what a save would send. Every dependent fetch (candidates, vessel
 // settings, equipment items, equipment profiles, dashboard pages) is routed
 // through one mock, the same pattern equipment-editor.test.tsx uses for its
 // own multi-endpoint component.
 
-let vesselSettings = { engines: [] as unknown[], house_bank: null as unknown }
+type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown }
+let latestDraft: RegularSettingsDraft
+// What the next Save would send as `vessel`.
+const pendingVessel = () => buildRegularSettingsPatch(latestDraft).vessel as unknown as SavedVessel
 const equipmentItems = [
   { id: 'eq-1', name: 'Port engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '', required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
   { id: 'eq-2', name: 'Starboard engine', category: 'mechanical', system: 'propulsion', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '', required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '', hour_meter_path: '', profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [] },
@@ -52,12 +64,11 @@ function stubFetch() {
         }),
       })
     }
-    if (u.endsWith('/api/vessel') && method === 'POST') {
-      vesselSettings = JSON.parse(String(init?.body))
-      return Promise.resolve({ ok: true, json: async () => vesselSettings })
+    if (u.endsWith('/api/settings')) {
+      return Promise.resolve({ ok: true, json: async () => ({ vessel: { engines: [], house_bank: null } }) })
     }
-    if (u.endsWith('/api/vessel')) {
-      return Promise.resolve({ ok: true, json: async () => vesselSettings })
+    if (u.endsWith('/api/vessel/particulars')) {
+      return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'not under test' }) })
     }
     if (u.match(/\/api\/inventory\/equipment\/[^/?]+$/) && method === 'GET') {
       const id = u.split('/').pop()
@@ -97,15 +108,26 @@ function stubFetch() {
 }
 
 beforeEach(() => {
-  vesselSettings = { engines: [], house_bank: null }
   dashboardPage = { id: 'page-1', widgets: [] }
   fetchMock.mockReset()
   stubFetch()
   vi.stubGlobal('fetch', fetchMock)
 })
 
+function SectionHarness() {
+  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null } }))
+  latestDraft = draft
+  return <BoatUiSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
+}
+
 function renderSection() {
-  return render(<BoatUiSection draft={initialRegularSettingsDraft} onChange={() => {}} />)
+  return render(
+    <SettingsFormProvider>
+      <VesselParticularsProvider>
+        <SectionHarness />
+      </VesselParticularsProvider>
+    </SettingsFormProvider>,
+  )
 }
 
 describe('Settings -> Vessel: Engines and Power', () => {
@@ -126,17 +148,25 @@ describe('Settings -> Vessel: Engines and Power', () => {
     expect(screen.getByText(/Tick a second engine/)).toBeInTheDocument()
   })
 
-  it('ticking engines and saving POSTs the included instances only', async () => {
+  it('ticking engines puts the included instances only into what a save sends', async () => {
     renderSection()
 
     await screen.findByText('propulsion.port')
     fireEvent.click(screen.getByLabelText('Include port in anomaly detection'))
     fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Vessel Settings' }))
+    await waitFor(() => expect(pendingVessel().engines).toHaveLength(2))
+    expect(pendingVessel().engines.map((e) => e.instance).sort()).toEqual(['port', 'starboard'])
 
-    await waitFor(() => expect(vesselSettings.engines).toHaveLength(2))
-    expect((vesselSettings.engines as { instance: string }[]).map((e) => e.instance).sort()).toEqual(['port', 'starboard'])
+    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    await waitFor(() => expect(pendingVessel().engines.map((e) => e.instance)).toEqual(['port']))
+  })
+
+  it('has no Save button of its own: the page Save bar owns it', async () => {
+    renderSection()
+    await screen.findByText('propulsion.port')
+    expect(screen.queryByRole('button', { name: /save vessel settings/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /save particulars/i })).toBeNull()
   })
 
   it('lists batteries with live voltage, current and SoC in the house bank picker', async () => {
@@ -159,7 +189,7 @@ describe('Settings -> Vessel: Engines and Power', () => {
     expect(screen.getByLabelText('Pack high voltage override')).toBeInTheDocument()
   })
 
-  it('saving the house bank POSTs its path, cells and capacity', async () => {
+  it('the house bank carries its path, cells and capacity into what a save sends', async () => {
     renderSection()
 
     const picker = await screen.findByLabelText('House bank')
@@ -168,10 +198,7 @@ describe('Settings -> Vessel: Engines and Power', () => {
     fireEvent.change(await screen.findByLabelText('House bank cell count'), { target: { value: '8' } })
     fireEvent.change(screen.getByLabelText('House bank capacity in amp-hours'), { target: { value: '400' } })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Vessel Settings' }))
-
-    await waitFor(() => expect(vesselSettings.house_bank).not.toBeNull())
-    expect(vesselSettings.house_bank).toMatchObject({ path: 'electrical.batteries.512', cells: 8, capacity_ah: 400 })
+    await waitFor(() => expect(pendingVessel().house_bank).toMatchObject({ path: 'electrical.batteries.512', cells: 8, capacity_ah: 400 }))
   })
 
   it('offers only engine-kind profiles once an engine row is linked to an item', async () => {

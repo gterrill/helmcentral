@@ -190,6 +190,17 @@ type settingsPayload struct {
 		Mode string `json:"mode"`
 	} `json:"auth"`
 	Units string `json:"units"`
+	// Vessel is the engines and house bank block (vessel_settings.go).
+	// A pointer so a save that omits it leaves the stored block alone:
+	// every other section here is rewritten wholesale from the payload,
+	// but an older client or a scripted partial post must not wipe the
+	// anomaly-detection setup by not mentioning it. GET always returns it.
+	Vessel *vesselSettings `json:"vessel,omitempty"`
+	// VesselError is set by GET only, when the stored vessel block cannot be
+	// parsed: the block is then omitted and this says why. The rest of the
+	// settings still load, so one corrupt section cannot make the page show
+	// defaults and overwrite the others on its next save. Ignored on POST.
+	VesselError string `json:"vessel_error,omitempty"`
 }
 
 func getSettingsHandler(c echo.Context) error {
@@ -199,7 +210,21 @@ func getSettingsHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
 	}
 
-	return c.JSON(http.StatusOK, buildSettingsPayload(settings))
+	payload := buildSettingsPayload(settings)
+	// A corrupt vessel block is surfaced, not masked: it is omitted and named
+	// in vessel_error, while every other setting is still returned.
+	vessel, err := parseVesselBlock(settings)
+	if err != nil {
+		log.Printf("settings: %v", err)
+		payload.VesselError = err.Error()
+		return c.JSON(http.StatusOK, payload)
+	}
+	if vessel.Engines == nil {
+		vessel.Engines = []vesselEngineSetting{}
+	}
+	payload.Vessel = &vessel
+
+	return c.JSON(http.StatusOK, payload)
 }
 
 func updateSettingsHandler(c echo.Context) error {
@@ -336,8 +361,28 @@ func updateSettingsHandler(c echo.Context) error {
 	}
 	settings["units"] = normalized.Units
 
+	// vessel is only touched when the request carries it (see the Vessel
+	// field's comment); an explicit empty block clears the setup.
+	if normalized.Vessel != nil {
+		block, err := vesselBlockMap(*normalized.Vessel)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+		}
+		settings["vessel"] = block
+	}
+
 	if err := writeSettings(settingsPath, settings); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+	}
+
+	// Engines or a house bank may have just become configured; seed whichever
+	// anomaly-v1 sub-sets that unlocks. A seeding failure is logged, not
+	// returned: the save itself succeeded, every sub-set's marker makes the
+	// call idempotent, and main.go retries it at the next start.
+	if normalized.Vessel != nil {
+		if err := seedAnomalyRules(*normalized.Vessel); err != nil {
+			log.Printf("could not seed the anomaly alarm rules after a settings save: %v", err)
+		}
 	}
 
 	// ADR 0120: this save may be the moment Mate just became ready (a key
@@ -784,6 +829,14 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {
 		normalized.Auth.Mode = authModeNone
+	}
+
+	if req.Vessel != nil {
+		vessel := *req.Vessel
+		if vessel.Engines == nil {
+			vessel.Engines = []vesselEngineSetting{}
+		}
+		normalized.Vessel = &vessel
 	}
 
 	normalized.Units = strings.ToLower(strings.TrimSpace(req.Units))

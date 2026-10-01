@@ -22,7 +22,7 @@ pick these from Settings.
 6. With a profile picked, an **Apply gauge zones** button appears. Use it to
    set that engine's gauge tile up from the profile, the same step you would
    otherwise reach from the dashboard, with the engine already filled in.
-7. Choose **Save Vessel Settings**.
+7. Choose **Save** in the bar across the top of the screen.
 
 The frozen-sensor check is ready once at least one engine is ticked. The
 engine-differential check (comparing engines against each other) needs at
@@ -43,7 +43,13 @@ least two.
 5. Leave **Warn override** and **High override** blank to use the profile's
    own thresholds, multiplied out by your cell count. Fill either in only if
    your bank needs a different number than the profile gives.
-6. Choose **Save Vessel Settings**.
+6. Choose **Save** in the bar across the top of the screen.
+
+Engines and the house bank save together with the rest of Settings. The bar
+appears as soon as you change anything, **Discard** puts it all back, and if
+you try to leave Settings with changes unsaved you are asked first. **Apply
+gauge zones** is not part of that: it adds the gauge tile to your first
+dashboard page straight away, and only needs the linked item and profile.
 
 Each fieldset shows whether its check is ready, or what is still missing,
 so you always know what saving will turn on.
