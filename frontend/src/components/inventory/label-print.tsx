@@ -37,7 +37,7 @@ function LabelSheet({ labels, sheet }: { labels: LabelSpec[]; sheet: boolean }) 
   return (
     <div
       data-testid="label-sheet"
-      className={sheet ? 'label-sheet grid grid-cols-3 gap-0' : 'label-single mx-auto w-64'}
+      className={sheet ? 'label-sheet' : 'label-single mx-auto w-64'}
     >
       {labels.map((spec) => <Label key={spec.key} spec={spec} />)}
     </div>

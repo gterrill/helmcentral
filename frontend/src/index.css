@@ -536,7 +536,13 @@
   display: none;
 }
 
+/* Inline cells rather than a grid: a line of inline boxes is never split
+   across a page, whereas Safari ignores break-inside inside a grid and would
+   cut a row of QR codes in half at the page break. */
 .label-sheet .label-cell {
+  display: inline-flex;
+  width: 33.333%;
+  vertical-align: top;
   border: 1px dashed currentColor;
   break-inside: avoid;
 }
