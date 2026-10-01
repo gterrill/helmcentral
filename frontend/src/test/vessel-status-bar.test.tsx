@@ -86,4 +86,51 @@ describe('VesselStatusBar', () => {
     button.click()
     expect(onLogout).toHaveBeenCalledTimes(1)
   })
+  // ── the Day / Night / Auto button ────────────────────────────────────────
+
+  function renderBar(props: React.ComponentProps<typeof VesselStatusBar>) {
+    mockSignalkConnected.mockReturnValue(true)
+    mockTelemetryStatus.mockReturnValue('connected')
+    return render(<VesselStatusBar {...props} />)
+  }
+
+  it('labels Day and Night as before and names the next mode in the cycle', () => {
+    const { unmount } = renderBar({ isDark: false, themeMode: 'day' })
+    expect(screen.getByRole('button', { name: 'Switch to night mode' })).toHaveTextContent('Day')
+    unmount()
+
+    renderBar({ isDark: true, themeMode: 'night' })
+    expect(screen.getByRole('button', { name: 'Switch to auto mode' })).toHaveTextContent('Night')
+  })
+
+  it('without a themeMode keeps the two-state behaviour', () => {
+    renderBar({ isDark: true })
+    expect(screen.getByRole('button', { name: 'Switch to auto mode' })).toHaveTextContent('Night')
+  })
+
+  it('shows Auto with the theme in effect and when it ends', () => {
+    renderBar({ isDark: true, themeMode: 'auto', autoUntil: '6:12 AM' })
+    const button = screen.getByRole('button', { name: 'Auto (night until 6:12 AM). Switch to day mode' })
+    expect(button).toHaveTextContent('Auto')
+    expect(button).toHaveAttribute('title', 'Auto (night until 6:12 AM). Switch to day mode')
+  })
+
+  it('says day by day in Auto', () => {
+    renderBar({ isDark: false, themeMode: 'auto', autoUntil: '5:48 PM' })
+    expect(screen.getByRole('button', { name: 'Auto (day until 5:48 PM). Switch to day mode' })).toBeInTheDocument()
+  })
+
+  it('says plainly that Auto cannot decide when sunrise and sunset are missing', () => {
+    renderBar({ isDark: true, themeMode: 'auto', autoUntil: null })
+    const button = screen.getByRole('button', { name: /sunrise and sunset are not available/i })
+    expect(button).toHaveAttribute('title', expect.stringMatching(/cannot decide/i))
+    expect(button).toHaveTextContent('Auto')
+  })
+
+  it('calls onToggleDarkMode on click', () => {
+    const onToggle = vi.fn()
+    renderBar({ themeMode: 'day', onToggleDarkMode: onToggle })
+    screen.getByRole('button', { name: 'Switch to night mode' }).click()
+    expect(onToggle).toHaveBeenCalledTimes(1)
+  })
 })

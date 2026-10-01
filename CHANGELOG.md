@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- The header's Day and Night button now has a third setting, **Auto**. Press
+  the button to step Day, Night, Auto. Auto shows the night theme from sunset to
+  sunrise and the day theme otherwise, using the same sunrise and sunset as the
+  Clock tile, and changes over by itself while the page is open. If the
+  forecast has no sunrise and sunset, Auto keeps whichever theme is showing and
+  the button's hover text says it cannot decide.
 - Wall displays now check themselves against the screen they run on. Open a
   display's address on its screen once and its page under **Wall displays**
   shows "Measured on this screen", the size that screen's browser really

@@ -60,6 +60,20 @@ If one page wants status lamps beyond the vessel-wide set, add an indicator
 tile to that page directly. It configures the same way and leaves the pinned
 ribbon alone. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md).
 
+## Day, night and auto
+
+The button at the right of the header sets the theme for this browser. Each
+press steps Day, then Night, then Auto. Auto shows the night theme from sunset
+to sunrise and the day theme the rest of the time, using the sunrise and sunset
+on the Clock tile, so a helm display dims itself at dusk without anyone
+touching it. The button reads "Auto" with a sun or moon for the theme showing
+now, and its hover text gives the time the theme ends.
+
+Auto needs a forecast with sunrise and sunset. Without one it keeps the theme
+that was showing and does not guess. The hover text then says sunrise and sunset
+are not available, and Day or Night will hold the theme you want until the
+forecast returns.
+
 ## Arranging it
 
 Toggle layout mode in the header to drag, resize, remove and add tiles, name
