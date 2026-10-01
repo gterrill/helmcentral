@@ -93,6 +93,13 @@ describe('zoomForRangeNm', () => {
     expect(metersPerPixel).toBeCloseTo((5 * 1852 * 2) / 400, 6)
   })
 
+  test('fits the maximum 25 nm range on a short map at high southern latitude without clamping', () => {
+    const zoom = zoomForRangeNm(25, -27, 300)
+    expect(zoom).toBeGreaterThan(POI_MAP_MIN_ZOOM)
+    const metersPerPixel = (78271.51696402048 * Math.cos((27 * Math.PI) / 180)) / 2 ** zoom
+    expect(metersPerPixel * 300).toBeGreaterThanOrEqual(25 * 1852 * 2 - 1)
+  })
+
   test('degenerate inputs fall back to the minimum rather than NaN', () => {
     expect(zoomForRangeNm(0, -25, 400)).toBe(POI_MAP_MIN_ZOOM)
     expect(zoomForRangeNm(5, -25, 0)).toBe(POI_MAP_MIN_ZOOM)

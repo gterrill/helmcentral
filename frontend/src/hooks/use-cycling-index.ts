@@ -31,12 +31,14 @@ export function useCyclingIndex(count: number, intervalSeconds: number, resetKey
   }
 
   useEffect(() => {
+    // resetKey is a dependency only to restart the interval on a reset, so the
+    // first item after it gets a full interval rather than the old remainder.
     if (count <= 1) return
     const timer = window.setInterval(() => {
       setIndex((i) => (i + 1) % count)
     }, intervalSeconds * 1000)
     return () => window.clearInterval(timer)
-  }, [count, intervalSeconds])
+  }, [count, intervalSeconds, resetKey])
 
   if (count === 0) return null
   return resetting ? 0 : index % count

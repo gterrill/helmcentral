@@ -678,23 +678,51 @@ describe('PoiMapTile', () => {
       expect(easeToMock.mock.calls[0][0]).toMatchObject({ pitch: 0 })
     })
 
-    it('levels the overview on the next fix when the highlight clears while a place is held', async () => {
+    it('flies back to the boat-centred overview, level, when the highlight clears while a place is held', async () => {
       usePoiMock.mockReturnValue(poiResult({ features }))
       const { rerender } = await renderTile()
       vi.useFakeTimers()
 
       moveHighlightToB(rerender)
       act(() => { vi.advanceTimersByTime(3000) })
+      expect(flyToMock).toHaveBeenCalledTimes(1)
 
       // A poll comes back empty mid-hold: no highlight, so no pull-out runs.
       usePoiMock.mockReturnValue(poiResult({ features: [] }))
       useCyclingIndexMock.mockReturnValue(null)
       act(() => { rerender(tile()) })
-      act(() => { vi.advanceTimersByTime(2100) })
-      act(() => { rerender(tile({ latitude: -20.272, longitude: 148.942 })) })
 
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+      const back = flyToMock.mock.calls[1][0] as { center: [number, number]; pitch: number }
+      expect(back.center).toEqual([vessel.lon, vessel.lat])
+      expect(back.pitch).toBe(0)
+
+      // Following resumes once that flight has ended.
+      act(() => { vi.advanceTimersByTime(placeTourTimings(10).pullOutMs + 2100) })
+      act(() => { rerender(tile({ latitude: -20.272, longitude: 148.942 })) })
       expect(easeToMock).toHaveBeenCalled()
       for (const [view] of easeToMock.mock.calls) expect(view).toMatchObject({ pitch: 0 })
+    })
+
+    it('releases the hold after a pull-out even if the highlighted place stops being the last mid-flight', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile()
+      vi.useFakeTimers()
+      const t = placeTourTimings(10)
+
+      moveHighlightToB(rerender)
+      act(() => { vi.advanceTimersByTime(t.pullOutStartMs + 100) })
+      expect(flyToMock).toHaveBeenCalledTimes(2)
+
+      // A place ranked after B appears mid pull-out: B is no longer last,
+      // but the highlight (B) is unchanged.
+      const c = feature({ id: 'c', name: 'C', lat: -20.25, lon: 148.98 })
+      usePoiMock.mockReturnValue(poiResult({ features: [...features, c] }))
+      act(() => { rerender(tile()) })
+
+      act(() => { vi.advanceTimersByTime(t.pullOutMs + 2100) })
+      act(() => { rerender(tile({ latitude: -20.272, longitude: 148.942 })) })
+      expect(easeToMock).toHaveBeenCalledTimes(1)
     })
 
     it('does not fly in for the highlight already showing at mount', async () => {
@@ -916,6 +944,10 @@ describe('PoiMapTile', () => {
       usePoiMock.mockReturnValue(poiResult({ features: [] }))
       useCyclingIndexMock.mockReturnValue(null)
       act(() => { rerender(tile()) })
+      // Clearing flies back to the level overview, then following resumes.
+      expect(flyToMock).toHaveBeenCalledTimes(3)
+      expect(fly(2)).toMatchObject({ pitch: 0 })
+      act(() => { vi.advanceTimersByTime(10000) })
       act(() => { rerender(tile({ latitude: -20.272, longitude: 148.942 })) })
       expect(easeToMock).toHaveBeenCalledTimes(1)
       expect(easeToMock.mock.calls[0][0]).toMatchObject({ pitch: 0 })

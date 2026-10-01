@@ -384,8 +384,8 @@ export default function PoiMapTileImpl({
   // the follow effect is deliberately not released by this effect's cleanup,
   // since the next place continues the tour; only the pull-out, a cleared
   // highlight or an unmount ends it. Reduced motion jumps and never tilts.
-  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout })
-  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout }
+  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId })
+  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId }
   const previousHighlightRef = useRef(expandedPoiId)
   // True while the camera is left tilted by a dive or hop, so a path that
   // skips the pull-out can still level it.
@@ -398,7 +398,24 @@ export default function PoiMapTileImpl({
     const previous = previousHighlightRef.current
     previousHighlightRef.current = expandedPoiId
     if (expandedPoiId === null) {
+      // The highlight cleared mid-tour (the list emptied): the follow effect
+      // already bailed while held, so fly back to the boat-centred overview
+      // and level, rather than leaving the camera on a place no longer listed.
+      const wasHolding = holdingPlaceRef.current
       holdingPlaceRef.current = false
+      const { cameraTarget: overview, gnssCriticalAlert: gnss } = latestRef.current
+      const map = mapRef.current
+      if (!map || !(wasHolding || tiltedRef.current)) return
+      tiltedRef.current = false
+      if (gnss || !overview) {
+        map.jumpTo({ pitch: 0 })
+        return
+      }
+      lastEaseAtRef.current = Date.now()
+      travelTo(
+        map, prefersReducedMotion(), overview.center, overview.zoom, 0,
+        placeTourTimings(latestRef.current.summaryCycleSeconds).pullOutMs,
+      )
       return
     }
     if (expandedPoiId === previous) return
@@ -446,7 +463,9 @@ export default function PoiMapTileImpl({
     const map = mapRef.current
     if (!map) return
     const timings = placeTourTimings(latestRef.current.summaryCycleSeconds)
+    let pulledOut = false
     const pullOutTimer = setTimeout(() => {
+      pulledOut = true
       const latest = latestRef.current
       if (latest.gnssCriticalAlert || !latest.cameraTarget) {
         holdingPlaceRef.current = false
@@ -460,13 +479,19 @@ export default function PoiMapTileImpl({
       tiltedRef.current = false
       travelTo(map, prefersReducedMotion(), latest.cameraTarget.center, latest.cameraTarget.zoom, 0, timings.pullOutMs)
     }, fresh ? timings.pullOutStartMs : timings.holdMs)
+    const heldId = expandedPoiId
     const releaseTimer = setTimeout(() => {
+      // A highlight that moved on has its own flight and its own hold.
+      if (latestRef.current.expandedPoiId !== heldId) return
       holdingPlaceRef.current = false
       lastEaseAtRef.current = Date.now()
     }, (fresh ? timings.pullOutStartMs : timings.holdMs) + timings.pullOutMs)
     return () => {
       clearTimeout(pullOutTimer)
-      clearTimeout(releaseTimer)
+      // Once the pull-out has started the hold must still end with it, even if
+      // the list changed shape (the place stopped being last) mid-flight;
+      // otherwise the follow effect would stay off with nothing to release it.
+      if (!pulledOut) clearTimeout(releaseTimer)
     }
   }, [expandedPoiId, isLastPlace])
 
