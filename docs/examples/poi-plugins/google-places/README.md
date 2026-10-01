@@ -40,13 +40,19 @@ One `POST https://places.googleapis.com/v1/places:searchNearby` per
 position/radius (clamped to Places' documented 50km circle limit) and
 `includedTypes` set to the union of Google types for the requested
 categories. The FieldMask header is fixed to
-`places.id,places.displayName,places.location,places.types,places.editorialSummary,places.googleMapsUri` -
+`places.id,places.displayName,places.location,places.types,places.editorialSummary,places.generativeSummary,places.reviewSummary,places.googleMapsUri` -
 deliberately no photo fields, since Google's photo URLs embed the API key in
 a URL the browser would fetch directly, which this plugin's "no photo URLs"
 contract rules out.
 
-`detail` comes from `editorialSummary.text` (empty when Google has none for a
-place - most places don't) and `source_url` from `googleMapsUri`.
+`detail` comes from `editorialSummary.text`, which most places don't have.
+When it is missing the plugin falls back to Google's AI-written
+`generativeSummary.overview.text`, then to `reviewSummary.text.text`, and is
+empty if none of the three exist. Google's terms require an AI summary to be
+shown with its disclosure, so for those two sources the `disclosureText.text`
+Google sends leads the text, for example
+`Summarized with Gemini: Text.`, so a client that clamps long text never
+cuts it off; if Google sends no disclosure, nothing is added. `source_url` comes from `googleMapsUri`.
 
 Google's Nearby Search caps results at `maxResultCount` (at most 20) with no
 "there were more" signal, the same shape problem `osm-overpass`'s per-category

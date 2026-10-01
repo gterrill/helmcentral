@@ -124,7 +124,7 @@ func fetchPOI() int32 {
 	req := pdk.NewHTTPRequest(pdk.MethodPost, searchNearbyURL)
 	req.SetHeader("Content-Type", "application/json")
 	req.SetHeader("X-Goog-Api-Key", apiKey)
-	req.SetHeader("X-Goog-FieldMask", "places.id,places.displayName,places.location,places.types,places.editorialSummary,places.googleMapsUri")
+	req.SetHeader("X-Goog-FieldMask", googleFieldMask)
 	req.SetBody(body)
 	resp := req.Send()
 

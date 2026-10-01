@@ -88,6 +88,11 @@ database, at the cost of narrower category coverage: only `marina`,
 the [developer documentation](../developers/plugins.md) for the exact type
 mapping and the cost/billing implications of switching to it.
 
+The description shown when you highlight a place is Google's own write-up
+where it has one. Many places have none, so Google's AI-written overview or
+summary of its reviews is used instead, and is marked as summarized by
+Google.
+
 ## Why a fixed category list
 
 Every provider answers the same eleven categories, translated into whatever

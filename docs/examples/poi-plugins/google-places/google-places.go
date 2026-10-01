@@ -12,6 +12,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 const searchNearbyURL = "https://places.googleapis.com/v1/places:searchNearby"
@@ -172,13 +173,17 @@ func buildSearchNearbyRequestBody(lat, lon float64, radiusM int, includedTypes [
 	return json.Marshal(req)
 }
 
-// googlePlace mirrors the subset of the Places API (New) Place resource
-// named by this plugin's FieldMask
-// (places.id,places.displayName,places.location,places.types,
-// places.editorialSummary,places.googleMapsUri) - see main.go. No photo
-// fields are requested at all: Google's photo URLs embed the API key in a
+// googleFieldMask is the X-Goog-FieldMask sent with every searchNearby call.
+// No photo fields are requested at all: Google's photo URLs embed the API key in a
 // URL the browser would fetch directly, which this plugin's contract
 // (no photo URLs) rules out.
+const googleFieldMask = "places.id,places.displayName,places.location,places.types," +
+	"places.editorialSummary,places.generativeSummary,places.reviewSummary,places.googleMapsUri"
+
+// googlePlace mirrors the subset of the Places API (New) Place resource
+// named by googleFieldMask. detail text comes from editorialSummary first,
+// then Google's AI-written generativeSummary overview, then its
+// reviewSummary; see placeDetail.
 type googlePlace struct {
 	ID          string `json:"id"`
 	DisplayName struct {
@@ -192,7 +197,50 @@ type googlePlace struct {
 	EditorialSummary struct {
 		Text string `json:"text"`
 	} `json:"editorialSummary"`
+	GenerativeSummary struct {
+		Overview struct {
+			Text string `json:"text"`
+		} `json:"overview"`
+		DisclosureText struct {
+			Text string `json:"text"`
+		} `json:"disclosureText"`
+	} `json:"generativeSummary"`
+	ReviewSummary struct {
+		Text struct {
+			Text string `json:"text"`
+		} `json:"text"`
+		DisclosureText struct {
+			Text string `json:"text"`
+		} `json:"disclosureText"`
+	} `json:"reviewSummary"`
 	GoogleMapsURI string `json:"googleMapsUri"`
+}
+
+// placeDetail picks the description text for a place: the editorial summary,
+// else the generative overview, else the review summary, else "". Google's
+// terms require an AI summary's disclosure to be shown with it, so the
+// disclosure is appended exactly as Google gave it; if Google sent none,
+// nothing is added.
+func placeDetail(p googlePlace) string {
+	if t := strings.TrimSpace(p.EditorialSummary.Text); t != "" {
+		return t
+	}
+	if t := strings.TrimSpace(p.GenerativeSummary.Overview.Text); t != "" {
+		return withDisclosure(t, p.GenerativeSummary.DisclosureText.Text)
+	}
+	if t := strings.TrimSpace(p.ReviewSummary.Text.Text); t != "" {
+		return withDisclosure(t, p.ReviewSummary.DisclosureText.Text)
+	}
+	return ""
+}
+
+// The disclosure leads rather than trails: the Nearby tile clamps detail to
+// three lines, and a trailing disclosure is the part that gets cut.
+func withDisclosure(text, disclosure string) string {
+	if d := strings.TrimSpace(disclosure); d != "" {
+		return d + ": " + text
+	}
+	return text
 }
 
 type searchNearbyResponse struct {
@@ -221,7 +269,7 @@ func parseSearchNearbyResponse(body []byte, categories []string) ([]poiFeatureOu
 			Name:      p.DisplayName.Text,
 			Lat:       p.Location.Latitude,
 			Lon:       p.Location.Longitude,
-			Detail:    p.EditorialSummary.Text,
+			Detail:    placeDetail(p),
 			SourceURL: p.GoogleMapsURI,
 		})
 	}
