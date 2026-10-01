@@ -191,6 +191,14 @@ function getSnapshot(): VesselIdentitySnapshot {
   return snapshot
 }
 
+/**
+ * Just the vessel's IANA zone. Unlike useVesselIdentity this does not
+ * re-render every second, so App can read it without ticking with the clock.
+ */
+export function useVesselTimeZone(): string | undefined {
+  return useSyncExternalStore(subscribeStore, () => snapshot.timeZone)
+}
+
 export function useVesselIdentity() {
   const state = useSyncExternalStore(subscribeStore, getSnapshot)
   const { boatModel } = useAppConfig()

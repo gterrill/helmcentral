@@ -6,6 +6,11 @@ import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 
 interface VesselStatusBarProps {
   isDark?: boolean
+  /** Which button state to show. Absent means plain Day or Night from isDark. */
+  themeMode?: 'day' | 'night' | 'auto'
+  /** In auto mode, when the theme in effect ends ("6:12 AM"); null when sunrise and sunset are unavailable. */
+  autoUntil?: string | null
+  /** Steps Day, Night, Auto, Day. */
   onToggleDarkMode?: () => void
   /**
    * The SignalK username of the current session, or null under mode:none
@@ -17,7 +22,7 @@ interface VesselStatusBarProps {
   onLogout?: () => void
 }
 
-export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = null, onLogout }: VesselStatusBarProps) {
+export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, onToggleDarkMode, username = null, onLogout }: VesselStatusBarProps) {
   const { currentDate, clock, signalkConnected } = useVesselIdentity()
   const telemetryStatus = useTelemetryStatus()
   const [hh = '--', mm = '--', ss = '--'] = clock.timePart.split(':')
@@ -33,6 +38,14 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = n
   const reconnecting = !noSignal && telemetryStatus === 'reconnecting'
   const label = noSignal ? 'No Signal' : reconnecting ? 'Reconnecting' : 'Live'
 
+  const mode = themeMode ?? (isDark ? 'night' : 'day')
+  const themeLabel = mode === 'auto' ? 'Auto' : mode === 'night' ? 'Night' : 'Day'
+  const themeButtonLabel = mode === 'auto'
+    ? autoUntil === null
+      ? 'Auto is on but sunrise and sunset are not available, so it cannot decide between day and night. Switch to day mode'
+      : `Auto (${isDark ? 'night' : 'day'} until ${autoUntil}). Switch to day mode`
+    : mode === 'night' ? 'Switch to auto mode' : 'Switch to night mode'
+
   return (
     <div className="flex shrink-0 items-center gap-1">
       <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-xs ${noSignal ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : reconnecting ? 'border-amber-300/60 bg-amber-50/60 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
@@ -42,10 +55,11 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = n
       <button
         onClick={onToggleDarkMode}
         className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-xs"
-        aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
+        aria-label={themeButtonLabel}
+        title={themeButtonLabel}
       >
         {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-        <span className="hidden sm:inline">{isDark ? 'Night' : 'Day'}</span>
+        <span className="hidden sm:inline">{themeLabel}</span>
       </button>
       {onLogout && (
         <button

@@ -21,6 +21,7 @@ vi.mock('@/hooks/use-vessel-identity', () => ({
     clock: { timePart: '09:41:07', meridiem: 'AM' },
     signalkConnected: true,
   }),
+  useVesselTimeZone: () => undefined,
 }))
 
 const pages = [

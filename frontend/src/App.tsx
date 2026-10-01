@@ -143,6 +143,7 @@ import { useAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
+import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
 import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { useMateVoice } from '@/hooks/use-mate-voice'
@@ -520,7 +521,27 @@ export function App() {
   // has it in scope. isDisplay depends only on activePanel, which is already
   // set by this point, so nothing about moving it changes what it means.
   const isDisplay = activePanel === 'display'
-  const [storedIsDarkTheme, toggleDarkMode] = useDarkMode()
+  // The forecast hook is called here, ahead of the theme, because Auto mode
+  // reads the same sunrise and sunset the Clock tile shows.
+  const {
+    forecast,
+    hourlyToday: forecastHourlyToday,
+    nextHour: forecastNextHour,
+    summary: forecastSummary,
+    loading: forecastLoading,
+    error: forecastError,
+    provider: forecastProvider,
+    isCached: forecastIsCached,
+    updatedAt: forecastUpdatedAt,
+    ttlSeconds: forecastTtlSeconds,
+    refetch: refetchForecast,
+  } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const vesselTimeZone = useVesselTimeZone()
+  const [storedIsDarkTheme, toggleDarkMode, themeState] = useDarkMode({
+    sunriseTime: forecast[0]?.sunriseTime ?? null,
+    sunsetTime: forecast[0]?.sunsetTime ?? null,
+    timeZone: vesselTimeZone,
+  })
   // The wall display always renders dark (operator decision, ADR 0089
   // phase 2, carried into ADR 0110), regardless of what this browser has
   // stored — a fresh profile otherwise defaults to light, which is how a
@@ -1528,19 +1549,6 @@ export function App() {
   const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const { activeWarning: activeForecastWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
-  const {
-    forecast,
-    hourlyToday: forecastHourlyToday,
-    nextHour: forecastNextHour,
-    summary: forecastSummary,
-    loading: forecastLoading,
-    error: forecastError,
-    provider: forecastProvider,
-    isCached: forecastIsCached,
-    updatedAt: forecastUpdatedAt,
-    ttlSeconds: forecastTtlSeconds,
-    refetch: refetchForecast,
-  } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
   const {
     days: waveForecastDays,
     seaTemperatureF: waveSeaTemperatureF,
@@ -3618,6 +3626,8 @@ export function App() {
             )}
             <VesselStatusBar
               isDark={isDarkTheme}
+              themeMode={themeState?.mode}
+              autoUntil={themeState?.autoUntil}
               onToggleDarkMode={toggleDarkMode}
               username={auth.mode === 'signalk' ? auth.user?.username ?? null : null}
               onLogout={auth.mode === 'signalk' ? () => { void auth.logout() } : undefined}
