@@ -53,6 +53,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   such as asking about conditions after moving anchorage, it says whether the
   window has opened, closed or shifted, and tells you when an earlier call no
   longer holds.
+- **Settings → Mate**: Choose a model takes a model ID typed in directly, for
+  OpenRouter models the catalog doesn't list, such as routers.
+- **Settings → Mate**: a new Document indexing section lets you choose the
+  model that reads and labels your documents and photos.
 
 ### Breaking
 
@@ -193,6 +197,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   you pan. The two
   radius shortcuts ("Rode + LOA", "Planner swing") are gone; use the − / +
   control, or the rode planner's own "Apply as alarm radius" button.
+- **Settings → Mate**: with OpenRouter Auto on, allowed and excluded models
+  show as chips you can remove one at a time, and the Clear buttons are gone.
+  The cost tier is now "Cost cap", sits below them, and reads "No cost cap"
+  when unset. Add models from **Manage…**.
 
 ### Fixed
 
