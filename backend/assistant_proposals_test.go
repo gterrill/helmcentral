@@ -412,6 +412,22 @@ func TestApplyAssistantProposalHandler_StaleIs409WithTheReason(t *testing.T) {
 	}
 }
 
+func TestApplyAssistantProposalHandler_ConflictNamesTheProposalStatus(t *testing.T) {
+	env := newProposalEnv(t)
+	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Dismissed one","interval_months":12}]}`)
+	if _, err := env.asst.DismissProposal(p.ID); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply?today=2026-09-30", "", p.ID)
+	_ = applyAssistantProposalHandler(c)
+	var resp map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if rec.Code != http.StatusConflict || resp["proposal_status"] != assistantProposalDismissed {
+		t.Fatalf("expected 409 naming the dismissed status, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetAssistantConversationHandler_ReturnsEachMessagesProposalsWithTheirCurrentStatus(t *testing.T) {
 	env := newProposalEnv(t)
 	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)

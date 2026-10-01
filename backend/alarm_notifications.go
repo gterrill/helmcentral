@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -330,11 +331,21 @@ func notificationStatus(value map[string]any, prefix []string) (alarmStatus, boo
 	}, true
 }
 
+// loggedBadAckedAt remembers, per notification path, the unreadable
+// acknowledgedAt value already reported, so each is logged once.
+var loggedBadAckedAt sync.Map
+
+func resetAckedAtLogged() {
+	loggedBadAckedAt.Range(func(k, _ any) bool { loggedBadAckedAt.Delete(k); return true })
+}
+
 // notificationAcknowledgedAt reads status.acknowledgedAt, which SignalK 2.31
 // and later stamps when an alarm is acknowledged, from any client, and removes
 // when the alarm clears or worsens. Older servers omit it, leaving the time
 // zero. A stamp that does not parse is logged and left zero rather than
-// replaced with a guess.
+// replaced with a guess. The notification is evaluated several times a second,
+// so the log line is written once per path and unreadable value, not on every
+// evaluation.
 func notificationAcknowledgedAt(value map[string]any, path string) time.Time {
 	status, ok := value["status"].(map[string]any)
 	if !ok {
@@ -347,7 +358,13 @@ func notificationAcknowledgedAt(value map[string]any, path string) time.Time {
 	text, _ := raw.(string)
 	at, err := time.Parse(time.RFC3339Nano, text)
 	if err != nil {
-		log.Printf("alarm notifications: %s has an unreadable status.acknowledgedAt %v", path, raw)
+		// Compare the printed form: raw may be a JSON object or array, which
+		// are not comparable as interface values.
+		shown := fmt.Sprintf("%v", raw)
+		if last, seen := loggedBadAckedAt.Load(path); !seen || last != shown {
+			loggedBadAckedAt.Store(path, shown)
+			log.Printf("alarm notifications: %s has an unreadable status.acknowledgedAt %v", path, raw)
+		}
 		return time.Time{}
 	}
 	return at.UTC()

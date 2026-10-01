@@ -46,10 +46,15 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         onChange(updated)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        // A 409 from Apply means the server has stored the proposal as stale
-        // with this reason; the thread holds that too, so a reload agrees.
+        // A 409 from Apply names the stored status it refused for. Stale
+        // carries its reason; a dismissed proposal (dismissed in another tab)
+        // shows as dismissed. The thread holds the same, so a reload agrees.
         if (kind === 'apply' && err instanceof ProposalActionError && err.status === 409) {
-          onChange({ ...proposal, status: 'stale', staleReason: message })
+          if (err.proposalStatus === 'dismissed') {
+            onChange({ ...proposal, status: 'dismissed' })
+          } else {
+            onChange({ ...proposal, status: 'stale', staleReason: message })
+          }
         } else {
           setError(message)
         }

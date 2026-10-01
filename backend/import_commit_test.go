@@ -794,3 +794,50 @@ func TestImportDefaults_UnreadableParticularsAreSkippedAndCannotBeApplied(t *tes
 		t.Fatalf("applying an unreadable year must be a validation error, got %v", err)
 	}
 }
+
+// A log entry's hours in the export are what the meter showed. Every other
+// log write stores true hours, so an item with a recorded meter reset gets the
+// offset applied here too.
+func TestImportCommit_LogEntryHoursAreConvertedToTrueHours(t *testing.T) {
+	store := withTestDocumentStore(t)
+	first := readyToCommit(t, store, stageFixtureRun(t, store))
+	if _, err := commitImportRun(first.ID); err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+	key := tztKey(t, first.Staged)
+	var equipmentID string
+	if err := store.db.QueryRow(`SELECT target_id FROM import_records WHERE external_key = ? AND target_kind = 'equipment'`, key).Scan(&equipmentID); err != nil {
+		t.Fatalf("recorded id: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO hour_meter_resets (id, equipment_id, old_reading, new_reading, changed_at, created_at) VALUES ('h1', ?, 1000, 0, '2026-01-01', 1)`, equipmentID); err != nil {
+		t.Fatalf("seed reset: %v", err)
+	}
+
+	hours := 50.0
+	second := stageChangedRun(t, store, func(st *stagedImport) {
+		st.LogEntries = append(st.LogEntries, stagedLogEntry{Key: "log-new-1", Date: "2026-05-01", Title: "Changed oil", EquipmentKey: key, Hours: &hours})
+	})
+	if _, err := commitImportRun(second.ID); err != nil {
+		t.Fatalf("second commit: %v", err)
+	}
+	var got float64
+	if err := store.db.QueryRow(`SELECT hours FROM maintenance_log_entries WHERE description LIKE 'Changed oil%'`).Scan(&got); err != nil {
+		t.Fatalf("read log entry: %v", err)
+	}
+	if got != 1050 {
+		t.Fatalf("hours = %v, want 1050 (gauge 50 plus the reset offset)", got)
+	}
+}
+
+func TestParticularUnreadable_YearOutsideTheVesselRangeIsRefused(t *testing.T) {
+	for _, v := range []string{"0", "85", "1799", "2201"} {
+		if particularUnreadable(stagedParticular{Field: "year", Value: v}) == "" {
+			t.Errorf("year %q is outside what the vessel record accepts but was called readable", v)
+		}
+	}
+	for _, v := range []string{"1800", "1998", "2200"} {
+		if got := particularUnreadable(stagedParticular{Field: "year", Value: v}); got != "" {
+			t.Errorf("year %q should be readable, got %q", v, got)
+		}
+	}
+}

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -838,5 +842,42 @@ func TestSignalKNotificationsNeverExcludesANotificationWithoutASentence(t *testi
 	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
 	if len(statuses) != 1 {
 		t.Fatalf("a notification with no sentence must never be excluded for age, got %d: %+v", len(statuses), statuses)
+	}
+}
+
+func TestNotificationAcknowledgedAtLogsAMalformedStampOncePerValue(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	resetAckedAtLogged()
+
+	value := map[string]any{"status": map[string]any{"acknowledgedAt": "yesterday"}}
+	for i := 0; i < 5; i++ {
+		notificationAcknowledgedAt(value, "notifications.once")
+	}
+	if n := strings.Count(buf.String(), "notifications.once"); n != 1 {
+		t.Fatalf("logged %d times for one unchanged bad stamp, want 1:\n%s", n, buf.String())
+	}
+	notificationAcknowledgedAt(map[string]any{"status": map[string]any{"acknowledgedAt": "later"}}, "notifications.once")
+	notificationAcknowledgedAt(value, "notifications.other")
+	if n := strings.Count(buf.String(), "notifications."); n != 3 {
+		t.Fatalf("a new value or a new path should log again; got %d lines:\n%s", n, buf.String())
+	}
+}
+
+// A stamp that arrives as a JSON object is not comparable as an interface
+// value; remembering it must not panic the evaluator.
+func TestNotificationAcknowledgedAtLogsAnObjectStampOnceWithoutPanicking(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	resetAckedAtLogged()
+
+	value := map[string]any{"status": map[string]any{"acknowledgedAt": map[string]any{"seconds": 1.0}}}
+	for i := 0; i < 3; i++ {
+		notificationAcknowledgedAt(value, "notifications.object")
+	}
+	if n := strings.Count(buf.String(), "notifications.object"); n != 1 {
+		t.Fatalf("logged %d times for one unchanged object stamp, want 1:\n%s", n, buf.String())
 	}
 }
