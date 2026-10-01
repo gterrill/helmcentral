@@ -3636,24 +3636,21 @@ export function App() {
             browser's own chrome still work too - useFullscreen's
             `fullscreenchange` listener is what notices either one.
 
-            Pinned top-LEFT, not top-right: the live alarm banner below
-            (data-testid="alarm-banner-stack") is a normal-flow element that
-            becomes the top-most thing on screen once the header is gone,
-            and its own View/Acknowledge buttons (alarm-banner.tsx) are
-            always the trailing, right-aligned child of its row - a `fixed`
-            control sharing that corner would sit on top of them and steal
-            the tap. The sidebar (and everything else that might otherwise
-            occupy the left corner) is fully unmounted while full screen, so
-            the left corner is free with no equivalent offset math needed -
-            simpler and more robust than chasing the banner's height, which
-            varies with wrapped text and how many alarms are shown. */}
+            Pinned top-right, where the header's own control was. The live
+            alarm banner below (data-testid="alarm-banner-stack") becomes the
+            top-most thing on screen once the header is gone, and its
+            View/Acknowledge buttons (alarm-banner.tsx) are always the
+            trailing, right-aligned child of its row, so the stack takes
+            pr-12 while full screen to keep them clear of this 40px button.
+            Padding the width rather than offsetting by the banner's height
+            holds however many alarms are shown or how their text wraps. */}
         {isFullscreenDashboard && (
           <Button
             variant="outline"
             size="icon"
             aria-label="Exit full screen"
             title="Exit full screen"
-            className="fixed left-2 top-2 z-60 border-border bg-card/80 text-muted-foreground"
+            className="fixed right-2 top-2 z-60 border-border bg-card/80 text-muted-foreground"
             onClick={() => fullscreen.exit()}
           >
             <Minimize className="h-4 w-4" />
@@ -3709,7 +3706,7 @@ export function App() {
                 sit at z-90, the topmost layer above all of these, because a
                 tooltip can be anchored to a trigger inside any of them and
                 must remain readable. */}
-            <div className="relative z-55" data-testid="alarm-banner-stack">
+            <div className={cn('relative z-55', isFullscreenDashboard && 'pr-12')} data-testid="alarm-banner-stack">
               <AlarmBanner
                 alarms={alarms}
                 onOpen={openAlarmsPanel}

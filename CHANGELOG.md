@@ -30,6 +30,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   "kts". The unit under the wind speed in the middle of the dial is larger.
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
   the Anchor Watch page, so a stray touch on a dashboard tile can't end it.
+- In full screen, the button that leaves full screen is now at the top right,
+  where the full-screen button was. An alarm banner keeps its **View** and
+  **Acknowledge** buttons clear of it.
 
 ## [0.37.0] - 2026-10-01
 
