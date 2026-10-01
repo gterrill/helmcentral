@@ -62,6 +62,7 @@ export interface RegularSettingsDraft {
   authMode: 'none' | 'signalk'
   assistantEnabled: boolean
   assistantModel: string
+  assistantDocumentModel: string
   assistantNotes: string
   assistantAllowedModels: string[]
   assistantExcludedModels: string[]
@@ -107,6 +108,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   mayaraPort: '6502',
   assistantEnabled: false,
   assistantModel: 'anthropic/claude-sonnet-4.5',
+  assistantDocumentModel: '',
   assistantNotes: '',
   assistantAllowedModels: [],
   assistantExcludedModels: [],
@@ -201,6 +203,7 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   // explicitly cleared) must hydrate as blank, not silently fall back to the
   // default model id — same reasoning as mayaraAddress above.
   if (typeof settings.assistant?.model === 'string') draft.assistantModel = settings.assistant.model
+  if (typeof settings.assistant?.document_model === 'string') draft.assistantDocumentModel = settings.assistant.document_model
   if (typeof settings.assistant?.notes === 'string') draft.assistantNotes = settings.assistant.notes
   draft.assistantAllowedModels = normalizeModelPatterns(settings.assistant?.allowed_models)
   draft.assistantExcludedModels = normalizeModelPatterns(settings.assistant?.excluded_models)
@@ -262,6 +265,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.mayaraPort !== b.mayaraPort) return false
   if (a.assistantEnabled !== b.assistantEnabled) return false
   if (a.assistantModel !== b.assistantModel) return false
+  if (a.assistantDocumentModel !== b.assistantDocumentModel) return false
   if (a.assistantNotes !== b.assistantNotes) return false
   if (a.assistantCostTier !== b.assistantCostTier) return false
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
@@ -349,6 +353,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     assistant: {
       enabled: draft.assistantEnabled,
       model: draft.assistantModel.trim(),
+      document_model: draft.assistantDocumentModel.trim(),
       notes: draft.assistantNotes,
       allowed_models: normalizeModelPatterns(draft.assistantAllowedModels),
       excluded_models: normalizeModelPatterns(draft.assistantExcludedModels),

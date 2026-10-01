@@ -63,6 +63,7 @@ export type SettingsPayload = {
   assistant?: {
     enabled?: boolean
     model?: string
+    document_model?: string
     notes?: string
     allowed_models?: string[]
     excluded_models?: string[]

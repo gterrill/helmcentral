@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AssistantSection } from '@/components/settings/sections/assistant-section'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import {
@@ -34,6 +34,13 @@ function renderSection(overrides: Partial<RegularSettingsDraft> = {}) {
 
   render(<Harness />)
   return { latestDraft: () => draftStates[draftStates.length - 1] }
+}
+
+async function chooseNewModel() {
+  const option = await screen.findByRole('option', { name: 'Choose a new model...' })
+  fireEvent.pointerDown(option)
+  fireEvent.pointerUp(option)
+  fireEvent.click(option)
 }
 
 describe('AssistantSection', () => {
@@ -81,8 +88,8 @@ describe('AssistantSection', () => {
     renderSection({ assistantModel: 'openrouter/auto' })
 
     expect(screen.getByLabelText('Mate Auto cost tier')).toBeInTheDocument()
-    expect(screen.getByLabelText('Mate allowed models')).toHaveAttribute('readonly')
-    expect(screen.getByLabelText('Mate excluded models')).toHaveAttribute('readonly')
+    expect(screen.getByLabelText('Mate allowed models')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mate excluded models')).toBeInTheDocument()
 
     vi.unstubAllGlobals()
   })
@@ -165,19 +172,125 @@ describe('AssistantSection', () => {
     vi.unstubAllGlobals()
   })
 
-  it('clears allowed and excluded model lists with clear buttons', () => {
+  it('shows allowed and excluded lists without clear buttons, then the cost tier', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
-    const { latestDraft } = renderSection({
+    renderSection({
       assistantModel: 'openrouter/auto',
       assistantAllowedModels: ['anthropic/*'],
       assistantExcludedModels: ['openai/gpt-4o-mini'],
     })
 
-    fireEvent.click(screen.getByLabelText('Clear allowed models'))
-    expect(latestDraft().assistantAllowedModels).toEqual([])
+    expect(screen.queryByLabelText('Clear allowed models')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Clear excluded models')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Managed from the model catalog/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByLabelText('Clear excluded models'))
+    const excluded = screen.getByLabelText('Mate excluded models')
+    const costTier = screen.getByLabelText('Mate Auto cost tier')
+    expect(excluded.compareDocumentPosition(costTier) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(costTier).toHaveTextContent('No cost cap')
+    expect(screen.getByText('Cost cap')).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('renders allowed and excluded models as chips with short names and removes the right one', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
+    const { latestDraft } = renderSection({
+      assistantModel: 'openrouter/auto',
+      assistantAllowedModels: ['anthropic/claude-sonnet-4.5', 'openai/gpt-5'],
+      assistantExcludedModels: ['openai/gpt-4o-mini'],
+    })
+
+    const allowed = screen.getByLabelText('Mate allowed models')
+    expect(within(allowed).getByText('claude-sonnet-4.5')).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5')
+    expect(within(allowed).getByText('gpt-5')).toBeInTheDocument()
+    const excluded = screen.getByLabelText('Mate excluded models')
+    expect(within(excluded).getByText('gpt-4o-mini')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Remove anthropic/claude-sonnet-4.5 from allowed models'))
+    expect(latestDraft().assistantAllowedModels).toEqual(['openai/gpt-5'])
+    expect(latestDraft().assistantExcludedModels).toEqual(['openai/gpt-4o-mini'])
+
+    fireEvent.click(screen.getByLabelText('Remove openai/gpt-4o-mini from excluded models'))
     expect(latestDraft().assistantExcludedModels).toEqual([])
+    expect(latestDraft().assistantAllowedModels).toEqual(['openai/gpt-5'])
+
+    vi.unstubAllGlobals()
+  })
+
+  it('shows empty-state copy when no models are allowed or excluded', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
+    renderSection({ assistantModel: 'openrouter/auto' })
+
+    expect(within(screen.getByLabelText('Mate allowed models')).getByText('Any tool-capable model')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Mate excluded models')).getByText('None')).toBeInTheDocument()
+    expect(screen.getByLabelText('Manage Auto model filters')).toHaveTextContent('Manage')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('capitalises the selected cost cap label', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
+    renderSection({
+      assistantModel: 'openrouter/auto',
+      assistantCostTier: 'xhigh' as RegularSettingsDraft['assistantCostTier'],
+    })
+
+    expect(screen.getByLabelText('Mate Auto cost tier')).toHaveTextContent('XHigh')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('accepts a typed model id in the Choose a model dialog and shows it in the model select', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    const { latestDraft } = renderSection({ assistantModel: 'anthropic/claude-sonnet-4.5' })
+
+    fireEvent.click(screen.getByLabelText('Mate model'))
+    await chooseNewModel()
+    await screen.findByText('Choose a model')
+
+    expect(screen.getByLabelText('Model ID')).toHaveAttribute('id', 'assistant-custom-model-id')
+    expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: ' typesafe/jev-router ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }))
+
+    expect(latestDraft().assistantModel).toBe('typesafe/jev-router')
+    await waitFor(() => expect(screen.queryByText('Choose a model')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Mate model')).toHaveTextContent('typesafe/jev-router')
+
+    fireEvent.click(screen.getByLabelText('Mate model'))
+    expect(await screen.findByRole('option', { name: 'typesafe/jev-router' })).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('rejects an invalid typed model id and leaves the draft alone', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    const { latestDraft } = renderSection({ assistantModel: 'anthropic/claude-sonnet-4.5' })
+
+    fireEvent.click(screen.getByLabelText('Mate model'))
+    await chooseNewModel()
+    await screen.findByText('Choose a model')
+
+    fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'not a model' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }))
+
+    expect(screen.getByText('Enter an OpenRouter model ID like provider/model.')).toBeInTheDocument()
+    expect(latestDraft().assistantModel).toBe('anthropic/claude-sonnet-4.5')
+    expect(screen.getByText('Choose a model')).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('does not offer the typed model id form in Auto mode', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    renderSection({ assistantModel: 'openrouter/auto' })
+
+    fireEvent.click(screen.getByLabelText('Manage Auto model filters'))
+    await screen.findByText('Include or exclude tool-capable models for OpenRouter Auto.')
+
+    expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
 
     vi.unstubAllGlobals()
   })
@@ -259,6 +372,7 @@ describe('assistant settings-draft plumbing', () => {
     expect(patch.assistant).toEqual({
       enabled: true,
       model: 'anthropic/claude-sonnet-4.5',
+      document_model: '',
       notes: 'Queenfish on a rising tide.',
       allowed_models: [],
       excluded_models: [],
@@ -375,5 +489,55 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantVoiceInput).toBe(false)
     expect(draft.assistantReadAloud).toBe(false)
     expect(draft.assistantWakeWord).toBe(false)
+  })
+
+  it('renders a Document indexing section with its model field and helper text', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection()
+
+    expect(screen.getByText('Document indexing')).toBeInTheDocument()
+    const input = screen.getByLabelText('Document indexing model')
+    expect(input).toHaveAttribute('id', 'assistant-document-model')
+    expect(input).toHaveAttribute('placeholder', 'google/gemini-2.5-flash')
+    expect(screen.getByText(/pick a cheap model that can read images/)).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('typing in the document indexing model updates the draft', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    fireEvent.change(screen.getByLabelText('Document indexing model'), { target: { value: 'google/gemini-2.5-flash-lite' } })
+    expect(latestDraft().assistantDocumentModel).toBe('google/gemini-2.5-flash-lite')
+    expect(screen.queryByText('Enter an OpenRouter model ID like provider/model.')).not.toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('flags an invalid document indexing model id but allows blank', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection({ assistantDocumentModel: 'not a model' })
+    expect(screen.getByText('Enter an OpenRouter model ID like provider/model.')).toBeInTheDocument()
+    vi.unstubAllGlobals()
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection({ assistantDocumentModel: '' })
+    expect(screen.getAllByText('Enter an OpenRouter model ID like provider/model.')).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('document model settings-draft plumbing', () => {
+  it('sends a trimmed document_model in the patch', () => {
+    const patch = buildRegularSettingsPatch({ ...initialRegularSettingsDraft, assistantDocumentModel: '  google/gemini-2.5-flash-lite ' })
+    expect(patch.assistant?.document_model).toBe('google/gemini-2.5-flash-lite')
+  })
+
+  it('hydrates and compares assistantDocumentModel', () => {
+    const settings: SettingsPayload = { assistant: { document_model: 'google/gemini-2.5-flash' } }
+    const draft = hydrateDraftFromSettings(settings)
+    expect(draft.assistantDocumentModel).toBe('google/gemini-2.5-flash')
+    expect(draftsEqual(draft, { ...draft, assistantDocumentModel: 'other/model' })).toBe(false)
   })
 })
