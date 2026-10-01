@@ -1,12 +1,10 @@
-import { useEffect, useState } from 'react'
-
-import { Button } from '@/components/ui/button'
 import { FormRow, FormSection } from '@/components/patterns'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
 import { useVesselState } from '@/hooks/use-vessel-state'
-import { useVesselParticulars, type VesselParticulars } from '@/hooks/use-vessel-particulars'
+import { useVesselParticularsFormContext } from '@/components/settings/vessel-particulars-context'
+import type { VesselParticulars } from '@/hooks/use-vessel-particulars'
 
 type TextField =
   | 'builder' | 'model' | 'hin' | 'flag' | 'hailing_port' | 'hull_type' | 'hull_material'
@@ -37,47 +35,33 @@ function numberOrNull(raw: string): number | null {
 /**
  * Settings -> Vessel: the particulars Helmcentral keeps for the boat, with the
  * values live instrument data already supplies shown read only beside them.
- * Saves on its own button: it is a separate record from the settings file, so
- * the page's Save Settings does not cover it.
+ * Edits are held by VesselParticularsProvider and save with the page's Save
+ * bar; the record is its own table, so the bar sends it as its own request.
  */
 export function VesselParticularsForm() {
-  const { particulars, error, save } = useVesselParticulars()
-  const [draft, setDraft] = useState<VesselParticulars | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const { draft, update, fieldError, loadError } = useVesselParticularsFormContext()
   const { boatName } = useVesselIdentity()
   const { vesselLengthOverallM, vesselDraftM } = useVesselState()
 
-  useEffect(() => {
-    if (particulars !== null) setDraft(particulars)
-  }, [particulars])
-
-  if (error !== null) {
-    return <p role="alert" className="text-sm text-destructive">{error}</p>
+  if (loadError !== null) {
+    return <p role="alert" className="text-sm text-destructive">{loadError}</p>
   }
   if (draft === null) {
     return <p className="text-sm text-muted-foreground">Loading particulars</p>
   }
 
-  const update = (patch: Partial<VesselParticulars>) => {
-    setSaved(false)
-    setDraft((previous) => (previous === null ? previous : { ...previous, ...patch }))
+  const errorFor = (field: keyof VesselParticulars) =>
+    fieldError !== null && fieldError.field === field ? fieldError.message : null
+  const fieldErrorText = (field: keyof VesselParticulars) => {
+    const message = errorFor(field)
+    return message === null
+      ? null
+      : <p id={`particulars-${field}-error`} className="text-xs text-destructive">{message}</p>
   }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setSaveError(null)
-    setSaved(false)
-    try {
-      await save(draft)
-      setSaved(true)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
-    }
-  }
+  const invalidProps = (field: keyof VesselParticulars) =>
+    errorFor(field) === null
+      ? {}
+      : { 'aria-invalid': true as const, 'aria-describedby': `particulars-${field}-error` }
 
   const live: Array<[string, string]> = [
     ['Name', boatName ?? '--'],
@@ -106,7 +90,9 @@ export function VesselParticularsForm() {
               id={`particulars-${id}`}
               value={draft[id]}
               onChange={(e) => update({ [id]: e.target.value })}
+              {...invalidProps(id)}
             />
+            {fieldErrorText(id)}
           </Field>
         ))}
         <Field>
@@ -116,7 +102,9 @@ export function VesselParticularsForm() {
             type="number"
             value={draft.year ?? ''}
             onChange={(e) => update({ year: numberOrNull(e.target.value) })}
+            {...invalidProps('year')}
           />
+          {fieldErrorText('year')}
         </Field>
         <Field>
           <FieldLabel htmlFor="particulars-displacement">Displacement (kg)</FieldLabel>
@@ -126,7 +114,9 @@ export function VesselParticularsForm() {
             min={0}
             value={draft.displacement_kg ?? ''}
             onChange={(e) => update({ displacement_kg: numberOrNull(e.target.value) })}
+            {...invalidProps('displacement_kg')}
           />
+          {fieldErrorText('displacement_kg')}
         </Field>
         <Field>
           <FieldLabel htmlFor="particulars-date-acquired">Date acquired</FieldLabel>
@@ -135,16 +125,11 @@ export function VesselParticularsForm() {
             type="date"
             value={draft.date_acquired}
             onChange={(e) => update({ date_acquired: e.target.value })}
+            {...invalidProps('date_acquired')}
           />
+          {fieldErrorText('date_acquired')}
         </Field>
       </FormRow>
-      <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" onClick={() => void handleSave()} disabled={saving}>
-          {saving ? 'Saving' : 'Save particulars'}
-        </Button>
-        {saved && <span role="status" className="text-xs text-muted-foreground">Particulars saved</span>}
-      </div>
-      {saveError !== null && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
     </FormSection>
   )
 }

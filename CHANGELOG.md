@@ -81,6 +81,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The engines, house bank and particulars under **Settings → Vessel** now
+  save with the **Save** bar like the rest of Settings, instead of with
+  **Save Vessel Settings** and **Save particulars** buttons of their own.
+  Leaving Settings with unsaved changes there now warns you, and **Discard**
+  puts them back.
 - Settings pages now show a save bar across the top of the screen as soon as
   you have unsaved changes, with **Save** and **Discard**. It replaces the
   **Save Settings** button at the foot of each page, and **Discard** puts every

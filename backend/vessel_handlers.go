@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"regexp"
 	"sort"
@@ -12,10 +11,10 @@ import (
 // vessel_handlers.go is Settings -> Vessel's own read/write surface:
 // GET /api/vessel/candidates lists what the boat is currently publishing so
 // the operator picks engines and a house bank from live readings rather
-// than typing a SignalK path, and GET/POST /api/vessel load and save the
-// vessel.* block itself (vessel_settings.go), re-seeding whichever
-// anomaly-v1 sub-sets just became configured (alarm_seed_anomaly.go) on
-// every save.
+// than typing a SignalK path. The vessel.* block itself (vessel_settings.go)
+// loads and saves with the rest of the settings (GET/POST /api/settings),
+// which re-seeds whichever anomaly-v1 sub-sets just became configured
+// (alarm_seed_anomaly.go).
 
 // vesselEngineCandidate is one propulsion.<instance> the boat is currently
 // publishing, with its live rpm and coolant temperature so the operator
@@ -161,37 +160,4 @@ func getVesselCandidatesHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
 	}
 	return c.JSON(http.StatusOK, vesselCandidates(globalSignalKSnapshot, vessel))
-}
-
-// GET /api/vessel
-func getVesselSettingsHandler(c echo.Context) error {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
-	}
-	return c.JSON(http.StatusOK, vessel)
-}
-
-// POST /api/vessel saves the whole vessel.* block and re-seeds whichever
-// anomaly-v1 sub-sets have just become configured. A seeding failure is
-// logged, not returned as an error: the save itself succeeded, and the
-// alarm rules will catch up on the next server restart if they didn't just
-// now (the same non-fatal treatment main.go gives every seed call at
-// startup).
-func postVesselSettingsHandler(c echo.Context) error {
-	var req vesselSettings
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
-	}
-
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	if err := saveVesselSettings(settingsPath, req); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save vessel settings"})
-	}
-
-	if err := seedAnomalyRules(req); err != nil {
-		log.Printf("could not seed the anomaly alarm rules after a vessel-settings save: %v", err)
-	}
-
-	return c.JSON(http.StatusOK, req)
 }

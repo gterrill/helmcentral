@@ -4,6 +4,10 @@ import { SaveBar } from '@/components/patterns'
 import { SettingsFormProvider, useSettingsFormContext } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider, useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
+import {
+  VesselParticularsProvider,
+  useVesselParticularsFormContext,
+} from '@/components/settings/vessel-particulars-context'
 import { refreshAuthState } from '@/hooks/use-auth'
 import { SettingsNav, SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import { SECRET_KEYS } from '@/hooks/use-secrets-status'
@@ -53,7 +57,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     <SettingsFormProvider>
       <SecretsStatusProvider>
         <AlarmTransportsProvider>
-          <SettingsPageContent {...props} ref={ref} />
+          <VesselParticularsProvider>
+            <SettingsPageContent {...props} ref={ref} />
+          </VesselParticularsProvider>
         </AlarmTransportsProvider>
       </SecretsStatusProvider>
     </SettingsFormProvider>
@@ -74,6 +80,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   const { settings, loading, save } = useSettingsFormContext()
   const { touched, saveTouchedKeys, resetTouched } = useSecretsStatusContext()
   const transports = useAlarmTransportsFormContext()
+  const particulars = useVesselParticularsFormContext()
   // Uncontrolled fallback for callers that don't pass activeSectionId (e.g.
   // settings-page.test.tsx, settings-alarms-section.test.tsx) — App.tsx
   // passes both props and this local state just goes along for the ride,
@@ -107,6 +114,9 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // settings.yaml), so its failure needs its own slot rather than being
   // folded into either of the other two.
   const [transportsSaveError, setTransportsSaveError] = useState<string | null>(null)
+  // And the particulars PUT, a fourth: the record lives in its own table
+  // (the import wizard writes it too), so it is saved by its own request.
+  const [particularsSaveError, setParticularsSaveError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   // `touched` covers ALL secret keys tracked by useSecretsStatus — the
@@ -120,7 +130,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // The Alarms section's provider is mounted for the whole page, not just
   // while that section is on screen, so an edit there counts as dirty from
   // whichever section you happen to be looking at when you navigate away.
-  const dirty = draftDirty || hasUnsavedSecrets || transports.dirty
+  const dirty = draftDirty || hasUnsavedSecrets || transports.dirty || particulars.dirty
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -168,6 +178,12 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         setTransportsSaveError(err instanceof Error ? err.message : 'Unable to save notifications')
         throw err
       }),
+      // Its snapshot moves inside save() as soon as its own request lands, for
+      // the same reason the settings one does above.
+      particulars.save().catch((err: unknown) => {
+        setParticularsSaveError(err instanceof Error ? err.message : 'Unable to save particulars')
+        throw err
+      }),
     ])
 
     // Re-read auth after every save. If this save turned authentication on,
@@ -182,7 +198,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     // succeeded. The module publishes to its listeners when it resolves, so the
     // gate applies either way.
     void refreshAuthState()
-  }, [save, draft, saveTouchedKeys, transports])
+  }, [save, draft, saveTouchedKeys, transports, particulars])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -190,6 +206,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     setSettingsSaveError(null)
     setSecretsSaveError(null)
     setTransportsSaveError(null)
+    setParticularsSaveError(null)
     setIsSavingSettings(true)
     try {
       await performSave()
@@ -201,20 +218,24 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     }
   }
 
-  // Discard puts all three stores back to what was last saved: the regular
-  // draft, every in-progress secret edit, and the alarm-transports draft.
+  // Discard puts all four stores back to what was last saved: the regular
+  // draft, every in-progress secret edit, the alarm-transports draft and the
+  // vessel particulars.
   // Nothing is written, and any failed-save message goes with the edits.
   const transportsReset = transports.reset
+  const particularsReset = particulars.reset
   const handleDiscard = useCallback(() => {
     setDraft(savedDraftSnapshot)
     resetTouched()
     transportsReset()
+    particularsReset()
     setSettingsSaveError(null)
     setSecretsSaveError(null)
     setTransportsSaveError(null)
-  }, [savedDraftSnapshot, resetTouched, transportsReset])
+    setParticularsSaveError(null)
+  }, [savedDraftSnapshot, resetTouched, transportsReset, particularsReset])
 
-  const saveBarError = [settingsSaveError, secretsSaveError, transportsSaveError].filter(Boolean).join('. ') || null
+  const saveBarError = [settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError].filter(Boolean).join('. ') || null
 
   const activeSection = (() => {
     switch (activeSectionId) {

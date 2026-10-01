@@ -72,6 +72,12 @@ func loadVesselSettings(settingsPath string) (vesselSettings, error) {
 		return vesselSettings{}, err
 	}
 
+	return parseVesselBlock(settings)
+}
+
+// parseVesselBlock decodes the "vessel" key of an already-read settings map.
+// Absent or nil is the zero value; a block that does not parse is an error.
+func parseVesselBlock(settings map[string]any) (vesselSettings, error) {
 	raw, ok := settings["vessel"]
 	if !ok || raw == nil {
 		return vesselSettings{}, nil
@@ -102,17 +108,28 @@ func saveVesselSettings(settingsPath string, v vesselSettings) error {
 		return err
 	}
 
-	buf, err := yaml.Marshal(v)
+	generic, err := vesselBlockMap(v)
 	if err != nil {
-		return fmt.Errorf("vessel settings: marshalling vessel block: %w", err)
-	}
-	var generic map[string]any
-	if err := yaml.Unmarshal(buf, &generic); err != nil {
-		return fmt.Errorf("vessel settings: round-tripping vessel block: %w", err)
+		return err
 	}
 
 	settings["vessel"] = generic
 	return writeSettings(settingsPath, settings)
+}
+
+// vesselBlockMap turns v into the generic map settings.yaml stores under
+// "vessel", so POST /api/settings can set the key in the document it is
+// already rewriting.
+func vesselBlockMap(v vesselSettings) (map[string]any, error) {
+	buf, err := yaml.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("vessel settings: marshalling vessel block: %w", err)
+	}
+	var generic map[string]any
+	if err := yaml.Unmarshal(buf, &generic); err != nil {
+		return nil, fmt.Errorf("vessel settings: round-tripping vessel block: %w", err)
+	}
+	return generic, nil
 }
 
 // loadHouseBatteryCapacityAh reads the configured house bank's capacity in
