@@ -66,19 +66,60 @@ configured, with its address, size and how many pages are on it. Choose
 - **Name**, what you call the screen: "Flybridge", "Saloon TV".
 - **Address**, the last part of its web address. `flybridge` gives
   `/display/flybridge`.
-- **Screen size**, from the probe's viewport line in step 1.
+- **Canvas**, the width and height you lay the pages out against, taken from
+  the probe's viewport line in step 1.
 - **Magnification**, how much larger to draw everything. Start at 1 for a
-  screen you read close up, and 1.5 for a television across a cabin. You can
-  change it after you have looked at it from where you will actually sit.
+  screen you read close up, and 1.5 for a television across a cabin. It takes
+  two decimals, so 0.79 is a fine value. You can change it after you have
+  looked at it from where you will actually sit.
 - **Upside down**, for a panel mounted inverted.
 - **OLED panel**, for an OLED television, so a board left up all season does
   not burn in.
 - **Keep awake**, to ask the screen not to sleep.
 
-For a television, prefer a smaller screen size with more magnification over a
-larger one at 1. Setting a saloon television to 1280x720 at 1.5 rather than
-1920x1080 at 1 gives you the same picture with tiles you can lay out the way
-you lay out every other page.
+### The rule: canvas times magnification has to fit the screen
+
+The canvas, multiplied by the magnification, has to fit inside the size the
+screen's browser reports. If it is bigger, the right and bottom edges are cut
+off and nothing on the screen tells you. A canvas smaller than the screen is
+fine: the flybridge strip is 1920x360 inside a browser that reports 1920x1080,
+and it is meant to be.
+
+A television often reports less than its advertised resolution. A 1080p set
+with its picture scaling turned up can report 1536x856, and a canvas of
+1920x1080 at magnification 1 then loses the right column and the bottom row.
+Trust the probe's number, not the box.
+
+That is also why a smaller canvas with more magnification works well on a
+television. 1280x720 at 1.5 comes to 1920x1080 on the screen, which fits a
+browser reporting 1920x1080, and the tiles are big enough to read across the
+cabin. It only works if the browser really reports 1920x1080 or more; on the
+1536x856 set above, 1280x720 at 1.5 would be too big, and 1280x720 at 1.1
+(1408x792) would fit.
+
+### Let the screen tell you
+
+Open the display's address (step 4) once on the screen itself. The wall page
+then tells Helmcentral what size the browser really reports, and the display's
+page under **Wall displays** shows it under the canvas: **Measured on this
+screen: 1536 × 856**, with when it was last seen. If you change the TV's
+picture scaling later, open the address again and the number follows. The line
+also names the browser that reported it, so if it shows your laptop instead of
+the TV, you know the number is not the screen's. The **Preview** links in the
+app do not report, so looking at a display from your own browser never
+overwrites what the wall measured.
+
+If the canvas times the magnification is bigger than that, the same place
+shows a warning that says how many pixels run past the right edge and the
+bottom. Click **Fit to screen** and the magnification is set to the largest
+value that fits, keeping your width and height. For 1920x1080 on a 1536x856
+screen that is 0.79. If the canvas is so large that it would need less than
+0.5 magnification, there is no button; use a smaller canvas instead.
+
+The **Wall displays** list marks the same problem next to the canvas, so you
+can spot it without opening each screen. The wall itself also says so: while
+the canvas is too big, a small amber note at its top left reads "This page is
+larger than the screen", with the display's name to open.
 
 ## 3. Put pages on it
 

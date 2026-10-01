@@ -651,3 +651,128 @@ func TestCreateDisplay_ExplicitOverlongSlugIsStillRejected(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
+
+// ── PUT /api/displays/:id/viewport ──────────────────────────────────────────
+
+func putTestViewport(t *testing.T, id string, body any) (int, string) {
+	t.Helper()
+	c, rec := newDashboardPagesRequest(t, http.MethodPut, "/api/displays/"+id+"/viewport", body)
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+	if err := putDisplayViewportHandler(c); err != nil {
+		t.Fatalf("putDisplayViewportHandler returned error: %v", err)
+	}
+	return rec.Code, rec.Body.String()
+}
+
+func TestPutDisplayViewport_StoresMeasurementAndLeavesGeometryAlone(t *testing.T) {
+	setupDisplaysTest(t)
+	d := createTestDisplay(t, map[string]any{"name": "Salon TV", "width": 1920, "height": 1080, "scale": 1})
+
+	code, body := putTestViewport(t, d.ID, map[string]any{"w": 1536, "h": 856, "user_agent": "Mozilla/5.0 NetCast SmartTV/10.0"})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", code, body)
+	}
+	var got displayData
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Viewport == nil || got.Viewport.W != 1536 || got.Viewport.H != 856 || got.Viewport.MeasuredAt.IsZero() {
+		t.Fatalf("viewport not stored: %+v", got.Viewport)
+	}
+	if got.Width != 1920 || got.Height != 1080 || got.Scale != 1 {
+		t.Fatalf("geometry changed: %+v", got)
+	}
+	if !got.UpdatedAt.Equal(d.UpdatedAt) {
+		t.Fatalf("a measurement must not bump updated_at")
+	}
+	// Persisted: a reload sees it.
+	loadDashboardPages()
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	if v := displaysState[d.ID].Viewport; v == nil || v.W != 1536 {
+		t.Fatalf("viewport not persisted: %+v", v)
+	}
+}
+
+func TestPutDisplayViewport_TruncatesUserAgent(t *testing.T) {
+	setupDisplaysTest(t)
+	d := createTestDisplay(t, map[string]any{"name": "Salon TV"})
+	code, body := putTestViewport(t, d.ID, map[string]any{"w": 1536, "h": 856, "user_agent": strings.Repeat("x", 1000)})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", code, body)
+	}
+	var got displayData
+	_ = json.Unmarshal([]byte(body), &got)
+	if len(got.Viewport.UserAgent) != displayViewportUserAgentMaxLen {
+		t.Fatalf("user agent length = %d", len(got.Viewport.UserAgent))
+	}
+}
+
+func TestPutDisplayViewport_RejectsBadInput(t *testing.T) {
+	setupDisplaysTest(t)
+	d := createTestDisplay(t, map[string]any{"name": "Salon TV"})
+	for name, body := range map[string]any{
+		"too small":  map[string]any{"w": 99, "h": 856},
+		"too large":  map[string]any{"w": 1536, "h": 10001},
+		"negative":   map[string]any{"w": -5, "h": 856},
+		"missing h":  map[string]any{"w": 1536},
+		"fractional": json.RawMessage(`{"w":1536.5,"h":856}`),
+		"string":     json.RawMessage(`{"w":"1536","h":856}`),
+	} {
+		if code, out := putTestViewport(t, d.ID, body); code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d: %s", name, code, out)
+		}
+	}
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	if displaysState[d.ID].Viewport != nil {
+		t.Fatalf("a rejected report must not store anything")
+	}
+}
+
+func TestPutDisplayViewport_UnknownDisplayIs404(t *testing.T) {
+	setupDisplaysTest(t)
+	if code, out := putTestViewport(t, "nope", map[string]any{"w": 1536, "h": 856}); code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", code, out)
+	}
+}
+
+func TestPatchDisplay_KeepsMeasuredViewport(t *testing.T) {
+	setupDisplaysTest(t)
+	d := createTestDisplay(t, map[string]any{"name": "Salon TV", "width": 1920, "height": 1080})
+	putTestViewport(t, d.ID, map[string]any{"w": 1536, "h": 856})
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/displays/"+d.ID, map[string]any{"scale": 0.79})
+	c.SetParamNames("id")
+	c.SetParamValues(d.ID)
+	if err := patchDisplayHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("patch failed: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	var got displayData
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Viewport == nil || got.Viewport.W != 1536 {
+		t.Fatalf("patch dropped the measurement: %+v", got.Viewport)
+	}
+}
+
+func TestBuildAPIRoutes_DisplayViewportRouteIsReadTier(t *testing.T) {
+	sessions := newTestSessionStore(t)
+	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+		if route.Method == http.MethodPut && route.Path == "/api/displays/:id/viewport" {
+			if route.Tier != tierRead {
+				t.Fatalf("tier = %v, want tierRead", route.Tier)
+			}
+			return
+		}
+	}
+	t.Fatal("route PUT /api/displays/:id/viewport missing")
+}
+
+func TestPutDisplayViewport_RejectsOversizedBody(t *testing.T) {
+	setupDisplaysTest(t)
+	d := createTestDisplay(t, map[string]any{"name": "Salon TV"})
+	code, _ := putTestViewport(t, d.ID, map[string]any{"w": 1536, "h": 856, "user_agent": strings.Repeat("x", 100000)})
+	if code != http.StatusBadRequest && code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 400/413 for an oversized body, got %d", code)
+	}
+}

@@ -39,8 +39,86 @@ function display(overrides: Partial<Display> = {}): Display {
   }
 }
 
+function setViewport(w: number, h: number) {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true })
+  Object.defineProperty(window, 'innerHeight', { value: h, configurable: true })
+}
+
+describe('DisplayShell fit notice', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    mockPixelShift.mockReturnValue({ dx: 0, dy: 0 })
+    mockWakeLock.mockReturnValue({ status: 'off' })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  test('says so when the canvas is larger than the screen', () => {
+    setViewport(1536, 856)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ name: 'Salon TV', width: 1920, height: 1080, scale: 1 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(getByTestId('display-overflow-notice')).toHaveTextContent(
+      'This page is larger than the screen. Open Wall displays › Salon TV to fit it.',
+    )
+  })
+
+  test('sits at the canvas top left upright and bottom right when rotated 180', () => {
+    setViewport(1536, 856)
+    const upright = render(
+      <DisplayShell display={display({ width: 1920, height: 1080, rotate: 0 })} alarms={[]}><div /></DisplayShell>,
+    )
+    const upClass = upright.getByTestId('display-overflow-notice').className
+    expect(upClass).toContain('left-2')
+    expect(upClass).toContain('top-2')
+    upright.unmount()
+    const flipped = render(
+      <DisplayShell display={display({ width: 1920, height: 1080, rotate: 180 })} alarms={[]}><div /></DisplayShell>,
+    )
+    const downClass = flipped.getByTestId('display-overflow-notice').className
+    expect(downClass).toContain('right-2')
+    expect(downClass).toContain('bottom-2')
+  })
+
+  test('still shows in preview, but a preview never reports its size', () => {
+    setViewport(1536, 856)
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 1080 })} alarms={[]} preview><div /></DisplayShell>,
+    )
+    expect(getByTestId('display-overflow-notice')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test('is absent when the canvas fits', () => {
+    setViewport(1920, 1080)
+    const { queryByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 360 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(queryByTestId('display-overflow-notice')).toBeNull()
+  })
+
+  test('is absent for a full-viewport canvas', () => {
+    setViewport(800, 600)
+    const { queryByTestId } = render(
+      <DisplayShell display={display({ width: 0, height: 0, scale: 0 })} alarms={[]}>
+        <div />
+      </DisplayShell>,
+    )
+    expect(queryByTestId('display-overflow-notice')).toBeNull()
+  })
+})
+
 describe('DisplayShell', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    setViewport(1920, 1080)
     mockPixelShift.mockReturnValue({ dx: 0, dy: 0 })
     mockWakeLock.mockReturnValue({ status: 'off' })
   })
@@ -49,6 +127,7 @@ describe('DisplayShell', () => {
     document.documentElement.style.cursor = ''
     document.body.style.overflow = ''
     vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   test('renders its children inside the inner canvas', () => {

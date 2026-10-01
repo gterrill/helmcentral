@@ -27,8 +27,50 @@ export interface Display {
   /** Slow four-position shift of the whole board, to spare an OLED panel. */
   pixel_shift: boolean
   wake_lock: boolean
+  /** What the screen's own browser last reported for its window. Absent
+   * until the wall page has opened on this display. Never edited by the
+   * operator and never changes the canvas above. */
+  viewport?: DisplayViewport
   created_at: string
   updated_at: string
+}
+
+export interface DisplayViewport {
+  w: number
+  h: number
+  measured_at: string
+  user_agent?: string
+}
+
+/** Smallest magnification the backend accepts. */
+export const DISPLAY_MIN_SCALE = 0.5
+
+export type DisplayFit =
+  | { status: 'unmeasured' }
+  | { status: 'fits' }
+  /** The canvas times its magnification is bigger than the measured window.
+   * overW/overH are the px beyond the window on each axis (0 where it fits).
+   * fitScale is the magnification that makes it fit with the canvas kept, or
+   * null when that would fall under DISPLAY_MIN_SCALE. */
+  | { status: 'overflow'; overW: number; overH: number; fitScale: number | null }
+
+/**
+ * Does the display's canvas, at its magnification, fit inside what the
+ * screen's browser reported? A canvas smaller than the window is fine (the
+ * flybridge strip is deliberately 1920x360 in a 1920x1080 window), so only
+ * overflow is ever reported. A zero canvas claims the whole window and
+ * always fits.
+ */
+export function displayFit(d: Display, viewport: { w: number; h: number } | undefined): DisplayFit {
+  if (!viewport) return { status: 'unmeasured' }
+  if (d.width === 0 && d.height === 0) return { status: 'fits' }
+  const scale = displayScale(d)
+  const overW = Math.max(0, Math.round(d.width * scale - viewport.w))
+  const overH = Math.max(0, Math.round(d.height * scale - viewport.h))
+  if (overW === 0 && overH === 0) return { status: 'fits' }
+  // The epsilon keeps 0.58 from flooring to 0.57 on a binary float of 57.999...
+  const fitScale = Math.floor(Math.min(viewport.w / d.width, viewport.h / d.height) * 100 + 1e-9) / 100
+  return { status: 'overflow', overW, overH, fitScale: fitScale >= DISPLAY_MIN_SCALE ? fitScale : null }
 }
 
 /** display-shell.tsx's root padding (`p-1` = 4px) on every edge, in logical px. */
@@ -115,12 +157,15 @@ export interface DisplayOptions {
    * and viewport height moved onto the display record (ADR 0110) and have
    * no back-compat shim here. */
   pageId: string | null
+  /** `?preview=1`: the in-app Preview link. A preview runs in the operator's
+   * own browser, so it must not report that window as the wall's size. */
+  preview: boolean
 }
 
 /** Parses the wall display route's own query string. Never throws on a malformed value. */
 export function parseDisplayOptions(search: string): DisplayOptions {
   const params = new URLSearchParams(search)
-  return { pageId: params.get('page') }
+  return { pageId: params.get('page'), preview: params.get('preview') === '1' }
 }
 
 /** The subset of DashboardPage that displayFeed needs — kept minimal and

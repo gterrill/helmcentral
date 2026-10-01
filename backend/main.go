@@ -775,6 +775,10 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// small array the wall fetches on mount and slug resolution is a
 		// client-side find.
 		{http.MethodGet, "/api/displays", tierRead, listDisplaysHandler},
+		// The wall browser reports its own window size here (ADR 0153).
+		// Read tier on purpose: the wall holds a read session, and this
+		// route can only write the measurement fields.
+		{http.MethodPut, "/api/displays/:id/viewport", tierRead, putDisplayViewportHandler},
 		{http.MethodGet, "/api/routes", tierRead, listRoutesHandler},
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},

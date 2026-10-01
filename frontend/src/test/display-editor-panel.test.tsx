@@ -141,7 +141,7 @@ describe('DisplayEditorPanel', () => {
   it('Preview opens /display/<slug> in a new tab, safely', () => {
     render(<DisplayEditorPanel {...baseProps()} />)
     const preview = screen.getByRole('link', { name: /Preview/i })
-    expect(preview).toHaveAttribute('href', '/display/flybridge')
+    expect(preview).toHaveAttribute('href', '/display/flybridge?preview=1')
     expect(preview).toHaveAttribute('target', '_blank')
     expect(preview).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
@@ -318,5 +318,49 @@ describe('DisplayEditorPanel', () => {
 
     const filled = screen.getByText('Wall: Engines').closest('tr') as HTMLElement
     expect(within(filled).queryByText(/no tiles yet/i)).not.toBeInTheDocument()
+  })
+
+  describe('measured screen', () => {
+    const viewport = { w: 1536, h: 856, measured_at: '2026-10-02T01:00:00Z' }
+
+    it('asks to open the wall page when nothing has been measured', () => {
+      render(<DisplayEditorPanel {...baseProps()} />)
+      expect(screen.getByTestId('display-measured')).toHaveTextContent(/not measured yet/i)
+    })
+
+    it('shows the measurement and nothing else when a strip is smaller than the screen', () => {
+      const display = makeDisplay({ viewport: { ...viewport, w: 1920, h: 1080 } })
+      render(<DisplayEditorPanel {...baseProps({ display, displays: [display] })} />)
+      expect(screen.getByTestId('display-measured')).toHaveTextContent('Measured on this screen: 1920 × 1080')
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('button', { name: /fit to screen/i })).toBeNull()
+    })
+
+    it('warns by how much and fits to screen with one click', () => {
+      const onUpdate = vi.fn().mockResolvedValue(makeDisplay())
+      const display = makeDisplay({ width: 1920, height: 1080, rotate: 0, viewport })
+      render(<DisplayEditorPanel {...baseProps({ display, displays: [display], onUpdate })} />)
+      expect(screen.getByRole('alert')).toHaveTextContent('384 px past the right edge and 224 px past the bottom')
+      fireEvent.click(screen.getByRole('button', { name: /fit to screen/i }))
+      expect(onUpdate).toHaveBeenCalledWith('d1', { scale: 0.79 })
+    })
+
+    it('offers no fit below the minimum magnification', () => {
+      const display = makeDisplay({ width: 3840, height: 2160, rotate: 0, viewport })
+      render(<DisplayEditorPanel {...baseProps({ display, displays: [display] })} />)
+      expect(screen.getByRole('alert')).toHaveTextContent(/too large for this screen/i)
+      expect(screen.queryByRole('button', { name: /fit to screen/i })).toBeNull()
+    })
+
+    it('names the browser that reported, so a wrong device is recognisable', () => {
+      const display = makeDisplay({ viewport: { ...viewport, user_agent: 'Mozilla/5.0 NetCast SmartTV/10.0' } })
+      render(<DisplayEditorPanel {...baseProps({ display, displays: [display] })} />)
+      expect(screen.getByTestId('display-measured')).toHaveTextContent('Mozilla/5.0 NetCast SmartTV/10.0')
+    })
+
+    it('steps magnification by 0.01', () => {
+      render(<DisplayEditorPanel {...baseProps()} />)
+      expect(screen.getByLabelText('Scale for Flybridge')).toHaveAttribute('step', '0.01')
+    })
   })
 })

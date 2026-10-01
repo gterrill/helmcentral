@@ -139,9 +139,23 @@
     border: 0;
     background: #000;
   }
+  /* The size this browser reports, first thing on the page and large, so it
+     can still be read off a screen the rest of the probe overflows. */
+  #viewport-line {
+    flex: none;
+    padding: 6px 12px;
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    background: #1d4ed8;
+    color: #fff;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
+<div id="viewport-line">Viewport: measuring</div>
 <div id="header">
   <span id="title">Kiosk probe</span>
   <span id="ua"></span>
@@ -179,6 +193,14 @@
     document.body.style.height = height + 'px';
     document.body.style.overflow = 'hidden';
   }
+
+  // The size line at the very top. Set on load and kept current on resize.
+  var viewportLine = document.getElementById('viewport-line');
+  function showViewport() {
+    viewportLine.textContent = 'Viewport: ' + window.innerWidth + ' x ' + window.innerHeight;
+  }
+  showViewport();
+  window.addEventListener('resize', showViewport);
 
   var grid = document.getElementById('grid');
   var checks = [];
