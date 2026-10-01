@@ -34,6 +34,27 @@ an iPhone or a computer.
    App Store) and write the tag from there.
 3. Stick the tag down and test it the same way.
 
+## Print a QR label
+
+A printed label needs no NFC sticker and no special phone to write it. Any
+phone camera, including an iPhone's, reads the code and offers to open the
+page, the same page a tag opens.
+
+1. Open the bin's page or the item's editor.
+2. Press **Print label** under the tag address.
+3. Check the preview, then press **Print**. The bin's code, or the item's
+   name, is printed large under the QR code.
+4. Stick the label on the bin or the item, and scan it once to confirm it
+   opens the right page.
+
+To label every bin at once, open **Locations**, choose **Print bin labels**
+from the page menu, then **Print**. The sheet has three labels across; print
+it on plain A4 or Letter paper and cut along the dashed lines.
+
+A scan only opens the page for a phone that can reach the boat, the same as a
+tag: aboard on the boat's network, or away from it over the tailnet. Someone
+without that access gets nothing useful from the label.
+
 ## Tap a tag
 
 Tap it with any NFC-capable phone, no app required. On Android it opens

@@ -109,3 +109,15 @@ describe('LocationsIndex', () => {
     expect(screen.queryByRole('button', { name: 'New location' })).not.toBeInTheDocument()
   })
 })
+
+describe('LocationsIndex bin labels', () => {
+  it('offers Print bin labels from the page menu and lists every bin', async () => {
+    render(<LocationsIndex onOpenLocation={vi.fn()} />)
+    await screen.findByText('Lazarette')
+    fireEvent.click(screen.getByRole('button', { name: /more|actions/i }))
+    fireEvent.click(await screen.findByText('Print bin labels'))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('ER-01')).toBeInTheDocument()
+    expect(within(dialog).getByText('ER-02')).toBeInTheDocument()
+  })
+})

@@ -528,3 +528,48 @@
 .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
   filter: invert(1);
 }
+
+/* Printed QR labels (components/inventory/label-print.tsx). The labels sit in
+   a portal on <body>; printing hides everything else and forces black on
+   white so a dark-theme session still prints a readable label. */
+.label-print-root {
+  display: none;
+}
+
+/* Inline cells rather than a grid: a line of inline boxes is never split
+   across a page, whereas Safari ignores break-inside inside a grid and would
+   cut a row of QR codes in half at the page break. */
+.label-sheet .label-cell {
+  display: inline-flex;
+  width: 33.333%;
+  vertical-align: top;
+  border: 1px dashed currentColor;
+  break-inside: avoid;
+}
+
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  body > *:not(.label-print-root) {
+    display: none !important;
+  }
+
+  .label-print-root {
+    display: block;
+    color: black;
+    background: white;
+  }
+
+  .label-print-root .label-single {
+    width: 80mm;
+  }
+}

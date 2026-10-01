@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { MapPin, Plus } from 'lucide-react'
+import { MapPin, Plus, Printer } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { PrintBinLabelsDialog } from '@/components/inventory/label-print'
 import { EmptyState, IndexFilters, IndexTable, Page } from '@/components/patterns'
 import { useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
 
@@ -40,6 +41,7 @@ export function LocationsIndex({ onOpenLocation, canWrite = true }: LocationsInd
   const { zones, loading, error, refresh, createZone } = useInventoryZones()
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
+  const [printingLabels, setPrintingLabels] = useState(false)
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -81,6 +83,9 @@ export function LocationsIndex({ onOpenLocation, canWrite = true }: LocationsInd
           ? { label: 'New location', icon: <Plus className="h-4 w-4" aria-hidden="true" />, onClick: openCreate }
           : undefined
       }
+      secondaryActions={[
+        { label: 'Print bin labels', icon: <Printer className="h-4 w-4" aria-hidden="true" />, onClick: () => setPrintingLabels(true) },
+      ]}
     >
       <div className="flex h-full min-h-0 flex-col gap-4">
         <IndexFilters
@@ -119,6 +124,12 @@ export function LocationsIndex({ onOpenLocation, canWrite = true }: LocationsInd
           }
         />
       </div>
+
+      <PrintBinLabelsDialog
+        open={printingLabels}
+        onOpenChange={setPrintingLabels}
+        bins={zones.flatMap((z) => z.bins.map((b) => ({ id: b.id, code: b.code, zoneName: z.name })))}
+      />
 
       <Dialog open={creating} onOpenChange={(open) => { if (!saving) setCreating(open) }}>
         <DialogContent>
