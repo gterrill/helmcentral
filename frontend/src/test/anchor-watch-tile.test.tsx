@@ -312,23 +312,17 @@ describe('AnchorWatchTile', () => {
     expect(screen.queryByRole('button', { name: 'Raise' })).toBeNull()
   })
 
-  it('shows Raise when an anchor is set, and confirming calls watch.clearAnchor', () => {
-    const clearAnchor = vi.fn()
+  it('has no Raise button when an anchor is set; raising belongs to the Anchor Watch page', () => {
     render(
       <AnchorWatchTile
         {...baseProps({
-          watch: baseWatch({ anchorState: 'set', anchorLat: -25.1, anchorLon: 152.9, clearAnchor }),
+          watch: baseWatch({ anchorState: 'set', anchorLat: -25.1, anchorLon: 152.9 }),
         })}
       />,
     )
 
     expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Raise' }))
-
-    const dialog = screen.getByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Raise' }))
-
-    expect(clearAnchor).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Raise' })).toBeNull()
   })
 
   // The recommendation itself now renders in the map's metric overlay (ADR
