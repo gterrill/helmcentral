@@ -19,10 +19,16 @@ import { useEffect, useState } from 'react'
  */
 export function useCyclingIndex(count: number, intervalSeconds: number, resetKey: string): number | null {
   const [index, setIndex] = useState(0)
+  const [lastResetKey, setLastResetKey] = useState(resetKey)
 
-  useEffect(() => {
+  // Reset during render, not in an effect: an effect would let one render
+  // through with the old index, and a caller that acts on each new index
+  // (the Nearby map flies to it) would start toward a place that has moved.
+  const resetting = resetKey !== lastResetKey
+  if (resetting) {
+    setLastResetKey(resetKey)
     setIndex(0)
-  }, [resetKey])
+  }
 
   useEffect(() => {
     if (count <= 1) return
@@ -32,5 +38,6 @@ export function useCyclingIndex(count: number, intervalSeconds: number, resetKey
     return () => window.clearInterval(timer)
   }, [count, intervalSeconds])
 
-  return count > 0 ? index % count : null
+  if (count === 0) return null
+  return resetting ? 0 : index % count
 }

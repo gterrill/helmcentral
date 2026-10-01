@@ -66,8 +66,13 @@ export function poiCategoryById(id: string): PoiCategory | undefined {
   return POI_CATEGORY_BY_ID.get(id)
 }
 
-// Web Mercator metres-per-pixel at zoom 0, equator: 2*pi*earthRadiusM / tileSizePx.
-const WEB_MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392
+// MapLibre GL tiles the world in 512px tiles (Transform.worldSize =
+// 512 * 2**zoom), not the 256px tiles most "zoom to fit" formulas assume. The
+// commonly quoted 156543.03392 (circumference / 256) would leave this map
+// twice as zoomed in as intended; the constant for MapLibre's own zoom is the
+// equatorial circumference over 512: 40075016.68557849 / 512. Same value and
+// reason as anchor-view.ts.
+const MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 = 78271.51696402048
 const METERS_PER_NM = 1852
 export const POI_MAP_MIN_ZOOM = 8
 export const POI_MAP_MAX_ZOOM = 16
@@ -85,16 +90,16 @@ export function zoomForRangeNm(rangeNm: number, lat: number, heightPx: number): 
   const targetMetersPerPixel = diameterM / heightPx
   const latRad = (lat * Math.PI) / 180
   const zoom = Math.log2(
-    (WEB_MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * Math.cos(latRad)) / targetMetersPerPixel,
+    (MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 * Math.cos(latRad)) / targetMetersPerPixel,
   )
   if (!Number.isFinite(zoom)) return POI_MAP_MIN_ZOOM
   return Math.max(POI_MAP_MIN_ZOOM, Math.min(POI_MAP_MAX_ZOOM, zoom))
 }
 
-// Same tile size WEB_MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 above is derived
-// from (earth's equatorial circumference / 256), so fitCameraToPoints below
+// Same tile size MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 above is derived from
+// (earth's equatorial circumference / 512), so fitCameraAroundPoint below
 // stays in the same projection zoomForRangeNm already uses.
-const MERCATOR_TILE_SIZE_PX = 256
+const MERCATOR_TILE_SIZE_PX = 512
 
 /** Fraction of the world's width, 0 (antimeridian, west) to 1 (antimeridian, east). */
 function mercatorX(lon: number): number {
@@ -107,57 +112,46 @@ function mercatorY(lat: number): number {
   return 0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)
 }
 
-function mercatorYToLat(y: number): number {
-  const n = Math.PI - 2 * Math.PI * y
-  // atan(sinh(n)), the Gudermannian function - the standard inverse of the
-  // Web Mercator latitude stretch above.
-  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
-}
-
 export interface MapPoint {
   lat: number
   lon: number
 }
 
 /**
- * The camera (centre + zoom) that fits every one of `points` inside a
- * `widthPx` x `heightPx` viewport, with `paddingPx` of clearance on every
- * edge for marker size and labels. The pure-arithmetic equivalent of
- * maplibre's own `Map.cameraForBounds`, done in the same Web Mercator
- * projection zoomForRangeNm above uses, so it needs no live map instance and
- * can be unit-tested without a WebGL context (poi-map-tile-impl.tsx still
- * uses the real map's easeTo/jumpTo to actually move the camera - this only
- * computes where to move it to).
+ * The camera (centre + zoom) that keeps `center` in the middle of a
+ * `widthPx` x `heightPx` viewport while fitting every one of `points` inside
+ * it, with `paddingPx` of clearance on every edge for marker size and labels.
+ * The boat stays at the centre so the operator reads every POI relative to
+ * it; fitting a bounding box instead would slide the boat off to one side
+ * whenever the POIs lie mostly in one direction. Done in the same Web
+ * Mercator projection zoomForRangeNm above uses, so it needs no live map
+ * instance and can be unit-tested without a WebGL context
+ * (poi-map-tile-impl.tsx still uses the real map's easeTo/jumpTo to actually
+ * move the camera - this only computes the zoom to move it to).
  *
- * Zoom is clamped to POI_MAP_MIN_ZOOM/MAX_ZOOM, same as zoomForRangeNm.
- * `points` must be non-empty. When every point shares the same longitude, or
- * the same latitude, that axis has no span to fit against and imposes no
- * limit on zoom by itself - a single point (or several coincident ones) hits
- * this on both axes at once and gets POI_MAP_MAX_ZOOM. Callers that also want
- * a floor (never zoom in tighter than some minimum range) apply that
- * themselves, e.g. `Math.min(fitCameraToPoints(...).zoom, zoomForRangeNm(...))`.
+ * With `center` fixed, the viewport has to reach the farthest point on each
+ * axis in both directions, so the span on an axis is twice the largest
+ * offset from `center`. Zoom is clamped to POI_MAP_MIN_ZOOM/MAX_ZOOM, same as
+ * zoomForRangeNm. When no point is offset from `center` on either axis (none
+ * given, or all coincident with it) there is nothing to fit against and the
+ * result is POI_MAP_MAX_ZOOM. Callers that also want a floor (never zoom in
+ * tighter than some minimum range) apply that themselves, e.g.
+ * `Math.min(fitCameraAroundPoint(...).zoom, zoomForRangeNm(...))`.
  */
-export function fitCameraToPoints(points: MapPoint[], widthPx: number, heightPx: number, paddingPx: number): { center: MapPoint; zoom: number } {
-  const lons = points.map((p) => p.lon)
-  const xs = points.map((p) => mercatorX(p.lon))
-  const ys = points.map((p) => mercatorY(p.lat))
-
-  const minLon = Math.min(...lons)
-  const maxLon = Math.max(...lons)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
-
-  const center: MapPoint = {
-    lat: mercatorYToLat((minY + maxY) / 2),
-    lon: (minLon + maxLon) / 2,
-  }
+export function fitCameraAroundPoint(
+  center: MapPoint,
+  points: MapPoint[],
+  widthPx: number,
+  heightPx: number,
+  paddingPx: number,
+): { center: MapPoint; zoom: number } {
+  const cx = mercatorX(center.lon)
+  const cy = mercatorY(center.lat)
+  const spanX = 2 * Math.max(0, ...points.map((p) => Math.abs(mercatorX(p.lon) - cx)))
+  const spanY = 2 * Math.max(0, ...points.map((p) => Math.abs(mercatorY(p.lat) - cy)))
 
   const availableWidthPx = Math.max(1, widthPx - 2 * paddingPx)
   const availableHeightPx = Math.max(1, heightPx - 2 * paddingPx)
-  const spanX = maxX - minX
-  const spanY = maxY - minY
 
   const worldSizeCandidates: number[] = []
   if (spanX > 0) worldSizeCandidates.push(availableWidthPx / spanX)

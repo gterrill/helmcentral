@@ -244,6 +244,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   show as chips you can remove one at a time, and the Clear buttons are gone.
   The cost tier is now "Cost cap", sits below them, and reads "No cost cap"
   when unset. Add models from **Manage…**.
+- With Google Places selected, the Nearby tile now shows Google's AI-written
+  overview, or its summary of reviews, for places that have no description of
+  their own. These are marked as summarized by Google.
+- The Nearby map now dives in to the first highlighted place and tilts, holds
+  there, then flies on to each next place in a high arc that shows the boat
+  and the whole area on the way. After the last place it pulls back out to the
+  view centred on the boat and rests on it before starting again. A longer
+  Summary cycle (15 to 20 seconds) gives each place a longer hold.
 
 ### Fixed
 
@@ -253,6 +261,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Arrival circle and waypoint perpendicular passed alarms from the plotter's
   route no longer stay lit forever after the route is stopped or cancelled;
   they now clear themselves within a few minutes of the plotter going quiet.
+- The Nearby tile keeps the boat at the centre of the map and zooms out far
+  enough to show every place in its list. It used to sit the boat off to one
+  side, zoomed in twice too far, so places further down the list fell off
+  the edge.
 
 ## [0.36.0] - 2026-09-28
 

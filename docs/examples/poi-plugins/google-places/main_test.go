@@ -233,3 +233,68 @@ func TestClampInt(t *testing.T) {
 		t.Fatalf("expected clamp to max 20, got %d", got)
 	}
 }
+
+// ── detail text: editorial summary, then Google's AI summaries ───────────
+
+func detailFor(t *testing.T, place string) string {
+	t.Helper()
+	body := []byte(`{"places":[` + place + `]}`)
+	features, err := parseSearchNearbyResponse(body, []string{"marina"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(features) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(features))
+	}
+	return features[0].Detail
+}
+
+const placeHead = `"id":"p1","displayName":{"text":"Test Marina"},"location":{"latitude":-20,"longitude":148},"types":["marina"]`
+
+func TestDetail_EditorialSummaryWinsOverAISummaries(t *testing.T) {
+	got := detailFor(t, `{`+placeHead+`,
+		"editorialSummary":{"text":"  Editorial text.  "},
+		"generativeSummary":{"overview":{"text":"Generative text."},"disclosureText":{"text":"Summarized with Gemini"}},
+		"reviewSummary":{"text":{"text":"Review text."},"disclosureText":{"text":"Summarized with Gemini"}}}`)
+	if got != "Editorial text." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDetail_GenerativeSummaryUsedWithDisclosure(t *testing.T) {
+	got := detailFor(t, `{`+placeHead+`,
+		"generativeSummary":{"overview":{"text":"Generative text."},"disclosureText":{"text":"Summarized with Gemini"}},
+		"reviewSummary":{"text":{"text":"Review text."},"disclosureText":{"text":"Summarized with Gemini"}}}`)
+	if got != "Summarized with Gemini: Generative text." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDetail_ReviewSummaryUsedWithDisclosure(t *testing.T) {
+	got := detailFor(t, `{`+placeHead+`,
+		"reviewSummary":{"text":{"text":"Review text."},"disclosureText":{"text":"Summarized with Gemini"}}}`)
+	if got != "Summarized with Gemini: Review text." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDetail_AISummaryWithoutDisclosureAddsNothing(t *testing.T) {
+	got := detailFor(t, `{`+placeHead+`,"generativeSummary":{"overview":{"text":" Generative text. "}}}`)
+	if got != "Generative text." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDetail_EmptyWhenNoSummaryPresent(t *testing.T) {
+	if got := detailFor(t, `{`+placeHead+`}`); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFieldMask_RequestsAISummaries(t *testing.T) {
+	for _, f := range []string{"places.editorialSummary", "places.generativeSummary", "places.reviewSummary"} {
+		if !strings.Contains(googleFieldMask, f) {
+			t.Errorf("field mask %q is missing %s", googleFieldMask, f)
+		}
+	}
+}

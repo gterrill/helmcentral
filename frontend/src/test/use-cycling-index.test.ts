@@ -70,6 +70,28 @@ describe('useCyclingIndex', () => {
     expect(result.current).toBe(0)
   })
 
+  it('never renders the stale index after resetKey changes, not even for one render', () => {
+    // A caller that acts on each new index (the Nearby map flies to it)
+    // would otherwise start toward the old position before the reset lands.
+    vi.useFakeTimers()
+    const seen: Array<number | null> = []
+    const { rerender } = renderHook(
+      ({ resetKey }: { resetKey: string }) => {
+        const index = useCyclingIndex(3, 5, resetKey)
+        seen.push(index)
+        return index
+      },
+      { initialProps: { resetKey: 'a|b|c' } },
+    )
+
+    act(() => { vi.advanceTimersByTime(5000) })
+    seen.length = 0
+
+    rerender({ resetKey: 'c|b|a' })
+    expect(seen).not.toContain(1)
+    expect(seen.at(-1)).toBe(0)
+  })
+
   it('does not reset when the same resetKey is passed again (a fresh array, same ids)', () => {
     vi.useFakeTimers()
     const { result, rerender } = renderHook(
