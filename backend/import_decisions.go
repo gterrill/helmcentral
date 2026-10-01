@@ -48,8 +48,12 @@ func importRecordKinds(st stagedImport) map[string]string {
 func particularUnreadable(p stagedParticular) string {
 	switch p.Field {
 	case "year":
-		if _, err := strconv.Atoi(p.Value); err != nil {
+		year, err := strconv.Atoi(p.Value)
+		if err != nil {
 			return fmt.Sprintf("year %q is not a number", p.Value)
+		}
+		if year < vesselYearMin || year > vesselYearMax {
+			return fmt.Sprintf("year %q is not between %d and %d", p.Value, vesselYearMin, vesselYearMax)
 		}
 	case "displacement_kg":
 		if _, err := parseDisplacementKg(p.Value); err != nil {

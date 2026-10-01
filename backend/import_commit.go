@@ -693,7 +693,20 @@ func (w *importWriter) writeLog() error {
 		}
 		var hours any
 		if e.Hours != nil {
-			hours = *e.Hours
+			trueHours := *e.Hours
+			// The export carries what the meter showed; the log stores true
+			// hours, so an item with a recorded meter reset gets its offset.
+			if equipmentID != nil {
+				performedAt, err := time.Parse("2006-01-02", e.Date)
+				if err != nil {
+					return importInvalidf("log entry %q has an unreadable date %q; skip it", e.Title, e.Date)
+				}
+				trueHours, err = convertGaugeHoursToTrueTx(w.tx, equipmentID.(string), trueHours, performedAt)
+				if err != nil {
+					return fmt.Errorf("commit import: convert hours for log entry %q: %w", e.Title, err)
+				}
+			}
+			hours = trueHours
 		}
 		id := uuid.NewString()
 		// Every YachtWave log row is a service or a repair done on the boat;
