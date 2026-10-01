@@ -11,7 +11,7 @@ import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { fitCameraToPoints, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -92,7 +92,7 @@ const RANKED_LIST_SIZE = 5
 const FOLLOW_THROTTLE_MS = 2000
 const FOLLOW_EASE_DURATION_MS = 500
 
-// Clearance kept around the fitted vessel+ranked-POIs bounding box, in
+// Clearance kept around the farthest ranked POI in the vessel-centred fit, in
 // screen pixels, so a marker (h-9 w-9, 36px) plus its name label doesn't sit
 // flush against the tile's edge. Exported for the test suite, which computes
 // the same fit independently to check the tile's jumpTo/easeTo calls against.
@@ -105,7 +105,7 @@ const FALLBACK_WIDTH = 240
 
 // Same technique sea-state-tile.tsx's own useMeasuredBox uses - this tile
 // needs both dimensions, not just height, now that the camera fits the
-// vessel plus the ranked POIs against the actual viewport shape rather than
+// ranked POIs around the vessel against the actual viewport shape rather than
 // assuming height is always the binding constraint (in "split" layout the
 // map pane is half-width, so POIs east/west of the vessel used to fall off
 // the edge even though a height-only zoom said they'd fit).
@@ -240,11 +240,11 @@ export default function PoiMapTileImpl({
   // this same number said they'd fit.
   const rangeZoomFloor = zoomForRangeNm(config.rangeNm, latitude ?? 0, Math.min(widthPx, heightPx))
 
-  // The camera: fits the vessel plus the ranked list (not every fetched
-  // feature - the ranked list is what the operator can actually see named in
-  // the split layout's rows, and what topPoi already limits to
-  // RANKED_LIST_SIZE) inside the measured viewport, padded for marker size
-  // and labels. Falls back to the old vessel-centred range zoom when there's
+  // The camera: stays centred on the vessel and zooms out until the ranked
+  // list (not every fetched feature - the ranked list is what the operator
+  // can actually see named in the split layout's rows, and what topPoi
+  // already limits to RANKED_LIST_SIZE) fits inside the measured viewport,
+  // padded for marker size and labels. Falls back to the old vessel-centred range zoom when there's
   // nothing ranked yet (feed still loading, or "map" layout content aside,
   // topPoi is layout-independent). Never tighter than rangeZoomFloor, so a
   // single close POI doesn't zoom in past what the configured range implies.
@@ -255,15 +255,15 @@ export default function PoiMapTileImpl({
     if (latitude === null || longitude === null) return null
     const vessel: MapPoint = { lat: latitude, lon: longitude }
     if (rankedList.length === 0) return { center: vessel, zoom: rangeZoomFloor }
-    const points: MapPoint[] = [vessel, ...rankedList.map((f) => ({ lat: f.lat, lon: f.lon }))]
-    const fit = fitCameraToPoints(points, widthPx, heightPx, POI_MAP_FIT_PADDING_PX)
+    const points: MapPoint[] = rankedList.map((f) => ({ lat: f.lat, lon: f.lon }))
+    const fit = fitCameraAroundPoint(vessel, points, widthPx, heightPx, POI_MAP_FIT_PADDING_PX)
     return { center: fit.center, zoom: Math.min(fit.zoom, rangeZoomFloor) }
   }, [latitude, longitude, rankedList, widthPx, heightPx, rangeZoomFloor])
 
   const hasCenteredRef = useRef(false)
   const lastEaseAtRef = useRef(0)
 
-  // Follow the vessel-plus-ranked-POIs fit: first fix jumps straight there,
+  // Follow the vessel-centred fit: first fix jumps straight there,
   // later fixes ease in, throttled to at most one per FOLLOW_THROTTLE_MS.
   // Holding still while gnssCriticalAlert is set (last good centre, no
   // jump/ease at all) is the same rule the anchor-watch gate uses for the
@@ -398,7 +398,7 @@ export default function PoiMapTileImpl({
                   longitude: longitude ?? 0,
                   // The mount-time jumpTo in the follow effect above fires
                   // right after this first paint and takes over from here
-                  // (to the fitted vessel+ranked-POIs camera, once the ranked
+                  // (to the vessel-centred fitted camera, once the ranked
                   // list has anything in it) - this is only what's on screen
                   // for that one frame before it does.
                   zoom: rangeZoomFloor,

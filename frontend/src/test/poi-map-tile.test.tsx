@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PoiMapTile } from '@/components/poi-map-tile'
 import { POI_MAP_FIT_PADDING_PX } from '@/components/poi-map-tile-impl'
 import type { PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
-import { fitCameraToPoints, zoomForRangeNm, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, zoomForRangeNm, type PoiFeature } from '@/lib/poi'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { UsePoiResult } from '@/hooks/use-poi'
 
@@ -508,10 +508,10 @@ describe('PoiMapTile', () => {
 
   // jsdom's global ResizeObserver stub (src/test/setup.ts) never fires, so
   // the tile's measured box always falls back to its 240x240 constant here -
-  // every expectation below computes fitCameraToPoints/zoomForRangeNm
+  // every expectation below computes fitCameraAroundPoint/zoomForRangeNm
   // against that same 240x240, not a guessed number.
   describe('camera fit (vessel + ranked POIs)', () => {
-    it('fits the camera to the vessel plus the ranked POIs, not just the vessel', async () => {
+    it('keeps the vessel at the centre and zooms out far enough to show the ranked POIs', async () => {
       const vessel = { lat: -20.27, lon: 148.94 }
       const farPoi = { lat: -20.27, lon: 149.5 } // ~30nm east - well outside a 5nm range
       usePoiMock.mockReturnValue(poiResult({
@@ -520,19 +520,18 @@ describe('PoiMapTile', () => {
 
       await renderTile({ latitude: vessel.lat, longitude: vessel.lon, config: config({ rangeNm: 5 }) })
 
-      const fit = fitCameraToPoints([vessel, farPoi], 240, 240, POI_MAP_FIT_PADDING_PX)
+      const fit = fitCameraAroundPoint(vessel, [farPoi], 240, 240, POI_MAP_FIT_PADDING_PX)
       const rangeFloor = zoomForRangeNm(5, vessel.lat, 240)
       const expectedZoom = Math.min(fit.zoom, rangeFloor)
 
       // The far-off POI pulls the fit zoom well below the range floor, so
-      // this is actually exercising fitCameraToPoints, not just re-deriving
+      // this is actually exercising fitCameraAroundPoint, not just re-deriving
       // the old vessel-centred behaviour by coincidence.
       expect(fit.zoom).toBeLessThan(rangeFloor)
 
       expect(jumpToMock).toHaveBeenCalledTimes(1)
       const call = jumpToMock.mock.calls[0][0] as { center: [number, number]; zoom: number }
-      expect(call.center[0]).toBeCloseTo(fit.center.lon, 6)
-      expect(call.center[1]).toBeCloseTo(fit.center.lat, 6)
+      expect(call.center).toEqual([vessel.lon, vessel.lat])
       expect(call.zoom).toBeCloseTo(expectedZoom, 6)
     })
 
