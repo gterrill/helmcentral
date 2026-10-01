@@ -26,6 +26,8 @@ export interface AlarmTransportsFormValue {
   error: string | null
   dirty: boolean
   save: () => Promise<void>
+  /** Puts the draft back to the last saved config and drops entered secrets (Discard). */
+  reset: () => void
   test: () => Promise<void>
   testResults: Record<string, string> | null
   testing: boolean
@@ -38,7 +40,7 @@ const AlarmTransportsFormContext = createContext<AlarmTransportsFormValue | null
  * as SettingsFormProvider and SecretsStatusProvider beside it.
  *
  * The draft lives up here rather than inside the Notifications panel so the
- * page can fold it into its single dirty signal and its single Save button.
+ * page can fold it into its single dirty signal and its single Save bar.
  * The panel used to carry its own Save, which put two near-identical buttons
  * on screen once it moved onto the settings page. The cost is that opening
  * Settings fetches the transport config even when the Alarms section is
@@ -73,6 +75,11 @@ export function AlarmTransportsProvider({ children }: { children: ReactNode }) {
     (key: TransportSecretKey, value: string) => setSecrets((current) => ({ ...current, [key]: value })),
     [],
   )
+
+  const reset = useCallback(() => {
+    setDraft(savedSnapshot)
+    setSecrets({})
+  }, [savedSnapshot])
 
   const hasEnteredSecret = Object.values(secrets).some((value) => (value ?? '').trim() !== '')
   const dirty = !transportConfigsEqual(draft, savedSnapshot) || hasEnteredSecret
@@ -113,9 +120,9 @@ export function AlarmTransportsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AlarmTransportsFormValue>(
     () => ({
       draft, setSection, secrets, setSecret, secretsPresent,
-      loading, error, dirty, save: persist, test, testResults, testing,
+      loading, error, dirty, save: persist, reset, test, testResults, testing,
     }),
-    [draft, setSection, secrets, setSecret, secretsPresent, loading, error, dirty, persist, test, testResults, testing],
+    [draft, setSection, secrets, setSecret, secretsPresent, loading, error, dirty, persist, reset, test, testResults, testing],
   )
 
   return <AlarmTransportsFormContext.Provider value={value}>{children}</AlarmTransportsFormContext.Provider>

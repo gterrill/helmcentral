@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { FormSection, SettingsLayout } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { fetchImportRun, ImportApiError, recalledDraftRun, rememberDraftRun, type ImportRun } from '@/lib/import-run'
 
@@ -37,13 +38,11 @@ export function ImportSection({ onOpenImport }: ImportSectionProps) {
   }, [])
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Import</h2>
-      <p className="text-sm text-muted-foreground">
-        Bring a boat&apos;s records across from another app instead of typing them in again. You check each page before
-        anything is added.
-      </p>
-
+    <SettingsLayout
+      title="Import"
+      description="Bring a boat's records across from another app instead of typing them in again. You check each page before anything is added."
+    >
+      <FormSection title="Sources">
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium">YachtWave</p>
@@ -57,8 +56,10 @@ export function ImportSection({ onOpenImport }: ImportSectionProps) {
       </div>
 
       {error !== null && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      </FormSection>
 
       {draft !== null && (
+        <FormSection title="In progress">
         <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-medium">Import in progress</p>
@@ -68,7 +69,8 @@ export function ImportSection({ onOpenImport }: ImportSectionProps) {
             Resume
           </Button>
         </div>
+        </FormSection>
       )}
-    </div>
+    </SettingsLayout>
   )
 }

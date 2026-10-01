@@ -23,6 +23,24 @@ describe('useSecretsStatus', () => {
     expect(SECRET_KEYS).toContain('OPENROUTER_API_KEY')
   })
 
+  it('resetTouched drops every in-progress edit without any network write', async () => {
+    const fetchMock = vi.fn(async (_url: string, options?: { method?: string }) => {
+      if (options?.method === 'POST') throw new Error('reset must not POST')
+      return { ok: true, json: async () => secretsGetResponse }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useSecretsStatus())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => { result.current.setFieldValue('SIGNALK_USERNAME', 'alice') })
+    expect(result.current.touched.SIGNALK_USERNAME).toBe(true)
+
+    act(() => { result.current.resetTouched() })
+    expect(result.current.touched.SIGNALK_USERNAME).toBe(false)
+    expect(result.current.values.SIGNALK_USERNAME).toBe('')
+  })
+
   it('saveTouchedKeys only sends the touched subset of the given keys', async () => {
     const fetchMock = vi.fn(async (url: string, options?: { method?: string; body?: string }) => {
       if (url.includes('/api/settings/secrets') && options?.method === 'POST') {

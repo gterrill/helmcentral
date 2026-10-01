@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MessageSquareText } from 'lucide-react'
 
+import { FormSection, SettingsLayout } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { useLogs } from '@/hooks/use-logs'
 
@@ -46,13 +47,21 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-medium uppercase tracking-[0.12em] text-muted-foreground">Logs</h3>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <SettingsLayout
+      title="Logs"
+      tools={
+        <Button
+          type="button"
+          variant="outline"
+          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+          onClick={clearLogs}
+        >
+          Clear
+        </Button>
+      }
+    >
+      <FormSection title="Recent entries">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1 rounded-md border bg-card p-1">
             {(['all', 'warnings', 'errors'] as const).map((value) => (
               <Button
@@ -77,12 +86,7 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
             />
             Live update
           </label>
-
-          <Button type="button" variant="outline" size="sm" onClick={clearLogs}>
-            Clear
-          </Button>
         </div>
-      </div>
 
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -115,8 +119,10 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
           )}
         </div>
       </div>
+      </FormSection>
 
-      <div className="rounded-md border border-border bg-card p-2 text-sm">
+      <FormSection title="Selected log">
+        <div className="text-sm">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Selected log</div>
           <Button
@@ -136,7 +142,8 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
         ) : (
           <p className="text-muted-foreground">Select a log line to ask Mate about it.</p>
         )}
-      </div>
-    </div>
+        </div>
+      </FormSection>
+    </SettingsLayout>
   )
 }

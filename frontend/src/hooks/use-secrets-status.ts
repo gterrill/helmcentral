@@ -39,6 +39,8 @@ export interface UseSecretsStatusResult {
   setFieldValue: (key: SecretKey, value: string) => void
   saveTouchedKeys: (keys: SecretKey[]) => Promise<Record<SecretKey, boolean>>
   clearKey: (key: SecretKey, label?: string) => Promise<Record<SecretKey, boolean> | null>
+  /** Drops every in-progress edit (values and touched flags) without writing anything - the Save bar's Discard. */
+  resetTouched: () => void
 }
 
 /**
@@ -49,7 +51,7 @@ export interface UseSecretsStatusResult {
  * so the several consumers across the settings page (SignalK, InfluxDB
  * sections, and up to two provider-settings modals at once) don't each
  * independently refetch or track their own local edit state — callers
- * (the page-level "Save Settings" button, or a provider modal's own Save
+ * (the page-level Save bar, or a provider modal's own Save
  * button) decide WHEN a given set of touched keys actually gets persisted
  * via `saveTouchedKeys`.
  */
@@ -181,5 +183,10 @@ export function useSecretsStatus(): UseSecretsStatusResult {
     [postSecretsPatch],
   )
 
-  return { status, values, touched, loading, error, setFieldValue, saveTouchedKeys, clearKey }
+  const resetTouched = useCallback(() => {
+    setValues(emptyValues())
+    setTouched(emptyTouched())
+  }, [])
+
+  return { status, values, touched, loading, error, setFieldValue, saveTouchedKeys, clearKey, resetTouched }
 }

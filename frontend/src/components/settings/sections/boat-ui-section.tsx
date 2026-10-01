@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { FormRow, FormSection, SettingsLayout } from '@/components/patterns'
 import { EngineProfileDialog } from '@/components/engine-profile-dialog'
 import { VesselParticularsForm } from '@/components/settings/sections/vessel-particulars-form'
 import { EquipmentProfileLinker } from '@/components/settings/sections/equipment-profile-linker'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -23,10 +24,9 @@ interface BoatUiSectionProps {
 
 export function BoatUiSection({ draft, onChange }: BoatUiSectionProps) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Vessel</FieldLegend>
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+    <SettingsLayout title="Vessel">
+      <FormSection title="Identity">
+        <FormRow>
           <Field>
             <FieldLabel htmlFor="vessel-prefix">Vessel Prefix</FieldLabel>
             <Input
@@ -46,13 +46,13 @@ export function BoatUiSection({ draft, onChange }: BoatUiSectionProps) {
               aria-label="Boat model"
             />
           </Field>
-        </div>
-      </FieldSet>
+        </FormRow>
+      </FormSection>
 
       <VesselParticularsForm />
 
       <VesselEnginesAndPowerSection />
-    </div>
+    </SettingsLayout>
   )
 }
 
@@ -205,22 +205,19 @@ function VesselEnginesAndPowerSection() {
 
   if (loading && !hydrated) {
     return (
-      <FieldSet>
-        <FieldLegend variant="label">Vessel: Engines and House Bank</FieldLegend>
-        <p className="mt-3 text-sm text-muted-foreground">Loading…</p>
-      </FieldSet>
+      <FormSection title="Vessel: Engines and House Bank">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </FormSection>
     )
   }
 
   return (
     <>
-      <FieldSet>
-        <FieldLegend variant="label">Engines</FieldLegend>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Tick every engine the frozen-sensor and engine-differential checks should watch. Each needs a linked
-          inventory item so its equipment profile applies gauge zones and pack thresholds.
-        </p>
-        <div className="mt-3 flex flex-col gap-2">
+      <FormSection
+        title="Engines"
+        description="Tick every engine the frozen-sensor and engine-differential checks should watch. Each needs a linked inventory item so its equipment profile applies gauge zones and pack thresholds."
+      >
+        <div className="flex flex-col gap-2">
           {instances.length === 0 && (
             <p className="text-sm text-muted-foreground">No propulsion instances published yet.</p>
           )}
@@ -243,24 +240,20 @@ function VesselEnginesAndPowerSection() {
           })}
         </div>
         {detectorLine('Frozen/impossible sensor check', candidates.detectors.frozen)}
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">Power</FieldLegend>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Pick which battery bank is the house bank the full-bank-charging check watches. Live voltage, current and
-          state of charge are shown for every bank so you can tell which one is which.
-        </p>
-        <div className="mt-3">
-          <PowerFieldset
-            houseBank={houseBank}
-            onChange={setHouseBank}
-            batteries={candidates.batteries}
-          />
-        </div>
+      <FormSection
+        title="Power"
+        description="Pick which battery bank is the house bank the full-bank-charging check watches. Live voltage, current and state of charge are shown for every bank so you can tell which one is which."
+      >
+        <PowerFieldset
+          houseBank={houseBank}
+          onChange={setHouseBank}
+          batteries={candidates.batteries}
+        />
         {detectorLine('Full-bank charging check', candidates.detectors.battery)}
         {detectorLine('Engine differential check', candidates.detectors.engines)}
-      </FieldSet>
+      </FormSection>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" onClick={() => void handleSave()} disabled={saving}>

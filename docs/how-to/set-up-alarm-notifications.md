@@ -18,7 +18,8 @@ checking it works.
    - **Web push (browser & phone)**: see [Web push over
      Tailscale](../reference/configuration.md#web-push-over-tailscale) first;
      it needs Helmcentral served over https before the toggle does anything.
-3. Save Settings.
+3. Choose **Save** in the bar that appears across the top once you have changed
+   something. **Discard** puts everything back as it was.
 4. Choose **Send Test** at the top of the Notifications panel. It sends a
    sample alert through every transport you have enabled, so you can confirm
    delivery before relying on it at sea.

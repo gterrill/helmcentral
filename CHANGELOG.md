@@ -77,6 +77,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Settings pages now show a save bar across the top of the screen as soon as
+  you have unsaved changes, with **Save** and **Discard**. It replaces the
+  **Save Settings** button at the foot of each page, and **Discard** puts every
+  field, including passwords and notification settings you have typed in, back
+  to what was saved. The bar goes away when there is nothing to save. Each
+  settings page is now one column of headed sections, with secondary actions
+  such as clearing the logs gathered under **Tools** at the bottom.
+- Switching a data provider under **Settings > Tiles** now tells you when the
+  change could not be saved, instead of leaving the old provider selected
+  without a word.
 - An item's maintenance schedule now follows its equipment profile live.
   Correct an interval on the profile and every item using it follows at
   once, instead of each item keeping the copy it took. An item's page lists

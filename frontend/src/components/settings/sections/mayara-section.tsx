@@ -1,4 +1,5 @@
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormRow, FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 
@@ -9,18 +10,12 @@ interface MayaraSectionProps {
 
 export function MayaraSection({ draft, onChange }: MayaraSectionProps) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Mayara Radar Server</FieldLegend>
-
-        <p className="text-xs text-muted-foreground">
-          This address is only needed for the radar picture overlay on the anchor watch map. ARPA
-          radar targets need no configuration here: they already arrive through the SignalK
-          plugin. That plugin does not proxy the spoke stream, so the picture needs a direct
-          address to mayara-server.
-        </p>
-
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+    <SettingsLayout title="Mayara">
+      <FormSection
+        title="Mayara Radar Server"
+        description="This address is only needed for the radar picture overlay on the anchor watch map. ARPA radar targets need no configuration here: they already arrive through the SignalK plugin. That plugin does not proxy the spoke stream, so the picture needs a direct address to mayara-server."
+      >
+        <FormRow>
           <Field>
             <FieldLabel htmlFor="mayara-address">Address</FieldLabel>
             <Input
@@ -40,8 +35,8 @@ export function MayaraSection({ draft, onChange }: MayaraSectionProps) {
               aria-label="Mayara port"
             />
           </Field>
-        </div>
-      </FieldSet>
-    </div>
+        </FormRow>
+      </FormSection>
+    </SettingsLayout>
   )
 }

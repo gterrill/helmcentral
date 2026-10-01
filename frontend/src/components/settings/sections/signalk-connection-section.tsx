@@ -1,7 +1,8 @@
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -38,7 +39,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
     }
   }
 
-  // Picking a result fills the form; "Save Settings" persists it. Same
+  // Picking a result fills the form; the Save bar persists it. Same
   // draft-then-save model as every other field on this page — nothing here
   // writes on click (ADR 0028).
   const applyDiscoveredServer = (address: string, port: number) => {
@@ -50,7 +51,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
 
   // A pure diagnostic against `/api/settings/signalk/test`: it probes the
   // address currently in the draft and reports what answered, without saving
-  // anything. Persisting is the pinned "Save Settings" button's job alone
+  // anything. Persisting is the Save bar's job alone
   // (which re-validates a changed address server-side), so there is exactly
   // one write path for this field — see ADR 0028. Deliberately does NOT call
   // onChange: the operator's typed value is the input to the test, not
@@ -84,8 +85,8 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
       // can't tell your boat apart from another server on the same network.
       setTestSuccess(
         vesselName
-          ? `Connected — ${vesselName} responded. Save Settings to apply.`
-          : 'Connected. Save Settings to apply.',
+          ? `Connected — ${vesselName} responded. Save to apply.`
+          : 'Connected. Save to apply.',
       )
     } catch (error) {
       setTestError(error instanceof Error ? error.message : 'Unable to connect to SignalK')
@@ -95,11 +96,9 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">SignalK Connection</FieldLegend>
-
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]">
+    <SettingsLayout title="SignalK">
+      <FormSection title="SignalK Connection">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]">
           <Field>
             <FieldLabel htmlFor="signalk-address">Address</FieldLabel>
             <Input
@@ -171,7 +170,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
           {servers !== null && servers.length > 0 && (
             <div className="flex flex-col gap-2 md:col-span-3">
               <span className="text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                {`Found on ${scannedSubnet ?? 'the local network'} — pick one to fill in, then Save Settings`}
+                {`Found on ${scannedSubnet ?? 'the local network'} — pick one to fill in, then Save`}
               </span>
               {servers.map((server) => (
                 <Button
@@ -187,23 +186,19 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
             </div>
           )}
         </div>
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">SignalK Credentials</FieldLegend>
-        <div className="mt-3">
-          <SecretFieldGroup
-            fields={[
-              { key: 'SIGNALK_USERNAME', label: 'SignalK Username' },
-              { key: 'SIGNALK_PASSWORD', label: 'SignalK Password' },
-            ]}
-          />
-        </div>
-      </FieldSet>
+      <FormSection title="SignalK Credentials">
+        <SecretFieldGroup
+          fields={[
+            { key: 'SIGNALK_USERNAME', label: 'SignalK Username' },
+            { key: 'SIGNALK_PASSWORD', label: 'SignalK Password' },
+          ]}
+        />
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">Labels</FieldLegend>
-        <div className="mt-3 grid grid-cols-1 gap-2">
+      <FormSection title="Labels">
+        <div className="grid grid-cols-1 gap-4">
           {Object.keys(draft.tankLabels).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((id) => (
             <Field key={id}>
               <FieldLabel htmlFor={`tank-label-${id}`}>{`Tank Label ${id}`}</FieldLabel>
@@ -216,8 +211,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
             </Field>
           ))}
         </div>
-      </FieldSet>
-
-    </div>
+      </FormSection>
+    </SettingsLayout>
   )
 }

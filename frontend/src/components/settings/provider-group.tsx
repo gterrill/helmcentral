@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useState } from 'react'
 
 import { ProviderIntegrationCard } from '@/components/settings/provider-integration-card'
@@ -88,7 +89,13 @@ export function ProviderGroup({ type, providers }: ProviderGroupProps) {
   const activeId = configuredId && configuredId !== '' ? configuredId : DEFAULT_ACTIVE_PROVIDER[type]
 
   const handleActivate = (id: string) => {
-    void save({ ui: { [settingsKey]: id } })
+    // Saves at once, outside the page's draft, so the Save bar never opens
+    // for it: a refused change has to report itself.
+    save({ ui: { [settingsKey]: id } }).catch((err: unknown) => {
+      toast.error('Could not change provider', {
+        description: err instanceof Error ? err.message : 'Unable to save settings',
+      })
+    })
   }
 
   return (

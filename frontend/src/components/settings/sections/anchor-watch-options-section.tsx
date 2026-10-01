@@ -1,4 +1,5 @@
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -20,10 +21,9 @@ export function AnchorWatchOptionsSection({
   onChange,
 }: AnchorWatchOptionsSectionProps) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Anchor</FieldLegend>
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+    <SettingsLayout title="Anchor Watch">
+      <FormSection title="Anchor">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="bow-roller-height">Bow Roller</FieldLabel>
             <InputGroup>
@@ -151,11 +151,9 @@ export function AnchorWatchOptionsSection({
             </FieldDescription>
           </Field>
         </div>
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">Anchor Watch Options</FieldLegend>
-        <div className="mt-3 space-y-3">
+      <FormSection title="Anchor Watch Options">
           <Field orientation="horizontal">
             <Switch
               checked={draft.autoRaiseOnMotoring}
@@ -186,8 +184,7 @@ export function AnchorWatchOptionsSection({
               depth here would leave less.
             </FieldDescription>
           </Field>
-        </div>
-      </FieldSet>
-    </div>
+      </FormSection>
+    </SettingsLayout>
   )
 }

@@ -8,11 +8,12 @@
  * Moving it there means it must behave like a settings section rather
  * than a self-contained panel: no Save button of its own (two adjacent
  * buttons that look alike is the UX this replaces), edits feed the
- * page's single dirty signal, and the page's one "Save Settings" —
+ * page's single dirty signal, and the page's one Save bar —
  * plus App.tsx's "Save and Continue" handle — persists the transport
  * config alongside everything else.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { createRef } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -41,7 +42,7 @@ vi.mock('@/hooks/use-secrets-status', async (importOriginal) => {
       values: Object.fromEntries(actual.SECRET_KEYS.map((key: SecretKey) => [key, ''])),
       touched: Object.fromEntries(actual.SECRET_KEYS.map((key: SecretKey) => [key, false])),
       loading: false, error: null,
-      setFieldValue: vi.fn(), saveTouchedKeys: vi.fn().mockResolvedValue({}), clearKey: vi.fn(),
+      setFieldValue: vi.fn(), saveTouchedKeys: vi.fn().mockResolvedValue({}), clearKey: vi.fn(), resetTouched: vi.fn(),
     }),
   }
 })
@@ -91,6 +92,16 @@ beforeEach(() => {
   transportsState.loadError = null
 })
 
+// ADR 0142: the page's Save bar portals into the app header's SaveBarSlot.
+function render(ui: ReactElement) {
+  return rtlRender(
+    <div>
+      <header className="relative"><div id="save-bar-slot" /></header>
+      {ui}
+    </div>,
+  )
+}
+
 function renderSettings(props: Partial<{ onDirtyChange: (d: boolean) => void }> = {}) {
   return render(
     <SettingsPage {...props} />,
@@ -120,8 +131,11 @@ describe('Settings Alarms section', () => {
     openAlarms()
 
     expect(screen.queryByRole('button', { name: /save notifications/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^save/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText(/webhook/i))
     expect(screen.getAllByRole('button', { name: /^save/i })).toHaveLength(1)
-    expect(screen.getByRole('button', { name: /save settings/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
   })
 })
 
@@ -138,18 +152,18 @@ describe('Settings Alarms section saving', () => {
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
 
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
-  it('persists the transport config through the page\'s Save Settings button', async () => {
+  it('persists the transport config through the page\'s Save bar', async () => {
     renderSettings()
     openAlarms()
 
     fireEvent.click(screen.getByLabelText(/webhook/i))
     fireEvent.change(screen.getByLabelText(/^url$/i), { target: { value: 'https://hass.local/hook' } })
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(saveTransportsMock).toHaveBeenCalledTimes(1))
     const [config] = saveTransportsMock.mock.calls[0] as [AlarmTransportConfig]
@@ -165,11 +179,27 @@ describe('Settings Alarms section saving', () => {
     fireEvent.click(screen.getByLabelText(/ntfy \(phone push\)/i))
     const token = screen.getByLabelText(/access token/i) as HTMLInputElement
     fireEvent.change(token, { target: { value: 'tk_live' } })
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(saveTransportsMock).toHaveBeenCalledTimes(1))
     expect(saveTransportsMock.mock.calls[0][1]).toEqual({ NTFY_TOKEN: 'tk_live' })
     await waitFor(() => expect(token.value).toBe(''))
+  })
+
+  it('Discard puts the transport draft and any entered secret back to what was saved', async () => {
+    renderSettings()
+    openAlarms()
+
+    const webhook = screen.getByLabelText(/webhook/i) as HTMLInputElement
+    expect(webhook.checked).toBe(false)
+    fireEvent.click(webhook)
+    expect(webhook.checked).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+
+    await waitFor(() => expect(webhook.checked).toBe(false))
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(saveTransportsMock).not.toHaveBeenCalled()
   })
 
   it('persists transports through the imperative handle App.tsx uses for "Save and Continue"', async () => {
@@ -195,7 +225,11 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    // Nothing touched on the transports panel; a regular-settings edit is
+    // what opens the bar from this section.
+    fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+    fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1))
     expect(saveTransportsMock).not.toHaveBeenCalled()
@@ -208,7 +242,7 @@ describe('Settings Alarms section saving', () => {
     openAlarms()
 
     fireEvent.click(screen.getByLabelText(/webhook/i))
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText(/notifications did not load/i)).toBeInTheDocument()
     expect(saveTransportsMock).not.toHaveBeenCalled()
@@ -220,7 +254,7 @@ describe('Settings Alarms section saving', () => {
     openAlarms()
 
     fireEvent.click(screen.getByLabelText(/webhook/i))
-    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText(/alarm-transports unreachable/i)).toBeInTheDocument()
     expect(screen.queryByText(/^settings saved$/i)).not.toBeInTheDocument()

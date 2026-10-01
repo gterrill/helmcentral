@@ -1,4 +1,5 @@
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { FormSection, SettingsLayout } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
@@ -11,10 +12,8 @@ interface InfluxdbSectionProps {
 
 export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">InfluxDB (optional)</FieldLegend>
-        <div className="mt-3 space-y-3">
+    <SettingsLayout title="InfluxDB">
+      <FormSection title="InfluxDB (optional)">
           <Field orientation="horizontal">
             <Switch checked={draft.influxdbEnabled} onCheckedChange={(checked) => onChange({ influxdbEnabled: checked })} />
             <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer</FieldLabel>
@@ -51,15 +50,11 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               />
             </Field>
           </div>
-        </div>
-      </FieldSet>
+      </FormSection>
 
-      <FieldSet>
-        <FieldLegend variant="label">InfluxDB Token</FieldLegend>
-        <div className="mt-3">
-          <SecretFieldGroup fields={[{ key: 'INFLUXDB_TOKEN', label: 'InfluxDB Token' }]} />
-        </div>
-      </FieldSet>
-    </div>
+      <FormSection title="InfluxDB Token">
+        <SecretFieldGroup fields={[{ key: 'INFLUXDB_TOKEN', label: 'InfluxDB Token' }]} />
+      </FormSection>
+    </SettingsLayout>
   )
 }

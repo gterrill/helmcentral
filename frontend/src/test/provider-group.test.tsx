@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { toast } from 'sonner'
 import { ProviderGroup } from '@/components/settings/provider-group'
 import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 // Guards against a regression of the bug where a provider select/card
 // silently pre-selected a hardcoded provider before settings ever loaded,
@@ -180,5 +183,44 @@ describe('ProviderGroup tide provider default', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/plugins/poi/osm-overpass')
     })
+  })
+})
+
+// Activating a provider saves at once, outside the page's draft, so the
+// Save bar never opens for it. A refused save must say so on its own.
+describe('ProviderGroup activation failure', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('reports a refused provider change instead of failing silently', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === 'POST'
+          ? { ok: false, json: async () => ({ error: 'settings locked' }) }
+          : { ok: true, json: async () => ({ ui: {} }) },
+      ),
+    )
+
+    render(
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <ProviderGroup
+            type="weather"
+            providers={[
+              { id: 'open-meteo', name: 'Open-Meteo', description: 'Free worldwide weather data' },
+              { id: 'weatherkit', name: 'WeatherKit', description: "Apple's weather API" },
+            ]}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>,
+    )
+
+    fireEvent.click(await screen.findByLabelText('Activate WeatherKit'))
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Could not change provider', { description: 'settings locked' }),
+    )
   })
 })

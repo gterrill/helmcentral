@@ -24,5 +24,6 @@ export { IndexFilters, type IndexFilter, type IndexFilterOption, type IndexFilte
 export { ResourceItem, type ResourceItemProps } from './resource-item'
 export { ResourceList, type ResourceListProps } from './resource-list'
 export { Page, type PageAction, type PageProps } from './page'
+export { SettingsLayout, type SettingsLayoutProps } from './settings-layout'
 export { SaveBar, type SaveBarProps } from './save-bar'
 export { SaveBarSlot, SAVE_BAR_SLOT_ID } from './save-bar-slot'

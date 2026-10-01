@@ -412,3 +412,32 @@ duplication problem this ADR exists to close.
   `documents-panel.tsx` and `empty-page-prompt.tsx` keep their own
   `onOpenHelp` - each of those points at a specific how-to, not the section's
   own page, so the header `?` cannot stand in for them.
+
+## Settings template
+
+`SettingsLayout` is a further template, modelled on Polaris' settings
+template: a page heading over one narrow, centred column (`max-w-3xl`, the
+width the settings sections already used) of `FormSection` blocks, with an
+optional `tools` slot rendered as a trailing "Tools" section for secondary and
+destructive actions that are not part of the draft (reset, export, clear).
+There is no aside and no second column. It is built on `Page`, so its heading
+matches every other CRUD page.
+
+Every settings section under `components/settings/sections` now uses it, in
+place of the ad-hoc `rounded-lg border bg-background/60 p-4` wrappers with
+`FieldSet`/`FieldLegend` headings (`assistant-section.tsx` follows separately).
+The Alarms notifications panel and the ignored-sensors list became
+`FormSection`s rather than a `Tile` and a bordered box. The Logs section's
+Clear button moved to `tools`.
+
+The settings page's pinned "Save Settings" button and its four inline
+error/success banners are replaced by `SaveBar`, the same way Equipment uses
+it. The bar is dirty when the regular draft, any touched secret or the
+alarm-transports draft differs from what was saved, and it shows the settings,
+secrets and transports errors joined. Discard restores the regular draft to its
+saved snapshot, clears every in-progress secret edit (`resetTouched` on
+`useSecretsStatus`, no network write) and puts the transports draft back to its
+saved copy (`reset` on `AlarmTransportsProvider`). The "Settings saved" banner
+is gone: the bar disappearing is the confirmation. The Vessel section's own
+Save buttons (particulars, engines and house bank) stay, because they write to
+their own endpoints and are not part of the page draft.
