@@ -260,6 +260,15 @@ and then Documents, are done (see "Documents migration" below); the flat
 migrations in between have not happened yet and Documents did not wait for
 them, because its folder browsing turned out not to be a tree at all.
 
+Locations has since been migrated: `locations-index.tsx` (IndexTable of name
+and bin count, a search box, "New location" in a small name-only dialog that
+opens the new location's page) and `location-editor.tsx` (a Details page at
+`/inventory/locations/<id>` with the name as a SaveBar draft, bins as
+inline-editable ResourceList rows saved on blur, and ConfirmDelete for the
+location, which shows the server's 409 verbatim). The unsaved-changes guard
+covers the rename through the same `inventoryDirty` flag the Equipment editor
+uses.
+
 ## Documents migration
 
 `documents-panel.tsx` and `document-details-page.tsx` moved onto the

@@ -100,6 +100,14 @@ export interface AppLocation {
    * and a plain `/inventory/locations` is the correct place to land on one
    * anyway (isCanonicalAppPath then just replaceState's it there). */
   binCode?: string
+  /** The Locations section's `/inventory/locations/<id>` segment - one
+   * location's own page, where it is renamed and its bins added or removed.
+   * Same rules as `binCode`: only meaningful alongside inventorySection
+   * 'locations', absent everywhere else, and a bare `/inventory/locations`
+   * carries no value rather than an explicit null. A brand new location has
+   * no id until the server assigns one, so there is no draft state to
+   * serialise: creating one navigates here once it exists. */
+  locationEditId?: string
 }
 
 export interface LocationContext {
@@ -236,7 +244,15 @@ export function parseAppLocation(pathname: string): AppLocation {
       }
       return { panel: 'inventory', inventorySection: 'locations' }
     }
-    if (second === 'maintenance' || second === 'profiles' || second === 'locations' || second === 'stocktake') {
+    if (second === 'locations') {
+      const idSegment = segments[2]
+      const locationEditId = idSegment !== undefined ? decodeSegment(idSegment) : null
+      if (locationEditId) {
+        return { panel: 'inventory', inventorySection: 'locations', locationEditId }
+      }
+      return { panel: 'inventory', inventorySection: 'locations' }
+    }
+    if (second === 'maintenance' || second === 'profiles' || second === 'stocktake') {
       return { panel: 'inventory', inventorySection: second }
     }
     if (second === 'equipment') {
@@ -382,6 +398,9 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     if (section === 'locations' && loc.binCode) {
       return `/inventory/bins/${encodeURIComponent(loc.binCode)}`
     }
+    if (section === 'locations' && loc.locationEditId) {
+      return `/inventory/locations/${encodeURIComponent(loc.locationEditId)}`
+    }
     return `/inventory/${section}`
   }
 
@@ -424,6 +443,9 @@ export interface InventoryEditorState {
   section: InventorySectionId
   equipmentEditId: string | null
   creating: boolean
+  /** The location page (`/inventory/locations/<id>`), which holds its own
+   * rename draft. Absent or null when no location page is open. */
+  locationEditId?: string | null
 }
 
 /**
@@ -442,6 +464,13 @@ export interface InventoryEditorState {
  * for the draft and none for a section switch.
  */
 export function inventoryEditorClosedBy(current: InventoryEditorState, target: AppLocation): boolean {
+  // A location page is the other editor that holds a draft. It has a URL, so
+  // it survives only a target naming the same location.
+  if (current.section === 'locations' && (current.locationEditId ?? null) !== null) {
+    return target.panel !== 'inventory'
+      || (target.inventorySection ?? 'equipment') !== 'locations'
+      || (target.locationEditId ?? null) !== current.locationEditId
+  }
   const showing = current.section === 'equipment'
     && (current.equipmentEditId !== null || current.creating)
   if (!showing) return false

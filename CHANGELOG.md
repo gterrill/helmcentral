@@ -77,6 +77,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Inventory → Locations is now a list of your locations with how many bins
+  each holds, searchable by name. Press **New location** to add one, or tap a
+  location to open its own page, where you rename it, add and remove its bins,
+  or delete it. Bin codes and names still edit in place. Back from a bin's
+  page returns to its location.
 - An item's maintenance schedule now follows its equipment profile live.
   Correct an interval on the profile and every item using it follows at
   once, instead of each item keeping the copy it took. An item's page lists

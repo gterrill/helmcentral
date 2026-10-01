@@ -94,14 +94,26 @@ For the profile format itself, see
 
 ## Locations
 
-A zone is an area of the boat: salon, flybridge, lazarette, engine room,
+A location is an area of the boat: salon, flybridge, lazarette, engine room,
 forepeak. A bin is a numbered container in one. Bin codes are short and
 meant to be printed on a label and stuck to the bin, so `LAZ-02` rather than
 something generated.
 
-A bin belongs to one zone, so naming the bin names the zone. A zone or bin
-that something is filed in cannot be deleted until you have moved what is in
-it, and the refusal tells you how many things that is.
+Locations opens on a list of your locations with how many bins each holds.
+Search narrows it by name, and the column headings sort it. Press **New
+location**, give it a name, and its own page opens ready for bins. Tap any
+location in the list to open that page, where you can:
+
+- **Rename it.** Edit the name and press **Save** in the bar that appears at
+  the top.
+- **Add bins.** Type a code and, if you like, a name, then press **Add bin**.
+- **Change or remove a bin.** Edit a bin's code or name in place, or press
+  the trash button beside it to remove it.
+- **Delete the location.** Use the menu at the top right, then confirm.
+
+A bin belongs to one location, so naming the bin names the location. A
+location or bin that something is filed in cannot be deleted until you have
+moved what is in it, and the refusal tells you how many things that is.
 
 Tap a bin's code to open its own page: everything filed in it, at a glance,
 with a photo of each thing underneath. See Tags and photos.
@@ -199,9 +211,9 @@ a scannable identifier.
 
 ## Browsing and searching
 
-The default view shows zones, then the bins in a zone, then each bin's contents.
-A zone shows how many bins and items it holds; a
-bin shows its contents and their photos.
+The default view shows locations, then the bins in a location, then each bin's
+contents. A location shows how many bins it holds; a bin shows its contents and
+their photos.
 
 Search is fuzzy and runs across names, part numbers, manufacturers and serials.
 It lists matching items and highlights the bins that hold them.

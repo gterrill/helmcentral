@@ -452,7 +452,7 @@ describe('App: three more exits guarded against losing stocktake or quick-add wo
     await screen.findByRole('heading', { name: 'LAZ-02' })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
 
-    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Locations' }))
+    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Lazarette' }))
     await screen.findByText('Leave this bin?')
     expect(screen.getByText('The name and photos you have added will be cleared.')).toBeInTheDocument()
     // The dialog is modal - the rest of the tree (the bin page underneath)
@@ -465,7 +465,7 @@ describe('App: three more exits guarded against losing stocktake or quick-add wo
     expect(screen.queryByText('Leave this bin?')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('Gaffer tape')
 
-    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Locations' }))
+    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Lazarette' }))
     await screen.findByText('Leave this bin?')
     fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
 
@@ -477,10 +477,13 @@ describe('App: three more exits guarded against losing stocktake or quick-add wo
     render(<App />)
     await screen.findByRole('heading', { name: 'LAZ-02' })
 
-    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Locations' }))
+    fireEvent.click(within(binPageContainer()).getByRole('button', { name: 'Lazarette' }))
 
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'LAZ-02' })).not.toBeInTheDocument())
     expect(screen.queryByText('Leave this bin?')).not.toBeInTheDocument()
+    // Back goes up to the bin's own location page, not the Locations index.
+    expect(window.location.pathname).toBe('/inventory/locations/z1')
+    await screen.findByLabelText('Location name')
   })
 
   it('leaving Inventory from the sidebar asks first when the bin page holds quick-add work; Stay keeps it, Leave performs it', async () => {
@@ -644,7 +647,7 @@ describe('App: the guard dialog freezes its wording at the moment it opens', () 
 
     const heading = screen.getByRole('heading', { name: 'LAZ-02' })
     const container = heading.closest('.mx-auto') as HTMLElement
-    fireEvent.click(within(container).getByRole('button', { name: 'Locations' }))
+    fireEvent.click(within(container).getByRole('button', { name: 'Lazarette' }))
 
     await screen.findByText('Leave this bin?')
     expect(screen.getByText('The name and photos you have added will be cleared.')).toBeInTheDocument()

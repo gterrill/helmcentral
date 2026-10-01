@@ -13,8 +13,9 @@ standard sticker to read poorly or not at all stuck straight onto one.
 
 ## Write a tag from an Android phone
 
-1. Open the bin's page (tap its code in Locations, or create the bin first
-   if it doesn't exist yet) or the item's own editor.
+1. Open the bin's page (open its location in Locations and tap the bin's
+   code, or add the bin there first if it doesn't exist yet) or the item's
+   own editor.
 2. Find the tag address - on the bin's page, or in the item's Location
    section - and press **Write tag**.
 3. Hold the tag against the back of the phone when prompted, and hold it

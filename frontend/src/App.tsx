@@ -776,6 +776,9 @@ export function App() {
   // bin page" (the ordinary Locations index), the same convention
   // wallDisplaysSlug/documentsEditId use for their own "nothing open" state.
   const [inventoryBinCode, setInventoryBinCode] = useState<string | null>(initialLocation.binCode ?? null)
+  // The Locations section's own page - `/inventory/locations/<id>`. Same
+  // "null is the index" convention as inventoryBinCode.
+  const [inventoryLocationEditId, setInventoryLocationEditId] = useState<string | null>(initialLocation.locationEditId ?? null)
   // ADR 0127: the bin/zone the bin page's "Full item" button last asked
   // for - local UI state, like inventoryCreatingEquipment above, never
   // serialised to the URL (a "New item" draft has none of its own either
@@ -970,9 +973,11 @@ export function App() {
       || inventorySection !== 'equipment'
       || (inventoryEquipmentEditId === null && !inventoryCreatingEquipment)
     ) {
+      // The location page reports its rename draft through the same flag.
+      if (activePanel === 'inventory' && inventorySection === 'locations' && inventoryLocationEditId !== null) return
       setInventoryDirty(false)
     }
-  }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment])
+  }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment, inventoryLocationEditId])
   // inventoryHasWork/inventoryWorkDetail (declared up with inventoryDirty)
   // are only meaningful while Stocktake or the bin page's quick-add are
   // actually mounted and reporting them - same reasoning as inventoryDirty's
@@ -1195,6 +1200,7 @@ export function App() {
       // doc comment above.
       setInventoryCreatingEquipment(false)
       setInventoryBinCode(loc.binCode ?? null)
+      setInventoryLocationEditId(loc.locationEditId ?? null)
     }
   }, [pages, pagesLoading, setActivePageId])
 
@@ -1241,6 +1247,7 @@ export function App() {
       inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
       equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
       binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
+      locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
     }, ctx)
     // documents is the one panel whose canonical URL can carry a query
     // string (?folder=/?document=/?section=) - pathname alone is never
@@ -1312,6 +1319,7 @@ export function App() {
             section: inventorySection,
             equipmentEditId: inventoryEquipmentEditId,
             creating: inventoryCreatingEquipment,
+            locationEditId: inventoryLocationEditId,
           },
           parsed,
         )
@@ -1353,6 +1361,7 @@ export function App() {
           inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
           equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
           binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
+          locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
         }, ctx))
       }
     }
@@ -1361,7 +1370,7 @@ export function App() {
   }, [
     shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, requestWithinInventory, applyAppLocation,
     activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId, wallDisplaysSlug,
-    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
+    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId, pages, pagesLoading, canAdmin,
   ])
 
   // If admin access ends (or was never established) while Settings happens
@@ -2899,7 +2908,14 @@ export function App() {
           <InventoryPanel
             ref={inventoryPanelRef}
             activeSectionId={inventorySection}
-            onSectionChange={(id) => { requestWithinInventory(() => setInventorySection(id)) }}
+            onSectionChange={(id) => {
+              requestWithinInventory(() => {
+                setInventorySection(id)
+                // Picking Locations in the nav from a location page returns
+                // to the index, not to the page already open.
+                setInventoryLocationEditId(null)
+              })
+            }}
             equipmentEditId={inventoryEquipmentEditId}
             creatingEquipment={inventoryCreatingEquipment}
             // Opening an item or starting a new one enters the editor, so
@@ -2932,6 +2948,7 @@ export function App() {
               requestWithinInventory(() => {
                 setInventorySection('equipment')
                 setInventoryBinCode(null)
+                setInventoryLocationEditId(null)
                 setInventoryEquipmentEditId(id)
               })
             }}
@@ -2939,6 +2956,7 @@ export function App() {
               requestWithinInventory(() => {
                 setInventorySection('equipment')
                 setInventoryBinCode(null)
+                setInventoryLocationEditId(null)
                 setInventoryNewEquipmentPreset(preset ?? null)
                 setInventoryCreatingEquipment(true)
               })
@@ -3001,6 +3019,7 @@ export function App() {
             onOpenBin={(code) => {
               requestWithinInventory(() => {
                 setInventorySection('locations')
+                setInventoryLocationEditId(null)
                 setInventoryBinCode(code)
               })
             }}
@@ -3010,7 +3029,32 @@ export function App() {
             // quick-add form living on this same page (ADR 0127), which can
             // hold a staged name/photos or a photo still queued for Retry.
             // Routed through the same guard onOpenBin/onSectionChange use.
-            onCloseBin={() => { requestWithinInventory(() => { setInventoryBinCode(null) }) }}
+            onCloseBin={(zoneId) => {
+              // Back is "up": a resolved bin returns to its own location's
+              // page, whether the operator came from there or from a tag
+              // scan. No zone (unknown bin, failed load) is the index.
+              requestWithinInventory(() => {
+                setInventoryBinCode(null)
+                setInventoryLocationEditId(zoneId ?? null)
+              })
+            }}
+            locationEditId={inventoryLocationEditId}
+            // Opening a location discards nothing; Back is the one exit that
+            // can throw away an unsaved rename, so it goes through the guard.
+            onOpenLocation={(id) => {
+              requestWithinInventory(() => {
+                setInventorySection('locations')
+                setInventoryBinCode(null)
+                setInventoryLocationEditId(id)
+              })
+            }}
+            onCloseLocation={() => { requestWithinInventory(() => { setInventoryLocationEditId(null) }) }}
+            // A delete that already succeeded: the page is still reporting
+            // dirty if a rename was pending, and has nothing left to save.
+            onLocationDeleted={() => {
+              setInventoryDirty(false)
+              setInventoryLocationEditId(null)
+            }}
             newEquipmentPreset={inventoryNewEquipmentPreset}
           />
         )

@@ -4,7 +4,8 @@ import { BinPage } from '@/components/inventory/bin-page'
 import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
-import { LocationsSection } from '@/components/inventory/locations-section'
+import { LocationEditor, type LocationEditorHandle } from '@/components/inventory/location-editor'
+import { LocationsIndex } from '@/components/inventory/locations-index'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
@@ -86,13 +87,23 @@ interface InventoryPanelProps {
   binCode: string | null
   /** Locations-section bin click, or a tag/deep link landing on one. */
   onOpenBin: (code: string) => void
-  /** The bin page's own Back. Release-fixes code-review finding: this used
+  /** The bin page's own Back, which goes up to the bin's location page when
+   * the bin resolved (`zoneId`), else to the Locations index. Release-fixes code-review finding: this used
    * to be a plain setter on the theory that the bin page holds no draft to
    * discard - true of the equipment editor, but the quick-add form living on
    * this same page (ADR 0127) can hold a staged name/photos or a photo still
    * queued for Retry, so App.tsx routes this through the same
    * requestWithinInventory guard onOpenBin/onSectionChange already use. */
-  onCloseBin: () => void
+  onCloseBin: (zoneId?: string) => void
+  /** `/inventory/locations/<id>` - one location's own page. null is the
+   * Locations index. Same index/page split as binCode and equipmentEditId. */
+  locationEditId: string | null
+  /** Locations index row click. Opening a location never discards anything. */
+  onOpenLocation: (id: string) => void
+  /** The location page's Back - the one exit that can discard an unsaved rename. */
+  onCloseLocation: () => void
+  /** A delete that already succeeded. */
+  onLocationDeleted: () => void
   /** The zone/bin App.tsx stashed from the last onNewEquipment(preset) call
    * - read once by EquipmentEditor when it mounts a brand new draft. null
    * for the ordinary "New item" button. */
@@ -121,6 +132,10 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     binCode,
     onOpenBin,
     onCloseBin,
+    locationEditId,
+    onOpenLocation,
+    onCloseLocation,
+    onLocationDeleted,
     newEquipmentPreset,
   },
   ref,
@@ -131,8 +146,14 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
   // it) when nothing is bound, same contract as SettingsPageHandle/
   // DocumentDetailsPageHandle's own imperative save.
   const editorRef = useRef<EquipmentEditorHandle>(null)
+  // The Locations page's rename draft is the only other thing that can be
+  // dirty, and never at the same time as the Equipment editor.
+  const locationEditorRef = useRef<LocationEditorHandle>(null)
   useImperativeHandle(ref, () => ({
-    save: async () => { await editorRef.current?.save() },
+    save: async () => {
+      await editorRef.current?.save()
+      await locationEditorRef.current?.save()
+    },
   }), [])
 
   const showEquipmentEditor = activeSectionId === 'equipment' && (equipmentEditId !== null || creatingEquipment)
@@ -184,7 +205,20 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
           />
         )
       }
-      return <LocationsSection canWrite={canWrite} onOpenBin={onOpenBin} />
+      if (locationEditId !== null) {
+        return (
+          <LocationEditor
+            ref={locationEditorRef}
+            id={locationEditId}
+            onBack={onCloseLocation}
+            onDeleted={onLocationDeleted}
+            onOpenBin={onOpenBin}
+            onDirtyChange={onDirtyChange}
+            canWrite={canWrite}
+          />
+        )
+      }
+      return <LocationsIndex onOpenLocation={onOpenLocation} canWrite={canWrite} />
     }
     if (activeSectionId === 'stocktake') {
       return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />
