@@ -19,6 +19,11 @@ const { mockPixelShift, mockWakeLock } = vi.hoisted(() => ({
 }))
 vi.mock('@/hooks/use-pixel-shift', () => ({ usePixelShift: mockPixelShift }))
 vi.mock('@/hooks/use-screen-wake-lock', () => ({ useScreenWakeLock: mockWakeLock }))
+// The shell also reports its viewport to the backend. Unmocked, that PUT goes
+// to a server that isn't there, and its failure logs after the file tears down.
+vi.mock('@/hooks/use-display-viewport', () => ({
+  useDisplayViewport: () => ({ w: window.innerWidth, h: window.innerHeight }),
+}))
 
 function display(overrides: Partial<Display> = {}): Display {
   return {

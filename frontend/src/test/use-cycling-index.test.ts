@@ -70,6 +70,23 @@ describe('useCyclingIndex', () => {
     expect(result.current).toBe(0)
   })
 
+  it('restarts the interval on reset so the first item gets a full interval', () => {
+    vi.useFakeTimers()
+    const { result, rerender } = renderHook(
+      ({ resetKey }: { resetKey: string }) => useCyclingIndex(3, 10, resetKey),
+      { initialProps: { resetKey: 'a|b|c' } },
+    )
+
+    act(() => { vi.advanceTimersByTime(8000) })
+    rerender({ resetKey: 'c|b|a' })
+    expect(result.current).toBe(0)
+
+    act(() => { vi.advanceTimersByTime(3000) })
+    expect(result.current).toBe(0)
+    act(() => { vi.advanceTimersByTime(7000) })
+    expect(result.current).toBe(1)
+  })
+
   it('never renders the stale index after resetKey changes, not even for one render', () => {
     // A caller that acts on each new index (the Nearby map flies to it)
     // would otherwise start toward the old position before the reset lands.

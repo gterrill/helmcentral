@@ -120,8 +120,8 @@ describe('tile inset', () => {
     const { container, getByLabelText } = renderGrid({ editing: true })
     const inner = container.querySelector<HTMLElement>('[data-testid="widget-wind"]')!.closest<HTMLElement>('.pt-2')
     expect(inner).not.toBeNull()
-    expect(getByLabelText(/Remove Wind tile/i).className).toContain('top-5')
-    expect(getByLabelText(/Remove Wind tile/i).className).not.toContain('-top-2')
+    expect(getByLabelText(/Remove Wind tile/i).className).toContain('bottom-5')
+    expect(getByLabelText(/Remove Wind tile/i).className).not.toMatch(/\btop-\d+\b/)
     expect(getByLabelText(/Drag handle for the Wind tile/i).className).toContain('top-5')
   })
 

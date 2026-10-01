@@ -74,15 +74,18 @@ export function poiCategoryById(id: string): PoiCategory | undefined {
 // reason as anchor-view.ts.
 const MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 = 78271.51696402048
 const METERS_PER_NM = 1852
-export const POI_MAP_MIN_ZOOM = 8
+export const POI_MAP_MIN_ZOOM = 5
 export const POI_MAP_MAX_ZOOM = 16
 
 /**
  * The zoom level whose visible span holds a circle of the given range,
  * centred at `lat`, inside a map `heightPx` tall — i.e. the range's full
- * diameter fits the tile's height. Clamped to [8, 16]: below 8 the vessel's
- * own position is barely a dot, and above 16 raster tiles this app draws
- * (OpenSeaMap, the Carto basemap) are already past their native resolution.
+ * diameter fits the tile's height. Clamped to [5, 16]: the floor leaves room
+ * for the maximum 25 nm range on a short map at high latitude (about zoom 7.8
+ * on a 300px map at 27 degrees south, at MapLibre's 512px tile scale), and
+ * below 5 the vessel's own position is barely a dot; above 16 the raster
+ * tiles this app draws (OpenSeaMap, the Carto basemap) are already past their
+ * native resolution.
  */
 export function zoomForRangeNm(rangeNm: number, lat: number, heightPx: number): number {
   if (!(rangeNm > 0) || !(heightPx > 0)) return POI_MAP_MIN_ZOOM

@@ -141,7 +141,7 @@ describe('Tile legend', () => {
   // between the card and the pill has to pass the card's border colour down,
   // or a stale or alarming tile turns its edge and title amber but leaves the
   // controls grey.
-  it('passes the card border colour down to the controls on the top edge', () => {
+  test('passes the card border colour down to the controls on the top edge', () => {
     const { container } = render(
       <Tile title="Wind" stale titleExtra={<button>Apparent</button>}>
         <p>content</p>
