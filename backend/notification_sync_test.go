@@ -198,7 +198,7 @@ func TestNotificationSyncerAFetchErrorStopsTheRunWithoutTouchingTheSnapshot(t *t
 	}
 
 	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
-	if len(statuses) != 1 || statuses[0].Label != "arrivalCircleEntered" {
+	if len(statuses) != 1 || statuses[0].Path != "notifications.arrivalCircleEntered" {
 		t.Fatalf("a fetch error must leave the snapshot untouched, got %+v", statuses)
 	}
 

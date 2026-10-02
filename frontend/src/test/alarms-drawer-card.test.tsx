@@ -48,7 +48,7 @@ function renderDrawer(alarms: ActiveAlarm[]) {
 }
 
 describe('AlarmsDrawer active alarm card', () => {
-  it('renders the rule label as headline, the operator sentence, the path once, and the acknowledged pill', () => {
+  it('renders the rule label as headline, the operator sentence, no path, and the acknowledged pill', () => {
     renderDrawer([
       makeAlarm({
         rule_id: 'helmcentral:barometer-falling',
@@ -78,10 +78,8 @@ describe('AlarmsDrawer active alarm card', () => {
       screen.getByText('Falling 1.1 mb/hr. Clears once the fall eases to 0.7 mb/hr.'),
     ).toBeInTheDocument()
 
-    // The path appears exactly once, in its own case.
-    const pathMatches = screen.getAllByText('helmcentral.environment.pressureRate')
-    expect(pathMatches).toHaveLength(1)
-    expect(pathMatches[0]).not.toHaveClass('uppercase')
+    // The path is machinery; the meta line carries only the times.
+    expect(screen.queryByText('helmcentral.environment.pressureRate')).toBeNull()
 
     // No missing-time placeholder anywhere on the card.
     expect(screen.queryByText(/--/)).toBeNull()
@@ -91,13 +89,13 @@ describe('AlarmsDrawer active alarm card', () => {
     expect(screen.queryByRole('button', { name: /silence/i })).toBeNull()
   })
 
-  it('renders a bus notification message plus the clears-elsewhere line, and omits Raised when absent', () => {
+  it('renders a bus notification as title and plain sentence, with no path and no clearing claim', () => {
     renderDrawer([
       makeAlarm({
-        rule_id: 'notifications:radar-guard-zone-1',
-        label: 'Radar guard zone 1',
-        path: 'radar.fur6424A.guardZone.1',
-        message: 'Radar guard zone 1: target 100000294 acquired',
+        rule_id: 'notifications:radar.fur6424A.guardZone.1',
+        label: 'Radar Guard Zone 1',
+        path: 'notifications.radar.fur6424A.guardZone.1',
+        message: 'Target in guard zone 1.',
         state: 'alert',
         phase: 'active',
         acked_at: undefined,
@@ -105,30 +103,30 @@ describe('AlarmsDrawer active alarm card', () => {
       }),
     ])
 
-    expect(
-      screen.getByText('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Radar Guard Zone 1')).toBeInTheDocument()
+    expect(screen.getByText('Target in guard zone 1.')).toBeInTheDocument()
+    expect(screen.queryByText(/Clears when the source/)).toBeNull()
+    expect(screen.queryByText(/fur6424A/)).toBeNull()
     expect(screen.queryByText(/^Raised/)).toBeNull()
   })
 
-  it('renders the path once when it equals the label, for a bus alarm whose label is the path itself', () => {
+  it('renders no body line when the condition sentence is empty', () => {
     renderDrawer([
       makeAlarm({
-        rule_id: 'notifications:radar-guard-zone-1',
-        label: 'radar.fur6424A.guardZone.1',
-        path: 'notifications.radar.fur6424A.guardZone.1',
-        message: 'Radar fur6424A guard zone 1: target 100000294 acquired',
+        rule_id: 'notifications:navigation.anchor',
+        label: 'Navigation Anchor',
+        path: 'notifications.navigation.anchor',
+        message: '',
+        op: undefined,
         state: 'alert',
         phase: 'active',
       }),
     ])
-
-    // The label IS the path (after stripping the notifications. prefix), so
-    // the meta line must not repeat it below the headline.
-    expect(screen.getAllByText('radar.fur6424A.guardZone.1')).toHaveLength(1)
+    expect(screen.getByText('Navigation Anchor')).toBeInTheDocument()
+    expect(screen.getByText('Navigation Anchor').nextElementSibling?.tagName).not.toBe('P')
   })
 
-  it('still renders both the label and the path when they differ, for a rule alarm', () => {
+  it('renders the rule label without the path, for a rule alarm', () => {
     renderDrawer([
       makeAlarm({
         rule_id: 'house-bank-low',
@@ -145,7 +143,7 @@ describe('AlarmsDrawer active alarm card', () => {
     ])
 
     expect(screen.getByText('House bank low')).toBeInTheDocument()
-    expect(screen.getByText('electrical.batteries.house.voltage')).toBeInTheDocument()
+    expect(screen.queryByText('electrical.batteries.house.voltage')).toBeNull()
   })
 
   it('renders a generic above rule sentence for a voltage alarm', () => {

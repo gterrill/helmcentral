@@ -271,32 +271,35 @@ describe('alarmConditionSentence', () => {
     expect(alarmConditionSentence(alarm)).toContain('No data.')
   })
 
-  // The bus message has no terminal punctuation of its own (SignalK builds
-  // it as a fragment), so run straight into "Clears..." reads as one
-  // run-on sentence. A missing period gets exactly one added.
-  it('appends the message and the clears-when-the-source-clears line for a bus notification, adding a period the message lacks', () => {
+  // The backend has already normalised the bus message (no ids, one
+  // terminal period), so the card shows it as is, with no clearing claim.
+  it('shows a bus notification message as is, with no clearing clause', () => {
+    const alarm = makeAlarm({ op: undefined, unit: undefined, message: 'Target in guard zone 1.' })
+    expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 1.')
+  })
+
+  it('is empty when a bus notification has no message', () => {
+    expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: '' }))).toBe('')
+  })
+
+  it('appends live radar figures after the sentence', () => {
     const alarm = makeAlarm({
       op: undefined,
       unit: undefined,
-      message: 'Radar guard zone 1: target 100000294 acquired',
+      message: 'Target in guard zone 1.',
+      radar_target: { bearing_rad: (42 * Math.PI) / 180, range_m: 1.4 * 1852, cpa_m: 0.3 * 1852, tcpa_seconds: 100 },
     })
-    expect(alarmConditionSentence(alarm)).toBe('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.')
+    expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 1 · 042°T · 1.4 NM · CPA 0.3 NM')
   })
 
-  it('does not add a second period when the bus message already ends with one', () => {
+  it('omits CPA when the radar has none, and wraps bearings into 0-359', () => {
     const alarm = makeAlarm({
       op: undefined,
       unit: undefined,
-      message: 'Radar guard zone 1: target 100000294 acquired.',
+      message: 'Target in guard zone 2.',
+      radar_target: { bearing_rad: -Math.PI / 2, range_m: 926 },
     })
-    expect(alarmConditionSentence(alarm)).toBe('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.')
-  })
-
-  it('does not add a period when the bus message already ends with ! or ?', () => {
-    expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: 'Anchor dragging!' })))
-      .toBe('Anchor dragging! Clears when the source clears it.')
-    expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: 'Anchor dragging?' })))
-      .toBe('Anchor dragging? Clears when the source clears it.')
+    expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 2 · 270°T · 0.5 NM')
   })
 
   // Law of Storms tendency rules (ADR 0095) fire on a Pa reading of a

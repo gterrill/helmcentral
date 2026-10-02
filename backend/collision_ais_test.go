@@ -87,7 +87,7 @@ func TestCollisionNotificationsSurfaceFromATargetContext(t *testing.T) {
 	if statuses[0].State != alarmStateWarn {
 		t.Fatalf("state: got %q, want %q", statuses[0].State, alarmStateWarn)
 	}
-	if statuses[0].Message != "TASHTEGO - CPA WARNING" {
+	if statuses[0].Message != "TASHTEGO inside the CPA limit." {
 		t.Fatalf("message: got %q", statuses[0].Message)
 	}
 }

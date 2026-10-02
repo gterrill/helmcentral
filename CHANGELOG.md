@@ -23,6 +23,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the local flood direction, and any lag before the stream turns, to your
   standing notes to have Mate use them.
 
+### Changed
+
+- Alarm cards raised by other instruments on the network now name the event
+  in plain words instead of showing the instrument's address. A radar guard
+  zone alarm reads "Radar Guard Zone 1", and while the radar is still
+  tracking the target it gives its bearing, range and closest approach. An AIS
+  collision alarm reads "Collision Risk" and names the vessel. The
+  "Clears when the source clears it" line is gone, and so is the address under
+  each card. Push notifications and emails carry the same title, so if you
+  filter alarm notifications on their text, check your filters after
+  upgrading. The anchor drag alarm now reads "Anchor 45 m from the drop point".
+
 ## [0.39.0] - 2026-10-02
 
 ### Added

@@ -120,6 +120,11 @@ type alarmStatus struct {
 	// raise event.
 	Encounter string `json:"encounter,omitempty"`
 
+	// RadarTarget carries the live radar figures behind a guard-zone
+	// notification, looked up on every read (alarm_presentation.go). nil when
+	// the target is not in the store.
+	RadarTarget *alarmRadarTarget `json:"radar_target,omitempty"`
+
 	// Evidence is the "why" sentence behind an anomaly-detection alarm
 	// (anomaly_detector.go's anomalyReading.Evidence, e.g. "House bank 96%
 	// SoC, 28.90 V, charging 42 A"), and empty for every other alarm source.

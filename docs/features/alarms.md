@@ -29,8 +29,14 @@ says you have seen it; it stops the sound and the visual alert, and the alarm
 stays on the board until the value has recovered. Every alarm card shows its
 clearing condition in your selected units: "Falling 1.1 mb/hr. Clears once the
 fall eases to 0.7 mb/hr." An alarm raised by something else on the network,
-which has no rule behind it, says so and clears when its source clears it.
-If that kind of alarm gets worse after you acknowledge it, it comes back as
+such as a radar guard zone or an engine gateway, has no rule behind it, so
+it clears when the instrument that raised it lets go, and the card gives no
+clearing condition it cannot vouch for. Its card names the event in plain
+words, "Radar Guard Zone 1", rather than the instrument's own address. A
+guard zone card also gives the target's bearing, range and closest approach
+while the radar is still tracking it: "Target in guard zone 1 · 042°T ·
+1.4 NM · CPA 0.3 NM". If the radar has lost the target, or its feed is down,
+the card says only that a target is in the zone. If that kind of alarm gets worse after you acknowledge it, it comes back as
 active and needs a fresh acknowledgement. The card shows when it was
 acknowledged, even if you did it at the chartplotter.
 

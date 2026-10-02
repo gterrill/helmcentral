@@ -1281,7 +1281,7 @@ func TestReconcileNotificationsAddsALiveLeafWeDidNotHold(t *testing.T) {
 	}
 
 	statuses := signalKNotifications(snapshot, ownsNothing, alarmNow)
-	if len(statuses) != 1 || statuses[0].Label != "navigation.arrivalCircleEntered" {
+	if len(statuses) != 1 || statuses[0].Path != "notifications.navigation.arrivalCircleEntered" {
 		t.Fatalf("expected the leaf added and listed, got %+v", statuses)
 	}
 }

@@ -39,8 +39,9 @@ func TestAnchorWatcherRaisesOutsideRadiusPlusBuffer(t *testing.T) {
 	if event.Status.State != alarmStateAlarm {
 		t.Fatalf("state: got %q, want %q", event.Status.State, alarmStateAlarm)
 	}
-	if !strings.Contains(event.Status.Message, "dragging") {
-		t.Fatalf("message should say it is dragging, got %q", event.Status.Message)
+	// Published to SignalK on its own, so it has to say it is the anchor.
+	if !strings.HasPrefix(event.Status.Message, "Anchor ") || !strings.Contains(event.Status.Message, "from the drop point") {
+		t.Fatalf("message should give the distance from the drop point, got %q", event.Status.Message)
 	}
 }
 

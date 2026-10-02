@@ -45,6 +45,18 @@ export interface ActiveAlarm {
   encounter?: string
 
   /**
+   * Live radar figures for the target behind a guard-zone notification,
+   * looked up server-side on every read (alarm_presentation.go). Bearing is
+   * radians true. Absent when the target is not in the radar store.
+   */
+  radar_target?: {
+    bearing_rad: number
+    range_m: number
+    cpa_m?: number
+    tcpa_seconds?: number
+  }
+
+  /**
    * The "why" sentence behind an anomaly-detection alarm, e.g. "House bank
    * 96% SoC, 28.90 V, charging 42 A" or "At 2,400 rpm port 84.0 degC, peers
    * 79.0 degC; usually 1.2 degC off (38m learned); now 3.8 degC beyond

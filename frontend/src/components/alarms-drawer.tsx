@@ -197,21 +197,14 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
               const raised = formatAlarmTime(alarm.raised_at)
               const acked = formatAlarmTime(alarm.acked_at)
               const timeParts = [raised && `Raised ${raised}`, acked && `acknowledged ${acked}`].filter(Boolean)
-              // The path is a SignalK bus topic, and notifications all live
-              // under one namespace on it, so stripping that prefix leaves
-              // the part that actually identifies the source.
-              const displayPath = alarm.path.replace(/^notifications\./, '')
-              // A bus notification has no rule label of its own, so its
-              // label IS the path already (see use-alarms). Showing it again
-              // on the meta line would just repeat the headline.
-              const showPath = displayPath !== alarm.label
-              const hasMeta = timeParts.length > 0 || showPath
+              const hasMeta = timeParts.length > 0
               // The URL lives on the forecast-warnings payload, not on the
               // alarm (ADR 0114); null for every non-forecast alarm and for
               // a forecast alarm with no currently-active matching
               // bulletin, in which case the sentence keeps its own
               // "Details on the Forecast page." clause.
               const forecastDetailsUrl = forecastWarningDetailsUrl(forecastWarnings, alarm.path)
+              const conditionSentence = alarmConditionSentence(alarm, { forecastDetailsLinked: forecastDetailsUrl !== null })
 
               return (
                 <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
@@ -220,8 +213,9 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       <p className={`wrap-break-word font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
                         {alarm.label}
                       </p>
+                      {(conditionSentence !== '' || forecastDetailsUrl) && (
                       <p className="mt-1.5 text-sm text-foreground/90">
-                        {alarmConditionSentence(alarm, { forecastDetailsLinked: forecastDetailsUrl !== null })}
+                        {conditionSentence}
                         {forecastDetailsUrl && (
                           <>
                             {' '}
@@ -236,6 +230,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           </>
                         )}
                       </p>
+                      )}
                       {/*
                         The COLREGS "situation + role" line (ADR 0098):
                         what kind of encounter this is and what the rules
@@ -288,9 +283,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       )}
                       {hasMeta && (
                         <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {timeParts.length > 0 && timeParts.join(' · ')}
-                          {timeParts.length > 0 && showPath && ' · '}
-                          {showPath && <span className="font-display">{displayPath}</span>}
+                          {timeParts.join(' · ')}
                         </p>
                       )}
                       {/*

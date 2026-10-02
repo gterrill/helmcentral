@@ -176,6 +176,37 @@ against stored state.
 that was the word when they were written, and they are the historical record.
 Do not rewrite them.
 
+## Alarm Wording
+
+An alarm card is read by a watchkeeper at the helm, often at 02:00, asking
+what happened, where it is, and whether to do something. Write every alarm
+title, body and notification for that reader, not for the code that raised
+it. See [ADR 0157](docs/adr/0157-alarm-cards-say-what-happened-not-where-it-came-from.md).
+
+- **Title: the event, in a few words.** "Radar Guard Zone 1", "Anchor
+  Dragging", "House Bank Low". It fits one line on a phone. Never a SignalK
+  path, device key (`fur6424A`), plugin name or rule id. Name a device only
+  when two of the same kind are live, and then by the operator's name for it.
+  A rule alarm's title is the operator's own label; leave it alone.
+- **Body: the situation.** What, where, how close, which way it is going, in
+  that order and in the operator's units: `Target in guard zone 1 · 042°T ·
+  1.4 NM · CPA 0.3 NM`. With no figures to give, one plain sentence. Present
+  tense, the boat's frame ("45 m from the drop point", not "value now 45").
+- **No internal identifiers.** Track ids, `$source`, paths and rule ids stay
+  off the card. The one exception is an id the operator needs to find the same
+  thing on another screen, and then it is the label that screen shows.
+- **Severity is the colour and the state word.** No `!` or `?` in the text.
+- **State and clearing go in the badge and footer, never the body.** Say how
+  an alarm clears only when Helmcentral knows: a rule's clear point, yes; how
+  another instrument clears its own alarm, no. Never explain the latching.
+- **Never claim what isn't known.** If a figure can't be read, leave it out
+  and keep the one sentence. Do not estimate, convert through a guessed
+  variation, or fill from an older reading.
+- **One presenter.** Titles and bodies for alarms raised elsewhere on the
+  network are set on the server, so the card, the banner, Mate and every
+  notification transport say the same thing. A new alarm source gets its own
+  written title rather than leaning on the path-to-words fallback.
+
 ## CRUD Pattern Library
 
 Equipment, Locations, Profiles, Maintenance, Wall displays and Documents are

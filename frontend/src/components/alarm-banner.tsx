@@ -201,7 +201,7 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
             banner is read. Clipping the sentence and keeping the link is
             the one arrangement where both stay usable. */}
         <div className="flex min-w-0 items-baseline gap-1 text-xs">
-          <span className="min-w-0 truncate">{sentence}</span>
+          {sentence !== '' && <span className="min-w-0 truncate">{sentence}</span>}
           {forecastDetailsUrl && (
             // Text colour is inherited from the container above (the worst
             // rung's own colour while loud, muted-foreground once
