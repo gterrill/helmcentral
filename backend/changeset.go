@@ -55,6 +55,8 @@ type changeOpResult struct {
 	Action string `json:"action"`
 	ID     string `json:"id"`
 	Label  string `json:"label,omitempty"`
+	// Href is the page that shows the record, empty for a delete.
+	Href string `json:"href,omitempty"`
 }
 
 // changeResult is what Apply stores: one entry per operation, in order.
@@ -231,6 +233,9 @@ func normalizeFieldValue(f recordField, v any, ops []changeOp, i int) (any, erro
 		if !ok {
 			return nil, errors.New("must be text")
 		}
+		if len(f.Enum) > 0 && !containsString(f.Enum, s) {
+			return nil, fmt.Errorf("must be one of %s", quoteList(f.Enum))
+		}
 		return s, nil
 	case kindID:
 		s, ok := v.(string)
@@ -342,7 +347,21 @@ func (r *recordRegistry) run(env changeEnv, ops []changeOp) ([]opRun, error) {
 		fail := func(err error) error {
 			return &changeOpError{Index: i, Type: op.Type, Action: op.Action, Err: translateChangeError(t, err)}
 		}
-		fields := resolveFields(t, op.Fields, created)
+		// A stored proposal's fields come back from JSON as plain lists and
+		// numbers: shape them again the way propose did.
+		norm := make(map[string]any, len(op.Fields))
+		for name, v := range op.Fields {
+			f, ok := t.field(name)
+			if !ok {
+				return nil, fail(fmt.Errorf("%s: %s has no such field", name, t.Name))
+			}
+			nv, err := normalizeFieldValue(f, v, ops, i)
+			if err != nil {
+				return nil, fail(fmt.Errorf("%s: %w", name, err))
+			}
+			norm[name] = nv
+		}
+		fields := resolveFields(t, norm, created)
 		id := op.ID
 		if isRef(id) {
 			n, _ := refIndex(id)
@@ -637,7 +656,11 @@ func (r *recordRegistry) apply(tx *sql.Tx, now, today time.Time, ops []changeOp)
 		if runs[i].after != nil {
 			label = runs[i].after.Label
 		}
-		results[i] = changeOpResult{Type: op.Type, Action: op.Action, ID: runs[i].id, Label: label}
+		res := changeOpResult{Type: op.Type, Action: op.Action, ID: runs[i].id, Label: label}
+		if t := r.types[op.Type]; runs[i].after != nil && t.Href != nil {
+			res.Href = t.Href(*runs[i].after)
+		}
+		results[i] = res
 	}
 	return results, nil
 }

@@ -156,7 +156,7 @@ type recordType struct {
 	// default names the action and the record.
 	Describe func(d describeInput) string
 	// Href is the page that shows a record, once it exists.
-	Href func(id string) string
+	Href func(r recordSnapshot) string
 	// Renames maps a command's field name to the name Mate used for it (a
 	// meter reading is what the operator's form calls hours).
 	Renames map[string]string

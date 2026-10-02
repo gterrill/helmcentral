@@ -140,7 +140,7 @@ func fakeThingType(kind string, actions []string) *recordType {
 			}
 			return nil, nil
 		},
-		Href: func(id string) string { return "/things/" + id },
+		Href: func(r recordSnapshot) string { return "/things/" + r.ID },
 	}
 }
 

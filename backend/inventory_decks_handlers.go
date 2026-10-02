@@ -103,14 +103,9 @@ func uploadDeckPlanHandler(c echo.Context) error {
 	}
 
 	mimeType := detectDocumentMIME(up.head, up.filename)
-	switch mimeType {
-	case "image/jpeg", "image/png":
-	case "image/heic":
+	if refusal := deckPlanRefusal(mimeType); refusal != "" {
 		os.Remove(up.tmpPath)
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": documentHEICRejectionMessage})
-	default:
-		os.Remove(up.tmpPath)
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "a deck plan must be a JPEG or PNG image"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": refusal})
 	}
 
 	enrich, _, err := documentEnrichFlag("inventory: upload deck plan")

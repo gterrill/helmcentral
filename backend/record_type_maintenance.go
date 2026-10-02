@@ -142,7 +142,7 @@ func maintenanceRuleRecordType() *recordType {
 		Create:   createMaintenanceRuleRecord,
 		Update:   updateMaintenanceRuleRecord,
 		Describe: describeMaintenanceRule,
-		Href:     func(string) string { return "/inventory/maintenance" },
+		Href:     func(recordSnapshot) string { return "/inventory/maintenance" },
 	}
 }
 
@@ -588,7 +588,7 @@ func maintenanceLogRecordType() *recordType {
 		Create:   createMaintenanceLogRecord,
 		Watch:    watchMaintenanceLogRule,
 		Describe: describeMaintenanceLog,
-		Href:     func(string) string { return "/inventory/maintenance" },
+		Href:     func(recordSnapshot) string { return "/inventory/maintenance" },
 	}
 }
 
