@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Locations can now be drawn on deck plans. Add a picture of each deck, such as
+  the builder's general arrangement drawing, outline your locations on it and
+  pin your bins, then find them by looking at the boat. Locations has a new
+  **Plan** view next to the list, a location's page and a bin's page show where
+  it sits, and the new **Decks** list, opened from the menu at the top right of
+  Locations, is where you add a plan and draw on it. Nothing needs changing on
+  upgrade, and locations without a plan work as before.
 - Mate can now recommend a departure time that gives you a fair tidal stream
   on a passage leaving from the boat. It names the best departures and the one
   to avoid, says how much of the run has the stream with you, and warns when

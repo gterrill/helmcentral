@@ -120,6 +120,58 @@ moved what is in it, and the refusal tells you how many things that is.
 Tap a bin's code to open its own page: everything filed in it, at a glance,
 with a photo of each thing underneath. See Tags and photos.
 
+### Deck plans
+
+A list says the spare impeller is in bin `ENG-03` in the engine room. That is
+enough for whoever set the bins up. A crew member, a delivery skipper or you,
+six months on, still has to find the engine room hatch and then the third bin.
+A deck plan answers that by showing it.
+
+A deck plan is a picture of one deck, usually the builder's general arrangement
+drawing, with your locations outlined on it and your bins pinned. You add the
+picture, trace each location, and drop a pin where each bin sits. Nothing here
+is required. A location that is not on a plan works exactly as it did, and you
+can plan one deck and leave the rest.
+
+The plan picture is a JPEG or PNG. A PDF drawing has to be exported to an image
+first, and large pictures are shrunk to 3000 pixels on the long side, which
+keeps small print on a drawing readable. The picture is kept in Documents like
+any other file.
+
+Where plans appear:
+
+- **Locations, Plan view.** The switch at the top of Locations flips between
+  the list (**Table**) and the plans (**Plan**). Plan shows one tab per deck.
+  Tap a location's outline to open that location, or a pin to open that bin.
+- **A location's page.** An **On the plan** section shows a small plan with the
+  location highlighted, and **Edit on plan** takes you to the deck to adjust
+  it. A location that is not on a plan says so.
+- **A bin's page.** If the bin has a pin, its page shows the plan with the
+  location highlighted and the bin marked.
+- **Decks.** Open it from the menu at the top right of Locations. It lists your
+  decks, whether each has a plan picture, and how many locations are on it.
+  This is where decks are added, renamed and deleted, and where plans are drawn.
+
+A location is on one deck. If a space runs across two decks, make it two
+locations. A bin's pin is allowed only when its location is on a plan, and
+taking a location off a plan clears its bins' pins. A pin does not have to
+fall inside its location's outline: outlines are traced loosely, and a locker
+can sit on an edge.
+
+Deleting a deck does not delete the locations or bins. Its locations lose their
+outlines, their bins lose their pins, and the confirmation says how many
+locations that is. The plan picture stays in Documents.
+
+Replacing a deck's picture keeps every outline and pin where it was on the
+image. If the new picture is a different shape from the old one by more than a
+couple of percent, you get a warning, because the outlines will no longer line
+up with the drawing and need checking.
+
+Drawing is by touch or mouse, and there is no zoom yet: the plan draws at the
+width of the page. If bins sit too close together to place by finger on a large
+boat, use a bigger screen for the drawing. See
+[Draw your deck plans](../how-to/draw-deck-plans.md) for the steps.
+
 ## Tags and photos
 
 Stick an NFC tag on a bin, tap it with a phone, and the phone opens straight
