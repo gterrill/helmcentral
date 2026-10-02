@@ -97,7 +97,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
 
   return (
     <SettingsLayout title="Mate">
-      <FormSection title="Mate">
+      <FormSection title="AI">
         <FieldGroup>
           <Field orientation="horizontal">
             <Switch
@@ -120,7 +120,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
 
       {draft.assistantEnabled ? (
         <>
-          <FormSection title="Model">
+          <FormSection title="Chat">
             <FieldGroup>
               <Field orientation="horizontal">
                 <Switch
