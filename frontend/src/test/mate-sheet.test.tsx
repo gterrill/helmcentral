@@ -165,7 +165,7 @@ describe('MateSheet', () => {
     render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask Mate')).toBeInTheDocument()
   })
 
   // ADR 0094: the sheet is one thread plus the composer, and it keeps
@@ -194,7 +194,7 @@ describe('MateSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
 
     await waitFor(() => expect(screen.queryByText('How does tomorrow look?')).not.toBeInTheDocument())
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
     await waitFor(() => expect(textarea).toHaveFocus())
   })
 
@@ -533,9 +533,9 @@ describe('MateSheet', () => {
 
     await screen.findByRole('heading', { name: 'Mate' })
     expect(screen.getByText('--')).toBeInTheDocument()
-    // The blank-thread hint (assistant-thread.tsx's EXAMPLE_QUESTION) shows -
+    // The blank-thread hint (assistant-thread.tsx's "What Mate can check" help) shows -
     // not either conversation's own content, confirming nothing loaded.
-    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
   })
 
   // mate-answer-toast plan: App.tsx needs to know which conversation the
@@ -654,7 +654,7 @@ describe('MateSheet', () => {
 
       await waitFor(() => expect(screen.getByText('--')).toBeInTheDocument())
       expect(screen.queryByText('Hamilton Island to Gloucester Island')).not.toBeInTheDocument()
-      expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+      expect(screen.getByText('What Mate can check')).toBeInTheDocument()
     })
 
     // ADR 0105 ("the answer outlives the page") applied to the sheet's own
@@ -673,7 +673,7 @@ describe('MateSheet', () => {
         <MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
       )
 
-      const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = await screen.findByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
       fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -769,7 +769,7 @@ describe('MateSheet recoverable load failure', () => {
     fireEvent.click(within(card!).getByRole('button', { name: 'Try again' }))
 
     await waitFor(() => expect(screen.queryByText("Mate's conversations could not be loaded.")).not.toBeInTheDocument())
-    expect(await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('Ask Mate')).toBeInTheDocument()
   })
 
   it('Open the Mate page on the card hands the panel null and closes the sheet', async () => {

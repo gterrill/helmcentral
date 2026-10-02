@@ -270,7 +270,7 @@ func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry) str
 
 // assistantEmitter pushes one named progress event to the SSE stream a
 // caller is writing (assistant_handlers.go). This file emits "status"
-// events with a {"text": "..."} payload (see assistantStatus), "delta"
+// events with a {"text": "..."} payload (see assistantStatus), or {"kind":"waiting"} (assistantWaitingStatus), "delta"
 // events carrying a fragment of the round's answer text as it streams in
 // (assistantDelta), and "retract" events with an empty payload
 // (assistantRetractPayload) telling the browser to discard whatever delta
@@ -281,6 +281,13 @@ type assistantEmitter func(event string, payload any)
 // assistantStatus builds the payload every status event carries.
 func assistantStatus(text string) any {
 	return map[string]string{"text": text}
+}
+
+// assistantWaitingStatus is the status payload for "waiting on the model, no
+// tool running": it carries a kind and no text, so the browser chooses what
+// to show rather than the server fixing one English phrase.
+func assistantWaitingStatus() any {
+	return map[string]string{"kind": "waiting"}
 }
 
 // assistantDelta builds the payload every delta event carries: one
@@ -634,11 +641,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	var reply assistantReply
 
 	for round := 0; ; round++ {
-		if round == 0 {
-			r.emit("status", assistantStatus("Thinking…"))
-		} else {
-			r.emit("status", assistantStatus("Working out the answer…"))
-		}
+		r.emit("status", assistantWaitingStatus())
 
 		req := openRouterChatRequest{
 			Model:    r.model,

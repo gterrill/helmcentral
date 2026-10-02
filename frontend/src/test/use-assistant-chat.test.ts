@@ -127,6 +127,42 @@ describe('useAssistantChat', () => {
     expect(result.current.sending).toBe(false)
   })
 
+  it('tells the operator to reload when the server rejects the missing today field, not the raw validation text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's",
+        field: 'today',
+      }),
+    }))
+
+    const { result } = renderHook(() => useAssistantChat())
+
+    let reply: unknown
+    await act(async () => {
+      reply = await result.current.send('c1', 'hello')
+    })
+
+    expect(reply).toBeNull()
+    expect(result.current.error).toBe('Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.')
+  })
+
+  it('keeps the server text for a 400 that is about some other field', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'content is required', field: 'content' }),
+    }))
+
+    const { result } = renderHook(() => useAssistantChat())
+    await act(async () => {
+      await result.current.send('c1', 'hello')
+    })
+
+    expect(result.current.error).toBe('content is required')
+  })
+
   it('falls back to HTTP <status> when a non-2xx body is not JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -690,11 +726,18 @@ describe('useAssistantChat', () => {
       })
 
       await act(async () => {
-        push('event: status\ndata: {"text":"Thinking…"}\n\n')
+        push('event: status\ndata: {"text":"Looking up Tongue Bay…"}\n\n')
         await flushMicrotasks()
       })
       expect(result.current.sending).toBe(true)
-      expect(result.current.statusText).toBe('Thinking…')
+      expect(result.current.statusText).toBe('Looking up Tongue Bay…')
+
+      // A bare waiting status clears the text so the thread can show its own phrase.
+      await act(async () => {
+        push('event: status\ndata: {"kind":"waiting"}\n\n')
+        await flushMicrotasks()
+      })
+      expect(result.current.statusText).toBeNull()
 
       await act(async () => {
         push('event: delta\ndata: {"text":"Tongue Bay"}\n\n')

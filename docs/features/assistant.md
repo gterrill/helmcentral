@@ -15,7 +15,14 @@ rest of the dashboard uses.
 The answer appears as Mate writes it, rather than sitting on a blank panel
 until the whole reply is ready. While it's still looking something up you
 see what it's doing instead ("Looking up Tongue Bay…"); that swaps for the
-words themselves the moment there's an answer to show.
+words themselves the moment there's an answer to show. While Mate is simply
+thinking, with nothing to look up, the line shows a nautical phrase ("Coming
+about…", "Trimming the sails…") that changes every few seconds.
+
+A new conversation opens with a short list of what Mate can check, so you can
+see what to ask about: position and wind, instrument history, nearby vessels,
+forecasts and tides, passage estimates, places, equipment and maintenance, and
+your documents.
 
 Mate keeps writing the answer even if you switch to another panel, or the
 sheet closes, while it's still working. Come back and you'll either see it
@@ -48,7 +55,13 @@ sheet mid-answer - that keeps arriving exactly as it was, rather than being
 cut off. To pick up an earlier conversation instead, choose it from the
 panel's list, or from the sheet's own search - its header's search icon
 opens a quick list of your 8 most recent conversations, or type to filter
-by title.
+by title. On a phone the panel has no list down the side. Press **Chats** at
+the top of the panel to open that same quick list, and **New** beside it to
+start a blank conversation.
+
+If you send a question and Mate answers that Helmcentral has been updated since
+the page was opened, reload the page. A page left open across an update can't
+talk to the new version until it is reloaded.
 
 The panel lives at `/mate`. A specific conversation can be opened directly at
 `/mate/<thread-id>`, for example `/mate/12345`.

@@ -23,10 +23,37 @@ import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversa
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
+import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
 import { cn } from '@/lib/utils'
 
-const EXAMPLE_QUESTION =
-  "We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first over the next two days?"
+// What Mate can look at, in the operator's words. Each line matches a real
+// capability (position and wind in its live context; the forecast, tide,
+// passage, places, nearby-vessel, history, equipment, maintenance, document
+// and help lookups), so the list never promises more than Mate can do.
+const MATE_CAPABILITIES = [
+  'Position, heading, speed and apparent wind',
+  'Whether an instrument is still reporting, and its logged history',
+  'Other vessels nearby',
+  'Wind and wave forecasts, tides and marine warnings',
+  "Passage time and fuel from your boat's own logged runs",
+  'Bays, anchorages and marinas near you or any position',
+  'Equipment, maintenance due and the service log',
+  'Your documents, notes and manuals, and how Helmcentral works',
+] as const
+
+// While Mate is waiting on the model with no tool running, the status line
+// shows a nautical phrase that changes every few seconds, never repeating
+// the one before.
+function useWaitingPhrase(active: boolean): string {
+  const [phrase, setPhrase] = useState(() => pickWaitingPhrase(null))
+  useEffect(() => {
+    if (!active) return
+    setPhrase((previous) => pickWaitingPhrase(previous))
+    const timer = setInterval(() => setPhrase((previous) => pickWaitingPhrase(previous)), MATE_WAITING_ROTATE_MS)
+    return () => clearInterval(timer)
+  }, [active])
+  return phrase
+}
 
 // ADR 0093: every reply's footer names what it cost, in full - which model
 // answered, how many tokens it used, and the price - so the running cost of
@@ -353,6 +380,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // back to null and the marker returns, even though `sending` is still true.
   const showDraft = chat.sending && Boolean(chat.draft)
   const showStatusMarker = chat.sending && !showDraft
+  const waitingPhrase = useWaitingPhrase(showStatusMarker && chat.statusText === null)
 
   // ADR 0106 F2: Send's own disabled reasons, beyond the plain "nothing
   // typed and nothing attached" case. uploads.ready requires every staged
@@ -380,7 +408,17 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           <MessageScrollerViewport className="min-h-0 flex-1 px-1 py-2" data-testid="assistant-thread-scroll">
             <MessageScrollerContent className="gap-6">
               {!hasMessages && !showDraft ? (
-                <p className="text-sm text-muted-foreground">Ask Mate: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
+                <section aria-label="What Mate can check" className="min-w-0 space-y-2">
+                  <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">What Mate can check</h3>
+                  <ul className="space-y-1 text-xs text-muted-foreground">
+                    {MATE_CAPABILITIES.map((line) => (
+                      <li key={line} className="flex min-w-0 gap-2">
+                        <span aria-hidden="true" className="select-none">&middot;</span>
+                        <span className="min-w-0">{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ) : (
                 <>
                   {conversations.messages.map((message) => (
@@ -482,7 +520,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
               <MarkerIcon>
                 <Loader2 className="animate-spin" />
               </MarkerIcon>
-              <MarkerContent className="shimmer">{chat.statusText ?? 'Thinking…'}</MarkerContent>
+              <MarkerContent className="shimmer">{chat.statusText ?? waitingPhrase}</MarkerContent>
             </>
           )}
           {/* Stop outlives the status text: a streaming answer is still
@@ -567,7 +605,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           <InputGroupTextarea
             ref={composerRef}
             rows={3}
-            placeholder="Ask about a passage, an anchorage, or how a panel works…"
+            placeholder="Ask Mate"
             value={content}
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={handleKeyDown}

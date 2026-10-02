@@ -329,6 +329,7 @@ func (o *orderedDelayToolExecutor) execute(ctx context.Context, name string, arg
 type recordedEvent struct {
 	event string
 	text  string
+	kind  string
 }
 
 func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
@@ -338,7 +339,11 @@ func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
 		if m, ok := payload.(map[string]string); ok {
 			text = m["text"]
 		}
-		events = append(events, recordedEvent{event: event, text: text})
+		kind := ""
+		if m, ok := payload.(map[string]string); ok {
+			kind = m["kind"]
+		}
+		events = append(events, recordedEvent{event: event, text: text, kind: kind})
 	}
 	return emit, &events
 }
@@ -594,10 +599,10 @@ func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
 	// streaming, so it never appears mid-round and is flushed whole once
 	// the round ends clean (assistant_run.go's run).
 	want := []recordedEvent{
-		{event: "status", text: "Thinking…"},
+		{event: "status", kind: "waiting"},
 		{event: "status", text: "Looking up Tongue Bay…"},
 		{event: "status", text: "Fetching wind forecast for 1.0000,2.0000…"},
-		{event: "status", text: "Working out the answer…"},
+		{event: "status", kind: "waiting"},
 		{event: "delta", text: "done"},
 	}
 	if len(*events) != len(want) {
@@ -605,8 +610,8 @@ func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
 	}
 	for i, w := range want {
 		got := (*events)[i]
-		if got.event != w.event || got.text != w.text {
-			t.Fatalf("event %d: got {%q %q}, want {%q %q}", i, got.event, got.text, w.event, w.text)
+		if got.event != w.event || got.text != w.text || got.kind != w.kind {
+			t.Fatalf("event %d: got {%q %q %q}, want {%q %q %q}", i, got.event, got.text, got.kind, w.event, w.text, w.kind)
 		}
 	}
 }

@@ -152,6 +152,7 @@ import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { useFullscreen } from '@/hooks/use-fullscreen'
 import { useSwipePaging } from '@/hooks/use-swipe-paging'
+import { useVersionReload } from '@/hooks/use-version-reload'
 import {
   DASHBOARD_WIDGET_DEFAULT_SIZE,
   duplicateWidget,
@@ -456,6 +457,13 @@ export function App() {
   // InventoryPanel forwards whichever child (EquipmentEditor) is actually
   // mounted, see its own imperative handle.
   const [inventoryDirty, setInventoryDirty] = useState(false)
+  // Reload when a new build has been deployed (checked on return to the
+  // page, at most hourly), but never over an unsaved Settings, document or
+  // inventory draft - those wait until the operator has saved or left.
+  // Mounted at the App root, so the wall display and kiosk routes get it too.
+  const unsavedWorkRef = useRef(false)
+  unsavedWorkRef.current = settingsDirty || documentDetailsDirty || inventoryDirty
+  useVersionReload({ hasUnsavedWork: () => unsavedWorkRef.current })
   // Release-fixes code-review finding: Stocktake's scan events/live NFC
   // session and the bin page's quick-add draft, reported the same way
   // inventoryDirty is (onDirtyChange) - see requestWithinInventory's own

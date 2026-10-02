@@ -6,6 +6,7 @@ import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useNotes } from '@/hooks/use-notes'
+import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
 
 // The thread creates a note directly (no sheet) when the operator saves an
 // answer - Mate is often itself a sheet, so opening the capture sheet over
@@ -134,8 +135,9 @@ describe('AssistantThread', () => {
   it('shows the empty-thread hint when there are no messages yet', () => {
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
 
-    expect(screen.getByText(/Ask Mate: /)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
+    expect(screen.getByText('Other vessels nearby')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask Mate')).toBeInTheDocument()
   })
 
   it('renders messages with the assistant reply footer, cost first and mechanics in a tooltip', async () => {
@@ -233,7 +235,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
+    const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -249,7 +251,7 @@ describe('AssistantThread', () => {
     const send = vi.fn()
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
+    const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Draft in progress' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
 
@@ -264,7 +266,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = screen.getByPlaceholderText('Ask Mate')
     fireEvent.change(textarea, { target: { value: 'A fresh question' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -334,7 +336,7 @@ describe('AssistantThread', () => {
     rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: false, send, abort })} />)
     expect(screen.getByText('Stopped.')).toBeInTheDocument()
 
-    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = screen.getByPlaceholderText('Ask Mate')
     fireEvent.change(textarea, { target: { value: 'A follow-up' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -373,9 +375,56 @@ describe('AssistantThread', () => {
   it('disables the composer and shows the read-only hint when canWrite is false', () => {
     render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} />)
 
-    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeDisabled()
+    expect(screen.getByPlaceholderText('Ask Mate')).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+  })
+
+  describe('waiting phrase', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const shownPhrase = () => {
+      const status = screen.getByRole('status')
+      return MATE_WAITING_PHRASES.find((phrase) => status.textContent?.includes(phrase)) ?? null
+    }
+
+    it('shows a nautical phrase while waiting with no tool status, and rotates it without repeating', () => {
+      vi.useFakeTimers()
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ sending: true, statusText: null })} />)
+
+      let previous = shownPhrase()
+      expect(previous).not.toBeNull()
+      for (let i = 0; i < 6; i++) {
+        act(() => {
+          vi.advanceTimersByTime(3000)
+        })
+        const next = shownPhrase()
+        expect(next).not.toBeNull()
+        expect(next).not.toBe(previous)
+        previous = next
+      }
+    })
+
+    it('shows the tool status as given, with no phrase, when statusText is set', () => {
+      vi.useFakeTimers()
+      render(
+        <AssistantThread
+          canWrite
+          conversations={buildConversations()}
+          chat={buildChat({ sending: true, statusText: 'Looking up Tongue Bay…' })}
+        />,
+      )
+
+      expect(screen.getByRole('status')).toHaveTextContent('Looking up Tongue Bay…')
+      expect(shownPhrase()).toBeNull()
+      act(() => {
+        vi.advanceTimersByTime(9000)
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Looking up Tongue Bay…')
+      expect(shownPhrase()).toBeNull()
+    })
   })
 
   // ADR 0105: the streamed draft renders as its own assistant item inside
@@ -527,7 +576,7 @@ describe('AssistantThread', () => {
       const first = buildConversations({ activeId: 'c1' })
       const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'Refuge Cove or Waterloo Bay?' } })
       fireEvent.keyDown(textarea, { key: 'Enter' })
       await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Refuge Cove or Waterloo Bay?'))
@@ -570,7 +619,7 @@ describe('AssistantThread', () => {
     it('disables Send while an attachment is uploading, with a readable reason, and enables it once indexed', () => {
       render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'What does this say about the impeller?' } })
       expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
 
@@ -595,7 +644,7 @@ describe('AssistantThread', () => {
       fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
       resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'What is the impeller part number?' } })
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
@@ -627,7 +676,7 @@ describe('AssistantThread', () => {
       const send = vi.fn().mockResolvedValue(null)
       render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'Plain question, no attachment' } })
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
@@ -654,7 +703,7 @@ describe('AssistantThread', () => {
       expect(screen.getAllByText('manual.pdf')).toHaveLength(1)
       expect(screen.getByRole('alert')).toHaveTextContent('"manual.pdf" is already attached.')
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'What is the impeller part number?' } })
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
@@ -727,7 +776,7 @@ describe('AssistantThread', () => {
     it('puts the textarea, the attach button and the send button inside one input-group panel', () => {
       render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
 
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       const group = textarea.closest('[data-slot="input-group"]')
       expect(group).not.toBeNull()
 
@@ -785,7 +834,7 @@ describe('AssistantThread', () => {
         const send = vi.fn()
         render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
 
-        const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+        const textarea = screen.getByPlaceholderText('Ask Mate')
         const group = textarea.closest('[data-slot="input-group"]')
         const dictateButton = screen.getByRole('button', { name: 'Dictate' })
         expect(group as HTMLElement).toContainElement(dictateButton)
@@ -819,7 +868,7 @@ describe('AssistantThread', () => {
         const send = vi.fn().mockResolvedValue(null)
         render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
 
-        const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
+        const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
         fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
         fireEvent.click(screen.getByRole('button', { name: 'Dictate' }))
         expect(currentRecognition().started).toBe(true)
@@ -843,7 +892,7 @@ describe('AssistantThread', () => {
       })
 
       const chips = screen.getByTestId('composer-attachments')
-      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const textarea = screen.getByPlaceholderText('Ask Mate')
       const group = textarea.closest('[data-slot="input-group"]')
       expect(group).not.toBeNull()
       expect(group as HTMLElement).toContainElement(chips)

@@ -80,13 +80,19 @@ export interface AssistantSendOptions {
   onConversation?: (conversation: AssistantConversation) => void
 }
 
+const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
+
 // A non-2xx response carries a JSON `{error}` body per the API contract, but
 // a 503 from a proxy in front of the backend (or any other layer that never
 // reaches the handler) won't - read it defensively rather than letting a
 // malformed body throw past the caller.
 async function readErrorMessage(response: Response): Promise<string> {
   try {
-    const data = (await response.json()) as { error?: string }
+    const data = (await response.json()) as { error?: string; field?: string }
+    // A page opened before the server started requiring `today` posts
+    // without it. The server's wording is for engineers; the operator's fix
+    // is to reload, so say that. No server-side date is ever substituted.
+    if (response.status === 400 && data.field === 'today') return STALE_PAGE_MESSAGE
     if (typeof data.error === 'string' && data.error !== '') return data.error
   } catch {
     // Not JSON - fall through to the generic message below.
