@@ -81,6 +81,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Inventory side menu is in two groups: **Inventory** (Equipment,
+  Locations, Stocktake) and **Servicing** (Maintenance, Profiles).
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
   the Anchor Watch page, so a stray touch on a dashboard tile can't end it.
 - The engines, house bank and particulars under **Settings → Vessel** now

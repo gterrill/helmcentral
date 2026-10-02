@@ -4,9 +4,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 export interface SectionNavGroup<Id extends string> {
-  /** Omitted for a page with a single, unlabelled group of sections (e.g.
-   * Inventory) - present for a page whose sections fall into named groups
-   * (e.g. Settings' "Boat & app" / "Connections" / "Features" / "System"). */
+  /** Omitted for a page with a single, unlabelled group of sections -
+   * present for a page whose sections fall into named groups (e.g.
+   * Settings' "Boat & app" / "Connections", Inventory's "Inventory" /
+   * "Servicing"). */
   label?: string
   items: Array<{ id: Id; label: string }>
 }
