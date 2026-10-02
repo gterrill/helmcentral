@@ -609,7 +609,11 @@ func pickFields(snapshot map[string]any, given map[string]any) map[string]any {
 func pickAfter(after *recordSnapshot, given map[string]any) map[string]any {
 	out := make(map[string]any, len(given))
 	for name, v := range given {
-		if cur, ok := after.Fields[name]; ok {
+		// A local reference stays a reference: the id the dry run gave the new
+		// record is thrown away with its transaction.
+		if isRefValue(v) {
+			out[name] = v
+		} else if cur, ok := after.Fields[name]; ok {
 			out[name] = cur
 		} else {
 			out[name] = v

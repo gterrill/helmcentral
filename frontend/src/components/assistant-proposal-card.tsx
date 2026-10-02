@@ -2,13 +2,10 @@ import { Check, Loader2, Wrench } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import type { AssistantProposal } from '@/hooks/use-assistant-conversations'
+import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
+import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
 import { applyAssistantProposal, dismissAssistantProposal, ProposalActionError } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
-
-// Where an applied change can be seen: the Maintenance section of Inventory.
-// It has no per-rule URL, so every line shares this one link.
-const MAINTENANCE_HREF = '/inventory/maintenance'
 
 interface AssistantProposalCardProps {
   proposal: AssistantProposal
@@ -21,8 +18,10 @@ interface AssistantProposalCardProps {
 }
 
 /**
- * The card under a Mate reply that proposes changes to the maintenance
- * schedule (ADR 0146). Mate writes nothing: Apply is the operator's tap, and
+ * The card under a Mate reply that proposes changes to records (ADR 0146,
+ * ADR 0158). Each change shows its description and, field by field, what it
+ * was and what it will be; a delete shows what goes with it. Once applied each
+ * change links to the page that shows its record. Mate writes nothing: Apply is the operator's tap, and
  * the server runs every change together or none. The card always renders from
  * the stored status, so a reloaded thread shows an applied or dismissed card
  * as it was left.
@@ -73,7 +72,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
 
   return (
     <section
-      aria-label="Proposed maintenance changes"
+      aria-label="Proposed changes"
       data-testid="assistant-proposal-card"
       data-status={proposal.status}
       className="flex min-w-0 flex-col gap-2 rounded-md border border-border bg-card p-3"
@@ -92,19 +91,21 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         </span>
       </div>
 
-      <ul className="flex min-w-0 flex-col gap-1">
+      <ul className="flex min-w-0 flex-col gap-2">
         {proposal.ops.map((op, index) => (
-          <li
-            key={index}
-            className={cn('min-w-0 break-words text-sm', dismissed || stale ? 'text-muted-foreground' : 'text-foreground', dismissed && 'line-through')}
-          >
-            {applied ? (
-              <a href={MAINTENANCE_HREF} className="text-primary underline underline-offset-2">
-                {op.summary}
-              </a>
-            ) : (
-              op.summary
-            )}
+          <li key={index} className="flex min-w-0 flex-col gap-1">
+            <span
+              className={cn('min-w-0 break-words text-sm', dismissed || stale ? 'text-muted-foreground' : 'text-foreground', dismissed && 'line-through')}
+            >
+              {applied && op.href ? (
+                <a href={op.href} className="text-primary underline underline-offset-2">
+                  {op.description}
+                </a>
+              ) : (
+                op.description
+              )}
+            </span>
+            <OpFields op={op} ops={proposal.ops} />
           </li>
         ))}
       </ul>
@@ -137,5 +138,41 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         </div>
       )}
     </section>
+  )
+}
+
+/** The fields a change names. A create shows what it sets, an update what
+ * changes, and a delete what the record held. A field with its own view (a
+ * deck plan) shows that instead of text. */
+function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposalOp[] }) {
+  const names = Array.from(new Set([...Object.keys(op.before ?? {}), ...Object.keys(op.after ?? {})]))
+  if (names.length === 0) return null
+  const value = (data: Record<string, unknown> | undefined, name: string) =>
+    fieldView(op.type, name, data?.[name]) ?? <span className="min-w-0 break-words">{formatFieldValue(data?.[name], ops)}</span>
+  return (
+    <dl className="flex min-w-0 flex-col gap-1 rounded-sm bg-muted/40 p-2 text-xs">
+      {names.map((name) => (
+        <div key={name} className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
+          <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name)}</dt>
+          <dd className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1 text-foreground">
+            {op.action === 'delete' ? (
+              value(op.before, name)
+            ) : (
+              <>
+                {op.action === 'update' && (
+                  <>
+                    <span className="min-w-0 text-muted-foreground">{value(op.before, name)}</span>
+                    <span aria-hidden="true" className="text-muted-foreground">
+                      →
+                    </span>
+                  </>
+                )}
+                {value(op.after, name)}
+              </>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
   )
 }

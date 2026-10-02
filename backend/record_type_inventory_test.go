@@ -45,6 +45,9 @@ func TestInventory_CreateDeckAndMoveALocationOntoItInOneChangeset(t *testing.T) 
 	if got := p.Ops[1].Description; got != "Change location Salon: put it on a deck plan with an outline" {
 		t.Errorf("location description %q", got)
 	}
+	if p.Ops[1].After["deck_id"] != "$1" {
+		t.Errorf("a card shows the reference, not a dry-run id, got %v", p.Ops[1].After["deck_id"])
+	}
 	if decks, _ := env.docs.ListDecks(); len(decks) != 0 {
 		t.Fatalf("propose writes nothing, got %+v", decks)
 	}

@@ -985,7 +985,7 @@ describe('AssistantThread: save an answer as a note', () => {
     expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
   })
 
-  describe('maintenance proposals (ADR 0146)', () => {
+  describe('change proposals (ADR 0146, ADR 0158)', () => {
     const proposedMessage = (status: 'pending' | 'applied' | 'dismissed' | 'stale') =>
       assistantMessage({
         proposals: [
@@ -994,7 +994,7 @@ describe('AssistantThread: save an answer as a note', () => {
             messageId: 'm1',
             status,
             staleReason: status === 'stale' ? 'a rule changed since Mate proposed this' : undefined,
-            ops: [{ op: 'acknowledge', summary: 'Acknowledge Generator · Belts: parts on order' }],
+            ops: [{ type: 'maintenance_rule', action: 'update', description: 'Acknowledge Generator · Belts: parts on order', href: '/inventory/maintenance' }],
           },
         ],
       })
