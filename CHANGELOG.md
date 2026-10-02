@@ -13,6 +13,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Helmcentral reloads itself when you come back to it after an update has been
+  installed, so a phone or tablet left open never runs an old version. It checks
+  when you return to the page, at most once an hour, and holds off while a
+  Settings, document or inventory edit is unsaved.
 - On a phone, the Mate page now has **Chats** and **New** buttons at the top.
   **Chats** opens a list of your recent conversations that you can filter by
   typing, so earlier chats are reachable on a small screen.
