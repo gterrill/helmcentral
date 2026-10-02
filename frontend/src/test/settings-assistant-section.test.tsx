@@ -252,7 +252,7 @@ describe('AssistantSection', () => {
     await chooseNewModel()
     await screen.findByText('Choose a model')
 
-    expect(screen.getByLabelText('Model ID')).toHaveAttribute('id', 'assistant-custom-model-id')
+    expect(screen.getByLabelText('Model ID')).toHaveAttribute('id')
     expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: ' typesafe/jev-router ' } })
@@ -544,6 +544,21 @@ describe('assistant settings-draft plumbing', () => {
     expect(latestDraft().assistantDocumentModel).toBe('google/gemini-2.5-flash-lite')
     expect(latestDraft().assistantModel).toBe(initialRegularSettingsDraft.assistantModel)
     await waitFor(() => expect(screen.getByLabelText('Document indexing model')).toHaveTextContent('google/gemini-2.5-flash-lite'))
+
+    vi.unstubAllGlobals()
+  })
+
+  it('returns the document indexing model to the backend default', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    const { latestDraft } = renderSection({ assistantDocumentModel: 'qwen/qwen2.5-vl-72b-instruct' })
+
+    fireEvent.click(screen.getByLabelText('Document indexing model'))
+    const option = await screen.findByRole('option', { name: 'Default (google/gemini-2.5-flash)' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+
+    await waitFor(() => expect(latestDraft().assistantDocumentModel).toBe(''))
 
     vi.unstubAllGlobals()
   })

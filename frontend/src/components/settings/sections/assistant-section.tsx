@@ -17,6 +17,7 @@ interface AssistantSectionProps {
 const noCostTierValue = '__none__'
 const recentModelStorageKey = 'assistant.recent-models'
 const recentDocumentModelStorageKey = 'assistant.recent-document-models'
+// Keep in step with defaultDocumentModel in backend/assistant_settings.go.
 const defaultDocumentModel = 'google/gemini-2.5-flash'
 const costTierLabels: Record<string, string> = {
   low: 'Low',

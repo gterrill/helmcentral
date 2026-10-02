@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 export type ModelCapability = 'tools' | 'images'
 
 const chooseNewModelValue = '__choose_new_model__'
+const defaultModelValue = '__default_model__'
 const modelSearchDebounceMs = 300
 export const customModelIDPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i
 
@@ -114,6 +115,10 @@ export function ModelCatalogDialog({
   const [tableQuery, setTableQuery] = useState('')
   const [customModelID, setCustomModelID] = useState('')
   const [customModelError, setCustomModelError] = useState(false)
+  const idBase = useId()
+  const customModelInputID = `${idBase}-custom-model-id`
+  const searchInputID = `${idBase}-model-search`
+  const sortTriggerID = `${idBase}-model-sort`
 
   useEffect(() => {
     const timeoutID = window.setTimeout(() => {
@@ -127,9 +132,13 @@ export function ModelCatalogDialog({
     setTablePage(1)
   }, [tableQuery])
 
-  useEffect(() => {
+  // Reset the page while rendering the open transition, so the first fetch
+  // after reopening asks for page 1 rather than the page left behind.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) setTablePage(1)
-  }, [open])
+  }
 
   const visibleTableModels = useMemo(
     () => tableModels.filter((model) => modelMatchesSearch(model, tableQuery)),
@@ -158,6 +167,7 @@ export function ModelCatalogDialog({
       try {
         const response = await fetch(`/api/assistant/models?${params.toString()}`)
         if (!response.ok) {
+          if (cancelled) return
           setTableError('Unable to load model catalog.')
           return
         }
@@ -166,6 +176,7 @@ export function ModelCatalogDialog({
           page?: { total_pages?: number }
         }
         if (cancelled) return
+        setTableError(null)
         setTableModels(Array.isArray(payload.models) ? payload.models : [])
         setTableTotalPages(Math.max(1, payload.page?.total_pages ?? 1))
       } catch {
@@ -216,10 +227,10 @@ export function ModelCatalogDialog({
               submitCustomModel()
             }}
           >
-            <FieldLabel htmlFor="assistant-custom-model-id">Use a model ID</FieldLabel>
+            <FieldLabel htmlFor={customModelInputID}>Use a model ID</FieldLabel>
             <div className="flex items-center gap-2">
               <Input
-                id="assistant-custom-model-id"
+                id={customModelInputID}
                 aria-label="Model ID"
                 placeholder="provider/model, e.g. typesafe/jev-router"
                 value={customModelID}
@@ -240,10 +251,10 @@ export function ModelCatalogDialog({
 
         <FieldGroup className="grid grid-cols-4 items-end gap-3">
           <Field className="col-span-3 min-w-0">
-            <FieldLabel htmlFor="assistant-model-search">Search</FieldLabel>
+            <FieldLabel htmlFor={searchInputID}>Search</FieldLabel>
             <div className="flex w-full items-center gap-2">
               <Input
-                id="assistant-model-search"
+                id={searchInputID}
                 aria-label="Search model catalog"
                 placeholder="Search by model name or id"
                 value={tableQueryInput}
@@ -268,7 +279,7 @@ export function ModelCatalogDialog({
           </Field>
 
           <Field className="col-span-1 min-w-0">
-            <FieldLabel htmlFor="assistant-model-sort">Sort</FieldLabel>
+            <FieldLabel htmlFor={sortTriggerID}>Sort</FieldLabel>
             <Select
               value={formatSortSelection(tableSort, tableOrder)}
               onValueChange={(value) => {
@@ -278,7 +289,7 @@ export function ModelCatalogDialog({
                 setTablePage(1)
               }}
             >
-              <SelectTrigger id="assistant-model-sort" aria-label="Model catalog sort" className="w-full">
+              <SelectTrigger id={sortTriggerID} aria-label="Model catalog sort" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
@@ -455,6 +466,10 @@ export function ModelPicker({
               setDialogOpen(true)
               return
             }
+            if (next === defaultModelValue) {
+              onChange('')
+              return
+            }
             choose(next)
           }}
         >
@@ -462,6 +477,7 @@ export function ModelPicker({
             <SelectValue>{(current: string | null) => (current ? current : (emptyLabel ?? ''))}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
+            {emptyLabel ? <SelectItem value={defaultModelValue}>{emptyLabel}</SelectItem> : null}
             {modelOptions.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.label}

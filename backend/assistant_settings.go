@@ -16,6 +16,7 @@ const defaultAssistantModel = "anthropic/claude-sonnet-4.5"
 // model that is vision-capable (for the image OCR branch) and cheap enough
 // to run unattended, rather than whichever model the operator picked for
 // interactive chat.
+// Keep in step with defaultDocumentModel in frontend/src/components/settings/sections/assistant-section.tsx.
 const defaultDocumentModel = "google/gemini-2.5-flash"
 
 // defaultEmbeddingModel is the OpenRouter model id the document indexer's
