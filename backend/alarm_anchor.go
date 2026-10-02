@@ -93,7 +93,7 @@ func (w *anchorDragWatcher) transition(dragging bool, distance float64, now time
 	rule := alarmRule{
 		ID:      anchorDragRuleID,
 		Enabled: true,
-		Label:   "Anchor dragging",
+		Label:   "Anchor Dragging",
 		Path:    anchorDragPath,
 		State:   alarmStateAlarm,
 		Methods: []string{"visual", "sound"},
@@ -110,7 +110,7 @@ func (w *anchorDragWatcher) transition(dragging bool, distance float64, now time
 				Phase:    alarmPhaseActive,
 				State:    alarmStateAlarm,
 				Value:    distance,
-				Message:  fmt.Sprintf("Anchor dragging: %.0fm from where it was set", distance),
+				Message:  fmt.Sprintf("Anchor %.0f m from the drop point.", distance),
 				RaisedAt: now,
 			},
 		}, true

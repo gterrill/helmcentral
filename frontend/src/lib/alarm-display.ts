@@ -205,6 +205,20 @@ function lawOfStormsSentence(alarm: ActiveAlarm): string | null {
   return `${sentence} Clears once the ${verb} eases to ${clears}.`
 }
 
+const METRES_PER_NM = 1852
+
+/** "Target in guard zone 1." + figures -> "Target in guard zone 1 · 042°T · 1.4 NM · CPA 0.3 NM". */
+function withRadarFigures(sentence: string, target: ActiveAlarm['radar_target']): string {
+  if (!target) return sentence
+  const degrees = Math.round(((target.bearing_rad * 180) / Math.PI + 360) % 360) % 360
+  const parts = [
+    `${String(degrees).padStart(3, '0')}°T`,
+    `${(target.range_m / METRES_PER_NM).toFixed(1)} NM`,
+  ]
+  if (target.cpa_m !== undefined) parts.push(`CPA ${(target.cpa_m / METRES_PER_NM).toFixed(1)} NM`)
+  return [sentence.replace(/\.$/, ''), ...parts].join(' · ')
+}
+
 /**
  * The operator-facing sentence for an alarm card: what it is doing now, and
  * what will clear it. A rule alarm renders its own sentence from the
@@ -219,12 +233,11 @@ export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastD
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
   if (op === undefined) {
-    // SignalK builds this message as a fragment with no terminal
-    // punctuation, so running straight into "Clears..." reads as one
-    // run-on sentence. Add the period it is missing; don't double up one
-    // it already has.
-    const sentence = /[.!?]$/.test(message) ? message : `${message}.`
-    return `${sentence} Clears when the source clears it.`
+    // A bus notification: the backend has already stripped internal ids and
+    // normalised the punctuation, and nothing here knows how the producer
+    // clears it, so no clearing claim is made. Live radar figures, when the
+    // target is known, follow the sentence.
+    return withRadarFigures(message ?? '', alarm.radar_target)
   }
 
   if (op === 'stale') {

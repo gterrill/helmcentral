@@ -102,6 +102,7 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []a
 		// Two boats can be in alarm at once. Without the vessel in the rule id
 		// they collide in the watcher's live set and one alarm disappears.
 		status.RuleID += notificationVesselSeparator + vesselID
+		status.Label, status.Message = presentCollision(status.Message)
 
 		// The COLREGS line (ADR 0098) is computed live on every call, not
 		// frozen once at raise: it exists to guide what happens next, so it

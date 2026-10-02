@@ -60,8 +60,14 @@ func TestSignalKNotificationsSurfacesAnAlarmFromAnotherProducer(t *testing.T) {
 	if statuses[0].State != alarmStateAlarm {
 		t.Fatalf("state: got %q, want %q", statuses[0].State, alarmStateAlarm)
 	}
-	if statuses[0].Message != "House bank critically low" {
+	if statuses[0].Message != "House bank critically low." {
 		t.Fatalf("message: got %q", statuses[0].Message)
+	}
+	if statuses[0].Label != "Electrical Batteries House Voltage" {
+		t.Fatalf("label: got %q", statuses[0].Label)
+	}
+	if statuses[0].Label != "Electrical Batteries House Voltage" {
+		t.Fatalf("label: got %q", statuses[0].Label)
 	}
 	if statuses[0].Path != "notifications.electrical.batteries.house.voltage" {
 		t.Fatalf("path: got %q", statuses[0].Path)
