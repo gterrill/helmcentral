@@ -2425,10 +2425,10 @@ func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRi
 	t.Fatal("get_nearby_vessels tool definition not found")
 }
 
-func TestAssistantToolDefinitions_SixteenToolsIncludingMaintenance(t *testing.T) {
+func TestAssistantToolDefinitions_NineteenToolsIncludingMaintenanceAndRecords(t *testing.T) {
 	tools := assistantToolDefinitions()
-	if len(tools) != 16 {
-		t.Fatalf("expected 16 tool definitions, got %d: %+v", len(tools), tools)
+	if len(tools) != 19 {
+		t.Fatalf("expected 19 tool definitions, got %d: %+v", len(tools), tools)
 	}
 
 	var names []string
@@ -2440,6 +2440,7 @@ func TestAssistantToolDefinitions_SixteenToolsIncludingMaintenance(t *testing.T)
 		"search_documents", "read_document", "get_nearby_vessels",
 		"check_signalk_paths", "get_last_recorded", "get_path_history",
 		"find_equipment", "list_maintenance", "get_maintenance_log", "propose_changes",
+		"describe_record_type", "list_records", "get_record",
 		"plan_tidal_departure",
 	} {
 		found := false
@@ -2614,6 +2615,9 @@ func TestExecuteSearchDocuments_ReturnsShapeWithFolderPathAndCleanSnippet(t *tes
 	}
 	if hit.Status != "pending" {
 		t.Fatalf("expected status pending (no SetIndexed called), got %q", hit.Status)
+	}
+	if hit.MIME != "application/pdf" {
+		t.Fatalf("expected the hit to carry the document's mime type, got %q", hit.MIME)
 	}
 	if hit.Page != 3 {
 		t.Fatalf("expected page 3, got %d", hit.Page)

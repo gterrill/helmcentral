@@ -682,6 +682,55 @@ func assistantToolDefinitions() []openRouterTool {
 		{
 			Type: "function",
 			Function: openRouterFunctionDef{
+				Name: "describe_record_type",
+				Description: "Describe a kind of Helmcentral record Mate can read or propose changes to: its fields (which " +
+					"are writable, which can be cleared, which refer to other records), the actions a proposal may " +
+					"take on it, and the filters list_records accepts. Call it with no type to list the types. Use it " +
+					"before you read or propose changes to a type you have not used in this conversation.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type; leave out to list the types."}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "list_records",
+				Description: "List records of one type with their registered fields and each one's version. Use it for " +
+					"records no other tool reads (locations, bins, decks, and the rest of describe_record_type's list); " +
+					"find_equipment and list_maintenance remain better for equipment and the maintenance schedule.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type."},
+						"filter": {"type": "object", "description": "Filters by name, as describe_record_type lists them."},
+						"limit": {"type": "integer", "description": "Maximum records (default 25, maximum 100)."}
+					},
+					"required": ["type"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name:        "get_record",
+				Description: "Read one record by id: its registered fields and its version (the base_version for a proposal that changes or deletes it).",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type."},
+						"id": {"type": "string", "description": "The record's id."}
+					},
+					"required": ["type", "id"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
 				Name: "propose_changes",
 				Description: "Propose changes to Helmcentral's records. This changes NOTHING: the operator sees your " +
 					"proposal as a card under your reply and taps Apply (or Dismiss). Use it only for a change the " +
@@ -689,10 +738,12 @@ func assistantToolDefinitions() []openRouterTool {
 					"you have real ids. Give every change in one call as a list of operations; the card applies them all " +
 					"together or not at all. An operation is {type, action, id, fields}: action is create, update or " +
 					"delete; update and delete name the record by id; fields holds only the fields that change, and null " +
-					"removes a value where the type allows it. The record types and their fields:\n" +
-					recordTypeGuide(defaultRecordRegistry) +
-					"A call that fails names the operation and the field to correct. Everything else, such as deleting " +
-					"rules or log entries, photos, parts, meter replacements and procedure notes, cannot be proposed.",
+					"removes a value where the type allows it. Call describe_record_type first to learn a type's fields, and " +
+					"list_records or get_record for real ids and versions (pass the version you read as base_version). " +
+					"A later operation can refer to a record an earlier create makes by its position, as $1, $2: " +
+					"\"create the deck and move these locations onto it\" is one proposal. A call that fails names the " +
+					"operation and the field to correct. Anything else, such as deleting rules or log entries, photos, " +
+					"parts, meter replacements and procedure notes, cannot be proposed.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -766,6 +817,12 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeListMaintenance(ctx, args)
 	case "get_maintenance_log":
 		return d.executeGetMaintenanceLog(ctx, args)
+	case "describe_record_type":
+		return d.executeDescribeRecordType(ctx, args)
+	case "list_records":
+		return d.executeListRecords(ctx, args)
+	case "get_record":
+		return d.executeGetRecord(ctx, args)
 	case assistantProposalToolTag:
 		return d.executeProposeChanges(ctx, args)
 	default:
@@ -896,6 +953,12 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Checking the maintenance list…"
 	case "get_maintenance_log":
 		return "Reading the maintenance log…"
+	case "describe_record_type":
+		return "Checking what can be recorded…"
+	case "list_records":
+		return "Reading the records…"
+	case "get_record":
+		return "Reading a record…"
 	case assistantProposalToolTag:
 		return "Preparing the changes…"
 	default:
@@ -2055,6 +2118,9 @@ type assistantDocumentSearchHit struct {
 	Page       int    `json:"page,omitempty"`
 	Snippet    string `json:"snippet"`
 	Status     string `json:"status"`
+	// MIME is the document's type, so Mate can tell a picture a plan can use
+	// (image/jpeg, image/png) from a PDF without opening it.
+	MIME string `json:"mime,omitempty"`
 }
 
 type assistantSearchDocumentsResult struct {
@@ -2190,7 +2256,14 @@ func (d assistantToolDeps) executeSearchDocuments(ctx context.Context, raw json.
 			}
 			path = cached
 		}
+		var mimeType string
+		if err := store.Read(func(q sqlQueryer) error {
+			return q.QueryRow(`SELECT mime FROM documents WHERE id = ?`, h.DocumentID).Scan(&mimeType)
+		}); err != nil {
+			return "", fmt.Errorf("search_documents: read mime type of %s: %w", h.DocumentID, err)
+		}
 		result.Results = append(result.Results, assistantDocumentSearchHit{
+			MIME:       mimeType,
 			DocumentID: h.DocumentID,
 			Filename:   h.Filename,
 			FolderPath: path,
