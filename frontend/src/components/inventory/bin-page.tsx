@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DeckPlan } from '@/components/inventory/deck-plan'
 import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 import { PrintLabelButton } from '@/components/inventory/label-print'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
-import { findBinByCode, useEquipment, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
+import { findBinByCode, useEquipment, useInventoryDecks, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
 import { binTagPath } from '@/lib/tag-url'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
@@ -34,9 +35,11 @@ interface BinPageProps {
    * routes Open/Full item through the same unsaved-work guard when this is
    * true. */
   onHasWorkChange?: (hasWork: boolean, detail?: string) => void
+  /** ADR 0156: opens a deck's page, from the missing-plan-image notice. */
+  onOpenDeck?: (deckId: string) => void
 }
 
-export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange }: BinPageProps) {
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange, onOpenDeck = () => {} }: BinPageProps) {
   // ONE useInventoryZones() instance for the whole page (there is no shared
   // store between separate calls - the hook's own header comment), so that
   // when BinNotFound's Create bin below calls createBin/createZone, THIS
@@ -52,12 +55,14 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
     return (
       <BinContents
         zone={match.zone}
+        zones={zones}
         bin={match.bin}
         onClose={onClose}
         onOpenEquipment={onOpenEquipment}
         onNewEquipment={onNewEquipment}
         canWrite={canWrite}
         onHasWorkChange={onHasWorkChange}
+        onOpenDeck={onOpenDeck}
       />
     )
   }
@@ -304,16 +309,48 @@ export function BinPhotoGrid({ items, onOpenEquipment }: { items: EquipmentItem[
   )
 }
 
-function BinContents({
-  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange,
+// ADR 0156: a small plan with the bin's location highlighted and the bin
+// itself pinned. Only rendered for a bin that has a pin.
+function BinOnPlan({
+  zone, zones, bin, canWrite, onOpenDeck,
 }: {
   zone: InventoryZone
+  zones: InventoryZone[]
+  bin: InventoryBin
+  canWrite: boolean
+  onOpenDeck: (deckId: string) => void
+}) {
+  const { decks, error } = useInventoryDecks()
+  const deck = decks.find((d) => d.id === zone.deck_id)
+  if (error) return <p role="alert" className="text-sm text-destructive">{error}</p>
+  if (!deck) return null
+  if (!deck.plan_document_id) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
+        <p className="text-sm text-muted-foreground">{zone.name} is on {deck.name}, whose plan image is missing.</p>
+        {canWrite && (
+          <Button type="button" variant="outline" size="sm" onClick={() => onOpenDeck(deck.id)}>Open {deck.name}</Button>
+        )}
+      </div>
+    )
+  }
+  return (
+    <DeckPlan deck={deck} zones={zones} highlightZoneId={zone.id} highlightBinId={bin.id} showPinLabels={false} />
+  )
+}
+
+function BinContents({
+  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange, onOpenDeck,
+}: {
+  zone: InventoryZone
+  zones: InventoryZone[]
   bin: InventoryBin
   onClose: (zoneId?: string) => void
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
   onHasWorkChange?: (hasWork: boolean, detail?: string) => void
+  onOpenDeck: (deckId: string) => void
 }) {
   const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
 
@@ -336,6 +373,8 @@ function BinContents({
         </div>
         <p className="text-xs text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
       </div>
+
+      {bin.pin && zone.deck_id && <BinOnPlan zone={zone} zones={zones} bin={bin} canWrite={canWrite} onOpenDeck={onOpenDeck} />}
 
       {error && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

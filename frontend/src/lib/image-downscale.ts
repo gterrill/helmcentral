@@ -12,10 +12,13 @@
 // anything reaches the network.
 
 const MAX_DIMENSION = 1600
+/** ADR 0156: a deck plan has fine detail (small labels on a builder's
+ * drawing), so it keeps more of its resolution than a photo does. */
+export const PLAN_MAX_DIMENSION = 3000
 const JPEG_QUALITY = 0.85
 
 /**
- * Downscales file to at most MAX_DIMENSION px on its long edge and
+ * Downscales file to at most maxDimension px (default MAX_DIMENSION) on its long edge and
  * re-encodes it as JPEG at JPEG_QUALITY. A file already smaller than
  * MAX_DIMENSION is still re-encoded (never upscaled - the scale factor is
  * clamped to 1), which is what performs the HEIC-to-JPEG conversion above
@@ -26,10 +29,10 @@ const JPEG_QUALITY = 0.85
  * encoder that returns no blob, is a real failure the caller has to show,
  * not a reason to silently upload an oversized or unconverted original.
  */
-export async function downscaleImage(file: Blob): Promise<Blob> {
+export async function downscaleImage(file: Blob, maxDimension: number = MAX_DIMENSION): Promise<Blob> {
   const bitmap = await createImageBitmap(file)
   try {
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
     const width = Math.max(1, Math.round(bitmap.width * scale))
     const height = Math.max(1, Math.round(bitmap.height * scale))
 

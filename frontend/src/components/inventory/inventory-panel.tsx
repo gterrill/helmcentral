@@ -1,11 +1,13 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 
 import { BinPage } from '@/components/inventory/bin-page'
+import { DeckEditor, type DeckEditorHandle } from '@/components/inventory/deck-editor'
+import { DecksIndex } from '@/components/inventory/decks-index'
 import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationEditor, type LocationEditorHandle } from '@/components/inventory/location-editor'
-import { LocationsIndex } from '@/components/inventory/locations-index'
+import { LocationsIndex, type LocationsView } from '@/components/inventory/locations-index'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
@@ -104,6 +106,25 @@ interface InventoryPanelProps {
   onCloseLocation: () => void
   /** A delete that already succeeded. */
   onLocationDeleted: () => void
+  /** ADR 0156: the Locations index's Table or Plan view, the deck tab open in
+   * Plan, and their setters. App.tsx keeps them in the URL. */
+  locationsView: LocationsView
+  onLocationsViewChange: (view: LocationsView) => void
+  planDeckId: string | null
+  onPlanDeckChange: (deckId: string) => void
+  /** ADR 0156: the Decks list (`/inventory/decks`) and, within it, one deck's
+   * page. deckEditId is only meaningful while decksOpen. */
+  decksOpen: boolean
+  deckEditId: string | null
+  onOpenDecks: () => void
+  onOpenDeck: (id: string) => void
+  /** The Decks list's and deck page's Locations breadcrumb, up to the Locations index. */
+  onCloseDecks: () => void
+  /** The deck page's Decks breadcrumb, up to the Decks list - an exit that can
+   * discard an unsaved layout draft. */
+  onCloseDeck: () => void
+  /** A delete that already succeeded. */
+  onDeckDeleted: () => void
   /** The zone/bin App.tsx stashed from the last onNewEquipment(preset) call
    * - read once by EquipmentEditor when it mounts a brand new draft. null
    * for the ordinary "New item" button. */
@@ -136,6 +157,17 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onOpenLocation,
     onCloseLocation,
     onLocationDeleted,
+    locationsView,
+    onLocationsViewChange,
+    planDeckId,
+    onPlanDeckChange,
+    decksOpen,
+    deckEditId,
+    onOpenDecks,
+    onOpenDeck,
+    onCloseDecks,
+    onCloseDeck,
+    onDeckDeleted,
     newEquipmentPreset,
   },
   ref,
@@ -149,10 +181,13 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
   // The Locations page's rename draft is the only other thing that can be
   // dirty, and never at the same time as the Equipment editor.
   const locationEditorRef = useRef<LocationEditorHandle>(null)
+  // So can the deck page's name and layout draft (ADR 0156).
+  const deckEditorRef = useRef<DeckEditorHandle>(null)
   useImperativeHandle(ref, () => ({
     save: async () => {
       await editorRef.current?.save()
       await locationEditorRef.current?.save()
+      await deckEditorRef.current?.save()
     },
   }), [])
 
@@ -202,6 +237,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
             onHasWorkChange={onHasWorkChange}
+            onOpenDeck={onOpenDeck}
           />
         )
       }
@@ -213,12 +249,42 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onBack={onCloseLocation}
             onDeleted={onLocationDeleted}
             onOpenBin={onOpenBin}
+            onOpenDeck={onOpenDeck}
+            onOpenDecks={onOpenDecks}
             onDirtyChange={onDirtyChange}
             canWrite={canWrite}
           />
         )
       }
-      return <LocationsIndex onOpenLocation={onOpenLocation} canWrite={canWrite} />
+      if (decksOpen) {
+        if (deckEditId !== null) {
+          return (
+            <DeckEditor
+              ref={deckEditorRef}
+              id={deckEditId}
+              onOpenLocations={onCloseDecks}
+              onOpenDecks={onCloseDeck}
+              onDeleted={onDeckDeleted}
+              onDirtyChange={onDirtyChange}
+              canWrite={canWrite}
+            />
+          )
+        }
+        return <DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={onCloseDecks} canWrite={canWrite} />
+      }
+      return (
+        <LocationsIndex
+          onOpenLocation={onOpenLocation}
+          onOpenBin={onOpenBin}
+          view={locationsView}
+          onViewChange={onLocationsViewChange}
+          planDeckId={planDeckId}
+          onPlanDeckChange={onPlanDeckChange}
+          onOpenDecks={onOpenDecks}
+          onOpenDeck={onOpenDeck}
+          canWrite={canWrite}
+        />
+      )
     }
     if (activeSectionId === 'stocktake') {
       return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />

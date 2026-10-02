@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LocationEditor } from '@/components/inventory/location-editor'
-import type { InventoryZone } from '@/hooks/use-inventory'
+import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
+import { stubImageSize } from './stub-image'
 
 let zones: InventoryZone[]
 const fetchMock = vi.fn()
@@ -345,5 +346,56 @@ describe('LocationEditor', () => {
 
     await screen.findByText('bin code already in use')
     expect(screen.queryByText(/no longer open this bin/)).not.toBeInTheDocument()
+  })
+})
+
+describe('LocationEditor "On the plan" (ADR 0156)', () => {
+  let decks: InventoryDeck[]
+
+  beforeEach(() => {
+    stubImageSize(2000, 1000)
+    decks = [{ id: 'd1', name: 'Main deck', sort_index: 0, plan_document_id: 'doc1' }]
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.endsWith('/api/inventory/decks')) return Promise.resolve({ ok: true, json: async () => ({ decks }) })
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+  })
+
+  it('shows the location outlined on its deck plan with a way to edit it', async () => {
+    zones = [{ ...zones[0], deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]] }]
+    const onOpenDeck = vi.fn()
+    renderEditor({ onOpenDeck })
+    expect(await screen.findByRole('group', { name: 'Main deck plan' })).toBeInTheDocument()
+    expect(document.querySelector('polygon')).toHaveAttribute('data-highlighted', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit on plan' }))
+    expect(onOpenDeck).toHaveBeenCalledWith('d1')
+  })
+
+  it('says the location is not on a plan and points to Decks', async () => {
+    const onOpenDecks = vi.fn()
+    renderEditor({ onOpenDecks })
+    await screen.findByText('This location is not on a deck plan.')
+    fireEvent.click(screen.getByRole('button', { name: 'Open Decks' }))
+    expect(onOpenDecks).toHaveBeenCalled()
+  })
+
+  it('says the plan image is missing when the location is on a deck that has none', async () => {
+    decks = [{ id: 'd1', name: 'Main deck', sort_index: 0, plan_document_id: null }]
+    zones = [{ ...zones[0], deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]] }]
+    const onOpenDeck = vi.fn()
+    renderEditor({ onOpenDeck })
+    await screen.findByText('This location is on Main deck, whose plan image is missing.')
+    expect(screen.queryByText('This location is not on a deck plan.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Main deck' }))
+    expect(onOpenDeck).toHaveBeenCalledWith('d1')
+  })
+
+  it('does not offer Edit on plan when read-only', async () => {
+    zones = [{ ...zones[0], deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]] }]
+    renderEditor({ canWrite: false })
+    await screen.findByRole('group', { name: 'Main deck plan' })
+    expect(screen.queryByRole('button', { name: 'Edit on plan' })).not.toBeInTheDocument()
   })
 })

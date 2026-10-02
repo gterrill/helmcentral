@@ -108,6 +108,18 @@ export interface AppLocation {
    * no id until the server assigns one, so there is no draft state to
    * serialise: creating one navigates here once it exists. */
   locationEditId?: string
+  /** ADR 0156: the Locations index shows its Plan view - `?view=plan` on
+   * `/inventory/locations`. Absent for the ordinary Table view. */
+  locationsView?: 'plan'
+  /** The deck tab open in the Plan view (`&deck=<id>`). Only meaningful
+   * alongside locationsView 'plan'. */
+  planDeckId?: string
+  /** ADR 0156: the Decks list - `/inventory/decks` - which sits under the
+   * Locations section. true only there; absent everywhere else. */
+  decksOpen?: boolean
+  /** The deck page, `/inventory/decks/<id>`. Only meaningful alongside
+   * decksOpen. */
+  deckEditId?: string
 }
 
 export interface LocationContext {
@@ -244,11 +256,29 @@ export function parseAppLocation(pathname: string): AppLocation {
       }
       return { panel: 'inventory', inventorySection: 'locations' }
     }
+    // ADR 0156: decks sit under Locations in the nav but have a URL of
+    // their own, like the bin page.
+    if (second === 'decks') {
+      const idSegment = segments[2]
+      const deckEditId = idSegment !== undefined ? decodeSegment(idSegment) : null
+      if (deckEditId) {
+        return { panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId }
+      }
+      return { panel: 'inventory', inventorySection: 'locations', decksOpen: true }
+    }
     if (second === 'locations') {
       const idSegment = segments[2]
       const locationEditId = idSegment !== undefined ? decodeSegment(idSegment) : null
       if (locationEditId) {
         return { panel: 'inventory', inventorySection: 'locations', locationEditId }
+      }
+      const params = new URLSearchParams(search)
+      if (params.get('view') === 'plan') {
+        const planDeckId = params.get('deck')
+        return {
+          panel: 'inventory', inventorySection: 'locations', locationsView: 'plan',
+          ...(planDeckId ? { planDeckId } : {}),
+        }
       }
       return { panel: 'inventory', inventorySection: 'locations' }
     }
@@ -401,6 +431,14 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     if (section === 'locations' && loc.locationEditId) {
       return `/inventory/locations/${encodeURIComponent(loc.locationEditId)}`
     }
+    if (section === 'locations' && loc.decksOpen) {
+      return loc.deckEditId ? `/inventory/decks/${encodeURIComponent(loc.deckEditId)}` : '/inventory/decks'
+    }
+    if (section === 'locations' && loc.locationsView === 'plan') {
+      const params = new URLSearchParams({ view: 'plan' })
+      if (loc.planDeckId) params.set('deck', loc.planDeckId)
+      return `/inventory/locations?${params.toString()}`
+    }
     return `/inventory/${section}`
   }
 
@@ -446,6 +484,9 @@ export interface InventoryEditorState {
   /** The location page (`/inventory/locations/<id>`), which holds its own
    * rename draft. Absent or null when no location page is open. */
   locationEditId?: string | null
+  /** The deck page (`/inventory/decks/<id>`), which holds its own name and
+   * layout draft. Absent or null when no deck page is open. */
+  deckEditId?: string | null
 }
 
 /**
@@ -464,6 +505,13 @@ export interface InventoryEditorState {
  * for the draft and none for a section switch.
  */
 export function inventoryEditorClosedBy(current: InventoryEditorState, target: AppLocation): boolean {
+  // The deck page holds a layout draft and has a URL, so like a location page
+  // it survives only a target naming the same deck.
+  if (current.section === 'locations' && (current.deckEditId ?? null) !== null) {
+    return target.panel !== 'inventory'
+      || (target.inventorySection ?? 'equipment') !== 'locations'
+      || (target.deckEditId ?? null) !== current.deckEditId
+  }
   // A location page is the other editor that holds a draft. It has a URL, so
   // it survives only a target naming the same location.
   if (current.section === 'locations' && (current.locationEditId ?? null) !== null) {

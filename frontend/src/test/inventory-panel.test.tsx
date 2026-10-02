@@ -12,6 +12,7 @@ import { InventoryPanel, type InventoryPanelHandle } from '@/components/inventor
 // the right child prop.
 
 const saveMock = vi.fn().mockResolvedValue(undefined)
+const deckSaveMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/components/inventory/equipment-index', () => ({
   EquipmentIndex: (props: { onOpenItem: (id: string) => void; onNewItem: () => void }) => (
@@ -50,10 +51,37 @@ vi.mock('@/components/inventory/profiles-section', () => ({
   ProfilesSection: () => <div data-testid="profiles-section" />,
 }))
 
+vi.mock('@/components/inventory/decks-index', () => ({
+  DecksIndex: (props: { onOpenDeck: (id: string) => void; onOpenLocations: () => void }) => (
+    <div data-testid="decks-index">
+      <button type="button" onClick={() => props.onOpenDeck('d1')}>open-deck-d1</button>
+      <button type="button" onClick={props.onOpenLocations}>decks-back</button>
+    </div>
+  ),
+}))
+
+vi.mock('@/components/inventory/deck-editor', () => ({
+  DeckEditor: forwardRef(function MockDeckEditor(
+    props: { id: string; onOpenLocations: () => void; onOpenDecks: () => void; onDeleted: () => void; onDirtyChange?: (dirty: boolean) => void },
+    ref,
+  ) {
+    useImperativeHandle(ref, () => ({ save: deckSaveMock }), [])
+    return (
+      <div data-testid="deck-editor">
+        {props.id}
+        <button type="button" onClick={props.onOpenDecks}>deck-crumb-decks</button>
+        <button type="button" onClick={props.onOpenLocations}>deck-crumb-locations</button>
+        <button type="button" onClick={props.onDeleted}>deck-deleted</button>
+      </div>
+    )
+  }),
+}))
+
 vi.mock('@/components/inventory/locations-index', () => ({
-  LocationsIndex: (props: { onOpenLocation: (id: string) => void }) => (
+  LocationsIndex: (props: { onOpenLocation: (id: string) => void; onOpenDeck?: (id: string) => void }) => (
     <div data-testid="locations-index">
       <button type="button" onClick={() => props.onOpenLocation('z1')}>open-location-z1</button>
+      <button type="button" onClick={() => props.onOpenDeck?.('d9')}>edit-deck-d9</button>
     </div>
   ),
 }))
@@ -109,6 +137,17 @@ function baseProps() {
     onOpenLocation: vi.fn(),
     onCloseLocation: vi.fn(),
     onLocationDeleted: vi.fn(),
+    locationsView: 'table' as const,
+    onLocationsViewChange: vi.fn(),
+    planDeckId: null,
+    onPlanDeckChange: vi.fn(),
+    decksOpen: false,
+    deckEditId: null as string | null,
+    onOpenDecks: vi.fn(),
+    onOpenDeck: vi.fn(),
+    onCloseDecks: vi.fn(),
+    onCloseDeck: vi.fn(),
+    onDeckDeleted: vi.fn(),
     newEquipmentPreset: null,
   }
 }
@@ -196,6 +235,8 @@ describe('InventoryPanel', () => {
     const { unmount } = render(<InventoryPanel {...props} activeSectionId="locations" />)
     fireEvent.click(screen.getByText('open-location-z1'))
     expect(props.onOpenLocation).toHaveBeenCalledWith('z1')
+    fireEvent.click(screen.getByText('edit-deck-d9'))
+    expect(props.onOpenDeck).toHaveBeenCalledWith('d9')
     unmount()
 
     render(<InventoryPanel {...props} activeSectionId="locations" locationEditId="z1" />)
@@ -203,6 +244,35 @@ describe('InventoryPanel', () => {
     expect(props.onCloseLocation).toHaveBeenCalled()
     fireEvent.click(screen.getByText('location-deleted'))
     expect(props.onLocationDeleted).toHaveBeenCalled()
+  })
+
+  // ADR 0156: the Decks list and a deck's page are the same section too.
+  it('renders the Decks list when decksOpen is set, and a deck page when a deck is named', () => {
+    const props = baseProps()
+    const { unmount } = render(<InventoryPanel {...props} activeSectionId="locations" decksOpen />)
+    expect(screen.getByTestId('decks-index')).toBeInTheDocument()
+    expect(screen.queryByTestId('locations-index')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('open-deck-d1'))
+    expect(props.onOpenDeck).toHaveBeenCalledWith('d1')
+    fireEvent.click(screen.getByText('decks-back'))
+    expect(props.onCloseDecks).toHaveBeenCalled()
+    unmount()
+
+    render(<InventoryPanel {...props} activeSectionId="locations" decksOpen deckEditId="d1" />)
+    expect(screen.getByTestId('deck-editor')).toHaveTextContent('d1')
+    fireEvent.click(screen.getByText('deck-crumb-decks'))
+    expect(props.onCloseDeck).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('deck-crumb-locations'))
+    expect(props.onCloseDecks).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('deck-deleted'))
+    expect(props.onDeckDeleted).toHaveBeenCalled()
+  })
+
+  it('saves the deck page through the panel handle', async () => {
+    const ref = { current: null as InventoryPanelHandle | null }
+    render(<InventoryPanel {...baseProps()} ref={ref} activeSectionId="locations" decksOpen deckEditId="d1" />)
+    await ref.current!.save()
+    expect(deckSaveMock).toHaveBeenCalled()
   })
 
   // ADR 0127: the bin page is the SAME section as Locations, split by

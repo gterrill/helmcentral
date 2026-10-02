@@ -57,6 +57,24 @@ describe('downscaleImage', () => {
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 1600, 1200)
   })
 
+  it('takes a larger long edge for a deck plan, which has fine detail (ADR 0156)', async () => {
+    stubImageBitmap(6000, 3000)
+    const drawImage = stubCanvas({}, new Blob(['jpeg'], { type: 'image/jpeg' }))
+
+    await downscaleImage(new Blob(['original']), 3000)
+
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 3000, 1500)
+  })
+
+  it('does not upscale a plan smaller than the given edge', async () => {
+    stubImageBitmap(2000, 1000)
+    const drawImage = stubCanvas({}, new Blob(['jpeg'], { type: 'image/jpeg' }))
+
+    await downscaleImage(new Blob(['original']), 3000)
+
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 2000, 1000)
+  })
+
   it('never upscales a photo already smaller than 1600px', async () => {
     stubImageBitmap(800, 600)
     const jpegOut = new Blob(['jpeg'], { type: 'image/jpeg' })

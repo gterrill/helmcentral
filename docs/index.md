@@ -66,6 +66,8 @@ Steps for specific tasks.
   using an NFC tag, and the iPhone Copy route.
 - [Photograph your gear](how-to/photograph-your-gear.md), from an item's
   editor or on the spot while adding it from a bin.
+- [Draw your deck plans](how-to/draw-deck-plans.md), adding a deck picture,
+  outlining locations on it and pinning bins.
 - [Run a stocktake](how-to/run-a-stocktake.md), scanning a bin and its
   contents to confirm what's aboard.
 - [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md),

@@ -1905,3 +1905,193 @@ func TestDeleteEquipmentHandler_KeepsRemovingPhotoFilesAfterOneFails(t *testing.
 		t.Fatalf("expected the second photo's file removed despite the first failing, stat err = %v", err)
 	}
 }
+
+// ── decks (ADR 0156) ─────────────────────────────────────────────────────
+
+func TestDeckHandlers_CreateListRenameDelete(t *testing.T) {
+	withTestDocumentStore(t)
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/decks", `{"name":"Main deck"}`, "")
+	if err := createDeckHandler(c); err != nil {
+		t.Fatalf("createDeckHandler: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Deck inventoryDeck `json:"deck"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/decks", `{"name":"main deck"}`, "")
+	_ = createDeckHandler(c)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 on duplicate, got %d", rec.Code)
+	}
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/decks", `{"name":" "}`, "")
+	_ = createDeckHandler(c)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on blank, got %d", rec.Code)
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/inventory/decks", "", "")
+	if err := listDecksHandler(c); err != nil {
+		t.Fatalf("listDecksHandler: %v", err)
+	}
+	if !strings.Contains(rec.Body.String(), `"plan_document_id":null`) || !strings.Contains(rec.Body.String(), `"sort_index"`) {
+		t.Fatalf("unexpected list body %s", rec.Body.String())
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/decks/"+created.Deck.ID, `{"name":"Upper deck"}`, created.Deck.ID)
+	if err := updateDeckHandler(c); err != nil {
+		t.Fatalf("updateDeckHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Upper deck") {
+		t.Fatalf("unexpected rename response %d %s", rec.Code, rec.Body.String())
+	}
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/decks/nope", `{"name":"x"}`, "nope")
+	_ = updateDeckHandler(c)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodDelete, "/api/inventory/decks/"+created.Deck.ID, "", created.Deck.ID)
+	if err := deleteDeckHandler(c); err != nil {
+		t.Fatalf("deleteDeckHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"zones_cleared":0`) {
+		t.Fatalf("unexpected delete response %d %s", rec.Code, rec.Body.String())
+	}
+	c, rec = newDocumentEchoContext(http.MethodDelete, "/api/inventory/decks/"+created.Deck.ID, "", created.Deck.ID)
+	_ = deleteDeckHandler(c)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 on second delete, got %d", rec.Code)
+	}
+}
+
+func TestSaveDeckLayoutHandler_SavesAndMapsErrors(t *testing.T) {
+	store := withTestDocumentStore(t)
+	deck, _ := store.CreateDeck("Main")
+	zone := mustZone(t, store, "Engine room")
+	bin := mustBin(t, store, zone.ID, "ENG-01")
+	other := mustZone(t, store, "Salon")
+	otherBin := mustBin(t, store, other.ID, "SAL-01")
+
+	body := `{"zones":[{"id":"` + zone.ID + `","polygon":[[0.1,0.1],[0.5,0.1],[0.3,0.5]]}],"bins":[{"id":"` + bin.ID + `","x":0.25,"y":0.2}]}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/decks/"+deck.ID+"/layout", body, deck.ID)
+	if err := saveDeckLayoutHandler(c); err != nil {
+		t.Fatalf("saveDeckLayoutHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Zones []inventoryZone `json:"zones"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var found bool
+	for _, z := range resp.Zones {
+		if z.ID == zone.ID {
+			found = true
+			if z.DeckID == nil || len(z.Polygon) != 3 || z.Bins[0].Pin == nil {
+				t.Fatalf("response zone lacks layout: %+v", z)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected the refreshed zone list in the response, got %s", rec.Body.String())
+	}
+
+	bad := []struct {
+		name, body string
+		want       int
+	}{
+		{"polygon", `{"zones":[{"id":"` + zone.ID + `","polygon":[[0,0],[1,1]]}],"bins":[]}`, http.StatusBadRequest},
+		{"bin zone not listed", `{"zones":[{"id":"` + zone.ID + `","polygon":[[0.1,0.1],[0.5,0.1],[0.3,0.5]]}],"bins":[{"id":"` + otherBin.ID + `","x":0.5,"y":0.5}]}`, http.StatusBadRequest},
+		{"unknown zone", `{"zones":[{"id":"nope","polygon":[[0.1,0.1],[0.5,0.1],[0.3,0.5]]}],"bins":[]}`, http.StatusNotFound},
+		{"bad json", `{`, http.StatusBadRequest},
+	}
+	for _, tc := range bad {
+		c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/decks/"+deck.ID+"/layout", tc.body, deck.ID)
+		_ = saveDeckLayoutHandler(c)
+		if rec.Code != tc.want {
+			t.Fatalf("%s: expected %d, got %d: %s", tc.name, tc.want, rec.Code, rec.Body.String())
+		}
+	}
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/inventory/decks/nope/layout", `{"zones":[],"bins":[]}`, "nope")
+	_ = saveDeckLayoutHandler(c)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown deck, got %d", rec.Code)
+	}
+}
+
+func TestDeleteDeckHandler_ReportsZonesCleared(t *testing.T) {
+	store := withTestDocumentStore(t)
+	deck, _ := store.CreateDeck("Main")
+	zone := mustZone(t, store, "A")
+	if err := store.SaveDeckLayout(deck.ID, []deckLayoutZone{{ID: zone.ID, Polygon: triangle}}, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/decks/"+deck.ID, "", deck.ID)
+	_ = deleteDeckHandler(c)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"zones_cleared":1`) {
+		t.Fatalf("unexpected response %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func newDeckPlanUploadContext(t *testing.T, id string, fields []documentUploadField) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := newInventoryPhotoUploadContext(t, id, fields)
+	return c, rec
+}
+
+func TestUploadDeckPlanHandler_SetsPlanDocument(t *testing.T) {
+	store := withTestDocumentStore(t)
+	deck, _ := store.CreateDeck("Main")
+
+	c, rec := newDeckPlanUploadContext(t, deck.ID, []documentUploadField{{name: "file", filename: "plan.png", content: validPNGBytes}})
+	if err := uploadDeckPlanHandler(c); err != nil {
+		t.Fatalf("uploadDeckPlanHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Deck inventoryDeck `json:"deck"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Deck.PlanDocumentID == nil {
+		t.Fatalf("expected plan_document_id, got %s", rec.Body.String())
+	}
+
+	// Replacing keeps the first document in Documents.
+	c, rec = newDeckPlanUploadContext(t, deck.ID, []documentUploadField{{name: "file", filename: "plan2.jpg", content: validJPEGBytes}})
+	if err := uploadDeckPlanHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("replace: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	if _, err := store.Get(*resp.Deck.PlanDocumentID); err != nil {
+		t.Fatalf("old plan document should stay in Documents: %v", err)
+	}
+}
+
+func TestUploadDeckPlanHandler_RejectsNonImageAndUnknownDeck(t *testing.T) {
+	store := withTestDocumentStore(t)
+	deck, _ := store.CreateDeck("Main")
+
+	c, rec := newDeckPlanUploadContext(t, deck.ID, []documentUploadField{{name: "file", filename: "plan.pdf", content: []byte("%PDF-1.4 hello")}})
+	_ = uploadDeckPlanHandler(c)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a PDF, got %d: %s", rec.Code, rec.Body.String())
+	}
+	c, rec = newDeckPlanUploadContext(t, "nope", []documentUploadField{{name: "file", filename: "plan.png", content: validPNGBytes}})
+	_ = uploadDeckPlanHandler(c)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}

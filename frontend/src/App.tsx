@@ -820,6 +820,16 @@ export function App() {
   // The Locations section's own page - `/inventory/locations/<id>`. Same
   // "null is the index" convention as inventoryBinCode.
   const [inventoryLocationEditId, setInventoryLocationEditId] = useState<string | null>(initialLocation.locationEditId ?? null)
+  // ADR 0156: the Locations index's Plan view (`?view=plan`) and the deck tab
+  // open in it (`&deck=<id>`). Kept here, not in the index, so the choice is
+  // in the URL and survives opening a location and coming back.
+  const [inventoryPlanView, setInventoryPlanView] = useState(initialLocation.locationsView === 'plan')
+  const [inventoryPlanDeckId, setInventoryPlanDeckId] = useState<string | null>(initialLocation.planDeckId ?? null)
+  // ADR 0156: the Decks list (`/inventory/decks`) and one deck's page
+  // (`/inventory/decks/<id>`), both under the Locations section. The deck id
+  // is only meaningful while the list is open.
+  const [inventoryDecksOpen, setInventoryDecksOpen] = useState(initialLocation.decksOpen === true)
+  const [inventoryDeckEditId, setInventoryDeckEditId] = useState<string | null>(initialLocation.deckEditId ?? null)
   // ADR 0127: the bin/zone the bin page's "Full item" button last asked
   // for - local UI state, like inventoryCreatingEquipment above, never
   // serialised to the URL (a "New item" draft has none of its own either
@@ -1016,9 +1026,11 @@ export function App() {
     ) {
       // The location page reports its rename draft through the same flag.
       if (activePanel === 'inventory' && inventorySection === 'locations' && inventoryLocationEditId !== null) return
+      // So does the deck page (ADR 0156).
+      if (activePanel === 'inventory' && inventorySection === 'locations' && inventoryDeckEditId !== null) return
       setInventoryDirty(false)
     }
-  }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment, inventoryLocationEditId])
+  }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment, inventoryLocationEditId, inventoryDeckEditId])
   // inventoryHasWork/inventoryWorkDetail (declared up with inventoryDirty)
   // are only meaningful while Stocktake or the bin page's quick-add are
   // actually mounted and reporting them - same reasoning as inventoryDirty's
@@ -1242,6 +1254,10 @@ export function App() {
       setInventoryCreatingEquipment(false)
       setInventoryBinCode(loc.binCode ?? null)
       setInventoryLocationEditId(loc.locationEditId ?? null)
+      setInventoryPlanView(loc.locationsView === 'plan')
+      setInventoryPlanDeckId(loc.planDeckId ?? null)
+      setInventoryDecksOpen(loc.decksOpen === true)
+      setInventoryDeckEditId(loc.deckEditId ?? null)
     }
   }, [pages, pagesLoading, setActivePageId])
 
@@ -1289,6 +1305,10 @@ export function App() {
       equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
       binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
       locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
+      locationsView: activePanel === 'inventory' && inventoryPlanView ? 'plan' : undefined,
+      planDeckId: activePanel === 'inventory' ? (inventoryPlanDeckId ?? undefined) : undefined,
+      decksOpen: activePanel === 'inventory' && inventoryDecksOpen ? true : undefined,
+      deckEditId: activePanel === 'inventory' ? (inventoryDeckEditId ?? undefined) : undefined,
     }, ctx)
     // documents is the one panel whose canonical URL can carry a query
     // string (?folder=/?document=/?section=) - pathname alone is never
@@ -1307,7 +1327,8 @@ export function App() {
   }, [
     shellVisible, isDisplay, activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId,
     documentsFolderId, documentsEditId, documentsSectionId, wallDisplaysSlug,
-    inventorySection, inventoryEquipmentEditId, inventoryBinCode, pages, pagesLoading, canAdmin,
+    inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId, inventoryPlanView, inventoryPlanDeckId,
+    inventoryDecksOpen, inventoryDeckEditId, pages, pagesLoading, canAdmin,
   ])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
@@ -1361,6 +1382,7 @@ export function App() {
             equipmentEditId: inventoryEquipmentEditId,
             creating: inventoryCreatingEquipment,
             locationEditId: inventoryLocationEditId,
+            deckEditId: inventoryDeckEditId,
           },
           parsed,
         )
@@ -1403,6 +1425,10 @@ export function App() {
           equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
           binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
           locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
+          locationsView: activePanel === 'inventory' && inventoryPlanView ? 'plan' : undefined,
+          planDeckId: activePanel === 'inventory' ? (inventoryPlanDeckId ?? undefined) : undefined,
+          decksOpen: activePanel === 'inventory' && inventoryDecksOpen ? true : undefined,
+          deckEditId: activePanel === 'inventory' ? (inventoryDeckEditId ?? undefined) : undefined,
         }, ctx))
       }
     }
@@ -1411,7 +1437,8 @@ export function App() {
   }, [
     shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, requestWithinInventory, applyAppLocation,
     activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId, wallDisplaysSlug,
-    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId, pages, pagesLoading, canAdmin,
+    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId,
+    inventoryPlanView, inventoryPlanDeckId, inventoryDeckEditId, inventoryDecksOpen, pages, pagesLoading, canAdmin,
   ])
 
   // If admin access ends (or was never established) while Settings happens
@@ -2943,6 +2970,8 @@ export function App() {
                 // Picking Locations in the nav from a location page returns
                 // to the index, not to the page already open.
                 setInventoryLocationEditId(null)
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
               })
             }}
             equipmentEditId={inventoryEquipmentEditId}
@@ -2978,6 +3007,8 @@ export function App() {
                 setInventorySection('equipment')
                 setInventoryBinCode(null)
                 setInventoryLocationEditId(null)
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
                 setInventoryEquipmentEditId(id)
               })
             }}
@@ -2986,6 +3017,8 @@ export function App() {
                 setInventorySection('equipment')
                 setInventoryBinCode(null)
                 setInventoryLocationEditId(null)
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
                 setInventoryNewEquipmentPreset(preset ?? null)
                 setInventoryCreatingEquipment(true)
               })
@@ -3049,6 +3082,8 @@ export function App() {
               requestWithinInventory(() => {
                 setInventorySection('locations')
                 setInventoryLocationEditId(null)
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
                 setInventoryBinCode(code)
               })
             }}
@@ -3074,10 +3109,52 @@ export function App() {
               requestWithinInventory(() => {
                 setInventorySection('locations')
                 setInventoryBinCode(null)
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
                 setInventoryLocationEditId(id)
               })
             }}
             onCloseLocation={() => { requestWithinInventory(() => { setInventoryLocationEditId(null) }) }}
+            locationsView={inventoryPlanView ? 'plan' : 'table'}
+            onLocationsViewChange={(view) => { setInventoryPlanView(view === 'plan') }}
+            planDeckId={inventoryPlanDeckId}
+            onPlanDeckChange={setInventoryPlanDeckId}
+            // ADR 0156: the Decks list and a deck's page. Opening one is a
+            // move within the Locations section, so it goes through the same
+            // guard as every other move that can leave a draft behind; the
+            // deck page's own Back is the one exit that can discard its
+            // layout draft.
+            decksOpen={inventoryDecksOpen}
+            deckEditId={inventoryDeckEditId}
+            onOpenDecks={() => {
+              requestWithinInventory(() => {
+                setInventorySection('locations')
+                setInventoryBinCode(null)
+                setInventoryLocationEditId(null)
+                setInventoryDecksOpen(true)
+                setInventoryDeckEditId(null)
+              })
+            }}
+            onOpenDeck={(deckId) => {
+              requestWithinInventory(() => {
+                setInventorySection('locations')
+                setInventoryBinCode(null)
+                setInventoryLocationEditId(null)
+                setInventoryDecksOpen(true)
+                setInventoryDeckEditId(deckId)
+              })
+            }}
+            onCloseDecks={() => {
+              requestWithinInventory(() => {
+                setInventoryDecksOpen(false)
+                setInventoryDeckEditId(null)
+              })
+            }}
+            onCloseDeck={() => { requestWithinInventory(() => { setInventoryDeckEditId(null) }) }}
+            onDeckDeleted={() => {
+              setInventoryDirty(false)
+              setInventoryDeckEditId(null)
+            }}
             // A delete that already succeeded: the page is still reporting
             // dirty if a rename was pending, and has nothing left to save.
             onLocationDeleted={() => {

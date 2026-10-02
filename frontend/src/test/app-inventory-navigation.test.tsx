@@ -778,3 +778,81 @@ describe('App: a photo still queued for Retry guards leaving the bin', () => {
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Spare impeller'))
   })
 })
+
+describe('App: deck plans under Locations (ADR 0156)', () => {
+  beforeEach(() => {
+    const previous = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<unknown>
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/decks') && (init?.method ?? 'GET') === 'GET') {
+        return { ok: true, json: async () => ({ decks: [{ id: 'd1', name: 'Main deck', sort_index: 0, plan_document_id: null }] }) }
+      }
+      return previous(url, init)
+    }))
+  })
+
+  it('opens the Plan view from the URL, and switching to Table puts the URL back', async () => {
+    window.history.replaceState({}, '', '/inventory/locations?view=plan')
+    render(<App />)
+
+    expect(await screen.findByText('No deck plans yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Plan' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/inventory/locations'))
+    await screen.findByText('Lazarette')
+  })
+
+  it('reaches the Decks list from the empty plan view and comes back with Back', async () => {
+    window.history.replaceState({}, '', '/inventory/locations?view=plan')
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a deck plan' }))
+    await screen.findByRole('heading', { name: 'Decks' })
+    expect(window.location.pathname).toBe('/inventory/decks')
+    await screen.findByText('Main deck')
+
+    // The header breadcrumb also says Locations; the page's own is last.
+    fireEvent.click(screen.getAllByRole('link', { name: 'Locations' }).at(-1)!)
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/inventory/locations?view=plan'))
+  })
+
+  it('reaches the Decks list from the Decks button', async () => {
+    window.history.replaceState({}, '', '/inventory/locations')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Decks' }))
+    await screen.findByRole('heading', { name: 'Decks' })
+    expect(window.location.pathname).toBe('/inventory/decks')
+  })
+
+  // The breadcrumb links are the deck page's exits now, so a dirty draft
+  // must stop them exactly as the old back arrow did.
+  it.each([['Decks', '/inventory/decks'], ['Locations', '/inventory/locations']])(
+    'the %s breadcrumb on a dirty deck page asks first; Cancel keeps the draft, Discard goes',
+    async (crumb, path) => {
+      window.history.replaceState({}, '', '/inventory/decks/d1')
+      render(<App />)
+      const name = await screen.findByLabelText('Deck name')
+      fireEvent.change(name, { target: { value: 'Main deck renamed' } })
+
+      fireEvent.click(screen.getAllByRole('link', { name: crumb }).at(-1)!)
+      await screen.findByRole('button', { name: 'Save and Continue' })
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('button', { name: 'Save and Continue' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Deck name')).toHaveValue('Main deck renamed')
+      expect(window.location.pathname).toBe('/inventory/decks/d1')
+
+      fireEvent.click(screen.getAllByRole('link', { name: crumb }).at(-1)!)
+      await screen.findByRole('button', { name: 'Save and Continue' })
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+      await waitFor(() => expect(window.location.pathname).toBe(path))
+    },
+  )
+
+  it('opens a deck page from a deep link', async () => {
+    window.history.replaceState({}, '', '/inventory/decks/d1')
+    render(<App />)
+    expect(await screen.findByDisplayValue('Main deck')).toBeInTheDocument()
+    expect(screen.getByText(/Upload a plan image to start drawing/i)).toBeInTheDocument()
+  })
+})

@@ -557,6 +557,20 @@ var documentStoreSchema = []string{
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS inventory_zones_name ON inventory_zones (lower(name))`,
 
+	// ADR 0156: a deck is a plan image zones are outlined on. Created before
+	// the ALTERs in applyDocumentStoreMigrations that point
+	// inventory_zones.deck_id at it. The plan is an ordinary document; if the
+	// operator deletes it from Documents the deck simply has no plan.
+	`CREATE TABLE IF NOT EXISTS inventory_decks (
+		id               TEXT PRIMARY KEY,
+		name             TEXT NOT NULL,
+		sort_index       INTEGER NOT NULL DEFAULT 0,
+		plan_document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+		created_at       INTEGER NOT NULL,
+		updated_at       INTEGER NOT NULL
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS inventory_decks_name ON inventory_decks (lower(name))`,
+
 	`CREATE TABLE IF NOT EXISTS inventory_bins (
 		id         TEXT PRIMARY KEY,
 		zone_id    TEXT NOT NULL REFERENCES inventory_zones(id) ON DELETE RESTRICT,
@@ -819,6 +833,13 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		// of a job row hold a value only for an overridden field.
 		`ALTER TABLE maintenance_rules ADD COLUMN overridden_fields TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE maintenance_rules ADD COLUMN not_applicable INTEGER NOT NULL DEFAULT 0 CHECK (not_applicable IN (0,1))`,
+		// ADR 0156: deck plans. deck_id and polygon are set together or not at
+		// all; pin_x and pin_y likewise. Coordinates are fractions (0..1) of
+		// the plan image.
+		`ALTER TABLE inventory_zones ADD COLUMN deck_id TEXT REFERENCES inventory_decks(id)`,
+		`ALTER TABLE inventory_zones ADD COLUMN polygon TEXT`,
+		`ALTER TABLE inventory_bins ADD COLUMN pin_x REAL`,
+		`ALTER TABLE inventory_bins ADD COLUMN pin_y REAL`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -834,6 +855,7 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS documents_kind_folder ON documents (kind, folder_id)`,
 		`CREATE INDEX IF NOT EXISTS documents_pinned ON documents (pinned) WHERE pinned = 1`,
 		`CREATE INDEX IF NOT EXISTS document_folders_role ON document_folders (role) WHERE role <> ''`,
+		`CREATE INDEX IF NOT EXISTS inventory_zones_deck_id ON inventory_zones (deck_id)`,
 	}
 	for _, stmt := range indexStmts {
 		if _, err := db.Exec(stmt); err != nil {
