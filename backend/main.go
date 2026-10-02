@@ -877,6 +877,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// read-tier comment above the document library's own routes on why
 		// Echo's router never needs that ordering.
 		{http.MethodGet, "/api/inventory/zones", tierRead, listZonesHandler},
+		{http.MethodGet, "/api/inventory/decks", tierRead, listDecksHandler},
 		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
 		// Vessel particulars: the facts about the boat SignalK does not
@@ -1006,6 +1007,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/inventory/zones", tierWrite, createZoneHandler},
 		{http.MethodPut, "/api/inventory/zones/:id", tierWrite, updateZoneHandler},
 		{http.MethodDelete, "/api/inventory/zones/:id", tierWrite, deleteZoneHandler},
+		{http.MethodPost, "/api/inventory/decks", tierWrite, createDeckHandler},
+		{http.MethodPut, "/api/inventory/decks/:id", tierWrite, updateDeckHandler},
+		{http.MethodDelete, "/api/inventory/decks/:id", tierWrite, deleteDeckHandler},
+		{http.MethodPost, "/api/inventory/decks/:id/plan", tierWrite, uploadDeckPlanHandler},
+		{http.MethodPut, "/api/inventory/decks/:id/layout", tierWrite, saveDeckLayoutHandler},
 		{http.MethodPost, "/api/inventory/bins", tierWrite, createBinHandler},
 		{http.MethodPut, "/api/inventory/bins/:id", tierWrite, updateBinHandler},
 		{http.MethodDelete, "/api/inventory/bins/:id", tierWrite, deleteBinHandler},

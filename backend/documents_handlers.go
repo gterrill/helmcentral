@@ -336,6 +336,16 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusBadRequest, errEquipmentPhotoSetMismatch.Error()
 	case errors.Is(err, errEquipmentPhotoNotFound):
 		return http.StatusNotFound, errEquipmentPhotoNotFound.Error()
+	// Deck plans (ADR 0156, inventory_decks_store.go).
+	case errors.Is(err, errDeckNotFound):
+		return http.StatusNotFound, errDeckNotFound.Error()
+	case errors.Is(err, errDeckNameInvalid):
+		return http.StatusBadRequest, errDeckNameInvalid.Error()
+	case errors.Is(err, errDeckNameTaken):
+		return http.StatusConflict, errDeckNameTaken.Error()
+	case errors.Is(err, errPolygonInvalid), errors.Is(err, errPinInvalid),
+		errors.Is(err, errLayoutBinZoneNotListed), errors.Is(err, errLayoutInvalid):
+		return http.StatusBadRequest, err.Error()
 	// Maintenance (ADR 0138, maintenance_store.go) shares this same mapping
 	// function too - it is a sub-feature of Inventory, not a separate one,
 	// the same reasoning the inventory comment above already gives.

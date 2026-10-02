@@ -159,6 +159,10 @@ type inventoryZone struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	Bins      []inventoryBin `json:"bins"`
+	// DeckID and Polygon (ADR 0156) are both set or both null: a zone is on a
+	// deck plan with an outline, or it is not on a plan.
+	DeckID  *string      `json:"deck_id"`
+	Polygon [][2]float64 `json:"polygon"`
 }
 
 // inventoryBin is one row of inventory_bins: a numbered, printable-coded
@@ -171,6 +175,15 @@ type inventoryBin struct {
 	SortIndex int       `json:"sort_index"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Pin (ADR 0156) is where the bin sits on its zone's deck plan, as
+	// fractions of the plan image; null when it has not been placed.
+	Pin *binPin `json:"pin"`
+}
+
+// binPin is a bin's position on a deck plan, x across and y down, each 0..1.
+type binPin struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // equipmentItem is one row of equipment, the registry's own record, plus
@@ -456,7 +469,7 @@ func (s *documentStore) ListZones() ([]inventoryZone, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, name, sort_index, created_at, updated_at FROM inventory_zones ORDER BY sort_index, lower(name)`)
+	rows, err := s.db.Query(`SELECT id, name, sort_index, created_at, updated_at, deck_id, polygon FROM inventory_zones ORDER BY sort_index, lower(name)`)
 	if err != nil {
 		return nil, fmt.Errorf("list zones: %w", err)
 	}
@@ -464,11 +477,12 @@ func (s *documentStore) ListZones() ([]inventoryZone, error) {
 		id, name             string
 		sortIndex            int
 		createdAt, updatedAt int64
+		deckID, polygon      sql.NullString
 	}
 	var raw []zoneRow
 	for rows.Next() {
 		var r zoneRow
-		if err := rows.Scan(&r.id, &r.name, &r.sortIndex, &r.createdAt, &r.updatedAt); err != nil {
+		if err := rows.Scan(&r.id, &r.name, &r.sortIndex, &r.createdAt, &r.updatedAt, &r.deckID, &r.polygon); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list zones: scan: %w", err)
 		}
@@ -486,10 +500,14 @@ func (s *documentStore) ListZones() ([]inventoryZone, error) {
 		if err != nil {
 			return nil, err
 		}
+		deckID, polygon, err := zoneLayoutFromColumns(r.deckID, r.polygon)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, inventoryZone{
 			ID: r.id, Name: r.name, SortIndex: r.sortIndex,
 			CreatedAt: time.Unix(r.createdAt, 0).UTC(), UpdatedAt: time.Unix(r.updatedAt, 0).UTC(),
-			Bins: bins,
+			Bins: bins, DeckID: deckID, Polygon: polygon,
 		})
 	}
 	return out, nil
@@ -502,8 +520,9 @@ func (s *documentStore) ListZones() ([]inventoryZone, error) {
 func zoneByID(q sqlQueryer, id string) (inventoryZone, error) {
 	var z inventoryZone
 	var createdAt, updatedAt int64
-	err := q.QueryRow(`SELECT id, name, sort_index, created_at, updated_at FROM inventory_zones WHERE id = ?`, id).
-		Scan(&z.ID, &z.Name, &z.SortIndex, &createdAt, &updatedAt)
+	var deckID, polygon sql.NullString
+	err := q.QueryRow(`SELECT id, name, sort_index, created_at, updated_at, deck_id, polygon FROM inventory_zones WHERE id = ?`, id).
+		Scan(&z.ID, &z.Name, &z.SortIndex, &createdAt, &updatedAt, &deckID, &polygon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inventoryZone{}, errZoneNotFound
 	}
@@ -512,6 +531,9 @@ func zoneByID(q sqlQueryer, id string) (inventoryZone, error) {
 	}
 	z.CreatedAt = time.Unix(createdAt, 0).UTC()
 	z.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	if z.DeckID, z.Polygon, err = zoneLayoutFromColumns(deckID, polygon); err != nil {
+		return inventoryZone{}, err
+	}
 
 	bins, err := binsForZone(q, id)
 	if err != nil {
@@ -526,7 +548,7 @@ func zoneByID(q sqlQueryer, id string) (inventoryZone, error) {
 // so there is exactly one query that decides bin order.
 func binsForZone(q sqlQueryer, zoneID string) ([]inventoryBin, error) {
 	rows, err := q.Query(
-		`SELECT id, zone_id, code, name, sort_index, created_at, updated_at FROM inventory_bins WHERE zone_id = ? ORDER BY sort_index, lower(code)`,
+		`SELECT id, zone_id, code, name, sort_index, created_at, updated_at, pin_x, pin_y FROM inventory_bins WHERE zone_id = ? ORDER BY sort_index, lower(code)`,
 		zoneID,
 	)
 	if err != nil {
@@ -538,9 +560,11 @@ func binsForZone(q sqlQueryer, zoneID string) ([]inventoryBin, error) {
 	for rows.Next() {
 		var b inventoryBin
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&b.ID, &b.ZoneID, &b.Code, &b.Name, &b.SortIndex, &createdAt, &updatedAt); err != nil {
+		var pinX, pinY sql.NullFloat64
+		if err := rows.Scan(&b.ID, &b.ZoneID, &b.Code, &b.Name, &b.SortIndex, &createdAt, &updatedAt, &pinX, &pinY); err != nil {
 			return nil, fmt.Errorf("bins for zone: scan: %w", err)
 		}
+		b.Pin = pinFromColumns(pinX, pinY)
 		b.CreatedAt = time.Unix(createdAt, 0).UTC()
 		b.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 		out = append(out, b)
@@ -699,8 +723,9 @@ func (s *documentStore) DeleteBin(id string) error {
 func binByID(q sqlQueryer, id string) (inventoryBin, error) {
 	var b inventoryBin
 	var createdAt, updatedAt int64
-	err := q.QueryRow(`SELECT id, zone_id, code, name, sort_index, created_at, updated_at FROM inventory_bins WHERE id = ?`, id).
-		Scan(&b.ID, &b.ZoneID, &b.Code, &b.Name, &b.SortIndex, &createdAt, &updatedAt)
+	var pinX, pinY sql.NullFloat64
+	err := q.QueryRow(`SELECT id, zone_id, code, name, sort_index, created_at, updated_at, pin_x, pin_y FROM inventory_bins WHERE id = ?`, id).
+		Scan(&b.ID, &b.ZoneID, &b.Code, &b.Name, &b.SortIndex, &createdAt, &updatedAt, &pinX, &pinY)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inventoryBin{}, errBinNotFound
 	}
@@ -709,6 +734,7 @@ func binByID(q sqlQueryer, id string) (inventoryBin, error) {
 	}
 	b.CreatedAt = time.Unix(createdAt, 0).UTC()
 	b.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	b.Pin = pinFromColumns(pinX, pinY)
 	return b, nil
 }
 
