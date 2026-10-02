@@ -398,7 +398,7 @@ describe('App-wide voice (ADR 0093)', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
     fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 

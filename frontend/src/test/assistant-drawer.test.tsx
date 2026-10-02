@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 
 import { AssistantDrawer } from '@/components/assistant-drawer'
 
@@ -149,7 +149,7 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={onOpenSettings} />)
 
     expect(await screen.findByText('Set up an OpenRouter key in Settings → Assistant.')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Ask Mate')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Mate settings' }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
@@ -164,10 +164,10 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
     expect(await screen.findByText('Hook Reef anchorages')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask Mate')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeInTheDocument()
-    // Empty-thread hint shows the Whitsundays example question.
-    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    // Empty-thread help section shows what Mate can check.
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
   })
 
   // Mate UI cycle ("Mate opens on an empty chat"): clicking Mate must not
@@ -185,7 +185,7 @@ describe('AssistantDrawer', () => {
     // Not the active-row highlight (assistant-drawer.tsx: bg-primary/10)
     // that a genuinely selected conversation gets.
     expect(row.closest('button')?.parentElement).not.toHaveClass('bg-primary/10')
-    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
   })
 
   // Mate UI cycle ("Mate opens on an empty chat"): "New conversation" used to
@@ -209,7 +209,7 @@ describe('AssistantDrawer', () => {
       ([url, init]) => (url as string).endsWith('/api/assistant/conversations') && (init as RequestInit | undefined)?.method === 'POST',
     )
     expect(postCalls).toHaveLength(0)
-    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
   })
 
   it('shows a search box above the list and filters conversations by query', async () => {
@@ -232,6 +232,77 @@ describe('AssistantDrawer', () => {
     expect(screen.queryByText('Hamilton Island Weather')).not.toBeInTheDocument()
   })
 
+  // Below lg the sidebar list is hidden (jsdom has no media queries, so this
+  // checks the controls exist and work, not the breakpoint): a Chats button
+  // opens the search overlay with the recent conversations.
+  it('has a Chats button that opens the recent conversations, and picking one selects it', async () => {
+    const fetchMock = buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Gloucester Island Anchorages', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+        { id: 'c2', title: 'Hamilton Island Weather', created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z' },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Chats' }))
+
+    const list = await screen.findByRole('listbox', { name: 'Conversations' })
+    expect(within(list).getByText('Gloucester Island Anchorages')).toBeInTheDocument()
+    expect(within(list).getByText('Hamilton Island Weather')).toBeInTheDocument()
+
+    fireEvent.click(within(list).getByText('Hamilton Island Weather'))
+
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Conversations' })).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => (url as string).endsWith('/api/assistant/conversations/c2'))).toBe(true),
+    )
+  })
+
+  it('the Chats overlay can delete a conversation', async () => {
+    const fetchMock = buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Gloucester Island Anchorages', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Chats' }))
+    const list = await screen.findByRole('listbox', { name: 'Conversations' })
+    expect(within(list).getByText('Gloucester Island Anchorages')).toBeInTheDocument()
+    // The sidebar's own Delete button shares this name; the overlay's is the one inside the dialog.
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete Gloucester Island Anchorages' }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url, init]) => (url as string).endsWith('/api/assistant/conversations/c1') && (init as RequestInit | undefined)?.method === 'DELETE'),
+      ).toBe(true),
+    )
+  })
+
+  it('the compact New button starts a blank chat without POSTing', async () => {
+    const fetchMock = buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' }],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }))
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => (url as string).endsWith('/api/assistant/conversations') && (init as RequestInit | undefined)?.method === 'POST',
+    )
+    expect(postCalls).toHaveLength(0)
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
+  })
+
   it('disables the composer and shows the read-only hint when canWrite is false', async () => {
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
@@ -239,7 +310,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite={false} onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
     expect(textarea).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
@@ -259,7 +330,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
+    const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Tongue Bay or Blue Pearl Bay first?' } })
 
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
@@ -290,7 +361,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
 
     act(() => { fireEvent.keyDown(textarea, { key: 'Enter' }) })
@@ -360,7 +431,7 @@ describe('AssistantDrawer', () => {
     rerender(<AssistantDrawer canWrite onOpenSettings={vi.fn()} initialConversationId={null} />)
 
     await waitFor(() => expect(screen.getByText('Hook Reef anchorages').closest('button')?.parentElement).not.toHaveClass('bg-primary/10'))
-    expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
+    expect(screen.getByText('What Mate can check')).toBeInTheDocument()
   })
 
   it('renders -- for every footer field the server did not report', async () => {
@@ -381,7 +452,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
     fireEvent.change(textarea, { target: { value: 'Any cost info?' } })
 
     await act(async () => {

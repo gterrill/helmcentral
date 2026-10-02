@@ -11,6 +11,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- On a phone, the Mate page now has **Chats** and **New** buttons at the top.
+  **Chats** opens a list of your recent conversations that you can filter by
+  typing, so earlier chats are reachable on a small screen.
+- A new Mate conversation opens with a short list of what Mate can check,
+  in place of the example question.
+- While Mate is thinking and has nothing to look up, its status line shows a
+  nautical phrase that changes every few seconds instead of "Thinking…".
+
+### Changed
+
+- The Mate message box now reads "Ask Mate".
+
+### Fixed
+
+- A phone that kept Helmcentral open through an update could fail to send a
+  question to Mate with a technical error about a missing date. It now says
+  Helmcentral has been updated and asks you to reload the page.
+
 ## [0.38.0] - 2026-10-02
 
 ### Added

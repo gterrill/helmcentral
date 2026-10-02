@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Trash2 } from 'lucide-react'
+import { History, MessageSquarePlus, Search, Trash2 } from 'lucide-react'
 
 import { AssistantThread } from '@/components/assistant-thread'
+import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { filterConversationsByQuery, formatConversationRelativeTime } from '@/lib/assistant-conversation-search'
@@ -37,6 +38,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
   const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
   const [query, setQuery] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const filteredConversations = useMemo(
     () => filterConversationsByQuery(conversations.conversations, query),
@@ -66,7 +68,27 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
 
     return (
       <div className="flex h-full min-h-0 w-full flex-col gap-4 lg:flex-row">
-        <div className="flex min-w-0 shrink-0 gap-2 lg:w-64 lg:flex-col">
+        {/* Below lg there is no room for a list: a compact header row opens
+            the same search overlay the Mate sheet uses (8 most recent chats,
+            filter as you type). From lg up the sidebar list below is shown. */}
+        <div className="flex min-w-0 shrink-0 gap-2 lg:hidden">
+          <Button variant="outline" className="h-11 flex-1 justify-start gap-2" onClick={() => setHistoryOpen(true)}>
+            <History className="h-4 w-4" />
+            Chats
+          </Button>
+          <Button variant="outline" className="h-11 gap-2" onClick={() => conversations.startNew()}>
+            <MessageSquarePlus className="h-4 w-4" />
+            New
+          </Button>
+        </div>
+        <ConversationSearchOverlay
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          conversations={conversations.conversations}
+          onSelect={(id) => void conversations.select(id)}
+          onDelete={(id) => void conversations.remove(id)}
+        />
+        <div className="hidden min-w-0 shrink-0 gap-2 lg:flex lg:w-64 lg:flex-col">
           {/* Mate UI cycle ("Mate opens on an empty chat"): a local reset,
               not a POST - see conversations.startNew's own doc comment for
               why persisting a conversation here, before the operator has
@@ -87,7 +109,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
               className="h-9 pl-9"
             />
           </div>
-          <div className="flex min-h-0 min-w-0 flex-1 gap-1 overflow-x-auto lg:flex-col lg:overflow-x-visible lg:overflow-y-auto">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
             {filteredConversations.length === 0 ? (
               <div className="rounded-md border border-dashed border-border px-2 py-3 text-xs text-muted-foreground">
                 No matching conversations
@@ -97,7 +119,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
                 <div
                   key={conversation.id}
                   className={cn(
-                    'group flex w-56 shrink-0 items-center gap-1 rounded-md px-2 py-1.5 lg:w-auto',
+                    'group flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5',
                     conversations.activeId === conversation.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                   )}
                 >

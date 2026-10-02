@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
+import { Trash2 } from 'lucide-react'
+
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { AssistantConversation } from '@/hooks/use-assistant-conversations'
@@ -13,6 +15,8 @@ interface ConversationSearchOverlayProps {
   onOpenChange: (open: boolean) => void
   conversations: AssistantConversation[]
   onSelect: (id: string) => void
+  /** When given, each row gets a delete button (the drawer's phone layout has no sidebar to delete from). */
+  onDelete?: (id: string) => void
 }
 
 /**
@@ -32,7 +36,7 @@ interface ConversationSearchOverlayProps {
  * `aria-selected` highlight across `role="option"` rows rather than moving
  * real focus, so typing and navigating never fight each other.
  */
-export function ConversationSearchOverlay({ open, onOpenChange, conversations, onSelect }: ConversationSearchOverlayProps) {
+export function ConversationSearchOverlay({ open, onOpenChange, conversations, onSelect, onDelete }: ConversationSearchOverlayProps) {
   const [query, setQuery] = useState('')
   const [highlighted, setHighlighted] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -80,7 +84,10 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm gap-3 p-3 sm:max-w-md">
+      {/* Below sm the panel drops from the top of the screen like a search
+          bar (full width less a 16px gutter, clear of the on-screen
+          keyboard); from sm up it is the centred palette it always was. */}
+      <DialogContent className="top-4 w-[calc(100%-2rem)] max-w-none -translate-y-0 gap-3 p-3 sm:top-1/2 sm:max-w-md sm:-translate-y-1/2">
         {/* sr-only: the visible surface is just the search box and its
             results, matching a command-palette's own convention (no header
             bar) - composition.md still requires every Dialog to carry a
@@ -100,21 +107,39 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
             <p className="p-3 text-sm text-muted-foreground">No matching conversations</p>
           ) : (
             visible.map((conversation, index) => (
-              <button
+              <div
                 key={conversation.id}
-                type="button"
-                role="option"
-                aria-selected={index === highlighted}
-                onMouseEnter={() => setHighlighted(index)}
-                onClick={() => select(conversation.id)}
+                role="presentation"
                 className={cn(
-                  'flex w-full min-w-0 flex-col items-start gap-0.5 border-b border-border px-3 py-2 text-left last:border-b-0',
+                  'flex min-w-0 items-center border-b border-border last:border-b-0',
                   index === highlighted ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                 )}
+                onMouseEnter={() => setHighlighted(index)}
               >
-                <span className="w-full truncate text-sm">{conversation.title}</span>
-                <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
-              </button>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={index === highlighted}
+                  onClick={() => select(conversation.id)}
+                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
+                >
+                  <span className="w-full truncate text-sm">{conversation.title}</span>
+                  <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
+                </button>
+                {onDelete && (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${conversation.title}`}
+                    tabIndex={-1}
+                    // Keep DOM focus on the search input so arrows and Enter keep working.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onDelete(conversation.id)}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>

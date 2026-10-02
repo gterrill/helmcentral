@@ -116,4 +116,29 @@ describe('ConversationSearchOverlay', () => {
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('Search conversations')).toBeInTheDocument()
   })
+
+  it('shows no delete buttons unless onDelete is given', () => {
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={[conversation({ id: 'a', title: 'Alpha' })]} onSelect={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Delete Alpha' })).not.toBeInTheDocument()
+  })
+
+  it('delete calls onDelete with the id, and does not select the row', () => {
+    const onSelect = vi.fn()
+    const onDelete = vi.fn()
+    render(
+      <ConversationSearchOverlay
+        open
+        onOpenChange={vi.fn()}
+        conversations={[conversation({ id: 'a', title: 'Alpha' }), conversation({ id: 'b', title: 'Bravo' })]}
+        onSelect={onSelect}
+        onDelete={onDelete}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Bravo' }))
+
+    expect(onDelete).toHaveBeenCalledWith('b')
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+  })
 })
