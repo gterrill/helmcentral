@@ -11,12 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-02
+
 ### Added
 
-- Helmcentral reloads itself when you come back to it after an update has been
-  installed, so a phone or tablet left open never runs an old version. It checks
-  when you return to the page, at most once an hour, and holds off while a
-  Settings, document or inventory edit is unsaved.
+- Helmcentral reloads itself after an update has been installed, so a screen
+  never runs an old version. A phone or tablet reloads when you come back to
+  it, and a wall display that stays on screen checks by itself once an hour.
+  The reload waits while a Settings, document or inventory edit is unsaved, a
+  stocktake scan or bin quick-add is in progress, or a Mate message is typed
+  but not sent.
 - On a phone, the Mate page now has **Chats** and **New** buttons at the top.
   **Chats** opens a list of your recent conversations that you can filter by
   typing, so earlier chats are reachable on a small screen.
@@ -28,14 +32,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Changed
 
 - The Mate message box now reads "Ask Mate".
+- In **Settings → Mate**, the document indexing model is now picked from the
+  catalog of models that can read images, the same way as the Mate model,
+  instead of typed in. Turning Mate off now hides its other settings.
+- The Inventory side menu is in two groups: **Inventory** (Equipment,
+  Locations, Stocktake) and **Servicing** (Maintenance, Profiles).
 
 ### Fixed
 
 - On a phone, picking a page from the side menu now closes the menu, so you
   land on the page instead of having to dismiss the menu to see it.
-- A phone that kept Helmcentral open through an update could fail to send a
-  question to Mate with a technical error about a missing date. It now says
-  Helmcentral has been updated and asks you to reload the page.
 
 ## [0.38.0] - 2026-10-02
 
@@ -169,13 +175,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- In **Settings → Mate**, the document indexing model is now picked from the
-  catalog of models that can read images, the same way as the Mate model,
-  instead of typed in. Turning Mate off now hides its other settings.
-- The Inventory side menu is in two groups: **Inventory** (Equipment,
-  Locations, Stocktake) and **Servicing** (Maintenance, Profiles).
-- The Anchor Watch tile no longer has a **Raise** button. Raise the watch from
-  the Anchor Watch page, so a stray touch on a dashboard tile can't end it.
 - The engines, house bank and particulars under **Settings → Vessel** now
   save with the **Save** bar like the rest of Settings, instead of with
   **Save Vessel Settings** and **Save particulars** buttons of their own.
@@ -763,7 +762,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/gterrill/helmcentral/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/gterrill/helmcentral/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/gterrill/helmcentral/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/gterrill/helmcentral/compare/v0.35.0...v0.36.0

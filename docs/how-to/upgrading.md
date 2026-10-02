@@ -26,11 +26,16 @@ curl -s http://localhost:8080/api/health
 
 ## Open pages pick up the new version
 
-A phone, tablet or wall display left open across an upgrade reloads itself the
-next time you return to it, checking at most once an hour. It waits if a
-Settings, document or inventory edit is unsaved, and reloads once you have saved
-or left. If the check can't reach Helmcentral it does nothing and tries again on
-a later return. Reloading the page by hand always works.
+A phone or tablet left open across an upgrade reloads itself the next time you
+return to it. A wall display that stays on screen checks by itself once an hour,
+so it picks up the new version without anyone touching it. Either way, the check
+runs at most once an hour.
+
+The reload waits while you are in the middle of something: an unsaved Settings,
+document or inventory edit, a stocktake scan or a bin quick-add in progress, or
+a Mate message you have typed but not sent. It goes ahead once you have saved,
+sent or left. If the check can't reach Helmcentral it does nothing and tries
+again later. Reloading the page by hand always works.
 
 ## SignalK delegated authentication (opt-in)
 

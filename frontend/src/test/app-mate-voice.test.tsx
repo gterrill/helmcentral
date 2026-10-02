@@ -264,6 +264,15 @@ function stubFetch() {
   return fetchMock
 }
 
+// Captures the latest options App hands the update-reload hook, so a test can
+// ask the same hasUnsavedWork() the real hook would consult before reloading.
+const versionReload = vi.hoisted(() => ({ latest: null as null | { hasUnsavedWork?: () => boolean } }))
+vi.mock('@/hooks/use-version-reload', () => ({
+  useVersionReload: (options: { hasUnsavedWork?: () => boolean }) => {
+    versionReload.latest = options
+  },
+}))
+
 describe('App-wide voice (ADR 0093)', () => {
   beforeEach(() => {
     instances = []
@@ -340,6 +349,24 @@ describe('App-wide voice (ADR 0093)', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
     expect(await screen.findByText('how does the passage look')).toBeInTheDocument()
+  })
+
+  it('an unsent message in the Mate sheet holds an update reload until it is cleared', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+    expect(versionReload.latest?.hasUnsavedWork?.()).toBe(false)
+
+    fireEvent.keyDown(window, { altKey: true, code: 'KeyM' })
+    await waitFor(() => expect(instances).toHaveLength(1))
+    currentRecognition().emitResult('how does the passage look', true)
+    await screen.findByText('how does the passage look')
+
+    const composer = await screen.findByPlaceholderText('Ask Mate')
+    fireEvent.change(composer, { target: { value: 'half a thought' } })
+    await waitFor(() => expect(versionReload.latest?.hasUnsavedWork?.()).toBe(true))
+
+    fireEvent.change(composer, { target: { value: '' } })
+    await waitFor(() => expect(versionReload.latest?.hasUnsavedWork?.()).toBe(false))
   })
 
   it('Alt+M triggers push-to-talk from anywhere in the shell', async () => {

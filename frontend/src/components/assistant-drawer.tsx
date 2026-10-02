@@ -21,6 +21,8 @@ interface AssistantDrawerProps {
    * for the ordinary "Mate" nav click behaves exactly as before. */
   initialConversationId?: string | null
   onActiveConversationChange?: (id: string | null) => void
+  /** Whether the composer holds an unsent draft; see AssistantThread. */
+  onHasDraftChange?: (hasDraft: boolean) => void
 }
 
 /**
@@ -33,7 +35,7 @@ interface AssistantDrawerProps {
  * sheet uses, so the long-session panel and the quick voice channel render
  * one conversation identically.
  */
-export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId, onActiveConversationChange }: AssistantDrawerProps) {
+export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId, onActiveConversationChange, onHasDraftChange }: AssistantDrawerProps) {
   const status = useAssistantStatus()
   const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
@@ -145,7 +147,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
           </div>
         </div>
 
-        <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} />
+        <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} onHasDraftChange={onHasDraftChange} />
       </div>
     )
   })()
