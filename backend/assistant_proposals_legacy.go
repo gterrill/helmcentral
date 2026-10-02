@@ -140,6 +140,10 @@ func convertLegacyResult(raw string, ops []legacyProposalOp) (string, error) {
 			conv = convertLegacyOp(ops[i])
 		}
 		res := changeOpResult{Type: conv.Type, Action: conv.Action}
+		if conv.Type != "" && (conv.Action == changeCreate || conv.Action == changeUpdate) {
+			// The Maintenance list is where every rule and log entry shows.
+			res.Href = "/inventory/maintenance"
+		}
 		switch {
 		case r.EntryID != "":
 			res.ID = r.EntryID

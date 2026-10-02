@@ -269,3 +269,12 @@ func TestInventory_AStaleLocationEditIsRefusedWithItsName(t *testing.T) {
 		t.Fatalf("expected a stale refusal naming the location, got %v", err)
 	}
 }
+
+func TestInventory_BinLinkEscapesTheFreeTextCode(t *testing.T) {
+	for code, want := range map[string]string{"Locker #3": "Locker%20%233", "A/2": "A%2F2", "L-1": "L-1"} {
+		got := binRecordType().Href(recordSnapshot{Fields: map[string]any{"code": code}})
+		if got != "/inventory/bins/"+want {
+			t.Errorf("code %q: got %q, want /inventory/bins/%s", code, got, want)
+		}
+	}
+}

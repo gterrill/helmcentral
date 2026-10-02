@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -28,6 +30,12 @@ func init() {
 	defaultRecordRegistry.register(locationRecordType())
 	defaultRecordRegistry.register(binRecordType())
 	defaultRecordRegistry.register(deckRecordType())
+}
+
+// escapePathSegment is encodeURIComponent for a URL path segment, the form
+// the frontend uses for a bin's code (lib/app-location.ts).
+func escapePathSegment(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 func unixVersion(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -556,7 +564,7 @@ func binRecordType() *recordType {
 			return mapInventoryErrorOnly(err)
 		},
 		Delete: func(env changeEnv, b recordSnapshot) error { return mapInventoryErrorOnly(deleteBinTx(env.tx, b.ID)) },
-		Href:   func(r recordSnapshot) string { return "/inventory/bins/" + stringOf(r.Fields["code"]) },
+		Href:   func(r recordSnapshot) string { return "/inventory/bins/" + escapePathSegment(stringOf(r.Fields["code"])) },
 	}
 }
 

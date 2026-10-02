@@ -238,6 +238,9 @@ func lastDoneRequest(fields fieldSet) maintenanceLastDoneRequest {
 }
 
 func createMaintenanceRuleRecord(env changeEnv, fields fieldSet) (createdRecord, error) {
+	if _, ok := fields["not_applicable"]; ok {
+		return createdRecord{}, fieldErr("not_applicable", "only a profile job (an id starting with job:) can be marked not applicable; a new rule is the item's own")
+	}
 	req := ruleRequest(fields)
 	if req.EquipmentID != nil {
 		if _, err := equipmentNameOf(env.tx, *req.EquipmentID); err != nil {

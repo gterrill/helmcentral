@@ -78,8 +78,8 @@ func TestLegacyProposals_AppliedResultsAndStatusesSurvive(t *testing.T) {
 		t.Fatalf("result: %v (%s)", err, applied.Result)
 	}
 	if applied.Status != assistantProposalApplied || len(res.Ops) != 2 ||
-		res.Ops[0] != (changeOpResult{Type: recordTypeMaintenanceRule, Action: changeCreate, ID: "rule-new"}) ||
-		res.Ops[1] != (changeOpResult{Type: recordTypeMaintenanceLog, Action: changeCreate, ID: "entry-1"}) {
+		res.Ops[0] != (changeOpResult{Type: recordTypeMaintenanceRule, Action: changeCreate, ID: "rule-new", Href: "/inventory/maintenance"}) ||
+		res.Ops[1] != (changeOpResult{Type: recordTypeMaintenanceLog, Action: changeCreate, ID: "entry-1", Href: "/inventory/maintenance"}) {
 		t.Fatalf("unexpected applied proposal %+v result %+v", applied, res)
 	}
 	if d, _ := env.asst.GetProposal("old-dismissed"); d.Status != assistantProposalDismissed {
@@ -128,5 +128,19 @@ func TestLegacyProposals_APendingConvertedProposalAppliesAndAStaleOneIsRefused(t
 	row, _ := env.docs.GetMaintenanceRuleRow(rule.ID)
 	if !row.Acknowledged || row.AckReason != "later" {
 		t.Fatalf("expected the rule acknowledged, got %+v", row)
+	}
+}
+
+func TestLegacyProposals_AppliedResultsKeepTheirMaintenanceLink(t *testing.T) {
+	env := newProposalEnv(t)
+	env.insertLegacy(t, "old-applied", `[{"op":"create_rule","description":"Belts","interval_months":12,"summary":"Add Belts"}]`,
+		`{"ops":[{"op":"create_rule","rule_ids":["rule-new"]}]}`, "applied")
+	if err := convertLegacyProposals(env.asst.db); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	applied, _ := env.asst.GetProposal("old-applied")
+	var res changeResult
+	if err := json.Unmarshal(applied.Result, &res); err != nil || res.Ops[0].Href != "/inventory/maintenance" {
+		t.Fatalf("expected the maintenance link, got %s (%v)", applied.Result, err)
 	}
 }

@@ -416,3 +416,12 @@ func TestProposeChanges_ReadOnlyFieldsAreRefused(t *testing.T) {
 		t.Fatalf("got %q", msg)
 	}
 }
+
+func TestProposeChanges_NotApplicableIsRefusedOnACreate(t *testing.T) {
+	deps, store := proposeDeps(t)
+	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical"})
+	msg := proposeError(t, deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"create","fields":{"equipment_id":%q,"description":"Belts","interval_months":12,"not_applicable":true}}]}`, gen.ID))
+	if !strings.Contains(msg, "not_applicable: only a profile job") {
+		t.Fatalf("got %q", msg)
+	}
+}
