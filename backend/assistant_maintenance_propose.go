@@ -839,7 +839,7 @@ func applyMaintenanceProposalOp(tx *sql.Tx, now, today time.Time, op assistantPr
 	return res, nil
 }
 
-// errProposalDryRunDone ends the dry run's transaction: RunMaintenanceTx
+// errProposalDryRunDone ends the dry run's transaction: RunTx
 // commits only when its function returns nil, so returning this always rolls
 // back. It never leaves dryRunProposal.
 var errProposalDryRunDone = errors.New("dry run finished")
@@ -852,13 +852,13 @@ var errProposalDryRunDone = errors.New("dry run finished")
 // makes a later completion need a reading); this cannot. Nothing is
 // committed, so the propose tool still writes nothing.
 //
-// RunMaintenanceTx holds the document store's mutex for the run, so a round's
+// RunTx holds the document store's mutex for the run, so a round's
 // concurrent tool calls queue behind it rather than deadlock: the run waits on
 // nothing but the database file's write lock, which a competing Apply holds
 // only briefly and never while waiting on this mutex.
 func dryRunProposal(store *documentStore, today time.Time, ops []assistantProposalOp) error {
 	results := make([]assistantProposalOpResult, len(ops))
-	err := store.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := store.RunTx(func(tx *sql.Tx, now time.Time) error {
 		for i, op := range ops {
 			res, err := applyMaintenanceProposalOp(tx, now, today, op)
 			if err != nil {

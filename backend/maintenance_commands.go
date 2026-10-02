@@ -14,7 +14,7 @@ import (
 // The maintenance write commands (ADR 0146). Each is one rule write with its
 // validation, its gauge-to-true hours conversion and its store call, taking
 // an open transaction so the HTTP handlers (which run one command in a
-// transaction of their own, via documentStore.RunMaintenanceTx) and Mate's
+// transaction of their own, via documentStore.RunTx) and Mate's
 // proposal apply (which runs several in one transaction and commits only if
 // every one succeeds) execute exactly the same code. A command never touches
 // the store's mutex, the echo context or the wall clock: now and today come
