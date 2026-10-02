@@ -118,9 +118,9 @@ interface InventoryPanelProps {
   deckEditId: string | null
   onOpenDecks: () => void
   onOpenDeck: (id: string) => void
-  /** The Decks list's Back, up to the Locations index. */
+  /** The Decks list's and deck page's Locations breadcrumb, up to the Locations index. */
   onCloseDecks: () => void
-  /** The deck page's Back, up to the Decks list - the one exit that can
+  /** The deck page's Decks breadcrumb, up to the Decks list - an exit that can
    * discard an unsaved layout draft. */
   onCloseDeck: () => void
   /** A delete that already succeeded. */
@@ -262,14 +262,15 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             <DeckEditor
               ref={deckEditorRef}
               id={deckEditId}
-              onBack={onCloseDeck}
+              onOpenLocations={onCloseDecks}
+              onOpenDecks={onCloseDeck}
               onDeleted={onDeckDeleted}
               onDirtyChange={onDirtyChange}
               canWrite={canWrite}
             />
           )
         }
-        return <DecksIndex onOpenDeck={onOpenDeck} onBack={onCloseDecks} canWrite={canWrite} />
+        return <DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={onCloseDecks} canWrite={canWrite} />
       }
       return (
         <LocationsIndex
@@ -280,6 +281,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
           planDeckId={planDeckId}
           onPlanDeckChange={onPlanDeckChange}
           onOpenDecks={onOpenDecks}
+          onOpenDeck={onOpenDeck}
           canWrite={canWrite}
         />
       )

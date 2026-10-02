@@ -209,12 +209,44 @@ describe('LocationsIndex plan view (ADR 0156)', () => {
     expect(onOpenDecks).toHaveBeenCalled()
   })
 
-  it('reaches the Decks list from the page menu', async () => {
+  it('reaches the Decks list from a Decks button beside the view switch, not the page menu', async () => {
     const onOpenDecks = vi.fn()
     render(<LocationsIndex onOpenLocation={vi.fn()} onOpenDecks={onOpenDecks} />)
     await screen.findByText('Engine room')
+    fireEvent.click(screen.getByRole('button', { name: 'Decks' }))
+    expect(onOpenDecks).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: /more|actions/i }))
-    fireEvent.click(await screen.findByText('Decks'))
-    expect(onOpenDecks).toHaveBeenCalled()
+    await screen.findByText('Print bin labels')
+    expect(screen.queryByRole('menuitem', { name: 'Decks' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the Decks button in the plan view too', async () => {
+    const onOpenDecks = vi.fn()
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="plan" onOpenDecks={onOpenDecks} />)
+    await screen.findByRole('link', { name: 'Engine room, 1 bin' })
+    fireEvent.click(screen.getByRole('button', { name: 'Decks' }))
+    expect(onOpenDecks).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers Edit deck on the deck shown in the plan, with or without tabs', async () => {
+    const onOpenDeck = vi.fn()
+    const { unmount } = render(<LocationsIndex onOpenLocation={vi.fn()} view="plan" planDeckId="d2" onOpenDeck={onOpenDeck} />)
+    await screen.findByRole('group', { name: 'Decks' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit deck' }))
+    expect(onOpenDeck).toHaveBeenCalledWith('d2')
+    unmount()
+
+    decks = decks.filter((d) => d.id === 'd1')
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="plan" onOpenDeck={onOpenDeck} />)
+    await screen.findByRole('link', { name: 'Engine room, 1 bin' })
+    expect(screen.queryByRole('group', { name: 'Decks' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit deck' }))
+    expect(onOpenDeck).toHaveBeenLastCalledWith('d1')
+  })
+
+  it('hides Edit deck when read-only', async () => {
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="plan" canWrite={false} onOpenDeck={vi.fn()} />)
+    await screen.findByRole('link', { name: 'Engine room, 1 bin' })
+    expect(screen.queryByRole('button', { name: 'Edit deck' })).not.toBeInTheDocument()
   })
 })

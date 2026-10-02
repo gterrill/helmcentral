@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Layers, Plus } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -39,12 +40,12 @@ const columns: ColumnDef<DeckRow, unknown>[] = [
 
 interface DecksIndexProps {
   onOpenDeck: (id: string) => void
-  /** Back to the Locations index. */
-  onBack: () => void
+  /** The breadcrumb's Locations: up to the Locations index. */
+  onOpenLocations: () => void
   canWrite?: boolean
 }
 
-export function DecksIndex({ onOpenDeck, onBack, canWrite = true }: DecksIndexProps) {
+export function DecksIndex({ onOpenDeck, onOpenLocations, canWrite = true }: DecksIndexProps) {
   const { decks, loading, error, refresh, createDeck } = useInventoryDecks()
   const { zones } = useInventoryZones()
   const [creating, setCreating] = useState(false)
@@ -86,8 +87,19 @@ export function DecksIndex({ onOpenDeck, onBack, canWrite = true }: DecksIndexPr
   return (
     <Page
       title="Decks"
-      onBack={onBack}
-      backLabel="Back"
+      breadcrumb={
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenLocations() }}>Locations</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>Decks</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      }
       primaryAction={
         canWrite
           ? { label: 'New deck', icon: <Plus className="h-4 w-4" aria-hidden="true" />, onClick: openCreate }

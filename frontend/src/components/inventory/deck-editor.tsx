@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -25,7 +26,10 @@ export interface DeckEditorHandle {
 
 interface DeckEditorProps {
   id: string
-  onBack: () => void
+  /** The breadcrumb's Locations: up to the Locations index. */
+  onOpenLocations: () => void
+  /** The breadcrumb's Decks: up to the Decks list. */
+  onOpenDecks: () => void
   /** A delete that already succeeded - the page no longer has a record. */
   onDeleted: () => void
   onDirtyChange?: (dirty: boolean) => void
@@ -38,7 +42,7 @@ const ASPECT_TOLERANCE = 0.02
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function DeckEditor(
-  { id, onBack, onDeleted, onDirtyChange, canWrite = true },
+  { id, onOpenLocations, onOpenDecks, onDeleted, onDirtyChange, canWrite = true },
   ref,
 ) {
   const { decks, loading, error, refresh, renameDeck, deleteDeck, uploadPlan, saveLayout } = useInventoryDecks()
@@ -167,16 +171,36 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
     }
   }
 
+  // Both links go through the app's unsaved-changes guard, as the old back
+  // arrow did. Until the record loads the last crumb is just "Deck".
+  const breadcrumb = (
+    <Breadcrumb>
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenLocations() }}>Locations</BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem>
+          <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenDecks() }}>Decks</BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem className="min-w-0">
+          <BreadcrumbPage className="truncate">{deck?.name ?? 'Deck'}</BreadcrumbPage>
+        </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  )
+
   if (!deck && loading) {
     return (
-      <Page title="Deck" onBack={onBack}>
+      <Page title="Deck" breadcrumb={breadcrumb}>
         <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">Loading...</div>
       </Page>
     )
   }
   if (!deck && error) {
     return (
-      <Page title="Deck" onBack={onBack}>
+      <Page title="Deck" breadcrumb={breadcrumb}>
         <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 text-center">
           <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
           <Button type="button" variant="outline" size="sm" onClick={() => { void refresh() }}>Retry</Button>
@@ -186,7 +210,7 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
   }
   if (!deck) {
     return (
-      <Page title="Deck" onBack={onBack}>
+      <Page title="Deck" breadcrumb={breadcrumb}>
         <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">This deck could not be found.</div>
       </Page>
     )
@@ -197,7 +221,7 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
   return (
     <Page
       title={deck.name}
-      onBack={onBack}
+      breadcrumb={breadcrumb}
       secondaryActions={
         canWrite && zonesKnown
           ? [

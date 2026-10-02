@@ -37,7 +37,7 @@ const calls = (method: string, suffix: string) =>
   fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && ((init as RequestInit | undefined)?.method ?? 'GET') === method)
 
 function renderEditor(props: Partial<React.ComponentProps<typeof DeckEditor>> = {}) {
-  return render(<DeckEditor id="d1" onBack={vi.fn()} onDeleted={vi.fn()} {...props} />)
+  return render(<DeckEditor id="d1" onOpenLocations={vi.fn()} onOpenDecks={vi.fn()} onDeleted={vi.fn()} {...props} />)
 }
 
 beforeEach(() => {
@@ -170,7 +170,7 @@ describe('DeckEditor', () => {
 
   it('exposes save() for the unsaved-changes guard', async () => {
     const ref = createRef<DeckEditorHandle>()
-    render(<DeckEditor ref={ref} id="d1" onBack={vi.fn()} onDeleted={vi.fn()} />)
+    render(<DeckEditor ref={ref} id="d1" onOpenLocations={vi.fn()} onOpenDecks={vi.fn()} onDeleted={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Stub: outline Lazarette' }))
     await ref.current!.save()
     expect(calls('PUT', '/api/inventory/decks/d1/layout')).toHaveLength(1)
@@ -261,5 +261,29 @@ describe('DeckEditor delete', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())
     expect(calls('DELETE', '/api/inventory/decks/d1')).toHaveLength(1)
+  })
+
+  it('shows a Locations / Decks / <name> breadcrumb in place of a back arrow', async () => {
+    const onOpenLocations = vi.fn()
+    const onOpenDecks = vi.fn()
+    renderEditor({ onOpenLocations, onOpenDecks })
+    await screen.findByDisplayValue('Main deck')
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Main deck' })).toBeInTheDocument()
+    expect(screen.getByText('Main deck', { selector: '[aria-current="page"]' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: 'Decks' }))
+    expect(onOpenDecks).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('link', { name: 'Locations' }))
+    expect(onOpenLocations).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the breadcrumb, ending in Deck, while the deck is loading or missing', async () => {
+    decks = []
+    renderEditor()
+    await screen.findByText('This deck could not be found.')
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Locations' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Decks' })).toBeInTheDocument()
+    expect(screen.getByText('Deck', { selector: '[aria-current="page"]' })).toBeInTheDocument()
   })
 })

@@ -39,7 +39,7 @@ beforeEach(() => {
 
 describe('DecksIndex', () => {
   it('lists each deck with whether it has a plan and how many locations are on it', async () => {
-    render(<DecksIndex onOpenDeck={vi.fn()} onBack={vi.fn()} />)
+    render(<DecksIndex onOpenDeck={vi.fn()} onOpenLocations={vi.fn()} />)
     await screen.findByText('Main deck')
     expect(screen.getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Name', 'Plan', 'Locations'])
     const main = screen.getByText('Main deck').closest('tr')!
@@ -52,22 +52,24 @@ describe('DecksIndex', () => {
 
   it('opens a deck when its row is clicked', async () => {
     const onOpenDeck = vi.fn()
-    render(<DecksIndex onOpenDeck={onOpenDeck} onBack={vi.fn()} />)
+    render(<DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={vi.fn()} />)
     fireEvent.click(await screen.findByText('Flybridge'))
     expect(onOpenDeck).toHaveBeenCalledWith('d2')
   })
 
-  it('goes back to Locations', async () => {
-    const onBack = vi.fn()
-    render(<DecksIndex onOpenDeck={vi.fn()} onBack={onBack} />)
+  it('goes back to Locations through its breadcrumb, with no back arrow', async () => {
+    const onOpenLocations = vi.fn()
+    render(<DecksIndex onOpenDeck={vi.fn()} onOpenLocations={onOpenLocations} />)
     await screen.findByText('Main deck')
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    expect(onBack).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    expect(screen.getByText('Decks', { selector: '[aria-current="page"]' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: 'Locations' }))
+    expect(onOpenLocations).toHaveBeenCalled()
   })
 
   it('creates a deck by name and opens its page', async () => {
     const onOpenDeck = vi.fn()
-    render(<DecksIndex onOpenDeck={onOpenDeck} onBack={vi.fn()} />)
+    render(<DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={vi.fn()} />)
     await screen.findByText('Main deck')
     fireEvent.click(screen.getByRole('button', { name: 'New deck' }))
     fireEvent.change(await screen.findByLabelText('Deck name'), { target: { value: 'Lower deck' } })
@@ -77,7 +79,7 @@ describe('DecksIndex', () => {
 
   it('shows the server message verbatim when a create is refused', async () => {
     const onOpenDeck = vi.fn()
-    render(<DecksIndex onOpenDeck={onOpenDeck} onBack={vi.fn()} />)
+    render(<DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={vi.fn()} />)
     await screen.findByText('Main deck')
     fireEvent.click(screen.getByRole('button', { name: 'New deck' }))
     fireEvent.change(await screen.findByLabelText('Deck name'), { target: { value: 'main deck' } })
@@ -88,13 +90,13 @@ describe('DecksIndex', () => {
 
   it('explains what a deck is when there are none', async () => {
     decks = []
-    render(<DecksIndex onOpenDeck={vi.fn()} onBack={vi.fn()} />)
+    render(<DecksIndex onOpenDeck={vi.fn()} onOpenLocations={vi.fn()} />)
     await screen.findByText('No decks yet')
     expect(screen.getByText(/picture of a deck/i)).toBeInTheDocument()
   })
 
   it('hides New deck when read-only', async () => {
-    render(<DecksIndex onOpenDeck={vi.fn()} onBack={vi.fn()} canWrite={false} />)
+    render(<DecksIndex onOpenDeck={vi.fn()} onOpenLocations={vi.fn()} canWrite={false} />)
     await screen.findByText('Main deck')
     expect(screen.queryByRole('button', { name: 'New deck' })).not.toBeInTheDocument()
   })

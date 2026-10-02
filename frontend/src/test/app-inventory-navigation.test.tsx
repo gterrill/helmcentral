@@ -812,9 +812,42 @@ describe('App: deck plans under Locations (ADR 0156)', () => {
     expect(window.location.pathname).toBe('/inventory/decks')
     await screen.findByText('Main deck')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    // The header breadcrumb also says Locations; the page's own is last.
+    fireEvent.click(screen.getAllByRole('link', { name: 'Locations' }).at(-1)!)
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/inventory/locations?view=plan'))
   })
+
+  it('reaches the Decks list from the Decks button', async () => {
+    window.history.replaceState({}, '', '/inventory/locations')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Decks' }))
+    await screen.findByRole('heading', { name: 'Decks' })
+    expect(window.location.pathname).toBe('/inventory/decks')
+  })
+
+  // The breadcrumb links are the deck page's exits now, so a dirty draft
+  // must stop them exactly as the old back arrow did.
+  it.each([['Decks', '/inventory/decks'], ['Locations', '/inventory/locations']])(
+    'the %s breadcrumb on a dirty deck page asks first; Cancel keeps the draft, Discard goes',
+    async (crumb, path) => {
+      window.history.replaceState({}, '', '/inventory/decks/d1')
+      render(<App />)
+      const name = await screen.findByLabelText('Deck name')
+      fireEvent.change(name, { target: { value: 'Main deck renamed' } })
+
+      fireEvent.click(screen.getAllByRole('link', { name: crumb }).at(-1)!)
+      await screen.findByRole('button', { name: 'Save and Continue' })
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('button', { name: 'Save and Continue' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Deck name')).toHaveValue('Main deck renamed')
+      expect(window.location.pathname).toBe('/inventory/decks/d1')
+
+      fireEvent.click(screen.getAllByRole('link', { name: crumb }).at(-1)!)
+      await screen.findByRole('button', { name: 'Save and Continue' })
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+      await waitFor(() => expect(window.location.pathname).toBe(path))
+    },
+  )
 
   it('opens a deck page from a deep link', async () => {
     window.history.replaceState({}, '', '/inventory/decks/d1')

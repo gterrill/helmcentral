@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Layers, MapPin, Plus, Printer } from 'lucide-react'
+import { Layers, MapPin, Pencil, Plus, Printer } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { Button } from '@/components/ui/button'
@@ -61,6 +61,8 @@ interface LocationsIndexProps {
   onOpenBin?: (code: string) => void
   /** The Decks list, where plans are added and locations drawn on them. */
   onOpenDecks?: () => void
+  /** One deck's page, from Edit deck on the Plan view. */
+  onOpenDeck?: (deckId: string) => void
 }
 
 function ViewSwitch({ view, onChange }: { view: LocationsView; onChange: (view: LocationsView) => void }) {
@@ -83,7 +85,7 @@ function ViewSwitch({ view, onChange }: { view: LocationsView; onChange: (view: 
 }
 
 function PlanView({
-  decksState, zones, planDeckId, onPlanDeckChange, onOpenLocation, onOpenBin, onOpenDecks, canWrite,
+  decksState, zones, planDeckId, onPlanDeckChange, onOpenLocation, onOpenBin, onOpenDecks, onOpenDeck, canWrite,
 }: {
   decksState: ReturnType<typeof useInventoryDecks>
   zones: InventoryZone[]
@@ -92,6 +94,7 @@ function PlanView({
   onOpenLocation: (id: string) => void
   onOpenBin: (code: string) => void
   onOpenDecks: () => void
+  onOpenDeck: (deckId: string) => void
   canWrite: boolean
 }) {
   const { decks, loading, error, refresh } = decksState
@@ -121,20 +124,30 @@ function PlanView({
   }
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {planned.length > 1 && (
-        <div role="group" aria-label="Decks" className="flex flex-wrap gap-1">
-          {planned.map((d) => (
-            <Button
-              key={d.id}
-              type="button"
-              size="sm"
-              variant={d.id === deck.id ? 'default' : 'outline'}
-              aria-pressed={d.id === deck.id}
-              onClick={() => onPlanDeckChange(d.id)}
-            >
-              {d.name}
+      {(planned.length > 1 || canWrite) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {planned.length > 1 && (
+            <div role="group" aria-label="Decks" className="flex min-w-0 flex-1 flex-wrap gap-1">
+              {planned.map((d) => (
+                <Button
+                  key={d.id}
+                  type="button"
+                  size="sm"
+                  variant={d.id === deck.id ? 'default' : 'outline'}
+                  aria-pressed={d.id === deck.id}
+                  onClick={() => onPlanDeckChange(d.id)}
+                >
+                  {d.name}
+                </Button>
+              ))}
+            </div>
+          )}
+          {canWrite && (
+            <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => onOpenDeck(deck.id)}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Edit deck
             </Button>
-          ))}
+          )}
         </div>
       )}
       <DeckPlan deck={deck} zones={zones} onOpenZone={onOpenLocation} onOpenBin={onOpenBin} />
@@ -151,6 +164,7 @@ export function LocationsIndex({
   onPlanDeckChange = () => {},
   onOpenBin = () => {},
   onOpenDecks = () => {},
+  onOpenDeck = () => {},
 }: LocationsIndexProps) {
   const { zones, loading, error, refresh, createZone } = useInventoryZones()
   const decksState = useInventoryDecks()
@@ -200,13 +214,16 @@ export function LocationsIndex({
           : undefined
       }
       secondaryActions={[
-        { label: 'Decks', icon: <Layers className="h-4 w-4" aria-hidden="true" />, onClick: onOpenDecks },
         { label: 'Print bin labels', icon: <Printer className="h-4 w-4" aria-hidden="true" />, onClick: () => setPrintingLabels(true) },
       ]}
     >
       <div className="flex h-full min-h-0 flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <ViewSwitch view={view} onChange={onViewChange} />
+          <Button type="button" variant="outline" size="sm" onClick={onOpenDecks}>
+            <Layers className="h-4 w-4" aria-hidden="true" />
+            Decks
+          </Button>
           {view === 'table' && (
             <div className="min-w-0 flex-1">
               <IndexFilters
@@ -228,6 +245,7 @@ export function LocationsIndex({
             onOpenLocation={onOpenLocation}
             onOpenBin={onOpenBin}
             onOpenDecks={onOpenDecks}
+            onOpenDeck={onOpenDeck}
             canWrite={canWrite}
           />
         ) : (

@@ -52,24 +52,25 @@ vi.mock('@/components/inventory/profiles-section', () => ({
 }))
 
 vi.mock('@/components/inventory/decks-index', () => ({
-  DecksIndex: (props: { onOpenDeck: (id: string) => void; onBack: () => void }) => (
+  DecksIndex: (props: { onOpenDeck: (id: string) => void; onOpenLocations: () => void }) => (
     <div data-testid="decks-index">
       <button type="button" onClick={() => props.onOpenDeck('d1')}>open-deck-d1</button>
-      <button type="button" onClick={props.onBack}>decks-back</button>
+      <button type="button" onClick={props.onOpenLocations}>decks-back</button>
     </div>
   ),
 }))
 
 vi.mock('@/components/inventory/deck-editor', () => ({
   DeckEditor: forwardRef(function MockDeckEditor(
-    props: { id: string; onBack: () => void; onDeleted: () => void; onDirtyChange?: (dirty: boolean) => void },
+    props: { id: string; onOpenLocations: () => void; onOpenDecks: () => void; onDeleted: () => void; onDirtyChange?: (dirty: boolean) => void },
     ref,
   ) {
     useImperativeHandle(ref, () => ({ save: deckSaveMock }), [])
     return (
       <div data-testid="deck-editor">
         {props.id}
-        <button type="button" onClick={props.onBack}>deck-back</button>
+        <button type="button" onClick={props.onOpenDecks}>deck-crumb-decks</button>
+        <button type="button" onClick={props.onOpenLocations}>deck-crumb-locations</button>
         <button type="button" onClick={props.onDeleted}>deck-deleted</button>
       </div>
     )
@@ -77,9 +78,10 @@ vi.mock('@/components/inventory/deck-editor', () => ({
 }))
 
 vi.mock('@/components/inventory/locations-index', () => ({
-  LocationsIndex: (props: { onOpenLocation: (id: string) => void }) => (
+  LocationsIndex: (props: { onOpenLocation: (id: string) => void; onOpenDeck?: (id: string) => void }) => (
     <div data-testid="locations-index">
       <button type="button" onClick={() => props.onOpenLocation('z1')}>open-location-z1</button>
+      <button type="button" onClick={() => props.onOpenDeck?.('d9')}>edit-deck-d9</button>
     </div>
   ),
 }))
@@ -233,6 +235,8 @@ describe('InventoryPanel', () => {
     const { unmount } = render(<InventoryPanel {...props} activeSectionId="locations" />)
     fireEvent.click(screen.getByText('open-location-z1'))
     expect(props.onOpenLocation).toHaveBeenCalledWith('z1')
+    fireEvent.click(screen.getByText('edit-deck-d9'))
+    expect(props.onOpenDeck).toHaveBeenCalledWith('d9')
     unmount()
 
     render(<InventoryPanel {...props} activeSectionId="locations" locationEditId="z1" />)
@@ -256,8 +260,10 @@ describe('InventoryPanel', () => {
 
     render(<InventoryPanel {...props} activeSectionId="locations" decksOpen deckEditId="d1" />)
     expect(screen.getByTestId('deck-editor')).toHaveTextContent('d1')
-    fireEvent.click(screen.getByText('deck-back'))
+    fireEvent.click(screen.getByText('deck-crumb-decks'))
     expect(props.onCloseDeck).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('deck-crumb-locations'))
+    expect(props.onCloseDecks).toHaveBeenCalled()
     fireEvent.click(screen.getByText('deck-deleted'))
     expect(props.onDeckDeleted).toHaveBeenCalled()
   })

@@ -11,8 +11,8 @@ A clear photo of a printed drawing also works if it is taken square on.
 
 ## Add a deck and its picture
 
-1. Open **Inventory**, then **Locations**, and open the menu at the top right.
-   Choose **Decks**.
+1. Open **Inventory**, then **Locations**, and press **Decks**, beside **Table**
+   and **Plan**.
 2. Press **New deck**, type a name such as `Main deck`, and press **Create**.
    The deck's page opens.
 3. Under **Plan image**, press **Upload plan** and choose the picture. It
@@ -68,3 +68,7 @@ stay, and the picture stays in Documents.
 Open **Locations** and press **Plan** at the top. Pick a deck tab, then tap a
 location's outline to open it or a pin to open that bin. A location's page and
 a bin's page show the same plan with their place marked.
+
+To change the deck you are looking at, press **Edit deck** beside the deck tabs.
+It opens that deck's page. The deck's page has a trail across the top
+(**Locations / Decks / the deck's name**) for getting back.
