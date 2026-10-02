@@ -5,6 +5,16 @@ export interface ImageSize {
   height: number
 }
 
+/** Loads `url` and resolves with its natural size; rejects if it will not load. */
+export function loadImageSize(url: string): Promise<ImageSize> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => reject(new Error('The plan image could not be loaded.'))
+    img.src = url
+  })
+}
+
 /**
  * The natural pixel size of the image at `url`, or null until it has loaded
  * (and for a null url). A load failure leaves it null and reports `failed`,
