@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate can now propose changes to your equipment, locations, bins and decks, as
+  well as the maintenance schedule. Ask it to file a spare into a bin, rename a
+  location or set up a deck from a drawing in your documents, and it answers
+  with a card that shows each change as it is now and as it will become, and
+  says what a removal takes with it. Several changes that belong together, such
+  as a new deck and the locations moved onto it, are one card that applies all
+  of them or none. Nothing changes until you tap **Apply**. Mate can't see
+  pictures, so a card that sets a deck's plan shows you the picture to check,
+  and a PDF can't be used as a plan yet. Nothing needs changing on upgrade:
+  cards Mate wrote earlier carry over and work as before.
 - Locations can now be drawn on deck plans. Add a picture of each deck, such as
   the builder's general arrangement drawing, outline your locations on it and
   pin your bins, then find them by looking at the boat. Locations has a new

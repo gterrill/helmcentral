@@ -22,6 +22,19 @@ To swap the picture later, press **Replace plan**. Outlines and pins stay where
 they are on the image. If the new picture is a different shape, a warning tells
 you to check them.
 
+## Ask Mate to start a deck
+
+If the drawing is already in your documents as a JPEG or PNG, you can ask
+Mate to set the deck up: "Make a Main deck and use the general arrangement
+drawing in my documents as its plan." Mate answers with a card. Check the
+picture on the card is the right drawing, then tap **Apply**. Mate can't see
+the picture, so that check is yours.
+
+If the drawing is a PDF, Mate will say a page of a PDF can't be a plan yet and
+ask you to upload a picture of that page. Export the page to an image, upload
+it as above, and Mate can use that. Outlining locations and pinning bins is
+still done on the deck's page, as below.
+
 ## Outline a location
 
 1. On the deck's page, pick a location from the list beside the plan. A
