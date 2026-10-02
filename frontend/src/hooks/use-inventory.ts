@@ -78,6 +78,9 @@ export interface InventoryBin {
   code: string
   name: string
   sort_index: number
+  /** Where the bin sits on its location's deck plan, as fractions (0..1) of
+   * the plan image; null or absent when it has not been placed. */
+  pin?: { x: number; y: number } | null
 }
 
 /** inventoryZone, backend/inventory_store.go. */
@@ -86,6 +89,33 @@ export interface InventoryZone {
   name: string
   sort_index: number
   bins: InventoryBin[]
+  /** The deck plan this location is outlined on; null or absent when it is
+   * not on a plan. Set together with polygon. */
+  deck_id?: string | null
+  /** The outline on the plan: 3 to 64 [x, y] points, fractions (0..1) of the
+   * plan image. */
+  polygon?: Array<[number, number]> | null
+}
+
+/** inventoryDeck, backend/inventory_decks_store.go - a deck plan image that
+ * locations are outlined on. */
+export interface InventoryDeck {
+  id: string
+  name: string
+  sort_index: number
+  plan_document_id: string | null
+}
+
+/** One deck's whole layout as the editor saves it: the outlines of the
+ * locations on the plan and the pins of their bins. */
+export interface DeckLayout {
+  zones: Array<{ id: string; polygon: Array<[number, number]> }>
+  bins: Array<{ id: string; x: number; y: number }>
+}
+
+/** The URL of a deck's plan image. */
+export function deckPlanUrl(deck: Pick<InventoryDeck, 'plan_document_id'>): string | null {
+  return deck.plan_document_id ? `${apiBaseUrl}/api/documents/${encodeURIComponent(deck.plan_document_id)}/content` : null
 }
 
 /** equipmentItem, backend/inventory_store.go. zone_id/bin_id are the raw
@@ -791,4 +821,78 @@ export function useInventoryZones() {
   }, [refresh])
 
   return { zones, loading, error, refresh, createZone, renameZone, deleteZone, createBin, renameBin, deleteBin }
+}
+
+/**
+ * Decks and their plan images (ADR 0156). Same shape as useInventoryZones:
+ * one instance per caller, every write re-fetches the list. saveLayout
+ * returns the refreshed zone list the server answers with, so a caller that
+ * also holds zones can adopt it without a second request.
+ */
+export function useInventoryDecks() {
+  const [decks, setDecks] = useState<InventoryDeck[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const seqRef = useRef(0)
+
+  const refresh = useCallback(async () => {
+    const seq = (seqRef.current += 1)
+    setLoading(true)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/inventory/decks`)
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? `HTTP ${res.status}`)
+      }
+      const data = (await res.json()) as { decks?: InventoryDeck[] }
+      if (seq !== seqRef.current) return
+      setDecks(data.decks ?? [])
+      setError(null)
+    } catch (err) {
+      if (seq !== seqRef.current) return
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (seq === seqRef.current) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const createDeck = useCallback(async (name: string) => {
+    const data = await submitJSON<{ deck: InventoryDeck }>(`${apiBaseUrl}/api/inventory/decks`, 'POST', { name })
+    await refresh()
+    return data.deck
+  }, [refresh])
+
+  const renameDeck = useCallback(async (id: string, name: string) => {
+    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}`, 'PUT', { name })
+    await refresh()
+  }, [refresh])
+
+  /** Resolves with how many locations lost their outline. */
+  const deleteDeck = useCallback(async (id: string) => {
+    const data = await submitJSON<{ zones_cleared: number }>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}`, 'DELETE')
+    await refresh()
+    return data.zones_cleared
+  }, [refresh])
+
+  const uploadPlan = useCallback(async (id: string, file: Blob, filename: string) => {
+    const form = new FormData()
+    form.append('file', file, filename)
+    const response = await fetch(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}/plan`, { method: 'POST', body: form })
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      throw new Error(payload.error ?? `HTTP ${response.status}`)
+    }
+    const data = (await response.json()) as { deck: InventoryDeck }
+    await refresh()
+    return data.deck
+  }, [refresh])
+
+  const saveLayout = useCallback(async (id: string, layout: DeckLayout) => {
+    const data = await submitJSON<{ zones: InventoryZone[] }>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}/layout`, 'PUT', layout)
+    return data.zones
+  }, [])
+
+  return { decks, loading, error, refresh, createDeck, renameDeck, deleteDeck, uploadPlan, saveLayout }
 }

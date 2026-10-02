@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DeckPlan } from '@/components/inventory/deck-plan'
 import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
 import { PrintLabelButton } from '@/components/inventory/label-print'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
-import { findBinByCode, useEquipment, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
+import { findBinByCode, useEquipment, useInventoryDecks, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
 import { binTagPath } from '@/lib/tag-url'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
@@ -52,6 +53,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
     return (
       <BinContents
         zone={match.zone}
+        zones={zones}
         bin={match.bin}
         onClose={onClose}
         onOpenEquipment={onOpenEquipment}
@@ -304,10 +306,23 @@ export function BinPhotoGrid({ items, onOpenEquipment }: { items: EquipmentItem[
   )
 }
 
+// ADR 0156: a small plan with the bin's location highlighted and the bin
+// itself pinned. Only rendered for a bin that has a pin.
+function BinOnPlan({ zone, zones, bin }: { zone: InventoryZone; zones: InventoryZone[]; bin: InventoryBin }) {
+  const { decks, error } = useInventoryDecks()
+  const deck = decks.find((d) => d.id === zone.deck_id)
+  if (error) return <p role="alert" className="text-sm text-destructive">{error}</p>
+  if (!deck || !deck.plan_document_id) return null
+  return (
+    <DeckPlan deck={deck} zones={zones} highlightZoneId={zone.id} highlightBinId={bin.id} showPinLabels={false} />
+  )
+}
+
 function BinContents({
-  zone, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange,
+  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange,
 }: {
   zone: InventoryZone
+  zones: InventoryZone[]
   bin: InventoryBin
   onClose: (zoneId?: string) => void
   onOpenEquipment: (id: string) => void
@@ -336,6 +351,8 @@ function BinContents({
         </div>
         <p className="text-xs text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
       </div>
+
+      {bin.pin && zone.deck_id && <BinOnPlan zone={zone} zones={zones} bin={bin} />}
 
       {error && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

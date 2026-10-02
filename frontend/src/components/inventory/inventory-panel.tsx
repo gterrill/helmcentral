@@ -5,7 +5,7 @@ import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/invent
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationEditor, type LocationEditorHandle } from '@/components/inventory/location-editor'
-import { LocationsIndex } from '@/components/inventory/locations-index'
+import { LocationsIndex, type LocationsView } from '@/components/inventory/locations-index'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
@@ -104,6 +104,12 @@ interface InventoryPanelProps {
   onCloseLocation: () => void
   /** A delete that already succeeded. */
   onLocationDeleted: () => void
+  /** ADR 0156: the Locations index's Table or Plan view, the deck tab open in
+   * Plan, and their setters. App.tsx keeps them in the URL. */
+  locationsView: LocationsView
+  onLocationsViewChange: (view: LocationsView) => void
+  planDeckId: string | null
+  onPlanDeckChange: (deckId: string) => void
   /** The zone/bin App.tsx stashed from the last onNewEquipment(preset) call
    * - read once by EquipmentEditor when it mounts a brand new draft. null
    * for the ordinary "New item" button. */
@@ -136,6 +142,10 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onOpenLocation,
     onCloseLocation,
     onLocationDeleted,
+    locationsView,
+    onLocationsViewChange,
+    planDeckId,
+    onPlanDeckChange,
     newEquipmentPreset,
   },
   ref,
@@ -218,7 +228,17 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
           />
         )
       }
-      return <LocationsIndex onOpenLocation={onOpenLocation} canWrite={canWrite} />
+      return (
+        <LocationsIndex
+          onOpenLocation={onOpenLocation}
+          onOpenBin={onOpenBin}
+          view={locationsView}
+          onViewChange={onLocationsViewChange}
+          planDeckId={planDeckId}
+          onPlanDeckChange={onPlanDeckChange}
+          canWrite={canWrite}
+        />
+      )
     }
     if (activeSectionId === 'stocktake') {
       return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />

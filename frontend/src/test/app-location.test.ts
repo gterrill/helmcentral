@@ -789,3 +789,49 @@ describe('resolveScannedText', () => {
     })
   })
 })
+
+describe('deck plans in the Locations section (ADR 0156)', () => {
+  const ctx = { firstPageId: null }
+
+  it('parses the Plan view with and without a deck', () => {
+    expect(parseAppLocation('/inventory/locations?view=plan')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', locationsView: 'plan',
+    })
+    expect(parseAppLocation('/inventory/locations?view=plan&deck=d1')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', locationsView: 'plan', planDeckId: 'd1',
+    })
+  })
+
+  it('ignores an unknown view', () => {
+    expect(parseAppLocation('/inventory/locations?view=grid')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
+  })
+
+  it('parses the Decks list and a deck page', () => {
+    expect(parseAppLocation('/inventory/decks')).toEqual({ panel: 'inventory', inventorySection: 'locations', decksOpen: true })
+    expect(parseAppLocation('/inventory/decks/d%201')).toEqual({
+      panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId: 'd 1',
+    })
+  })
+
+  it('formats them back to the same paths', () => {
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationsView: 'plan' }, ctx)).toBe('/inventory/locations?view=plan')
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationsView: 'plan', planDeckId: 'd1' }, ctx)).toBe('/inventory/locations?view=plan&deck=d1')
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', decksOpen: true }, ctx)).toBe('/inventory/decks')
+    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId: 'd 1' }, ctx)).toBe('/inventory/decks/d%201')
+  })
+
+  it('treats the new paths as canonical', () => {
+    const c = { firstPageId: null, knownPageIds: null, canAdmin: true }
+    for (const path of ['/inventory/locations?view=plan', '/inventory/locations?view=plan&deck=d1', '/inventory/decks', '/inventory/decks/d1']) {
+      expect(isCanonicalAppPath(path, c)).toBe(true)
+    }
+  })
+
+  it('a deck page is an editor that a Back to anywhere else closes', () => {
+    const current = { section: 'locations' as const, equipmentEditId: null, creating: false, deckEditId: 'd1' }
+    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks'))).toBe(true)
+    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/locations'))).toBe(true)
+    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks/d2'))).toBe(true)
+    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks/d1'))).toBe(false)
+  })
+})

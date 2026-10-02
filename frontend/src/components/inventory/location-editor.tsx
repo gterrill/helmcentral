@@ -1,12 +1,13 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ConfirmDelete, DetailsLayout, FormSection, Page, ResourceList, SaveBar } from '@/components/patterns'
+import { DeckPlan } from '@/components/inventory/deck-plan'
 import { BinRow } from '@/components/inventory/location-bin-row'
-import { useInventoryZones } from '@/hooks/use-inventory'
+import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
 
 // ADR 0142: one location's own page - rename it, add and remove its bins,
 // delete it. Built from the pattern library the way EquipmentEditor is.
@@ -34,14 +35,58 @@ interface LocationEditorProps {
   onDeleted: () => void
   /** ADR 0127: each bin's code opens its bin page. */
   onOpenBin?: (code: string) => void
+  /** ADR 0156: "Edit on plan" opens the deck page the location is drawn on. */
+  onOpenDeck?: (deckId: string) => void
+  /** ADR 0156: a location not on any plan points to the Decks list. */
+  onOpenDecks?: () => void
   onDirtyChange?: (dirty: boolean) => void
   canWrite?: boolean
 }
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+// ADR 0156: where this location sits on its deck plan. Shown whether or not it
+// is on one, so the way to put it there is never hidden.
+function OnThePlan({
+  zone, zones, canWrite, onOpenDeck, onOpenDecks,
+}: {
+  zone: InventoryZone
+  zones: InventoryZone[]
+  canWrite: boolean
+  onOpenDeck: (deckId: string) => void
+  onOpenDecks: () => void
+}) {
+  const { decks, loading, error } = useInventoryDecks()
+  const deck = zone.deck_id ? decks.find((d) => d.id === zone.deck_id) ?? null : null
+
+  return (
+    <FormSection title="On the plan" description="Where this location sits on a deck plan.">
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">{error}</p>
+      ) : deck && deck.plan_document_id ? (
+        <div className="flex max-w-xl flex-col gap-3">
+          <DeckPlan deck={deck} zones={zones} highlightZoneId={zone.id} showPinLabels={false} />
+          {canWrite && (
+            <Button type="button" variant="outline" size="sm" className="w-fit gap-2" onClick={() => onOpenDeck(deck.id)}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Edit on plan
+            </Button>
+          )}
+        </div>
+      ) : loading ? (
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted-foreground">This location is not on a deck plan.</p>
+          <Button type="button" variant="outline" size="sm" onClick={onOpenDecks}>Open Decks</Button>
+        </div>
+      )}
+    </FormSection>
+  )
+}
+
 export const LocationEditor = forwardRef<LocationEditorHandle, LocationEditorProps>(function LocationEditor(
-  { id, onBack, onDeleted, onOpenBin = () => {}, onDirtyChange, canWrite = true },
+  { id, onBack, onDeleted, onOpenBin = () => {}, onOpenDeck = () => {}, onOpenDecks = () => {}, onDirtyChange, canWrite = true },
   ref,
 ) {
   const { zones, loading, error, refresh, renameZone, deleteZone, createBin, renameBin, deleteBin } = useInventoryZones()
@@ -227,6 +272,8 @@ export const LocationEditor = forwardRef<LocationEditorHandle, LocationEditorPro
             />
           </Field>
         </FormSection>
+
+        <OnThePlan zone={zone} zones={zones} canWrite={canWrite} onOpenDeck={onOpenDeck} onOpenDecks={onOpenDecks} />
 
         <FormSection title="Bins" description="Numbered containers in this location. Each bin's code is what goes on its label.">
           <ResourceList

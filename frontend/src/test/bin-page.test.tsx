@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BinPage } from '@/components/inventory/bin-page'
-import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
+import type { EquipmentItem, InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
+import { stubImageSize } from './stub-image'
 
 // ADR 0127 (the plan's A4): BinQuickAdd and TagRow are each already
 // covered by their own test file (bin-quick-add.test.tsx, tag-row.test.tsx)
@@ -267,5 +268,44 @@ describe('BinPage', () => {
     await screen.findByText("Fasteners")
 
     expect((screen.getByLabelText("Quick add draft") as HTMLInputElement).value).toBe("")
+  })
+})
+
+describe('BinPage on the plan (ADR 0156)', () => {
+  const planned: InventoryZone[] = [
+    {
+      id: 'z1', name: 'Lazarette', sort_index: 0, deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]],
+      bins: [
+        { id: 'b1', zone_id: 'z1', code: 'LAZ-02', name: 'Adhesives', sort_index: 0, pin: { x: 0.3, y: 0.3 } },
+        { id: 'b2', zone_id: 'z1', code: 'LAZ-03', name: '', sort_index: 1, pin: null },
+      ],
+    },
+  ]
+  const decks: InventoryDeck[] = [{ id: 'd1', name: 'Main deck', sort_index: 0, plan_document_id: 'doc1' }]
+
+  beforeEach(() => {
+    stubImageSize(2000, 1000)
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.endsWith('/api/inventory/decks')) return Promise.resolve({ ok: true, json: async () => ({ decks }) })
+      if (u.includes('/api/inventory/equipment?bin=')) return Promise.resolve({ ok: true, json: async () => ({ items }) })
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+  })
+
+  it('shows the plan with the zone highlighted and the bin pinned', async () => {
+    zones = planned
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    expect(await screen.findByRole('group', { name: 'Main deck plan' })).toBeInTheDocument()
+    expect(document.querySelector('polygon')).toHaveAttribute('data-highlighted', 'true')
+    expect(document.querySelector('circle')).toHaveAttribute('data-highlighted', 'true')
+  })
+
+  it('shows no plan for a bin that has no pin', async () => {
+    zones = planned
+    render(<BinPage code="LAZ-03" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    await screen.findByText('LAZ-03')
+    expect(screen.queryByRole('group', { name: 'Main deck plan' })).not.toBeInTheDocument()
   })
 })

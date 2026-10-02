@@ -109,6 +109,10 @@ function baseProps() {
     onOpenLocation: vi.fn(),
     onCloseLocation: vi.fn(),
     onLocationDeleted: vi.fn(),
+    locationsView: 'table' as const,
+    onLocationsViewChange: vi.fn(),
+    planDeckId: null,
+    onPlanDeckChange: vi.fn(),
     newEquipmentPreset: null,
   }
 }
