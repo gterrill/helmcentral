@@ -97,7 +97,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
 
   return (
     <SettingsLayout title="Mate">
-      <FormSection title="AI">
+      <FormSection title="Helmcentral AI Assistant">
         <FieldGroup>
           <Field orientation="horizontal">
             <Switch
