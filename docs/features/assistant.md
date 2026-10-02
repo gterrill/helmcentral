@@ -237,9 +237,15 @@ Auto routing only applies when the model is set to OpenRouter Auto; for any
 other model id, those routing constraints are ignored.
 
 Documents are read and labelled by a separate model, set under Settings →
-Mate → Document indexing. It runs unattended over the whole library, so pick a
-cheap model that can read images; it doesn't have to be the one Mate answers
-with. Left blank, it uses the built-in default.
+Mate → Document indexing. You pick it the same way as the Mate model: from a
+list of recent choices, or from the catalog, which here shows only models that
+can read images. It runs unattended over the whole library, so pick a cheap
+one; it doesn't have to be the model Mate answers with. Until you choose one,
+it uses the built-in default.
+
+While Mate is switched off, Settings → Mate shows only the Enable Mate switch
+and what Mate sends to OpenRouter. The model, indexing, key, notes and voice
+settings appear once it is on.
 
 ## Standing notes
 

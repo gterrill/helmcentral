@@ -81,6 +81,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- In **Settings → Mate**, the document indexing model is now picked from the
+  catalog of models that can read images, the same way as the Mate model,
+  instead of typed in. Turning Mate off now hides its other settings.
 - The Inventory side menu is in two groups: **Inventory** (Equipment,
   Locations, Stocktake) and **Servicing** (Maintenance, Profiles).
 - The Anchor Watch tile no longer has a **Raise** button. Raise the watch from

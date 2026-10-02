@@ -9,7 +9,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"net/url"
 	"regexp"
 	"runtime/debug"
 	"sort"
@@ -113,6 +112,12 @@ type assistantModelOption struct {
 	Throughput float64 `json:"throughput"`
 	Latency    float64 `json:"latency"`
 	Popularity float64 `json:"popularity"`
+
+	// SupportsTools and SupportsImages are what the cached catalogue is
+	// filtered on per request (capability query parameter). They are not
+	// part of the response.
+	SupportsTools  bool `json:"-"`
+	SupportsImages bool `json:"-"`
 }
 
 var assistantOpenRouterDoer openRouterDoer = openRouterHTTPClient
@@ -281,9 +286,10 @@ const assistantModelsFetchTimeout = 30 * time.Second
 // assistantModelsCache holds the last parsed OpenRouter model catalogue.
 // This is not keyed by the OpenRouter API key: fetchAssistantModelsFromOpenRouter
 // sends no Authorization header at all (checked - the /models list is
-// fetched anonymously; only the fixed ?supported_parameters=tools query
-// varies the upstream response), so every caller gets the same catalogue
-// and one shared cache entry is correct.
+// fetched anonymously with no filter query), so every caller gets the same
+// catalogue and one shared cache entry is correct. It holds every model the
+// upstream lists; the tools or images capability filter is applied per
+// request.
 //
 // get's mutex is held across the whole upstream fetch, not just the
 // read/write of the cached fields, so concurrent callers who all miss the
@@ -323,7 +329,8 @@ func (c *assistantModelsCache) get(now time.Time, fetch func() ([]assistantModel
 }
 
 // fetchAssistantModelsFromOpenRouter fetches and parses OpenRouter's whole
-// tool-capable model catalogue: one upstream call, no search/sort/paging
+// model catalogue, tagged with what each model supports (tools, image input):
+// one upstream call, no search/sort/paging
 // applied - those happen afterward, in memory, over whatever this returns
 // (assistantModelsHandler). Called through assistantModelsCache.get, never
 // directly by the handler.
@@ -337,9 +344,7 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), assistantModelsFetchTimeout)
 	defer cancel()
 
-	upstreamURL := openRouterModelsListURL + "?" + (url.Values{"supported_parameters": {"tools"}}).Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openRouterModelsListURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build openrouter models request: %w", err)
 	}
@@ -363,9 +368,12 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 			ID                  string   `json:"id"`
 			Name                string   `json:"name"`
 			SupportedParameters []string `json:"supported_parameters"`
-			Created             int64    `json:"created"`
-			CreatedAt           string   `json:"created_at"`
-			Pricing             struct {
+			Architecture        struct {
+				InputModalities []string `json:"input_modalities"`
+			} `json:"architecture"`
+			Created   int64  `json:"created"`
+			CreatedAt string `json:"created_at"`
+			Pricing   struct {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			} `json:"pricing"`
@@ -384,9 +392,6 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 
 	models := make([]assistantModelOption, 0, len(parsed.Data))
 	for _, model := range parsed.Data {
-		if !containsString(model.SupportedParameters, "tools") {
-			continue
-		}
 		name := strings.TrimSpace(model.Name)
 		if name == "" {
 			name = model.ID
@@ -411,13 +416,27 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 			Throughput: throughput,
 			Latency:    latency,
 			Popularity: model.Popularity,
+
+			SupportsTools:  containsString(model.SupportedParameters, "tools"),
+			SupportsImages: containsString(model.Architecture.InputModalities, "image"),
 		})
 	}
 	return models, nil
 }
 
 // GET /api/assistant/models
+//
+// capability=tools (default) lists models that can call tools, the Mate
+// chat requirement; capability=images lists models that accept image input,
+// the document indexing requirement. Anything else is a 400.
 func assistantModelsHandler(c echo.Context) error {
+	capability := strings.TrimSpace(c.QueryParam("capability"))
+	if capability == "" {
+		capability = "tools"
+	}
+	if capability != "tools" && capability != "images" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "capability must be tools or images"})
+	}
 	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
 	searchQuery := c.QueryParam("q")
 	page := intQueryParamWithDefault(c.QueryParam("page"), 1)
@@ -432,8 +451,7 @@ func assistantModelsHandler(c echo.Context) error {
 		pageSize = 100
 	}
 
-	// The catalogue itself (every tool-capable model OpenRouter lists) is
-	// cached; search, sort and paging below are applied in memory to a copy
+	// The catalogue itself (every model OpenRouter lists) is cached; search, sort and paging below are applied in memory to a copy
 	// of it on every request, so a debounced keystroke never refetches
 	// OpenRouter (see assistantModelsCache).
 	cached, err := globalAssistantModelsCache.get(time.Now(), fetchAssistantModelsFromOpenRouter)
@@ -445,7 +463,12 @@ func assistantModelsHandler(c echo.Context) error {
 	// sort below mutates in place - sorting it directly would silently
 	// reorder every other caller's cached catalogue too, and race with a
 	// concurrent reader.
-	models := append([]assistantModelOption(nil), cached...)
+	models := make([]assistantModelOption, 0, len(cached))
+	for _, model := range cached {
+		if (capability == "tools" && model.SupportsTools) || (capability == "images" && model.SupportsImages) {
+			models = append(models, model)
+		}
+	}
 	if strings.TrimSpace(searchQuery) != "" {
 		filtered := make([]assistantModelOption, 0, len(models))
 		for _, model := range models {
