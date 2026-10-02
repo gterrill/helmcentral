@@ -236,7 +236,7 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
       }
     >
       <DetailsLayout>
-        <FormSection title="Deck" description="A plan of one deck of the boat.">
+        <FormSection title="Deck">
           <Field>
             <FieldLabel htmlFor="deck-name">Name</FieldLabel>
             <Input
