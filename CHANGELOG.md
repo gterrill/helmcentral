@@ -31,6 +31,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- On a phone, picking a page from the side menu now closes the menu, so you
+  land on the page instead of having to dismiss the menu to see it.
 - A phone that kept Helmcentral open through an update could fail to send a
   question to Mate with a technical error about a missing date. It now says
   Helmcentral has been updated and asks you to reload the page.
