@@ -19,7 +19,9 @@ interface AnchorDropRaiseButtonProps {
   anchorActive: boolean
   canDrop: boolean
   onDrop: () => void
-  onRaise: () => Promise<void> | void
+  /** Omitted by a host that never offers Raise (the dashboard tile, which
+      only drops); with no handler there is no Raise button to show. */
+  onRaise?: () => Promise<void> | void
   /** Sizing/alignment is the host's call: Drop is a state's primary action
       and gets width; Raise is a departure chore and shouldn't dominate. */
   className?: string
@@ -41,7 +43,7 @@ export function AnchorDropRaiseButton({ anchorActive, canDrop, onDrop, onRaise, 
   }, [onDrop])
 
   const handleConfirmRaise = useCallback(() => {
-    void onRaise()
+    void onRaise?.()
   }, [onRaise])
 
   if (!anchorActive) {
@@ -56,6 +58,8 @@ export function AnchorDropRaiseButton({ anchorActive, canDrop, onDrop, onRaise, 
       </Button>
     )
   }
+
+  if (!onRaise) return null
 
   return (
     <>
