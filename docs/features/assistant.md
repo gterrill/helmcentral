@@ -81,6 +81,22 @@ your planned course itself, rather than leaving a language model to
 subtract bearings by eye: a following sea and a head sea get called
 correctly instead of guessed at.
 
+For a passage leaving from where the boat is now, it can also pick a
+departure time that gives you a fair tidal stream: it ranks departures over
+the next day by how much of the run has the stream with you, recommends the
+best one and names the time to avoid. It times the stream from the tide
+station's high and low water, so it tells you which spell of flood or ebb
+you will be in, not how fast it runs. The direction the flood sets comes
+from your standing notes first; if they are silent it uses its own general
+knowledge and says so, and either way you should check it against the tidal
+stream atlas or the cruising guide. If it does not know which way the flood
+sets in that water it says so instead of guessing. Put the local flood
+direction in your standing notes, and any lag between high or low water and
+the stream turning, and Mate uses them. Where the stream sets against the
+forecast wind during the run, it warns that the seas will be steeper and
+shorter and says when the fair-tide departure runs into that. A course
+square across the stream gains little from timing, and Mate says so.
+
 When InfluxDB is configured, it can also estimate how long a passage will
 take and how much fuel it will burn, from your own boat's logged speed over
 ground and fuel-rate history, not a manufacturer's polar or fuel curve.

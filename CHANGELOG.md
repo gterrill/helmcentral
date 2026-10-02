@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate can now recommend a departure time that gives you a fair tidal stream
+  on a passage leaving from the boat. It names the best departures and the one
+  to avoid, says how much of the run has the stream with you, and warns when
+  the stream sets against the wind. It works from the nearest tide station's
+  high and low water times, so it knows which spell of flood or ebb you will be
+  in, not how fast the stream runs. It takes the direction the flood sets from
+  your standing notes, else from its own general knowledge, and says which. Add
+  the local flood direction, and any lag before the stream turns, to your
+  standing notes to have Mate use them.
+
 ## [0.39.0] - 2026-10-02
 
 ### Added
