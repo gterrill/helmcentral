@@ -838,7 +838,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // from inside a goroutine below is serialised through mu.
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
-// get_tides, estimate_passage, read_help, search_documents, read_document,
+// get_tides, estimate_passage, plan_tidal_departure, read_help, search_documents, read_document,
 // get_nearby_vessels, check_signalk_paths, get_last_recorded,
 // get_path_history, find_equipment, list_maintenance, get_maintenance_log,
 // propose_maintenance_changes) only reads: none of them writes to the

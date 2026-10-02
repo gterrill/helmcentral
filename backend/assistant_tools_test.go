@@ -2425,10 +2425,10 @@ func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRi
 	t.Fatal("get_nearby_vessels tool definition not found")
 }
 
-func TestAssistantToolDefinitions_FifteenToolsIncludingMaintenance(t *testing.T) {
+func TestAssistantToolDefinitions_SixteenToolsIncludingMaintenance(t *testing.T) {
 	tools := assistantToolDefinitions()
-	if len(tools) != 15 {
-		t.Fatalf("expected 15 tool definitions, got %d: %+v", len(tools), tools)
+	if len(tools) != 16 {
+		t.Fatalf("expected 16 tool definitions, got %d: %+v", len(tools), tools)
 	}
 
 	var names []string
@@ -2440,6 +2440,7 @@ func TestAssistantToolDefinitions_FifteenToolsIncludingMaintenance(t *testing.T)
 		"search_documents", "read_document", "get_nearby_vessels",
 		"check_signalk_paths", "get_last_recorded", "get_path_history",
 		"find_equipment", "list_maintenance", "get_maintenance_log", "propose_maintenance_changes",
+		"plan_tidal_departure",
 	} {
 		found := false
 		for _, name := range names {

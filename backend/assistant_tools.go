@@ -388,6 +388,40 @@ func assistantToolDefinitions() []openRouterTool {
 		{
 			Type: "function",
 			Function: openRouterFunctionDef{
+				Name: "plan_tidal_departure",
+				Description: "Rank departure times by how much of a passage runs with a fair tidal stream. It uses the " +
+					"nearest tide station's high and low water times for the stream's phase and the direction you give " +
+					"for the flood stream's set; stream rate is not modelled. Call it after estimate_passage, with " +
+					"find_places' bearing_deg as course_deg and the estimated hours as passage_hours. Take " +
+					"flood_set_deg from the operator's standing notes first, else general knowledge, and say which in " +
+					"flood_set_source. If you do not know which way the flood sets in that water, do not call it.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"lat": {"type": "number", "description": "Latitude of the departure position, used to find the tide station."},
+						"lon": {"type": "number", "description": "Longitude of the departure position."},
+						"course_deg": {"type": "number", "description": "Passage course in degrees true, 0 to 360 (find_places' bearing_deg)."},
+						"passage_hours": {"type": "number", "description": "Passage duration in hours, greater than 0 and at most 24 (from estimate_passage)."},
+						"flood_set_deg": {"type": "number", "description": "Direction in degrees true that the flood stream sets toward, 0 to 360."},
+						"flood_set_source": {
+							"type": "string",
+							"enum": ["standing_notes", "general_knowledge", "operator"],
+							"description": "Where flood_set_deg came from; it is echoed back so the answer can label it."
+						},
+						"slack_offset_min": {
+							"type": "integer",
+							"description": "Minutes the turn of the stream lags (positive) or leads (negative) local high and low water, -180 to 180 (default 0). Only when standing notes or knowledge say so."
+						},
+						"earliest": {"type": "string", "description": "Earliest departure, RFC3339. Default now."},
+						"latest": {"type": "string", "description": "Latest departure, RFC3339. Default 24 hours after earliest (or now)."}
+					},
+					"required": ["lat", "lon", "course_deg", "passage_hours", "flood_set_deg", "flood_set_source"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
 				Name: "read_help",
 				Description: "Read one page of Helmcentral's own in-app help, or one section of it by " +
 					"heading. Use it before answering any question about how Helmcentral itself works, what a " +
@@ -730,6 +764,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetTides(ctx, args)
 	case "estimate_passage":
 		return d.executeEstimatePassage(ctx, args)
+	case "plan_tidal_departure":
+		return d.executePlanTidalDeparture(ctx, args)
 	case "read_help":
 		return d.executeReadHelp(ctx, args)
 	case "search_documents":
@@ -776,6 +812,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return fmt.Sprintf("Fetching wind forecast for %s…", assistantLocationLabel(args))
 	case "get_tides":
 		return fmt.Sprintf("Fetching tides near %s…", assistantLocationLabel(args))
+	case "plan_tidal_departure":
+		return fmt.Sprintf("Timing the departure to the tide near %s…", assistantLocationLabel(args))
 	case "estimate_passage":
 		var a assistantEstimatePassageArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -1560,30 +1598,35 @@ type assistantGetTidesResult struct {
 
 func roundTo2(value float64) float64 { return math.Round(value*100) / 100 }
 
-func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMessage) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
+// assistantResolvedTideStation is what get_tides and plan_tidal_departure
+// both need before they can read a station's extremes: the provider, the
+// nearest station to the position, its fetched chart, and the zone its times
+// are meaningful in.
+type assistantResolvedTideStation struct {
+	providerID string
+	chart      tideChartResult
+	loc        *time.Location
+	timeBasis  string
+	info       assistantStationInfo
+}
 
-	var args assistantLocationArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", fmt.Errorf("parse get_tides arguments: %w", err)
-	}
-	days := clampAssistantDays(args.Days, 3, assistantMaxTideDays)
-
+// resolveTideStation picks the nearest station to (lat, lon) from the
+// selected tide provider and fetches its chart. Every failure is returned
+// with the tool's name in front; nothing is guessed when a piece is missing.
+func (d assistantToolDeps) resolveTideStation(tool string, lat, lon float64) (assistantResolvedTideStation, error) {
 	provider, providerID, err := d.tides()
 	if err != nil {
-		return "", fmt.Errorf("get_tides: %w", err)
+		return assistantResolvedTideStation{}, fmt.Errorf("%s: %w", tool, err)
 	}
 
-	station, ok := nearestStation(provider, args.Lat, args.Lon)
+	station, ok := nearestStation(provider, lat, lon)
 	if !ok {
-		return "", fmt.Errorf("get_tides: tide provider %q has no stations", providerID)
+		return assistantResolvedTideStation{}, fmt.Errorf("%s: tide provider %q has no stations", tool, providerID)
 	}
 
 	res, err := provider.FetchTideChart(station.StationID)
 	if err != nil {
-		return "", fmt.Errorf("get_tides: tide provider %q: %w", providerID, err)
+		return assistantResolvedTideStation{}, fmt.Errorf("%s: tide provider %q: %w", tool, providerID, err)
 	}
 
 	// The station's own timezone is preferred (it's the zone tide times are
@@ -1602,6 +1645,41 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 		loc = vesselLocalLocation(station.Lon)
 		timeBasis = loc.String()
 	}
+
+	return assistantResolvedTideStation{
+		providerID: providerID,
+		chart:      res,
+		loc:        loc,
+		timeBasis:  timeBasis,
+		info: assistantStationInfo{
+			Name:       station.Name,
+			ID:         station.StationID,
+			State:      station.State,
+			Timezone:   station.Timezone,
+			Lat:        station.Lat,
+			Lon:        station.Lon,
+			DistanceNm: roundTo1(haversineMeters(lat, lon, station.Lat, station.Lon) / metersPerNauticalMile),
+			BearingDeg: int(math.Round(bearingDeg(lat, lon, station.Lat, station.Lon))),
+		},
+	}, nil
+}
+
+func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	var args assistantLocationArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return "", fmt.Errorf("parse get_tides arguments: %w", err)
+	}
+	days := clampAssistantDays(args.Days, 3, assistantMaxTideDays)
+
+	st, err := d.resolveTideStation("get_tides", args.Lat, args.Lon)
+	if err != nil {
+		return "", err
+	}
+	providerID, res, loc, timeBasis, stationInfo := st.providerID, st.chart, st.loc, st.timeBasis, st.info
 
 	now := d.now()
 	localNow := now.In(loc)
@@ -1632,16 +1710,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 	}
 
 	result := assistantGetTidesResult{
-		Station: assistantStationInfo{
-			Name:       station.Name,
-			ID:         station.StationID,
-			State:      station.State,
-			Timezone:   station.Timezone,
-			Lat:        station.Lat,
-			Lon:        station.Lon,
-			DistanceNm: roundTo1(haversineMeters(args.Lat, args.Lon, station.Lat, station.Lon) / metersPerNauticalMile),
-			BearingDeg: int(math.Round(bearingDeg(args.Lat, args.Lon, station.Lat, station.Lon))),
-		},
+		Station:  stationInfo,
 		Provider: providerID,
 		Now: assistantTideNow{
 			Time:      localNow.Format("Mon 2 Jan 15:04"),

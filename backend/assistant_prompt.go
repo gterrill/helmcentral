@@ -809,6 +809,29 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"sea and slows and burns more into a head sea. Say which it is for this passage. If the answer includes " +
 		"a passage recommendation, end with a brief follow-up question: \"Would you like me to create a route for this passage?\"\n\n" +
 
+		// Fair-tide departures: the tide plugins give high and low water
+		// times only, and a model asked to time a departure to the stream
+		// does the half-cycle arithmetic itself and gets it wrong. The tool
+		// does the arithmetic; the model's job is to supply the set
+		// direction honestly (it is the one input the tool cannot know) and
+		// to weigh the result against the wind. Scoped to the same
+		// now-or-forecast-range case as estimate_passage: the planning
+		// question above is already told to use general knowledge.
+		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
+		"streams, after estimate_passage call plan_tidal_departure with find_places' bearing_deg as course_deg " +
+		"and the estimated hours as passage_hours. Take flood_set_deg, the direction the flood stream sets " +
+		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match; " +
+		"never present a guessed direction as the notes' own. If you do not know which way the flood sets in " +
+		"that water, say so instead of calling it. Recommend a departure time from the best candidate and say " +
+		"how much of the run is with the stream (fair_fraction), name the departure time to avoid, and label " +
+		"the set direction as from the standing notes or from general knowledge, to be checked against the " +
+		"tidal stream atlas and the cruising guide; the tool times the stream from the tide station and does " +
+		"not know its rate. If it returns a note that the course runs across the stream, say that timing the " +
+		"tide will barely help. Weigh the departure against the wind: where the stream sets opposite to the " +
+		"forecast wind direction during the run, that is wind against tide, which steepens and shortens the " +
+		"seas, so say so and say when the fair-tide departure lands in it. Do not use it for the planning " +
+		"question above.\n\n" +
+
 		// Open-plan continuity: the operator asked about an outer-reef window,
 		// got "no window through Thursday, Friday possible"; moved anchorage
 		// and asked only "what do the conditions look like now?"; Mate ran a
