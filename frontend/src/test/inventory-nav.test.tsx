@@ -1,17 +1,29 @@
 import { describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { InventoryNav } from '@/components/inventory/inventory-nav'
 
 // Same shape as settings-nav.test.tsx: a pure controlled list, no state of
 // its own, no scroll-spy - the panel owns which section is active.
 describe('InventoryNav', () => {
-  it('renders all four sections', () => {
+  it('renders every section', () => {
     render(<InventoryNav activeSectionId="equipment" onSelect={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'Equipment' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Profiles' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Locations' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stocktake' })).toBeInTheDocument()
+  })
+
+  it('groups sections under Inventory and Servicing', () => {
+    render(<InventoryNav activeSectionId="equipment" onSelect={vi.fn()} />)
+
+    const inventory = screen.getByRole('group', { name: 'Inventory' })
+    const servicing = screen.getByRole('group', { name: 'Servicing' })
+    const names = (group: HTMLElement) =>
+      within(group).getAllByRole('button').map((button) => button.textContent)
+
+    expect(names(inventory)).toEqual(['Equipment', 'Locations', 'Stocktake'])
+    expect(names(servicing)).toEqual(['Maintenance', 'Profiles'])
   })
 
   it('calls onSelect with the clicked section id', () => {

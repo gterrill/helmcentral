@@ -6,9 +6,11 @@ registry: one record per piece of gear, from a bilge pump to a main engine,
 so that "what generator is this and how do I start it" has one answer
 instead of five places to look.
 
-The **Inventory** panel in the sidebar has five sections: Equipment,
-Maintenance, Profiles, Locations and Stocktake. Maintenance has its own
-page - see [Maintenance](maintenance.md).
+The **Inventory** panel in the sidebar has five sections in two groups.
+Under **Inventory** are Equipment, Locations and Stocktake: what is aboard
+and where it is stowed. Under **Servicing** are Maintenance and Profiles:
+what keeps it running. Maintenance has its own page - see
+[Maintenance](maintenance.md).
 
 ## Equipment
 

@@ -4,6 +4,10 @@
 > Helmcentral is under active development. Expect breaking changes between
 > releases, including to configuration, stored settings and the HTTP API. Read
 > the release notes before you upgrade.
+>
+> Having said that, I'd really love nerds who already have SignalK installed to
+> give it a whirl. It's at a point now where I think it is useful and I could use
+> help with the install experience on other platforms.
 
 A dashboard and alarm system for [SignalK](https://signalk.org/). It puts anchor
 watch, tides, weather, routes, tanks, points of interest and electrical

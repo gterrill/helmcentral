@@ -5,8 +5,8 @@ import { SectionNav } from '@/components/section-nav'
 // The shared in-page section nav: a pure controlled list (no state, no
 // scroll-spy, no fetches) rendered once for Settings and once for
 // Inventory. Covers the group-heading rendering settings-nav.test.tsx and
-// inventory-nav.test.tsx don't need to (Inventory has a single unlabelled
-// group), plus the same active/onSelect contract those two already cover
+// inventory-nav.test.tsx don't need to, plus the single unlabelled
+// group case, plus the same active/onSelect contract those two already cover
 // via their thin wrappers.
 describe('SectionNav', () => {
   const groups = [
