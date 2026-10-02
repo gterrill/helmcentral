@@ -75,6 +75,16 @@ function OnThePlan({
         </div>
       ) : loading ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
+      ) : deck ? (
+        // zone.deck_id is the truth: the plan document can be deleted from
+        // Documents while the outline stays. Say so, and point at the deck
+        // rather than inviting a redraw on another one.
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted-foreground">This location is on {deck.name}, whose plan image is missing.</p>
+          {canWrite && (
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenDeck(deck.id)}>Open {deck.name}</Button>
+          )}
+        </div>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">This location is not on a deck plan.</p>

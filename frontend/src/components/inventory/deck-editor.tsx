@@ -42,7 +42,7 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
   ref,
 ) {
   const { decks, loading, error, refresh, renameDeck, deleteDeck, uploadPlan, saveLayout } = useInventoryDecks()
-  const { zones, refresh: refreshZones } = useInventoryZones()
+  const { zones, loading: zonesLoading, error: zonesError, refresh: refreshZones } = useInventoryZones()
   const deck = decks.find((d) => d.id === id) ?? null
   const { size: planSize } = useImageSize(deck ? deckPlanUrl(deck) : null)
 
@@ -146,6 +146,9 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
     }
   }
 
+  // Until the locations are known the page cannot draw them, and Delete
+  // cannot truthfully say how many outlines it would clear.
+  const zonesKnown = !zonesError && !zonesLoading
   const zonesOnDeck = zones.filter((z) => z.deck_id === id).length
 
   const handleConfirmDelete = async () => {
@@ -196,7 +199,7 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
       title={deck.name}
       onBack={onBack}
       secondaryActions={
-        canWrite
+        canWrite && zonesKnown
           ? [
               {
                 label: 'Delete deck',
@@ -260,7 +263,14 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
           title="Locations on this plan"
           description="Outline each location and pin its bins. Changes are kept as a draft until you save."
         >
-          {!deck.plan_document_id ? (
+          {zonesError ? (
+            <div className="flex flex-col items-start gap-2">
+              <p role="alert" className="text-sm text-destructive">{zonesError}</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => { void refreshZones() }}>Retry</Button>
+            </div>
+          ) : zonesLoading && zones.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : !deck.plan_document_id ? (
             <p className="text-sm text-muted-foreground">Upload a plan image to start drawing.</p>
           ) : canWrite ? (
             <DeckPlanEditor deck={deck} zones={zones} deckNames={deckNames} layout={layout} onChange={setLayout} />

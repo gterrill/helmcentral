@@ -302,6 +302,22 @@ describe('BinPage on the plan (ADR 0156)', () => {
     expect(document.querySelector('circle')).toHaveAttribute('data-highlighted', 'true')
   })
 
+  it('says the plan image is missing for a pinned bin whose deck has none', async () => {
+    zones = planned
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.endsWith('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.endsWith('/api/inventory/decks')) return Promise.resolve({ ok: true, json: async () => ({ decks: [{ ...decks[0], plan_document_id: null }] }) })
+      if (u.includes('/api/inventory/equipment?bin=')) return Promise.resolve({ ok: true, json: async () => ({ items }) })
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+    const onOpenDeck = vi.fn()
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} onOpenDeck={onOpenDeck} />)
+    await screen.findByText('Lazarette is on Main deck, whose plan image is missing.')
+    fireEvent.click(screen.getByRole('button', { name: 'Open Main deck' }))
+    expect(onOpenDeck).toHaveBeenCalledWith('d1')
+  })
+
   it('shows no plan for a bin that has no pin', async () => {
     zones = planned
     render(<BinPage code="LAZ-03" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)

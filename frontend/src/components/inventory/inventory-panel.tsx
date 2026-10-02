@@ -237,6 +237,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
             onHasWorkChange={onHasWorkChange}
+            onOpenDeck={onOpenDeck}
           />
         )
       }

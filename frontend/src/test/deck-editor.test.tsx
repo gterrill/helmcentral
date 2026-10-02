@@ -233,6 +233,23 @@ describe('DeckEditor plan image', () => {
   })
 })
 
+describe('DeckEditor when locations will not load', () => {
+  it('shows the load error and offers neither Delete nor the drawing surface', async () => {
+    const previous = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/api/inventory/zones')) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'zones unavailable' }) })
+      }
+      return previous(url, init)
+    })
+    renderEditor()
+    await screen.findByDisplayValue('Main deck')
+    expect(await screen.findByText('zones unavailable')).toBeInTheDocument()
+    expect(screen.queryByTestId('plan-editor')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /More|actions/i })).not.toBeInTheDocument()
+  })
+})
+
 describe('DeckEditor delete', () => {
   it('names how many locations lose their outline, then deletes', async () => {
     const onDeleted = vi.fn()

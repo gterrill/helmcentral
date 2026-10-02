@@ -381,6 +381,17 @@ describe('LocationEditor "On the plan" (ADR 0156)', () => {
     expect(onOpenDecks).toHaveBeenCalled()
   })
 
+  it('says the plan image is missing when the location is on a deck that has none', async () => {
+    decks = [{ id: 'd1', name: 'Main deck', sort_index: 0, plan_document_id: null }]
+    zones = [{ ...zones[0], deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]] }]
+    const onOpenDeck = vi.fn()
+    renderEditor({ onOpenDeck })
+    await screen.findByText('This location is on Main deck, whose plan image is missing.')
+    expect(screen.queryByText('This location is not on a deck plan.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Main deck' }))
+    expect(onOpenDeck).toHaveBeenCalledWith('d1')
+  })
+
   it('does not offer Edit on plan when read-only', async () => {
     zones = [{ ...zones[0], deck_id: 'd1', polygon: [[0.1, 0.2], [0.5, 0.2], [0.5, 0.6]] }]
     renderEditor({ canWrite: false })
