@@ -247,6 +247,26 @@ describe('AssistantThread', () => {
     await waitFor(() => expect(textarea.value).toBe(''))
   })
 
+  it('reports typed-but-unsent text as a draft, and not once it is sent or cleared', async () => {
+    const onHasDraftChange = vi.fn()
+    const send = vi.fn().mockResolvedValue(null)
+    render(
+      <AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} onHasDraftChange={onHasDraftChange} />,
+    )
+    expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
+
+    const textarea = screen.getByPlaceholderText('Ask Mate')
+    fireEvent.change(textarea, { target: { value: 'What about the wind' } })
+    expect(onHasDraftChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.change(textarea, { target: { value: '   ' } })
+    expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
+
+    fireEvent.change(textarea, { target: { value: 'Sent one' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(onHasDraftChange).toHaveBeenLastCalledWith(false))
+  })
+
   it('Shift+Enter does not send', () => {
     const send = vi.fn()
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
@@ -614,6 +634,22 @@ describe('AssistantThread', () => {
 
     afterEach(() => {
       vi.unstubAllGlobals()
+    })
+
+    it('reports a draft while an attachment is staged and clears it on unmount', () => {
+      const onHasDraftChange = vi.fn()
+      const { unmount } = render(
+        <AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} onHasDraftChange={onHasDraftChange} />,
+      )
+      expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
+
+      fireEvent.change(screen.getByTestId('composer-file-input'), {
+        target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] },
+      })
+      expect(onHasDraftChange).toHaveBeenLastCalledWith(true)
+
+      unmount()
+      expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
     })
 
     it('disables Send while an attachment is uploading, with a readable reason, and enables it once indexed', () => {

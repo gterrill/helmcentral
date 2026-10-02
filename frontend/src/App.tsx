@@ -457,13 +457,6 @@ export function App() {
   // InventoryPanel forwards whichever child (EquipmentEditor) is actually
   // mounted, see its own imperative handle.
   const [inventoryDirty, setInventoryDirty] = useState(false)
-  // Reload when a new build has been deployed (checked on return to the
-  // page, at most hourly), but never over an unsaved Settings, document or
-  // inventory draft - those wait until the operator has saved or left.
-  // Mounted at the App root, so the wall display and kiosk routes get it too.
-  const unsavedWorkRef = useRef(false)
-  unsavedWorkRef.current = settingsDirty || documentDetailsDirty || inventoryDirty
-  useVersionReload({ hasUnsavedWork: () => unsavedWorkRef.current })
   // Release-fixes code-review finding: Stocktake's scan events/live NFC
   // session and the bin page's quick-add draft, reported the same way
   // inventoryDirty is (onDirtyChange) - see requestWithinInventory's own
@@ -476,6 +469,25 @@ export function App() {
   // below), not live by the dialog - see pendingNavigationDetail's own
   // comment for why.
   const [inventoryWorkDetail, setInventoryWorkDetail] = useState<string | null>(null)
+  // Unsent Mate composer text or staged attachments, one flag per mounted
+  // composer (the /mate panel and the sheet over any page).
+  const [matePanelHasDraft, setMatePanelHasDraft] = useState(false)
+  const [mateSheetHasDraft, setMateSheetHasDraft] = useState(false)
+  // Reload when a new build has been deployed (checked on return to the
+  // page and hourly while it stays on screen), but never over unsaved work:
+  // a Settings, document or inventory edit, a stocktake scan or bin quick-add
+  // draft, or an unsent Mate message. The reload waits until the operator
+  // has saved, sent or left. Mounted at the App root, so the wall display
+  // and kiosk routes get it too.
+  const unsavedWorkRef = useRef(false)
+  unsavedWorkRef.current =
+    settingsDirty ||
+    documentDetailsDirty ||
+    inventoryDirty ||
+    inventoryHasWork ||
+    matePanelHasDraft ||
+    mateSheetHasDraft
+  useVersionReload({ hasUnsavedWork: () => unsavedWorkRef.current })
   const inventoryPanelRef = useRef<InventoryPanelHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
   // Release-fixes code-review finding: which dialog form (pendingNavigationKind)
@@ -2799,6 +2811,7 @@ export function App() {
             onOpenSettings={() => openSettingsSection('assistant')}
             initialConversationId={matePanelConversationId}
             onActiveConversationChange={setMatePanelConversationId}
+            onHasDraftChange={setMatePanelHasDraft}
           />
         )
       case 'wall-displays': {
@@ -3877,6 +3890,7 @@ export function App() {
               requestNavigate('assistant', () => setActivePanel('assistant'))
             }}
             onActiveConversationChange={setMateSheetConversationId}
+            onHasDraftChange={setMateSheetHasDraft}
           />
         </Suspense>
       )}

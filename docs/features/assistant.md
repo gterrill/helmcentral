@@ -59,10 +59,6 @@ by title. On a phone the panel has no list down the side. Press **Chats** at
 the top of the panel to open that same quick list, and **New** beside it to
 start a blank conversation.
 
-If you send a question and Mate answers that Helmcentral has been updated since
-the page was opened, reload the page. A page left open across an update can't
-talk to the new version until it is reloaded.
-
 The panel lives at `/mate`. A specific conversation can be opened directly at
 `/mate/<thread-id>`, for example `/mate/12345`.
 

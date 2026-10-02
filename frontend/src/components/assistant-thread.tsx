@@ -194,6 +194,10 @@ interface AssistantThreadProps {
    * "New conversation" button focuses it directly after `create()` resolves,
    * which `autoFocus` alone can't do since that only ever fires on mount. */
   composerRef?: Ref<HTMLTextAreaElement>
+  /** Fires with whether the composer holds a draft: typed-but-unsent text or
+   * a staged attachment. Reports false when the thread unmounts. App uses it
+   * so an update reload never throws a half-written question away. */
+  onHasDraftChange?: (hasDraft: boolean) => void
 }
 
 /**
@@ -209,7 +213,7 @@ interface AssistantThreadProps {
  * jump-to-latest button, Message/Bubble render one turn each, and Marker
  * carries the status line and tool activity while a reply is in flight.
  */
-export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef }: AssistantThreadProps) {
+export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef, onHasDraftChange }: AssistantThreadProps) {
   const [content, setContent] = useState('')
   // [P1, ADR 0093/impeccable critique 2026-09-12] chat.abort() already
   // cancelled a request on unmount or a superseding send, but the operator
@@ -225,6 +229,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // above is local rather than owned by AssistantDrawer/MateSheet.
   const uploads = useDocumentUploads()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const hasDraft = content.trim() !== '' || uploads.items.length > 0
+  const onHasDraftChangeRef = useRef(onHasDraftChange)
+  onHasDraftChangeRef.current = onHasDraftChange
+  useEffect(() => {
+    onHasDraftChangeRef.current?.(hasDraft)
+  }, [hasDraft])
+  useEffect(() => () => onHasDraftChangeRef.current?.(false), [])
   const [dragOver, setDragOver] = useState(false)
 
   // ADR 0105 ("the answer outlives the page"): whenever the active

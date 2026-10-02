@@ -57,6 +57,8 @@ interface MateSheetProps {
    * currently showing - the App-level answer watcher needs this to know
    * not to toast for a reply the sheet is displaying right now. */
   onActiveConversationChange?: (id: string | null) => void
+  /** Whether the composer holds an unsent draft; see AssistantThread. */
+  onHasDraftChange?: (hasDraft: boolean) => void
 }
 
 /**
@@ -72,7 +74,7 @@ interface MateSheetProps {
  * keep whatever conversation was last active across every later close and
  * reopen, for the rest of the session - see the reset-on-open effect below.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
@@ -334,6 +336,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
               chat={chat}
               autoFocus={!initialQuestion}
               composerRef={composerRef}
+              onHasDraftChange={onHasDraftChange}
             />
           )}
         </div>

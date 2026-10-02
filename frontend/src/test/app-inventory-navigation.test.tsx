@@ -27,6 +27,15 @@ vi.mock('@/lib/image-downscale', () => ({
   photoFilename: (original: string) => `${original.replace(/\.[^.]+$/, '').trim() || 'photo'}.jpg`,
 }))
 
+// Captures the latest options App hands the update-reload hook, so a test can
+// ask the same hasUnsavedWork() the real hook would consult before reloading.
+const versionReload = vi.hoisted(() => ({ latest: null as null | { hasUnsavedWork?: () => boolean } }))
+vi.mock('@/hooks/use-version-reload', () => ({
+  useVersionReload: (options: { hasUnsavedWork?: () => boolean }) => {
+    versionReload.latest = options
+  },
+}))
+
 // This test renders the dashboard, not the auth gate - an install with
 // auth.mode:none (ADR 0040), the same precondition every other App-level
 // test in this suite states explicitly.
@@ -293,6 +302,34 @@ beforeEach(() => {
   }))
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+})
+
+describe('App: an update reload waits for inventory work', () => {
+  it('holds while a bin quick-add draft is staged and not otherwise', async () => {
+    window.history.replaceState({}, '', '/inventory/bins/LAZ-02')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    expect(versionReload.latest?.hasUnsavedWork?.()).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    await waitFor(() => expect(versionReload.latest?.hasUnsavedWork?.()).toBe(true))
+  })
+
+  it('holds while a stocktake pass holds a confirmed scan', async () => {
+    window.history.replaceState({}, '', '/inventory/stocktake')
+    render(<App />)
+
+    const scanField = await screen.findByLabelText('Scan')
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/bins/LAZ-02' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/equipment/eq-1' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByText('Confirmed')
+
+    expect(versionReload.latest?.hasUnsavedWork?.()).toBe(true)
+  })
 })
 
 describe('App: Open/Full item from outside the Equipment section', () => {

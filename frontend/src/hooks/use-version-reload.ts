@@ -4,13 +4,15 @@ import { apiBaseUrl } from '@/config/api'
 import type { AppVersion } from '@/hooks/use-app-version'
 
 export const VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000
+// A timer can fire a few ms ahead of the wall clock; it must not skip a whole hour for that.
+const TIMER_TOLERANCE_MS = 5000
 
 export interface VersionReloadOptions {
   /** Clock, injectable for tests. */
   now?: () => number
   /** Reload action, injectable for tests. */
   reload?: () => void
-  /** Return true while a reload would lose unsaved work; the reload waits for the next return to the page. */
+  /** Return true while a reload would lose unsaved work; the reload waits and is retried on the next return to the page or hourly tick. */
   hasUnsavedWork?: () => boolean
 }
 
@@ -27,9 +29,12 @@ async function readBuild(): Promise<AppVersion> {
  * phone or tablet left open never keeps running an old bundle. The build
  * stamp (`/api/health`) is read on load and remembered; when the page
  * regains attention (tab visible, window focus) it is read again, but at
- * most once an hour, with no timers. A failed or malformed read never
- * reloads and is not retried early: it is logged and the next eligible
- * return to the page tries again. If the first read failed, the next
+ * most once an hour. A page that is never refocused (a wall display or
+ * kiosk that stays on screen) is covered by an hourly timer that runs the
+ * same check while the page is visible, and retries a reload that was held
+ * back by unsaved work. A failed or malformed read never reloads and is not
+ * retried early: it is logged and the next eligible return or tick tries
+ * again. If the first read failed, the next
  * successful one becomes the baseline instead of triggering a reload.
  */
 export function useVersionReload(options: VersionReloadOptions = {}): void {
@@ -71,23 +76,26 @@ export function useVersionReload(options: VersionReloadOptions = {}): void {
       }
     }
 
-    const onAttention = () => {
+    const onAttention = (toleranceMs = 0) => {
       if (document.visibilityState === 'hidden') return
       if (reloadWaiting) {
         reloadIfSafe()
         return
       }
-      if (checking || now() - lastCheck < VERSION_CHECK_INTERVAL_MS) return
+      if (checking || now() - lastCheck < VERSION_CHECK_INTERVAL_MS - toleranceMs) return
       void check()
     }
 
+    const onEvent = () => onAttention()
     void check()
-    document.addEventListener('visibilitychange', onAttention)
-    window.addEventListener('focus', onAttention)
+    const timer = setInterval(() => onAttention(TIMER_TOLERANCE_MS), VERSION_CHECK_INTERVAL_MS)
+    document.addEventListener('visibilitychange', onEvent)
+    window.addEventListener('focus', onEvent)
     return () => {
       cancelled = true
-      document.removeEventListener('visibilitychange', onAttention)
-      window.removeEventListener('focus', onAttention)
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onEvent)
+      window.removeEventListener('focus', onEvent)
     }
   }, [])
 }
