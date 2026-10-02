@@ -545,6 +545,16 @@ const sidebarMenuButtonVariants = cva(
   }
 )
 
+// On a phone the sidebar is a sheet over the page, so picking an entry has to
+// put it away; otherwise the page changes behind it and the operator has to
+// dismiss it by hand to see where they went.
+function useCloseMobileSheet() {
+  const { isMobile, setOpenMobile } = useSidebar()
+  return React.useCallback(() => {
+    if (isMobile) setOpenMobile(false)
+  }, [isMobile, setOpenMobile])
+}
+
 const SidebarMenuButton = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<typeof ButtonPrimitive> & {
@@ -559,11 +569,13 @@ const SidebarMenuButton = React.forwardRef<
       size = "default",
       tooltip,
       className,
+      onClick,
       ...props
     },
     ref
   ) => {
     const { isMobile, state } = useSidebar()
+    const closeMobileSheet = useCloseMobileSheet()
 
     const button = (
       <ButtonPrimitive
@@ -572,6 +584,10 @@ const SidebarMenuButton = React.forwardRef<
         data-size={size}
         data-active={isActive}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+        onClick={(event) => {
+          onClick?.(event)
+          closeMobileSheet()
+        }}
         {...props}
       />
     )
@@ -717,7 +733,8 @@ const SidebarMenuSubButton = React.forwardRef<
     size?: "sm" | "md"
     isActive?: boolean
   }
->(({ render, size = "md", isActive, className, ...props }, ref) => {
+>(({ render, size = "md", isActive, className, onClick, ...props }, ref) => {
+  const closeMobileSheet = useCloseMobileSheet()
   return useRender({
     defaultTagName: "a",
     render,
@@ -735,6 +752,10 @@ const SidebarMenuSubButton = React.forwardRef<
           "group-data-[collapsible=icon]:hidden",
           className
         ),
+        onClick: (event: React.MouseEvent<HTMLAnchorElement>) => {
+          onClick?.(event)
+          closeMobileSheet()
+        },
       } as React.ComponentPropsWithRef<"a">,
       props
     ),
