@@ -682,57 +682,37 @@ func assistantToolDefinitions() []openRouterTool {
 		{
 			Type: "function",
 			Function: openRouterFunctionDef{
-				Name: "propose_maintenance_changes",
-				Description: "Propose changes to the maintenance schedule. This changes NOTHING: the operator sees your " +
+				Name: "propose_changes",
+				Description: "Propose changes to Helmcentral's records. This changes NOTHING: the operator sees your " +
 					"proposal as a card under your reply and taps Apply (or Dismiss). Use it only for a change the " +
-					"operator asked for or agreed to, and read the rules first (list_maintenance, find_equipment) so " +
-					"you have real ids. Give every change in one call as a list of ops; the card applies them all " +
-					"together or not at all. Ops: create_rule (equipment_id optional for a calendar-only rule; may " +
-					"also carry last_done_at and last_done_meter_reading), update_rule (rule_id plus only the fields " +
-					"that change; list interval fields to remove in clear; not_applicable only on a job: id), set_last_done (rule_id, last_done_at " +
-					"and/or last_done_meter_reading), complete_rule (rule_id, performed_at, meter_reading, and " +
-					"optionally description, who, cost, new_due_date), acknowledge (rule_id, reason). " +
-					"A rule whose id starts with job: comes from the item's equipment profile; update_rule on one " +
-					"is a per-item override of the profile's live value (description, interval_hours, interval_months), and " +
-					"not_applicable true/false marks it as not applying to that item or restores it; a change to the " +
-					"profile itself reaches every item, so never propose copying profile jobs into rules. " +
-					"Every hours figure here is a METER reading, what the operator's gauge shows, never cumulative " +
-					"engine hours. Dates are YYYY-MM-DD. A call that fails names the field to correct. Deleting rules " +
-					"or log entries, photos, parts, meter replacements and procedure notes cannot be proposed.",
+					"operator asked for or agreed to, and read the records first (find_equipment, list_maintenance) so " +
+					"you have real ids. Give every change in one call as a list of operations; the card applies them all " +
+					"together or not at all. An operation is {type, action, id, fields}: action is create, update or " +
+					"delete; update and delete name the record by id; fields holds only the fields that change, and null " +
+					"removes a value where the type allows it. The record types and their fields:\n" +
+					recordTypeGuide(defaultRecordRegistry) +
+					"A call that fails names the operation and the field to correct. Everything else, such as deleting " +
+					"rules or log entries, photos, parts, meter replacements and procedure notes, cannot be proposed.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
-						"ops": {
+						"operations": {
 							"type": "array",
-							"description": "The changes, in order (at most 20).",
+							"description": "The changes, in order (at most 50).",
 							"items": {
 								"type": "object",
 								"properties": {
-									"op": {"type": "string", "description": "create_rule, update_rule, set_last_done, complete_rule, or acknowledge."},
-									"equipment_id": {"type": "string", "description": "create_rule (optional): an id from find_equipment."},
-									"rule_id": {"type": "string", "description": "update_rule, set_last_done, complete_rule, acknowledge: an id from list_maintenance."},
-									"description": {"type": "string", "description": "create_rule/update_rule: the rule's description. complete_rule: what was done."},
-									"interval_hours": {"type": "number", "description": "Interval in meter hours."},
-									"interval_months": {"type": "integer", "description": "Interval in months."},
-									"due_soon_hours": {"type": "number", "description": "Warn this many meter hours before due."},
-									"due_soon_months": {"type": "integer", "description": "Warn this many months before due."},
-									"fixed_due_date": {"type": "string", "description": "A fixed due date, YYYY-MM-DD."},
-									"not_applicable": {"type": "boolean", "description": "update_rule on a job: rule only: true marks the profile job as not applying to this item, false makes it apply again."},
-									"clear": {"type": "array", "items": {"type": "string"}, "description": "update_rule only: interval_hours, interval_months, due_soon_hours, due_soon_months or fixed_due_date to remove."},
-									"last_done_at": {"type": "string", "description": "create_rule/set_last_done: the date it was last done, YYYY-MM-DD."},
-									"last_done_meter_reading": {"type": "number", "description": "create_rule/set_last_done: the meter reading when it was last done."},
-									"performed_at": {"type": "string", "description": "complete_rule: the date it was done, YYYY-MM-DD."},
-									"meter_reading": {"type": "number", "description": "complete_rule: the meter reading when it was done (required for an hours-based rule)."},
-									"who": {"type": "string", "description": "complete_rule: who did it."},
-									"cost": {"type": "number", "description": "complete_rule: what it cost."},
-									"new_due_date": {"type": "string", "description": "complete_rule: the next fixed due date, only for a fixed-date rule with no monthly interval."},
-									"reason": {"type": "string", "description": "acknowledge: why the rule is being acknowledged."}
+									"type": {"type": "string", "description": "The record type."},
+									"action": {"type": "string", "description": "create, update or delete."},
+									"id": {"type": "string", "description": "update and delete: the record's id."},
+									"fields": {"type": "object", "description": "The fields to set, by name."},
+									"base_version": {"type": "string", "description": "Optional: the version of the record you read, so the proposal fails if it has changed since."}
 								},
-								"required": ["op"]
+								"required": ["type", "action"]
 							}
 						}
 					},
-					"required": ["ops"]
+					"required": ["operations"]
 				}`),
 			},
 		},
@@ -787,7 +767,7 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 	case "get_maintenance_log":
 		return d.executeGetMaintenanceLog(ctx, args)
 	case assistantProposalToolTag:
-		return d.executeProposeMaintenanceChanges(ctx, args)
+		return d.executeProposeChanges(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -917,7 +897,7 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 	case "get_maintenance_log":
 		return "Reading the maintenance log…"
 	case assistantProposalToolTag:
-		return "Preparing the maintenance changes…"
+		return "Preparing the changes…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

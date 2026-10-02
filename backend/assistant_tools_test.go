@@ -2439,7 +2439,7 @@ func TestAssistantToolDefinitions_SixteenToolsIncludingMaintenance(t *testing.T)
 		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_help",
 		"search_documents", "read_document", "get_nearby_vessels",
 		"check_signalk_paths", "get_last_recorded", "get_path_history",
-		"find_equipment", "list_maintenance", "get_maintenance_log", "propose_maintenance_changes",
+		"find_equipment", "list_maintenance", "get_maintenance_log", "propose_changes",
 		"plan_tidal_departure",
 	} {
 		found := false

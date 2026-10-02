@@ -163,7 +163,7 @@ func checkMaintenancePartsExistTx(q sqlQueryer, parts []maintenanceLogPartInput)
 
 // planMaintenanceCompletion is the part of completing a rule that needs only
 // the rule and the validated entry, no store access: the checks that can
-// refuse it and the fixed due date it advances to. propose_maintenance_changes
+// refuse it and the fixed due date it advances to. propose_changes
 // runs it at propose time so a completion Mate cannot make is refused before
 // the operator sees a card.
 //

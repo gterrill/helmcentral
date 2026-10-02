@@ -506,6 +506,17 @@ func resolveWatchFields(t *recordType, fields map[string]any) fieldSet {
 // sameFieldValue compares a given value with a snapshot's, ignoring the
 // padding a command would trim and the int/float split JSON blurs.
 func sameFieldValue(a, b any) bool {
+	// A cleared text field is null in a read and "" when given blank.
+	if a == nil {
+		if bs, ok := b.(string); ok {
+			return strings.TrimSpace(bs) == ""
+		}
+	}
+	if b == nil {
+		if as, ok := a.(string); ok {
+			return strings.TrimSpace(as) == ""
+		}
+	}
 	if as, ok := a.(string); ok {
 		bs, ok := b.(string)
 		return ok && strings.TrimSpace(as) == strings.TrimSpace(bs)
@@ -644,6 +655,13 @@ func (r *recordRegistry) afterCommit(results []changeOpResult) {
 // operations on one record are both checked against the same stored version
 // up front, then run in order, the second seeing the first's writes.
 func (r *recordRegistry) checkFresh(q sqlQueryer, ops []changeOp) error {
+	// A card stored by an older Helmcentral may ask for something that is no
+	// longer offered: stale, with a reason, rather than broken.
+	for _, op := range ops {
+		if _, ok := r.types[op.Type]; !ok || (op.Action != changeCreate && op.Action != changeUpdate && op.Action != changeDelete) {
+			return &staleProposalError{reason: fmt.Sprintf("this card asks for a change Helmcentral no longer makes (%s), so it can no longer be applied", op.Description)}
+		}
+	}
 	for _, op := range ops {
 		if op.Action != changeCreate && !isRef(op.ID) {
 			if err := r.checkOneFresh(q, op.Type, op.ID, op.BaseVersion, op.Label); err != nil {

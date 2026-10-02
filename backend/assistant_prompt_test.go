@@ -530,7 +530,7 @@ func TestBuildAssistantSystemPrompt_MaintenanceGuidance(t *testing.T) {
 		"say the hours are unknown",
 		"quote the meter reading",
 		"cumulative across meter replacements",
-		"propose_maintenance_changes",
+		"propose_changes",
 		"tap Apply",
 		"never say it is done",
 		"Hours in a proposal are meter readings",

@@ -10,13 +10,12 @@ import (
 	"time"
 )
 
-// Mate's maintenance proposals (ADR 0146). Mate never writes the maintenance
-// schedule: propose_maintenance_changes validates a list of operations and
-// returns them as data, the runner saves them with the assistant message that
-// carries them, and the operator's Apply tap runs them (ApplyProposal below)
-// through the same commands the Maintenance HTTP handlers use. This file is
-// the persistence half; assistant_maintenance_propose.go is the tool and the
-// per-operation logic.
+// Mate's proposals (ADR 0146, generalised by ADR 0158). Mate never writes a
+// record: propose_changes validates a changeset and returns it as data, the
+// runner saves it with the assistant message that carries it, and the
+// operator's Apply tap runs it (ApplyProposal below) through the same
+// commands the records' HTTP handlers use. This file is the persistence half;
+// changeset.go is the type-agnostic logic and record_type_*.go the types.
 
 const (
 	assistantProposalPending   = "pending"
@@ -33,20 +32,20 @@ const (
 // database failures: assistantProposalErrorStatus maps them to 404/409.
 var (
 	errAssistantProposalNotFound  = errors.New("proposal not found")
-	errAssistantProposalStale     = errors.New("a rule changed since Mate proposed this, so nothing was applied")
+	errAssistantProposalStale     = errors.New("a record changed since Mate proposed this, so nothing was applied")
 	errAssistantProposalDismissed = errors.New("this proposal was dismissed and can no longer be applied")
 	errAssistantProposalApplied   = errors.New("this proposal was already applied and can no longer be dismissed")
 )
 
-// assistantProposal is one card under an assistant message: a validated list
-// of maintenance operations waiting for the operator. Status is pending until
-// the operator taps Apply or Dismiss; Result is what Apply did (rule and log
-// entry ids per operation) and is what a repeated Apply answers with.
+// assistantProposal is one card under an assistant message: a validated
+// changeset waiting for the operator. Status is pending until the operator
+// taps Apply or Dismiss; Result is what Apply did (the record each operation
+// wrote) and is what a repeated Apply answers with.
 type assistantProposal struct {
-	ID        string                `json:"id"`
-	MessageID string                `json:"message_id"`
-	Ops       []assistantProposalOp `json:"ops"`
-	Status    string                `json:"status"`
+	ID        string     `json:"id"`
+	MessageID string     `json:"message_id"`
+	Ops       []changeOp `json:"ops"`
+	Status    string     `json:"status"`
 	// StaleReason is why a stale proposal was refused, in words for the card.
 	StaleReason string          `json:"stale_reason,omitempty"`
 	ResolvedAt  *time.Time      `json:"resolved_at,omitempty"`
@@ -79,7 +78,7 @@ func createAssistantProposalsSchema(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assistant_message_proposals_message ON assistant_message_proposals (message_id)`); err != nil {
 		return fmt.Errorf("index assistant_message_proposals table: %w", err)
 	}
-	return nil
+	return convertLegacyProposals(db)
 }
 
 const assistantProposalColumns = `id, message_id, ops, status, stale_reason, resolved_at, result, created_at`
@@ -289,20 +288,18 @@ func (s *assistantStore) applyProposalTx(id string, today time.Time) (assistantP
 		return assistantProposal{}, &staleProposalError{reason: p.StaleReason}
 	}
 
-	if err := checkMaintenanceProposalFresh(tx, p.Ops); err != nil {
+	now := s.now()
+	results, err := defaultRecordRegistry.apply(tx, now, today, p.Ops)
+	if err != nil {
+		var oerr *changeOpError
+		if errors.As(err, &oerr) {
+			// The operator reads which change failed and why; the original
+			// error stays in the chain for proposalGoesStale.
+			return assistantProposal{}, &appliedOpError{msg: oerr.applyMessage(len(p.Ops)), cause: err}
+		}
 		return assistantProposal{}, err
 	}
-
-	now := s.now()
-	results := make([]assistantProposalOpResult, 0, len(p.Ops))
-	for i, op := range p.Ops {
-		res, err := applyMaintenanceProposalOp(tx, now, today, op)
-		if err != nil {
-			return assistantProposal{}, fmt.Errorf("change %d of %d (%s): %w", i+1, len(p.Ops), op.Op, err)
-		}
-		results = append(results, res)
-	}
-	resultJSON, err := json.Marshal(assistantProposalResult{Ops: results})
+	resultJSON, err := json.Marshal(changeResult{Ops: results})
 	if err != nil {
 		return assistantProposal{}, fmt.Errorf("encode proposal result: %w", err)
 	}
@@ -317,25 +314,19 @@ func (s *assistantStore) applyProposalTx(id string, today time.Time) (assistantP
 	if err := tx.Commit(); err != nil {
 		return assistantProposal{}, fmt.Errorf("commit apply proposal: %w", err)
 	}
+	defaultRecordRegistry.afterCommit(results)
 	return p, nil
 }
 
-// assistantProposalResult is what Apply stores: one entry per operation.
-type assistantProposalResult struct {
-	Ops []assistantProposalOpResult `json:"ops"`
+// appliedOpError is a failed operation of an Apply, worded for the card and
+// keeping the underlying error for classification.
+type appliedOpError struct {
+	msg   string
+	cause error
 }
 
-// assistantProposalOpResult names what one operation wrote: the rules it
-// created or changed and the log entry a completion wrote.
-type assistantProposalOpResult struct {
-	Op      string   `json:"op"`
-	RuleIDs []string `json:"rule_ids,omitempty"`
-	EntryID string   `json:"entry_id,omitempty"`
-	// NewFixedDueDate is the fixed due date a completion moved the rule to,
-	// when it moved. Propose's dry run reads it to write the card's summary
-	// from what Apply will actually do.
-	NewFixedDueDate string `json:"new_fixed_due_date,omitempty"`
-}
+func (e *appliedOpError) Error() string { return e.msg }
+func (e *appliedOpError) Unwrap() error { return e.cause }
 
 // staleProposalError is a stale refusal carrying its stored or freshly worked
 // out reason. It matches errAssistantProposalStale with errors.Is.
@@ -344,16 +335,20 @@ type staleProposalError struct{ reason string }
 func (e *staleProposalError) Error() string        { return e.reason }
 func (e *staleProposalError) Is(target error) bool { return target == errAssistantProposalStale }
 
-// proposalGoesStale reports whether err means the schedule no longer matches
+// proposalGoesStale reports whether err means the records no longer match
 // what the proposal was written against, so the proposal should be marked
-// stale rather than left offering an Apply that can only fail again: the stale
-// check itself, an operation the commands now refuse (validation or a
-// refusal), or a target that no longer exists. A database failure is not one.
+// stale rather than left offering an Apply that can only fail again: the
+// freshness check itself, an operation the commands now refuse (validation or
+// a refusal), or a target that no longer exists. A database failure is not
+// one.
 func proposalGoesStale(err error) bool {
 	var verr *inventoryValidationError
 	var cerr *maintenanceCommandError
+	var ferr *fieldedError
+	var inUse *inventoryInUseError
 	return errors.Is(err, errAssistantProposalStale) || errors.As(err, &verr) || errors.As(err, &cerr) ||
-		errors.Is(err, errMaintenanceRuleNotFound) || errors.Is(err, errEquipmentNotFound)
+		errors.As(err, &ferr) || errors.As(err, &inUse) ||
+		errors.Is(err, errMaintenanceRuleNotFound) || errors.Is(err, errEquipmentNotFound) || errors.Is(err, errRecordNotFound)
 }
 
 // assistantProposalErrorStatus maps the proposal sentinels to the status Apply

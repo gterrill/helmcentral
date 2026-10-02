@@ -225,3 +225,19 @@ var defaultRecordRegistry = newRecordRegistry()
 
 // quoteList renders names as "a, b, c".
 func quoteList(names []string) string { return strings.Join(names, ", ") }
+
+// recordTypeGuide lists every type's writable fields for a tool description.
+func recordTypeGuide(r *recordRegistry) string {
+	var b strings.Builder
+	for _, name := range r.names() {
+		t := r.types[name]
+		fmt.Fprintf(&b, "- %s (%s): %s\n", t.Name, quoteList(t.Actions), t.Summary)
+		for _, f := range t.Fields {
+			if !f.Writable {
+				continue
+			}
+			fmt.Fprintf(&b, "    %s (%s): %s\n", f.Name, f.Kind, f.Description)
+		}
+	}
+	return b.String()
+}

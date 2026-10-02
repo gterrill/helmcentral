@@ -715,11 +715,12 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"(next_due_meter_reading, with remaining_hours): that is what their gauge will show. Engine hours " +
 		"(last_done_engine_hours, engine_hours in the log) are cumulative across meter replacements and equal the " +
 		"meter only when no replacement is recorded. You never change the maintenance schedule yourself. To change it, call " +
-		"propose_maintenance_changes: the operator sees your proposal as a card under your reply and taps Apply. Propose only " +
+		"propose_changes with maintenance_rule and maintenance_log operations: the operator sees your proposal as a card " +
+		"under your reply and taps Apply. Propose only " +
 		"what the operator asked for or agreed to, read the rules first so you use real ids, and put every change in one call. " +
-		"A profile job (id starting job:) is live from the equipment profile: changing it for one item is an update_rule " +
+		"A profile job (id starting job:) is live from the equipment profile: changing it for one item is an update " +
 		"override, and not_applicable can be set per item; changing it for every item means editing the profile, " +
-		"which you cannot do. " +
+		"which you cannot do. Logging a job as done is creating a maintenance_log entry for its rule. " +
 		"After proposing, say that the proposal is waiting and they should tap Apply; never say it is done, added or changed. " +
 		"Hours in a proposal are meter readings, what their gauge shows, the same as the Maintenance form, never cumulative " +
 		"engine hours. If a change was dismissed, or went stale (its status line says why), do not propose it again " +
