@@ -16,11 +16,14 @@ import type { SettingsPayload } from '@/hooks/use-settings-form'
 // that carries its three fields (enabled, model, notes) through
 // hydrate/save, mirroring settings-mayara-section.test.tsx.
 
+const enabledBaseline: RegularSettingsDraft = { ...initialRegularSettingsDraft, assistantEnabled: true }
+
 function renderSection(overrides: Partial<RegularSettingsDraft> = {}) {
+  // Mate is enabled by default here: every other section is hidden while it is off.
   const draftStates: RegularSettingsDraft[] = []
 
   function Harness() {
-    const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, ...overrides })
+    const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, assistantEnabled: true, ...overrides })
     draftStates.push(draft)
     return (
       <SecretsStatusProvider>
@@ -61,7 +64,7 @@ describe('AssistantSection', () => {
 
   it('toggling the switch marks the form dirty', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
-    const { latestDraft } = renderSection()
+    const { latestDraft } = renderSection({ assistantEnabled: false })
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(true)
 
     fireEvent.click(screen.getByLabelText('Enable Mate'))
@@ -78,7 +81,7 @@ describe('AssistantSection', () => {
     fireEvent.click(screen.getByLabelText('Use OpenRouter Auto'))
 
     expect(latestDraft().assistantModel).toBe('openrouter/auto')
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
 
     vi.unstubAllGlobals()
   })
@@ -249,7 +252,7 @@ describe('AssistantSection', () => {
     await chooseNewModel()
     await screen.findByText('Choose a model')
 
-    expect(screen.getByLabelText('Model ID')).toHaveAttribute('id', 'assistant-custom-model-id')
+    expect(screen.getByLabelText('Model ID')).toHaveAttribute('id')
     expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: ' typesafe/jev-router ' } })
@@ -298,13 +301,13 @@ describe('AssistantSection', () => {
   it('typing standing notes marks the form dirty', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     const { latestDraft } = renderSection()
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(true)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(true)
 
     fireEvent.change(screen.getByLabelText('Mate standing notes'), {
       target: { value: 'Queenfish on a rising tide at Tongue Bay.' },
     })
 
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
 
     vi.unstubAllGlobals()
   })
@@ -328,7 +331,7 @@ describe('AssistantSection', () => {
     fireEvent.click(screen.getByLabelText('Voice input'))
 
     expect(latestDraft().assistantVoiceInput).toBe(true)
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
 
     vi.unstubAllGlobals()
   })
@@ -340,7 +343,7 @@ describe('AssistantSection', () => {
     fireEvent.click(screen.getByLabelText('Read replies aloud'))
 
     expect(latestDraft().assistantReadAloud).toBe(true)
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
 
     vi.unstubAllGlobals()
   })
@@ -352,7 +355,7 @@ describe('AssistantSection', () => {
     fireEvent.click(screen.getByLabelText('Listen for Hey Mate'))
 
     expect(latestDraft().assistantWakeWord).toBe(true)
-    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
 
     vi.unstubAllGlobals()
   })
@@ -491,39 +494,128 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantWakeWord).toBe(false)
   })
 
-  it('renders a Document indexing section with its model field and helper text', () => {
+  it('renders a Document indexing section with a picker and helper text', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     renderSection()
 
     expect(screen.getByText('Document indexing')).toBeInTheDocument()
-    const input = screen.getByLabelText('Document indexing model')
-    expect(input).toHaveAttribute('id', 'assistant-document-model')
-    expect(input).toHaveAttribute('placeholder', 'google/gemini-2.5-flash')
+    const trigger = screen.getByLabelText('Document indexing model')
+    expect(trigger).toHaveAttribute('id', 'assistant-document-model')
+    expect(trigger).toHaveTextContent('Default (google/gemini-2.5-flash)')
     expect(screen.getByText(/pick a cheap model that can read images/)).toBeInTheDocument()
 
     vi.unstubAllGlobals()
   })
 
-  it('typing in the document indexing model updates the draft', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
-    const { latestDraft } = renderSection()
+  it('opens the image-capable catalog from the document indexing picker', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSection()
 
-    fireEvent.change(screen.getByLabelText('Document indexing model'), { target: { value: 'google/gemini-2.5-flash-lite' } })
-    expect(latestDraft().assistantDocumentModel).toBe('google/gemini-2.5-flash-lite')
-    expect(screen.queryByText('Enter an OpenRouter model ID like provider/model.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Document indexing model'))
+    await chooseNewModel()
+
+    expect(await screen.findByText('Models that can read images, with server-side sorting and pagination.')).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.startsWith('/api/assistant/models?') && url.includes('capability=images'))).toBe(true)
+    expect(urls.some((url) => url.includes('capability=tools'))).toBe(false)
 
     vi.unstubAllGlobals()
   })
 
-  it('flags an invalid document indexing model id but allows blank', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
-    renderSection({ assistantDocumentModel: 'not a model' })
-    expect(screen.getByText('Enter an OpenRouter model ID like provider/model.')).toBeInTheDocument()
-    vi.unstubAllGlobals()
+  it('selecting a catalog row sets the document indexing model', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          models: [{ id: 'google/gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', price: 0.0001, created_at: '2026-01-01T00:00:00Z' }],
+          page: { total_pages: 1 },
+        }),
+      }),
+    )
+    const { latestDraft } = renderSection()
 
+    fireEvent.click(screen.getByLabelText('Document indexing model'))
+    await chooseNewModel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+
+    expect(latestDraft().assistantDocumentModel).toBe('google/gemini-2.5-flash-lite')
+    expect(latestDraft().assistantModel).toBe(initialRegularSettingsDraft.assistantModel)
+    await waitFor(() => expect(screen.getByLabelText('Document indexing model')).toHaveTextContent('google/gemini-2.5-flash-lite'))
+
+    vi.unstubAllGlobals()
+  })
+
+  it('returns the document indexing model to the backend default', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    const { latestDraft } = renderSection({ assistantDocumentModel: 'qwen/qwen2.5-vl-72b-instruct' })
+
+    fireEvent.click(screen.getByLabelText('Document indexing model'))
+    const option = await screen.findByRole('option', { name: 'Default (google/gemini-2.5-flash)' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+
+    await waitFor(() => expect(latestDraft().assistantDocumentModel).toBe(''))
+
+    vi.unstubAllGlobals()
+  })
+
+  it('accepts a custom model id for document indexing and keeps its recents separate', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], page: { total_pages: 1 } }) }))
+    window.localStorage.clear()
+    const { latestDraft } = renderSection()
+
+    fireEvent.click(screen.getByLabelText('Document indexing model'))
+    await chooseNewModel()
+    await screen.findByText('Choose a model')
+    fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'qwen/qwen2.5-vl-72b-instruct' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }))
+
+    expect(latestDraft().assistantDocumentModel).toBe('qwen/qwen2.5-vl-72b-instruct')
+    expect(window.localStorage.getItem('assistant.recent-document-models')).toContain('qwen/qwen2.5-vl-72b-instruct')
+    expect(window.localStorage.getItem('assistant.recent-models')).toBeNull()
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('AssistantSection enable gate', () => {
+  const hiddenWhenOff = [
+    'Use OpenRouter Auto',
+    'Mate model',
+    'Document indexing model',
+    'Mate standing notes',
+    'Voice input',
+    'Read replies aloud',
+    'Listen for Hey Mate',
+  ]
+
+  it('shows only the enable switch and its disclosure while Mate is off', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
-    renderSection({ assistantDocumentModel: '' })
-    expect(screen.getAllByText('Enter an OpenRouter model ID like provider/model.')).toHaveLength(1)
+    renderSection({ assistantEnabled: false, assistantModel: 'openrouter/auto' })
+
+    expect(screen.getByLabelText('Enable Mate')).toBeInTheDocument()
+    expect(screen.getByText(/Every question sends your position/)).toBeInTheDocument()
+    for (const label of hiddenWhenOff) expect(screen.queryByLabelText(label)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Mate Auto cost tier')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'OpenRouter API key' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Document indexing' })).not.toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the other settings once Mate is switched on', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection({ assistantEnabled: false })
+
+    fireEvent.click(screen.getByLabelText('Enable Mate'))
+
+    for (const label of hiddenWhenOff) expect(screen.getByLabelText(label)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'OpenRouter API key' })).toBeInTheDocument()
+
     vi.unstubAllGlobals()
   })
 })

@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -464,8 +466,8 @@ func TestAssistantModelsHandler_ReturnsToolCapableModelsFromOpenRouter(t *testin
 	if len(fake.requests) != 1 {
 		t.Fatalf("expected one upstream call, got %d", len(fake.requests))
 	}
-	if got := fake.requests[0].URL.String(); got != "https://openrouter.ai/api/v1/models?supported_parameters=tools" {
-		t.Fatalf("expected tools-filtered models URL, got %q", got)
+	if got := fake.requests[0].URL.String(); got != "https://openrouter.ai/api/v1/models" {
+		t.Fatalf("expected the unfiltered models URL, got %q", got)
 	}
 
 	var resp struct {
@@ -486,6 +488,69 @@ func TestAssistantModelsHandler_ReturnsToolCapableModelsFromOpenRouter(t *testin
 	// Name falls back to the id when upstream omits it.
 	if resp.Models[1].ID != "openai/gpt-4o-mini" || resp.Models[1].Name != "openai/gpt-4o-mini" {
 		t.Fatalf("unexpected second model: %+v", resp.Models[1])
+	}
+}
+
+func TestAssistantModelsHandler_CapabilityFiltersOneCachedCatalogue(t *testing.T) {
+	resetAssistantModelsCache(t)
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
+		"data": [
+			{"id": "vendor/tools-only", "supported_parameters": ["tools"], "architecture": {"input_modalities": ["text"]}},
+			{"id": "vendor/vision-tools", "supported_parameters": ["tools"], "architecture": {"input_modalities": ["text", "image"]}},
+			{"id": "vendor/vision-only", "supported_parameters": ["temperature"], "architecture": {"input_modalities": ["text", "image"]}},
+			{"id": "vendor/plain", "supported_parameters": ["temperature"]}
+		]
+	}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	ids := func(url string) []string {
+		c, rec := newAssistantEchoContext(http.MethodGet, url, "", "")
+		if err := assistantModelsHandler(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d: %s", url, rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Models []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		out := []string{}
+		for _, m := range resp.Models {
+			out = append(out, m.ID)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	if got := ids("/api/assistant/models"); !reflect.DeepEqual(got, []string{"vendor/tools-only", "vendor/vision-tools"}) {
+		t.Fatalf("default capability should be tools, got %v", got)
+	}
+	if got := ids("/api/assistant/models?capability=tools"); !reflect.DeepEqual(got, []string{"vendor/tools-only", "vendor/vision-tools"}) {
+		t.Fatalf("tools capability, got %v", got)
+	}
+	if got := ids("/api/assistant/models?capability=images"); !reflect.DeepEqual(got, []string{"vendor/vision-only", "vendor/vision-tools"}) {
+		t.Fatalf("images capability, got %v", got)
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("expected one upstream call across capabilities, got %d", len(fake.requests))
+	}
+}
+
+func TestAssistantModelsHandler_UnknownCapabilityIsBadRequest(t *testing.T) {
+	resetAssistantModelsCache(t)
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/models?capability=audio", "", "")
+	if err := assistantModelsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
