@@ -169,7 +169,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     distanceMeters,
     bearingDeg,
     setAnchorHere,
-    clearAnchor,
     seaState,
     seabedType,
   } = watch
@@ -397,7 +396,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
             anchorActive={false}
             canDrop={lat !== null && lon !== null}
             onDrop={handleDropHere}
-            onRaise={clearAnchor}
           />
         </div>
       )}
