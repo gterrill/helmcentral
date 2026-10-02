@@ -45,12 +45,12 @@ beforeEach(() => {
 })
 
 describe('LocationsIndex', () => {
-  it('lists each location with its bin count in two columns', async () => {
+  it('lists each location with its deck and bin count', async () => {
     render(<LocationsIndex onOpenLocation={vi.fn()} />)
     await screen.findByText('Engine room (stbd)')
 
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim())
-    expect(headers).toEqual(['Name', 'Bins'])
+    expect(headers).toEqual(['Name', 'Deck', 'Bins'])
 
     const row = screen.getByText('Engine room (stbd)').closest('tr')!
     expect(within(row).getByText('2')).toBeInTheDocument()
@@ -143,6 +143,25 @@ describe('LocationsIndex plan view (ADR 0156)', () => {
       },
       { id: 'z2', name: 'Salon', sort_index: 1, deck_id: 'd2', polygon: [[0, 0], [1, 0], [1, 1]], bins: [] },
     ]
+  })
+
+  it('names each location\'s deck in the table, and a dash when it is on none', async () => {
+    zones = [...zones, { id: 'z3', name: 'Chain locker', sort_index: 2, bins: [] }]
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="table" />)
+    const engineRow = (await screen.findByText('Engine room')).closest('tr')!
+    expect(await within(engineRow).findByText('Main deck')).toBeInTheDocument()
+    expect(within(screen.getByText('Salon').closest('tr')!).getByText('Lower deck')).toBeInTheDocument()
+    expect(within(screen.getByText('Chain locker').closest('tr')!).getByText('--')).toBeInTheDocument()
+  })
+
+  it('shows the decks load error instead of a table with no deck names', async () => {
+    const base = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).endsWith('/api/inventory/decks')
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'decks unavailable' }) })
+        : base(url, init))
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="table" />)
+    expect(await screen.findByText(/decks unavailable/)).toBeInTheDocument()
   })
 
   it('switches between Table and Plan and reports the choice', async () => {

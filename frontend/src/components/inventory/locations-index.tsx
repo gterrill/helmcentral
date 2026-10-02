@@ -8,9 +8,9 @@ import { Input } from '@/components/ui/input'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { PrintBinLabelsDialog } from '@/components/inventory/label-print'
 import { EmptyState, IndexFilters, IndexTable, Page } from '@/components/patterns'
-import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
+import { useInventoryDecks, useInventoryZones, type InventoryDeck, type InventoryZone } from '@/hooks/use-inventory'
 
-// ADR 0142: the Locations index - a name and a bin count per location, built
+// ADR 0142: the Locations index - a name, deck and bin count per location, built
 // on the pattern library like EquipmentIndex. A location is an area of the
 // boat (a "zone" in the code). Rows open the location's own page.
 //
@@ -19,19 +19,31 @@ import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hook
 // id, so there is no draft worth a page of its own. Creating it opens its
 // page straight away, where the bins are added.
 
-const columns: ColumnDef<InventoryZone, unknown>[] = [
-  {
-    accessorKey: 'name',
-    header: 'Name',
-    cell: ({ row }) => <span className="font-medium text-foreground">{row.original.name}</span>,
-  },
-  {
-    id: 'bins',
-    accessorFn: (zone) => zone.bins.length,
-    header: 'Bins',
-    cell: ({ getValue }) => <span className="tabular-nums text-muted-foreground">{getValue<number>()}</span>,
-  },
-]
+// The Deck column names the deck a location is outlined on (ADR 0156), and a
+// structural dash when it is on none. Decks come from their own request, so
+// the columns are built from the loaded decks rather than declared once.
+function buildColumns(decks: InventoryDeck[]): ColumnDef<InventoryZone, unknown>[] {
+  const deckNames = new Map(decks.map((d) => [d.id, d.name]))
+  return [
+    {
+      accessorKey: 'name',
+      header: 'Name',
+      cell: ({ row }) => <span className="font-medium text-foreground">{row.original.name}</span>,
+    },
+    {
+      id: 'deck',
+      accessorFn: (zone) => (zone.deck_id ? deckNames.get(zone.deck_id) ?? '' : ''),
+      header: 'Deck',
+      cell: ({ getValue }) => <span className="truncate text-muted-foreground">{getValue<string>() || '--'}</span>,
+    },
+    {
+      id: 'bins',
+      accessorFn: (zone) => zone.bins.length,
+      header: 'Bins',
+      cell: ({ getValue }) => <span className="tabular-nums text-muted-foreground">{getValue<number>()}</span>,
+    },
+  ]
+}
 
 export type LocationsView = 'table' | 'plan'
 
@@ -71,8 +83,9 @@ function ViewSwitch({ view, onChange }: { view: LocationsView; onChange: (view: 
 }
 
 function PlanView({
-  zones, planDeckId, onPlanDeckChange, onOpenLocation, onOpenBin, onOpenDecks, canWrite,
+  decksState, zones, planDeckId, onPlanDeckChange, onOpenLocation, onOpenBin, onOpenDecks, canWrite,
 }: {
+  decksState: ReturnType<typeof useInventoryDecks>
   zones: InventoryZone[]
   planDeckId: string | null
   onPlanDeckChange: (deckId: string) => void
@@ -81,7 +94,7 @@ function PlanView({
   onOpenDecks: () => void
   canWrite: boolean
 }) {
-  const { decks, loading, error, refresh } = useInventoryDecks()
+  const { decks, loading, error, refresh } = decksState
   const planned = decks.filter((d) => d.plan_document_id)
   const deck = planned.find((d) => d.id === planDeckId) ?? planned[0] ?? null
 
@@ -140,6 +153,8 @@ export function LocationsIndex({
   onOpenDecks = () => {},
 }: LocationsIndexProps) {
   const { zones, loading, error, refresh, createZone } = useInventoryZones()
+  const decksState = useInventoryDecks()
+  const columns = useMemo(() => buildColumns(decksState.decks), [decksState.decks])
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const [printingLabels, setPrintingLabels] = useState(false)
@@ -206,6 +221,7 @@ export function LocationsIndex({
 
         {view === 'plan' ? (
           <PlanView
+            decksState={decksState}
             zones={zones}
             planDeckId={planDeckId}
             onPlanDeckChange={onPlanDeckChange}
@@ -220,9 +236,11 @@ export function LocationsIndex({
           rows={rows}
           getRowId={(zone) => zone.id}
           onOpen={(zone) => onOpenLocation(zone.id)}
-          loading={loading && zones.length === 0}
-          error={error}
-          onRetry={() => { void refresh() }}
+          loading={(loading && zones.length === 0) || (decksState.loading && decksState.decks.length === 0)}
+          // A failed decks load would leave every Deck cell a dash, which
+          // reads as "on no deck" - show the error instead (AGENTS.md).
+          error={error ?? decksState.error}
+          onRetry={() => { void refresh(); void decksState.refresh() }}
           empty={
             <EmptyState
               icon={<MapPin className="h-8 w-8 text-muted-foreground" aria-hidden="true" />}
