@@ -6,7 +6,7 @@
 > the release notes before you upgrade.
 >
 > Having said that, It would be really great if some nautical nerds who already
-> have SignalK installed would be will to give it a whirl. It's at a point now
+> have SignalK installed would be willing to give it a whirl. It's at a point now
 > where it is useful and I would love some feedback on the install experience
 > on other platforms.
 
