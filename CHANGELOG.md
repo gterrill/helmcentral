@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-03
+
+### Breaking
+
+- **Alarm notification titles have changed.** Push notifications and emails
+  for alarms raised by other instruments now carry a plain title such as
+  "Radar Guard Zone 1" or "Collision Risk" instead of the instrument's
+  address. If you filter or route alarm notifications on their text, in ntfy,
+  your mail client or a webhook, check those filters after upgrading.
+
 ### Added
 
 - Mate can now search the web when your boat's documents and instruments
@@ -55,9 +65,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   tracking the target it gives its bearing, range and closest approach. An AIS
   collision alarm reads "Collision Risk" and names the vessel. The
   "Clears when the source clears it" line is gone, and so is the address under
-  each card. Push notifications and emails carry the same title, so if you
-  filter alarm notifications on their text, check your filters after
-  upgrading. The anchor drag alarm now reads "Anchor 45 m from the drop point".
+  each card. With two radars running, a guard zone title adds the name you
+  gave that radar. Push notifications and emails carry the same title as the
+  card. The anchor drag alarm now reads "Anchor 45 m from the drop point".
 
 ### Fixed
 
@@ -66,7 +76,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   set in **Settings → Vessel**. Without it they show a dash, instead of a
   figure that flickered and mostly read nothing. When the battery monitor
   stops reporting current, they and the Net readout show a dash rather than a
-  false 1 A discharge.
+  false 1 A discharge, and a real 1 A discharge is shown as one.
 
 ## [0.39.0] - 2026-10-02
 
@@ -819,7 +829,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/gterrill/helmcentral/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/gterrill/helmcentral/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/gterrill/helmcentral/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/gterrill/helmcentral/compare/v0.36.0...v0.37.0
