@@ -109,8 +109,12 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 	if globalRadarTargetStore != nil && needsRadarTargets(out) {
 		targets = globalRadarTargetStore.list(now)
 	}
+	var radars []radarInfo
+	if needsRadarTargets(out) {
+		radars = radarsFromSnapshot(snapshot, now)
+	}
 	for i := range out {
-		out[i] = presentNotificationStatus(out[i], targets, now)
+		out[i] = presentNotificationStatus(out[i], targets, radars, now)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -491,7 +495,7 @@ func actOnSignalKNotification(snapshot *signalKSnapshot, path, action string, no
 	if vesselID != "" {
 		status.Label, status.Message = presentCollision(status.Message)
 	} else {
-		status.Label, status.Message = presentNotification(status.Label, status.Message)
+		status.Label, status.Message = presentNotification(status.Label, status.Message, radarsForPresentation(snapshot, status.Label, now))
 	}
 	if status.State == alarmStateEmergency {
 		return alarmStatus{}, fmt.Errorf("%w: %s.%s", errNotificationEmergency, notificationsRoot, path)

@@ -39,9 +39,19 @@ var writtenTitles = map[string]string{
 // name and the situation sentence an operator reads. The title is never a
 // path, device id or plugin name; the body never carries internal ids and is
 // empty when the producer said nothing beyond the path.
-func presentNotification(path, message string) (title, body string) {
+func presentNotification(path, message string, radars []radarInfo) (title, body string) {
 	if m := radarGuardZonePath.FindStringSubmatch(path); m != nil {
-		return "Radar Guard Zone " + m[2], "Target in guard zone " + m[2] + "."
+		title = "Radar Guard Zone " + m[2]
+		// Name the radar only when more than one is live, and then by the
+		// operator's own name for it, never its device key.
+		if len(radars) > 1 {
+			for _, r := range radars {
+				if r.ID == m[1] && r.Name != "" {
+					title += " · " + r.Name
+				}
+			}
+		}
+		return title, "Target in guard zone " + m[2] + "."
 	}
 
 	message = strings.TrimSpace(message)
@@ -57,6 +67,15 @@ func presentNotification(path, message string) (title, body string) {
 		title = humanisePath(path)
 	}
 	return title, sentence(message, path)
+}
+
+// radarsForPresentation is the live radar list, read only when path is a
+// guard zone so other notifications skip the tree walk.
+func radarsForPresentation(snapshot *signalKSnapshot, path string, now time.Time) []radarInfo {
+	if !radarGuardZonePath.MatchString(path) {
+		return nil
+	}
+	return radarsFromSnapshot(snapshot, now)
 }
 
 // presentCollision words an AIS target's collision alarm. It is always a
@@ -132,9 +151,9 @@ func radarFiguresFor(path, message string, targets []radarTarget) *alarmRadarTar
 // presentNotificationStatus rewrites a bus notification status (whose Label
 // is still the bare path) for display. Path and RuleID are untouched, so
 // everything keyed on them keeps working. Apply it once, last.
-func presentNotificationStatus(status alarmStatus, targets []radarTarget, _ time.Time) alarmStatus {
+func presentNotificationStatus(status alarmStatus, targets []radarTarget, radars []radarInfo, _ time.Time) alarmStatus {
 	path := status.Label
 	status.RadarTarget = radarFiguresFor(path, status.Message, targets)
-	status.Label, status.Message = presentNotification(path, status.Message)
+	status.Label, status.Message = presentNotification(path, status.Message, radars)
 	return status
 }

@@ -2287,14 +2287,8 @@ func (d assistantToolDeps) executeSearchDocuments(ctx context.Context, raw json.
 			}
 			path = cached
 		}
-		var mimeType string
-		if err := store.Read(func(q sqlQueryer) error {
-			return q.QueryRow(`SELECT mime FROM documents WHERE id = ?`, h.DocumentID).Scan(&mimeType)
-		}); err != nil {
-			return "", fmt.Errorf("search_documents: read mime type of %s: %w", h.DocumentID, err)
-		}
 		result.Results = append(result.Results, assistantDocumentSearchHit{
-			MIME:       mimeType,
+			MIME:       h.Mime,
 			DocumentID: h.DocumentID,
 			Filename:   h.Filename,
 			FolderPath: path,

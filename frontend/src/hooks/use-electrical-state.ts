@@ -14,8 +14,8 @@ interface ElectricalState {
   last_update_age_s: number
   battery_soc_percent: number
   battery_capacity_ah: number
-  charging_current_a: number
-  charging_power_w: number
+  charging_current_a: number | null
+  charging_power_w: number | null
   solar_output_w: number
   ac_output_w: number
   dc_12v_power_w: number
@@ -42,10 +42,10 @@ function parseAlt(v: unknown): number | null {
   return typeof v === 'number' && v >= 0 ? v : null
 }
 
-// Bank current and power are signed (negative is discharge), so the backend's
-// "unknown" is -1 exactly rather than any negative value.
+// Bank current and power are signed (negative is discharge), so no number can
+// mean unknown; the backend sends null.
 function parseSigned(v: unknown): number | null {
-  return typeof v === 'number' && v !== -1 ? v : null
+  return typeof v === 'number' ? v : null
 }
 
 export function useElectricalState() {

@@ -278,6 +278,13 @@ describe('alarmConditionSentence', () => {
     expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 1.')
   })
 
+  it('ends an op-less message with one full stop, whatever its source', () => {
+    const say = (message: string) => alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message }))
+    expect(say('No SignalK data for 30s')).toBe('No SignalK data for 30s.')
+    expect(say('Engine too hot!')).toBe('Engine too hot.')
+    expect(say('  Already done.  ')).toBe('Already done.')
+  })
+
   it('is empty when a bus notification has no message', () => {
     expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: '' }))).toBe('')
   })

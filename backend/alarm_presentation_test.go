@@ -6,7 +6,7 @@ import (
 )
 
 func TestPresentNotificationGuardZone(t *testing.T) {
-	title, body := presentNotification("radar.fur6424A.guardZone.1", "Radar fur6424A guard zone 1: target 100000030 acquired")
+	title, body := presentNotification("radar.fur6424A.guardZone.1", "Radar fur6424A guard zone 1: target 100000030 acquired", nil)
 	if title != "Radar Guard Zone 1" {
 		t.Fatalf("title = %q", title)
 	}
@@ -16,10 +16,26 @@ func TestPresentNotificationGuardZone(t *testing.T) {
 }
 
 func TestPresentNotificationGuardZoneIgnoresRadarID(t *testing.T) {
-	a, _ := presentNotification("radar.fur6424A.guardZone.2", "x")
-	b, _ := presentNotification("radar.fur6424B.guardZone.2", "x")
+	a, _ := presentNotification("radar.fur6424A.guardZone.2", "x", nil)
+	b, _ := presentNotification("radar.fur6424B.guardZone.2", "x", nil)
 	if a != "Radar Guard Zone 2" || a != b {
 		t.Fatalf("titles = %q, %q", a, b)
+	}
+}
+
+func TestPresentNotificationGuardZoneNamesTheRadarWhenTwoAreLive(t *testing.T) {
+	one := []radarInfo{{ID: "fur6424A", Name: "Bow radar"}}
+	two := []radarInfo{{ID: "fur6424A", Name: "Bow radar"}, {ID: "fur6424B", Name: "Mast radar"}}
+	if title, _ := presentNotification("radar.fur6424A.guardZone.1", "x", one); title != "Radar Guard Zone 1" {
+		t.Fatalf("one radar: title = %q", title)
+	}
+	if title, _ := presentNotification("radar.fur6424B.guardZone.1", "x", two); title != "Radar Guard Zone 1 · Mast radar" {
+		t.Fatalf("two radars: title = %q", title)
+	}
+	// No operator name: no device key either.
+	unnamed := []radarInfo{{ID: "fur6424A"}, {ID: "fur6424B"}}
+	if title, _ := presentNotification("radar.fur6424B.guardZone.1", "x", unnamed); title != "Radar Guard Zone 1" {
+		t.Fatalf("unnamed: title = %q", title)
 	}
 }
 
@@ -34,7 +50,7 @@ func TestPresentNotificationGeneric(t *testing.T) {
 		{"navigation.depth", "navigation.depth", "Navigation Depth", ""},
 	}
 	for _, c := range cases {
-		title, body := presentNotification(c.path, c.message)
+		title, body := presentNotification(c.path, c.message, nil)
 		if title != c.title || body != c.body {
 			t.Errorf("%q/%q -> %q / %q, want %q / %q", c.path, c.message, title, body, c.title, c.body)
 		}
@@ -74,7 +90,7 @@ func TestPresentNotificationStatusKeepsPathAndRuleID(t *testing.T) {
 		Path:    "notifications.radar.fur6424A.guardZone.1",
 		Message: "Radar fur6424A guard zone 1: target 7 acquired",
 	}
-	got := presentNotificationStatus(status, []radarTarget{{RadarID: "fur6424A", TargetID: 7, RangeM: 100}}, time.Time{})
+	got := presentNotificationStatus(status, []radarTarget{{RadarID: "fur6424A", TargetID: 7, RangeM: 100}}, nil, time.Time{})
 	if got.Label != "Radar Guard Zone 1" || got.Message != "Target in guard zone 1." {
 		t.Fatalf("got %q / %q", got.Label, got.Message)
 	}
@@ -95,7 +111,7 @@ func TestPresentNotificationWrittenTitles(t *testing.T) {
 		{"navigation.anchor", "Anchor dragging!", "Anchor Alarm", "Anchor dragging."},
 	}
 	for _, c := range cases {
-		title, body := presentNotification(c.path, c.message)
+		title, body := presentNotification(c.path, c.message, nil)
 		if title != c.title || body != c.body {
 			t.Errorf("%q/%q -> %q / %q, want %q / %q", c.path, c.message, title, body, c.title, c.body)
 		}

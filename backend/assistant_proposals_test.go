@@ -533,7 +533,7 @@ func TestAssistantRunner_CollectsProposalsFromTheToolResult(t *testing.T) {
 
 func TestAssistantRunner_AFailedProposeCallCollectsNothing(t *testing.T) {
 	doer := &queuedChatDoer{responses: []*http.Response{proposalToolCallRound(t), finalResponse(t, "That did not validate.", "m", usage(10, 5, 0))}, errs: []error{nil, nil}}
-	tools := &fakeToolExecutor{errs: map[string]error{"propose_changes": errors.New("ops[0] (create_rule): description: description is required")}}
+	tools := &fakeToolExecutor{errs: map[string]error{"propose_changes": errors.New("operations[0] (create_rule): description: description is required")}}
 	emit, _ := recordingEmitter()
 	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
 
@@ -603,7 +603,7 @@ func TestPropose_RejectsWhatAnEarlierOpInTheSameProposalMakesInvalid(t *testing.
 	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[
 		{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":250}},
 		{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-01"}}]}`, rule.ID, rule.ID))
-	if !strings.Contains(msg, "ops[1] (maintenance_log create): meter_reading:") {
+	if !strings.Contains(msg, "operations[1] (maintenance_log create): meter_reading:") {
 		t.Fatalf("expected the dry run to refuse op 1 naming meter_reading, got %q", msg)
 	}
 	if after := env.counts(t); after != before {

@@ -150,6 +150,9 @@ type recordType struct {
 	// Effects lists what else a delete takes with it, in the operator's words
 	// ("removes the outlines of 3 locations"). Optional.
 	Effects func(q sqlQueryer, before recordSnapshot) ([]string, error)
+	// UpdateEffects is Effects for an update: what else the given fields
+	// change that the field list does not show. Optional.
+	UpdateEffects func(q sqlQueryer, before recordSnapshot, given fieldSet) ([]string, error)
 	// Watch lists other records an operation's fields depend on. Optional.
 	Watch func(q sqlQueryer, fields fieldSet) ([]recordWatch, error)
 	// Describe writes the operator's line for an operation. Optional: the

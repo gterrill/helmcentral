@@ -1417,7 +1417,7 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 }
 
 func fetchSignalKElectricalState() (electricalStateData, error) {
-	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
+	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	payload, err := signalKSelfPayload()
 	if err != nil {
@@ -1511,41 +1511,54 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 		batteryVoltage = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"voltage", "value"})
 	}
 
-	current := -1.0
+	// Bank current and power are signed, so no number can stand for "unknown":
+	// they are left nil until a path actually reports one.
+	var current, power *float64
 	if mainBattery != nil {
-		current = lookupNumber(mainBattery, "current", "value")
+		if v, ok := lookupNumberOK(mainBattery, "current", "value"); ok {
+			current = &v
+		}
 	}
-	if current == -1 {
-		current = lookupFirstNumber(payload,
+	if current == nil {
+		if v, ok := lookupFirstNumberOK(payload,
 			[]string{"electrical", "batteries", "house", "current", "value"},
 			[]string{"electrical", "batteries", "house", "current"},
 			[]string{"electrical", "batteries", "service", "current", "value"},
 			[]string{"electrical", "batteries", "service", "current"},
-		)
+		); ok {
+			current = &v
+		}
 	}
-	if current != -1 {
-		state.ChargingCurrentA = roundTo1(current)
+	if current != nil {
+		v := roundTo1(*current)
+		state.ChargingCurrentA = &v
 	}
 
-	power := -1.0
 	if mainBattery != nil {
-		power = lookupNumber(mainBattery, "power", "value")
+		if v, ok := lookupNumberOK(mainBattery, "power", "value"); ok {
+			power = &v
+		}
 	}
-	if power == -1 {
-		power = lookupFirstNumber(payload,
+	if power == nil {
+		if v, ok := lookupFirstNumberOK(payload,
 			[]string{"electrical", "batteries", "house", "power", "value"},
 			[]string{"electrical", "batteries", "house", "power"},
 			[]string{"electrical", "batteries", "service", "power", "value"},
 			[]string{"electrical", "batteries", "service", "power"},
-		)
+		); ok {
+			power = &v
+		}
 	}
-	if power != -1 {
-		state.ChargingPowerW = roundTo1(power)
-	} else if state.ChargingCurrentA != -1 && batteryVoltage > 0 {
-		state.ChargingPowerW = roundTo1(state.ChargingCurrentA * batteryVoltage)
+	if power != nil {
+		v := roundTo1(*power)
+		state.ChargingPowerW = &v
+	} else if state.ChargingCurrentA != nil && batteryVoltage > 0 {
+		v := roundTo1(*state.ChargingCurrentA * batteryVoltage)
+		state.ChargingPowerW = &v
 	}
-	if state.ChargingCurrentA == -1 && state.ChargingPowerW != -1 && batteryVoltage > 0 {
-		state.ChargingCurrentA = roundTo1(state.ChargingPowerW / batteryVoltage)
+	if state.ChargingCurrentA == nil && state.ChargingPowerW != nil && batteryVoltage > 0 {
+		v := roundTo1(*state.ChargingPowerW / batteryVoltage)
+		state.ChargingCurrentA = &v
 	}
 
 	// venus.totalPanelPower is the Victron system aggregate; sum individual chargers as fallback.
@@ -2469,6 +2482,38 @@ func lookupNumber(payload map[string]any, keys ...string) float64 {
 	default:
 		return -1
 	}
+}
+
+// lookupNumberOK is lookupNumber for signed values, where -1 is a real reading.
+func lookupNumberOK(payload map[string]any, keys ...string) (float64, bool) {
+	var current any = payload
+	for _, key := range keys {
+		asMap, ok := current.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		next, ok := asMap[key]
+		if !ok {
+			return 0, false
+		}
+		current = next
+	}
+	switch v := current.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	}
+	return 0, false
+}
+
+func lookupFirstNumberOK(payload map[string]any, paths ...[]string) (float64, bool) {
+	for _, path := range paths {
+		if v, ok := lookupNumberOK(payload, path...); ok {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
 func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
