@@ -128,20 +128,19 @@ func deckByID(q sqlQueryer, id string) (inventoryDeck, error) {
 }
 
 // CreateDeck adds a deck at the next sort_index.
-func (s *documentStore) CreateDeck(name string) (inventoryDeck, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) CreateDeck(name string) (d inventoryDeck, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		d, err = createDeckTx(tx, now, name)
+		return err
+	})
+	return d, err
+}
 
+func createDeckTx(tx *sql.Tx, now time.Time, name string) (inventoryDeck, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return inventoryDeck{}, errDeckNameInvalid
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryDeck{}, fmt.Errorf("create deck: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	taken, err := rowExists(tx, `SELECT 1 FROM inventory_decks WHERE lower(name) = lower(?)`, trimmed)
 	if err != nil {
 		return inventoryDeck{}, fmt.Errorf("create deck: check name: %w", err)
@@ -153,7 +152,6 @@ func (s *documentStore) CreateDeck(name string) (inventoryDeck, error) {
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(sort_index), -1) + 1 FROM inventory_decks`).Scan(&next); err != nil {
 		return inventoryDeck{}, fmt.Errorf("create deck: next sort index: %w", err)
 	}
-	now := s.now()
 	id := uuid.NewString()
 	if _, err := tx.Exec(
 		`INSERT INTO inventory_decks (id, name, sort_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
@@ -161,31 +159,23 @@ func (s *documentStore) CreateDeck(name string) (inventoryDeck, error) {
 	); err != nil {
 		return inventoryDeck{}, fmt.Errorf("create deck: %w", err)
 	}
-	d, err := deckByID(tx, id)
-	if err != nil {
-		return inventoryDeck{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return inventoryDeck{}, fmt.Errorf("create deck: commit: %w", err)
-	}
-	return d, nil
+	return deckByID(tx, id)
 }
 
 // UpdateDeck renames a deck.
-func (s *documentStore) UpdateDeck(id, name string) (inventoryDeck, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) UpdateDeck(id, name string) (d inventoryDeck, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		d, err = updateDeckTx(tx, now, id, name)
+		return err
+	})
+	return d, err
+}
 
+func updateDeckTx(tx *sql.Tx, now time.Time, id, name string) (inventoryDeck, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return inventoryDeck{}, errDeckNameInvalid
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryDeck{}, fmt.Errorf("update deck: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	if _, err := deckByID(tx, id); err != nil {
 		return inventoryDeck{}, err
 	}
@@ -196,52 +186,62 @@ func (s *documentStore) UpdateDeck(id, name string) (inventoryDeck, error) {
 	if taken {
 		return inventoryDeck{}, errDeckNameTaken
 	}
-	if _, err := tx.Exec(`UPDATE inventory_decks SET name = ?, updated_at = ? WHERE id = ?`, trimmed, s.now().Unix(), id); err != nil {
+	if _, err := tx.Exec(`UPDATE inventory_decks SET name = ?, updated_at = ? WHERE id = ?`, trimmed, now.Unix(), id); err != nil {
 		return inventoryDeck{}, fmt.Errorf("update deck: %w", err)
 	}
-	d, err := deckByID(tx, id)
-	if err != nil {
-		return inventoryDeck{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return inventoryDeck{}, fmt.Errorf("update deck: commit: %w", err)
-	}
-	return d, nil
+	return deckByID(tx, id)
 }
 
 // SetDeckPlan points a deck at its plan image document. The previous plan
 // document, if any, stays in Documents.
-func (s *documentStore) SetDeckPlan(deckID, documentID string) (inventoryDeck, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) SetDeckPlan(deckID, documentID string) (d inventoryDeck, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		d, err = setDeckPlanTx(tx, now, deckID, documentID)
+		return err
+	})
+	return d, err
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryDeck{}, fmt.Errorf("set deck plan: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+// setDeckPlanTx points a deck at a plan document. The document must exist and
+// be an image a plan can be drawn on (deckPlanRefusal); the upload handler
+// applies the same rule to the file it has just received, so a plan chosen
+// from Documents and a plan uploaded are held to one standard.
+func setDeckPlanTx(tx *sql.Tx, now time.Time, deckID, documentID string) (inventoryDeck, error) {
 	if _, err := deckByID(tx, deckID); err != nil {
 		return inventoryDeck{}, err
 	}
-	ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, documentID)
+	var mimeType string
+	err := tx.QueryRow(`SELECT mime FROM documents WHERE id = ?`, documentID).Scan(&mimeType)
+	if errors.Is(err, sql.ErrNoRows) {
+		return inventoryDeck{}, errDocumentNotFound
+	}
 	if err != nil {
 		return inventoryDeck{}, fmt.Errorf("set deck plan: check document: %w", err)
 	}
-	if !ok {
-		return inventoryDeck{}, errDocumentNotFound
+	if refusal := deckPlanRefusal(mimeType); refusal != "" {
+		return inventoryDeck{}, &inventoryValidationError{Field: "plan_document_id", Message: refusal}
 	}
-	if _, err := tx.Exec(`UPDATE inventory_decks SET plan_document_id = ?, updated_at = ? WHERE id = ?`, documentID, s.now().Unix(), deckID); err != nil {
+	if _, err := tx.Exec(`UPDATE inventory_decks SET plan_document_id = ?, updated_at = ? WHERE id = ?`, documentID, now.Unix(), deckID); err != nil {
 		return inventoryDeck{}, fmt.Errorf("set deck plan: %w", err)
 	}
-	d, err := deckByID(tx, deckID)
-	if err != nil {
-		return inventoryDeck{}, err
+	return deckByID(tx, deckID)
+}
+
+// deckPlanRefusal is why a file of this MIME type cannot be a deck plan, in
+// the operator's words, or "" when it can. Only JPEG and PNG pictures are
+// accepted: a plan is drawn over as an image, and a page of a PDF is not one
+// yet.
+func deckPlanRefusal(mimeType string) string {
+	switch mimeType {
+	case "image/jpeg", "image/png":
+		return ""
+	case "image/heic":
+		return documentHEICRejectionMessage
+	case "application/pdf":
+		return "a page of a PDF cannot be a deck plan yet; upload a picture of that page (JPEG or PNG) instead"
+	default:
+		return "a deck plan must be a JPEG or PNG image"
 	}
-	if err := tx.Commit(); err != nil {
-		return inventoryDeck{}, fmt.Errorf("set deck plan: commit: %w", err)
-	}
-	return d, nil
 }
 
 // GetDeck returns one deck.
@@ -278,23 +278,22 @@ func (s *documentStore) ListDecks() ([]inventoryDeck, error) {
 // DeleteDeck takes the deck's zones off the plan (outline and their bins'
 // pins cleared) and deletes it, returning how many zones lost their outline.
 // The plan document stays in Documents.
-func (s *documentStore) DeleteDeck(id string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) DeleteDeck(id string) (cleared int, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		cleared, err = deleteDeckTx(tx, now, id)
+		return err
+	})
+	return cleared, err
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, fmt.Errorf("delete deck: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+func deleteDeckTx(tx *sql.Tx, now time.Time, id string) (int, error) {
 	if _, err := deckByID(tx, id); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(`UPDATE inventory_bins SET pin_x = NULL, pin_y = NULL WHERE zone_id IN (SELECT id FROM inventory_zones WHERE deck_id = ?)`, id); err != nil {
 		return 0, fmt.Errorf("delete deck: clear pins: %w", err)
 	}
-	res, err := tx.Exec(`UPDATE inventory_zones SET deck_id = NULL, polygon = NULL, updated_at = ? WHERE deck_id = ?`, s.now().Unix(), id)
+	res, err := tx.Exec(`UPDATE inventory_zones SET deck_id = NULL, polygon = NULL, updated_at = ? WHERE deck_id = ?`, now.Unix(), id)
 	if err != nil {
 		return 0, fmt.Errorf("delete deck: clear zones: %w", err)
 	}
@@ -305,9 +304,6 @@ func (s *documentStore) DeleteDeck(id string) (int, error) {
 	if _, err := tx.Exec(`DELETE FROM inventory_decks WHERE id = ?`, id); err != nil {
 		return 0, fmt.Errorf("delete deck: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("delete deck: commit: %w", err)
-	}
 	return int(cleared), nil
 }
 
@@ -317,15 +313,10 @@ func (s *documentStore) DeleteDeck(id string) (int, error) {
 // listed or de-listed zone loses its pin, then the listed pins are set. Any
 // validation failure changes nothing.
 func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bins []deckLayoutBin) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return saveDeckLayoutTx(tx, now, deckID, zones, bins) })
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("save deck layout: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+func saveDeckLayoutTx(tx *sql.Tx, now time.Time, deckID string, zones []deckLayoutZone, bins []deckLayoutBin) error {
 	if _, err := deckByID(tx, deckID); err != nil {
 		return err
 	}
@@ -369,7 +360,7 @@ func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bi
 		}
 	}
 
-	now := s.now().Unix()
+	nowUnix := now.Unix()
 
 	// Zones leaving this deck: off the plan, pins cleared.
 	rows, err := tx.Query(`SELECT id FROM inventory_zones WHERE deck_id = ?`, deckID)
@@ -395,7 +386,7 @@ func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bi
 		if _, err := tx.Exec(`UPDATE inventory_bins SET pin_x = NULL, pin_y = NULL WHERE zone_id = ?`, id); err != nil {
 			return fmt.Errorf("save deck layout: clear pins: %w", err)
 		}
-		if _, err := tx.Exec(`UPDATE inventory_zones SET deck_id = NULL, polygon = NULL, updated_at = ? WHERE id = ?`, now, id); err != nil {
+		if _, err := tx.Exec(`UPDATE inventory_zones SET deck_id = NULL, polygon = NULL, updated_at = ? WHERE id = ?`, nowUnix, id); err != nil {
 			return fmt.Errorf("save deck layout: take zone off plan: %w", err)
 		}
 	}
@@ -408,7 +399,7 @@ func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bi
 		if _, err := tx.Exec(`UPDATE inventory_bins SET pin_x = NULL, pin_y = NULL WHERE zone_id = ?`, z.ID); err != nil {
 			return fmt.Errorf("save deck layout: clear pins: %w", err)
 		}
-		if _, err := tx.Exec(`UPDATE inventory_zones SET deck_id = ?, polygon = ?, updated_at = ? WHERE id = ?`, deckID, string(poly), now, z.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE inventory_zones SET deck_id = ?, polygon = ?, updated_at = ? WHERE id = ?`, deckID, string(poly), nowUnix, z.ID); err != nil {
 			return fmt.Errorf("save deck layout: place zone: %w", err)
 		}
 	}
@@ -416,9 +407,6 @@ func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bi
 		if _, err := tx.Exec(`UPDATE inventory_bins SET pin_x = ?, pin_y = ? WHERE id = ?`, b.X, b.Y, b.ID); err != nil {
 			return fmt.Errorf("save deck layout: pin bin: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("save deck layout: commit: %w", err)
 	}
 	return nil
 }

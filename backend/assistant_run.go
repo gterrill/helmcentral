@@ -99,8 +99,8 @@ type assistantReply struct {
 	CompletionTokens int
 	CostUSD          float64
 	ToolRounds       int
-	// Proposals are the maintenance change proposals (ADR 0146) Mate's
-	// propose_maintenance_changes calls produced during this run, in call
+	// Proposals are the change proposals (ADR 0146, ADR 0158) Mate's
+	// propose_changes calls produced during this run, in call
 	// order. The handler saves them with the assistant message in one
 	// transaction, so a run that fails or is cancelled saves none.
 	Proposals []assistantProposal
@@ -841,24 +841,24 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // get_tides, estimate_passage, plan_tidal_departure, read_help, search_documents, read_document,
 // get_nearby_vessels, check_signalk_paths, get_last_recorded,
 // get_path_history, find_equipment, list_maintenance, get_maintenance_log,
-// propose_maintenance_changes) only reads: none of them writes to the
+// propose_changes) only reads: none of them writes to the
 // conversation store, settings, the document store, or any other shared
 // state, so running a round's calls in parallel needs no locking beyond
 // r.emit's own and failures' own (see assistantToolFailures's doc comment for
 // why that one is not just guarded by this round's local mu).
 //
-// propose_maintenance_changes is the one that looks like an exception and is
-// not (ADR 0146). It validates operations against the maintenance rules and
-// returns them as data: a proposal. To do that faithfully it dry-runs every
+// propose_changes is the one that looks like an exception and is
+// not (ADR 0146, ADR 0158). It validates operations against the registered
+// record types and returns them as data: a proposal. To do that faithfully it dry-runs every
 // operation, in order, through the same commands Apply uses, inside a
-// transaction that is ALWAYS rolled back (dryRunProposal), so nothing is ever
+// transaction that is ALWAYS rolled back (recordRegistry.prepare), so nothing is ever
 // committed. The transaction holds the document store's mutex, so a round's
 // concurrent calls queue behind it instead of deadlocking. The run collects the
 // proposal from the tool result after the round (see run), the handler saves
 // it with the assistant message in that message's own transaction, and the
-// operator's Apply tap on the card is what writes the maintenance schedule. A
+// operator's Apply tap on the card is what writes the records. A
 // retried, duplicated or cancelled tool call therefore produces at worst an
-// extra card, never an extra rule, and a run that fails or is cancelled saves
+// extra card, never an extra record, and a run that fails or is cancelled saves
 // no proposal because it saves no message.
 //
 // This is a RULE, not an observation about the tools that happen to exist
@@ -1038,7 +1038,7 @@ func assistantFindPlacesLogSuffix(name, result string) string {
 }
 
 // assistantProposalFromToolResult reads the proposal out of a successful
-// propose_maintenance_changes result. A failed call's result is the
+// propose_changes result. A failed call's result is the
 // {"error": ...} body every tool failure gets and carries no proposal, so it
 // yields nil. A result that claims to be a proposal but cannot be read is a
 // bug in this code, not something to skip: the operator would never see the
@@ -1112,7 +1112,7 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 			}
 			content = preamble.String()
 		}
-		// A maintenance proposal (ADR 0146) is part of what Mate said on this
+		// A proposal (ADR 0146, ADR 0158) is part of what Mate said on this
 		// turn: replay each one with the status it has now, so Mate knows on
 		// the next turn whether the operator applied it, dismissed it, or has
 		// not decided.
@@ -1131,19 +1131,19 @@ func assistantProposalHistoryBlock(p assistantProposal) string {
 	var status string
 	switch p.Status {
 	case assistantProposalApplied:
-		status = "the operator tapped Apply: these changes ARE now in the maintenance schedule"
+		status = "the operator tapped Apply: these changes ARE now made"
 	case assistantProposalDismissed:
 		status = "the operator dismissed it: NONE of these changes were made; do not propose them again unless asked"
 	case assistantProposalStale:
 		status = "it went stale and could NOT be applied: NONE of these changes were made (" + p.StaleReason +
-			"); do not propose them again unless the operator asks, and if they do, read the rules again and make a fresh proposal"
+			"); do not propose them again unless the operator asks, and if they do, read the records again and make a fresh proposal"
 	default:
 		status = "still waiting for the operator to tap Apply: NONE of these changes have been made yet"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n\n[Maintenance proposal %s (%s)]", p.Status, status)
+	fmt.Fprintf(&b, "\n\n[Proposal %s (%s)]", p.Status, status)
 	for _, op := range p.Ops {
-		b.WriteString("\n- " + op.Summary)
+		b.WriteString("\n- " + op.Description)
 	}
 	return b.String()
 }

@@ -29,14 +29,14 @@ var (
 	errMaintenanceLogEntryNotFound = errors.New("log entry not found")
 )
 
-// RunMaintenanceTx runs fn in one transaction on this store's connection,
+// RunTx runs fn in one transaction on this store's connection,
 // holding the store mutex for its duration, and commits only when fn
-// returns nil. now is the store's own clock. Every maintenance write the
-// HTTP handlers make goes through it (maintenance_commands.go), so a handler
-// and Mate's proposal apply (ADR 0146), which runs several of the same
-// commands in one transaction of its own, execute identical code. fn must
-// not call another documentStore method: they take the same mutex.
-func (s *documentStore) RunMaintenanceTx(fn func(tx *sql.Tx, now time.Time) error) error {
+// returns nil. now is the store's own clock. Every maintenance and inventory
+// write the HTTP handlers make goes through it, so a handler and a Mate
+// changeset (ADR 0158), which runs several of the same commands in one
+// transaction of its own, execute identical code. fn must not call another
+// documentStore method: they take the same mutex.
+func (s *documentStore) RunTx(fn func(tx *sql.Tx, now time.Time) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -256,7 +256,7 @@ func maintenanceRuleByID(q sqlQueryer, id string) (maintenanceRule, error) {
 // writing.
 func (s *documentStore) CreateMaintenanceRule(in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = createMaintenanceRuleTx(tx, now, in)
 		return err
@@ -269,7 +269,7 @@ func (s *documentStore) CreateMaintenanceRule(in maintenanceRuleInput) (maintena
 
 // createMaintenanceRuleTx is CreateMaintenanceRule inside a transaction the caller owns and commits, with now
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
+// the same write (see RunTx).
 func createMaintenanceRuleTx(tx *sql.Tx, now time.Time, in maintenanceRuleInput) (maintenanceRule, error) {
 
 	if in.EquipmentID != nil {
@@ -309,7 +309,7 @@ func createMaintenanceRuleTx(tx *sql.Tx, now time.Time, in maintenanceRuleInput)
 // created_at.
 func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = updateMaintenanceRuleTx(tx, now, id, in)
 		return err
@@ -322,7 +322,7 @@ func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput
 
 // updateMaintenanceRuleTx is UpdateMaintenanceRule inside a transaction the caller owns and commits, with now
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
+// the same write (see RunTx).
 func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanceRuleInput) (maintenanceRule, error) {
 	if isMaintenanceJobID(id) {
 		return maintenanceRule{}, &inventoryValidationError{Field: "id", Message: "a profile job has no fields of its own to replace; change it for this item with overrides"}
@@ -373,7 +373,7 @@ func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanc
 // own doc comment) - history is never erased by deleting the rule that
 // generated it.
 func (s *documentStore) DeleteMaintenanceRule(id string) error {
-	return s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		return cmdDeleteMaintenanceRule(tx, id)
 	})
 }
@@ -403,7 +403,7 @@ func (s *documentStore) ListMaintenanceRuleRows(filter maintenanceRuleFilter) ([
 // clears it, independently of this method.
 func (s *documentStore) AcknowledgeMaintenanceRule(id, reason string) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = acknowledgeMaintenanceRuleTx(tx, now, id, reason)
 		return err
@@ -416,7 +416,7 @@ func (s *documentStore) AcknowledgeMaintenanceRule(id, reason string) (maintenan
 
 // acknowledgeMaintenanceRuleTx is AcknowledgeMaintenanceRule inside a transaction the caller owns and commits, with now
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
+// the same write (see RunTx).
 func acknowledgeMaintenanceRuleTx(tx *sql.Tx, now time.Time, id, reason string) (maintenanceRule, error) {
 
 	// A profile job's row is created by its first write (this one, if nothing
@@ -449,7 +449,7 @@ func acknowledgeMaintenanceRuleTx(tx *sql.Tx, now time.Time, id, reason string) 
 // "date and/or hours" (spec's own wording).
 func (s *documentStore) SetMaintenanceRuleLastDone(id string, at *string, hours *float64) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = setMaintenanceRuleLastDoneTx(tx, now, id, at, hours)
 		return err
@@ -462,7 +462,7 @@ func (s *documentStore) SetMaintenanceRuleLastDone(id string, at *string, hours 
 
 // setMaintenanceRuleLastDoneTx is SetMaintenanceRuleLastDone inside a transaction the caller owns and commits, with now
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
+// the same write (see RunTx).
 func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *string, hours *float64) (maintenanceRule, error) {
 
 	if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
@@ -499,7 +499,7 @@ func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *stri
 // note - spec §8.
 func (s *documentStore) SetMaintenanceRuleProcedureNote(id, noteID string) (maintenanceRule, error) {
 	var out maintenanceRule
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
 			return err
 		}
@@ -893,7 +893,7 @@ func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) (
 func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 	var out0 maintenanceRule
 	var out1 maintenanceLogEntry
-	err := s.RunMaintenanceTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, out1, err = completeMaintenanceRuleTx(tx, now, ruleID, in, newFixedDueDate)
 		return err
@@ -906,7 +906,7 @@ func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLog
 
 // completeMaintenanceRuleTx is CompleteMaintenanceRule inside a transaction the caller owns and commits, with now
 // supplied by the caller, so the HTTP handler and the Mate proposal apply run
-// the same write (see RunMaintenanceTx).
+// the same write (see RunTx).
 func completeMaintenanceRuleTx(tx *sql.Tx, now time.Time, ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 
 	if _, err := prepareMaintenanceRuleWriteTx(tx, now, ruleID); err != nil {
@@ -1149,4 +1149,14 @@ func nilIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// Read runs fn with a read-only view of the database, holding the store mutex
+// for its duration. It is for code that reads through the transaction-taking
+// helpers (a registered record type's Get) outside any write. fn must not
+// call another documentStore method.
+func (s *documentStore) Read(fn func(q sqlQueryer) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn(s.db)
 }

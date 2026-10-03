@@ -491,7 +491,7 @@ describe('describeLoadError', () => {
     expect(describeLoadError('Failed to fetch')).toBe("Mate's conversations could not be loaded. The server did not answer.")
   })
 
-  // ADR 0146: a reloaded thread carries each reply's maintenance proposals
+  // ADR 0146: a reloaded thread carries each reply's proposals
   // with the status they have now.
   it('maps a message\'s proposals, with their stored status', async () => {
     vi.stubGlobal(
@@ -509,7 +509,7 @@ describe('describeLoadError', () => {
                 id: 'm2',
                 role: 'assistant',
                 proposals: [
-                  { id: 'p1', message_id: 'm2', status: 'stale', stale_reason: 'a rule changed', ops: [{ op: 'acknowledge', summary: 'Acknowledge Belts: later' }], resolved_at: '2026-09-30T00:00:00Z' },
+                  { id: 'p1', message_id: 'm2', status: 'stale', stale_reason: 'a rule changed', ops: [{ type: 'maintenance_rule', action: 'update', description: 'Acknowledge Belts: later' }], resolved_at: '2026-09-30T00:00:00Z' },
                 ],
               }),
             ],
@@ -526,7 +526,7 @@ describe('describeLoadError', () => {
         id: 'p1',
         messageId: 'm2',
         status: 'stale',
-        ops: [{ op: 'acknowledge', summary: 'Acknowledge Belts: later' }],
+        ops: [{ type: 'maintenance_rule', action: 'update', description: 'Acknowledge Belts: later' }],
         staleReason: 'a rule changed',
         resolvedAt: '2026-09-30T00:00:00Z',
       },

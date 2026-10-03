@@ -98,8 +98,8 @@ func (e *proposalEnv) counts(t *testing.T) maintenanceRowCounts {
 
 func TestAppendMessage_SavesProposalsWithTheAssistantRowAndListMessagesReturnsThem(t *testing.T) {
 	env := newProposalEnv(t)
-	env.propose(t, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
-	env.propose(t, `{"ops":[{"op":"create_rule","description":"Liferaft service","interval_months":36}]}`)
+	env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
+	env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Liferaft service","interval_months":36}}]}`)
 
 	msgs, err := env.asst.ListMessages(env.conv.ID)
 	if err != nil {
@@ -109,14 +109,14 @@ func TestAppendMessage_SavesProposalsWithTheAssistantRowAndListMessagesReturnsTh
 		t.Fatalf("expected each assistant message to carry its proposal, got %+v", msgs)
 	}
 	p := msgs[0].Proposals[0]
-	if p.Status != assistantProposalPending || p.MessageID != msgs[0].ID || len(p.Ops) != 1 || p.Ops[0].Summary == "" {
+	if p.Status != assistantProposalPending || p.MessageID != msgs[0].ID || len(p.Ops) != 1 || p.Ops[0].Description == "" {
 		t.Fatalf("unexpected stored proposal: %+v", p)
 	}
 }
 
 func TestAppendMessage_ProposalFailureLeavesNoMessage(t *testing.T) {
 	env := newProposalEnv(t)
-	p := runPropose(t, env.deps, `{"ops":[{"op":"create_rule","description":"X","interval_months":12}]}`)
+	p := runPropose(t, env.deps, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"X","interval_months":12}}]}`)
 	// The same proposal id twice trips the primary key on the second insert.
 	_, err := env.asst.AppendMessage(assistantMessage{ConversationID: env.conv.ID, Role: "assistant", Content: "hi", Proposals: []assistantProposal{p, p}})
 	if err == nil {
@@ -133,7 +133,7 @@ func TestAppendMessage_ProposalFailureLeavesNoMessage(t *testing.T) {
 
 func TestAppendMessage_OnlyAnAssistantMessageCarriesProposals(t *testing.T) {
 	env := newProposalEnv(t)
-	p := runPropose(t, env.deps, `{"ops":[{"op":"create_rule","description":"X","interval_months":12}]}`)
+	p := runPropose(t, env.deps, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"X","interval_months":12}}]}`)
 	if _, err := env.asst.AppendMessage(assistantMessage{ConversationID: env.conv.ID, Role: "user", Content: "hi", Proposals: []assistantProposal{p}}); err == nil {
 		t.Fatal("expected a user message with proposals to be refused")
 	}
@@ -141,7 +141,7 @@ func TestAppendMessage_OnlyAnAssistantMessageCarriesProposals(t *testing.T) {
 
 func TestDeleteConversation_RemovesItsProposals(t *testing.T) {
 	env := newProposalEnv(t)
-	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"X","interval_months":12}]}`)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"X","interval_months":12}}]}`)
 	if err := env.asst.DeleteConversation(env.conv.ID); err != nil {
 		t.Fatalf("DeleteConversation: %v", err)
 	}
@@ -165,11 +165,11 @@ func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 	anodes := mustToolRule(t, env.docs, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Anodes", IntervalMonths: iptr(12)})
 	env.advance()
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[
-		{"op":"create_rule","equipment_id":%q,"description":"Coolant","interval_months":24,"last_done_at":"2025-09-01","last_done_meter_reading":39},
-		{"op":"update_rule","rule_id":%q,"interval_hours":300},
-		{"op":"complete_rule","rule_id":%q,"performed_at":"2025-10-01","meter_reading":45,"who":"Gavin","cost":120},
-		{"op":"acknowledge","rule_id":%q,"reason":"parts on order"}]}`, gen.ID, oil.ID, belts.ID, anodes.ID))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[
+		{"type":"maintenance_rule","action":"create","fields":{"equipment_id":%q,"description":"Coolant","interval_months":24,"last_done_at":"2025-09-01","last_done_meter_reading":39}},
+		{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":300}},
+		{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2025-10-01","meter_reading":45,"who":"Gavin","cost":120}},
+		{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"parts on order"}}]}`, gen.ID, oil.ID, belts.ID, anodes.ID))
 	before := env.counts(t)
 	env.advance()
 
@@ -218,9 +218,9 @@ func TestApplyProposal_StaleRuleIs409AndNothingIsWritten(t *testing.T) {
 	rule := mustToolRule(t, env.docs, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Belts", IntervalMonths: iptr(12)})
 	env.advance()
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[
-		{"op":"create_rule","description":"Registration renewal","interval_months":12},
-		{"op":"acknowledge","rule_id":%q,"reason":"later"}]}`, rule.ID))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[
+		{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}},
+		{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"later"}}]}`, rule.ID))
 	before := env.counts(t)
 
 	// The operator edits the rule after Mate proposed.
@@ -250,7 +250,7 @@ func TestApplyProposal_StaleRuleIs409AndNothingIsWritten(t *testing.T) {
 func TestApplyProposal_DeletedTargetRuleCountsAsStale(t *testing.T) {
 	env := newProposalEnv(t)
 	rule := mustToolRule(t, env.docs, maintenanceRuleInput{Description: "Cert", IntervalMonths: iptr(12)})
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"later"}]}`, rule.ID))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"later"}}]}`, rule.ID))
 	if err := env.docs.DeleteMaintenanceRule(rule.ID); err != nil {
 		t.Fatalf("DeleteMaintenanceRule: %v", err)
 	}
@@ -262,9 +262,9 @@ func TestApplyProposal_DeletedTargetRuleCountsAsStale(t *testing.T) {
 func TestApplyProposal_AFailingOperationMidwayRollsEverythingBack(t *testing.T) {
 	env := newProposalEnv(t)
 	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical"})
-	p := env.propose(t, fmt.Sprintf(`{"ops":[
-		{"op":"create_rule","description":"Registration renewal","interval_months":12},
-		{"op":"create_rule","equipment_id":%q,"description":"Belts","interval_months":12}]}`, gen.ID))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[
+		{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}},
+		{"type":"maintenance_rule","action":"create","fields":{"equipment_id":%q,"description":"Belts","interval_months":12}}]}`, gen.ID))
 	before := env.counts(t)
 
 	// The second operation's item is deleted after the proposal was made: the
@@ -273,8 +273,8 @@ func TestApplyProposal_AFailingOperationMidwayRollsEverythingBack(t *testing.T) 
 		t.Fatalf("DeleteEquipment: %v", err)
 	}
 	_, err := env.apply(p.ID)
-	if !errors.Is(err, errAssistantProposalStale) || !strings.Contains(err.Error(), "equipment not found") {
-		t.Fatalf("expected a stale refusal naming equipment not found, got %v", err)
+	if !errors.Is(err, errAssistantProposalStale) || !strings.Contains(err.Error(), "no equipment with id") {
+		t.Fatalf("expected a stale refusal naming the missing equipment, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "change 2 of 2") {
 		t.Fatalf("expected the error to say which change failed, got %q", err)
@@ -290,7 +290,7 @@ func TestApplyProposal_AFailingOperationMidwayRollsEverythingBack(t *testing.T) 
 
 func TestApplyProposal_SecondApplyReturnsTheStoredResultAndWritesNothing(t *testing.T) {
 	env := newProposalEnv(t)
-	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
 
 	first, err := env.apply(p.ID)
 	if err != nil {
@@ -312,8 +312,8 @@ func TestApplyProposal_SecondApplyReturnsTheStoredResultAndWritesNothing(t *test
 
 func TestApplyProposal_DismissedCannotBeAppliedAndAppliedCannotBeDismissed(t *testing.T) {
 	env := newProposalEnv(t)
-	dismissed := env.propose(t, `{"ops":[{"op":"create_rule","description":"A","interval_months":12}]}`)
-	applied := env.propose(t, `{"ops":[{"op":"create_rule","description":"B","interval_months":12}]}`)
+	dismissed := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"A","interval_months":12}}]}`)
+	applied := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"B","interval_months":12}}]}`)
 
 	if _, err := env.asst.DismissProposal(dismissed.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
@@ -344,7 +344,7 @@ func TestApplyProposal_DismissedCannotBeAppliedAndAppliedCannotBeDismissed(t *te
 
 func TestApplyAssistantProposalHandler_StatusCodes(t *testing.T) {
 	env := newProposalEnv(t)
-	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
 
 	// today is required, like every maintenance write.
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
@@ -397,7 +397,7 @@ func TestApplyAssistantProposalHandler_StaleIs409WithTheReason(t *testing.T) {
 	env := newProposalEnv(t)
 	rule := mustToolRule(t, env.docs, maintenanceRuleInput{Description: "Cert", IntervalMonths: iptr(12)})
 	env.advance()
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"later"}]}`, rule.ID))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"later"}}]}`, rule.ID))
 	env.advance()
 	if _, err := env.docs.AcknowledgeMaintenanceRule(rule.ID, "someone else"); err != nil {
 		t.Fatalf("Acknowledge: %v", err)
@@ -414,7 +414,7 @@ func TestApplyAssistantProposalHandler_StaleIs409WithTheReason(t *testing.T) {
 
 func TestApplyAssistantProposalHandler_ConflictNamesTheProposalStatus(t *testing.T) {
 	env := newProposalEnv(t)
-	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Dismissed one","interval_months":12}]}`)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Dismissed one","interval_months":12}}]}`)
 	if _, err := env.asst.DismissProposal(p.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestApplyAssistantProposalHandler_ConflictNamesTheProposalStatus(t *testing
 
 func TestGetAssistantConversationHandler_ReturnsEachMessagesProposalsWithTheirCurrentStatus(t *testing.T) {
 	env := newProposalEnv(t)
-	p := env.propose(t, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
 	if _, err := env.apply(p.ID); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestGetAssistantConversationHandler_ReturnsEachMessagesProposalsWithTheirCu
 		t.Fatalf("expected the proposal on its message, got %s", rec.Body.String())
 	}
 	got := resp.Messages[0].Proposals[0]
-	if got.ID != p.ID || got.Status != assistantProposalApplied || got.Ops[0].Summary == "" {
+	if got.ID != p.ID || got.Status != assistantProposalApplied || got.Ops[0].Description == "" {
 		t.Fatalf("expected the applied status and the summary after a reload, got %+v", got)
 	}
 }
@@ -458,9 +458,9 @@ func TestGetAssistantConversationHandler_ReturnsEachMessagesProposalsWithTheirCu
 
 func TestAssistantHistoryMessages_CarriesEachProposalsSummaryAndStatus(t *testing.T) {
 	env := newProposalEnv(t)
-	pending := env.propose(t, `{"ops":[{"op":"create_rule","description":"Pending one","interval_months":12}]}`)
-	applied := env.propose(t, `{"ops":[{"op":"create_rule","description":"Applied one","interval_months":12}]}`)
-	dismissed := env.propose(t, `{"ops":[{"op":"create_rule","description":"Dismissed one","interval_months":12}]}`)
+	pending := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Pending one","interval_months":12}}]}`)
+	applied := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Applied one","interval_months":12}}]}`)
+	dismissed := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Dismissed one","interval_months":12}}]}`)
 	if _, err := env.apply(applied.ID); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -480,13 +480,13 @@ func TestAssistantHistoryMessages_CarriesEachProposalsSummaryAndStatus(t *testin
 		t.Fatalf("expected three turns, got %d", len(history))
 	}
 	want := []struct{ status, summary, marker string }{
-		{"pending", pending.Ops[0].Summary, "NONE of these changes have been made yet"},
-		{"applied", applied.Ops[0].Summary, "ARE now in the maintenance schedule"},
-		{"dismissed", dismissed.Ops[0].Summary, "do not propose them again unless asked"},
+		{"pending", pending.Ops[0].Description, "NONE of these changes have been made yet"},
+		{"applied", applied.Ops[0].Description, "ARE now made"},
+		{"dismissed", dismissed.Ops[0].Description, "do not propose them again unless asked"},
 	}
 	for i, w := range want {
 		text := string(history[i].Content)
-		for _, needle := range []string{"[Maintenance proposal " + w.status, w.summary, w.marker} {
+		for _, needle := range []string{"[Proposal " + w.status, w.summary, w.marker} {
 			if !strings.Contains(text, needle) {
 				t.Errorf("turn %d (%s): expected %q in:\n%s", i, w.status, needle, text)
 			}
@@ -503,7 +503,7 @@ func proposalToolCallRound(t *testing.T) *http.Response {
 		Choices: []openRouterChoice{{Message: openRouterMessage{
 			Role: "assistant",
 			ToolCalls: []openRouterToolCall{{ID: "call_1", Type: "function", Function: openRouterToolCallFunction{
-				Name: "propose_maintenance_changes", Arguments: openRouterArguments(`{"ops":[]}`),
+				Name: "propose_changes", Arguments: openRouterArguments(`{"operations":[]}`),
 			}}},
 		}}},
 		Usage: usage(10, 5, 0),
@@ -512,13 +512,13 @@ func proposalToolCallRound(t *testing.T) *http.Response {
 
 func TestAssistantRunner_CollectsProposalsFromTheToolResult(t *testing.T) {
 	env := newProposalEnv(t)
-	result, err := env.deps.execute(context.Background(), "propose_maintenance_changes",
-		json.RawMessage(`{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`))
+	result, err := env.deps.execute(context.Background(), "propose_changes",
+		json.RawMessage(`{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`))
 	if err != nil {
 		t.Fatalf("propose: %v", err)
 	}
 	doer := &queuedChatDoer{responses: []*http.Response{proposalToolCallRound(t), finalResponse(t, "Tap Apply.", "m", usage(10, 5, 0))}, errs: []error{nil, nil}}
-	tools := &fakeToolExecutor{results: map[string]string{"propose_maintenance_changes": result}}
+	tools := &fakeToolExecutor{results: map[string]string{"propose_changes": result}}
 	emit, _ := recordingEmitter()
 	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
 
@@ -533,7 +533,7 @@ func TestAssistantRunner_CollectsProposalsFromTheToolResult(t *testing.T) {
 
 func TestAssistantRunner_AFailedProposeCallCollectsNothing(t *testing.T) {
 	doer := &queuedChatDoer{responses: []*http.Response{proposalToolCallRound(t), finalResponse(t, "That did not validate.", "m", usage(10, 5, 0))}, errs: []error{nil, nil}}
-	tools := &fakeToolExecutor{errs: map[string]error{"propose_maintenance_changes": errors.New("ops[0] (create_rule): description: description is required")}}
+	tools := &fakeToolExecutor{errs: map[string]error{"propose_changes": errors.New("ops[0] (create_rule): description: description is required")}}
 	emit, _ := recordingEmitter()
 	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
 
@@ -553,7 +553,7 @@ func TestPostAssistantMessageHandler_PersistsProposalsWithTheReplyAndAFailedRunS
 		t.Fatalf("Set: %v", err)
 	}
 	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
-	p := runPropose(t, env.deps, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
+	p := runPropose(t, env.deps, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
 
 	// A run that fails after proposing saves no message and so no proposal.
 	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
@@ -600,10 +600,10 @@ func TestPropose_RejectsWhatAnEarlierOpInTheSameProposalMakesInvalid(t *testing.
 
 	// Alone, completing a months-only rule needs no reading. After op 0 gives
 	// it an hours interval it does.
-	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[
-		{"op":"update_rule","rule_id":%q,"interval_hours":250},
-		{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01"}]}`, rule.ID, rule.ID))
-	if !strings.Contains(msg, "ops[1] (complete_rule): meter_reading:") {
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[
+		{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":250}},
+		{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-01"}}]}`, rule.ID, rule.ID))
+	if !strings.Contains(msg, "ops[1] (maintenance_log create): meter_reading:") {
 		t.Fatalf("expected the dry run to refuse op 1 naming meter_reading, got %q", msg)
 	}
 	if after := env.counts(t); after != before {
@@ -620,14 +620,14 @@ func TestPropose_CompletionSummaryShowsTheNewFixedDueDate(t *testing.T) {
 	cert := mustToolRule(t, env.docs, maintenanceRuleInput{Description: "Registration", IntervalMonths: iptr(12), FixedDueDate: "2026-10-01"})
 	oneOff := mustToolRule(t, env.docs, maintenanceRuleInput{Description: "Liferaft", FixedDueDate: "2026-10-05"})
 
-	p := runPropose(t, env.deps, fmt.Sprintf(`{"ops":[
-		{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-29"},
-		{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-29","new_due_date":"2028-09-29"}]}`, cert.ID, oneOff.ID))
-	if !strings.HasSuffix(p.Ops[0].Summary, ", next due 29 Sep 2027") {
-		t.Errorf("computed from interval_months, got %q", p.Ops[0].Summary)
+	p := runPropose(t, env.deps, fmt.Sprintf(`{"operations":[
+		{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-29"}},
+		{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-29","new_due_date":"2028-09-29"}}]}`, cert.ID, oneOff.ID))
+	if !strings.HasSuffix(p.Ops[0].Description, ", next due 29 Sep 2027") {
+		t.Errorf("computed from interval_months, got %q", p.Ops[0].Description)
 	}
-	if !strings.HasSuffix(p.Ops[1].Summary, ", next due 29 Sep 2028") {
-		t.Errorf("operator-supplied new_due_date, got %q", p.Ops[1].Summary)
+	if !strings.HasSuffix(p.Ops[1].Description, ", next due 29 Sep 2028") {
+		t.Errorf("operator-supplied new_due_date, got %q", p.Ops[1].Description)
 	}
 	stored, _ := env.docs.GetMaintenanceRuleRow(cert.ID)
 	if stored.FixedDueDate != "2026-10-01" {
@@ -638,7 +638,7 @@ func TestPropose_CompletionSummaryShowsTheNewFixedDueDate(t *testing.T) {
 func TestApplyProposal_ApplyTimeValidationFailureIsStoredAsStaleWithTheReason(t *testing.T) {
 	env := newProposalEnv(t)
 	// Built by hand, past the tool's dry run: an operation the commands refuse.
-	bad := assistantProposal{ID: "p-bad", Ops: []assistantProposalOp{{Op: proposalOpCreateRule, Description: " ", IntervalMonths: iptr(12), Summary: "Add nothing"}}}
+	bad := assistantProposal{ID: "p-bad", Ops: []changeOp{{Type: recordTypeMaintenanceRule, Action: changeCreate, Fields: map[string]any{"description": " ", "interval_months": 12.0}, Description: "Add nothing"}}}
 	env.saveOnMessage(t, "Tap Apply.", bad)
 
 	_, err := env.apply("p-bad")
@@ -657,7 +657,7 @@ func TestApplyProposal_ApplyTimeValidationFailureIsStoredAsStaleWithTheReason(t 
 
 func TestApplyProposal_AStaleProposalCanNeitherBeAppliedNorDismissedAndHistoryTellsMate(t *testing.T) {
 	env := newProposalEnv(t)
-	bad := assistantProposal{ID: "p-bad", Ops: []assistantProposalOp{{Op: proposalOpCreateRule, Description: " ", IntervalMonths: iptr(12), Summary: "Add nothing"}}}
+	bad := assistantProposal{ID: "p-bad", Ops: []changeOp{{Type: recordTypeMaintenanceRule, Action: changeCreate, Fields: map[string]any{"description": " ", "interval_months": 12.0}, Description: "Add nothing"}}}
 	env.saveOnMessage(t, "Tap Apply.", bad)
 	_, _ = env.apply("p-bad")
 	before := env.counts(t)
@@ -678,7 +678,7 @@ func TestApplyProposal_AStaleProposalCanNeitherBeAppliedNorDismissedAndHistoryTe
 		t.Fatalf("history: %v", err)
 	}
 	text := string(history[0].Content)
-	for _, needle := range []string{"[Maintenance proposal stale", "went stale", "description is required", "fresh proposal"} {
+	for _, needle := range []string{"[Proposal stale", "went stale", "description is required", "fresh proposal"} {
 		if !strings.Contains(text, needle) {
 			t.Errorf("expected %q in:\n%s", needle, text)
 		}
@@ -699,8 +699,8 @@ func TestProposal_UpdateOnAProfileJobAppliesAsAnOverride(t *testing.T) {
 	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", HourMeterPath: "propulsion.main.runTime"})
 	job := maintenanceJobID(item.ID, "engine-oil")
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"interval_hours":500}]}`, job))
-	if got, want := p.Ops[0].Summary, "Change Main engine · Engine oil and filter for this item: now every 500 h or 12 mo"; got != want {
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":500}}]}`, job))
+	if got, want := p.Ops[0].Description, "Change Main engine · Engine oil and filter for this item: now every 500 h or 12 mo"; got != want {
 		t.Fatalf("summary %q, want %q", got, want)
 	}
 	if n := env.counts(t).rules; n != 0 {
@@ -729,11 +729,11 @@ func TestProposal_UpdateOnAProfileJobRefusesWhatItCannotChange(t *testing.T) {
 	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
 	job := maintenanceJobID(item.ID, "engine-oil")
 
-	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"clear":["description"]}]}`, job))
-	if !strings.Contains(msg, "clear") || !strings.Contains(msg, "profile job") {
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"description":null}}]}`, job))
+	if !strings.Contains(msg, "description: cannot be cleared") {
 		t.Fatalf("got %q", msg)
 	}
-	msg = proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"interval_hours":250}]}`, job))
+	msg = proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":250}}]}`, job))
 	if !strings.Contains(msg, "exactly as it is") {
 		t.Fatalf("an override equal to the current values is no change, got %q", msg)
 	}
@@ -748,12 +748,12 @@ func TestProposal_CompletingAProfileJobUsesTheEffectiveInterval(t *testing.T) {
 
 	// The profile's interval is in hours, so a reading is needed though the
 	// job has no row.
-	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01"}]}`, oil))
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-01"}}]}`, oil))
 	if !strings.Contains(msg, "meter_reading") {
 		t.Fatalf("got %q", msg)
 	}
 	// A slot has no hours interval, so it completes without one.
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"complete_rule","rule_id":%q,"performed_at":"2026-09-01"}]}`, impeller))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_log","action":"create","fields":{"rule_id":%q,"performed_at":"2026-09-01"}}]}`, impeller))
 	env.advance()
 	if _, err := env.apply(p.ID); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -770,7 +770,7 @@ func TestProposal_ATouchedJobMakesAnEarlierProposalStale(t *testing.T) {
 	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
 	job := maintenanceJobID(item.ID, "impeller")
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"acknowledge","rule_id":%q,"reason":"later"}]}`, job))
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"later"}}]}`, job))
 	env.advance()
 	if _, err := env.docs.AcknowledgeMaintenanceRule(job, "someone else got there first"); err != nil {
 		t.Fatal(err)
@@ -786,9 +786,9 @@ func TestProposal_UpdateOnAProfileJobCanSetDueSoonAndFixedDate(t *testing.T) {
 	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
 	job := maintenanceJobID(item.ID, "engine-oil")
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"due_soon_hours":20,"fixed_due_date":"2027-03-01"}]}`, job))
-	if !strings.Contains(p.Ops[0].Summary, "due 1 Mar 2027") || !strings.Contains(p.Ops[0].Summary, "due soon at 20 h") {
-		t.Fatalf("summary %q", p.Ops[0].Summary)
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"due_soon_hours":20,"fixed_due_date":"2027-03-01"}}]}`, job))
+	if !strings.Contains(p.Ops[0].Description, "due 1 Mar 2027") || !strings.Contains(p.Ops[0].Description, "due soon at 20 h") {
+		t.Fatalf("summary %q", p.Ops[0].Description)
 	}
 	env.advance()
 	if _, err := env.apply(p.ID); err != nil {
@@ -801,7 +801,7 @@ func TestProposal_UpdateOnAProfileJobCanSetDueSoonAndFixedDate(t *testing.T) {
 	if eff.DueSoonHours == nil || *eff.DueSoonHours != 20 || eff.FixedDueDate != "2027-03-01" || len(eff.OverriddenFields) != 0 {
 		t.Fatalf("got %+v", eff)
 	}
-	p = env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"clear":["fixed_due_date","due_soon_hours"]}]}`, job))
+	p = env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"fixed_due_date":null,"due_soon_hours":null}}]}`, job))
 	env.advance()
 	if _, err := env.apply(p.ID); err != nil {
 		t.Fatalf("apply clear: %v", err)
@@ -818,8 +818,8 @@ func TestProposal_UpdateOnAProfileJobSetsAndClearsNotApplicable(t *testing.T) {
 	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a"})
 	job := maintenanceJobID(item.ID, "impeller")
 
-	p := env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, job))
-	if got, want := p.Ops[0].Summary, "Main engine · Raw water impeller: mark not applicable to this item"; got != want {
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"not_applicable":true}}]}`, job))
+	if got, want := p.Ops[0].Description, "Main engine · Raw water impeller: mark not applicable to this item"; got != want {
 		t.Fatalf("summary %q, want %q", got, want)
 	}
 	env.advance()
@@ -835,13 +835,13 @@ func TestProposal_UpdateOnAProfileJobSetsAndClearsNotApplicable(t *testing.T) {
 	}
 
 	// Setting it again is no change; clearing it is.
-	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, job))
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"not_applicable":true}}]}`, job))
 	if !strings.Contains(msg, "exactly as it is") {
 		t.Fatalf("got %q", msg)
 	}
 	env.advance()
-	p = env.propose(t, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":false}]}`, job))
-	if got, want := p.Ops[0].Summary, "Main engine · Raw water impeller: applies to this item again"; got != want {
+	p = env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"not_applicable":false}}]}`, job))
+	if got, want := p.Ops[0].Description, "Main engine · Raw water impeller: applies to this item again"; got != want {
 		t.Fatalf("summary %q, want %q", got, want)
 	}
 	env.advance()
@@ -861,24 +861,9 @@ func TestProposal_NotApplicableIsRefusedOnAHandRule(t *testing.T) {
 	env := newProposalEnv(t)
 	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical"})
 	rule := mustToolRule(t, env.docs, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Belts", IntervalMonths: iptr(12)})
-	msg := proposeError(t, env.deps, fmt.Sprintf(`{"ops":[{"op":"update_rule","rule_id":%q,"not_applicable":true}]}`, rule.ID))
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"not_applicable":true}}]}`, rule.ID))
 	if !strings.Contains(msg, "not_applicable") {
 		t.Fatalf("got %q", msg)
 	}
 }
 
-func TestApplyProposal_ARemovedCopyProfileScheduleOpGoesStaleWithAReason(t *testing.T) {
-	env := newProposalEnv(t)
-	// A card stored before the op was removed: it must not 500 forever.
-	old := assistantProposal{ID: "p-copy", Ops: []assistantProposalOp{{Op: "copy_profile_schedule", Summary: "Copy the profile schedule"}}}
-	env.saveOnMessage(t, "Tap Apply.", old)
-
-	_, err := env.apply("p-copy")
-	if !errors.Is(err, errAssistantProposalStale) || !strings.Contains(err.Error(), "no longer does") {
-		t.Fatalf("expected a stale refusal with the reason, got %v", err)
-	}
-	got, _ := env.asst.GetProposal("p-copy")
-	if got.Status != assistantProposalStale || !strings.Contains(got.StaleReason, "profile jobs are already on its schedule") {
-		t.Fatalf("expected stored stale with the reason, got %q %q", got.Status, got.StaleReason)
-	}
-}

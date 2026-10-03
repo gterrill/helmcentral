@@ -321,21 +321,21 @@ var (
 // no zone-reorder endpoint (plain CRUD, per plan), so every zone is born at
 // the same sort_index and ListZones' own ORDER BY falls back to
 // lower(name).
-func (s *documentStore) CreateZone(name string) (inventoryZone, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) CreateZone(name string) (zone inventoryZone, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		zone, err = createZoneTx(tx, now, name)
+		return err
+	})
+	return zone, err
+}
 
+// createZoneTx is CreateZone inside an open transaction, so a changeset
+// (ADR 0158) and the REST handler run the same command.
+func createZoneTx(tx *sql.Tx, now time.Time, name string) (inventoryZone, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return inventoryZone{}, errZoneNameInvalid
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryZone{}, fmt.Errorf("create zone: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	taken, err := rowExists(tx, `SELECT 1 FROM inventory_zones WHERE lower(name) = lower(?)`, trimmed)
 	if err != nil {
 		return inventoryZone{}, fmt.Errorf("create zone: check name: %w", err)
@@ -344,7 +344,6 @@ func (s *documentStore) CreateZone(name string) (inventoryZone, error) {
 		return inventoryZone{}, errZoneNameTaken
 	}
 
-	now := s.now()
 	id := uuid.NewString()
 	if _, err := tx.Exec(
 		`INSERT INTO inventory_zones (id, name, sort_index, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
@@ -352,31 +351,25 @@ func (s *documentStore) CreateZone(name string) (inventoryZone, error) {
 	); err != nil {
 		return inventoryZone{}, fmt.Errorf("create zone: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return inventoryZone{}, fmt.Errorf("create zone: commit: %w", err)
-	}
 	return inventoryZone{ID: id, Name: trimmed, CreatedAt: now, UpdatedAt: now, Bins: []inventoryBin{}}, nil
 }
 
 // UpdateZone renames an existing zone - the only field this cycle's plain
 // CRUD ever changes on a zone (sort_index has no editor this cycle; see
 // CreateZone's own comment).
-func (s *documentStore) UpdateZone(id, name string) (inventoryZone, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) UpdateZone(id, name string) (zone inventoryZone, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		zone, err = updateZoneTx(tx, now, id, name)
+		return err
+	})
+	return zone, err
+}
 
+func updateZoneTx(tx *sql.Tx, now time.Time, id, name string) (inventoryZone, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return inventoryZone{}, errZoneNameInvalid
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryZone{}, fmt.Errorf("update zone: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	ok, err := rowExists(tx, `SELECT 1 FROM inventory_zones WHERE id = ?`, id)
 	if err != nil {
 		return inventoryZone{}, fmt.Errorf("update zone: check exists: %w", err)
@@ -384,7 +377,6 @@ func (s *documentStore) UpdateZone(id, name string) (inventoryZone, error) {
 	if !ok {
 		return inventoryZone{}, errZoneNotFound
 	}
-
 	taken, err := rowExists(tx, `SELECT 1 FROM inventory_zones WHERE lower(name) = lower(?) AND id != ?`, trimmed, id)
 	if err != nil {
 		return inventoryZone{}, fmt.Errorf("update zone: check name: %w", err)
@@ -392,21 +384,10 @@ func (s *documentStore) UpdateZone(id, name string) (inventoryZone, error) {
 	if taken {
 		return inventoryZone{}, errZoneNameTaken
 	}
-
-	now := s.now()
 	if _, err := tx.Exec(`UPDATE inventory_zones SET name = ?, updated_at = ? WHERE id = ?`, trimmed, now.Unix(), id); err != nil {
 		return inventoryZone{}, fmt.Errorf("update zone: %w", err)
 	}
-
-	zone, err := zoneByID(tx, id)
-	if err != nil {
-		return inventoryZone{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return inventoryZone{}, fmt.Errorf("update zone: commit: %w", err)
-	}
-	return zone, nil
+	return zoneByID(tx, id)
 }
 
 // DeleteZone refuses to remove a zone that is still in use - a bin filed
@@ -420,15 +401,10 @@ func (s *documentStore) UpdateZone(id, name string) (inventoryZone, error) {
 // comment for why this pre-checks with COUNT(*) rather than attempting the
 // DELETE and inspecting what SQLite's RESTRICT violation says.
 func (s *documentStore) DeleteZone(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return deleteZoneTx(tx, id) })
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("delete zone: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+func deleteZoneTx(tx *sql.Tx, id string) error {
 	ok, err := rowExists(tx, `SELECT 1 FROM inventory_zones WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete zone: check exists: %w", err)
@@ -437,12 +413,9 @@ func (s *documentStore) DeleteZone(id string) error {
 		return errZoneNotFound
 	}
 
-	var binCount, equipmentCount int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM inventory_bins WHERE zone_id = ?`, id).Scan(&binCount); err != nil {
-		return fmt.Errorf("delete zone: count bins: %w", err)
-	}
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM equipment WHERE zone_id = ?`, id).Scan(&equipmentCount); err != nil {
-		return fmt.Errorf("delete zone: count equipment: %w", err)
+	binCount, equipmentCount, err := zoneUseCounts(tx, id)
+	if err != nil {
+		return err
 	}
 	if total := binCount + equipmentCount; total > 0 {
 		return &inventoryInUseError{
@@ -455,7 +428,18 @@ func (s *documentStore) DeleteZone(id string) error {
 	if _, err := tx.Exec(`DELETE FROM inventory_zones WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete zone: %w", err)
 	}
-	return tx.Commit()
+	return nil
+}
+
+// zoneUseCounts is how many bins and equipment items reference a zone.
+func zoneUseCounts(q sqlQueryer, id string) (bins, equipment int, err error) {
+	if err := q.QueryRow(`SELECT COUNT(*) FROM inventory_bins WHERE zone_id = ?`, id).Scan(&bins); err != nil {
+		return 0, 0, fmt.Errorf("delete zone: count bins: %w", err)
+	}
+	if err := q.QueryRow(`SELECT COUNT(*) FROM equipment WHERE zone_id = ?`, id).Scan(&equipment); err != nil {
+		return 0, 0, fmt.Errorf("delete zone: count equipment: %w", err)
+	}
+	return bins, equipment, nil
 }
 
 // ListZones returns every zone, each with its own bins nested, both
@@ -580,21 +564,20 @@ func binsForZone(q sqlQueryer, zoneID string) ([]inventoryBin, error) {
 // CreateBin validates zoneID exists and code is non-blank and unique
 // (case-insensitively, boat-wide - inventory_bins_code's own schema
 // comment), then inserts.
-func (s *documentStore) CreateBin(zoneID, code, name string) (inventoryBin, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) CreateBin(zoneID, code, name string) (bin inventoryBin, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		bin, err = createBinTx(tx, now, zoneID, code, name)
+		return err
+	})
+	return bin, err
+}
 
+func createBinTx(tx *sql.Tx, now time.Time, zoneID, code, name string) (inventoryBin, error) {
 	trimmedCode := strings.TrimSpace(code)
 	if trimmedCode == "" {
 		return inventoryBin{}, errBinCodeInvalid
 	}
 	trimmedName := strings.TrimSpace(name)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryBin{}, fmt.Errorf("create bin: begin: %w", err)
-	}
-	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM inventory_zones WHERE id = ?`, zoneID)
 	if err != nil {
@@ -612,17 +595,12 @@ func (s *documentStore) CreateBin(zoneID, code, name string) (inventoryBin, erro
 		return inventoryBin{}, errBinCodeTaken
 	}
 
-	now := s.now()
 	id := uuid.NewString()
 	if _, err := tx.Exec(
 		`INSERT INTO inventory_bins (id, zone_id, code, name, sort_index, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`,
 		id, zoneID, trimmedCode, trimmedName, now.Unix(), now.Unix(),
 	); err != nil {
 		return inventoryBin{}, fmt.Errorf("create bin: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return inventoryBin{}, fmt.Errorf("create bin: commit: %w", err)
 	}
 	return inventoryBin{ID: id, ZoneID: zoneID, Code: trimmedCode, Name: trimmedName, CreatedAt: now, UpdatedAt: now}, nil
 }
@@ -631,21 +609,20 @@ func (s *documentStore) CreateBin(zoneID, code, name string) (inventoryBin, erro
 // CRUD, per plan, has no "move this bin to a different zone" action this
 // cycle, so zone_id is fixed at creation and every equipment record already
 // pointing at this bin keeps a location that still makes sense.
-func (s *documentStore) UpdateBin(id, code, name string) (inventoryBin, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) UpdateBin(id, code, name string) (bin inventoryBin, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		bin, err = updateBinTx(tx, now, id, code, name)
+		return err
+	})
+	return bin, err
+}
 
+func updateBinTx(tx *sql.Tx, now time.Time, id, code, name string) (inventoryBin, error) {
 	trimmedCode := strings.TrimSpace(code)
 	if trimmedCode == "" {
 		return inventoryBin{}, errBinCodeInvalid
 	}
 	trimmedName := strings.TrimSpace(name)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return inventoryBin{}, fmt.Errorf("update bin: begin: %w", err)
-	}
-	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM inventory_bins WHERE id = ?`, id)
 	if err != nil {
@@ -663,35 +640,20 @@ func (s *documentStore) UpdateBin(id, code, name string) (inventoryBin, error) {
 		return inventoryBin{}, errBinCodeTaken
 	}
 
-	now := s.now()
 	if _, err := tx.Exec(`UPDATE inventory_bins SET code = ?, name = ?, updated_at = ? WHERE id = ?`, trimmedCode, trimmedName, now.Unix(), id); err != nil {
 		return inventoryBin{}, fmt.Errorf("update bin: %w", err)
 	}
-
-	bin, err := binByID(tx, id)
-	if err != nil {
-		return inventoryBin{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return inventoryBin{}, fmt.Errorf("update bin: commit: %w", err)
-	}
-	return bin, nil
+	return binByID(tx, id)
 }
 
 // DeleteBin refuses to remove a bin that still has an equipment item
 // pointing at it - see inventoryInUseError's own doc comment for why this
 // pre-checks with COUNT(*) rather than attempting the DELETE.
 func (s *documentStore) DeleteBin(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return deleteBinTx(tx, id) })
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("delete bin: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+func deleteBinTx(tx *sql.Tx, id string) error {
 	ok, err := rowExists(tx, `SELECT 1 FROM inventory_bins WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete bin: check exists: %w", err)
@@ -715,7 +677,7 @@ func (s *documentStore) DeleteBin(id string) error {
 	if _, err := tx.Exec(`DELETE FROM inventory_bins WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete bin: %w", err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // binByID reads a single bin - the unlocked helper UpdateBin's own return
@@ -1082,10 +1044,17 @@ func validateEquipmentQuantities(item equipmentItem) (quantity int, required any
 // same treatment, just with a default value substituted first. zone_id/
 // bin_id go through validateEquipmentLocation before anything is written,
 // so a bad or contradictory location never reaches the INSERT at all.
-func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) CreateEquipment(item equipmentItem) (created equipmentItem, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		created, err = createEquipmentTx(tx, now, item)
+		return err
+	})
+	return created, err
+}
 
+// createEquipmentTx is CreateEquipment inside an open transaction, so a
+// changeset (ADR 0158) and the REST handler run the same command.
+func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipmentItem, error) {
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
@@ -1110,12 +1079,6 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 		return equipmentItem{}, err
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return equipmentItem{}, fmt.Errorf("create equipment: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	resolvedZoneID, err := validateEquipmentLocation(tx, item.ZoneID, item.BinID)
 	if err != nil {
 		return equipmentItem{}, err
@@ -1126,7 +1089,6 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 		return equipmentItem{}, fmt.Errorf("create equipment: marshal aliases: %w", err)
 	}
 
-	now := s.now()
 	id := uuid.NewString()
 	if _, err := tx.Exec(`
 		INSERT INTO equipment (
@@ -1141,15 +1103,7 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 		return equipmentItem{}, fmt.Errorf("create equipment: %w", err)
 	}
 
-	created, err := equipmentByID(tx, id)
-	if err != nil {
-		return equipmentItem{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return equipmentItem{}, fmt.Errorf("create equipment: commit: %w", err)
-	}
-	return created, nil
+	return equipmentByID(tx, id)
 }
 
 // UpdateEquipment replaces id's WHOLE editable field set in one
@@ -1161,10 +1115,15 @@ func (s *documentStore) CreateEquipment(item equipmentItem) (equipmentItem, erro
 // re-validated, which is cheap and keeps this method's location handling
 // identical to CreateEquipment's rather than a second, subtly different
 // copy of it.
-func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmentItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (updated equipmentItem, err error) {
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		updated, err = updateEquipmentTx(tx, now, id, item)
+		return err
+	})
+	return updated, err
+}
 
+func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem) (equipmentItem, error) {
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
@@ -1188,12 +1147,6 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 	if err != nil {
 		return equipmentItem{}, err
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return equipmentItem{}, fmt.Errorf("update equipment: begin: %w", err)
-	}
-	defer tx.Rollback()
 
 	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
 	if err != nil {
@@ -1213,7 +1166,6 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 		return equipmentItem{}, fmt.Errorf("update equipment: marshal aliases: %w", err)
 	}
 
-	now := s.now()
 	if _, err := tx.Exec(`
 		UPDATE equipment SET
 			name = ?, category = ?, system = ?, manufacturer = ?, model = ?, serial = ?, part_number = ?, quantity = ?, required_quantity = ?, status = ?,
@@ -1228,15 +1180,7 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 		return equipmentItem{}, fmt.Errorf("update equipment: %w", err)
 	}
 
-	updated, err := equipmentByID(tx, id)
-	if err != nil {
-		return equipmentItem{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return equipmentItem{}, fmt.Errorf("update equipment: commit: %w", err)
-	}
-	return updated, nil
+	return equipmentByID(tx, id)
 }
 
 // DeleteEquipment removes an equipment row. Its equipment_documents links
@@ -1269,15 +1213,14 @@ func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (equipmen
 // this item, then delete its now-orphaned photos" atomic is to run both
 // steps' SQL inside the one transaction this method already holds.
 func (s *documentStore) DeleteEquipment(id string, deletePhotos bool) (deletedPhotoSHAs []string, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+		deletedPhotoSHAs, err = deleteEquipmentTx(tx, id, deletePhotos)
+		return err
+	})
+	return deletedPhotoSHAs, err
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("delete equipment: begin: %w", err)
-	}
-	defer tx.Rollback()
-
+func deleteEquipmentTx(tx *sql.Tx, id string, deletePhotos bool) (deletedPhotoSHAs []string, err error) {
 	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
 	if err != nil {
 		return nil, fmt.Errorf("delete equipment: check equipment: %w", err)
@@ -1314,9 +1257,6 @@ func (s *documentStore) DeleteEquipment(id string, deletePhotos bool) (deletedPh
 		deletedPhotoSHAs = append(deletedPhotoSHAs, sha)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("delete equipment: commit: %w", err)
-	}
 	return deletedPhotoSHAs, nil
 }
 
