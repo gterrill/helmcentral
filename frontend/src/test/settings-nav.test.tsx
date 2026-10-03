@@ -11,9 +11,9 @@ describe('SettingsNav', () => {
     const onSelect = vi.fn()
     render(<SettingsNav activeSectionId="signalk" onSelect={onSelect} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tiles' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Plugins' }))
 
-    expect(onSelect).toHaveBeenCalledWith('tiles')
+    expect(onSelect).toHaveBeenCalledWith('plugins')
   })
 
   // ADR 0093: the onboard assistant gets its own settings section, labelled
@@ -45,11 +45,11 @@ describe('SettingsNav', () => {
     const { rerender } = render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'SignalK' }).getAttribute('aria-current')).toBe('true')
-    expect(screen.getByRole('button', { name: 'Tiles' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Plugins' }).getAttribute('aria-current')).toBeNull()
 
-    rerender(<SettingsNav activeSectionId="tiles" onSelect={vi.fn()} />)
+    rerender(<SettingsNav activeSectionId="plugins" onSelect={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'SignalK' }).getAttribute('aria-current')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Tiles' }).getAttribute('aria-current')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Plugins' }).getAttribute('aria-current')).toBe('true')
   })
 })

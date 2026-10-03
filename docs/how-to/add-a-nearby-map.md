@@ -72,7 +72,7 @@ a mirror other than that one also needs.
 
 The name shown on the position tile, the anchor pin, and what Mate resolves
 when you ask it about a place by name all come from a different setting:
-**Settings → Tiles → Place names**. It defaults to the same OpenStreetMap
+**Settings → Plugins → Place names**. It defaults to the same OpenStreetMap
 plugin as Nearby, but you can point it at a different installed plugin
 without changing what Nearby uses, or vice versa. Only a plugin that
 supports place-name lookups appears in that list; not every `poi` plugin

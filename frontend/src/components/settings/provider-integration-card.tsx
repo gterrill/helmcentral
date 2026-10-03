@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 
 interface ProviderIntegrationCardProps {
@@ -12,8 +11,8 @@ interface ProviderIntegrationCardProps {
 }
 
 /**
- * One provider's "integration card" inside a Widgets tab's ProviderGroup
- * grid: name, description, a Settings button that always renders (so an
+ * One provider's row inside a Plugins section's ProviderGroup list: name,
+ * description, a Settings button that always renders (so an
  * inactive provider's host/secret config can still be reviewed or edited
  * ahead of activating it), and an activate Switch. The active card's switch
  * is checked+disabled — there is no explicit "deactivate" affordance,
@@ -29,14 +28,13 @@ export function ProviderIntegrationCard({
   onOpenSettings,
 }: ProviderIntegrationCardProps) {
   return (
-    <Card className="gap-3 border-border py-4">
-      <CardHeader className="gap-1 px-4">
-        <CardTitle className="truncate text-sm font-semibold">{name}</CardTitle>
-        <CardDescription className="line-clamp-2 text-xs text-muted-foreground">
-          {description}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex items-center justify-between gap-2 px-4">
+    <li className="flex min-w-0 flex-col gap-3 py-3 sm:flex-row sm:items-center sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+        <p className="line-clamp-2 text-xs text-muted-foreground">{description}</p>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
         <Button
           type="button"
           variant="outline"
@@ -47,7 +45,7 @@ export function ProviderIntegrationCard({
         </Button>
 
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="w-14 text-right text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
             {active ? 'Active' : 'Inactive'}
           </span>
           <Switch
@@ -59,7 +57,7 @@ export function ProviderIntegrationCard({
             aria-label={`Activate ${name}`}
           />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </li>
   )
 }

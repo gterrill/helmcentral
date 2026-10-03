@@ -8,7 +8,7 @@ export type SettingsSectionId =
   | 'general'
   | 'signalk'
   | 'boat-ui'
-  | 'tiles'
+  | 'plugins'
   | 'influxdb'
   | 'anchor-watch'
   | 'mayara'
@@ -29,7 +29,7 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
     items: [
       { id: 'general', label: 'General' },
       { id: 'boat-ui', label: 'Vessel' },
-      { id: 'tiles', label: 'Tiles' },
+      { id: 'plugins', label: 'Plugins' },
     ],
   },
   {

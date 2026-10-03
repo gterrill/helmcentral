@@ -9,6 +9,7 @@ export interface TideProviderInfo {
 export function useTideProviders() {
   const [providers, setProviders] = useState<TideProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -22,6 +23,7 @@ export function useTideProviders() {
         setProviders(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error('Error fetching tide providers:', error)
+        setError(error instanceof Error ? error.message : String(error))
       } finally {
         setLoading(false)
       }
@@ -30,5 +32,5 @@ export function useTideProviders() {
     void fetchProviders()
   }, [])
 
-  return { providers, loading }
+  return { providers, loading, error }
 }

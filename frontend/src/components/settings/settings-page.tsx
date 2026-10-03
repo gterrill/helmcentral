@@ -23,7 +23,7 @@ import { InfluxdbSection } from '@/components/settings/sections/influxdb-section
 import { LogsSection } from '@/components/settings/sections/logs-section'
 import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
-import { TilesSection } from '@/components/settings/sections/tiles-section'
+import { PluginsSection } from '@/components/settings/sections/plugins-section'
 import {
   buildRegularSettingsPatch,
   draftsEqual,
@@ -103,7 +103,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   // Each request inside one save gets its own error slot, all shown in the
   // Save bar. The settings one is the page's own copy, not the form hook's
-  // `error`: that is also set by a Tiles provider change (which saves on its
+  // `error`: that is also set by a Plugins provider change (which saves on its
   // own and reports its own failure), and Discard cannot clear it, so showing
   // it here would bring back a stale refusal. saveTouchedKeys hits an
   // independent endpoint, so it needs its own slot too.
@@ -245,8 +245,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <SignalKConnectionSection draft={draft} onChange={handleDraftChange} />
       case 'boat-ui':
         return <BoatUiSection draft={draft} onChange={handleDraftChange} />
-      case 'tiles':
-        return <TilesSection draft={draft} onChange={handleDraftChange} />
+      case 'plugins':
+        return <PluginsSection draft={draft} onChange={handleDraftChange} />
       case 'alarms':
         return <AlarmsSection />
       case 'assistant':

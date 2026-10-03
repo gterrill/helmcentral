@@ -67,7 +67,7 @@ function buildChart(overrides: Record<string, unknown> = {}) {
 
 describe('ForecastTideSection', () => {
   beforeEach(() => {
-    mockedUseTideProviders.mockReturnValue({ providers: [], loading: false })
+    mockedUseTideProviders.mockReturnValue({ providers: [], loading: false, error: null })
   })
 
   afterEach(() => {
@@ -208,6 +208,7 @@ describe('ForecastTideSection', () => {
     mockedUseTideProviders.mockReturnValue({
       providers: [{ id: 'noaa', name: 'NOAA (US)', description: 'US tide stations' }],
       loading: false,
+      error: null,
     })
     mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa' }))
     mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString() }))
@@ -218,7 +219,7 @@ describe('ForecastTideSection', () => {
   })
 
   it('falls back to the raw provider id in the "Data:" line when no matching provider is found', () => {
-    mockedUseTideProviders.mockReturnValue({ providers: [], loading: true })
+    mockedUseTideProviders.mockReturnValue({ providers: [], loading: true, error: null })
     mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa' }))
     mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString() }))
 

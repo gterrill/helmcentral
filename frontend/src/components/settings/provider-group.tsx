@@ -70,17 +70,24 @@ export interface ProviderGroupInfo {
 interface ProviderGroupProps {
   type: ProviderGroupDomain
   providers: ProviderGroupInfo[]
+  loading: boolean
+  /** The provider list's fetch failure, shown as such rather than as an empty list. */
+  error: string | null
+  /** Lower-case plural noun for the error line: "Could not load {kind}: ...". */
+  kind: string
+  /** Shown in place of the list once loading finishes with nothing installed. */
+  emptyMessage: string
 }
 
 /**
  * Renders one domain's grid of provider integration cards. The provider
- * list itself is fetched by the caller (widgets-section.tsx, via the
+ * list itself is fetched by the caller (plugins-section.tsx, via the
  * existing `use-{tide,weather,wave,forecast-warnings}-providers` hooks) and
  * passed in as a prop, rather than each of the four ProviderGroup instances
  * calling all four hooks internally — that would quadruple the number of
  * `/api/*-providers` requests for no benefit.
  */
-export function ProviderGroup({ type, providers }: ProviderGroupProps) {
+export function ProviderGroup({ type, providers, loading, error, kind, emptyMessage }: ProviderGroupProps) {
   const { settings, save } = useSettingsFormContext()
   const [openProviderId, setOpenProviderId] = useState<string | null>(null)
 
@@ -99,8 +106,15 @@ export function ProviderGroup({ type, providers }: ProviderGroupProps) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+    <div>
+      {error !== null ? (
+        <p role="alert" className="text-sm text-destructive">
+          Could not load {kind}: {error}
+        </p>
+      ) : (
+        !loading && providers.length === 0 && <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+      )}
+      <ul className="divide-y divide-border">
         {providers.map((provider) => (
           <ProviderIntegrationCard
             key={provider.id}
@@ -112,7 +126,7 @@ export function ProviderGroup({ type, providers }: ProviderGroupProps) {
             onOpenSettings={setOpenProviderId}
           />
         ))}
-      </div>
+      </ul>
 
       <ProviderSettingsModal
         type={MODAL_TYPE_BY_DOMAIN[type]}
