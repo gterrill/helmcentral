@@ -127,6 +127,7 @@ export interface RegularSettingsDraft {
   assistantVoiceInput: boolean
   assistantReadAloud: boolean
   assistantWakeWord: boolean
+  assistantWebSearch: boolean
   /**
    * null until the server's vessel block has been read. It stays null if the
    * settings fetch fell back without one, and the patch then omits `vessel`
@@ -179,6 +180,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantVoiceInput: false,
   assistantReadAloud: false,
   assistantWakeWord: false,
+  assistantWebSearch: false,
   vessel: null,
 }
 
@@ -276,6 +278,7 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
   if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
   if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
+  if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
 
   if (settings.vessel) {
     const engineRows: Record<string, VesselEngineRowDraft> = {}
@@ -343,6 +346,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
   if (a.assistantReadAloud !== b.assistantReadAloud) return false
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
+  if (a.assistantWebSearch !== b.assistantWebSearch) return false
 
   if (!vesselDraftsEqual(a.vessel, b.vessel)) return false
 
@@ -435,6 +439,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       voice_input: draft.assistantVoiceInput,
       read_aloud: draft.assistantReadAloud,
       wake_word: draft.assistantWakeWord,
+      web_search: draft.assistantWebSearch,
     },
     // Omitted while the vessel block was never read (see the draft field).
     ...(draft.vessel === null

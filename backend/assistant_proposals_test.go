@@ -556,7 +556,7 @@ func TestPostAssistantMessageHandler_PersistsProposalsWithTheReplyAndAFailedRunS
 	p := runPropose(t, env.deps, `{"ops":[{"op":"create_rule","description":"Registration renewal","interval_months":12}]}`)
 
 	// A run that fails after proposing saves no message and so no proposal.
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: errors.New("stopped")}
 	})
 	c, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+env.conv.ID+"/messages", `{"today":"2026-09-30","content":"add a renewal"}`, env.conv.ID)
@@ -569,7 +569,7 @@ func TestPostAssistantMessageHandler_PersistsProposalsWithTheReplyAndAFailedRunS
 
 	// A run that succeeds saves the proposal with the assistant row and puts it
 	// on the SSE message frame.
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Tap Apply.", Model: "openai/gpt-4o", Proposals: []assistantProposal{p}}}
 	})
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+env.conv.ID+"/messages", `{"today":"2026-09-30","content":"add a renewal"}`, env.conv.ID)

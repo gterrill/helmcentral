@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate can now search the web when your boat's documents and instruments
+  can't answer a question, such as a harbour's opening hours, a recent notice
+  or what a fault code means. Turn on **Web search** under Settings, Mate. It
+  is off by default and each search costs a small extra amount on your
+  OpenRouter account. The pages Mate used appear in its answer as links that
+  open in a new tab. Nothing needs changing on upgrade.
 - Locations can now be drawn on deck plans. Add a picture of each deck, such as
   the builder's general arrangement drawing, outline your locations on it and
   pin your bins, then find them by looking at the boat. Locations has a new

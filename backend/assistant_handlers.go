@@ -93,7 +93,10 @@ type assistantReadiness struct {
 	// chat's.
 	EmbeddingModel      string `json:"embedding_model"`
 	EmbeddingDimensions int    `json:"embedding_dimensions"`
-	Problem             string `json:"problem,omitempty"`
+	// WebSearch is assistant.web_search: whether search_web is offered to
+	// the model. Plays no part in Problem.
+	WebSearch bool   `json:"web_search"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
@@ -143,6 +146,7 @@ func checkAssistantReadiness(settingsPath string) (assistantReadiness, string, e
 		DocumentModel:       payload.Assistant.DocumentModel,
 		EmbeddingModel:      payload.Assistant.EmbeddingModel,
 		EmbeddingDimensions: payload.Assistant.EmbeddingDimensions,
+		WebSearch:           payload.Assistant.WebSearch,
 	}
 
 	apiKey, ok, err := globalSecretsStore.Get("OPENROUTER_API_KEY")
@@ -802,14 +806,20 @@ func assistantDocumentLookup(id string) (document, error) {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 	tools := assistantProductionToolDeps(settingsPath)
 	tools.today = today
+	if webSearch {
+		tools.webSearch = func(ctx context.Context, query string) ([]assistantWebResult, error) {
+			return assistantWebSearch(ctx, openRouterHTTPClient, apiKey, query)
+		}
+	}
 	return &assistantRunner{
 		doer:       openRouterHTTPClient,
 		apiKey:     apiKey,
 		model:      model,
 		autoRouter: autoRouter,
+		webSearch:  webSearch,
 		tools:      tools,
 		emit:       emit,
 	}
@@ -968,6 +978,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
 	pc.Spoken = body.Spoken
+	pc.WebSearch = readiness.WebSearch
 	if body.Screen != nil {
 		pc.Screen = assistantScreenContext{
 			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
@@ -982,7 +993,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, today, run.append)
+	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, readiness.WebSearch, today, run.append)
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
 	// drives, must outlive this one HTTP request (ADR 0105). Only

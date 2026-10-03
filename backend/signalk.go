@@ -185,6 +185,10 @@ type settingsPayload struct {
 		VoiceInput          bool     `json:"voice_input"`
 		ReadAloud           bool     `json:"read_aloud"`
 		WakeWord            bool     `json:"wake_word"`
+		// WebSearch lets Mate search the web through OpenRouter when it needs
+		// outside information (search_web). Off by default; when off the tool
+		// is not offered to the model at all.
+		WebSearch bool `json:"web_search"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -358,6 +362,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"voice_input":          normalized.Assistant.VoiceInput,
 		"read_aloud":           normalized.Assistant.ReadAloud,
 		"wake_word":            normalized.Assistant.WakeWord,
+		"web_search":           normalized.Assistant.WebSearch,
 	}
 	settings["units"] = normalized.Units
 
@@ -666,6 +671,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["wake_word"].(bool); ok {
 			payload.Assistant.WakeWord = v
 		}
+		if v, ok := assistantMap["web_search"].(bool); ok {
+			payload.Assistant.WebSearch = v
+		}
 	}
 
 	if authMap, ok := settings["auth"].(map[string]any); ok {
@@ -825,6 +833,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.VoiceInput = req.Assistant.VoiceInput
 	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
+	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

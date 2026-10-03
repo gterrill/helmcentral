@@ -235,6 +235,25 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             <SecretFieldGroup fields={[{ key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' }]} />
           </FormSection>
 
+          <FormSection title="Web search">
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <Switch
+                  checked={draft.assistantWebSearch}
+                  onCheckedChange={(checked) => onChange({ assistantWebSearch: checked })}
+                  aria-label="Web search"
+                />
+                <FieldContent>
+                  <FieldLabel>Web search</FieldLabel>
+                  <FieldDescription>
+                    Mate searches the web through OpenRouter when it needs outside information, at a small extra cost per
+                    search.
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+            </FieldGroup>
+          </FormSection>
+
           <FormSection title="Standing notes">
             <FieldGroup>
               <Field>

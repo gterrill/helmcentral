@@ -383,6 +383,7 @@ describe('assistant settings-draft plumbing', () => {
       voice_input: false,
       read_aloud: false,
       wake_word: false,
+      web_search: false,
     })
   })
 
@@ -492,6 +493,22 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantVoiceInput).toBe(false)
     expect(draft.assistantReadAloud).toBe(false)
     expect(draft.assistantWakeWord).toBe(false)
+  })
+
+  it('toggling Web search marks the form dirty and defaults off', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    expect(latestDraft().assistantWebSearch).toBe(false)
+    fireEvent.click(screen.getByLabelText('Web search'))
+
+    expect(latestDraft().assistantWebSearch).toBe(true)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
+    expect(buildRegularSettingsPatch(latestDraft()).assistant?.web_search).toBe(true)
+    expect(hydrateDraftFromSettings({ assistant: { web_search: true } }).assistantWebSearch).toBe(true)
+    expect(hydrateDraftFromSettings({}).assistantWebSearch).toBe(false)
+
+    vi.unstubAllGlobals()
   })
 
   it('renders a Document indexing section with a picker and helper text', () => {

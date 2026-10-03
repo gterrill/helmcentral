@@ -312,6 +312,17 @@ type openRouterAnnotationFile struct {
 type openRouterAnnotation struct {
 	Type string                   `json:"type"`
 	File openRouterAnnotationFile `json:"file"`
+	// URLCitation is the web plugin's annotation payload (type
+	// "url_citation"): one search result.
+	URLCitation openRouterURLCitation `json:"url_citation"`
+}
+
+// openRouterURLCitation is one web search result as the web plugin reports
+// it: the page, its title and the excerpt that matched.
+type openRouterURLCitation struct {
+	URL     string `json:"url"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 // openRouterUserMessage builds a user-role message whose content is the
@@ -376,6 +387,9 @@ type openRouterPlugin struct {
 	ExcludedModels []string             `json:"excluded_models,omitempty"`
 	CostTier       string               `json:"cost_tier,omitempty"`
 	PDF            *openRouterPluginPDF `json:"pdf,omitempty"`
+	// Engine and MaxResults configure the "web" plugin (search_web).
+	Engine     string `json:"engine,omitempty"`
+	MaxResults int    `json:"max_results,omitempty"`
 }
 
 // openRouterChatRequest is the request body for POST

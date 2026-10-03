@@ -240,6 +240,11 @@ OCR and summarising, whether or not you go on to ask a question about it;
 see [Documents](documents.md) for what that costs and what leaves the boat
 at that point, not just when you ask Mate about one.
 
+With Web search switched on, a search also sends Mate's search words (a place
+name, a part number, a question about a rule) to OpenRouter and the search
+service behind it. Nothing is searched unless Mate decides it needs to, and not
+at all while the switch is off.
+
 A voice question additionally sends your speech to whichever engine your
 browser uses to turn it into text: Apple's dictation for Safari (on-device on
 recent hardware), Google's speech service for Chrome. That happens before
@@ -269,8 +274,29 @@ one; it doesn't have to be the model Mate answers with. Until you choose one,
 it uses the built-in default.
 
 While Mate is switched off, Settings → Mate shows only the Enable Mate switch
-and what Mate sends to OpenRouter. The model, indexing, key, notes and voice
+and what Mate sends to OpenRouter. The model, indexing, key, web search, notes and voice
 settings appear once it is on.
+
+## Searching the web
+
+Mate answers from your boat first: live instruments, the forecast and tides,
+the help and your documents. Some questions need information from outside
+the boat: a harbour's opening hours, a recent notice, what a fault code means,
+a replacement for a part. Switch on **Web search** in Settings → Mate and Mate
+can look those up on the web through OpenRouter.
+
+It is off by default. Each search costs a small extra amount on your
+OpenRouter account on top of the reply itself, which is why Mate only
+searches when your documents and instruments can't answer. When it does, the
+status line says it is searching the web, and the sources it used appear in
+the answer as links that open in a new tab. Open them to check what a page
+actually says before you rely on it, especially for safety, regulations or
+anything about the boat.
+
+Web pages are written by anyone, so Mate treats what it reads there as
+information to weigh, never as instructions. It will not change your
+maintenance list or any other record because a web page said to. If a search
+fails, or finds nothing, Mate tells you so and answers without it.
 
 ## Standing notes
 

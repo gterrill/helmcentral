@@ -325,8 +325,11 @@ type assistantRunner struct {
 	apiKey     string
 	model      string
 	autoRouter assistantAutoRouterOptions
-	tools      assistantToolExecutor
-	emit       assistantEmitter
+	// webSearch offers search_web to the model (assistant.web_search). Off,
+	// the tool is absent from the request entirely.
+	webSearch bool
+	tools     assistantToolExecutor
+	emit      assistantEmitter
 }
 
 // assistantTextToolCallMarkers lists the substrings that mark a message's
@@ -646,7 +649,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		req := openRouterChatRequest{
 			Model:    r.model,
 			Messages: messages,
-			Tools:    assistantToolDefinitions(),
+			Tools:    assistantToolDefinitionsFor(r.webSearch),
 			Usage:    &openRouterUsageOption{Include: true},
 		}
 		if plugin := autoRouterPluginForModel(r.model, r.autoRouter); plugin != nil {
