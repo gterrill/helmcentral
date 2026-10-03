@@ -20,6 +20,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   OpenRouter account. Pick which model carries the search with **Search
   model**; a cheap one is fine. The pages Mate used appear in its answer as links that
   open in a new tab. Nothing needs changing on upgrade.
+- Mate can now propose changes to your equipment, locations, bins and decks, as
+  well as the maintenance schedule. Ask it to file a spare into a bin, rename a
+  location or set up a deck from a drawing in your documents, and it answers
+  with a card that shows each change as it is now and as it will become, and
+  says what a removal takes with it. Several changes that belong together, such
+  as a new deck and the locations moved onto it, are one card that applies all
+  of them or none. Nothing changes until you tap **Apply**. Mate can't see
+  pictures, so a card that sets a deck's plan shows you the picture to check,
+  and a PDF can't be used as a plan yet. Nothing needs changing on upgrade:
+  cards Mate wrote earlier carry over and work as before.
 - Locations can now be drawn on deck plans. Add a picture of each deck, such as
   the builder's general arrangement drawing, outline your locations on it and
   pin your bins, then find them by looking at the boat. Locations has a new
@@ -48,6 +58,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   each card. Push notifications and emails carry the same title, so if you
   filter alarm notifications on their text, check your filters after
   upgrading. The anchor drag alarm now reads "Anchor 45 m from the drop point".
+
+### Fixed
+
+- The Battery & Power tile's charge rate (%/h) and time to full or empty now
+  need the house bank's capacity, either reported by the battery monitor or
+  set in **Settings → Vessel**. Without it they show a dash, instead of a
+  figure that flickered and mostly read nothing. When the battery monitor
+  stops reporting current, they and the Net readout show a dash rather than a
+  false 1 A discharge.
 
 ## [0.39.0] - 2026-10-02
 

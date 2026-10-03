@@ -19,10 +19,24 @@ interface MessageAttachmentApi {
 }
 
 export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale'
+export type AssistantProposalAction = 'create' | 'update' | 'delete'
 
 interface ProposalOpApi {
-  op: string
-  summary: string
+  type: string
+  action: AssistantProposalAction
+  id?: string
+  label?: string
+  description: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+}
+
+interface ProposalOpResultApi {
+  type: string
+  action: AssistantProposalAction
+  id: string
+  label?: string
+  href?: string
 }
 
 export interface ProposalApi {
@@ -32,6 +46,8 @@ export interface ProposalApi {
   ops: ProposalOpApi[]
   stale_reason?: string
   resolved_at?: string
+  /** What Apply did, one entry per operation: present once applied. */
+  result?: { ops: ProposalOpResultApi[] }
 }
 
 interface MessageApi {
@@ -62,15 +78,24 @@ export interface AssistantMessageAttachment {
   filename: string
 }
 
-/** One change on a proposal card. `summary` is the operator-words line the
- * server wrote ("Generator · Oil and filter: every 250 h ..."); the client
- * shows it as given and never rebuilds it. */
+/** One change on a proposal card (ADR 0158): an action on a record of some
+ * type. `description` is the operator-words line the server wrote
+ * ("Generator · Oil and filter: every 250 h ..."); the client shows it as
+ * given and never rebuilds it. `before` and `after` hold the fields the change
+ * names, as they were and as they will be (a delete has only `before`).
+ * `href` is the page that shows the record, set once the proposal is applied. */
 export interface AssistantProposalOp {
-  op: string
-  summary: string
+  type: string
+  action: AssistantProposalAction
+  id?: string
+  label?: string
+  description: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  href?: string
 }
 
-/** A maintenance change Mate proposed (ADR 0146). `status` is the stored
+/** A change Mate proposed (ADR 0146, generalised by ADR 0158). `status` is the stored
  * one, so a reloaded thread shows applied and dismissed cards as they were
  * left. Nothing in a proposal has been written until it is `applied`. */
 export interface AssistantProposal {
@@ -98,7 +123,7 @@ export interface AssistantMessage {
   /** Documents (ADR 0106) attached to this message - only ever present on a
    * user message; the backend never sets it on an assistant reply. */
   attachments?: AssistantMessageAttachment[]
-  /** Maintenance change cards (ADR 0146) - only ever on an assistant reply. */
+  /** Change cards (ADR 0146, ADR 0158) - only ever on an assistant reply. */
   proposals?: AssistantProposal[]
 }
 
@@ -107,7 +132,16 @@ export function mapProposal(api: ProposalApi): AssistantProposal {
     id: api.id,
     messageId: api.message_id,
     status: api.status,
-    ops: api.ops.map((o) => ({ op: o.op, summary: o.summary })),
+    ops: api.ops.map((o, i) => ({
+      type: o.type,
+      action: o.action,
+      id: o.id,
+      label: o.label,
+      description: o.description,
+      before: o.before,
+      after: o.after,
+      href: api.result?.ops[i]?.href,
+    })),
     staleReason: api.stale_reason,
     resolvedAt: api.resolved_at,
   }

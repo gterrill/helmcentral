@@ -147,6 +147,22 @@ reply. Nothing changes until you tap **Apply**; see
 [Maintenance](maintenance.md) and
 [Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
 
+The same goes for your inventory. Mate can read equipment, locations, bins and
+decks, and propose adding, changing or removing them: filing a spare into a
+bin, renaming locations, setting up a deck from a drawing in your documents.
+Every proposal is a card under its reply that shows each change, with what it
+is now and what it will become, and a removal says what goes with it. A card
+can hold several changes that belong together, such as a new deck and the
+locations moved onto it, and applies all of them or none. You still tap
+**Apply**, and Mate won't say anything is done until you have.
+
+Mate can't see pictures, so when a card sets a deck's plan it shows you the
+picture and you check it is the right one. A plan has to be a JPEG or PNG; if
+the drawing in your documents is a PDF, Mate will ask you to upload a picture
+of that page instead. Mate never operates the boat. The autopilot, the
+generator, switching circuits, the anchor watch and alarm acknowledgement are
+not things it can propose, and neither are your settings or logins.
+
 Mate also knows two things about the app itself: what you're looking at when
 you ask, and how Helmcentral's own features work. A question asked from the
 sheet over the Forecast panel arrives with that noted, so "explain how the

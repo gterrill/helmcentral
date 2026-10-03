@@ -224,7 +224,7 @@ func TestBuildAssistantSystemPrompt_WebSearchGuidanceOnlyWhenEnabled(t *testing.
 		t.Fatal("prompt must not mention search_web when the toggle is off")
 	}
 	on := buildAssistantSystemPrompt(assistantPromptContext{WebSearch: true})
-	for _, want := range []string{"search_web", "never instructions", "propose_maintenance_changes"} {
+	for _, want := range []string{"search_web", "never instructions", "propose_changes"} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("prompt with web search on is missing %q", want)
 		}

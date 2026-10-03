@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
-import type { AssistantProposal } from '@/hooks/use-assistant-conversations'
+import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
 
-// ADR 0146: the card under a Mate reply that proposes changes to the
-// maintenance schedule. It renders from the stored status, so every state
+// ADR 0146, ADR 0158: the card under a Mate reply that proposes changes to
+// records. It renders from the stored status, so every state
 // below is also what a reloaded thread shows.
 
 const proposal = (overrides: Partial<AssistantProposal> = {}): AssistantProposal => ({
@@ -13,8 +13,12 @@ const proposal = (overrides: Partial<AssistantProposal> = {}): AssistantProposal
   messageId: 'm1',
   status: 'pending',
   ops: [
-    { op: 'create_rule', summary: 'Add Generator · Oil and filter: every 250 h or 12 mo, last done 9 Jan 2025 at 239 h (meter)' },
-    { op: 'acknowledge', summary: 'Acknowledge Generator · Belts: parts on order' },
+    {
+      type: 'maintenance_rule',
+      action: 'create',
+      description: 'Add Generator · Oil and filter: every 250 h or 12 mo, last done 9 Jan 2025 at 239 h (meter)',
+    },
+    { type: 'maintenance_rule', action: 'update', description: 'Acknowledge Generator · Belts: parts on order' },
   ],
   ...overrides,
 })
@@ -86,8 +90,10 @@ describe('AssistantProposalCard', () => {
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'stale' }))
   })
 
-  it('applied: each line links to the Maintenance list and there are no buttons', () => {
-    render(<AssistantProposalCard proposal={proposal({ status: 'applied' })} canWrite onChange={vi.fn()} />)
+  it('applied: each change links to the page that shows its record and there are no buttons', () => {
+    const base = proposal({ status: 'applied' })
+    const ops = base.ops.map((op) => ({ ...op, href: '/inventory/maintenance' }))
+    render(<AssistantProposalCard proposal={{ ...base, ops }} canWrite onChange={vi.fn()} />)
 
     expect(screen.getByText('Applied')).toBeInTheDocument()
     const links = screen.getAllByRole('link')
@@ -160,5 +166,125 @@ describe('AssistantProposalCard', () => {
     render(<AssistantProposalCard proposal={proposal({ ops: [proposal().ops[0]] })} canWrite onChange={vi.fn()} />)
 
     expect(screen.getByText('Proposed change')).toBeInTheDocument()
+  })
+
+  it('an update shows each field it names, before and after', () => {
+    const update: AssistantProposal = proposal({
+      ops: [
+        {
+          type: 'equipment',
+          action: 'update',
+          description: 'Move Fuse kit to bin B-02 (Lazarette)',
+          before: { bin_id: null, quantity: 1, verified_aboard: false },
+          after: { bin_id: '0710cae2-01e8-4000-b421-2f4c23ceac15', quantity: 2, verified_aboard: true },
+        },
+      ],
+    })
+    render(<AssistantProposalCard proposal={update} canWrite onChange={vi.fn()} />)
+
+    const bin = screen.getByText('Bin').closest('div') as HTMLElement
+    expect(bin).toHaveTextContent('--')
+    expect(bin).toHaveTextContent('#0710cae2')
+    const quantity = screen.getByText('Quantity').closest('div') as HTMLElement
+    expect(quantity).toHaveTextContent('1')
+    expect(quantity).toHaveTextContent('2')
+    expect(screen.getByText('Verified aboard').closest('div')).toHaveTextContent('No→Yes')
+  })
+
+  it('a create shows what it sets and a delete shows what goes with it', () => {
+    const mixed: AssistantProposal = proposal({
+      ops: [
+        { type: 'bin', action: 'create', description: 'Add bin S-1', after: { code: 'S-1', name: 'Spares' } },
+        {
+          type: 'deck',
+          action: 'delete',
+          description: 'Delete deck Main (removes the outlines of 3 locations and the pins of their bins)',
+          before: { name: 'Main' },
+        },
+      ],
+    })
+    render(<AssistantProposalCard proposal={mixed} canWrite onChange={vi.fn()} />)
+
+    expect(screen.getByText('Code').closest('div')).toHaveTextContent('S-1')
+    expect(screen.getByText('Add bin S-1')).toBeInTheDocument()
+    expect(screen.getByText(/removes the outlines of 3 locations/)).toBeInTheDocument()
+    expect(screen.queryByText('→')).not.toBeInTheDocument()
+  })
+
+  it('a local reference reads as the change that creates the record', () => {
+    const refs: AssistantProposal = proposal({
+      ops: [
+        { type: 'deck', action: 'create', label: 'Main deck', description: 'Add deck Main deck', after: { name: 'Main deck' } },
+        { type: 'location', action: 'update', description: 'Change location Salon', before: { deck_id: null }, after: { deck_id: '$1' } },
+      ],
+    })
+    render(<AssistantProposalCard proposal={refs} canWrite onChange={vi.fn()} />)
+
+    expect(screen.getByText('Deck').closest('div')).toHaveTextContent('Main deck')
+  })
+
+  it("a deck's plan is shown as a picture the operator can check", () => {
+    const deck: AssistantProposal = proposal({
+      ops: [
+        {
+          type: 'deck',
+          action: 'create',
+          description: 'Add deck Main with a plan picture',
+          after: { name: 'Main', plan_document_id: 'doc-42' },
+        },
+      ],
+    })
+    render(<AssistantProposalCard proposal={deck} canWrite onChange={vi.fn()} />)
+
+    const image = screen.getByRole('img', { name: 'Deck plan' })
+    expect(image).toHaveAttribute('src', '/api/documents/doc-42/content')
+  })
+})
+
+// The wire shape, as the server writes it for an applied changeset (captured
+// from the backend, not assumed): mapProposal must carry every operation's
+// fields and the page each record links to.
+describe('AssistantProposalCard with the server payload', () => {
+  const payload: ProposalApi = {
+    id: 'p1',
+    message_id: 'm1',
+    status: 'applied',
+    ops: [
+      {
+        type: 'deck',
+        action: 'create',
+        label: 'Main deck',
+        description: 'Add deck Main deck with a plan picture',
+        after: { name: 'Main deck', plan_document_id: '8bcd8d62-ba89-4e85-b3ac-5a63bdc7d31d' },
+      },
+      {
+        type: 'location',
+        action: 'update',
+        id: 'f3638bc7-3776-4e75-a15d-446b4dd2c076',
+        label: 'Salon',
+        description: 'Change location Salon: put it on a deck plan with an outline',
+        before: { deck_id: null, polygon: null },
+        after: { deck_id: '$1', polygon: [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5]] },
+      },
+    ],
+    result: {
+      ops: [
+        { type: 'deck', action: 'create', id: 'c3b8', label: 'Main deck', href: '/inventory/decks/c3b8' },
+        { type: 'location', action: 'update', id: 'f363', label: 'Salon', href: '/inventory/locations/f363' },
+      ],
+    },
+  }
+
+  it('links each applied change to its record and shows the plan and the outline', () => {
+    render(<AssistantProposalCard proposal={mapProposal(payload)} canWrite onChange={vi.fn()} />)
+
+    const links = screen.getAllByRole('link')
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/inventory/decks/c3b8', '/inventory/locations/f363'])
+    expect(screen.getByRole('img', { name: 'Deck plan' })).toHaveAttribute(
+      'src',
+      '/api/documents/8bcd8d62-ba89-4e85-b3ac-5a63bdc7d31d/content',
+    )
+    expect(screen.getByText('Deck').closest('div')).toHaveTextContent('Main deck')
+    expect(screen.getByText('Outline').closest('div')).toHaveTextContent('3 points')
   })
 })

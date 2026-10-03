@@ -530,13 +530,14 @@ func TestBuildAssistantSystemPrompt_MaintenanceGuidance(t *testing.T) {
 		"say the hours are unknown",
 		"quote the meter reading",
 		"cumulative across meter replacements",
-		"propose_maintenance_changes",
+		"propose_changes",
 		"tap Apply",
 		"never say it is done",
 		"Hours in a proposal are meter readings",
 		"do not propose it again",
 		"(/inventory/maintenance)",
 		"(/inventory/equipment/<id>)",
+		"describe_record_type", "never say a change is done", "a page of a PDF cannot be a plan yet", "You cannot see pictures", "the autopilot, the generator",
 	} {
 		if !strings.Contains(stable, want) {
 			t.Errorf("expected the stable prefix to contain %q, got:\n%s", want, stable)

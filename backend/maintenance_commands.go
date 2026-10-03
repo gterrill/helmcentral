@@ -14,7 +14,7 @@ import (
 // The maintenance write commands (ADR 0146). Each is one rule write with its
 // validation, its gauge-to-true hours conversion and its store call, taking
 // an open transaction so the HTTP handlers (which run one command in a
-// transaction of their own, via documentStore.RunMaintenanceTx) and Mate's
+// transaction of their own, via documentStore.RunTx) and Mate's
 // proposal apply (which runs several in one transaction and commits only if
 // every one succeeds) execute exactly the same code. A command never touches
 // the store's mutex, the echo context or the wall clock: now and today come
@@ -163,7 +163,7 @@ func checkMaintenancePartsExistTx(q sqlQueryer, parts []maintenanceLogPartInput)
 
 // planMaintenanceCompletion is the part of completing a rule that needs only
 // the rule and the validated entry, no store access: the checks that can
-// refuse it and the fixed due date it advances to. propose_maintenance_changes
+// refuse it and the fixed due date it advances to. propose_changes
 // runs it at propose time so a completion Mate cannot make is refused before
 // the operator sees a card.
 //

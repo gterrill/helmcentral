@@ -24,7 +24,8 @@ running total for you.
 
 ## Check the card
 
-Each change is one line. Read them the way you'd read the Maintenance list:
+Each change is one line, with the fields it sets listed under it: what a field
+is now and what it becomes. Read them the way you'd read the Maintenance list:
 
 - **Add** lines are new rules, such as "Add Generator · Belts: every 12 mo".
 - **Change** lines show what the rule becomes, such as "Change Generator ·
@@ -55,8 +56,8 @@ anything twice: an applied card stays applied.
 If the schedule no longer matches the card, Apply refuses. That happens when
 a rule was edited after Mate wrote the card, by you in Maintenance or from
 another device, or when you added the same entries by hand in the meantime.
-Nothing is made. The card is marked **Out of date**, says why, and stays that
-way when you reload the page. Ask Mate to redo it, and it reads the schedule
+Nothing is made. The card is marked **Out of date**, names the rule that
+changed, and stays that way when you reload the page. Ask Mate to redo it, and it reads the schedule
 again and writes a fresh card.
 
 ## What Mate can't do here

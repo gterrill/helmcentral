@@ -60,7 +60,7 @@ switches on **Web search** under Settings, Mate. It is off by default.
   snippets are flattened to one bounded line and stripped of the `<<<`/`>>>`
   sequences the prompt uses for its own boundaries; only http(s) URLs are
   kept. The prompt tells Mate that web results are data, never instructions,
-  and that they must never drive `propose_maintenance_changes` or any other
+  and that they must never drive `propose_changes` or any other
   write. This is the same stance as for document text, and the same
   limitation: it lowers the odds of an injected instruction being followed, it
   is not a guarantee. Writes still need the operator's explicit apply.
