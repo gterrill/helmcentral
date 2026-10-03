@@ -233,11 +233,13 @@ export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastD
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
   if (op === undefined) {
-    // A bus notification: the backend has already stripped internal ids and
-    // normalised the punctuation, and nothing here knows how the producer
+    // An alarm with no rule behind it: a bus notification (the backend has
+    // already stripped internal ids) or a source like the stream watchdog,
+    // which sends its message raw. Nothing here knows how the producer
     // clears it, so no clearing claim is made. Live radar figures, when the
     // target is known, follow the sentence.
-    return withRadarFigures(message ?? '', alarm.radar_target)
+    const text = (message ?? '').trim().replace(/[.!?]+$/, '')
+    return withRadarFigures(text === '' ? '' : `${text}.`, alarm.radar_target)
   }
 
   if (op === 'stale') {

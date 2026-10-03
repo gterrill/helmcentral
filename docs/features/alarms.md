@@ -32,7 +32,8 @@ fall eases to 0.7 mb/hr." An alarm raised by something else on the network,
 such as a radar guard zone or an engine gateway, has no rule behind it, so
 it clears when the instrument that raised it lets go, and the card gives no
 clearing condition it cannot vouch for. Its card names the event in plain
-words, "Radar Guard Zone 1", rather than the instrument's own address. A
+words, "Radar Guard Zone 1", rather than the instrument's own address. With two radars live, the title
+also carries the name you gave the radar, so you can tell which one raised it. A
 guard zone card also gives the target's bearing, range and closest approach
 while the radar is still tracking it: "Target in guard zone 1 · 042°T ·
 1.4 NM · CPA 0.3 NM". If the radar has lost the target, or its feed is down,
