@@ -147,7 +147,7 @@ func TestRuleValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 				fields["equipment_id"] = item.ID
 			}
 			msg := proposeError(t, deps, opsArgs(changeOp{Type: recordTypeMaintenanceRule, Action: changeCreate, Fields: fields}))
-			if !strings.Contains(msg, "ops[0] (maintenance_rule create): "+tc.wantField+":") {
+			if !strings.Contains(msg, "operations[0] (maintenance_rule create): "+tc.wantField+":") {
 				t.Fatalf("proposal: expected the error to name %q, got %q", tc.wantField, msg)
 			}
 		})
@@ -192,7 +192,7 @@ func TestLastDoneValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 				fields["last_done_meter_reading"] = *tc.hours
 			}
 			msg := proposeError(t, deps, opsArgs(changeOp{Type: recordTypeMaintenanceRule, Action: changeUpdate, ID: rule.ID, Fields: fields}))
-			if !strings.Contains(msg, "ops[0] (maintenance_rule update): "+tc.proposalField+":") {
+			if !strings.Contains(msg, "operations[0] (maintenance_rule update): "+tc.proposalField+":") {
 				t.Fatalf("proposal: expected the error to name %q, got %q", tc.proposalField, msg)
 			}
 		})
@@ -242,7 +242,7 @@ func TestCompleteValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 				fields["new_due_date"] = tc.req.NewDueDate
 			}
 			msg := proposeError(t, deps, opsArgs(changeOp{Type: recordTypeMaintenanceLog, Action: changeCreate, Fields: fields}))
-			if !strings.Contains(msg, "ops[0] (maintenance_log create): "+tc.proposalField+":") {
+			if !strings.Contains(msg, "operations[0] (maintenance_log create): "+tc.proposalField+":") {
 				t.Fatalf("proposal: expected the error to name %q, got %q", tc.proposalField, msg)
 			}
 		})
@@ -340,7 +340,7 @@ func TestProposeMaintenanceChanges_RefusesBadOps(t *testing.T) {
 	rule := mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil", IntervalMonths: iptr(12)})
 
 	cases := []struct{ name, args, want string }{
-		{"no ops", `{"operations":[]}`, "ops is required"},
+		{"no ops", `{"operations":[]}`, "operations is required"},
 		{"unknown action", `{"operations":[{"type":"maintenance_rule","action":"rename","id":"x"}]}`, "action: must be create, update or delete"},
 		{"delete is not offered", `{"operations":[{"type":"maintenance_rule","action":"delete","id":"x"}]}`, "maintenance_rule records cannot be deleted by a changeset"},
 		{"unknown type", `{"operations":[{"type":"anchor","action":"create"}]}`, `type: unknown record type "anchor"`},
@@ -358,7 +358,7 @@ func TestProposeMaintenanceChanges_RefusesBadOps(t *testing.T) {
 		{"bad clear", fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"description":null}}]}`, rule.ID), "description: cannot be cleared"},
 		{"an item's own rule cannot move", fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"equipment_id":"other"}}]}`, rule.ID), "equipment_id: a rule cannot move to another item"},
 		{"reading with no item", `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Cert","interval_months":12,"last_done_meter_reading":10}}]}`, "last_done_meter_reading"},
-		{"second op is the bad one", fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"r"}},{"type":"maintenance_rule","action":"update","id":"nope","fields":{"acknowledged_reason":"r"}}]}`, rule.ID), "ops[1] (maintenance_rule update)"},
+		{"second op is the bad one", fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"acknowledged_reason":"r"}},{"type":"maintenance_rule","action":"update","id":"nope","fields":{"acknowledged_reason":"r"}}]}`, rule.ID), "operations[1] (maintenance_rule update)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

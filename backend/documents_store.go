@@ -165,6 +165,7 @@ type documentSearchResult struct {
 	Title      string  `json:"title,omitempty"`
 	Status     string  `json:"status"`
 	FolderID   *string `json:"folder_id,omitempty"`
+	Mime       string  `json:"-"` // rides along for search_documents, so it needs no per-hit lookup
 	PageStart  int     `json:"page,omitempty"`
 	Heading    string  `json:"heading,omitempty"`
 	Snippet    string  `json:"snippet"`
@@ -1552,7 +1553,7 @@ func (s *documentStore) Search(query string, folderID *string, recursive bool, t
 	}
 
 	sqlQuery := `
-		SELECT d.id, d.filename, d.title, d.status, d.folder_id, c.page_start, c.heading,
+		SELECT d.id, d.filename, d.title, d.status, d.folder_id, d.mime, c.page_start, c.heading,
 		       snippet(document_chunks_fts, 0, char(2), char(3), '…', 16) AS snippet,
 		       bm25(document_chunks_fts, 1.0, 2.0) AS score
 		FROM document_chunks_fts
@@ -1611,7 +1612,7 @@ func (s *documentStore) Search(query string, folderID *string, recursive bool, t
 	for rows.Next() {
 		var r documentSearchResult
 		var folderID sql.NullString
-		if err := rows.Scan(&r.DocumentID, &r.Filename, &r.Title, &r.Status, &folderID, &r.PageStart, &r.Heading, &r.Snippet, &r.Score); err != nil {
+		if err := rows.Scan(&r.DocumentID, &r.Filename, &r.Title, &r.Status, &folderID, &r.Mime, &r.PageStart, &r.Heading, &r.Snippet, &r.Score); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		if folderID.Valid {
@@ -2535,7 +2536,7 @@ func (s *documentStore) SearchVector(queryVec []float32, model string, folderID 
 	}
 
 	sqlQuery := `
-		SELECT c.id, e.vector, e.dims, d.id, d.filename, d.title, d.status, d.folder_id, c.page_start, c.heading, c.text
+		SELECT c.id, e.vector, e.dims, d.id, d.filename, d.title, d.status, d.folder_id, d.mime, c.page_start, c.heading, c.text
 		FROM document_chunk_embeddings e
 		JOIN document_chunks c ON c.id = e.chunk_id
 		JOIN documents d ON d.id = c.document_id
@@ -2598,11 +2599,11 @@ func (s *documentStore) SearchVector(queryVec []float32, model string, folderID 
 		var chunkID int64
 		var vecBlob []byte
 		var dims int
-		var docID, filename, title, status, text string
+		var docID, filename, title, status, mime, text string
 		var rowFolderID sql.NullString
 		var pageStart int
 		var heading string
-		if err := rows.Scan(&chunkID, &vecBlob, &dims, &docID, &filename, &title, &status, &rowFolderID, &pageStart, &heading, &text); err != nil {
+		if err := rows.Scan(&chunkID, &vecBlob, &dims, &docID, &filename, &title, &status, &rowFolderID, &mime, &pageStart, &heading, &text); err != nil {
 			return nil, fmt.Errorf("search vector: scan: %w", err)
 		}
 		if dims != len(unitQuery) {
@@ -2647,6 +2648,7 @@ func (s *documentStore) SearchVector(queryVec []float32, model string, folderID 
 			Filename:   filename,
 			Title:      title,
 			Status:     status,
+			Mime:       mime,
 			PageStart:  pageStart,
 			Heading:    heading,
 			Snippet:    truncateSnippet(text, 200),

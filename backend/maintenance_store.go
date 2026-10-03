@@ -42,7 +42,7 @@ func (s *documentStore) RunTx(fn func(tx *sql.Tx, now time.Time) error) error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("maintenance write: begin: %w", err)
+		return fmt.Errorf("write: begin: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -50,7 +50,7 @@ func (s *documentStore) RunTx(fn func(tx *sql.Tx, now time.Time) error) error {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("maintenance write: commit: %w", err)
+		return fmt.Errorf("write: commit: %w", err)
 	}
 	return nil
 }

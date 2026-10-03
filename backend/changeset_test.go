@@ -187,9 +187,9 @@ func TestChangeset_RefusesBadShapes(t *testing.T) {
 	}{
 		{"no ops", nil, "at least one"},
 		{"too many ops", tooMany, "at most 50"},
-		{"unknown type", []changeOp{{Type: "anchor", Action: changeCreate}}, `ops[0]: type: unknown record type "anchor"; the types are buoy, mooring`},
+		{"unknown type", []changeOp{{Type: "anchor", Action: changeCreate}}, `operations[0]: type: unknown record type "anchor"; the types are buoy, mooring`},
 		{"unknown action", []changeOp{{Type: "buoy", Action: "rename", ID: buoy}}, "action: must be create, update or delete"},
-		{"action the type does not allow", []changeOp{{Type: "mooring", Action: changeDelete, ID: mooring}}, "ops[0] (mooring delete): action: mooring records cannot be deleted by a changeset"},
+		{"action the type does not allow", []changeOp{{Type: "mooring", Action: changeDelete, ID: mooring}}, "operations[0] (mooring delete): action: mooring records cannot be deleted by a changeset"},
 		{"create with an id", []changeOp{{Type: "buoy", Action: changeCreate, ID: "x", Fields: map[string]any{"name": "A"}}}, "id: a create has no id yet"},
 		{"update without an id", []changeOp{{Type: "buoy", Action: changeUpdate, Fields: map[string]any{"name": "A"}}}, "id: is required"},
 		{"update without fields", []changeOp{{Type: "buoy", Action: changeUpdate, ID: buoy}}, "fields: give at least one field to change"},
@@ -209,10 +209,22 @@ func TestChangeset_RefusesBadShapes(t *testing.T) {
 	}
 }
 
+func TestChangeset_PaddedIDIsTrimmedOnce(t *testing.T) {
+	env := newChangesetEnv(t)
+	buoy := env.seed(t, "buoy", "North")
+	ops, err := env.prepare(t, []changeOp{{Type: "buoy", Action: changeUpdate, ID: "  " + buoy + " ", Fields: map[string]any{"name": "North Cardinal"}}})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if ops[0].ID != buoy {
+		t.Fatalf("expected the trimmed id %q, got %q", buoy, ops[0].ID)
+	}
+}
+
 func TestChangeset_UnknownTargetNamesTheRecord(t *testing.T) {
 	env := newChangesetEnv(t)
 	msg := prepareError(t, env, []changeOp{{Type: "buoy", Action: changeUpdate, ID: "nope", Fields: map[string]any{"name": "A"}}})
-	if !strings.Contains(msg, `ops[0] (buoy update): id: no buoy with id "nope"`) {
+	if !strings.Contains(msg, `operations[0] (buoy update): id: no buoy with id "nope"`) {
 		t.Fatalf("got %q", msg)
 	}
 }
@@ -417,7 +429,7 @@ func TestChangeset_ACommandRefusalNamesTheOperationAndField(t *testing.T) {
 		{Type: "buoy", Action: changeCreate, Fields: map[string]any{"name": "A"}},
 		{Type: "buoy", Action: changeCreate, Fields: map[string]any{"name": " "}},
 	})
-	if !strings.Contains(msg, "ops[1] (buoy create): name: name is required") {
+	if !strings.Contains(msg, "operations[1] (buoy create): name: name is required") {
 		t.Fatalf("got %q", msg)
 	}
 }

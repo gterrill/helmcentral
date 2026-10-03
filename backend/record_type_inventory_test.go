@@ -148,7 +148,7 @@ func TestInventory_EquipmentCreateUpdateAndRefusals(t *testing.T) {
 		{`{"operations":[{"type":"equipment","action":"create","fields":{"name":"X","quantity":-1}}]}`, "quantity:"},
 		{`{"operations":[{"type":"equipment","action":"create","fields":{"name":"X","quantity":1.5}}]}`, "quantity: must be a whole number"},
 		{`{"operations":[{"type":"equipment","action":"create","fields":{"name":"X","category":"general"}}]}`, "category: cannot be changed"},
-		{`{"operations":[{"type":"equipment","action":"create","fields":{"name":"X","bin_id":"nope"}}]}`, "ops[0] (equipment create)"},
+		{`{"operations":[{"type":"equipment","action":"create","fields":{"name":"X","bin_id":"nope"}}]}`, "operations[0] (equipment create)"},
 	} {
 		if msg := proposeError(t, env.deps, tc.args); !strings.Contains(msg, tc.want) {
 			t.Errorf("%s: expected %q in %q", tc.args, tc.want, msg)
@@ -205,7 +205,7 @@ func TestInventory_LocationRenameDeleteAndRefusals(t *testing.T) {
 		{fmt.Sprintf(`{"operations":[{"type":"location","action":"update","id":%q,"fields":{"deck_id":%q}}]}`, salon.ID, deck.ID), "polygon: a location on a deck needs an outline"},
 		{fmt.Sprintf(`{"operations":[{"type":"location","action":"update","id":%q,"fields":{"polygon":[[0,0],[1,1],[0,1]]}}]}`, salon.ID), "polygon: a location must be on a deck"},
 		{fmt.Sprintf(`{"operations":[{"type":"location","action":"update","id":%q,"fields":{"deck_id":%q,"polygon":[[0,0],[1,1]]}}]}`, salon.ID, deck.ID), "polygon:"},
-		{`{"operations":[{"type":"bin","action":"create","fields":{"zone_id":"nope","code":"x"}}]}`, "ops[0] (bin create)"},
+		{`{"operations":[{"type":"bin","action":"create","fields":{"zone_id":"nope","code":"x"}}]}`, "operations[0] (bin create)"},
 	} {
 		if msg := proposeError(t, env.deps, tc.args); !strings.Contains(msg, tc.want) {
 			t.Errorf("%s: expected %q in %q", tc.args, tc.want, msg)
@@ -214,6 +214,26 @@ func TestInventory_LocationRenameDeleteAndRefusals(t *testing.T) {
 	env.applyOK(t, fmt.Sprintf(`{"operations":[{"type":"location","action":"update","id":%q,"fields":{"name":"Main salon"}}]}`, salon.ID))
 	if _, err := env.docs.CreateZone("Main salon"); !errors.Is(err, errZoneNameTaken) {
 		t.Fatalf("expected the rename to have happened already, got %v", err)
+	}
+}
+
+func TestInventory_MovingAPinnedLocationSaysItClearsThePins(t *testing.T) {
+	env := newProposalEnv(t)
+	deck, _ := env.docs.CreateDeck("Main")
+	zone, _ := env.docs.CreateZone("Salon")
+	bin, err := env.docs.CreateBin(zone.ID, "S1", "")
+	if err != nil {
+		t.Fatalf("CreateBin: %v", err)
+	}
+	tri := [][2]float64{{0, 0}, {1, 0}, {1, 1}}
+	if err := env.docs.SaveDeckLayout(deck.ID, []deckLayoutZone{{ID: zone.ID, Polygon: tri}}, []deckLayoutBin{{ID: bin.ID, X: 0.6, Y: 0.4}}); err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	env.advance()
+
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"location","action":"update","id":%q,"fields":{"polygon":[[0.1,0.1],[0.9,0.1],[0.9,0.9]]}}]}`, zone.ID))
+	if got := p.Ops[0].Description; !strings.Contains(got, "clears the pins of 1 bin") {
+		t.Fatalf("expected the card to warn about the pin, got %q", got)
 	}
 }
 

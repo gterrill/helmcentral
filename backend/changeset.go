@@ -73,7 +73,7 @@ type changeOpError struct {
 }
 
 func (e *changeOpError) Error() string {
-	return fmt.Sprintf("ops[%d] (%s %s): %s", e.Index, e.Type, e.Action, e.Err)
+	return fmt.Sprintf("operations[%d] (%s %s): %s", e.Index, e.Type, e.Action, e.Err)
 }
 func (e *changeOpError) Unwrap() error { return e.Err }
 
@@ -131,15 +131,17 @@ func refIndex(s string) (int, bool) {
 // ── shape ───────────────────────────────────────────────────────────────
 
 func (r *recordRegistry) checkShape(i int, ops []changeOp) error {
+	// Trim once here; every later lookup uses the trimmed id.
+	ops[i].ID = strings.TrimSpace(ops[i].ID)
 	op := ops[i]
 	t, ok := r.types[op.Type]
 	if !ok {
-		return fmt.Errorf("ops[%d]: type: unknown record type %q; the types are %s", i, op.Type, quoteList(r.names()))
+		return fmt.Errorf("operations[%d]: type: unknown record type %q; the types are %s", i, op.Type, quoteList(r.names()))
 	}
 	if op.Action != changeCreate && op.Action != changeUpdate && op.Action != changeDelete {
-		return fmt.Errorf("ops[%d] (%s): action: must be create, update or delete, got %q", i, op.Type, op.Action)
+		return fmt.Errorf("operations[%d] (%s): action: must be create, update or delete, got %q", i, op.Type, op.Action)
 	}
-	head := fmt.Sprintf("ops[%d] (%s %s)", i, op.Type, op.Action)
+	head := fmt.Sprintf("operations[%d] (%s %s)", i, op.Type, op.Action)
 	fail := func(field, format string, a ...any) error {
 		return fmt.Errorf("%s: %s: %s", head, field, fmt.Sprintf(format, a...))
 	}
@@ -156,7 +158,7 @@ func (r *recordRegistry) checkShape(i int, ops []changeOp) error {
 			return fail("base_version", "a create has no version to check")
 		}
 	default:
-		if strings.TrimSpace(op.ID) == "" {
+		if op.ID == "" {
 			return fail("id", "is required (an id from list_records or get_record)")
 		}
 		if isRef(op.ID) {
@@ -384,6 +386,12 @@ func (r *recordRegistry) run(env changeEnv, ops []changeOp) ([]opRun, error) {
 			if err != nil {
 				return nil, fail(notFoundOr(t, id, err))
 			}
+			var effects []string
+			if t.UpdateEffects != nil {
+				if effects, err = t.UpdateEffects(env.tx, before, fields); err != nil {
+					return nil, fail(err)
+				}
+			}
 			if err := t.Update(env, before, fields); err != nil {
 				return nil, fail(err)
 			}
@@ -391,7 +399,7 @@ func (r *recordRegistry) run(env changeEnv, ops []changeOp) ([]opRun, error) {
 			if err != nil {
 				return nil, fail(fmt.Errorf("read back the %s: %w", t.Label, err))
 			}
-			runs[i] = opRun{id: id, before: &before, after: &after}
+			runs[i] = opRun{id: id, before: &before, after: &after, effects: effects}
 		case changeDelete:
 			before, err := t.Get(env.tx, id)
 			if err != nil {
@@ -435,7 +443,7 @@ var errChangesetDryRunDone = errors.New("dry run finished")
 // and BaseVersion filled in, and writes nothing.
 func (r *recordRegistry) prepare(store *documentStore, today time.Time, in []changeOp) ([]changeOp, error) {
 	if len(in) == 0 {
-		return nil, errors.New("ops is required and must list at least one change")
+		return nil, errors.New("operations is required and must list at least one change")
 	}
 	if len(in) > changesetMaxOps {
 		return nil, fmt.Errorf("at most %d changes in one proposal, got %d", changesetMaxOps, len(in))
@@ -481,7 +489,7 @@ func (r *recordRegistry) prepare(store *documentStore, today time.Time, in []cha
 // base_version Mate supplied that is no longer current.
 func (r *recordRegistry) attach(env changeEnv, i int, op *changeOp) error {
 	t := r.types[op.Type]
-	head := fmt.Sprintf("ops[%d] (%s %s)", i, op.Type, op.Action)
+	head := fmt.Sprintf("operations[%d] (%s %s)", i, op.Type, op.Action)
 	if op.Action != changeCreate && !isRef(op.ID) {
 		before, err := t.Get(env.tx, op.ID)
 		if errors.Is(err, errRecordNotFound) {
@@ -549,7 +557,7 @@ func sameFieldValue(a, b any) bool {
 // run. For an update it also refuses a change that leaves the record as it is.
 func (r *recordRegistry) describe(i int, op *changeOp, run opRun) error {
 	t := r.types[op.Type]
-	head := fmt.Sprintf("ops[%d] (%s %s)", i, op.Type, op.Action)
+	head := fmt.Sprintf("operations[%d] (%s %s)", i, op.Type, op.Action)
 	switch op.Action {
 	case changeCreate:
 		op.Label = run.after.Label

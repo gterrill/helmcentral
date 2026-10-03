@@ -168,13 +168,13 @@ func mapInventoryError(err error) error {
 	case errors.Is(err, errZoneNameInvalid):
 		return fieldErr("name", "a location needs a name")
 	case errors.Is(err, errZoneNotFound):
-		return fieldErr("zone", "no such location")
+		return fieldErr("zone_id", "no such location")
 	case errors.Is(err, errBinCodeTaken):
 		return fieldErr("code", "a bin with this code already exists")
 	case errors.Is(err, errBinCodeInvalid):
 		return fieldErr("code", "a bin needs a code")
 	case errors.Is(err, errBinNotFound):
-		return fieldErr("bin", "no such bin")
+		return fieldErr("bin_id", "no such bin")
 	case errors.Is(err, errDeckNameTaken):
 		return fieldErr("name", "a deck with this name already exists")
 	case errors.Is(err, errDeckNameInvalid):
@@ -347,14 +347,15 @@ func locationRecordType() *recordType {
 			{Name: "polygon", Kind: kindPolygon, Writable: true, Nullable: true, Description: "its outline on the plan: 3 to 64 [x, y] points, each between 0 and 1, x across and y down"},
 			{Name: "bin_codes", Kind: kindStringList, Description: "the codes of the bins in it"},
 		},
-		Get:      getLocationRecord,
-		List:     listLocationRecords,
-		Create:   createLocationRecord,
-		Update:   updateLocationRecord,
-		Delete:   func(env changeEnv, b recordSnapshot) error { return mapInventoryErrorOnly(deleteZoneTx(env.tx, b.ID)) },
-		Effects:  locationDeleteEffects,
-		Describe: describeLocation,
-		Href:     func(r recordSnapshot) string { return "/inventory/locations/" + r.ID },
+		Get:           getLocationRecord,
+		List:          listLocationRecords,
+		Create:        createLocationRecord,
+		Update:        updateLocationRecord,
+		Delete:        func(env changeEnv, b recordSnapshot) error { return mapInventoryErrorOnly(deleteZoneTx(env.tx, b.ID)) },
+		Effects:       locationDeleteEffects,
+		UpdateEffects: locationUpdateEffects,
+		Describe:      describeLocation,
+		Href:          func(r recordSnapshot) string { return "/inventory/locations/" + r.ID },
 	}
 }
 
@@ -489,6 +490,25 @@ func locationDeleteEffects(q sqlQueryer, before recordSnapshot) ([]string, error
 	return nil, nil
 }
 
+// locationUpdateEffects warns when a placement change will clear bin pins:
+// placeZoneTx unpins every bin in the location whenever deck_id or polygon
+// is given.
+func locationUpdateEffects(q sqlQueryer, before recordSnapshot, given fieldSet) ([]string, error) {
+	_, hasDeck := given["deck_id"]
+	_, hasPoly := given["polygon"]
+	if !hasDeck && !hasPoly {
+		return nil, nil
+	}
+	var n int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM inventory_bins WHERE zone_id = ? AND pin_x IS NOT NULL`, before.ID).Scan(&n); err != nil {
+		return nil, fmt.Errorf("count pinned bins: %w", err)
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	return []string{"clears the pins of " + plural(n, "bin", "bins")}, nil
+}
+
 func describeLocation(d describeInput) string {
 	switch d.Op.Action {
 	case changeCreate:
@@ -513,7 +533,11 @@ func describeLocation(d describeInput) string {
 			parts = append(parts, "put it on a deck plan with an outline")
 		}
 	}
-	return "Change location " + d.Before.Label + ": " + joinEffects(parts)
+	line := "Change location " + d.Before.Label + ": " + joinEffects(parts)
+	if len(d.Effects) > 0 {
+		line += " (" + joinEffects(d.Effects) + ")"
+	}
+	return line
 }
 
 // ── bins ────────────────────────────────────────────────────────────────
@@ -564,7 +588,9 @@ func binRecordType() *recordType {
 			return mapInventoryErrorOnly(err)
 		},
 		Delete: func(env changeEnv, b recordSnapshot) error { return mapInventoryErrorOnly(deleteBinTx(env.tx, b.ID)) },
-		Href:   func(r recordSnapshot) string { return "/inventory/bins/" + escapePathSegment(stringOf(r.Fields["code"])) },
+		Href: func(r recordSnapshot) string {
+			return "/inventory/bins/" + escapePathSegment(stringOf(r.Fields["code"]))
+		},
 	}
 }
 
