@@ -12,8 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 // Which models the catalog lists: Mate answers through tool calls, document
-// indexing reads images.
-export type ModelCapability = 'tools' | 'images'
+// indexing reads images, web search needs neither ('all').
+export type ModelCapability = 'tools' | 'images' | 'all'
 
 const chooseNewModelValue = '__choose_new_model__'
 const defaultModelValue = '__default_model__'

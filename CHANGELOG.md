@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate can now search the web when your boat's documents and instruments
+  can't answer a question, such as a harbour's opening hours, a recent notice
+  or what a fault code means. Turn on **Web search** under Settings, Mate. It
+  is off by default and each search costs a small extra amount on your
+  OpenRouter account. Pick which model carries the search with **Search
+  model**; a cheap one is fine. The pages Mate used appear in its answer as links that
+  open in a new tab. Nothing needs changing on upgrade.
 - Mate can now propose changes to your equipment, locations, bins and decks, as
   well as the maintenance schedule. Ask it to file a spare into a bin, rename a
   location or set up a deck from a drawing in your documents, and it answers

@@ -319,14 +319,24 @@ type assistantToolExecutor interface {
 	execute(ctx context.Context, name string, args json.RawMessage) (string, error)
 }
 
+// assistantUsageReporter is implemented by a tool executor whose tools make
+// OpenRouter calls of their own; drainUsage returns the usage accrued since
+// the last call.
+type assistantUsageReporter interface {
+	drainUsage() openRouterUsage
+}
+
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
 	doer       openRouterDoer
 	apiKey     string
 	model      string
 	autoRouter assistantAutoRouterOptions
-	tools      assistantToolExecutor
-	emit       assistantEmitter
+	// webSearch offers search_web to the model (assistant.web_search). Off,
+	// the tool is absent from the request entirely.
+	webSearch bool
+	tools     assistantToolExecutor
+	emit      assistantEmitter
 }
 
 // assistantTextToolCallMarkers lists the substrings that mark a message's
@@ -646,7 +656,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		req := openRouterChatRequest{
 			Model:    r.model,
 			Messages: messages,
-			Tools:    assistantToolDefinitions(),
+			Tools:    assistantToolDefinitionsFor(r.webSearch),
 			Usage:    &openRouterUsageOption{Include: true},
 		}
 		if plugin := autoRouterPluginForModel(r.model, r.autoRouter); plugin != nil {
@@ -780,6 +790,14 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
 		if terr != nil {
 			return assistantReply{}, terr
+		}
+		// Tools that make their own OpenRouter calls (search_web) report what
+		// those cost, so the reply's footer covers them too.
+		if reporter, ok := r.tools.(assistantUsageReporter); ok {
+			u := reporter.drainUsage()
+			reply.PromptTokens += u.PromptTokens
+			reply.CompletionTokens += u.CompletionTokens
+			reply.CostUSD += u.Cost
 		}
 		messages = append(messages, toolMessages...)
 

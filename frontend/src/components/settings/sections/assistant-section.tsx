@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { FormSection, SettingsLayout } from '@/components/patterns'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
-import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { defaultWebSearchModel, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -17,6 +17,7 @@ interface AssistantSectionProps {
 const noCostTierValue = '__none__'
 const recentModelStorageKey = 'assistant.recent-models'
 const recentDocumentModelStorageKey = 'assistant.recent-document-models'
+const recentWebSearchModelStorageKey = 'assistant.recent-web-search-models'
 // Keep in step with defaultDocumentModel in backend/assistant_settings.go.
 const defaultDocumentModel = 'google/gemini-2.5-flash'
 const costTierLabels: Record<string, string> = {
@@ -233,6 +234,43 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
 
           <FormSection title="OpenRouter API key">
             <SecretFieldGroup fields={[{ key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' }]} />
+          </FormSection>
+
+          <FormSection title="Web search">
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <Switch
+                  checked={draft.assistantWebSearch}
+                  onCheckedChange={(checked) =>
+                    onChange({
+                      assistantWebSearch: checked,
+                      ...(checked && draft.assistantWebSearchModel.trim() === '' ? { assistantWebSearchModel: defaultWebSearchModel } : {}),
+                    })
+                  }
+                  aria-label="Web search"
+                />
+                <FieldContent>
+                  <FieldLabel>Web search</FieldLabel>
+                  <FieldDescription>
+                    Mate searches the web through OpenRouter when it needs outside information, at a small extra cost per
+                    search.
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+
+              {draft.assistantWebSearch ? (
+                <ModelPicker
+                  id="assistant-web-search-model"
+                  ariaLabel="Search model"
+                  value={draft.assistantWebSearchModel}
+                  onChange={(assistantWebSearchModel) => onChange({ assistantWebSearchModel })}
+                  recentStorageKey={recentWebSearchModelStorageKey}
+                  capability="all"
+                  description="The model that carries the search. Results come from the same search engine whichever model you choose, so a cheap model is fine."
+                  dialogDescription="Any model, with server-side sorting and pagination."
+                />
+              ) : null}
+            </FieldGroup>
           </FormSection>
 
           <FormSection title="Standing notes">

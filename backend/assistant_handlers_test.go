@@ -201,7 +201,7 @@ func waitForBodyContains(t *testing.T, c *sseBodyCollector, substr string, timeo
 
 // swapAssistantRunner replaces newAssistantRunner for the duration of a
 // test, restoring the previous value on cleanup.
-func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace) {
+func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace) {
 	t.Helper()
 	prev := newAssistantRunner
 	newAssistantRunner = fn
@@ -537,6 +537,9 @@ func TestAssistantModelsHandler_CapabilityFiltersOneCachedCatalogue(t *testing.T
 	}
 	if got := ids("/api/assistant/models?capability=images"); !reflect.DeepEqual(got, []string{"vendor/vision-only", "vendor/vision-tools"}) {
 		t.Fatalf("images capability, got %v", got)
+	}
+	if got := ids("/api/assistant/models?capability=all"); !reflect.DeepEqual(got, []string{"vendor/plain", "vendor/tools-only", "vendor/vision-only", "vendor/vision-tools"}) {
+		t.Fatalf("all capability lists every model, got %v", got)
 	}
 	if len(fake.requests) != 1 {
 		t.Fatalf("expected one upstream call across capabilities, got %d", len(fake.requests))
@@ -1003,7 +1006,7 @@ func TestPostAssistantMessageHandler_TooLongContentReturns400(t *testing.T) {
 func TestPostAssistantMessageHandler_TodayRequiredAndValidated(t *testing.T) {
 	_, _, conv := postAssistantMessageTestSetup(t)
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		t.Errorf("no run may start when today is missing or malformed")
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "x", Model: "openai/gpt-4o"}}
 	})
@@ -1031,7 +1034,7 @@ func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
 	_, _, conv := postAssistantMessageTestSetup(t)
 
 	var got time.Time
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		got = today
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
 	})
@@ -1213,7 +1216,7 @@ func TestPostAssistantMessageHandler_EmptyContentWithAttachmentAcceptedAndTitles
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Sure, here's what's in it.", Model: "openai/gpt-4o"}}
 	})
 
@@ -1256,7 +1259,7 @@ func TestPostAssistantMessageHandler_AttachmentsPersistedWithFilenameFromDocumen
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Noted.", Model: "openai/gpt-4o"}}
 	})
 
@@ -1296,7 +1299,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content:          "Tongue Bay first, on the rising tide.",
 			Model:            "openai/gpt-4o",
@@ -1403,7 +1406,7 @@ func TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage(t *testing.
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{
 			emit:   emit,
 			deltas: []string{"Tongue Bay ", "first, on the rising tide."},
@@ -1476,7 +1479,7 @@ func TestPostAssistantMessageHandler_UsesSpokenSummaryAsConversationTitle(t *tes
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "## Spoken summary\n\nGloucester Island Anchorages\n\n## Passage plan\n\nWe should favour the north side.",
 			Model:   "openai/gpt-4o",
@@ -1516,7 +1519,7 @@ func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "The upper atmosphere chart is the 500mb height and vorticity pattern.",
 			Model:   "openai/gpt-4o",
@@ -1557,7 +1560,7 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: fmt.Errorf("openrouter status 401: invalid api key")}
 	})
 
@@ -1610,7 +1613,7 @@ func TestPostAssistantMessageHandler_RunnerPanicYieldsErrorEventAndFreesTheRun(t
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &panicAssistantRunner{}
 	})
 
@@ -1656,7 +1659,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{started: started, proceed: proceed, reply: assistantReply{Content: "ok"}}
 	})
 
@@ -1708,7 +1711,7 @@ func TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun(t *testin
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{
 			started: started,
 			proceed: proceed,
@@ -1799,7 +1802,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 
 	started := make(chan struct{})
 	attach := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &scriptedAssistantRunner{
 			emit:    emit,
 			started: started,
@@ -1890,7 +1893,7 @@ func TestPostAssistantRunCancelHandler_CancelsRunAndEmitsStoppedError(t *testing
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &cancelAwareAssistantRunner{emit: emit, started: started}
 	})
 
@@ -1982,7 +1985,7 @@ func TestPostAssistantRunCancelHandler_RespondsOnlyOnceTheConversationIsFree(t *
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 		return &slowTeardownAssistantRunner{started: started, teardown: 300 * time.Millisecond}
 	})
 

@@ -93,7 +93,10 @@ type assistantReadiness struct {
 	// chat's.
 	EmbeddingModel      string `json:"embedding_model"`
 	EmbeddingDimensions int    `json:"embedding_dimensions"`
-	Problem             string `json:"problem,omitempty"`
+	// WebSearch is assistant.web_search: whether search_web is offered to
+	// the model. Plays no part in Problem.
+	WebSearch bool   `json:"web_search"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
@@ -143,6 +146,7 @@ func checkAssistantReadiness(settingsPath string) (assistantReadiness, string, e
 		DocumentModel:       payload.Assistant.DocumentModel,
 		EmbeddingModel:      payload.Assistant.EmbeddingModel,
 		EmbeddingDimensions: payload.Assistant.EmbeddingDimensions,
+		WebSearch:           payload.Assistant.WebSearch,
 	}
 
 	apiKey, ok, err := globalSecretsStore.Get("OPENROUTER_API_KEY")
@@ -428,14 +432,16 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 //
 // capability=tools (default) lists models that can call tools, the Mate
 // chat requirement; capability=images lists models that accept image input,
-// the document indexing requirement. Anything else is a 400.
+// the document indexing requirement; capability=all applies no filter, for
+// the web search model, which is called with no tools and no image input.
+// Anything else is a 400.
 func assistantModelsHandler(c echo.Context) error {
 	capability := strings.TrimSpace(c.QueryParam("capability"))
 	if capability == "" {
 		capability = "tools"
 	}
-	if capability != "tools" && capability != "images" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "capability must be tools or images"})
+	if capability != "tools" && capability != "images" && capability != "all" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "capability must be tools, images or all"})
 	}
 	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
 	searchQuery := c.QueryParam("q")
@@ -465,7 +471,7 @@ func assistantModelsHandler(c echo.Context) error {
 	// concurrent reader.
 	models := make([]assistantModelOption, 0, len(cached))
 	for _, model := range cached {
-		if (capability == "tools" && model.SupportsTools) || (capability == "images" && model.SupportsImages) {
+		if capability == "all" || (capability == "tools" && model.SupportsTools) || (capability == "images" && model.SupportsImages) {
 			models = append(models, model)
 		}
 	}
@@ -802,14 +808,27 @@ func assistantDocumentLookup(id string) (document, error) {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, today time.Time, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
 	tools := assistantProductionToolDeps(settingsPath)
 	tools.today = today
+	if webSearch {
+		// The model is read fresh on every call so a Settings change applies
+		// to the very next search; a blank or unreadable model is an error,
+		// never a substituted default.
+		tools = tools.withWebSearch(openRouterHTTPClient, apiKey, func() (string, error) {
+			settings, err := readSettings(settingsPath)
+			if err != nil {
+				return "", fmt.Errorf("web search failed: read settings: %w", err)
+			}
+			return buildSettingsPayload(settings).Assistant.WebSearchModel, nil
+		})
+	}
 	return &assistantRunner{
 		doer:       openRouterHTTPClient,
 		apiKey:     apiKey,
 		model:      model,
 		autoRouter: autoRouter,
+		webSearch:  webSearch,
 		tools:      tools,
 		emit:       emit,
 	}
@@ -968,6 +987,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
 	pc.Spoken = body.Spoken
+	pc.WebSearch = readiness.WebSearch
 	if body.Screen != nil {
 		pc.Screen = assistantScreenContext{
 			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
@@ -982,7 +1002,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, today, run.append)
+	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, readiness.WebSearch, today, run.append)
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
 	// drives, must outlive this one HTTP request (ADR 0105). Only

@@ -5,6 +5,9 @@ import {
   type VesselHouseBankSetting,
 } from '@/lib/vessel-settings'
 
+// Keep in step with defaultWebSearchModel in backend/assistant_web_search.go.
+export const defaultWebSearchModel = 'google/gemini-2.5-flash-lite'
+
 export const defaultTankLabelIds = [
   'blackWater.1',
   'blackWater.6',
@@ -127,6 +130,8 @@ export interface RegularSettingsDraft {
   assistantVoiceInput: boolean
   assistantReadAloud: boolean
   assistantWakeWord: boolean
+  assistantWebSearch: boolean
+  assistantWebSearchModel: string
   /**
    * null until the server's vessel block has been read. It stays null if the
    * settings fetch fell back without one, and the patch then omits `vessel`
@@ -179,6 +184,8 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantVoiceInput: false,
   assistantReadAloud: false,
   assistantWakeWord: false,
+  assistantWebSearch: false,
+  assistantWebSearchModel: defaultWebSearchModel,
   vessel: null,
 }
 
@@ -276,6 +283,8 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
   if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
   if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
+  if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
+  if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
 
   if (settings.vessel) {
     const engineRows: Record<string, VesselEngineRowDraft> = {}
@@ -343,6 +352,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
   if (a.assistantReadAloud !== b.assistantReadAloud) return false
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
+  if (a.assistantWebSearch !== b.assistantWebSearch) return false
+  if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
 
   if (!vesselDraftsEqual(a.vessel, b.vessel)) return false
 
@@ -435,6 +446,8 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       voice_input: draft.assistantVoiceInput,
       read_aloud: draft.assistantReadAloud,
       wake_word: draft.assistantWakeWord,
+      web_search: draft.assistantWebSearch,
+      web_search_model: draft.assistantWebSearchModel.trim(),
     },
     // Omitted while the vessel block was never read (see the draft field).
     ...(draft.vessel === null

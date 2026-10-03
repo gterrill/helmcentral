@@ -383,6 +383,8 @@ describe('assistant settings-draft plumbing', () => {
       voice_input: false,
       read_aloud: false,
       wake_word: false,
+      web_search: false,
+      web_search_model: 'google/gemini-2.5-flash-lite',
     })
   })
 
@@ -492,6 +494,60 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantVoiceInput).toBe(false)
     expect(draft.assistantReadAloud).toBe(false)
     expect(draft.assistantWakeWord).toBe(false)
+  })
+
+  it('toggling Web search marks the form dirty and defaults off', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    expect(latestDraft().assistantWebSearch).toBe(false)
+    fireEvent.click(screen.getByLabelText('Web search'))
+
+    expect(latestDraft().assistantWebSearch).toBe(true)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
+    expect(buildRegularSettingsPatch(latestDraft()).assistant?.web_search).toBe(true)
+    expect(hydrateDraftFromSettings({ assistant: { web_search: true } }).assistantWebSearch).toBe(true)
+    expect(hydrateDraftFromSettings({}).assistantWebSearch).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the Search model picker only while Web search is on', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection()
+
+    expect(screen.queryByLabelText('Search model')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Web search'))
+
+    expect(screen.getByLabelText('Search model')).toHaveTextContent('google/gemini-2.5-flash-lite')
+    expect(screen.getByText(/a cheap model is fine/)).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('selecting a catalog row sets the search model, from an unfiltered catalog', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [{ id: 'openai/gpt-4o-mini', name: 'GPT-4o mini', price: 0.0001, created_at: '2026-01-01T00:00:00Z' }],
+        page: { total_pages: 1 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { latestDraft } = renderSection({ assistantWebSearch: true })
+
+    fireEvent.click(screen.getByLabelText('Search model'))
+    await chooseNewModel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+
+    expect(latestDraft().assistantWebSearchModel).toBe('openai/gpt-4o-mini')
+    expect(buildRegularSettingsPatch(latestDraft()).assistant?.web_search_model).toBe('openai/gpt-4o-mini')
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.includes('capability=all'))).toBe(true)
+    expect(hydrateDraftFromSettings({ assistant: { web_search_model: 'x/y' } }).assistantWebSearchModel).toBe('x/y')
+    expect(hydrateDraftFromSettings({}).assistantWebSearchModel).toBe('google/gemini-2.5-flash-lite')
+
+    vi.unstubAllGlobals()
   })
 
   it('renders a Document indexing section with a picker and helper text', () => {

@@ -133,6 +133,13 @@ type assistantToolDeps struct {
 	// store might not be initialised yet, and get_nearby_vessels treats
 	// that as "no sighting history available" rather than an error.
 	contacts func() *nearbyContactStore
+	// webSearch backs search_web (ADR 0159). nil unless the operator has
+	// switched web search on, in which case the tool is not offered either;
+	// a call that arrives anyway is refused rather than guessed at.
+	webSearch func(ctx context.Context, query string) ([]assistantWebResult, error)
+	// searchUsage collects the web search sub-requests' usage for the run's
+	// cost (withWebSearch). nil when web search is not wired.
+	searchUsage *assistantUsageSink
 	// signalKPositionHistory is get_nearby_vessels' seam into the SignalK
 	// History API (fetchSignalKPositionHistory, signalk.go, ADR 0128) for a
 	// vessel's own logged dwell at its current position - a separate,
@@ -276,6 +283,18 @@ func assistantRouteSnapshot() []routeData {
 }
 
 // ── tool definitions (OpenRouter/OpenAI function-calling schemas) ──────────
+
+// assistantToolDefinitionsFor is the tool list offered to the model for one
+// run: every always-on tool, plus search_web only when the operator has
+// switched web search on (ADR 0159). Off, the tool is not in the request at
+// all.
+func assistantToolDefinitionsFor(webSearch bool) []openRouterTool {
+	tools := assistantToolDefinitions()
+	if webSearch {
+		tools = append(tools, assistantSearchWebToolDefinition())
+	}
+	return tools
+}
 
 func assistantToolDefinitions() []openRouterTool {
 	return []openRouterTool{
@@ -803,6 +822,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeSearchDocuments(ctx, args)
 	case "read_document":
 		return d.executeReadDocument(ctx, args)
+	case "search_web":
+		return d.executeSearchWeb(ctx, args)
 	case "get_nearby_vessels":
 		return d.executeGetNearbyVessels(ctx, args)
 	case "check_signalk_paths":
@@ -896,6 +917,16 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return "Reading a document…"
 		}
 		return fmt.Sprintf("Reading document %s…", id)
+	case "search_web":
+		var a assistantSearchWebArgs
+		query := ""
+		if json.Unmarshal(args, &a) == nil {
+			query = strings.TrimSpace(a.Query)
+		}
+		if query == "" {
+			return "Searching the web…"
+		}
+		return fmt.Sprintf("Searching the web for %q…", query)
 	case "get_nearby_vessels":
 		var a assistantGetNearbyVesselsArgs
 		vesselName := ""
