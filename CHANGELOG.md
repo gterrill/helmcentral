@@ -52,6 +52,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   filter alarm notifications on their text, check your filters after
   upgrading. The anchor drag alarm now reads "Anchor 45 m from the drop point".
 
+### Fixed
+
+- The Battery & Power tile's charge rate (%/h) and time to full or empty now
+  need the house bank's capacity, either reported by the battery monitor or
+  set in **Settings → Vessel**. Without it they show a dash, instead of a
+  figure that flickered and mostly read nothing. When the battery monitor
+  stops reporting current, they and the Net readout show a dash rather than a
+  false 1 A discharge.
+
 ## [0.39.0] - 2026-10-02
 
 ### Added
