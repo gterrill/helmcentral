@@ -42,6 +42,12 @@ function parseAlt(v: unknown): number | null {
   return typeof v === 'number' && v >= 0 ? v : null
 }
 
+// Bank current and power are signed (negative is discharge), so the backend's
+// "unknown" is -1 exactly rather than any negative value.
+function parseSigned(v: unknown): number | null {
+  return typeof v === 'number' && v !== -1 ? v : null
+}
+
 export function useElectricalState() {
   const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
   const [batterySocPercent, setBatterySocPercent] = useState<number | null>(null)
@@ -64,9 +70,6 @@ export function useElectricalState() {
   const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
 
   useEffect(() => {
-    let previousSocSample: { socPercent: number; timestampMs: number } | null = null
-    let smoothedChargeRatePercentPerHour: number | null = null
-
     const applyElectricalState = (payload: unknown) => {
       try {
         const data = payload as ElectricalState
@@ -76,8 +79,8 @@ export function useElectricalState() {
 
         setLastUpdateAgeS(parseAlt(data.last_update_age_s))
         setBatterySocPercent(nextBatterySocPercent)
-        setChargingCurrentA(typeof data.charging_current_a === 'number' ? data.charging_current_a : null)
-        setChargingPowerW(typeof data.charging_power_w === 'number' ? data.charging_power_w : null)
+        setChargingCurrentA(parseSigned(data.charging_current_a))
+        setChargingPowerW(parseSigned(data.charging_power_w))
         setSolarOutputW(typeof data.solar_output_w === 'number' && data.solar_output_w >= 0 ? data.solar_output_w : null)
         setAcOutputW(typeof data.ac_output_w === 'number' && data.ac_output_w >= 0 ? data.ac_output_w : null)
         setDc12vPowerW(typeof data.dc_12v_power_w === 'number' && data.dc_12v_power_w >= 0 ? data.dc_12v_power_w : null)
@@ -94,41 +97,17 @@ export function useElectricalState() {
 
         const batteryCapacityAh =
           typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
-        const chargingCurrentA =
-          typeof data.charging_current_a === 'number' ? data.charging_current_a : null
+        const chargingCurrentA = parseSigned(data.charging_current_a)
 
         if (nextBatterySocPercent === null) {
-          previousSocSample = null
-          smoothedChargeRatePercentPerHour = null
           setBatteryRatePercentPerHour(null)
           setTimeToGoHours(null)
           return
         }
 
-        const parsedTimestampMs = Date.parse(data.datetime)
-        const sampleTimestampMs = Number.isFinite(parsedTimestampMs) ? parsedTimestampMs : Date.now()
-        const currentSample = { socPercent: nextBatterySocPercent, timestampMs: sampleTimestampMs }
-
-        if (previousSocSample !== null) {
-          const elapsedHours = (currentSample.timestampMs - previousSocSample.timestampMs) / (60 * 60 * 1000)
-          if (elapsedHours > 0) {
-            const instantRatePercentPerHour = (currentSample.socPercent - previousSocSample.socPercent) / elapsedHours
-            if (Number.isFinite(instantRatePercentPerHour)) {
-              const alpha = 0.35
-              smoothedChargeRatePercentPerHour =
-                smoothedChargeRatePercentPerHour === null
-                  ? instantRatePercentPerHour
-                  : alpha * instantRatePercentPerHour + (1 - alpha) * smoothedChargeRatePercentPerHour
-            }
-          }
-        }
-
-        previousSocSample = currentSample
-
-        let rate = smoothedChargeRatePercentPerHour
-        if (batteryCapacityAh !== null && chargingCurrentA !== null && batteryCapacityAh > 0) {
-          rate = (chargingCurrentA / batteryCapacityAh) * 100
-        }
+        // Rate comes only from the configured house bank capacity; no estimate from SoC deltas.
+        const rate =
+          batteryCapacityAh !== null && chargingCurrentA !== null ? (chargingCurrentA / batteryCapacityAh) * 100 : null
 
         if (rate === null || !Number.isFinite(rate) || Math.abs(rate) <= 0.01) {
           setBatteryRatePercentPerHour(null)
