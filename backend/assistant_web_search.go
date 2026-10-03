@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -83,17 +84,71 @@ func assistantSearchWebToolDefinition() openRouterTool {
 // citations are all errors, never an empty success (AGENTS.md's fallback
 // policy). The key is only ever placed in the Authorization header; no error
 // or log line here includes it.
-func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, model, query string) ([]assistantWebResult, error) {
+// assistantUsageSink collects the usage of the search sub-requests made during
+// one run, so the runner can add it to the reply's cost and token totals the
+// same way it adds each main turn's. Tool calls in one round run concurrently,
+// hence the mutex.
+type assistantUsageSink struct {
+	mu    sync.Mutex
+	usage openRouterUsage
+}
+
+func (s *assistantUsageSink) add(u openRouterUsage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage.PromptTokens += u.PromptTokens
+	s.usage.CompletionTokens += u.CompletionTokens
+	s.usage.TotalTokens += u.TotalTokens
+	s.usage.Cost += u.Cost
+}
+
+// drain returns what has been collected since the last drain and resets.
+func (s *assistantUsageSink) drain() openRouterUsage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.usage
+	s.usage = openRouterUsage{}
+	return u
+}
+
+// drainUsage makes assistantToolDeps an assistantUsageReporter.
+func (d assistantToolDeps) drainUsage() openRouterUsage {
+	if d.searchUsage == nil {
+		return openRouterUsage{}
+	}
+	return d.searchUsage.drain()
+}
+
+// withWebSearch wires search_web: each search runs through doer with the
+// model modelFn returns (read per call, so a Settings change applies at once;
+// an error from it, such as a blank model, fails the search), and its usage is
+// collected for the run's cost.
+func (d assistantToolDeps) withWebSearch(doer openRouterDoer, apiKey string, modelFn func() (string, error)) assistantToolDeps {
+	sink := &assistantUsageSink{}
+	d.searchUsage = sink
+	d.webSearch = func(ctx context.Context, query string) ([]assistantWebResult, error) {
+		model, err := modelFn()
+		if err != nil {
+			return nil, err
+		}
+		results, usage, err := assistantWebSearch(ctx, doer, apiKey, model, query)
+		sink.add(usage)
+		return results, err
+	}
+	return d
+}
+
+func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, model, query string) ([]assistantWebResult, openRouterUsage, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return nil, fmt.Errorf("web search failed: no search model is set; choose one under Settings, Mate, Web search (assistant.web_search_model)")
+		return nil, openRouterUsage{}, fmt.Errorf("web search failed: no search model is set; choose one under Settings, Mate, Web search (assistant.web_search_model)")
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("web search failed: query must not be empty")
+		return nil, openRouterUsage{}, fmt.Errorf("web search failed: query must not be empty")
 	}
 	if len([]rune(query)) > assistantWebSearchMaxQuery {
-		return nil, fmt.Errorf("web search failed: query must be %d characters or fewer", assistantWebSearchMaxQuery)
+		return nil, openRouterUsage{}, fmt.Errorf("web search failed: query must be %d characters or fewer", assistantWebSearchMaxQuery)
 	}
 
 	req := openRouterChatRequest{
@@ -106,7 +161,7 @@ func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, model,
 	}
 	resp, err := openRouterChatCompletionOnce(ctx, doer, apiKey, req)
 	if err != nil {
-		return nil, fmt.Errorf("web search failed: %w", err)
+		return nil, openRouterUsage{}, fmt.Errorf("web search failed: %w", err)
 	}
 
 	seen := map[string]bool{}
@@ -131,9 +186,9 @@ func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, model,
 		})
 	}
 	if len(results) == 0 {
-		return nil, fmt.Errorf("web search failed: no results for %q", query)
+		return nil, resp.Usage, fmt.Errorf("web search failed: no results for %q", query)
 	}
-	return results, nil
+	return results, resp.Usage, nil
 }
 
 // assistantWebText flattens web text to one bounded line and removes the

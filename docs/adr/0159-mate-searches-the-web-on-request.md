@@ -91,9 +91,10 @@ switches on **Web search** under Settings, Mate. It is off by default.
 ## Consequences
 
 - Each search costs a few tenths of a cent through OpenRouter (the Exa engine
-  is billed per request), added to the reply's cost footer only through the
-  tokens of the main turn. The search's own charge appears on the OpenRouter
-  account, not in Mate's footer.
+  is billed per request). The search request asks OpenRouter for its usage, and
+  the run adds each search's cost and tokens to the reply's totals alongside
+  the main turns', so the footer covers searches. A search whose response
+  reports no usage adds nothing; no figure is invented.
 - A question sent to the search carries Mate's query text to OpenRouter and
   its search engine. The query is written by the model and can include place
   names and details from the conversation.

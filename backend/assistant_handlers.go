@@ -812,17 +812,16 @@ var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter ass
 	tools := assistantProductionToolDeps(settingsPath)
 	tools.today = today
 	if webSearch {
-		tools.webSearch = func(ctx context.Context, query string) ([]assistantWebResult, error) {
-			// Read fresh on every call so a Settings change applies to the very
-			// next search; a blank or unreadable model is an error, never a
-			// substituted default.
+		// The model is read fresh on every call so a Settings change applies
+		// to the very next search; a blank or unreadable model is an error,
+		// never a substituted default.
+		tools = tools.withWebSearch(openRouterHTTPClient, apiKey, func() (string, error) {
 			settings, err := readSettings(settingsPath)
 			if err != nil {
-				return nil, fmt.Errorf("web search failed: read settings: %w", err)
+				return "", fmt.Errorf("web search failed: read settings: %w", err)
 			}
-			model := buildSettingsPayload(settings).Assistant.WebSearchModel
-			return assistantWebSearch(ctx, openRouterHTTPClient, apiKey, model, query)
-		}
+			return buildSettingsPayload(settings).Assistant.WebSearchModel, nil
+		})
 	}
 	return &assistantRunner{
 		doer:       openRouterHTTPClient,

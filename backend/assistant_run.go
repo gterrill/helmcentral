@@ -319,6 +319,13 @@ type assistantToolExecutor interface {
 	execute(ctx context.Context, name string, args json.RawMessage) (string, error)
 }
 
+// assistantUsageReporter is implemented by a tool executor whose tools make
+// OpenRouter calls of their own; drainUsage returns the usage accrued since
+// the last call.
+type assistantUsageReporter interface {
+	drainUsage() openRouterUsage
+}
+
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
 	doer       openRouterDoer
@@ -783,6 +790,14 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
 		if terr != nil {
 			return assistantReply{}, terr
+		}
+		// Tools that make their own OpenRouter calls (search_web) report what
+		// those cost, so the reply's footer covers them too.
+		if reporter, ok := r.tools.(assistantUsageReporter); ok {
+			u := reporter.drainUsage()
+			reply.PromptTokens += u.PromptTokens
+			reply.CompletionTokens += u.CompletionTokens
+			reply.CostUSD += u.Cost
 		}
 		messages = append(messages, toolMessages...)
 

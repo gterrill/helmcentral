@@ -137,6 +137,9 @@ type assistantToolDeps struct {
 	// switched web search on, in which case the tool is not offered either;
 	// a call that arrives anyway is refused rather than guessed at.
 	webSearch func(ctx context.Context, query string) ([]assistantWebResult, error)
+	// searchUsage collects the web search sub-requests' usage for the run's
+	// cost (withWebSearch). nil when web search is not wired.
+	searchUsage *assistantUsageSink
 	// signalKPositionHistory is get_nearby_vessels' seam into the SignalK
 	// History API (fetchSignalKPositionHistory, signalk.go, ADR 0128) for a
 	// vessel's own logged dwell at its current position - a separate,

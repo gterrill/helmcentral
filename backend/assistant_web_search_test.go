@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -65,7 +67,7 @@ func TestAssistantToolDefinitionsFor_WebSearchOnAddsTool(t *testing.T) {
 
 func TestAssistantWebSearch_RequestCarriesWebPluginAndQuery(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, webSearchFixture)}}
-	if _, err := assistantWebSearch(context.Background(), doer, "sk-test", "test/search-model", "Bona Bay anchorage"); err != nil {
+	if _, _, err := assistantWebSearch(context.Background(), doer, "sk-test", "test/search-model", "Bona Bay anchorage"); err != nil {
 		t.Fatalf("assistantWebSearch: %v", err)
 	}
 	if len(doer.bodies) != 1 {
@@ -97,7 +99,7 @@ func TestAssistantWebSearch_RequestCarriesWebPluginAndQuery(t *testing.T) {
 
 func TestAssistantWebSearch_ParsesCitations(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, webSearchFixture)}}
-	results, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
+	results, _, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err != nil {
 		t.Fatalf("assistantWebSearch: %v", err)
 	}
@@ -117,7 +119,7 @@ func TestAssistantWebSearch_ParsesCitations(t *testing.T) {
 
 func TestAssistantWebSearch_ErrorsOnNon2xx(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(402, `{"error":{"message":"insufficient credits"}}`)}}
-	_, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
+	_, _, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "web search failed") || !strings.Contains(err.Error(), "insufficient credits") {
 		t.Fatalf("expected a 'web search failed' error naming the cause, got %v", err)
 	}
@@ -125,7 +127,7 @@ func TestAssistantWebSearch_ErrorsOnNon2xx(t *testing.T) {
 
 func TestAssistantWebSearch_ErrorsOnTransportFailure(t *testing.T) {
 	doer := &fakeOpenRouterDoer{errs: []error{errors.New("dial tcp: no route")}}
-	_, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
+	_, _, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "web search failed") {
 		t.Fatalf("expected a 'web search failed' error, got %v", err)
 	}
@@ -134,7 +136,7 @@ func TestAssistantWebSearch_ErrorsOnTransportFailure(t *testing.T) {
 func TestAssistantWebSearch_ErrorsOnZeroCitations(t *testing.T) {
 	body := `{"choices":[{"message":{"role":"assistant","content":"I could not find anything."}}]}`
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
-	results, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
+	results, _, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "no results") {
 		t.Fatalf("expected a no-results error, got results=%v err=%v", results, err)
 	}
@@ -142,7 +144,7 @@ func TestAssistantWebSearch_ErrorsOnZeroCitations(t *testing.T) {
 
 func TestAssistantWebSearch_RejectsBlankQuery(t *testing.T) {
 	doer := &fakeOpenRouterDoer{}
-	if _, err := assistantWebSearch(context.Background(), doer, "k", "m", "   "); err == nil {
+	if _, _, err := assistantWebSearch(context.Background(), doer, "k", "m", "   "); err == nil {
 		t.Fatal("expected an error for a blank query")
 	}
 	if doer.calls != 0 {
@@ -252,7 +254,7 @@ func TestBuildSettingsPayload_AbsentAssistantBlockDefaultsWebSearchFalse(t *test
 
 func TestAssistantWebSearch_ErrorsOnBlankModel(t *testing.T) {
 	doer := &fakeOpenRouterDoer{}
-	_, err := assistantWebSearch(context.Background(), doer, "k", "  ", "q")
+	_, _, err := assistantWebSearch(context.Background(), doer, "k", "  ", "q")
 	if err == nil || !strings.Contains(err.Error(), "assistant.web_search_model") {
 		t.Fatalf("expected an error naming the setting, got %v", err)
 	}
@@ -318,5 +320,72 @@ func TestPostSettings_AllowsBlankWebSearchModelWhenDisabled(t *testing.T) {
 	})
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%v)", code, body)
+	}
+}
+
+// searchResponseWithUsage is webSearchFixture with a known usage block.
+func searchResponseWithUsage(cost float64, prompt, completion int) string {
+	return strings.Replace(webSearchFixture,
+		`"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.007}`,
+		fmt.Sprintf(`"usage": {"prompt_tokens": %d, "completion_tokens": %d, "total_tokens": %d, "cost": %v}`, prompt, completion, prompt+completion, cost), 1)
+}
+
+func TestAssistantWebSearch_ReturnsTheSearchUsage(t *testing.T) {
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, searchResponseWithUsage(0.0071, 12, 7))}}
+	_, usage, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
+	if err != nil {
+		t.Fatalf("assistantWebSearch: %v", err)
+	}
+	if usage.Cost != 0.0071 || usage.PromptTokens != 12 || usage.CompletionTokens != 7 {
+		t.Fatalf("unexpected usage %+v", usage)
+	}
+}
+
+func TestAssistantRunner_ReplyCostIncludesWebSearchCharges(t *testing.T) {
+	const mainCost1, mainCost2, searchCost = 0.010, 0.020, 0.0071
+	doer := &queuedChatDoer{
+		responses: []*http.Response{
+			toolCallResponse(t, "c1", "search_web", `{"query":"tides"}`, usage(100, 10, mainCost1)),
+			finalResponse(t, "answer", "m", usage(200, 20, mainCost2)),
+		},
+		errs: []error{nil, nil},
+	}
+	searchDoer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, searchResponseWithUsage(searchCost, 30, 5))}}
+	tools := assistantToolDeps{}.withWebSearch(searchDoer, "k", func() (string, error) { return "m", nil })
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", webSearch: true, tools: tools, emit: emit}
+
+	reply, err := runner.run(context.Background(), "sys", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := mainCost1 + mainCost2 + searchCost
+	if math.Abs(reply.CostUSD-want) > 1e-9 {
+		t.Fatalf("expected cost %v (main turns plus search), got %v", want, reply.CostUSD)
+	}
+	if reply.PromptTokens != 100+200+30 || reply.CompletionTokens != 10+20+5 {
+		t.Fatalf("expected search tokens included, got %d/%d", reply.PromptTokens, reply.CompletionTokens)
+	}
+}
+
+func TestAssistantRunner_SearchWithNoUsageAddsNothing(t *testing.T) {
+	body := `{"choices":[{"message":{"role":"assistant","content":"x","annotations":[{"type":"url_citation","url_citation":{"url":"https://example.com/a","title":"A","content":"c"}}]}}]}`
+	doer := &queuedChatDoer{
+		responses: []*http.Response{
+			toolCallResponse(t, "c1", "search_web", `{"query":"tides"}`, usage(1, 1, 0.01)),
+			finalResponse(t, "answer", "m", usage(1, 1, 0.02)),
+		},
+		errs: []error{nil, nil},
+	}
+	searchDoer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+	tools := assistantToolDeps{}.withWebSearch(searchDoer, "k", func() (string, error) { return "m", nil })
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", webSearch: true, tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "sys", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if math.Abs(reply.CostUSD-0.03) > 1e-9 {
+		t.Fatalf("a search with no usage must add nothing, got %v", reply.CostUSD)
 	}
 }
