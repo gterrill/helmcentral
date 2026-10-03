@@ -9,6 +9,7 @@ export interface POIProviderInfo {
 export function usePOIProviders() {
   const [providers, setProviders] = useState<POIProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -22,6 +23,7 @@ export function usePOIProviders() {
         setProviders(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error('Error fetching POI providers:', error)
+        setError(error instanceof Error ? error.message : String(error))
       } finally {
         setLoading(false)
       }
@@ -30,5 +32,5 @@ export function usePOIProviders() {
     void fetchProviders()
   }, [])
 
-  return { providers, loading }
+  return { providers, loading, error }
 }

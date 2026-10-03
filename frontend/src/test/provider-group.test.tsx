@@ -29,6 +29,10 @@ describe('ProviderGroup tide provider default', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="tide"
             providers={[
               { id: 'bom', name: 'Bureau of Meteorology', description: 'Australian tide data' },
@@ -57,6 +61,10 @@ describe('ProviderGroup tide provider default', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="weather"
             providers={[
               { id: 'open-meteo', name: 'Open-Meteo', description: 'Free worldwide weather data' },
@@ -85,6 +93,10 @@ describe('ProviderGroup tide provider default', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="poi"
             providers={[
               { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless POI data from OpenStreetMap' },
@@ -116,6 +128,10 @@ describe('ProviderGroup tide provider default', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="place-names"
             providers={[
               { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless place names from OpenStreetMap' },
@@ -166,6 +182,10 @@ describe('ProviderGroup tide provider default', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="place-names"
             providers={[
               { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless place names from OpenStreetMap' },
@@ -207,6 +227,10 @@ describe('ProviderGroup activation failure', () => {
       <SettingsFormProvider>
         <SecretsStatusProvider>
           <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
             type="weather"
             providers={[
               { id: 'open-meteo', name: 'Open-Meteo', description: 'Free worldwide weather data' },

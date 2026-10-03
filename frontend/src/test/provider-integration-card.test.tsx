@@ -5,6 +5,7 @@ import { ProviderIntegrationCard } from '@/components/settings/provider-integrat
 describe('ProviderIntegrationCard', () => {
   it('renders the already-active card with its switch checked and disabled', () => {
     render(
+      <ul>
       <ProviderIntegrationCard
         id="bom"
         name="Bureau of Meteorology"
@@ -12,7 +13,8 @@ describe('ProviderIntegrationCard', () => {
         active
         onActivate={vi.fn()}
         onOpenSettings={vi.fn()}
-      />,
+      />
+      </ul>,
     )
 
     const switchEl = screen.getByRole('switch', { name: /activate bureau of meteorology/i })
@@ -23,6 +25,7 @@ describe('ProviderIntegrationCard', () => {
   it('calls the activate callback with its id when an inactive card is switched on', () => {
     const onActivate = vi.fn()
     render(
+      <ul>
       <ProviderIntegrationCard
         id="noaa"
         name="NOAA"
@@ -30,7 +33,8 @@ describe('ProviderIntegrationCard', () => {
         active={false}
         onActivate={onActivate}
         onOpenSettings={vi.fn()}
-      />,
+      />
+      </ul>,
     )
 
     const switchEl = screen.getByRole('switch', { name: /activate noaa/i })
@@ -43,6 +47,7 @@ describe('ProviderIntegrationCard', () => {
   it('calls onOpenSettings with its id when the Settings button is clicked, regardless of active state', () => {
     const onOpenSettings = vi.fn()
     render(
+      <ul>
       <ProviderIntegrationCard
         id="noaa"
         name="NOAA"
@@ -50,7 +55,8 @@ describe('ProviderIntegrationCard', () => {
         active={false}
         onActivate={vi.fn()}
         onOpenSettings={onOpenSettings}
-      />,
+      />
+      </ul>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))

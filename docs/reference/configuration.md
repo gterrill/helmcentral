@@ -112,7 +112,7 @@ section, set from the Settings UI.
 
 The Overpass server is the `osm-overpass` points-of-interest plugin's own
 setting, not an app-level one. The gear icon on osm-overpass's card, under
-either **Settings → Tiles → Nearby** or **Settings → Tiles → Place names**,
+either **Settings → Plugins → Nearby** or **Settings → Plugins → Place names**,
 opens the same **Overpass server** field. There is no environment-variable
 override and no `settings.yaml` entry. Saving it takes effect on the
 plugin's next call with no restart needed. Blank (the default) uses the

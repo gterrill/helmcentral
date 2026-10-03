@@ -10,7 +10,7 @@ can't be done.
 | Lookup | What it reads | Comes from | Needs configured | If it can't run |
 | --- | --- | --- | --- | --- |
 | Live vessel context | Position, heading, speed, apparent wind, current place name, marine warning in force | The dashboard's own live feed, exactly as shown right now | Nothing extra; always included | A missing reading reads as "unknown", never a guessed number |
-| Place lookup | Resolves a named place to a position | Your saved route waypoints first, then the configured place-names plugin, searched within about 100 nautical miles of the boat | A place-names plugin (**Settings → Tiles → Place names**; OpenStreetMap by default) | Says the name didn't resolve |
+| Place lookup | Resolves a named place to a position | Your saved route waypoints first, then the configured place-names plugin, searched within about 100 nautical miles of the boat | A place-names plugin (**Settings → Plugins → Place names**; OpenStreetMap by default) | Says the name didn't resolve |
 | Forecast for a place | Wind and wave forecast for a named place, not just where you are now | The same providers the Forecast panel uses | A forecast provider configured | Names the provider that failed |
 | Tide for a place | Tide predictions for a named place | The same tide provider and station catalog the dashboard uses | A tide provider and station | Says no tide provider is configured |
 | Passage wind and sea angle | True wind and sea angle against a planned course | Worked out from the forecast lookup above, not estimated by a language model | A course to compare against | - |

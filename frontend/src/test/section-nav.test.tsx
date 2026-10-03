@@ -10,7 +10,7 @@ import { SectionNav } from '@/components/section-nav'
 // via their thin wrappers.
 describe('SectionNav', () => {
   const groups = [
-    { label: 'Boat & app', items: [{ id: 'general', label: 'General' }, { id: 'tiles', label: 'Tiles' }] },
+    { label: 'Boat & app', items: [{ id: 'general', label: 'General' }, { id: 'plugins', label: 'Plugins' }] },
     { label: 'Connections', items: [{ id: 'signalk', label: 'SignalK' }] },
   ]
 
@@ -26,16 +26,16 @@ describe('SectionNav', () => {
 
     expect(screen.getByRole('button', { name: 'SignalK' }).getAttribute('aria-current')).toBe('true')
     expect(screen.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Tiles' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Plugins' }).getAttribute('aria-current')).toBeNull()
   })
 
   it('calls onSelect with the clicked item id', () => {
     const onSelect = vi.fn()
     render(<SectionNav groups={groups} activeId="general" onSelect={onSelect} aria-label="Settings sections" />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tiles' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Plugins' }))
 
-    expect(onSelect).toHaveBeenCalledWith('tiles')
+    expect(onSelect).toHaveBeenCalledWith('plugins')
   })
 
   it('wraps the nav in a landmark with the given accessible name', () => {

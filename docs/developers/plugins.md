@@ -197,8 +197,8 @@ Mate's `find_places` tool. Both exports are optional and both are required
 together: a plugin exporting only one is treated as supporting neither.
 There is no separate plugin kind or directory for this; the operator picks
 which installed, supporting `poi` plugin answers place-name questions via
-`ui.place_name_provider` (Settings → Tiles → Place names),
-independently of `ui.poi_provider` (Settings → Tiles → Nearby) - the two
+`ui.place_name_provider` (Settings → Plugins → Place names),
+independently of `ui.poi_provider` (Settings → Plugins → Nearby) - the two
 commonly name the same plugin but need not.
 
 | Export | Input | Returns |

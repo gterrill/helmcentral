@@ -13,6 +13,7 @@ export interface PlaceNameProviderInfo {
 export function usePlaceNameProviders() {
   const [providers, setProviders] = useState<PlaceNameProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -26,6 +27,7 @@ export function usePlaceNameProviders() {
         setProviders(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error('Error fetching place-name providers:', error)
+        setError(error instanceof Error ? error.message : String(error))
       } finally {
         setLoading(false)
       }
@@ -34,5 +36,5 @@ export function usePlaceNameProviders() {
     void fetchProviders()
   }, [])
 
-  return { providers, loading }
+  return { providers, loading, error }
 }
