@@ -179,8 +179,8 @@ type electricalStateData struct {
 	Datetime            time.Time
 	BatterySocPercent   float64
 	BatteryCapacityAh   float64
-	ChargingCurrentA    float64
-	ChargingPowerW      float64
+	ChargingCurrentA    *float64 // nil when unreported; signed, so no sentinel number fits
+	ChargingPowerW      *float64
 	SolarOutputW        float64
 	ACOutputW           float64
 	DC12VPowerW         float64
@@ -1398,8 +1398,6 @@ func buildElectricalStatePayload() map[string]any {
 		Datetime:            time.Now().UTC(),
 		BatterySocPercent:   -1,
 		BatteryCapacityAh:   -1,
-		ChargingCurrentA:    -1,
-		ChargingPowerW:      -1,
 		SolarOutputW:        -1,
 		ACOutputW:           -1,
 		DC12VPowerW:         -1,

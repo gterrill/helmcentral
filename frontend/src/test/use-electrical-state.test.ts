@@ -38,11 +38,20 @@ describe('useElectricalState charge rate', () => {
     expect(result.current.timeToGoHours).toBeCloseTo(47 / 1.4375, 4)
   })
 
-  it('reports no rate when the bank current is unknown (the backend sends -1)', () => {
+  it('reports no rate when the bank current is unknown (the backend sends null)', () => {
     const { result } = renderHook(() => useElectricalState())
-    emit({ datetime: '2026-09-14T00:00:00Z', battery_soc_percent: 53, battery_capacity_ah: 200, charging_current_a: -1 })
+    emit({ datetime: '2026-09-14T00:00:00Z', battery_soc_percent: 53, battery_capacity_ah: 200, charging_current_a: null })
+    expect(result.current.chargingCurrentA).toBeNull()
     expect(result.current.batteryRatePercentPerHour).toBeNull()
     expect(result.current.timeToGoHours).toBeNull()
+  })
+
+  it('keeps a real -1 A discharge', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', battery_soc_percent: 50, battery_capacity_ah: 200, charging_current_a: -1, charging_power_w: -1 })
+    expect(result.current.chargingCurrentA).toBe(-1)
+    expect(result.current.chargingPowerW).toBe(-1)
+    expect(result.current.batteryRatePercentPerHour).toBeCloseTo(-0.5, 4)
   })
 
   it('still reports a real discharge', () => {
