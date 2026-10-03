@@ -538,6 +538,9 @@ func TestAssistantModelsHandler_CapabilityFiltersOneCachedCatalogue(t *testing.T
 	if got := ids("/api/assistant/models?capability=images"); !reflect.DeepEqual(got, []string{"vendor/vision-only", "vendor/vision-tools"}) {
 		t.Fatalf("images capability, got %v", got)
 	}
+	if got := ids("/api/assistant/models?capability=all"); !reflect.DeepEqual(got, []string{"vendor/plain", "vendor/tools-only", "vendor/vision-only", "vendor/vision-tools"}) {
+		t.Fatalf("all capability lists every model, got %v", got)
+	}
 	if len(fake.requests) != 1 {
 		t.Fatalf("expected one upstream call across capabilities, got %d", len(fake.requests))
 	}

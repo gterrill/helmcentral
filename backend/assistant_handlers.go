@@ -432,14 +432,16 @@ func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
 //
 // capability=tools (default) lists models that can call tools, the Mate
 // chat requirement; capability=images lists models that accept image input,
-// the document indexing requirement. Anything else is a 400.
+// the document indexing requirement; capability=all applies no filter, for
+// the web search model, which is called with no tools and no image input.
+// Anything else is a 400.
 func assistantModelsHandler(c echo.Context) error {
 	capability := strings.TrimSpace(c.QueryParam("capability"))
 	if capability == "" {
 		capability = "tools"
 	}
-	if capability != "tools" && capability != "images" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "capability must be tools or images"})
+	if capability != "tools" && capability != "images" && capability != "all" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "capability must be tools, images or all"})
 	}
 	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
 	searchQuery := c.QueryParam("q")
@@ -469,7 +471,7 @@ func assistantModelsHandler(c echo.Context) error {
 	// concurrent reader.
 	models := make([]assistantModelOption, 0, len(cached))
 	for _, model := range cached {
-		if (capability == "tools" && model.SupportsTools) || (capability == "images" && model.SupportsImages) {
+		if capability == "all" || (capability == "tools" && model.SupportsTools) || (capability == "images" && model.SupportsImages) {
 			models = append(models, model)
 		}
 	}
@@ -811,7 +813,15 @@ var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter ass
 	tools.today = today
 	if webSearch {
 		tools.webSearch = func(ctx context.Context, query string) ([]assistantWebResult, error) {
-			return assistantWebSearch(ctx, openRouterHTTPClient, apiKey, query)
+			// Read fresh on every call so a Settings change applies to the very
+			// next search; a blank or unreadable model is an error, never a
+			// substituted default.
+			settings, err := readSettings(settingsPath)
+			if err != nil {
+				return nil, fmt.Errorf("web search failed: read settings: %w", err)
+			}
+			model := buildSettingsPayload(settings).Assistant.WebSearchModel
+			return assistantWebSearch(ctx, openRouterHTTPClient, apiKey, model, query)
 		}
 	}
 	return &assistantRunner{

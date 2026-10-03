@@ -15,16 +15,18 @@ import (
 // the operator's existing OpenRouter key. The results are page excerpts from
 // strangers, so they reach the model as marked-untrusted data.
 
-// assistantWebSearchModel answers the search sub-request. It never writes
-// the answer Mate gives: only the plugin's url_citation annotations are read,
-// so the cheapest tool-free model is enough, and it is deliberately not the
-// operator's chat model (a large model would bill its full rate to rephrase
-// results nobody reads).
-const assistantWebSearchModel = "google/gemini-2.5-flash-lite"
+// defaultWebSearchModel is what assistant.web_search_model holds until the
+// operator picks another (ADR 0159). The model only carries the search: the
+// plugin's url_citation annotations are read and its prose is thrown away, so
+// a cheap tool-free model is enough. It is a setting, not a constant, because
+// models and their prices change faster than releases.
+// Keep in step with defaultWebSearchModel in
+// frontend/src/components/settings/sections/assistant-section.tsx.
+const defaultWebSearchModel = "google/gemini-2.5-flash-lite"
 
 // assistantWebSearchEngine pins the plugin's engine so every call returns
-// the same url_citation shape and a flat per-search price regardless of the
-// model above.
+// the same url_citation shape and a flat per-search price whichever model
+// the operator chose. It is deliberately not a setting.
 const assistantWebSearchEngine = "exa"
 
 const assistantWebSearchMaxResults = 5
@@ -81,7 +83,11 @@ func assistantSearchWebToolDefinition() openRouterTool {
 // citations are all errors, never an empty success (AGENTS.md's fallback
 // policy). The key is only ever placed in the Authorization header; no error
 // or log line here includes it.
-func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, query string) ([]assistantWebResult, error) {
+func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, model, query string) ([]assistantWebResult, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, fmt.Errorf("web search failed: no search model is set; choose one under Settings, Mate, Web search (assistant.web_search_model)")
+	}
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("web search failed: query must not be empty")
@@ -91,7 +97,7 @@ func assistantWebSearch(ctx context.Context, doer openRouterDoer, apiKey, query 
 	}
 
 	req := openRouterChatRequest{
-		Model: assistantWebSearchModel,
+		Model: model,
 		Messages: []openRouterMessage{
 			{Role: "user", Content: openRouterContent("Search the web for: " + query + "\n\nList the most relevant results.")},
 		},

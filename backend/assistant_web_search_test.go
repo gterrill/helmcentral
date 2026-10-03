@@ -65,7 +65,7 @@ func TestAssistantToolDefinitionsFor_WebSearchOnAddsTool(t *testing.T) {
 
 func TestAssistantWebSearch_RequestCarriesWebPluginAndQuery(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, webSearchFixture)}}
-	if _, err := assistantWebSearch(context.Background(), doer, "sk-test", "Bona Bay anchorage"); err != nil {
+	if _, err := assistantWebSearch(context.Background(), doer, "sk-test", "test/search-model", "Bona Bay anchorage"); err != nil {
 		t.Fatalf("assistantWebSearch: %v", err)
 	}
 	if len(doer.bodies) != 1 {
@@ -84,8 +84,8 @@ func TestAssistantWebSearch_RequestCarriesWebPluginAndQuery(t *testing.T) {
 	if len(req.Tools) != 0 {
 		t.Fatalf("search request must carry no tools, got %+v", req.Tools)
 	}
-	if req.Model != assistantWebSearchModel {
-		t.Fatalf("expected model %q, got %q", assistantWebSearchModel, req.Model)
+	if req.Model != "test/search-model" {
+		t.Fatalf("expected the configured model, got %q", req.Model)
 	}
 	if !strings.Contains(string(doer.bodies[0]), "Bona Bay anchorage") {
 		t.Fatalf("query missing from request body: %s", doer.bodies[0])
@@ -97,7 +97,7 @@ func TestAssistantWebSearch_RequestCarriesWebPluginAndQuery(t *testing.T) {
 
 func TestAssistantWebSearch_ParsesCitations(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, webSearchFixture)}}
-	results, err := assistantWebSearch(context.Background(), doer, "k", "q")
+	results, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err != nil {
 		t.Fatalf("assistantWebSearch: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAssistantWebSearch_ParsesCitations(t *testing.T) {
 
 func TestAssistantWebSearch_ErrorsOnNon2xx(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(402, `{"error":{"message":"insufficient credits"}}`)}}
-	_, err := assistantWebSearch(context.Background(), doer, "k", "q")
+	_, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "web search failed") || !strings.Contains(err.Error(), "insufficient credits") {
 		t.Fatalf("expected a 'web search failed' error naming the cause, got %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAssistantWebSearch_ErrorsOnNon2xx(t *testing.T) {
 
 func TestAssistantWebSearch_ErrorsOnTransportFailure(t *testing.T) {
 	doer := &fakeOpenRouterDoer{errs: []error{errors.New("dial tcp: no route")}}
-	_, err := assistantWebSearch(context.Background(), doer, "k", "q")
+	_, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "web search failed") {
 		t.Fatalf("expected a 'web search failed' error, got %v", err)
 	}
@@ -134,7 +134,7 @@ func TestAssistantWebSearch_ErrorsOnTransportFailure(t *testing.T) {
 func TestAssistantWebSearch_ErrorsOnZeroCitations(t *testing.T) {
 	body := `{"choices":[{"message":{"role":"assistant","content":"I could not find anything."}}]}`
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
-	results, err := assistantWebSearch(context.Background(), doer, "k", "q")
+	results, err := assistantWebSearch(context.Background(), doer, "k", "m", "q")
 	if err == nil || !strings.Contains(err.Error(), "no results") {
 		t.Fatalf("expected a no-results error, got results=%v err=%v", results, err)
 	}
@@ -142,7 +142,7 @@ func TestAssistantWebSearch_ErrorsOnZeroCitations(t *testing.T) {
 
 func TestAssistantWebSearch_RejectsBlankQuery(t *testing.T) {
 	doer := &fakeOpenRouterDoer{}
-	if _, err := assistantWebSearch(context.Background(), doer, "k", "   "); err == nil {
+	if _, err := assistantWebSearch(context.Background(), doer, "k", "m", "   "); err == nil {
 		t.Fatal("expected an error for a blank query")
 	}
 	if doer.calls != 0 {
@@ -247,5 +247,76 @@ func TestSettingsPayloadRoundTripsAssistantWebSearch(t *testing.T) {
 func TestBuildSettingsPayload_AbsentAssistantBlockDefaultsWebSearchFalse(t *testing.T) {
 	if buildSettingsPayload(map[string]any{}).Assistant.WebSearch {
 		t.Fatal("expected assistant.web_search to default to false")
+	}
+}
+
+func TestAssistantWebSearch_ErrorsOnBlankModel(t *testing.T) {
+	doer := &fakeOpenRouterDoer{}
+	_, err := assistantWebSearch(context.Background(), doer, "k", "  ", "q")
+	if err == nil || !strings.Contains(err.Error(), "assistant.web_search_model") {
+		t.Fatalf("expected an error naming the setting, got %v", err)
+	}
+	if doer.calls != 0 {
+		t.Fatal("a blank model must not reach OpenRouter")
+	}
+}
+
+func TestBuildSettingsPayload_WebSearchModelDefaultsWhenAbsent(t *testing.T) {
+	if got := buildSettingsPayload(map[string]any{}).Assistant.WebSearchModel; got != defaultWebSearchModel {
+		t.Fatalf("expected default %q, got %q", defaultWebSearchModel, got)
+	}
+	got := buildSettingsPayload(map[string]any{"assistant": map[string]any{"enabled": true}}).Assistant.WebSearchModel
+	if got != defaultWebSearchModel {
+		t.Fatalf("absent key must default, got %q", got)
+	}
+}
+
+func TestBuildSettingsPayload_WebSearchModelBlankStaysBlank(t *testing.T) {
+	got := buildSettingsPayload(map[string]any{"assistant": map[string]any{"web_search": true, "web_search_model": ""}}).Assistant.WebSearchModel
+	if got != "" {
+		t.Fatalf("an explicitly blank stored model must stay blank, got %q", got)
+	}
+}
+
+func TestSettingsPayloadRoundTripsAssistantWebSearchModel(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.WebSearch = true
+		p.Assistant.WebSearchModel = " openai/gpt-4o-mini "
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%v)", code, body)
+	}
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Assistant.WebSearchModel; got != "openai/gpt-4o-mini" {
+		t.Fatalf("expected the trimmed model to round-trip, got %q", got)
+	}
+}
+
+func TestPostSettings_RejectsBlankWebSearchModelWhenEnabled(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.WebSearch = true
+		p.Assistant.WebSearchModel = "  "
+	})
+	if code == http.StatusOK {
+		t.Fatalf("expected a rejection, got 200 (%v)", body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "search model") {
+		t.Fatalf("expected a clear message, got %v", body)
+	}
+}
+
+func TestPostSettings_AllowsBlankWebSearchModelWhenDisabled(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.WebSearch = false
+		p.Assistant.WebSearchModel = ""
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%v)", code, body)
 	}
 }

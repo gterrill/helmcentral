@@ -32,10 +32,22 @@ switches on **Web search** under Settings, Mate. It is off by default.
   Exa engine), using the OpenRouter key Mate already holds. Only the
   annotations are read; the sub-request's own prose is thrown away. No new
   account, key or secret.
-- **A fixed cheap model for that request**, `google/gemini-2.5-flash-lite`,
-  not the operator's chat model. The model does no reasoning that reaches the
-  operator, so a large model would only add cost. The engine is pinned so the
-  citation shape and the per-search price do not vary with the model.
+- **The request's model is a setting**, `assistant.web_search_model`, picked
+  in Settings, Mate, Web search from the full model catalogue (no capability
+  filter: the request carries no tools and no images). It defaults to
+  `google/gemini-2.5-flash-lite`. The model does no reasoning that reaches the
+  operator, so a cheap one is right, but models and OpenRouter prices change
+  faster than releases and operators have preferences, so it is not a
+  constant. The default lives in one place per side (`defaultWebSearchModel`
+  in the backend and the settings draft). The engine stays pinned to Exa and
+  is not exposed: that keeps the citation shape and the per-search price the
+  same whichever model is chosen.
+- **A model is required while search is on.** Saving with web search on and a
+  blank model is rejected with a message asking for one. If a stored
+  configuration reaches a search that way anyway (a hand-edited file),
+  `search_web` returns an error naming `assistant.web_search_model`. The
+  default is never substituted at save or search time; it is only what a
+  settings file with no such key reads as.
 - **Off means absent.** With the toggle off the tool is not in the request's
   tool list and the system prompt never mentions it, so a boat that has not
   opted in sees no change and pays nothing.
@@ -69,9 +81,12 @@ switches on **Web search** under Settings, Mate. It is off by default.
 - **A search API of our own (Brave, Tavily, Exa direct).** Rejected for an
   extra account, an extra key to store and another vendor, for a feature the
   existing OpenRouter key already covers.
-- **Reusing the operator's chat model for the sub-request.** Rejected on cost,
-  as above. The configured document model was also considered and rejected: it
-  can be blank or set to anything, and it is chosen for reading images.
+- **Reusing the operator's chat model for the sub-request.** Rejected on cost:
+  a large model would bill its full rate to carry a search. The document model
+  was also considered and rejected: it can be blank and is chosen for reading
+  images.
+- **A hard-coded model.** The first cut. Replaced by the setting above for the
+  price-churn reason given there.
 
 ## Consequences
 
@@ -82,8 +97,8 @@ switches on **Web search** under Settings, Mate. It is off by default.
 - A question sent to the search carries Mate's query text to OpenRouter and
   its search engine. The query is written by the model and can include place
   names and details from the conversation.
-- The search model id is a constant. If OpenRouter retires it, searches fail
-  with the upstream error until the constant is changed.
+- If OpenRouter retires the chosen model, searches fail with the upstream
+  error until another is picked in Settings.
 - The response shape this was built against comes from OpenRouter's published
   documentation. No live response was captured when it was written, so the
   first search on the boat is the first check against real data.

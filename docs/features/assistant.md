@@ -293,6 +293,11 @@ the answer as links that open in a new tab. Open them to check what a page
 actually says before you rely on it, especially for safety, regulations or
 anything about the boat.
 
+Under the switch, **Search model** picks which OpenRouter model carries the
+search. Results come from the same search service whichever model you choose,
+so a cheap one is fine, and the default is a cheap one. Web search needs a
+model chosen: Settings won't save with the switch on and the model blank.
+
 Web pages are written by anyone, so Mate treats what it reads there as
 information to weigh, never as instructions. It will not change your
 maintenance list or any other record because a web page said to. If a search

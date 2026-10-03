@@ -189,6 +189,10 @@ type settingsPayload struct {
 		// outside information (search_web). Off by default; when off the tool
 		// is not offered to the model at all.
 		WebSearch bool `json:"web_search"`
+		// WebSearchModel carries the search sub-request (ADR 0159). Required
+		// while WebSearch is on: a blank value is rejected on save and never
+		// replaced by the default at search time.
+		WebSearchModel string `json:"web_search_model"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -363,6 +367,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"read_aloud":           normalized.Assistant.ReadAloud,
 		"wake_word":            normalized.Assistant.WakeWord,
 		"web_search":           normalized.Assistant.WebSearch,
+		"web_search_model":     normalized.Assistant.WebSearchModel,
 	}
 	settings["units"] = normalized.Units
 
@@ -431,6 +436,16 @@ func (e *settingsValidationError) Error() string { return e.Message }
 // transition, not the steady state, is what makes the check safe to apply to
 // an endpoint that saves everything at once.
 func validateSettingsChange(current, next settingsPayload) *settingsValidationError {
+	// Checked on every save, not only on change: web search on with no search
+	// model can never work, and substituting a default here or at search time
+	// would hide the gap (ADR 0159).
+	if next.Assistant.WebSearch && next.Assistant.WebSearchModel == "" {
+		return &settingsValidationError{
+			Field:   "assistant.web_search_model",
+			Message: "choose a search model before turning on web search",
+		}
+	}
+
 	if next.Signalk.Address != current.Signalk.Address || next.Signalk.Port != current.Signalk.Port {
 		signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
 		vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
@@ -479,6 +494,9 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 
 func buildSettingsPayload(settings map[string]any) settingsPayload {
 	payload := normalizeSettingsPayload(settingsPayload{})
+	// An absent web_search_model defaults; a stored blank stays blank (see the
+	// override in the assistant block below).
+	payload.Assistant.WebSearchModel = defaultWebSearchModel
 	// The true default lives here, not in normalizeSettingsPayload's
 	// baseline call above: that function also normalizes genuine save
 	// requests, where a bare bool can't tell "the operator submitted false"
@@ -671,6 +689,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["wake_word"].(bool); ok {
 			payload.Assistant.WakeWord = v
 		}
+		if raw, ok := assistantMap["web_search_model"]; ok {
+			payload.Assistant.WebSearchModel = strings.TrimSpace(coerceString(raw))
+		}
 		if v, ok := assistantMap["web_search"].(bool); ok {
 			payload.Assistant.WebSearch = v
 		}
@@ -834,6 +855,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
+	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

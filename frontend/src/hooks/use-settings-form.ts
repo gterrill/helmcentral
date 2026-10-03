@@ -73,6 +73,7 @@ export type SettingsPayload = {
     read_aloud?: boolean
     wake_word?: boolean
     web_search?: boolean
+    web_search_model?: string
   }
   // The engines and house bank the anomaly detectors watch. Saved with the
   // rest of Settings. A payload that omits it leaves the stored block alone
