@@ -184,6 +184,10 @@ type assistantToolDeps struct {
 	// zero value means "not supplied", and list_maintenance then fails
 	// rather than guess.
 	today time.Time
+	// watches is start_watch's registry (ADR 0160). Production wires
+	// globalAssistantWatches; nil (a test that never sets it) makes the tool
+	// fail plainly rather than start nothing.
+	watches *assistantWatchRegistry
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -226,6 +230,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
+		watches:                    globalAssistantWatches,
 	}
 }
 
@@ -786,6 +791,7 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		assistantStartWatchToolDefinition(),
 	}
 }
 
@@ -846,6 +852,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetRecord(ctx, args)
 	case assistantProposalToolTag:
 		return d.executeProposeChanges(ctx, args)
+	case "start_watch":
+		return d.executeStartWatch(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -992,6 +1000,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Reading a record…"
 	case assistantProposalToolTag:
 		return "Preparing the changes…"
+	case "start_watch":
+		return "Starting a watch…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}
