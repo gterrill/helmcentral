@@ -23,11 +23,20 @@ function activeZone(value: number | null, zones: GaugeZone[] | undefined): Gauge
  */
 export type GaugeDensity = 'full' | 'compact' | 'hero'
 
-const SHELL: Record<GaugeDensity, string> = {
-  full: 'rounded-md border bg-background/60 px-3 py-3',
-  compact: '',
-  hero: '',
-}
+/**
+ * A standalone gauge sits straight on the tile: the tile border already groups
+ * the reading and carries its severity colour, so a second frame inside it is a
+ * card in a card.
+ */
+/**
+ * The readout of a standalone numeric gauge grows with its tile. The tile body
+ * is a size container (see GaugeTile), so cqh and cqi are its height and width.
+ * Height drives it until the tile is wide, then width caps it so the value and
+ * unit still fit two columns across; 2.25rem is the floor the two-row minimum
+ * height is built on.
+ */
+const FLUID_READOUT_FONT = 'clamp(2.25rem, min(60cqh, 22cqi), 9rem)'
+const FLUID_LAMP_FONT = 'clamp(2.25rem, min(40cqh, 13cqi), 7rem)'
 
 interface GaugeBodyProps {
   config: GaugeWidgetConfig
@@ -99,6 +108,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
   // the reading's own zone (ADR 0081) without GaugeBody reaching back out.
   const converted = displayValue === null ? null : convertFromSI(displayValue, config.quantity, config.unit)
   const zone = activeZone(converted, config.zones)
+  const isFluidDisplay = config.display !== 'radial' && config.display !== 'bar' && config.display !== 'trend'
 
   return (
     <Tile
@@ -106,6 +116,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
       state={zone}
       stale={stale}
       staleLabel={formatDataAge(age)}
+      fill
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
@@ -115,7 +126,19 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
         ) : undefined
       }
     >
-      <GaugeBody config={config} value={displayValue} />
+      {/* The body fills what the tile leaves. Only a numeric or lamp reading,
+          which scales with cq units, is a size container; a bar, dial or chart
+          has to keep contributing its own height to the tile in the stacked
+          layout. Auto margins centre without ever pushing content above the
+          start edge, which justify-center would. */}
+      <div
+        data-testid="gauge-fill"
+        className={`flex min-h-0 flex-1 flex-col${isFluidDisplay ? ' [container-type:size]' : ''}`}
+      >
+        <div className="my-auto">
+          <GaugeBody config={config} value={displayValue} />
+        </div>
+      </div>
     </Tile>
   )
 })
@@ -124,7 +147,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
  * The structural dash, never a zero. A gauge reading 0 when it means "no data"
  * is the dangerous failure — AGENTS.md's zero-state rule exists for this.
  */
-function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass, readoutGapClass }: {
+function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass, readoutGapClass, fluid }: {
   text: string | null
   unitLabel: string
   zone: GaugeZone['state'] | null
@@ -132,13 +155,27 @@ function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass
   fallbackTextClass: string
   unitSizeClass?: string
   readoutGapClass?: string
+  /** Scale with the tile body (FLUID_READOUT_FONT); `size` and `unitSizeClass` are ignored. */
+  fluid?: boolean
 }) {
   return (
-    <div className={`flex items-baseline ${readoutGapClass ?? 'gap-1'} min-w-0`}>
-      <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, fallbackTextClass)}`}>
+    <div
+      className={`flex items-baseline ${readoutGapClass ?? 'gap-1'} min-w-0`}
+      style={fluid ? { fontSize: FLUID_READOUT_FONT } : undefined}
+    >
+      <span
+        style={fluid ? { fontSize: '1em' } : undefined}
+        className={`font-display ${fluid ? '' : size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, fallbackTextClass)}`}>
         {text ?? '--'}
       </span>
-      {unitLabel && <span className={`${unitSizeClass ?? 'text-xs'} leading-none text-muted-foreground`}>{unitLabel}</span>}
+      {unitLabel && (
+        <span
+          style={fluid ? { fontSize: 'max(0.75rem, 0.3em)' } : undefined}
+          className={`${fluid ? '' : unitSizeClass ?? 'text-xs'} leading-none text-muted-foreground`}
+        >
+          {unitLabel}
+        </span>
+      )}
     </div>
   )
 }
@@ -154,7 +191,7 @@ function NumericGauge({ text, unitLabel, zone, density, fallbackTextClass, reado
   readoutGapClass?: string
 }) {
   return (
-    <div className={SHELL[density]}>
+    <div className={density === 'full' ? 'flex justify-center' : undefined}>
       <Readout
         text={text}
         unitLabel={unitLabel}
@@ -163,6 +200,7 @@ function NumericGauge({ text, unitLabel, zone, density, fallbackTextClass, reado
         fallbackTextClass={fallbackTextClass}
         unitSizeClass={unitSizeClass}
         readoutGapClass={readoutGapClass}
+        fluid={density === 'full' && !readoutSizeClass}
       />
     </div>
   )
@@ -172,18 +210,22 @@ function LampGauge({ value, zone, text, density }: { value: number | null; zone:
   const lit = value !== null && value !== 0
   const color = zone ? severityFill(zone) : lit ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'
   const compact = density === 'compact'
+  const full = density === 'full'
 
   return (
-    <div className={`flex items-center gap-3 ${SHELL[density]}`}>
+    <div
+      className={`flex items-center ${full ? 'justify-center gap-[0.4em]' : 'gap-3'}`}
+      style={full ? { fontSize: FLUID_LAMP_FONT } : undefined}
+    >
       <svg
         viewBox="0 0 24 24"
-        className={compact ? 'h-6 w-6 shrink-0' : density === 'hero' ? 'h-10 w-10 shrink-0' : 'h-8 w-8 shrink-0'}
+        className={full ? 'h-[1em] w-[1em] shrink-0' : compact ? 'h-6 w-6 shrink-0' : 'h-10 w-10 shrink-0'}
         aria-hidden="true"
       >
         <circle cx="12" cy="12" r="9" fill={color} opacity={lit ? 1 : 0.25} />
       </svg>
       <span
-        className={`font-display ${compact ? 'text-xl' : density === 'hero' ? 'text-3xl' : 'text-2xl'} tabular-nums leading-none text-gauge-primary`}
+        className={`font-display ${full ? '' : compact ? 'text-xl' : 'text-3xl'} tabular-nums leading-none text-gauge-primary`}
       >
         {text === null ? '--' : lit ? 'ON' : 'OFF'}
       </span>
@@ -236,7 +278,7 @@ function BarGauge({ value, zone, config, text, unitLabel, density, fallbackTextC
   const fraction = clampFraction(value, min, max)
 
   return (
-    <div className={SHELL[density]}>
+    <div>
       <Readout
         text={text}
         unitLabel={unitLabel}
@@ -301,7 +343,7 @@ function RadialGauge({ value, zone, config, text, unitLabel, density, fallbackTe
         readoutGapClass={readoutGapClass} />
     )
     return (
-      <div className={`flex flex-col items-center ${SHELL[density]}`}>
+      <div className="flex flex-col items-center">
         <DialRing
           value={value}
           min={min}
@@ -339,7 +381,7 @@ function RadialGauge({ value, zone, config, text, unitLabel, density, fallbackTe
   }
 
   return (
-    <div className={`flex flex-col items-center ${SHELL[density]}`}>
+    <div className="flex flex-col items-center">
       <svg viewBox="0 0 100 74" className={density === 'compact' ? 'w-full max-w-[120px]' : 'w-full max-w-[180px]'} aria-hidden="true">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
@@ -407,7 +449,7 @@ function TrendGauge({ zone, config, text, unitLabel, density, fallbackTextClass,
   const { points, error } = useTelemetryHistory(config.path, window, config.path.trim() !== '')
 
   return (
-    <div className={SHELL[density]}>
+    <div>
       <Readout
         text={text}
         unitLabel={unitLabel}

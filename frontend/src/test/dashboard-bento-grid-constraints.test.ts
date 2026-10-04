@@ -8,9 +8,12 @@ import {
   POI_MAP_SPLIT_MIN_W,
   POI_MAP_WIDGET_CONSTRAINTS,
   WIDGET_CONSTRAINTS,
+  gaugeWidgetConstraints,
+  raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
 import { NARROW_STRIP_FOLD_PX } from '@/lib/displays'
+import { TILE_INSET_H, rowsForHeight } from '@/lib/grid-metrics'
 
 /**
  * A widget's minimum row count is the only thing standing between an operator
@@ -101,5 +104,53 @@ describe('the poi-map widget', () => {
 
   test('the split-layout floor is wider than the bare map floor', () => {
     expect(POI_MAP_SPLIT_MIN_W).toBeGreaterThan(POI_MAP_WIDGET_CONSTRAINTS.minW)
+  })
+})
+
+/**
+ * A standalone gauge tile used to be held at four rows whatever it showed. The
+ * short displays are one readout tall: 8px tile inset, 24px card padding-top
+ * and 8px card padding-bottom, plus the readout. A standalone gauge has no
+ * inner frame, so nothing else adds to that. Radial and trend gauges draw a
+ * dial or a chart and do need the four rows.
+ */
+describe('the standalone gauge resize floor', () => {
+  const CHROME_H = TILE_INSET_H + 24 + 8
+  const NUMERIC_H = CHROME_H + 36 // the 2.25rem floor of the readout, leading-none
+  const BAR_H = NUMERIC_H + 8 + 8 // mt-2 and the 8px bar
+
+  test.each([
+    ['numeric', NUMERIC_H, 2],
+    ['lamp', NUMERIC_H, 2],
+    ['bar', BAR_H, 3],
+  ] as const)('a %s gauge gets %i rows and they hold it', (display, measured, rows) => {
+    const { minW, minH } = gaugeWidgetConstraints(display)
+    expect(minW).toBe(2)
+    expect(minH).toBe(rows)
+    expect(gridPixelHeight(minH)).toBeGreaterThanOrEqual(measured)
+    expect(rowsForHeight(measured)).toBe(rows)
+    expect(gridPixelHeight(minH) - measured).toBeLessThan(GRID_ROW_HEIGHT + GRID_MARGIN)
+  })
+
+  test('a gauge with no display is drawn as numeric, so it gets two rows', () => {
+    expect(gaugeWidgetConstraints(undefined)).toEqual({ minW: 2, minH: 2 })
+    expect(gaugeWidgetConstraints('mystery' as never)).toEqual({ minW: 2, minH: 2 })
+  })
+
+  test.each(['radial', 'trend'] as const)('a %s gauge keeps four rows', (display) => {
+    expect(gaugeWidgetConstraints(display)).toEqual({ minW: 2, minH: 4 })
+  })
+})
+
+describe('raiseGaugeHeight', () => {
+  test.each([
+    ['radial', 2, 4], ['trend', 3, 4], ['bar', 2, 3], ['numeric', 2, 2], ['lamp', 1, 2],
+  ] as const)('a %s gauge at h=%i is raised to %i', (display, h, expected) => {
+    expect(raiseGaugeHeight(h, display)).toBe(expected)
+  })
+
+  test('never lowers a taller tile', () => {
+    expect(raiseGaugeHeight(6, 'numeric')).toBe(6)
+    expect(raiseGaugeHeight(5, 'radial')).toBe(5)
   })
 })
