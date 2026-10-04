@@ -326,3 +326,27 @@ pattern as the three above - a test that fails against the pre-fix code
   case is one shared timeout rather than the sum of several sequential ones.
 
 `go test -short -race ./...` and `go vet ./...` pass.
+
+## Amendment 2026-10-04: bucket width follows the span that holds data
+
+`get_path_history` chose its bucket width from the requested span alone. On
+the boat the engines had run for twenty minutes; Mate asked for several hours,
+got 15-minute buckets, and could not tell a five-second load jump from throttle
+movement, though InfluxDB held a sample about every 1.4 s.
+
+The first/last-sample query now runs first. When it finds data, the stat
+queries cover `[first_seen truncated to the width, min(end, last_seen + width)]`
+and the width comes from the span between first and last sample. The tier
+table, the 60-bucket cap and the 1-minute floor are unchanged; sub-minute
+tiers were rejected because a sparse path would then report false gaps.
+`start_iso`/`end_iso` still show the range the caller asked for, a note says
+when the buckets cover less, and gap detection starts at the narrowed start
+(`first_seen` already says nothing was recorded before it) but runs to the
+requested end: a path that went silent before the end of the range reports that
+silence as a gap, counted in buckets of the chosen width, because "when did it
+die" is what the tool is for. An earlier cut of this amendment stopped gap
+detection at `last_seen + width` too, and a path dead for the last three hours
+of a six-hour request reported no gaps at all.
+With no data at all the behaviour is as before. An error from the first/last
+query is still an error. The tool description tells the model that a short
+range gives 1-minute buckets and that each bucket's min/max expose transients.

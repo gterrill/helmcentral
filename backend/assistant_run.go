@@ -1137,7 +1137,13 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 		for _, p := range m.Proposals {
 			content += assistantProposalHistoryBlock(p)
 		}
-		out = append(out, openRouterMessage{Role: m.Role, Content: openRouterContent(content)})
+		role := m.Role
+		if role == "watch" {
+			// ADR 0160: a finished watch's report. The model sees it as a user
+			// turn; its own text says it is automatic, not the skipper.
+			role = "user"
+		}
+		out = append(out, openRouterMessage{Role: role, Content: openRouterContent(content)})
 	}
 	return out, nil
 }

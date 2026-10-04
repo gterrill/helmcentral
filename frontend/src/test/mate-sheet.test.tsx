@@ -94,6 +94,11 @@ function buildFetch(
       return onSendMessage(id, body)
     }
 
+    // ADR 0160: the thread asks whether a watch is running; none is here.
+    if (/\/api\/assistant\/conversations\/[^/]+\/watch$/.test(url) && method === 'GET') {
+      return { ok: true, status: 204 }
+    }
+
     const cancelMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run\/cancel$/)
     if (cancelMatch && method === 'POST') {
       return { ok: true, status: 204 }

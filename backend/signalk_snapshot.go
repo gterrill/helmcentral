@@ -16,13 +16,19 @@ import (
 // snapshot that remains compatible with the existing lookupString/lookupNumber/
 // lookupBool functions.
 type signalKSnapshot struct {
-	mu          sync.RWMutex
-	contexts    map[string]map[string]any  // context string → nested tree
-	pathSeen    map[string]time.Time       // "<context>|<dotted path>" → last update time
-	sourceSeen  map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
-	selfCtx     string                     // which context is this vessel, per the stream's hello frame
-	connected   bool
-	lastMessage time.Time
+	mu         sync.RWMutex
+	contexts   map[string]map[string]any  // context string → nested tree
+	pathSeen   map[string]time.Time       // "<context>|<dotted path>" → last update time
+	sourceSeen map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	// controlStamps tracks mayara radar controls ("<context>|radars.<id>.controls.<name>"):
+	// the mayara timestamp last held and when, on our clock, it last advanced.
+	controlStamps map[string]controlStampEntry
+	// controlStampCount is controlStamps' size per context, so the cap is per
+	// vessel and other vessels cannot crowd out our own radar.
+	controlStampCount map[string]int
+	selfCtx           string // which context is this vessel, per the stream's hello frame
+	connected         bool
+	lastMessage       time.Time
 
 	// sentenceSeen tracks, per NMEA 0183 sentence type ("APB", "RMC", ...),
 	// the receive time of the latest live (not cached-replay) update that
@@ -209,11 +215,66 @@ type signalKValue struct {
 // newSignalKSnapshot creates a new empty snapshot.
 func newSignalKSnapshot() *signalKSnapshot {
 	return &signalKSnapshot{
-		contexts:     make(map[string]map[string]any),
-		pathSeen:     make(map[string]time.Time),
-		sourceSeen:   make(map[string]sourceSeenEntry),
-		sentenceSeen: make(map[string]time.Time),
+		contexts:          make(map[string]map[string]any),
+		pathSeen:          make(map[string]time.Time),
+		controlStamps:     make(map[string]controlStampEntry),
+		controlStampCount: make(map[string]int),
+		sourceSeen:        make(map[string]sourceSeenEntry),
+		sentenceSeen:      make(map[string]time.Time),
 	}
+}
+
+// controlStampEntry is what the snapshot remembers of one radar control.
+type controlStampEntry struct {
+	stamp      time.Time // mayara's timestamp on the value we hold
+	advancedAt time.Time // our receive time when stamp last changed
+}
+
+// controlStampsMax bounds controlStamps per vessel context. A boat has a
+// handful of radars of a dozen-odd controls each; the cap only stops a
+// hostile stream growing it.
+const controlStampsMax = 512
+
+// radarControlPath reports whether path is "radars.<id>.controls.<name>".
+func radarControlPath(path string) bool {
+	segments := strings.Split(path, ".")
+	return len(segments) == 4 && segments[0] == "radars" && segments[2] == "controls"
+}
+
+// noteControlStamp records a radar control delta. A timestamp different from
+// the one already held counts as an advance, in either direction: a replay
+// never changes the timestamp, while mayara's unsynchronised clock can step
+// back. A first sight of the path (the subscribe replay after process start),
+// a repeat, and an unparseable timestamp do not count. Caller holds s.mu.
+func (s *signalKSnapshot) noteControlStamp(context, key string, value any, envelope string, now time.Time) {
+	control := map[string]any{"value": value}
+	if envelope != "" {
+		control["timestamp"] = envelope
+	}
+	stamp, ok := mayaraControlStamp(control)
+	if !ok {
+		return
+	}
+	held, known := s.controlStamps[key]
+	if !known {
+		if s.controlStampCount[context] >= controlStampsMax {
+			return
+		}
+		s.controlStamps[key] = controlStampEntry{stamp: stamp}
+		s.controlStampCount[context]++
+		return
+	}
+	if !stamp.Equal(held.stamp) {
+		s.controlStamps[key] = controlStampEntry{stamp: stamp, advancedAt: now}
+	}
+}
+
+// controlAdvancedAt reports when, on our clock, a radar control's mayara
+// timestamp last advanced, or the zero time if it never has.
+func (s *signalKSnapshot) controlAdvancedAt(context, path string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.controlStamps[context+"|"+path].advancedAt
 }
 
 // radarTargetDeltaPath reports whether path is one of mayara's own ARPA
@@ -382,6 +443,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 
 			s.pathSeen[d.Context+"|"+val.Path] = now
+			if radarControlPath(val.Path) {
+				s.noteControlStamp(d.Context, d.Context+"|"+val.Path, val.Value, update.Timestamp, now)
+			}
 
 			current := tree
 			for i, segment := range segments {
@@ -811,6 +875,12 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 				delete(s.pathSeen, key)
 			}
 		}
+		for key := range s.controlStamps {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.controlStamps, key)
+			}
+		}
+		delete(s.controlStampCount, context)
 		// sourceSeen is keyed "<context>|<$source>", the same shape as
 		// pathSeen's own "<context>|<path>" -- an evicted context must lose
 		// these too, or a contact heard once leaks one entry per $source it

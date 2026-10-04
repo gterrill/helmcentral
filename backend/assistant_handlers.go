@@ -735,6 +735,8 @@ func deleteAssistantConversationHandler(c echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	// A watch (ADR 0160) has nowhere to report once its conversation is gone.
+	globalAssistantWatches.cancel(id)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -935,15 +937,18 @@ func postAssistantMessageHandler(c echo.Context) error {
 	if readiness.Problem != "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": readiness.Problem})
 	}
-	settingsMap, err := readSettings(settingsPath)
+	params, err := assistantTurnParamsFromSettings(settingsPath, readiness, apiKey)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("read settings for assistant routing: %v", err)})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	settingsPayload := buildSettingsPayload(settingsMap)
-	autoRouter := assistantAutoRouterOptions{
-		AllowedModels:  settingsPayload.Assistant.AllowedModels,
-		ExcludedModels: settingsPayload.Assistant.ExcludedModels,
-		CostTier:       settingsPayload.Assistant.CostTier,
+	params.today = today
+	params.spoken = body.Spoken
+	if body.Screen != nil {
+		params.screen = &assistantScreenContext{
+			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
+			Section: trimmedAssistantScreenField(body.Screen.Section),
+			Page:    trimmedAssistantScreenField(body.Screen.Page),
+		}
 	}
 
 	if _, ok, err := globalAssistantStore.GetConversation(id); err != nil {
@@ -985,24 +990,80 @@ func postAssistantMessageHandler(c echo.Context) error {
 	}
 	previousMessages = append(previousMessages, userRow)
 
-	pc := collectAssistantPromptContext(settingsPath, time.Now())
-	pc.Spoken = body.Spoken
-	pc.WebSearch = readiness.WebSearch
-	if body.Screen != nil {
-		pc.Screen = assistantScreenContext{
-			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
-			Section: trimmedAssistantScreenField(body.Screen.Section),
-			Page:    trimmedAssistantScreenField(body.Screen.Page),
-		}
-	}
-	systemStable, systemLive := assistantSystemPromptParts(pc)
-	history, err := assistantHistoryMessages(previousMessages, assistantDocumentLookup)
-	if err != nil {
+	if err := beginAssistantTurn(runCtx, run, id, previousMessages, params); err != nil {
 		globalAssistantRuns.remove(id, run)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, readiness.WebSearch, today, run.append)
+	writeAssistantRunSSEHeaders(c)
+	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
+	return nil
+}
+
+// assistantTurnParams is everything beginAssistantTurn needs beyond the
+// conversation itself: readiness and routing from settings, plus the
+// turn-scoped fields a posted question carries.
+type assistantTurnParams struct {
+	apiKey       string
+	model        string
+	settingsPath string
+	autoRouter   assistantAutoRouterOptions
+	webSearch    bool
+	today        time.Time
+	spoken       bool
+	screen       *assistantScreenContext
+}
+
+// assistantTurnParamsFromSettings reads the routing options for a turn. A
+// failed settings read is an error, never a default.
+func assistantTurnParamsFromSettings(settingsPath string, readiness assistantReadiness, apiKey string) (assistantTurnParams, error) {
+	settingsMap, err := readSettings(settingsPath)
+	if err != nil {
+		return assistantTurnParams{}, fmt.Errorf("read settings for assistant routing: %w", err)
+	}
+	settingsPayload := buildSettingsPayload(settingsMap)
+	return assistantTurnParams{
+		apiKey:       apiKey,
+		model:        readiness.Model,
+		settingsPath: settingsPath,
+		webSearch:    readiness.WebSearch,
+		autoRouter: assistantAutoRouterOptions{
+			AllowedModels:  settingsPayload.Assistant.AllowedModels,
+			ExcludedModels: settingsPayload.Assistant.ExcludedModels,
+			CostTier:       settingsPayload.Assistant.CostTier,
+		},
+	}, nil
+}
+
+// beginAssistantTurn builds the prompt and history for one turn over
+// messages (the conversation as persisted, the turn's own triggering row
+// included) and launches the detached goroutine that runs it, persists the
+// reply and finishes run (ADR 0105). The caller has already registered run
+// via globalAssistantRuns.start; on an error returned here nothing was
+// launched and the caller removes it. postAssistantMessageHandler and the
+// end-of-watch handoff (ADR 0160, assistant_watch.go) both start turns here.
+func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, messages []assistantMessage, p assistantTurnParams) error {
+	pc := collectAssistantPromptContext(p.settingsPath, time.Now())
+	pc.Spoken = p.spoken
+	pc.WebSearch = p.webSearch
+	if p.screen != nil {
+		pc.Screen = *p.screen
+	}
+	// Only a watch still sampling counts: during the end-of-watch turn the
+	// watch is "reporting", and Mate is reading its report, not waiting on it.
+	if watch, ok := globalAssistantWatches.get(id); ok && watch.Status == assistantWatchStatusWatching {
+		pc.ActiveWatch = &watch
+	}
+	systemStable, systemLive := assistantSystemPromptParts(pc)
+	history, err := assistantHistoryMessages(messages, assistantDocumentLookup)
+	if err != nil {
+		return err
+	}
+
+	runner := newAssistantRunner(p.apiKey, p.model, p.settingsPath, p.autoRouter, p.webSearch, p.today, run.append)
+	// The conversation rides on the run's context so start_watch (ADR 0160)
+	// knows where to report back.
+	runCtx = withAssistantConversationID(runCtx, id)
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
 	// drives, must outlive this one HTTP request (ADR 0105). Only
@@ -1081,9 +1142,6 @@ func postAssistantMessageHandler(c echo.Context) error {
 		run.append("message", map[string]any{"message": assistantRow, "conversation": updatedConv})
 		run.finish()
 	}()
-
-	writeAssistantRunSSEHeaders(c)
-	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
 	return nil
 }
 

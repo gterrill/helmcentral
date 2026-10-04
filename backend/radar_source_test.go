@@ -52,9 +52,118 @@ func radarSnapshotWithRadarsAt(t *testing.T, radars map[string]struct{ modelName
 				{Path: "radars." + id + ".controls.power", Value: map[string]any{"value": float64(mayaraTransmitPowerValue), "timestamp": "2026-08-28T22:08:52.254697200Z"}},
 			}}},
 		}, receivedAt)
+		// The first receipt of a control is the retained-tree replay and does
+		// not prove the radar is live. A live radar republishes with a newer
+		// mayara timestamp thirty seconds later, which is what this delta is.
+		snapshot.applyDelta(radarPowerDelta(id, float64(mayaraTransmitPowerValue), "2026-08-28T22:09:22.254697200Z"), receivedAt)
 	}
 	snapshot.setSelfContext("vessels.self")
 	return snapshot
+}
+
+// radarPowerDelta is one power control delta carrying mayara's own timestamp.
+func radarPowerDelta(id string, power float64, stamp string) signalKDelta {
+	return signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{
+			{Path: "radars." + id + ".controls.power", Value: map[string]any{"value": power, "timestamp": stamp}},
+		}}},
+	}
+}
+
+// radarReplayDelta is what SignalK replays on subscribe for a radar mayara
+// stopped publishing hours ago: power frozen at Transmit, an old timestamp.
+func radarReplayDelta(id, stamp string) signalKDelta {
+	return signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{
+			{Path: "radars." + id + ".controls.userName", Value: map[string]any{"value": "DRS4D-NXT 6424", "timestamp": stamp}},
+			{Path: "radars." + id + ".controls.power", Value: map[string]any{"value": float64(mayaraTransmitPowerValue), "timestamp": stamp}},
+		}}},
+	}
+}
+
+// SignalK keeps mayara's last controls forever and replays them on every
+// subscribe. Measured 2026-10-05: fur6424A/B power = 2 with a mayara
+// timestamp 18 h old, the radar physically off. Receiving that replay must
+// not make the radar present, however many times it arrives.
+func TestRadarReplayOfRetainedControlsIsNotPresence(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	stamp := "2026-10-04T18:00:00.000Z"
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	snapshot.applyDelta(radarReplayDelta("fur6424A", stamp), now)
+	if got := radarsFromSnapshot(snapshot, now); len(got) != 0 {
+		t.Fatalf("first receipt of retained controls must not count as a radar, got %+v", got)
+	}
+
+	// A reconnect replays the identical tree.
+	snapshot.applyDelta(radarReplayDelta("fur6424A", stamp), now.Add(time.Minute))
+	if got := radarsFromSnapshot(snapshot, now.Add(time.Minute)); len(got) != 0 {
+		t.Fatalf("replay of identical timestamps must not count, got %+v", got)
+	}
+}
+
+// A live radar republishes with a newer mayara timestamp, which is the only
+// thing that proves it exists; five minutes of silence after that drops it.
+func TestRadarPresenceNeedsAnAdvanceAndExpires(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(radarReplayDelta("fur6424A", "2026-10-04T18:00:00.000Z"), now)
+
+	live := now.Add(30 * time.Second)
+	snapshot.applyDelta(radarPowerDelta("fur6424A", float64(mayaraTransmitPowerValue), "2026-10-04T18:00:30.000Z"), live)
+	got := radarsFromSnapshot(snapshot, live)
+	if len(got) != 1 || !got[0].Transmitting {
+		t.Fatalf("a control that advanced must read as a transmitting radar, got %+v", got)
+	}
+
+	later := live.Add(radarPresenceMaxAge + time.Second)
+	if got := radarsFromSnapshot(snapshot, later); len(got) != 0 {
+		t.Fatalf("radar still present %v after its last advance, got %+v", radarPresenceMaxAge, got)
+	}
+}
+
+// An older timestamp than the one held is not an advance either.
+func TestRadarClockSteppingBackIsStillAnAdvance(t *testing.T) {
+	// mayara's clock is a Windows box we do not synchronise. If it steps back
+	// (a reboot without a clock battery, a fast clock corrected), every new
+	// timestamp is older than the one held. A forward-only rule would hide a
+	// live radar until mayara's clock caught up. What a replay never does is
+	// change the timestamp, so a different one, either way, is fresh data.
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(radarReplayDelta("fur6424A", "2026-10-04T18:00:00.000Z"), now)
+	snapshot.applyDelta(radarPowerDelta("fur6424A", 2, "2026-10-04T17:00:00.000Z"), now.Add(time.Second))
+	if got := radarsFromSnapshot(snapshot, now.Add(time.Second)); len(got) != 1 {
+		t.Fatalf("a changed timestamp must count even when mayara's clock went back, got %+v", got)
+	}
+}
+
+// Radar controls from other vessels on the stream must not use up the
+// tracking room our own radar needs. The cap guards against a hostile
+// stream; one shared across vessels would lock our radar out after a restart
+// if others' entries arrived first.
+func TestRadarControlStampCapIsPerVessel(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	for i := 0; i < controlStampsMax+10; i++ {
+		snapshot.applyDelta(signalKDelta{
+			Context: fmt.Sprintf("vessels.urn:mrn:imo:mmsi:%09d", i),
+			Updates: []signalKUpdate{{Values: []signalKValue{
+				{Path: "radars.x.controls.power", Value: map[string]any{"value": float64(2), "timestamp": "2026-10-04T18:00:00.000Z"}},
+			}}},
+		}, now)
+	}
+	snapshot.applyDelta(radarReplayDelta("fur6424A", "2026-10-04T18:00:00.000Z"), now)
+	snapshot.applyDelta(radarPowerDelta("fur6424A", 2, "2026-10-04T18:00:30.000Z"), now.Add(time.Second))
+	if got := radarsFromSnapshot(snapshot, now.Add(time.Second)); len(got) != 1 {
+		t.Fatalf("other vessels' radar controls crowded out our own radar, got %+v", got)
+	}
 }
 
 func TestRadarsFromSnapshotReturnsBothDualRangeRadars(t *testing.T) {
@@ -670,6 +779,8 @@ func TestRadarsFromSnapshotReadsTheCapturedControlDeltaShape(t *testing.T) {
 
 	snapshot := newSignalKSnapshot()
 	snapshot.applyDelta(delta, time.Now().UTC())
+	// The fixture is the retained-tree replay; a live republish follows it.
+	snapshot.applyDelta(radarPowerDelta("fur6424A", float64(mayaraTransmitPowerValue), "2026-08-28T22:09:22.254697200Z"), time.Now().UTC())
 	snapshot.setSelfContext("vessels.self")
 
 	radars := radarsFromSnapshot(snapshot, time.Now().UTC())
@@ -741,22 +852,16 @@ func TestRadarPresenceIsJudgedOnLocalReceiveTime(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 
 	snapshot := newSignalKSnapshot()
-	snapshot.applyDelta(signalKDelta{
-		Context: "vessels.self",
-		Updates: []signalKUpdate{{Values: []signalKValue{
-			// mayara's embedded timestamp is deliberately ancient; the delta
-			// itself has only just been received.
-			{Path: "radars.fur6424A.controls.userName", Value: map[string]any{
-				"value": "DRS4D-NXT 6424", "timestamp": "2020-01-01T00:00:00.000Z"}},
-			{Path: "radars.fur6424A.controls.power", Value: map[string]any{
-				"value": float64(mayaraTransmitPowerValue), "timestamp": "2020-01-01T00:00:00.000Z"}},
-		}}},
-	}, now)
+	// mayara's embedded timestamps are deliberately ancient in absolute terms
+	// (its clock is years off ours); what matters is that they advance
+	// between two receipts.
+	snapshot.applyDelta(radarReplayDelta("fur6424A", "2020-01-01T00:00:00.000Z"), now)
+	snapshot.applyDelta(radarPowerDelta("fur6424A", float64(mayaraTransmitPowerValue), "2020-01-01T00:00:30.000Z"), now)
 	snapshot.setSelfContext("vessels.self")
 
 	got := radarsFromSnapshot(snapshot, now)
 	if len(got) != 1 {
-		t.Fatalf("a just-received delta must count as present however old mayara says its value is, got %d", len(got))
+		t.Fatalf("an advancing delta must count as present however old mayara says its value is, got %d", len(got))
 	}
 }
 
