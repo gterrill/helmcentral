@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **A switched-off radar no longer shows as present after a restart.** For the
+  first few minutes after Helmcentral restarted or reconnected to the boat's
+  network, a radar that was off could appear as transmitting, and the anchor
+  map could fail to load its radar overlay for the rest of the session. A
+  radar now appears once it is actually reporting, which can take a short
+  while after Helmcentral connects.
+
 ## [0.41.0] - 2026-10-04
 
 ### Breaking

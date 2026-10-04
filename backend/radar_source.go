@@ -87,7 +87,8 @@ const radarObservationMaxAge = 60 * time.Second
 // vessels.self.radars.<id>.controls.* — on the existing subscription
 // (context vessels.*, path *), plus the control values the list does not.
 // radarPresenceMaxAge is how long a radar keeps counting as present after
-// its last control delta.
+// its last control delta that carried a different mayara timestamp from the one
+// already held for that control (a replayed value does not count).
 //
 // The SignalK tree never evicts, so a radar published once stays in it
 // forever. Measured 2026-08-31 with the ship's computer off overnight: the
@@ -96,11 +97,15 @@ const radarObservationMaxAge = 60 * time.Second
 // straight off the tree therefore reports radars that no longer exist and,
 // worse, feeds an eighteen-hour-old power value to the standby gate.
 //
-// Controls re-publish roughly every thirty seconds while mayara holds the
-// radar, so five minutes is many missed rounds rather than a near miss.
-// Judged on our own receive clock via snapshot.lastSeen, never on the
-// timestamps inside the control values, which are mayara's (ADR 0062
-// decision 5). Same discipline as aisTargetPositionFresh (signalk.go).
+// mayara sends a control when its value changes, and the counters among them
+// (operatingTime, transmitTime, spokes) keep changing while it holds the
+// radar; the retained tree shows the other controls going hours without a
+// resend. The inner timestamp is the time of that change. The advance is
+// noticed on our own receive clock, and the only thing ever compared between
+// mayara timestamps is two of its own for the same control, which clock skew
+// cannot touch; mayara's time is never compared to ours (ADR 0062 decision 5).
+// A live radar therefore appears at its next counter tick after a restart
+// rather than at once.
 const radarPresenceMaxAge = 5 * time.Minute
 
 func radarsFromSnapshot(snapshot *signalKSnapshot, now time.Time) []radarInfo {
@@ -470,6 +475,28 @@ func observedTargets(targets []mayaraArpaTarget, radar radarInfo) []mayaraArpaTa
 	return kept
 }
 
+// mayaraControlStamp reads mayara's own timestamp off one control in the tree
+// shape applyDelta builds: inside the control's value object, with the delta's
+// envelope timestamp (control["timestamp"]) as the fallback. ok is false when
+// neither parses, which callers treat as no information.
+func mayaraControlStamp(control map[string]any) (time.Time, bool) {
+	stamp, ok := "", false
+	if inner, innerOK := control["value"].(map[string]any); innerOK {
+		stamp, ok = inner["timestamp"].(string)
+	}
+	if !ok {
+		stamp, ok = control["timestamp"].(string)
+	}
+	if !ok {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, stamp)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
 // freshestControlTimestamp reads mayara's current time off the newest control
 // it has published for a radar. Controls stream continuously while mayara is
 // connected to the radar, so this advances even when no target does, which is
@@ -481,21 +508,8 @@ func freshestControlTimestamp(controls map[string]any) time.Time {
 		if !ok {
 			continue
 		}
-		// mayara's own timestamp travels inside the control's value object.
-		// applyDelta also writes an envelope timestamp at control["timestamp"],
-		// but that is the delta's, so prefer the inner one and fall back.
-		stamp, ok := "", false
-		if inner, innerOK := control["value"].(map[string]any); innerOK {
-			stamp, ok = inner["timestamp"].(string)
-		}
+		parsed, ok := mayaraControlStamp(control)
 		if !ok {
-			stamp, ok = control["timestamp"].(string)
-		}
-		if !ok {
-			continue
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, stamp)
-		if err != nil {
 			continue
 		}
 		if parsed.After(newest) {
@@ -505,13 +519,15 @@ func freshestControlTimestamp(controls map[string]any) time.Time {
 	return newest
 }
 
-// newestControlReceipt reports when we last received any control for this
-// radar, on our own clock. snapshot.lastSeen records local receive time per
-// path, which is what makes this immune to mayara's clock (ADR 0062).
+// newestControlReceipt reports when, on our own clock, this radar last
+// published a control whose mayara timestamp differed from the one we already
+// held for that control. A bare receipt does not count: SignalK replays the
+// retained tree on every subscribe, so a radar switched off hours ago
+// "arrives" again after each restart (ADR 0062, amendment 2026-10-05).
 func newestControlReceipt(snapshot *signalKSnapshot, selfCtx, radarID string, controls map[string]any) time.Time {
 	var newest time.Time
 	for name := range controls {
-		seen := snapshot.lastSeen(selfCtx, "radars."+radarID+".controls."+name)
+		seen := snapshot.controlAdvancedAt(selfCtx, "radars."+radarID+".controls."+name)
 		if seen.After(newest) {
 			newest = seen
 		}
