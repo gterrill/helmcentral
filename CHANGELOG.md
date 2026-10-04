@@ -11,6 +11,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- A single gauge tile no longer draws a frame inside its own border. Numeric
+  and lamp gauge tiles can be made as short as two rows, and their reading
+  grows and stays centred as the tile is made bigger.
+
 ### Fixed
 
 - **A switched-off radar no longer shows as present after a restart.** For the

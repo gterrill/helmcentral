@@ -33,6 +33,31 @@ describe('GaugeTile', () => {
     expect(screen.getByText('psi')).toBeInTheDocument()
   })
 
+  test('draws a standalone numeric gauge with no inner frame, in a size container', () => {
+    const { container } = render(
+      <GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />,
+    )
+    const readout = screen.getByText('35.0')
+    expect(container.querySelector('.border.rounded-md.bg-background\\/60')).toBeNull()
+    expect(readout.closest('[data-testid="gauge-fill"]')).not.toBeNull()
+    expect(readout.closest('[data-testid="gauge-fill"]')?.className).toContain('[container-type:size]')
+  })
+
+  test.each<GaugeDisplay>(['numeric', 'lamp'])('puts a %s gauge in a size container, centred by auto margins', (display) => {
+    render(<GaugeTile config={config({ display })} value={241325} editing={false} onConfigure={vi.fn()} />)
+    const fill = screen.getByTestId('gauge-fill')
+    expect(fill.className).toContain('[container-type:size]')
+    expect(fill.className).not.toContain('justify-center')
+    expect(fill.firstElementChild?.className).toContain('my-auto')
+  })
+
+  test.each<GaugeDisplay>(['bar', 'radial', 'trend'])('keeps a %s gauge out of a size container so it sizes the tile', (display) => {
+    render(<GaugeTile config={config({ display, min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />)
+    const fill = screen.getByTestId('gauge-fill')
+    expect(fill.className).not.toContain('[container-type:size]')
+    expect(fill.className).not.toContain('justify-center')
+  })
+
   test.each<GaugeDisplay>(['numeric', 'radial', 'bar', 'lamp'])('renders the %s display', (display) => {
     render(
       <GaugeTile
@@ -303,10 +328,12 @@ describe('instrument ring style (ADR 0054)', () => {
 describe('numeric readout size without an explicit readoutSizeClass', () => {
   const numeric = config({ display: 'numeric' })
 
-  test('hero and full density render the same, largest size', () => {
+  test('hero keeps text-4xl and full scales with its container', () => {
     const { container: full } = render(<GaugeBody config={numeric} value={241325} density="full" />)
     const { container: hero } = render(<GaugeBody config={numeric} value={241325} density="hero" />)
-    expect(full.querySelector('.font-display')).toHaveClass('text-4xl')
+    expect(full.querySelector('.font-display')).not.toHaveClass('text-4xl')
+    // jsdom discards the cq-unit clamp itself, so the span's own 1em is the tell.
+    expect((full.querySelector('.font-display') as HTMLElement).style.fontSize).toBe('1em')
     expect(hero.querySelector('.font-display')).toHaveClass('text-4xl')
   })
 

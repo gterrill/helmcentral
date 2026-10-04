@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
 import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, TILE_INSET_H, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
-import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId, type GaugeDisplay } from '@/lib/dashboard-widgets'
 import { TileErrorBoundary } from '@/components/tile-error-boundary'
 import { effectiveRowsById } from '@/lib/list-tile-height'
 import { TileHeightScope } from '@/lib/tile-content-height'
@@ -24,10 +24,24 @@ export { GRID_ROW_HEIGHT, GRID_MARGIN, WALL_ROW_MARGIN, gridPixelHeight }
 // full-bleed in the two-column narrow layout instead of being squeezed into a half.
 const NARROW_FULL_SPAN_MIN_W = GRID_COLUMNS / 2
 
+// A standalone gauge has no inner frame, so a numeric or lamp reading is one
+// 36px line under the tile chrome (8px inset, 24px title room, 8px padding):
+// two rows hold it. A bar adds its 8px track and margin (92px), which is three.
+// Radial and trend draw a dial or a chart and need four. An absent display is
+// drawn as numeric.
+export function gaugeWidgetConstraints(display?: GaugeDisplay): { minW: number; minH: number } {
+  const minH = display === 'radial' || display === 'trend' ? 4 : display === 'bar' ? 3 : 2
+  return { minW: 2, minH }
+}
+
+// Changing a gauge's display in its dialog must not leave it shorter than the
+// new display needs. Only ever raises: a taller tile was sized on purpose.
+export function raiseGaugeHeight(h: number, display?: GaugeDisplay): number {
+  return Math.max(h, gaugeWidgetConstraints(display).minH)
+}
+
 // Embeds share one constraint rather than having per-id entries, since their ids
 // carry a per-instance token (see ADR 0031).
-const GAUGE_WIDGET_CONSTRAINTS = { minW: 2, minH: 4 }
-
 const EMBED_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 
 // Gauge groups can host compact telemetry sets (e.g. a single alternator),
@@ -203,7 +217,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
         : isGaugeGroupWidgetId(w.id)
           ? GAUGE_GROUP_WIDGET_CONSTRAINTS
           : isGaugeWidgetId(w.id)
-            ? GAUGE_WIDGET_CONSTRAINTS
+            ? gaugeWidgetConstraints(w.gauge?.display)
             : isPoiMapWidgetId(w.id)
               ? { ...POI_MAP_WIDGET_CONSTRAINTS, ...(w.poiMap?.layout === 'split' ? { minW: POI_MAP_SPLIT_MIN_W } : {}) }
               : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),

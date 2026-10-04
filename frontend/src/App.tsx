@@ -88,7 +88,7 @@ import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { RouteTile } from '@/components/route-tile'
-import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
+import { DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
@@ -1844,10 +1844,10 @@ export function App() {
     const id = gaugeDraft.id
     if (effectiveWidgets.some((w) => w.id === id)) {
       void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gauge } : w)),
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gauge, h: raiseGaugeHeight(w.h, gauge.display) } : w)),
       })
     } else {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeDraft, gauge }] })
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeDraft, gauge, h: raiseGaugeHeight(gaugeDraft.h, gauge.display) }] })
     }
     setGaugeDraft(null)
   }, [activePage, effectiveWidgets, gaugeDraft, updatePage])
