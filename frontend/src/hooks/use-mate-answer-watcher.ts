@@ -15,7 +15,7 @@ interface ConversationApi {
 interface MessageApi {
   id: string
   conversation_id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'watch'
   created_at: string
 }
 

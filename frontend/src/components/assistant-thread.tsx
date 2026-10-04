@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Eye, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 import { toast } from 'sonner'
 
@@ -21,6 +21,7 @@ import {
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
+import { formatWatchClock, type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
 import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
@@ -28,11 +29,12 @@ import { cn } from '@/lib/utils'
 
 // What Mate can look at, in the operator's words. Each line matches a real
 // capability (position and wind in its live context; the forecast, tide,
-// passage, places, nearby-vessel, history, equipment, maintenance, document
-// and help lookups), so the list never promises more than Mate can do.
+// passage, places, nearby-vessel, history, watch, equipment, maintenance,
+// document and help lookups), so the list never promises more than Mate can do.
 const MATE_CAPABILITIES = [
   'Position, heading, speed and apparent wind',
   'Whether an instrument is still reporting, and its logged history',
+  'Watching readings for a few minutes and reporting back',
   'Other vessels nearby',
   'Wind and wave forecasts, tides and marine warnings',
   "Passage time and fuel from your boat's own logged runs",
@@ -182,6 +184,52 @@ function SaveAsNoteButton({ content }: { content: string }) {
   )
 }
 
+// ADR 0160: a watch report row carries Mate's own reading material after its
+// first line. The operator sees only that headline ("Watch finished: Port
+// engine load (5 min)"); Mate's answer underneath is what explains it.
+function watchReportHeadline(content: string): string {
+  const index = content.indexOf('\n')
+  return index === -1 ? content : content.slice(0, index)
+}
+
+/**
+ * The line above the composer while Mate is watching readings for this
+ * conversation (ADR 0160): what, until when, and a Stop. Once the watch has
+ * ended it says Mate is reading the report until the answer arrives.
+ */
+function MateWatchChip({ watch, canWrite }: { watch: NonNullable<ReturnType<typeof useMateTelemetryWatch>>; canWrite: boolean }) {
+  const current = watch.watch
+  if (current === null) return null
+  const reporting = current.status === 'reporting'
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <Marker role="status" data-testid="mate-watch-chip" className="min-w-0 rounded-md border border-border bg-muted/50 px-2 py-1">
+        <MarkerIcon>
+          <Eye />
+        </MarkerIcon>
+        <MarkerContent className="min-w-0 truncate text-xs tabular-nums">
+          {reporting
+            ? 'Watch finished. Mate is reading it.'
+            : `Watching ${current.subject} · ends ${formatWatchClock(current.endsAt)}`}
+        </MarkerContent>
+        {!reporting && canWrite && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto shrink-0"
+            aria-label="Stop watching"
+            onClick={() => { void watch.stop() }}
+          >
+            Stop
+          </Button>
+        )}
+      </Marker>
+      {watch.error && <p className="text-xs text-destructive" role="alert">{watch.error}</p>}
+    </div>
+  )
+}
+
 interface AssistantThreadProps {
   canWrite: boolean
   conversations: ReturnType<typeof useAssistantConversations>
@@ -198,6 +246,10 @@ interface AssistantThreadProps {
    * a staged attachment. Reports false when the thread unmounts. App uses it
    * so an update reload never throws a half-written question away. */
   onHasDraftChange?: (hasDraft: boolean) => void
+  /** The watch Mate is running in the active conversation (ADR 0160), from
+   * `useMateTelemetryWatch`. Optional: without it the thread shows no chip
+   * and never collects a watch's report on its own. */
+  watch?: ReturnType<typeof useMateTelemetryWatch>
 }
 
 /**
@@ -213,7 +265,7 @@ interface AssistantThreadProps {
  * jump-to-latest button, Message/Bubble render one turn each, and Marker
  * carries the status line and tool activity while a reply is in flight.
  */
-export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef, onHasDraftChange }: AssistantThreadProps) {
+export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef, onHasDraftChange, watch }: AssistantThreadProps) {
   const [content, setContent] = useState('')
   // [P1, ADR 0093/impeccable critique 2026-09-12] chat.abort() already
   // cancelled a request on unmount or a superseding send, but the operator
@@ -271,6 +323,36 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // loop or race an in-progress send.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations.activeId])
+
+  // ADR 0160: a reply may have started a watch, so look again whenever the
+  // thread's messages change.
+  const messageCount = conversations.messages.length
+  const refreshWatch = watch?.refresh
+  useEffect(() => {
+    if (refreshWatch) void refreshWatch()
+  }, [messageCount, refreshWatch])
+
+  // ADR 0160: when a watch ends on its own the server has already started
+  // Mate's turn on the report. Rejoin it like any other run, then reload so
+  // the report row and the answer both show even if the turn already ended.
+  const watchEnded = watch?.ended ?? 0
+  useEffect(() => {
+    if (watchEnded === 0) return
+    const id = conversations.activeId
+    if (id === null || chat.isStreamingConversation(id)) return
+    let cancelled = false
+    void (async () => {
+      const reply = await chat.attach(id)
+      if (cancelled || activeIdRef.current !== id) return
+      if (reply !== null) conversations.appendLocal(reply)
+      await conversations.refresh()
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Only a new end should rejoin; see the activeId effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchEnded])
 
   // ADR 0122: dictation, not push-to-talk - appends to the composer, never
   // sends by itself. The header's "Talk to Mate" mic (App.tsx) stays the
@@ -438,7 +520,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                       messageId={message.id}
                       scrollAnchor={message.role === 'user'}
                     >
-                      {message.role === 'user' ? (
+                      {message.role === 'watch' ? (
+                        <Marker className="text-xs" data-testid="mate-watch-report">
+                          <MarkerIcon>
+                            <Eye />
+                          </MarkerIcon>
+                          <MarkerContent>{watchReportHeadline(message.content)}</MarkerContent>
+                        </Marker>
+                      ) : message.role === 'user' ? (
                         <Message align="end">
                           <MessageContent>
                             {message.content !== '' && (
@@ -523,6 +612,8 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           <MessageScrollerButton />
         </MessageScroller>
       </MessageScrollerProvider>
+
+      {watch && <MateWatchChip watch={watch} canWrite={canWrite} />}
 
       {chat.sending && (
         <Marker role={showStatusMarker ? 'status' : undefined}>

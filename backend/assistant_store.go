@@ -22,8 +22,9 @@ type assistantConversation struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// assistantMessage is one row of a conversation. Only user and assistant
-// roles are persisted (assistant_handlers.go) - a tool round trip inside the
+// assistantMessage is one row of a conversation. User and assistant roles
+// are persisted (assistant_handlers.go), plus "watch" for a finished watch's
+// report (ADR 0160, assistant_watch.go) - a tool round trip inside the
 // agentic loop is live status only, never written here. The model/token/cost
 // fields are populated on assistant rows and left at their zero value on
 // user rows.

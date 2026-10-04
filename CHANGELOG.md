@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate can now watch live readings for you. Ask it to keep an eye on
+  something for a few minutes, such as "watch port and starboard engine load
+  for five minutes and tell me if port spikes", and it watches up to six
+  readings once a second for up to 30 minutes, then explains what it saw in
+  the same conversation: the range, any spikes or dips with their times, and
+  any stretch where a reading dropped out. With two readings it compares them
+  second by second. A line above the message box shows what is being watched
+  and when it ends, with a **Stop** button. Restarting Helmcentral cancels a
+  watch in progress. Nothing needs changing on upgrade.
+
 ### Fixed
 
 - Mate looks at engine and other history at one-minute detail when the data only

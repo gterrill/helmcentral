@@ -28,6 +28,11 @@ type assistantPromptContext struct {
 	// search_web guidance; when false it never mentions the tool.
 	WebSearch bool
 
+	// ActiveWatch is the watch (ADR 0160) running in this conversation when
+	// the turn started, nil when none is. Rendered in the live part, so Mate
+	// can say a watch is running only when one is.
+	ActiveWatch *assistantWatchInfo
+
 	VesselName string
 	BoatModel  string
 	// LOAM is anchor.loa_m from settings, 0 when not entered (settings.go's
@@ -786,6 +791,16 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
 		"check both before concluding there is nothing to find).\n\n")
 
+	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
+	// chat that prompted this had Mate say it could not sit and watch a
+	// reading; it can now, and must never claim to without one running.
+	b.WriteString("When the skipper asks you to watch, monitor or keep an eye on a reading over minutes - " +
+		"intermittent spikes, dropouts, one engine against the other - use start_watch (find the exact paths with " +
+		"check_signalk_paths first), then tell them when you will report back. Never say you are watching " +
+		"something unless start_watch succeeded and the live context below says a watch is running. You cannot " +
+		"alert during a watch; alarms do that. When a watch report arrives, explain what it showed against the " +
+		"reason you gave.\n\n")
+
 	// 2c. Nearby vessels (ADR 0128) - fixed wording, identical for every
 	// turn. in_range_since's lower-bound caveat has to be stated here, not
 	// left for the tool result alone to carry: a model reading a plain ISO
@@ -1020,6 +1035,14 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		lb.WriteString("The operator asked by voice. End the answer with a heading exactly `## Spoken summary` " +
 			"followed by at most three sentences that can be read aloud: the recommendation and the one number " +
 			"that matters. Everything above that heading is the written briefing as usual.\n\n")
+	}
+
+	// 5c. A watch running in this conversation (ADR 0160): only when there
+	// is one, so the stable rule "never claim a watch without one running"
+	// has something true to check against.
+	if w := pc.ActiveWatch; w != nil {
+		fmt.Fprintf(&lb, "A watch you started is running in this conversation: %s, until %s. Its report will arrive in this conversation by itself when it ends.\n\n",
+			w.Subject, w.EndsAt.In(loc).Format("15:04"))
 	}
 
 	live = lb.String()

@@ -88,6 +88,10 @@ function buildAssistantFetch(opts: AssistantServerOptions) {
     if (/\/api\/assistant\/conversations\/[^/]+\/run\/cancel$/.test(url) && method === 'POST') {
       return { ok: true, status: 204 }
     }
+    // ADR 0160: the thread asks whether a watch is running; none is here.
+    if (/\/api\/assistant\/conversations\/[^/]+\/watch$/.test(url) && method === 'GET') {
+      return { ok: true, status: 204 }
+    }
 
     throw new Error(`Unhandled fetch in test: ${method} ${url}`)
   })

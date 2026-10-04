@@ -814,6 +814,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// SSE if a run is in flight, 204 if not - read-only, same tier as
 		// the conversation read above.
 		{http.MethodGet, "/api/assistant/conversations/:id/run", tierRead, getAssistantRunHandler},
+		// The running watch for the chat's chip (ADR 0160), or 204. Read
+		// tier: it only reports what is already running.
+		{http.MethodGet, "/api/assistant/conversations/:id/watch", tierRead, getAssistantWatchHandler},
 		// The in-app Help sheet's page fetch (ADR 0095), same embedded
 		// pages as read_help above, reached by direct id instead of a tool
 		// call. Wildcard path, not a :id param: page ids contain a slash
@@ -960,6 +963,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// spent the operator's OpenRouter credit, the same reasoning as the
 		// POST above.
 		{http.MethodPost, "/api/assistant/conversations/:id/run/cancel", tierWrite, postAssistantRunCancelHandler},
+		// The watch chip's Stop (ADR 0160). Write tier, the same as Stop on a
+		// reply: it ends something a write-tier question started.
+		{http.MethodDelete, "/api/assistant/conversations/:id/watch", tierWrite, deleteAssistantWatchHandler},
 		// The operator's Apply and Dismiss on a maintenance proposal card
 		// (ADR 0146). Apply is the one place Mate's maintenance changes are
 		// written, all in one transaction; write tier, since it edits the
