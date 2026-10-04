@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Settings > Tiles** is now **Settings > Plugins**, at `/settings/plugins`.
+  Each kind of plugin (Weather, Wave, Tide, Forecast Warnings, Place names,
+  Nearby) has its own section on one page instead of a tab, and each section
+  says which parts of Helmcentral use it. A bookmark to `/settings/tiles` now
+  opens General settings: update any bookmark to `/settings/plugins`.
+
 ### Added
 
 - Mate can now watch live readings for you. Ask it to keep an eye on
@@ -76,11 +84,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- **Settings > Tiles** is now **Settings > Plugins**, at `/settings/plugins`.
-  Each kind of plugin (Weather, Wave, Tide, Forecast Warnings, Place names,
-  Nearby) has its own section on one page instead of a tab, and each section
-  says which parts of Helmcentral use it. A bookmark to `/settings/tiles` now
-  opens General settings.
 - Alarm cards raised by other instruments on the network now name the event
   in plain words instead of showing the instrument's address. A radar guard
   zone alarm reads "Radar Guard Zone 1", and while the radar is still
