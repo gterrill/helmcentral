@@ -20,7 +20,8 @@ thinking, with nothing to look up, the line shows a nautical phrase ("Coming
 about…", "Trimming the sails…") that changes every few seconds.
 
 A new conversation opens with a short list of what Mate can check, so you can
-see what to ask about: position and wind, instrument history, nearby vessels,
+see what to ask about: position and wind, instrument history, watching a
+reading for a few minutes, nearby vessels,
 forecasts and tides, passage estimates, places, equipment and maintenance, and
 your documents.
 
@@ -135,6 +136,12 @@ to when it stopped - flat-lined, dropping in and out, or just gone. Without
 a history log configured, Mate can still tell you what's live right now; it
 just can't look further back than that.
 
+Some faults only show up over time: an engine load that jumps for a second
+every few minutes, a voltage that dips when something cycles on. Ask Mate to
+keep an eye on it, for example "watch port and starboard engine load for five
+minutes and tell me if port spikes", and it starts a watch and tells you when
+it will report back. See [Watching a reading](#watching-a-reading) below.
+
 Mate can read your maintenance schedule and service log. Ask "what's
 overdue", "when was the generator last serviced" or "is the schedule for the
 main engine complete" and it looks up the rules, their status today and the
@@ -178,6 +185,43 @@ it back.
 See [What Mate can look up](../reference/mate-tools.md) for exactly which
 provider each of these draws on, what counts as "nearby" for a place
 search, and what a failed or unconfigured lookup looks like.
+
+## Watching a reading
+
+A watch follows up to six live readings once a second for between one and
+thirty minutes. While it runs, a line above the composer says what Mate is
+watching and when it ends, for example "Watching Port engine load and
+Starboard engine load · ends 14:35", with a **Stop** button. You can keep
+asking other questions in the same conversation meanwhile, or leave the page
+altogether.
+
+When the time is up, a "Watch finished" line appears in the conversation and
+Mate explains what it saw: the range of each reading, how steady it was, any
+spikes or dips with the time and size of each, and any stretch where a reading
+dropped out or stopped updating. Watch two readings and it also compares them
+second by second, which is how you catch one engine working harder than the
+other at the same throttle. If the chat is open you see the answer arrive; if
+not, it is there next time you open the conversation. The answer costs the
+same as any other reply and shows in its footer.
+
+A few limits worth knowing:
+
+- Every reading has to be live when the watch starts. If one isn't reporting,
+  isn't a number, or hasn't updated in the last ten seconds, Mate says which
+  one and doesn't start.
+- A reading that drops out partway through is reported as a gap with its
+  times. Mate does not fill it in or guess what it was doing.
+- If two instruments send the same reading, such as two depth sounders,
+  Mate says so, since a jump may be one instrument disagreeing with the
+  other rather than the reading changing. A watch can't follow just one of
+  them.
+- One watch per conversation, and three at once across Helmcentral.
+- Mate does not interrupt you during a watch. If something needs your
+  attention right away, that is what alarms are for.
+- Restarting Helmcentral cancels any watch in progress, and nothing is
+  reported for it. So does **Stop**, and so does deleting the conversation.
+- If Mate has been switched off by the time a watch ends, nothing is sent and
+  no answer appears.
 
 ## Documents
 
@@ -246,7 +290,9 @@ won't light up.
 Every question sends your position, the question text itself, and whatever
 forecast or tide data Mate decided to look up, to OpenRouter and from there
 to whichever model you've chosen. This only happens when you ask something
-and Mate is switched on; nothing is sent in the background.
+and Mate is switched on. The one exception is a watch you asked for: when it
+ends, its summary of the readings goes to the model so Mate can explain it,
+and only if Mate is still switched on at that moment.
 
 A document you attach to a question, or one Mate reads through its own
 library search, is sent the same way - as text, since it's already been
@@ -394,9 +440,10 @@ already approximations before a chat model summarises them.
 It needs internet. Without a connection, or with no key configured, or
 switched off, it says so plainly rather than pretending to work.
 
-It can look things up and explain how Helmcentral works, and it can propose
-changes to the maintenance schedule, which you apply or dismiss. It cannot
-start anything, change a setting, or steer anything. There is nothing it can
+It can look things up and explain how Helmcentral works, watch readings for
+a few minutes and report back, and propose changes to the maintenance
+schedule, which you apply or dismiss. It cannot start anything on the boat,
+change a setting, or steer anything. There is nothing it can
 do to the boat, by typing or by voice, and nothing it proposes takes effect
 without your tap.
 

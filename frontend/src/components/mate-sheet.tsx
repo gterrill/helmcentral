@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAssistantChat, type AssistantScreenContext } from '@/hooks/use-assistant-chat'
 import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { extractSpokenSummary } from '@/lib/spoken-summary'
 
@@ -77,6 +78,7 @@ interface MateSheetProps {
 export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
+  const watch = useMateTelemetryWatch(conversations.activeId)
   const speechOutput = useSpeechOutput()
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // Mate UI cycle: search the Mate sheet's conversations. The sheet has no
@@ -334,6 +336,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
               canWrite={canWrite}
               conversations={conversations}
               chat={chat}
+              watch={watch}
               autoFocus={!initialQuestion}
               composerRef={composerRef}
               onHasDraftChange={onHasDraftChange}
