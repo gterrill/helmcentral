@@ -1464,3 +1464,41 @@ func TestExecuteGetPathHistory_FullSpanDataIsUnchanged(t *testing.T) {
 		t.Errorf("unexpected narrowing note: %q", result.Note)
 	}
 }
+
+// A path that went silent hours before the requested stop must still report
+// that silence as a gap: "when did it die" is what get_path_history is for.
+// Narrowing the buckets to the span that holds data must not hide it, while
+// the empty time before first_seen stays unreported (first_seen says that).
+func TestExecuteGetPathHistory_ReportsTrailingSilenceAsAGap(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	firstSeen := now.Add(-6*time.Hour + 10*time.Second) // 06:00:10
+	lastSeen := now.Add(-3 * time.Hour)                 // 09:00:00
+	deps := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{}, errNoVesselState },
+		influxPathHistoryStat:      stubInfluxPathHistoryStatFullyPopulated(t),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(firstSeen, lastSeen, true),
+	}
+	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.Bucket != "5m" {
+		t.Fatalf("expected 5m buckets for a 3 h span of data, got %q", result.Bucket)
+	}
+	if len(result.Gaps) != 1 {
+		t.Fatalf("expected exactly one gap (the trailing silence), got %+v", result.Gaps)
+	}
+	gap := result.Gaps[0]
+	if gap.From != "2026-10-04T09:05:00Z" || gap.To != now.Format(time.RFC3339) {
+		t.Fatalf("expected the trailing gap 09:05..12:00, got %+v", gap)
+	}
+	// 09:05 to 12:00 in 5-minute buckets.
+	if result.GapCount != 35 {
+		t.Fatalf("expected the trailing silence counted as 35 buckets, got %d", result.GapCount)
+	}
+}

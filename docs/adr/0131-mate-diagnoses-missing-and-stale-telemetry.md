@@ -340,8 +340,13 @@ and the width comes from the span between first and last sample. The tier
 table, the 60-bucket cap and the 1-minute floor are unchanged; sub-minute
 tiers were rejected because a sparse path would then report false gaps.
 `start_iso`/`end_iso` still show the range the caller asked for, a note says
-when the buckets cover less, and gap detection runs over the narrowed range
-only (`first_seen`/`last_seen` already say nothing was recorded outside it).
+when the buckets cover less, and gap detection starts at the narrowed start
+(`first_seen` already says nothing was recorded before it) but runs to the
+requested end: a path that went silent before the end of the range reports that
+silence as a gap, counted in buckets of the chosen width, because "when did it
+die" is what the tool is for. An earlier cut of this amendment stopped gap
+detection at `last_seen + width` too, and a path dead for the last three hours
+of a six-hour request reported no gaps at all.
 With no data at all the behaviour is as before. An error from the first/last
 query is still an error. The tool description tells the model that a short
 range gives 1-minute buckets and that each bucket's min/max expose transients.
