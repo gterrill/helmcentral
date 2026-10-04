@@ -15,6 +15,7 @@ const watchBody = {
     minutes: 5,
     started_at: '2026-10-04T04:00:00Z',
     ends_at: '2026-10-04T04:05:00Z',
+    ends_at_local: '14:05',
     status: 'watching',
   },
 }
@@ -44,6 +45,7 @@ describe('useMateTelemetryWatch', () => {
       id: 'w1',
       subject: 'Port engine load and Starboard engine load',
       endsAt: '2026-10-04T04:05:00Z',
+      endsAtLocal: '14:05',
       status: 'watching',
     })
     expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/api\/assistant\/conversations\/c1\/watch$/), expect.anything())
@@ -149,6 +151,74 @@ describe('useMateTelemetryWatch', () => {
 
     rerender({ id: 'c2' })
     await waitFor(() => expect(result.current.watch).toBeNull())
+    expect(result.current.ended).toBe(0)
+  })
+
+  it('a Stop that finds nothing to stop (404) treats the watch as ended and rejoins Mate', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return jsonResponse(404, { error: 'no watch is running in this conversation' })
+      return jsonResponse(200, watchBody)
+    }))
+
+    const { result } = renderHook(() => useMateTelemetryWatch('c1'))
+    await waitFor(() => expect(result.current.watch).not.toBeNull())
+
+    await act(async () => {
+      await result.current.stop()
+    })
+    expect(result.current.watch).toBeNull()
+    expect(result.current.error).toBeNull()
+    expect(result.current.ended).toBe(1)
+  })
+
+  it('counts a watch it never showed as ended when the server says it finished', async () => {
+    // The watch started and finished between two looks: the first look
+    // found nothing, the next (after the reply that started it) finds it
+    // already finished with Mate's follow-up under way.
+    let finished = false
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      finished ? jsonResponse(200, { watch: { ...watchBody.watch, status: 'finished' } }) : jsonResponse(204),
+    ))
+
+    const { result } = renderHook(() => useMateTelemetryWatch('c1'))
+    await waitFor(() => expect(result.current.ended).toBe(0))
+
+    finished = true
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.watch).toBeNull()
+    expect(result.current.ended).toBe(1)
+
+    // The same finished watch seen again does not rejoin twice.
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.ended).toBe(1)
+  })
+
+  it('follows a watch through reporting to finished and counts it once', async () => {
+    let status: 'watching' | 'finished' = 'watching'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { watch: { ...watchBody.watch, status } })))
+
+    const { result } = renderHook(() => useMateTelemetryWatch('c1', { pollMs: 20 }))
+    await waitFor(() => expect(result.current.watch).not.toBeNull())
+
+    status = 'finished'
+    await waitFor(() => expect(result.current.watch).toBeNull())
+    expect(result.current.ended).toBe(1)
+  })
+
+  it('a watch already finished when the conversation opens is not counted', async () => {
+    // Opening the conversation already rejoins any reply in progress.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { watch: { ...watchBody.watch, status: 'finished' } })))
+
+    const { result } = renderHook(() => useMateTelemetryWatch('c1'))
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled())
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.watch).toBeNull()
     expect(result.current.ended).toBe(0)
   })
 })

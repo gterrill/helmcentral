@@ -73,6 +73,13 @@ const (
 
 	assistantWatchStatusWatching  = "watching"
 	assistantWatchStatusReporting = "reporting"
+	assistantWatchStatusFinished  = "finished"
+
+	// assistantWatchFinishedKeep is how long GET .../watch keeps answering
+	// "finished" for a watch whose follow-up turn has been started (or given
+	// up), so a chat that never saw the watch running, because it started
+	// and ended between two looks, still learns there is a reply to rejoin.
+	assistantWatchFinishedKeep = 15 * time.Minute
 )
 
 // assistantWatchFollowUpDeadline bounds how long the end-of-watch turn waits
@@ -229,10 +236,15 @@ type assistantWatchRegistryDeps struct {
 	newTicker func(d time.Duration) assistantWatchTicker
 	read      assistantWatchReader
 	// finish receives every watch that ran to its end, on the watch's own
-	// goroutine, before the watch leaves the registry: while it runs, GET
-	// .../watch reports "reporting", so a page polling for the end sees the
-	// follow-up run already registered by the time the watch disappears.
-	finish func(info assistantWatchInfo, report assistantWatchReport)
+	// goroutine. It calls release once the report is kept in the
+	// conversation: the watch then gives up its slot (the per-conversation
+	// and concurrent limits) while finish goes on to wait for and start
+	// Mate's follow-up turn. From the end of sampling until finish returns,
+	// GET .../watch says "reporting"; after, "finished" for
+	// assistantWatchFinishedKeep, so a page polling for the end sees the
+	// follow-up run already registered by the time it reads "finished".
+	// The registry releases the slot itself if finish returns without.
+	finish func(info assistantWatchInfo, report assistantWatchReport, release func())
 }
 
 // assistantWatchInfo is a watch as the chip, the tool and the follow-up see
@@ -289,13 +301,25 @@ type assistantWatch struct {
 }
 
 type assistantWatchRegistry struct {
-	deps    assistantWatchRegistryDeps
-	mu      sync.Mutex
+	deps assistantWatchRegistryDeps
+	mu   sync.Mutex
+	// watches holds the slots: watches sampling, and watches that have just
+	// ended and are keeping their report. Only these count against the
+	// limits.
 	watches map[string]*assistantWatch
+	// ended holds, per conversation, the latest watch that has given up its
+	// slot: "reporting" while its follow-up turn waits to start, then
+	// "finished" (with finishedAt) for assistantWatchFinishedKeep.
+	ended map[string]*assistantWatchEnded
+}
+
+type assistantWatchEnded struct {
+	info       assistantWatchInfo
+	finishedAt time.Time
 }
 
 func newAssistantWatchRegistry(deps assistantWatchRegistryDeps) *assistantWatchRegistry {
-	return &assistantWatchRegistry{deps: deps, watches: map[string]*assistantWatch{}}
+	return &assistantWatchRegistry{deps: deps, watches: map[string]*assistantWatch{}, ended: map[string]*assistantWatchEnded{}}
 }
 
 // globalAssistantWatches is the process-wide registry. In memory only: a
@@ -316,13 +340,13 @@ func init() {
 }
 
 // assistantWatchDeliverReport is the production finish hook.
-func assistantWatchDeliverReport(info assistantWatchInfo, report assistantWatchReport) {
+func assistantWatchDeliverReport(info assistantWatchInfo, report assistantWatchReport, release func()) {
 	content, err := assistantWatchReportMessage(info, report)
 	if err != nil {
 		log.Printf("assistant: watch %s for conversation %s finished but its report could not be built: %v", info.ID, info.ConversationID, err)
 		return
 	}
-	assistantWatchFollowUp(info, content)
+	assistantWatchFollowUp(info, content, release)
 }
 
 // assistantWatchSubject joins labels the way a sentence would.
@@ -408,34 +432,56 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 	return info, nil
 }
 
+// get returns conversationID's watch: the one holding a slot if there is
+// one, else the latest that has given up its slot ("reporting" or, for
+// assistantWatchFinishedKeep, "finished").
 func (reg *assistantWatchRegistry) get(conversationID string) (assistantWatchInfo, bool) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
-	w, ok := reg.watches[conversationID]
+	if w, ok := reg.watches[conversationID]; ok {
+		return w.info, true
+	}
+	e, ok := reg.ended[conversationID]
 	if !ok {
 		return assistantWatchInfo{}, false
 	}
-	return w.info, true
+	if e.info.Status == assistantWatchStatusFinished && reg.deps.now().Sub(e.finishedAt) > assistantWatchFinishedKeep {
+		delete(reg.ended, conversationID)
+		return assistantWatchInfo{}, false
+	}
+	return e.info, true
 }
 
 // errAssistantWatchReporting is cancel's answer for a watch that has already
 // ended and is handing its report to Mate: too late to stop.
 var errAssistantWatchReporting = errors.New("the watch has already finished; Mate is reading its report")
 
-// cancel stops conversationID's watch without a report. It reports whether
-// there was one to stop. A watch already reporting cannot be cancelled
-// (errAssistantWatchReporting): its follow-up turn is already on its way,
-// and the chat's own Stop on a reply covers that.
+// cancel stops conversationID's watch without a report and forgets any
+// ended one, for a conversation being deleted. It reports whether there was
+// a watch sampling to stop.
 func (reg *assistantWatchRegistry) cancel(conversationID string) bool {
 	stopped, _ := reg.stop(conversationID)
+	reg.mu.Lock()
+	delete(reg.ended, conversationID)
+	reg.mu.Unlock()
 	return stopped
 }
 
+// stop is the chip's Stop: it stops a watch still sampling and reports true.
+// A watch already handing over its report cannot be stopped
+// (errAssistantWatchReporting): its follow-up turn is on its way, and the
+// chat's own Stop on a reply covers that. With no watch sampling or
+// reporting, including one that has finished, it reports false and no
+// error: there was nothing to stop.
 func (reg *assistantWatchRegistry) stop(conversationID string) (bool, error) {
 	reg.mu.Lock()
 	w, ok := reg.watches[conversationID]
 	if !ok {
+		e, ended := reg.ended[conversationID]
 		reg.mu.Unlock()
+		if ended && e.info.Status == assistantWatchStatusReporting {
+			return false, errAssistantWatchReporting
+		}
 		return false, nil
 	}
 	if w.info.Status != assistantWatchStatusWatching {
@@ -466,6 +512,7 @@ func (reg *assistantWatchRegistry) run(w *assistantWatch, ticker assistantWatchT
 		if r := recover(); r != nil {
 			log.Printf("assistant: watch %s for conversation %s panicked: %v", w.info.ID, w.info.ConversationID, r)
 			reg.remove(w)
+			reg.forgetEnded(w)
 		}
 	}()
 
@@ -507,12 +554,45 @@ func (reg *assistantWatchRegistry) finishWatch(w *assistantWatch, series [][]ass
 	w.info.Status = assistantWatchStatusReporting
 	info := w.info
 	reg.mu.Unlock()
-	defer reg.remove(w)
 
 	report := buildAssistantWatchReport(info, series)
 	log.Printf("assistant: watch %s for conversation %s ended; handing the report to Mate", info.ID, info.ConversationID)
+	var once sync.Once
+	release := func() { once.Do(func() { reg.release(w) }) }
 	if reg.deps.finish != nil {
-		reg.deps.finish(info, report)
+		reg.deps.finish(info, report, release)
+	}
+	release()
+	reg.markFinished(w)
+}
+
+// release moves w out of its slot into ended, still "reporting".
+func (reg *assistantWatchRegistry) release(w *assistantWatch) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if reg.watches[w.info.ConversationID] != w {
+		return
+	}
+	delete(reg.watches, w.info.ConversationID)
+	reg.ended[w.info.ConversationID] = &assistantWatchEnded{info: w.info}
+}
+
+// markFinished records that w's follow-up turn has been started, or given
+// up on, unless a later watch in the same conversation has ended since.
+func (reg *assistantWatchRegistry) markFinished(w *assistantWatch) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if e, ok := reg.ended[w.info.ConversationID]; ok && e.info.ID == w.info.ID {
+		e.info.Status = assistantWatchStatusFinished
+		e.finishedAt = reg.deps.now()
+	}
+}
+
+func (reg *assistantWatchRegistry) forgetEnded(w *assistantWatch) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if e, ok := reg.ended[w.info.ConversationID]; ok && e.info.ID == w.info.ID {
+		delete(reg.ended, w.info.ConversationID)
 	}
 }
 
@@ -891,11 +971,19 @@ func assistantWatchReportMessage(info assistantWatchInfo, report assistantWatchR
 // starts one Mate turn on it, through the same run registry and turn
 // launcher a posted question uses. It reports whether a turn started.
 //
+// The report is kept first, then release (when not nil) gives up the
+// watch's slot, and only then does it wait for questions already running in
+// the conversation: a busy conversation can hold the turn back for minutes,
+// and neither the report nor the slot should wait on it. While it waits, the
+// report is already in the conversation's history, so a question asked
+// meanwhile reads it; if Mate has answered such a question, the follow-up is
+// not started (assistantWatchReportAnswered).
+//
 // Nothing is appended and no turn starts when Mate has been switched off
 // (or lost its key or model) since the watch began, or the conversation has
 // been deleted: Mate being on is the consent to send anything to the model,
 // and a deleted conversation has nowhere to put an answer. Both are logged.
-func assistantWatchFollowUp(info assistantWatchInfo, content string) bool {
+func assistantWatchFollowUp(info assistantWatchInfo, content string, release func()) bool {
 	id := info.ConversationID
 	settingsPath := assistantSettingsPath()
 	readiness, apiKey, err := checkAssistantReadiness(settingsPath)
@@ -922,20 +1010,8 @@ func assistantWatchFollowUp(info assistantWatchInfo, content string) bool {
 		return false
 	}
 
-	runCtx, run, ok := acquireAssistantRunForWatch(id, assistantWatchFollowUpDeadline)
-	if !ok {
-		// Not dropped: the report is kept in the conversation, where the
-		// skipper sees it and Mate reads it with the next question.
-		if _, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "watch", Content: content}); err != nil {
-			log.Printf("assistant: watch %s: conversation %s stayed busy and the report could not be kept: %v", info.ID, id, err)
-		} else {
-			log.Printf("assistant: watch %s: conversation %s stayed busy; report kept without a follow-up turn", info.ID, id)
-		}
-		return false
-	}
-
-	if _, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "watch", Content: content}); err != nil {
-		globalAssistantRuns.remove(id, run)
+	kept, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "watch", Content: content})
+	if err != nil {
 		if errors.Is(err, errAssistantConversationNotFound) {
 			log.Printf("assistant: watch %s finished but conversation %s has been deleted; no follow-up", info.ID, id)
 		} else {
@@ -943,10 +1019,26 @@ func assistantWatchFollowUp(info assistantWatchInfo, content string) bool {
 		}
 		return false
 	}
+	if release != nil {
+		release()
+	}
+
+	runCtx, run, ok := acquireAssistantRunForWatch(id, assistantWatchFollowUpDeadline)
+	if !ok {
+		// Not dropped: the report is in the conversation, where the skipper
+		// sees it and Mate reads it with the next question.
+		log.Printf("assistant: watch %s: conversation %s stayed busy; report kept without a follow-up turn", info.ID, id)
+		return false
+	}
 	messages, err := globalAssistantStore.ListMessages(id)
 	if err != nil {
 		globalAssistantRuns.remove(id, run)
 		log.Printf("assistant: watch %s: list messages for conversation %s: %v", info.ID, id, err)
+		return false
+	}
+	if assistantWatchReportAnswered(messages, kept.ID) {
+		globalAssistantRuns.remove(id, run)
+		log.Printf("assistant: watch %s: Mate already answered a question that read the report in conversation %s; no follow-up turn", info.ID, id)
 		return false
 	}
 	if err := beginAssistantTurn(runCtx, run, id, messages, params); err != nil {
@@ -956,6 +1048,26 @@ func assistantWatchFollowUp(info assistantWatchInfo, content string) bool {
 	}
 	log.Printf("assistant: watch %s report delivered to conversation %s; Mate is answering", info.ID, id)
 	return true
+}
+
+// assistantWatchReportAnswered reports whether a question asked after the
+// report row (so with the report in its history) has been answered. The
+// reply to a question already running when the report was kept does not
+// count: that turn's history was read before the report existed.
+func assistantWatchReportAnswered(messages []assistantMessage, reportID string) bool {
+	afterReport, askedSince := false, false
+	for _, m := range messages {
+		switch {
+		case m.ID == reportID:
+			afterReport = true
+		case !afterReport:
+		case m.Role == "user":
+			askedSince = true
+		case m.Role == "assistant" && askedSince:
+			return true
+		}
+	}
+	return false
 }
 
 // acquireAssistantRunForWatch registers a run for id, waiting for questions
@@ -1106,8 +1218,10 @@ func (d assistantToolDeps) executeStartWatch(ctx context.Context, raw json.RawMe
 
 // ── HTTP ────────────────────────────────────────────────────────────────
 
-// GET /api/assistant/conversations/:id/watch: the running watch for the
-// chat's chip, or 204 when there is none.
+// GET /api/assistant/conversations/:id/watch: the conversation's watch for
+// the chat's chip: "watching", "reporting" while its report is handed to
+// Mate, or "finished" for a while after Mate's follow-up turn has started.
+// 204 when there is none.
 func getAssistantWatchHandler(c echo.Context) error {
 	info, ok := globalAssistantWatches.get(c.Param("id"))
 	if !ok {
@@ -1116,13 +1230,19 @@ func getAssistantWatchHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"watch": info})
 }
 
-// DELETE /api/assistant/conversations/:id/watch: the chip's Stop. 204 when
-// it stopped a watch or there was none, so a double tap is harmless; 409
-// when the watch has already ended, so the chat keeps following it to
-// Mate's answer rather than clearing the chip as if it had been stopped.
+// DELETE /api/assistant/conversations/:id/watch: the chip's Stop. 204 only
+// when it stopped a watch that was sampling. 409 when the watch has already
+// ended and is handing over its report, so the chat keeps following it to
+// Mate's answer. 404 when there was nothing to stop, including a watch that
+// has already finished: the chat treats that as the watch having ended and
+// rejoins Mate's follow-up, rather than clearing the chip as if stopped.
 func deleteAssistantWatchHandler(c echo.Context) error {
-	if _, err := globalAssistantWatches.stop(c.Param("id")); errors.Is(err, errAssistantWatchReporting) {
+	stopped, err := globalAssistantWatches.stop(c.Param("id"))
+	if errors.Is(err, errAssistantWatchReporting) {
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	}
+	if !stopped {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "no watch is running in this conversation"})
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -193,7 +193,8 @@ search, and what a failed or unconfigured lookup looks like.
 A watch follows up to six live readings once a second for between one and
 thirty minutes. While it runs, a line above the composer says what Mate is
 watching and when it ends, for example "Watching Port engine load and
-Starboard engine load · ends 14:35", with a **Stop** button. You can keep
+Starboard engine load · ends 14:35", with a **Stop** button. The end time is
+on the boat's clock, the same time Mate gives you. You can keep
 asking other questions in the same conversation meanwhile, or leave the page
 altogether.
 

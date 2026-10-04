@@ -73,7 +73,7 @@ func newWatchTestHarness(t *testing.T) *watchTestHarness {
 			}
 			return fn(now)
 		},
-		finish: func(info assistantWatchInfo, report assistantWatchReport) {
+		finish: func(info assistantWatchInfo, report assistantWatchReport, release func()) {
 			h.finished <- assistantWatchFinished{info: info, report: report}
 		},
 	})
@@ -253,7 +253,17 @@ func TestAssistantWatch_SamplesOncePerTickAndRecordsStaleGaps(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("ticker not stopped after the watch finished")
 	}
-	waitForConditionT(t, time.Second, func() bool { _, ok := h.reg.get("conv-1"); return !ok })
+	// The slot is given up; GET says "finished" for a while afterwards.
+	waitForConditionT(t, time.Second, func() bool {
+		info, ok := h.reg.get("conv-1")
+		return ok && info.Status == assistantWatchStatusFinished
+	})
+	h.reg.mu.Lock()
+	_, holding := h.reg.watches["conv-1"]
+	h.reg.mu.Unlock()
+	if holding {
+		t.Fatal("a finished watch must not hold a slot")
+	}
 }
 
 // ── excursions ──────────────────────────────────────────────────────────
@@ -555,7 +565,7 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 	h.reg.mu.Unlock()
 
 	info := assistantWatchInfo{ID: "w1", ConversationID: conv.ID, Subject: "Port load", Minutes: 5, Today: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)}
-	if !assistantWatchFollowUp(info, "Watch finished: Port load (5 min)\nreport") {
+	if !assistantWatchFollowUp(info, "Watch finished: Port load (5 min)\nreport", nil) {
 		t.Fatal("expected the follow-up turn to start")
 	}
 
@@ -593,7 +603,7 @@ func TestAssistantWatchFollowUp_SkipsWhenMateIsOff(t *testing.T) {
 		t.Fatal("no runner may be built while Mate is switched off")
 		return nil
 	})
-	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x\nreport") {
+	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x\nreport", nil) {
 		t.Fatal("expected no follow-up while Mate is off")
 	}
 	if msgs, _ := store.ListMessages(conv.ID); len(msgs) != 0 {
@@ -610,7 +620,7 @@ func TestAssistantWatchFollowUp_SkipsWhenConversationIsGone(t *testing.T) {
 	if err := store.DeleteConversation(conv.ID); err != nil {
 		t.Fatalf("DeleteConversation: %v", err)
 	}
-	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x\nreport") {
+	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x\nreport", nil) {
 		t.Fatal("expected no follow-up for a deleted conversation")
 	}
 	if _, busy := globalAssistantRuns.get(conv.ID); busy {
@@ -773,7 +783,7 @@ func TestAssistantWatchFollowUp_KeepsTheReportWhenTheConversationStaysBusy(t *te
 		return nil
 	})
 
-	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x (1 min)\nreport") {
+	if assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x (1 min)\nreport", nil) {
 		t.Fatal("expected no turn to start")
 	}
 	msgs, _ := store.ListMessages(conv.ID)
@@ -942,5 +952,223 @@ func TestGetAssistantWatchHandler_CarriesTheVesselLocalEndTime(t *testing.T) {
 	// t0 is 04:00 UTC; the request's vessel zone is UTC+10; five minutes on.
 	if body.Watch.EndsAtLocal != "14:05" {
 		t.Fatalf("expected ends_at_local 14:05, got %s", rec.Body.String())
+	}
+}
+
+// ── the slot is released once the report is kept ───────────────────────
+
+// A finished watch gives up its registry slot as soon as its report is kept,
+// not when Mate's follow-up turn finally starts (which can wait ten minutes
+// on a busy conversation). Until the turn is registered GET says
+// "reporting" and Stop is refused with 409; after it, GET says "finished"
+// and Stop has nothing to stop (404).
+func TestAssistantWatch_ReleasesItsSlotOnceTheReportIsKept(t *testing.T) {
+	h := newWatchTestHarness(t)
+	h.readings["a.one"] = constantReading(1)
+	withTestAssistantWatches(t, h.reg)
+	released := make(chan struct{})
+	unblock := make(chan struct{})
+	h.reg.deps.finish = func(info assistantWatchInfo, report assistantWatchReport, release func()) {
+		release()
+		close(released)
+		<-unblock
+	}
+
+	if _, err := h.reg.start(watchRequest("conv-1", `{"paths":[{"path":"a.one"}],"minutes":1,"reason":"x"}`)); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	for i := 2; i <= assistantWatchMaxConcurrent; i++ {
+		if _, err := h.reg.start(watchRequest("conv-"+string(rune('0'+i)), `{"paths":[{"path":"a.one"}],"minutes":5,"reason":"x"}`)); err != nil {
+			t.Fatalf("start %d: %v", i, err)
+		}
+	}
+	h.tickThrough(h.ticker(0), 60)
+	select {
+	case <-released:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the finish hook never released the slot")
+	}
+
+	if info, ok := h.reg.get("conv-1"); !ok || info.Status != assistantWatchStatusReporting {
+		t.Fatalf("expected conv-1 still shown as reporting while its follow-up waits, got %+v ok=%v", info, ok)
+	}
+	c, rec := newAssistantEchoContext(http.MethodDelete, "/api/assistant/conversations/conv-1/watch", "", "conv-1")
+	if err := deleteAssistantWatchHandler(c); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for a Stop while the report is being handed over, got %d", rec.Code)
+	}
+	if _, err := h.reg.start(watchRequest("conv-9", `{"paths":[{"path":"a.one"}],"minutes":5,"reason":"x"}`)); err != nil {
+		t.Fatalf("expected the released slot to take a new watch, got %v", err)
+	}
+
+	close(unblock)
+	waitForConditionT(t, 2*time.Second, func() bool {
+		info, ok := h.reg.get("conv-1")
+		return ok && info.Status == assistantWatchStatusFinished
+	})
+	c, rec = newAssistantEchoContext(http.MethodGet, "/api/assistant/conversations/conv-1/watch", "", "conv-1")
+	if err := getAssistantWatchHandler(c); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"finished"`) {
+		t.Fatalf("expected GET to say the watch finished, got %d %s", rec.Code, rec.Body.String())
+	}
+	c, rec = newAssistantEchoContext(http.MethodDelete, "/api/assistant/conversations/conv-1/watch", "", "conv-1")
+	if err := deleteAssistantWatchHandler(c); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for a Stop after the watch finished, got %d", rec.Code)
+	}
+}
+
+// Stop with no watch at all is a 404, so the chat can tell "stopped" from
+// "there was nothing to stop".
+func TestDeleteAssistantWatchHandler_NothingToStopIs404(t *testing.T) {
+	h := newWatchTestHarness(t)
+	withTestAssistantWatches(t, h.reg)
+	c, rec := newAssistantEchoContext(http.MethodDelete, "/api/assistant/conversations/conv-1/watch", "", "conv-1")
+	if err := deleteAssistantWatchHandler(c); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 with no watch to stop, got %d", rec.Code)
+	}
+}
+
+// The follow-up keeps the report in the conversation and releases the slot
+// BEFORE waiting for a busy conversation, then starts its turn once free.
+func TestAssistantWatchFollowUp_KeepsTheReportBeforeWaiting(t *testing.T) {
+	store, conv := watchFollowUpSetup(t, true)
+	_, busy, ok := globalAssistantRuns.start(conv.ID)
+	if !ok {
+		t.Fatal("could not register a busy run")
+	}
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+		return assistantRunnerFunc(func(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+			return assistantReply{Content: "Steady throughout.", Model: "openai/gpt-4o"}, nil
+		})
+	})
+
+	released := make(chan struct{})
+	done := make(chan bool, 1)
+	go func() {
+		done <- assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x (1 min)\nreport", func() { close(released) })
+	}()
+	select {
+	case <-released:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the slot was not released while the conversation was busy")
+	}
+	if msgs, _ := store.ListMessages(conv.ID); len(msgs) != 1 || msgs[0].Role != "watch" {
+		t.Fatalf("expected the report kept before waiting, got %+v", msgs)
+	}
+
+	globalAssistantRuns.remove(conv.ID, busy)
+	select {
+	case started := <-done:
+		if !started {
+			t.Fatal("expected the follow-up turn to start once the conversation was free")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow-up never returned")
+	}
+	waitForConditionT(t, 2*time.Second, func() bool {
+		msgs, _ := store.ListMessages(conv.ID)
+		return len(msgs) == 2 && msgs[1].Content == "Steady throughout."
+	})
+	waitForConditionT(t, time.Second, func() bool { _, busy := globalAssistantRuns.get(conv.ID); return !busy })
+}
+
+// A question asked while the follow-up waited already had the report in its
+// history; if Mate answered it, the follow-up does not explain it twice.
+func TestAssistantWatchFollowUp_SkipsWhenALaterQuestionAlreadyReadTheReport(t *testing.T) {
+	store, conv := watchFollowUpSetup(t, true)
+	_, busy, ok := globalAssistantRuns.start(conv.ID)
+	if !ok {
+		t.Fatal("could not register a busy run")
+	}
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+		t.Error("no follow-up turn may start once the report has been answered")
+		return nil
+	})
+
+	released := make(chan struct{})
+	done := make(chan bool, 1)
+	go func() {
+		done <- assistantWatchFollowUp(assistantWatchInfo{ID: "w1", ConversationID: conv.ID}, "Watch finished: x (1 min)\nreport", func() { close(released) })
+	}()
+	<-released
+	// The busy turn ends, then the skipper asks again and Mate answers with
+	// the report already in history; the follow-up is still waiting.
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "Reply to the earlier question."}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "What did the watch show?"}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "It held steady."}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	globalAssistantRuns.remove(conv.ID, busy)
+	if started := <-done; started {
+		t.Fatal("expected no follow-up turn for a report Mate has already answered")
+	}
+	if _, busy := globalAssistantRuns.get(conv.ID); busy {
+		t.Fatal("a skipped follow-up must not leave a run registered")
+	}
+}
+
+// The turn that was already running when the report was kept did not see
+// it, so its reply alone does not count as reading the report.
+func TestAssistantWatchReportAnswered(t *testing.T) {
+	cases := []struct {
+		name  string
+		roles []string
+		want  bool
+	}{
+		{"nothing after the report", []string{"user", "watch"}, false},
+		{"only the in-flight reply after it", []string{"user", "watch", "assistant"}, false},
+		{"a later question answered", []string{"user", "watch", "assistant", "user", "assistant"}, true},
+		{"a later question not answered yet", []string{"user", "watch", "assistant", "user"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var msgs []assistantMessage
+			reportID := ""
+			for i, role := range tc.roles {
+				m := assistantMessage{ID: "m" + string(rune('0'+i)), Role: role}
+				if role == "watch" {
+					reportID = m.ID
+				}
+				msgs = append(msgs, m)
+			}
+			if got := assistantWatchReportAnswered(msgs, reportID); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// "finished" is kept long enough for a chat to notice, then forgotten.
+func TestAssistantWatch_FinishedIsForgottenAfterAWhile(t *testing.T) {
+	h := newWatchTestHarness(t)
+	h.readings["a.one"] = constantReading(1)
+	if _, err := h.reg.start(watchRequest("conv-1", `{"paths":[{"path":"a.one"}],"minutes":1,"reason":"x"}`)); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	h.tickThrough(h.ticker(0), 60)
+	h.waitFinished()
+	waitForConditionT(t, time.Second, func() bool {
+		info, ok := h.reg.get("conv-1")
+		return ok && info.Status == assistantWatchStatusFinished
+	})
+	h.reg.mu.Lock()
+	h.t0 = h.t0.Add(assistantWatchFinishedKeep + time.Second)
+	h.reg.mu.Unlock()
+	if info, ok := h.reg.get("conv-1"); ok {
+		t.Fatalf("expected the finished watch forgotten after %v, got %+v", assistantWatchFinishedKeep, info)
 	}
 }

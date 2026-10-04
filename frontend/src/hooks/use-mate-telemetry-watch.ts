@@ -9,8 +9,10 @@ import { apiBaseUrl } from '@/config/api'
  *
  * `subject` is the operator-words name the server built from Mate's labels
  * ("Port engine load and Starboard engine load"); paths never reach here.
- * `status` is `watching` while it samples and `reporting` while Mate is
- * being handed the report.
+ * `endsAtLocal` is the end time as Mate states it, "HH:MM" on the boat's
+ * clock, formatted by the server. `status` is `watching` while it samples
+ * and `reporting` while Mate is being handed the report. A `finished` watch
+ * is never shown; it only tells the hook that Mate's follow-up has started.
  */
 export interface MateTelemetryWatch {
   id: string
@@ -19,6 +21,7 @@ export interface MateTelemetryWatch {
   minutes: number
   startedAt: string
   endsAt: string
+  endsAtLocal: string
   status: 'watching' | 'reporting'
 }
 
@@ -30,10 +33,11 @@ interface WatchApi {
   minutes: number
   started_at: string
   ends_at: string
-  status: 'watching' | 'reporting'
+  ends_at_local: string
+  status: 'watching' | 'reporting' | 'finished'
 }
 
-function mapWatch(api: WatchApi): MateTelemetryWatch {
+function mapWatch(api: WatchApi & { status: 'watching' | 'reporting' }): MateTelemetryWatch {
   return {
     id: api.id,
     subject: api.subject,
@@ -41,6 +45,7 @@ function mapWatch(api: WatchApi): MateTelemetryWatch {
     minutes: api.minutes,
     startedAt: api.started_at,
     endsAt: api.ends_at,
+    endsAtLocal: api.ends_at_local,
     status: api.status,
   }
 }
@@ -55,13 +60,6 @@ async function readError(response: Response): Promise<string> {
   return `HTTP ${response.status}`
 }
 
-/** "HH:MM" on this device's clock, for the chip's end time. */
-export function formatWatchClock(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '--:--'
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-
 const DEFAULT_POLL_MS = 5000
 
 /**
@@ -70,11 +68,17 @@ const DEFAULT_POLL_MS = 5000
  * Reads `GET .../watch` when the conversation changes and whenever the
  * thread calls `refresh` (after a reply lands, since Mate may just have
  * started one), then polls every few seconds only while a watch is showing.
- * When a watch that was showing disappears on its own, `ended` goes up by
- * one: the server has by then registered Mate's follow-up turn, and the
- * thread uses that to rejoin it. A Stop, or switching conversation, clears
- * the watch without counting it; a Stop that arrives after the watch has
- * already ended (409) keeps following it instead.
+ *
+ * `ended` goes up by one each time a watch ends on its own, which is the
+ * thread's cue to rejoin Mate's follow-up turn: when the server answers
+ * `finished` for a watch not yet counted (including one that started and
+ * ended between two looks and was never shown), when a shown watch
+ * disappears (204), or when Stop finds nothing left to stop (404). A
+ * `finished` watch found on the first look at a conversation is not
+ * counted: opening the conversation already rejoins any reply in progress.
+ * A Stop that stops the watch (204), or switching conversation, clears it
+ * without counting; a Stop refused because the watch is handing over its
+ * report (409) keeps following it instead.
  */
 export function useMateTelemetryWatch(conversationId: string | null, options: { pollMs?: number } = {}) {
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS
@@ -84,8 +88,20 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
   // The watch last shown, and for which conversation, so a 204 can tell
   // "it ended" from "there never was one here".
   const shownRef = useRef<{ conversationId: string; watchId: string } | null>(null)
+  // The last watch counted as ended (or seen finished on first look), so a
+  // finished watch rejoins Mate once however often it is read.
+  const countedRef = useRef<{ conversationId: string; watchId: string } | null>(null)
+  // True until the first answer for the current conversation arrives.
+  const firstLookRef = useRef(true)
   const conversationRef = useRef(conversationId)
   conversationRef.current = conversationId
+
+  const countEnded = useCallback((id: string, watchId: string | null) => {
+    const counted = countedRef.current
+    if (watchId !== null && counted?.conversationId === id && counted.watchId === watchId) return
+    if (watchId !== null) countedRef.current = { conversationId: id, watchId }
+    setEnded((n) => n + 1)
+  }, [])
 
   const refresh = useCallback(async () => {
     const id = conversationRef.current
@@ -99,7 +115,9 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
     }
     if (conversationRef.current !== id) return
     if (response.status === 204) {
-      if (shownRef.current?.conversationId === id) setEnded((n) => n + 1)
+      firstLookRef.current = false
+      const shown = shownRef.current
+      if (shown?.conversationId === id) countEnded(id, shown.watchId)
       shownRef.current = null
       setWatch(null)
       return
@@ -110,13 +128,27 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
     }
     const data = (await response.json()) as { watch: WatchApi }
     if (conversationRef.current !== id) return
-    shownRef.current = { conversationId: id, watchId: data.watch.id }
+    const firstLook = firstLookRef.current
+    firstLookRef.current = false
     setError(null)
-    setWatch(mapWatch(data.watch))
-  }, [])
+    if (data.watch.status === 'finished') {
+      if (firstLook) {
+        countedRef.current = { conversationId: id, watchId: data.watch.id }
+      } else {
+        countEnded(id, data.watch.id)
+      }
+      shownRef.current = null
+      setWatch(null)
+      return
+    }
+    shownRef.current = { conversationId: id, watchId: data.watch.id }
+    setWatch(mapWatch({ ...data.watch, status: data.watch.status }))
+  }, [countEnded])
 
   useEffect(() => {
     shownRef.current = null
+    countedRef.current = null
+    firstLookRef.current = true
     setWatch(null)
     setError(null)
     if (conversationId !== null) void refresh()
@@ -139,6 +171,17 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
         await refresh()
         return
       }
+      if (response.status === 404) {
+        // Nothing left to stop: the watch had already finished and Mate's
+        // follow-up is under way (or done). Treat it as a natural end.
+        if (conversationRef.current !== id) return
+        const shown = shownRef.current
+        shownRef.current = null
+        setError(null)
+        setWatch(null)
+        if (shown?.conversationId === id) countEnded(id, shown.watchId)
+        return
+      }
       if (!response.ok) {
         setError(await readError(response))
         return
@@ -151,7 +194,7 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
     shownRef.current = null
     setError(null)
     setWatch(null)
-  }, [refresh])
+  }, [refresh, countEnded])
 
   return { watch, ended, error, refresh, stop }
 }

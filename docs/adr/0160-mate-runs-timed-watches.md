@@ -55,10 +55,15 @@ Mate gets one more tool, `start_watch(paths, minutes, reason)`.
   this). An open chat rejoins that run the way it rejoins any other; a chat opened later finds the
   report and the answer in its history. The model sees the report as a user turn whose text says it
   is automatic and not from the skipper. The chat shows only its first line, "Watch finished: Port
-  engine load and Starboard engine load (5 min)". If a question is already running in that
-  conversation, the turn waits for it. If the conversation stays busy for about ten minutes the
-  report is still appended, without a turn, so it is not lost: the skipper sees it, and Mate reads
-  it with the next question.
+  engine load and Starboard engine load (5 min)". The report is appended first, and the watch then
+  gives up its slot (the one-per-conversation and concurrent limits) before the turn is started, so
+  neither the report nor the slot waits on a busy conversation. If a question is already running in
+  that conversation, the turn waits for it, for about ten minutes at most; after that the report
+  stays in the conversation without a turn: the skipper sees it, and Mate reads it with the next
+  question. A question asked while the turn waits already has the report in its history, so if Mate
+  has answered one, the follow-up turn is not started; the reply to the question that was running
+  when the report was appended does not count, since that turn read its history before the report
+  existed.
 - **Consent is checked again at the end.** If Mate has been switched off, lost its key or model, or
   the conversation has been deleted by the time the watch ends, nothing is appended and no turn
   starts, and the server logs why. Mate being on is the consent to send anything to the model
@@ -67,11 +72,18 @@ Mate gets one more tool, `start_watch(paths, minutes, reason)`.
   with the running watch's subject and end time, rather than replacing it. Simpler, and honest about
   what is already running. The process-wide cap keeps a runaway from sampling dozens of paths.
 - **Stop.** `DELETE /api/assistant/conversations/:id/watch` (write tier) stops a watch without a
-  report, answering 204 whether or not one was running, and 409 when the watch has already ended
-  and is handing over its report, so the chat keeps following it to Mate's answer instead of
-  clearing the chip as if it had been stopped. `GET` on the same path (read tier) returns it for the chat, which shows "Watching
-  &lt;labels&gt; · ends HH:MM" with a Stop button, and "Watch finished. Mate is reading it." while the
-  report turn starts. The chip names readings by Mate's labels, never by path.
+  report. It answers 204 only when it stopped a watch that was sampling; 409 when the watch has
+  already ended and is handing over its report, so the chat keeps following it to Mate's answer;
+  and 404 when there was nothing to stop, including a watch that has already finished, which the
+  chat treats as a natural end and rejoins Mate's follow-up rather than clearing the chip as if it
+  had been stopped. `GET` on the same path (read tier) returns the watch for the chat: `watching`,
+  `reporting` from the end of sampling until the follow-up turn is registered, then `finished` for
+  15 minutes. The chat shows "Watching &lt;labels&gt; · ends HH:MM" with a Stop button, and "Watch
+  finished. Mate is reading it." while reporting. `finished` is never shown; it lets a chat that
+  never saw the watch running, because it started and ended between two looks, still rejoin the
+  follow-up. The end time is formatted by the server (`ends_at_local`) on the same vessel-local
+  clock Mate states it in, not the viewing device's clock. The chip names readings by Mate's
+  labels, never by path.
 - **Mate is told the truth about it.** The prompt says to use `start_watch` when asked to watch or
   monitor something over minutes and never to claim a watch without one running, and the live
   part of the prompt names the watch running in the conversation, if any.
