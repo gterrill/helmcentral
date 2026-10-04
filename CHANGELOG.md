@@ -20,6 +20,33 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   radar now appears once it is actually reporting, which can take a short
   while after Helmcentral connects.
 
+## [0.41.0] - 2026-10-04
+
+### Breaking
+
+- **Settings > Tiles** is now **Settings > Plugins**, at `/settings/plugins`.
+  Each kind of plugin (Weather, Wave, Tide, Forecast Warnings, Place names,
+  Nearby) has its own section on one page instead of a tab, and each section
+  says which parts of Helmcentral use it. A bookmark to `/settings/tiles` now
+  opens General settings: update any bookmark to `/settings/plugins`.
+
+### Added
+
+- Mate can now watch live readings for you. Ask it to keep an eye on
+  something for a few minutes, such as "watch port and starboard engine load
+  for five minutes and tell me if port spikes", and it watches up to six
+  readings once a second for up to 30 minutes, then explains what it saw in
+  the same conversation: the range, any spikes or dips with their times, and
+  any stretch where a reading dropped out. With two readings in the same units
+  it compares them second by second. A line above the message box shows what is being watched
+  and when it ends, with a **Stop** button. Restarting Helmcentral cancels a
+  watch in progress. Nothing needs changing on upgrade.
+
+### Fixed
+
+- Mate looks at engine and other history at one-minute detail when the data only
+  covers a short stretch, so it can see brief spikes.
+
 ## [0.40.0] - 2026-10-03
 
 ### Breaking
@@ -68,11 +95,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- **Settings > Tiles** is now **Settings > Plugins**, at `/settings/plugins`.
-  Each kind of plugin (Weather, Wave, Tide, Forecast Warnings, Place names,
-  Nearby) has its own section on one page instead of a tab, and each section
-  says which parts of Helmcentral use it. A bookmark to `/settings/tiles` now
-  opens General settings.
 - Alarm cards raised by other instruments on the network now name the event
   in plain words instead of showing the instrument's address. A radar guard
   zone alarm reads "Radar Guard Zone 1", and while the radar is still
@@ -843,7 +865,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/gterrill/helmcentral/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/gterrill/helmcentral/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/gterrill/helmcentral/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/gterrill/helmcentral/compare/v0.37.0...v0.38.0

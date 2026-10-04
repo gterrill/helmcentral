@@ -2037,6 +2037,8 @@ func TestBuildAPIRoutes_AssistantRoutesHaveExpectedTiers(t *testing.T) {
 		"DELETE /api/assistant/conversations/:id":          tierWrite,
 		"POST /api/assistant/conversations/:id/messages":   tierWrite,
 		"POST /api/assistant/conversations/:id/run/cancel": tierWrite,
+		"GET /api/assistant/conversations/:id/watch":       tierRead,
+		"DELETE /api/assistant/conversations/:id/watch":    tierWrite,
 	}
 
 	got := map[string]apiTier{}

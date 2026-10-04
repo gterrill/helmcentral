@@ -9,6 +9,7 @@ import { filterConversationsByQuery, formatConversationRelativeTime } from '@/li
 import { cn } from '@/lib/utils'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 
 interface AssistantDrawerProps {
@@ -39,6 +40,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
   const status = useAssistantStatus()
   const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
+  const watch = useMateTelemetryWatch(conversations.activeId)
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
 
@@ -147,7 +149,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
           </div>
         </div>
 
-        <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} onHasDraftChange={onHasDraftChange} />
+        <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} watch={watch} onHasDraftChange={onHasDraftChange} />
       </div>
     )
   })()

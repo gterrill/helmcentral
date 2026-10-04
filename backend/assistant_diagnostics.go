@@ -745,43 +745,62 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		)
 	}
 
-	every, width := assistantPathHistoryBucketWidth(stop.Sub(start))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	// First/last seen runs first: the bucket width must follow the span that
+	// actually holds data, not the span that was asked for. A six-hour
+	// request over an engine that has run for twenty minutes would otherwise
+	// get 15-minute buckets, hiding a spike that one-minute buckets (whose
+	// max exposes it) show plainly.
+	firstSeenAt, lastSeenAt, firstLastFound, firstLastErr := d.influxPathHistoryFirstLast(ctx, path, source, start, stop)
+	if firstLastErr != nil {
+		return "", fmt.Errorf("get_path_history: %w", firstLastErr)
+	}
+
+	// queryStart/queryStop are the range the buckets cover. They equal the
+	// requested range unless data sits in only part of it.
+	queryStart, queryStop := start, stop
+	var every string
+	var width time.Duration
+	if firstLastFound {
+		every, width = assistantPathHistoryBucketWidth(lastSeenAt.Sub(firstSeenAt))
+		if s := firstSeenAt.Truncate(width); s.After(queryStart) {
+			queryStart = s
+		}
+		if e := lastSeenAt.Add(width); e.Before(queryStop) {
+			queryStop = e
+		}
+	} else {
+		every, width = assistantPathHistoryBucketWidth(stop.Sub(start))
+	}
 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
-	// The three bucketed stat queries (min/mean/max) and the actual-first/
-	// last-sample query all share the same range and filter, and none
-	// depends on another's result, so they run concurrently off the SAME
-	// tool ctx rather than sequentially each building its own
-	// context.Background() timeout (a code-review finding, 2026-09-25): the
-	// worst case is now one shared timeout, and cancelling ctx (the caller
-	// going away, or the model's own deadline) stops every one of them
-	// instead of none.
+	// The three bucketed stat queries (min/mean/max) share the same range
+	// and filter and none depends on another's result, so they run
+	// concurrently off the SAME tool ctx (a code-review finding,
+	// 2026-09-25): the worst case is one shared timeout, and cancelling ctx
+	// stops every one of them.
 	var minPts, meanPts, maxPts []telemetryPoint
 	var minErr, meanErr, maxErr error
-	var firstSeenAt, lastSeenAt time.Time
-	var firstLastFound bool
-	var firstLastErr error
 
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		minPts, minErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "min")
+		minPts, minErr = d.influxPathHistoryStat(ctx, path, source, queryStart, queryStop, every, "min")
 	}()
 	go func() {
 		defer wg.Done()
-		meanPts, meanErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "mean")
+		meanPts, meanErr = d.influxPathHistoryStat(ctx, path, source, queryStart, queryStop, every, "mean")
 	}()
 	go func() {
 		defer wg.Done()
-		maxPts, maxErr = d.influxPathHistoryStat(ctx, path, source, start, stop, every, "max")
-	}()
-	go func() {
-		defer wg.Done()
-		firstSeenAt, lastSeenAt, firstLastFound, firstLastErr = d.influxPathHistoryFirstLast(ctx, path, source, start, stop)
+		maxPts, maxErr = d.influxPathHistoryStat(ctx, path, source, queryStart, queryStop, every, "max")
 	}()
 	wg.Wait()
 
@@ -793,9 +812,6 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	}
 	if maxErr != nil {
 		return "", fmt.Errorf("get_path_history: %w", maxErr)
-	}
-	if firstLastErr != nil {
-		return "", fmt.Errorf("get_path_history: %w", firstLastErr)
 	}
 
 	loc := time.UTC
@@ -878,11 +894,21 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		result.LastSeen = lastSeenAt.In(loc).Format("Mon 2 Jan 15:04")
 		result.LastSeenISO = lastSeenAt.UTC().Format(time.RFC3339)
 	}
+	if queryStart.After(start) || queryStop.Before(stop) {
+		notes = append(notes, fmt.Sprintf(
+			"nothing recorded before first_seen or after last_seen; buckets cover %s-%s at %s.",
+			queryStart.UTC().Format(time.RFC3339), queryStop.UTC().Format(time.RFC3339), every,
+		))
+	}
 	if len(merged) == 0 {
 		notes = append(notes, "no data recorded for this path in the requested range")
 	}
 
-	gaps, gapCount := computePathHistoryGaps(start, stop, width, merged)
+	// Gaps run from queryStart to the REQUESTED stop, not queryStop: silence
+	// after last_seen is the answer to "when did it die", so it is reported
+	// and counted in buckets of the chosen width. Silence before first_seen
+	// is not, since first_seen already says nothing was recorded earlier.
+	gaps, gapCount := computePathHistoryGaps(queryStart, stop, width, merged)
 	result.GapCount = gapCount
 	if len(gaps) > assistantPathHistoryMaxReportedGaps {
 		// Keep the MOST RECENT gaps, not the oldest - gaps is already

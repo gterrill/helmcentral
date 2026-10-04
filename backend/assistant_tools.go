@@ -184,6 +184,10 @@ type assistantToolDeps struct {
 	// zero value means "not supplied", and list_maintenance then fails
 	// rather than guess.
 	today time.Time
+	// watches is start_watch's registry (ADR 0160). Production wires
+	// globalAssistantWatches; nil (a test that never sets it) makes the tool
+	// fail plainly rather than start nothing.
+	watches *assistantWatchRegistry
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -226,6 +230,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
+		watches:                    globalAssistantWatches,
 	}
 }
 
@@ -604,7 +609,10 @@ func assistantToolDefinitions() []openRouterTool {
 				Name: "get_path_history",
 				Description: "From InfluxDB, fetch one exact SignalK path's history over a time range - " +
 					"min/mean/max per bucket, overall min/mean/max, first/last seen, and any gaps - to see what " +
-					"a value actually did (flat-lined, noisy, or simply absent) around when it stopped. Use " +
+					"a value actually did (flat-lined, noisy, or simply absent) around when it stopped. Bucket width " +
+					"follows the span that holds data, not the span asked for: if the data covers an hour or less " +
+					"you get 1-minute buckets, so a short range gives the finest detail. Each bucket's min/max " +
+					"show transients shorter than the bucket. Use " +
 					"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
@@ -786,6 +794,7 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		assistantStartWatchToolDefinition(),
 	}
 }
 
@@ -846,6 +855,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetRecord(ctx, args)
 	case assistantProposalToolTag:
 		return d.executeProposeChanges(ctx, args)
+	case "start_watch":
+		return d.executeStartWatch(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -992,6 +1003,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Reading a record…"
 	case assistantProposalToolTag:
 		return "Preparing the changes…"
+	case "start_watch":
+		return "Starting a watch…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

@@ -54,7 +54,7 @@ interface MessageApi {
   id: string
   conversation_id: string
   seq: number
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'watch'
   content: string
   model?: string
   prompt_tokens?: number
@@ -112,7 +112,7 @@ export interface AssistantMessage {
   id: string
   conversationId: string
   seq: number
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'watch'
   content: string
   model?: string
   promptTokens?: number

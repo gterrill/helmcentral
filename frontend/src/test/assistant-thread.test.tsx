@@ -6,6 +6,7 @@ import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useNotes } from '@/hooks/use-notes'
+import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
 
 // The thread creates a note directly (no sheet) when the operator saves an
@@ -1041,5 +1042,95 @@ describe('AssistantThread: save an answer as a note', () => {
 
       expect(screen.queryByTestId('assistant-proposal-card')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
+  function buildWatch(
+    overrides: Partial<ReturnType<typeof useMateTelemetryWatch>> = {},
+  ): ReturnType<typeof useMateTelemetryWatch> {
+    return {
+      watch: {
+        id: 'w1',
+        subject: 'Port engine load and Starboard engine load',
+        labels: ['Port engine load', 'Starboard engine load'],
+        minutes: 5,
+        startedAt: '2026-10-04T04:00:00Z',
+        endsAt: '2026-10-04T04:05:00Z',
+        // Deliberately not 04:05Z on any likely device clock: the chip
+        // must show the server's vessel-local time, not its own.
+        endsAtLocal: '15:35',
+        status: 'watching',
+      },
+      ended: 0,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }
+  }
+
+  // The end time is the vessel-local clock Mate states, formatted by the
+  // server, never this device's clock.
+  it('shows what is being watched, when it ends, and a Stop that ends it', () => {
+    const watch = buildWatch()
+    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={watch} />)
+
+    const chip = screen.getByTestId('mate-watch-chip')
+    expect(chip).toHaveTextContent('Watching Port engine load and Starboard engine load · ends 15:35')
+    fireEvent.click(within(chip).getByRole('button', { name: 'Stop watching' }))
+    expect(watch.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers no Stop to a read-only session', () => {
+    render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} watch={buildWatch()} />)
+
+    expect(screen.getByTestId('mate-watch-chip')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop watching' })).not.toBeInTheDocument()
+  })
+
+  it('says Mate is reading the report once the watch has ended, with no Stop', () => {
+    const base = buildWatch()
+    const watch = buildWatch({ watch: { ...base.watch!, status: 'reporting' } })
+    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={watch} />)
+
+    expect(screen.getByTestId('mate-watch-chip')).toHaveTextContent('Watch finished. Mate is reading it.')
+    expect(screen.queryByRole('button', { name: 'Stop watching' })).not.toBeInTheDocument()
+  })
+
+  it('shows no chip with no watch running', () => {
+    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={buildWatch({ watch: null })} />)
+
+    expect(screen.queryByTestId('mate-watch-chip')).not.toBeInTheDocument()
+  })
+
+  it('shows a watch report row by its headline only, never the report Mate reads', () => {
+    const report = assistantMessage({
+      id: 'm2',
+      role: 'watch',
+      content: 'Watch finished: Port engine load and Starboard engine load (5 min)\n[Automatic watch report]\n{"watch_id":"w1"}',
+      model: undefined,
+      costUsd: undefined,
+    })
+    render(<AssistantThread canWrite conversations={buildConversations({ messages: [report] })} chat={buildChat()} />)
+
+    expect(screen.getByText('Watch finished: Port engine load and Starboard engine load (5 min)')).toBeInTheDocument()
+    expect(screen.queryByText(/watch_id/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Save as note/ })).not.toBeInTheDocument()
+  })
+
+  it('rejoins Mate\'s follow-up and reloads the thread when the watch ends', async () => {
+    const reply = assistantMessage({ id: 'm9', content: 'Port load spiked twice.' })
+    const attach = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(reply)
+    const chat = buildChat({ attach })
+    const conversations = buildConversations()
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch()} />)
+    await waitFor(() => expect(attach).toHaveBeenCalledTimes(1)) // the mount-time rejoin
+
+    rerender(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch({ watch: null, ended: 1 })} />)
+
+    await waitFor(() => expect(attach).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
+    expect(conversations.refresh).toHaveBeenCalled()
   })
 })
