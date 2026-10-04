@@ -21,7 +21,7 @@ import {
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
-import { formatWatchClock, type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
+import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
 import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
@@ -210,7 +210,7 @@ function MateWatchChip({ watch, canWrite }: { watch: NonNullable<ReturnType<type
         <MarkerContent className="min-w-0 truncate text-xs tabular-nums">
           {reporting
             ? 'Watch finished. Mate is reading it.'
-            : `Watching ${current.subject} · ends ${formatWatchClock(current.endsAt)}`}
+            : `Watching ${current.subject} · ends ${current.endsAtLocal}`}
         </MarkerContent>
         {!reporting && canWrite && (
           <Button

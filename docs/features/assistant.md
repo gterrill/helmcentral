@@ -193,16 +193,19 @@ search, and what a failed or unconfigured lookup looks like.
 A watch follows up to six live readings once a second for between one and
 thirty minutes. While it runs, a line above the composer says what Mate is
 watching and when it ends, for example "Watching Port engine load and
-Starboard engine load · ends 14:35", with a **Stop** button. You can keep
+Starboard engine load · ends 14:35", with a **Stop** button. The end time is
+on the boat's clock, the same time Mate gives you. You can keep
 asking other questions in the same conversation meanwhile, or leave the page
 altogether.
 
 When the time is up, a "Watch finished" line appears in the conversation and
 Mate explains what it saw: the range of each reading, how steady it was, any
 spikes or dips with the time and size of each, and any stretch where a reading
-dropped out or stopped updating. Watch two readings and it also compares them
-second by second, which is how you catch one engine working harder than the
-other at the same throttle. If the chat is open you see the answer arrive; if
+dropped out or stopped updating. Watch two readings of the same kind and it
+also compares them second by second, which is how you catch one engine working
+harder than the other at the same throttle. Two readings measured in different
+units, such as a bank's voltage and its current, are not compared that way, and
+Mate says so. If the chat is open you see the answer arrive; if
 not, it is there next time you open the conversation. The answer costs the
 same as any other reply and shows in its footer.
 

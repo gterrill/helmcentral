@@ -6,7 +6,7 @@ import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useNotes } from '@/hooks/use-notes'
-import { formatWatchClock, type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
+import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
 
 // The thread creates a note directly (no sheet) when the operator saves an
@@ -1057,6 +1057,9 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
         minutes: 5,
         startedAt: '2026-10-04T04:00:00Z',
         endsAt: '2026-10-04T04:05:00Z',
+        // Deliberately not 04:05Z on any likely device clock: the chip
+        // must show the server's vessel-local time, not its own.
+        endsAtLocal: '15:35',
         status: 'watching',
       },
       ended: 0,
@@ -1067,12 +1070,14 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
     }
   }
 
+  // The end time is the vessel-local clock Mate states, formatted by the
+  // server, never this device's clock.
   it('shows what is being watched, when it ends, and a Stop that ends it', () => {
     const watch = buildWatch()
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={watch} />)
 
     const chip = screen.getByTestId('mate-watch-chip')
-    expect(chip).toHaveTextContent(`Watching Port engine load and Starboard engine load · ends ${formatWatchClock('2026-10-04T04:05:00Z')}`)
+    expect(chip).toHaveTextContent('Watching Port engine load and Starboard engine load · ends 15:35')
     fireEvent.click(within(chip).getByRole('button', { name: 'Stop watching' }))
     expect(watch.stop).toHaveBeenCalledTimes(1)
   })

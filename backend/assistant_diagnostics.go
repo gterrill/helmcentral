@@ -904,7 +904,11 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		notes = append(notes, "no data recorded for this path in the requested range")
 	}
 
-	gaps, gapCount := computePathHistoryGaps(queryStart, queryStop, width, merged)
+	// Gaps run from queryStart to the REQUESTED stop, not queryStop: silence
+	// after last_seen is the answer to "when did it die", so it is reported
+	// and counted in buckets of the chosen width. Silence before first_seen
+	// is not, since first_seen already says nothing was recorded earlier.
+	gaps, gapCount := computePathHistoryGaps(queryStart, stop, width, merged)
 	result.GapCount = gapCount
 	if len(gaps) > assistantPathHistoryMaxReportedGaps {
 		// Keep the MOST RECENT gaps, not the oldest - gaps is already
