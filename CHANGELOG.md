@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-04
+
 ### Breaking
 
 - **Settings > Tiles** is now **Settings > Plugins**, at `/settings/plugins`.
@@ -854,7 +856,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/gterrill/helmcentral/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/gterrill/helmcentral/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/gterrill/helmcentral/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/gterrill/helmcentral/compare/v0.37.0...v0.38.0
