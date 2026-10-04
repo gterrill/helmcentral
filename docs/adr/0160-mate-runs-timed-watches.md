@@ -41,7 +41,7 @@ Mate gets one more tool, `start_watch(paths, minutes, reason)`.
   gap with its reason. Statistics and excursions use real samples only.
 - **The report.** Per path: tick and sample counts, min, mean, max, standard deviation, first and
   last, gaps, and excursions. An excursion is a run of samples more than five robust standard
-  deviations (1.4826 x the MAD of the residuals), or 5% of the level or range if larger, from a
+  deviations (1.4826 x the MAD of the residuals), or 5% of the series' own range if larger, from a
   centred 61 s rolling median, merged into episodes with start, duration, peak and baseline. With
   exactly two paths the same is reported for their per-second difference, which is the port
   against starboard case. Values are SignalK units, times vessel local, the whole report held to

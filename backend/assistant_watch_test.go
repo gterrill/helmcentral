@@ -803,3 +803,46 @@ func TestDeleteAssistantWatchHandler_RefusesAWatchAlreadyReporting(t *testing.T)
 		t.Fatalf("expected 409 saying the watch already finished, got %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// ── excursion floor follows the series' spread, not its zero point ──────
+
+// The floor used to scale with the absolute level, so a 26.4 V bank hid a
+// 1 V dip behind a 1.3 V floor and coolant at 358 K hid a 10 K spike behind
+// a 17.9 K one. The floor now comes from the series' own spread.
+func TestDetectAssistantWatchExcursions_FloorIgnoresTheUnitsZeroPoint(t *testing.T) {
+	t0 := time.Date(2026, 10, 4, 4, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		level     float64
+		jitter    float64
+		at        int
+		offset    float64
+		direction string
+	}{
+		{"1 V dip on a 26.4 V bank", 26.4, 0.02, 150, -1.0, "below"},
+		{"10 K spike on coolant at 358 K", 358.0, 0.1, 150, 10.0, "above"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			values := make([]float64, 300)
+			for i := range values {
+				values[i] = tc.level + tc.jitter*math.Sin(float64(i))
+			}
+			values[tc.at] += tc.offset
+			values[tc.at+1] += tc.offset
+			excursions, count := detectAssistantWatchExcursions(watchSeries(t0, values), time.UTC)
+			if count != 1 || len(excursions) != 1 || excursions[0].Direction != tc.direction || excursions[0].Seconds != 2 {
+				t.Fatalf("expected one 2 s excursion %s, got %d: %+v", tc.direction, count, excursions)
+			}
+		})
+	}
+
+	// A quiet, noisy series at a high level still reports nothing.
+	values := make([]float64, 300)
+	for i := range values {
+		values[i] = 358.0 + 0.3*float64(i%3-1)
+	}
+	if excursions, count := detectAssistantWatchExcursions(watchSeries(t0, values), time.UTC); count != 0 {
+		t.Fatalf("expected no excursions in plain jitter at 358 K, got %+v", excursions)
+	}
+}

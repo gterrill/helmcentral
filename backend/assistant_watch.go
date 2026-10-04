@@ -59,9 +59,10 @@ const (
 	// median to count as an excursion.
 	assistantWatchMADK = 5.0
 	// assistantWatchFloorFraction is the excursion threshold's floor, as a
-	// fraction of the series' typical level or range (whichever is larger),
-	// so a quantised, mostly flat signal (MAD 0) does not report every
-	// one-step flicker as a spike.
+	// fraction of the series' own range, so a mostly flat signal (MAD 0)
+	// does not report movement that is small against what the series did.
+	// Never a fraction of the level: that depends on the unit's zero point
+	// (coolant at 358 K would get a 17.9 K floor, a 26.4 V bank a 1.3 V one).
 	assistantWatchFloorFraction = 0.05
 	// assistantWatchEpisodeBridge merges flagged samples this close together
 	// into one episode.
@@ -558,7 +559,7 @@ type assistantWatchReport struct {
 	Note            string                       `json:"note"`
 }
 
-const assistantWatchReportNote = "Values are SignalK units, sampled once a second from the live feed. A gap is seconds with no usable reading (missing, not updating for 10 s, or not a number); gaps are not filled. source_switches above zero means more than one source took turns on that path, so a jump may be one source differing from the other rather than the reading changing. An excursion is a run of samples more than 5 robust standard deviations (or 5% of the level or range, whichever is larger) from the rolling 61 s median; baseline is that median at the peak. Times are vessel local."
+const assistantWatchReportNote = "Values are SignalK units, sampled once a second from the live feed. A gap is seconds with no usable reading (missing, not updating for 10 s, or not a number); gaps are not filled. source_switches above zero means more than one source took turns on that path, so a jump may be one source differing from the other rather than the reading changing. An excursion is a run of samples more than 5 robust standard deviations (or 5% of the series' range, whichever is larger) from the rolling 61 s median; baseline is that median at the peak. Times are vessel local."
 
 func roundTo4(v float64) float64 { return math.Round(v*1e4) / 1e4 }
 
@@ -745,13 +746,12 @@ func detectAssistantWatchExcursions(samples []assistantWatchSample, loc *time.Lo
 		absResiduals[i] = math.Abs(residuals[i])
 	}
 	sigma := 1.4826 * medianOf(absResiduals)
-	level := math.Abs(medianOf(values))
 	lo, hi := values[0], values[0]
 	for _, v := range values {
 		lo, hi = math.Min(lo, v), math.Max(hi, v)
 	}
-	floor := assistantWatchFloorFraction * math.Max(level, hi-lo)
-	threshold := math.Max(assistantWatchMADK*sigma, math.Max(floor, 1e-9))
+	floor := assistantWatchFloorFraction*(hi-lo) + 1e-9
+	threshold := math.Max(assistantWatchMADK*sigma, floor)
 
 	type episode struct {
 		start, end time.Time
