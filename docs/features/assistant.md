@@ -132,7 +132,9 @@ check rather than guessing. With a history log configured for the boat, it
 goes further: ask "when did the tank levels stop updating" and it finds the
 last recorded time for each one, names the specific feed behind it if that
 feed has gone quiet, and can pull up what a reading was doing in the run-up
-to when it stopped - flat-lined, dropping in and out, or just gone. Without
+to when it stopped - flat-lined, dropping in and out, or just gone. When a reading was only recorded for a short stretch, such as an
+engine that has been running for twenty minutes, Mate looks at it minute by
+minute, so a brief spike still shows. Without
 a history log configured, Mate can still tell you what's live right now; it
 just can't look further back than that.
 

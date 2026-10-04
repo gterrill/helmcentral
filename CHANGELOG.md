@@ -23,6 +23,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and when it ends, with a **Stop** button. Restarting Helmcentral cancels a
   watch in progress. Nothing needs changing on upgrade.
 
+### Fixed
+
+- Mate looks at engine and other history at one-minute detail when the data only
+  covers a short stretch, so it can see brief spikes.
+
 ## [0.40.0] - 2026-10-03
 
 ### Breaking

@@ -609,7 +609,10 @@ func assistantToolDefinitions() []openRouterTool {
 				Name: "get_path_history",
 				Description: "From InfluxDB, fetch one exact SignalK path's history over a time range - " +
 					"min/mean/max per bucket, overall min/mean/max, first/last seen, and any gaps - to see what " +
-					"a value actually did (flat-lined, noisy, or simply absent) around when it stopped. Use " +
+					"a value actually did (flat-lined, noisy, or simply absent) around when it stopped. Bucket width " +
+					"follows the span that holds data, not the span asked for: if the data covers an hour or less " +
+					"you get 1-minute buckets, so a short range gives the finest detail. Each bucket's min/max " +
+					"show transients shorter than the bucket. Use " +
 					"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
