@@ -11,6 +11,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- Mate looks at engine and other history at one-minute detail when the data only
+  covers a short stretch, so it can see brief spikes.
+
 ## [0.40.0] - 2026-10-03
 
 ### Breaking
