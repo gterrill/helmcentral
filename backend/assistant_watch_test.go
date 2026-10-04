@@ -846,3 +846,101 @@ func TestDetectAssistantWatchExcursions_FloorIgnoresTheUnitsZeroPoint(t *testing
 		t.Fatalf("expected no excursions in plain jitter at 358 K, got %+v", excursions)
 	}
 }
+
+// ── difference only in matching units ───────────────────────────────────
+
+// Volts minus amps means nothing: the difference series is taken only when
+// both readings carry the same known units, and the report says why not.
+func TestAssistantWatch_NoDifferenceAcrossDifferentUnits(t *testing.T) {
+	h := newWatchTestHarness(t)
+	h.readings["electrical.batteries.house.voltage"] = func(time.Time) assistantWatchReading {
+		r := liveReading(26.4)
+		r.Units = "V"
+		return r
+	}
+	h.readings["electrical.batteries.house.current"] = func(time.Time) assistantWatchReading {
+		r := liveReading(-12)
+		r.Units = "A"
+		return r
+	}
+	if _, err := h.reg.start(watchRequest("conv-1", `{"paths":[{"path":"electrical.batteries.house.voltage","label":"House voltage"},{"path":"electrical.batteries.house.current","label":"House current"}],"minutes":1,"reason":"x"}`)); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	h.tickThrough(h.ticker(0), 60)
+	report := h.waitFinished().report
+	if report.Difference != nil {
+		t.Fatalf("expected no difference between volts and amps, got %+v", report.Difference)
+	}
+	if !strings.Contains(report.DifferenceNote, "different units") {
+		t.Fatalf("expected the report to say the units differ, got %q", report.DifferenceNote)
+	}
+}
+
+// ── start_watch reports the readings it checked ─────────────────────────
+
+// value_now is the reading start() checked, not a second read that may find
+// the path gone and report 0.
+func TestExecuteStartWatch_ValueNowIsTheCheckedReading(t *testing.T) {
+	h := newWatchTestHarness(t)
+	var mu sync.Mutex
+	reads := 0
+	h.readings["electrical.batteries.house.voltage"] = func(time.Time) assistantWatchReading {
+		mu.Lock()
+		defer mu.Unlock()
+		reads++
+		if reads == 1 {
+			r := liveReading(26.4)
+			r.Units = "V"
+			return r
+		}
+		return assistantWatchReading{}
+	}
+	deps := assistantToolDeps{
+		now:     func() time.Time { return h.t0 },
+		watches: h.reg,
+		vesselState: func() (vesselStateData, error) {
+			return vesselStateData{Latitude: -20.1, Longitude: 149.0}, nil
+		},
+	}
+	ctx := withAssistantConversationID(context.Background(), "conv-1")
+	out, err := deps.execute(ctx, "start_watch", json.RawMessage(`{"paths":[{"path":"electrical.batteries.house.voltage","label":"House voltage"}],"minutes":5,"reason":"x"}`))
+	if err != nil {
+		t.Fatalf("start_watch: %v", err)
+	}
+	var result assistantStartWatchResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal: %v (%s)", err, out)
+	}
+	if len(result.Paths) != 1 || result.Paths[0].ValueNow != 26.4 || result.Paths[0].Units != "V" {
+		t.Fatalf("expected value_now 26.4 V from the checked reading, got %s", out)
+	}
+}
+
+// ── the chip's end time is Mate's end time ──────────────────────────────
+
+// The chip shows the end time in the same vessel-local clock Mate states,
+// formatted by the server, not the viewing device's clock.
+func TestGetAssistantWatchHandler_CarriesTheVesselLocalEndTime(t *testing.T) {
+	h := newWatchTestHarness(t)
+	h.readings["a.one"] = constantReading(1)
+	withTestAssistantWatches(t, h.reg)
+	if _, err := h.reg.start(watchRequest("conv-1", `{"paths":[{"path":"a.one"}],"minutes":5,"reason":"x"}`)); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/conversations/conv-1/watch", "", "conv-1")
+	if err := getAssistantWatchHandler(c); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	var body struct {
+		Watch struct {
+			EndsAtLocal string `json:"ends_at_local"`
+		} `json:"watch"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v (%s)", err, rec.Body.String())
+	}
+	// t0 is 04:00 UTC; the request's vessel zone is UTC+10; five minutes on.
+	if body.Watch.EndsAtLocal != "14:05" {
+		t.Fatalf("expected ends_at_local 14:05, got %s", rec.Body.String())
+	}
+}

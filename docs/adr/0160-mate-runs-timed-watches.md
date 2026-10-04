@@ -43,8 +43,9 @@ Mate gets one more tool, `start_watch(paths, minutes, reason)`.
   last, gaps, and excursions. An excursion is a run of samples more than five robust standard
   deviations (1.4826 x the MAD of the residuals), or 5% of the series' own range if larger, from a
   centred 61 s rolling median, merged into episodes with start, duration, peak and baseline. With
-  exactly two paths the same is reported for their per-second difference, which is the port
-  against starboard case. Values are SignalK units, times vessel local, the whole report held to
+  exactly two paths in the same known units the same is reported for their per-second difference,
+  which is the port against starboard case. Two paths in different units (volts and amps) get no
+  difference, and the report says why. Values are SignalK units, times vessel local, the whole report held to
   the tool result budget (`capToolResultJSON`) by trimming listed excursions, then gaps, with the
   counts kept.
 - **Summary at the end only.** Nothing is raised during a watch. Alarms already do that.

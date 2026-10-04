@@ -246,13 +246,29 @@ type assistantWatchInfo struct {
 	Minutes        int       `json:"minutes"`
 	StartedAt      time.Time `json:"started_at"`
 	EndsAt         time.Time `json:"ends_at"`
-	Status         string    `json:"status"`
+	// EndsAtLocal is EndsAt on the vessel-local clock Mate states it in
+	// (assistantWatchClock), so the chip and Mate never disagree.
+	EndsAtLocal string `json:"ends_at_local"`
+	Status      string `json:"status"`
 
 	Reason        string                  `json:"-"`
 	Paths         []assistantWatchPathArg `json:"-"`
 	Today         time.Time               `json:"-"`
 	Location      *time.Location          `json:"-"`
 	TimezoneLabel string                  `json:"-"`
+	// StartReadings are the readings start() checked, one per path, set
+	// only on the info start returns: start_watch reports them as value_now
+	// rather than reading again and finding a path that dropped meanwhile.
+	StartReadings []assistantWatchReading `json:"-"`
+}
+
+// assistantWatchClock formats a watch time as Mate states it: HH:MM on the
+// vessel-local clock.
+func assistantWatchClock(t time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("15:04")
 }
 
 type assistantWatchRequest struct {
@@ -334,7 +350,7 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 	if existing, ok := reg.watches[req.ConversationID]; ok {
 		reg.mu.Unlock()
 		return assistantWatchInfo{}, fmt.Errorf("start_watch: a watch is already running in this conversation (%s, until %s); wait for its report, or the skipper can stop it from the chat",
-			existing.info.Subject, existing.info.EndsAt.In(loc).Format("15:04"))
+			existing.info.Subject, assistantWatchClock(existing.info.EndsAt, loc))
 	}
 	if len(reg.watches) >= assistantWatchMaxConcurrent {
 		reg.mu.Unlock()
@@ -342,8 +358,10 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 	}
 	reg.mu.Unlock()
 
-	for _, spec := range req.Args.Paths {
-		if err := assistantWatchStartError(spec, reg.deps.read(spec.Path, now)); err != nil {
+	readings := make([]assistantWatchReading, len(req.Args.Paths))
+	for i, spec := range req.Args.Paths {
+		readings[i] = reg.deps.read(spec.Path, now)
+		if err := assistantWatchStartError(spec, readings[i]); err != nil {
 			return assistantWatchInfo{}, err
 		}
 	}
@@ -360,6 +378,7 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 		Minutes:        req.Args.Minutes,
 		StartedAt:      now,
 		EndsAt:         now.Add(time.Duration(req.Args.Minutes) * time.Minute),
+		EndsAtLocal:    assistantWatchClock(now.Add(time.Duration(req.Args.Minutes)*time.Minute), loc),
 		Status:         assistantWatchStatusWatching,
 		Reason:         req.Args.Reason,
 		Paths:          req.Args.Paths,
@@ -385,6 +404,7 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 	ticker := reg.deps.newTicker(assistantWatchSampleInterval)
 	go reg.run(w, ticker)
 	log.Printf("assistant: watch %s started for conversation %s: %d paths for %d min", info.ID, info.ConversationID, len(info.Paths), info.Minutes)
+	info.StartReadings = readings
 	return info, nil
 }
 
@@ -555,6 +575,7 @@ type assistantWatchReport struct {
 	SampleIntervalS int                          `json:"sample_interval_s"`
 	Series          []assistantWatchSeriesReport `json:"series"`
 	Difference      *assistantWatchSeriesReport  `json:"difference,omitempty"`
+	DifferenceNote  string                       `json:"difference_note,omitempty"`
 	Truncated       bool                         `json:"truncated,omitempty"`
 	Note            string                       `json:"note"`
 }
@@ -593,12 +614,27 @@ func buildAssistantWatchReport(info assistantWatchInfo, series [][]assistantWatc
 		report.Series = append(report.Series, r)
 	}
 	if len(info.Paths) == 2 && len(series) == 2 {
-		d := summarizeAssistantWatchSeries(assistantWatchDifference(series[0], series[1]), loc)
-		d.Label = info.Paths[0].Label + " minus " + info.Paths[1].Label
-		d.SourcesSeen, d.SourceSwitches = nil, 0
-		report.Difference = &d
+		// Only readings in the same known units can be subtracted: volts
+		// minus amps is a number with no meaning.
+		a, b := report.Series[0], report.Series[1]
+		if a.Units != "" && a.Units == b.Units {
+			d := summarizeAssistantWatchSeries(assistantWatchDifference(series[0], series[1]), loc)
+			d.Label = info.Paths[0].Label + " minus " + info.Paths[1].Label
+			d.SourcesSeen, d.SourceSwitches = nil, 0
+			report.Difference = &d
+		} else {
+			report.DifferenceNote = fmt.Sprintf("%s (%s) and %s (%s) are in different units, so no difference was taken.",
+				a.Label, assistantWatchUnitsWord(a.Units), b.Label, assistantWatchUnitsWord(b.Units))
+		}
 	}
 	return report
+}
+
+func assistantWatchUnitsWord(units string) string {
+	if units == "" {
+		return "units not stated"
+	}
+	return units
 }
 
 // assistantWatchDifference pairs two series tick by tick: a minus b where
@@ -957,7 +993,7 @@ func assistantStartWatchToolDefinition() openRouterTool {
 				"with the end time; tell the skipper when you will report back. When the watch ends, its report " +
 				"arrives in this conversation by itself and you will be asked to explain it: per path count, " +
 				"min/mean/max, stdev, first/last, gaps, excursions from a rolling median and the sources seen, and " +
-				"for exactly two paths the same for their difference. Every path must be live now or the call fails naming it; " +
+				"for exactly two paths in the same units the same for their difference. Every path must be live now or the call fails naming it; " +
 				"find exact paths with check_signalk_paths first. One watch per conversation. A Helmcentral " +
 				"restart cancels it, and the skipper can stop it from the chat.",
 			Parameters: json.RawMessage(`{
@@ -1054,16 +1090,15 @@ func (d assistantToolDeps) executeStartWatch(ctx context.Context, raw json.RawMe
 	result := assistantStartWatchResult{
 		WatchID:   info.ID,
 		Minutes:   info.Minutes,
-		EndsAt:    info.EndsAt.In(loc).Format("15:04"),
+		EndsAt:    info.EndsAtLocal,
 		EndsAtISO: info.EndsAt.UTC().Format(time.RFC3339),
 		Timezone:  tzLabel,
 		Note: "The watch is running. Tell the skipper you will report back at ends_at. Its report arrives in this " +
 			"conversation by itself when it ends. A Helmcentral restart cancels it, and the skipper can stop it " +
 			"from the chat.",
 	}
-	now := info.StartedAt
-	for _, p := range info.Paths {
-		r := d.watches.deps.read(p.Path, now)
+	for i, p := range info.Paths {
+		r := info.StartReadings[i]
 		result.Paths = append(result.Paths, assistantStartWatchResultPath{Path: p.Path, Label: p.Label, ValueNow: roundTo4(r.Value), Units: r.Units})
 	}
 	return capToolResultJSON(&result, nil)
