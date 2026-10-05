@@ -55,8 +55,9 @@ exception is a reply already being written when you close and reopen the
 sheet mid-answer - that keeps arriving exactly as it was, rather than being
 cut off. To pick up an earlier conversation instead, choose it from the
 panel's list, or from the sheet's own search - its header's search icon
-opens a quick list of your 8 most recent conversations, or type to filter
-by title. On a phone the panel has no list down the side. Press **Chats** at
+opens a quick list of your 8 most recent conversations, or type to find a
+conversation by any word in it, not just its title. A match inside a
+conversation shows a line of the matching text under the title. On a phone the panel has no list down the side. Press **Chats** at
 the top of the panel to open that same quick list, and **New** beside it to
 start a blank conversation.
 
@@ -411,6 +412,26 @@ Crew Training (Watchkeeping)" - so it knows which book to point you at by
 name. It's an index, not the manual's content: the actual reading still goes
 through the same document search everything else in the library uses (see
 [Documents](#documents) above for why there's no manual-specific search).
+
+## Remembering earlier conversations
+
+A new conversation starts without the old one in front of it, so Mate looks
+back for itself. Before it advises on a specific piece of your boat's
+equipment, and whenever you refer to earlier work ("yesterday", "we already
+did that"), it searches your past conversations for that equipment or topic
+and reads what was said. What you established then, especially from your own
+photos and observations, counts as a fact about your boat and comes ahead of
+general knowledge. If you showed Mate that a manifold has no sampling valve, or
+agreed that draining the other engine's fuel filter bowl was a bad idea, it
+will not suggest either again, and it tells you when it is going on something
+from an earlier conversation.
+
+Mate also does not offer options that depend on a fitting, valve or port it
+has not confirmed is aboard. It asks you, or checks your documents, equipment
+records and past conversations first.
+
+Mate can only recall conversations that are still in the list. Delete a
+conversation and Mate no longer knows what was in it.
 
 ## Conversations and cost
 
