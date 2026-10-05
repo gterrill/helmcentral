@@ -11,6 +11,8 @@ interface ConversationApi {
   title: string
   created_at: string
   updated_at: string
+  /** The note this conversation was summarised into, when it still exists. */
+  summary_note_id?: string
 }
 
 interface MessageAttachmentApi {
@@ -213,6 +215,10 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
+  // The active conversation's summary note (ADR 0162), null until the
+  // operator has saved one. Read from the conversation when it is opened and
+  // set by the summary dialog after a save.
+  const [summaryNoteId, setSummaryNoteId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -259,6 +265,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       const data = (await response.json()) as { conversation?: ConversationApi; messages?: MessageApi[] }
       if (selectionSeqRef.current !== seq) return
       setMessages(Array.isArray(data.messages) ? data.messages.map(mapMessage) : [])
+      setSummaryNoteId(data.conversation?.summary_note_id ?? null)
       setError(null)
     } catch (err) {
       if (selectionSeqRef.current !== seq) return
@@ -342,6 +349,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     selectionSeqRef.current += 1
     setActiveId(null)
     setMessages([])
+    setSummaryNoteId(null)
     setError(null)
   }, [])
 
@@ -414,6 +422,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
           selectionSeqRef.current += 1
           setActiveId(null)
           setMessages([])
+          setSummaryNoteId(null)
         }
       }
     } catch (err) {
@@ -446,6 +455,8 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     conversations,
     activeId,
     messages,
+    summaryNoteId,
+    setSummaryNoteId,
     loading,
     error,
     errorMessage,

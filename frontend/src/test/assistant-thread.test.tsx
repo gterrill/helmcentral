@@ -59,6 +59,8 @@ function buildConversations(
     conversations: [],
     activeId: 'c1',
     messages: [],
+    summaryNoteId: null,
+    setSummaryNoteId: vi.fn(),
     loading: false,
     error: null,
     errorMessage: null,
