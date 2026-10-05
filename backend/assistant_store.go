@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -702,21 +703,21 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 			continue
 		}
 		erows, err := s.db.Query(
-			`SELECT m.role, snippet(messages_fts, 0, '', '', '…', ?)
+			`SELECT m.role, m.content
 			 FROM messages_fts f JOIN messages m ON m.id = f.message_id
 			 WHERE messages_fts MATCH ? AND f.conversation_id = ?
 			 ORDER BY rank LIMIT ?`,
-			opts.ExcerptTokens, match, out[i].ID, opts.ExcerptsPerConv)
+			match, out[i].ID, opts.ExcerptsPerConv)
 		if err != nil {
 			return nil, fmt.Errorf("search conversation excerpts: %w", err)
 		}
 		for erows.Next() {
-			var role, text string
-			if err := erows.Scan(&role, &text); err != nil {
+			var role, content string
+			if err := erows.Scan(&role, &content); err != nil {
 				erows.Close()
 				return nil, fmt.Errorf("scan conversation excerpt: %w", err)
 			}
-			text = strings.Join(strings.Fields(text), " ")
+			text := excerptAroundMatch(stripMarkdownForExcerpt(content), terms, opts.ExcerptTokens)
 			if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
 				text = string(r[:opts.ExcerptMaxRunes]) + "…"
 			}
@@ -778,4 +779,63 @@ func titleMatchesTerms(title string, terms []string) bool {
 		}
 	}
 	return true
+}
+
+var (
+	excerptLinkPattern   = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	excerptLinePrefix    = regexp.MustCompile(`(?m)^[ \t]*(?:#{1,6}[ \t]+|>[ \t]*|[-*+][ \t]+|\d+[.)][ \t]+)`)
+	excerptEmphasisChars = strings.NewReplacer("**", "", "__", "", "`", "", "*", "")
+	excerptUnderscore    = regexp.MustCompile(`(^|[^\p{L}\p{N}])_+|_+([^\p{L}\p{N}]|$)`)
+)
+
+// stripMarkdownForExcerpt turns a message's Markdown into plain prose for a
+// search excerpt: links keep their text, emphasis, code ticks, heading marks
+// and list markers go, and whitespace collapses.
+func stripMarkdownForExcerpt(md string) string {
+	t := excerptLinkPattern.ReplaceAllString(md, "$1")
+	t = excerptLinePrefix.ReplaceAllString(t, "")
+	t = excerptEmphasisChars.Replace(t)
+	t = excerptUnderscore.ReplaceAllString(t, "$1$2")
+	return strings.Join(strings.Fields(t), " ")
+}
+
+// excerptAroundMatch returns about maxWords words of text, starting a few
+// words before the first word that matches a search term so the match is
+// visible at the start of a short clamp.
+func excerptAroundMatch(text string, terms []string, maxWords int) string {
+	if maxWords <= 0 {
+		maxWords = 16
+	}
+	words := strings.Fields(text)
+	first := 0
+	for i, w := range words {
+		matched := false
+		for _, tok := range stripMarks(searchTokens(w)) {
+			for j, term := range terms {
+				if tok == term || (j == len(terms)-1 && strings.HasPrefix(tok, term)) {
+					matched = true
+				}
+			}
+		}
+		if matched {
+			first = i
+			break
+		}
+	}
+	start := first - 3
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxWords
+	if end > len(words) {
+		end = len(words)
+	}
+	out := strings.Join(words[start:end], " ")
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(words) {
+		out += "…"
+	}
+	return out
 }

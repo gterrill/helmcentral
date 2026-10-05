@@ -297,3 +297,34 @@ func TestAssistantSearchSchema_FailureLeavesNoHalfBuiltIndex(t *testing.T) {
 		t.Fatalf("retry did not backfill, got %d", n)
 	}
 }
+
+func TestStripMarkdownForExcerpt(t *testing.T) {
+	cases := map[string]string{
+		"1. **Confirm the correct circuit.** Check whether":    "Confirm the correct circuit. Check whether",
+		"## Heading\n- item one\n* item `two`":                  "Heading item one item two",
+		"See [the manual](/documents?document=abc) and __this__": "See the manual and this",
+		"a  *b*   _c_\n\n  d":                                    "a b c d",
+	}
+	for in, want := range cases {
+		if got := stripMarkdownForExcerpt(in); got != want {
+			t.Errorf("stripMarkdownForExcerpt(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSearchConversations_ExcerptIsPlainTextWithMatchEarly(t *testing.T) {
+	s := newTestAssistantStore(t)
+	long := strings.Repeat("filler words go here ", 30)
+	seedSearchConv(t, s, "x", [2]string{"assistant", "1. **Intro** " + long + "then the **Racor** bowl [drain](/documents?document=1) is fine. " + long})
+	hits, err := s.SearchConversations("racor", assistantConversationSearchOptions{ExcerptTokens: 20})
+	if err != nil || len(hits) != 1 || len(hits[0].Excerpts) != 1 {
+		t.Fatalf("hits=%+v err=%v", hits, err)
+	}
+	text := hits[0].Excerpts[0].Text
+	if strings.ContainsAny(text, "*[]()#") {
+		t.Fatalf("markdown left in %q", text)
+	}
+	if i := strings.Index(text, "Racor"); i < 0 || i > 60 {
+		t.Fatalf("match not early in %q (at %d)", text, i)
+	}
+}
