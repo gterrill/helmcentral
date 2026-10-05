@@ -300,8 +300,8 @@ func TestAssistantSearchSchema_FailureLeavesNoHalfBuiltIndex(t *testing.T) {
 
 func TestStripMarkdownForExcerpt(t *testing.T) {
 	cases := map[string]string{
-		"1. **Confirm the correct circuit.** Check whether":    "Confirm the correct circuit. Check whether",
-		"## Heading\n- item one\n* item `two`":                  "Heading item one item two",
+		"1. **Confirm the correct circuit.** Check whether":      "Confirm the correct circuit. Check whether",
+		"## Heading\n- item one\n* item `two`":                   "Heading item one item two",
 		"See [the manual](/documents?document=abc) and __this__": "See the manual and this",
 		"a  *b*   _c_\n\n  d":                                    "a b c d",
 	}
