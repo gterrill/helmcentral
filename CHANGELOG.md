@@ -19,6 +19,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Dictating on an Android phone no longer repeats each phrase.** Speaking
+  into the message box or any dictation field used to type the growing
+  sentence over and over; each phrase now appears once. The microphone keeps
+  listening between phrases until you tap it off.
 - **A switched-off radar no longer shows as present after a restart.** For the
   first few minutes after Helmcentral restarted or reconnected to the boat's
   network, a radar that was off could appear as transmitting, and the anchor
