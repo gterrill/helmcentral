@@ -452,3 +452,16 @@ func TestAssistantSummaryPrompt_KeepsTheAssistantOutOfTheNote(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveSummaryEquipment_ExactAliasBeatsLongerNames(t *testing.T) {
+	docs := newTestDocumentStore(t)
+	maker := mustToolEquipment(t, docs, equipmentItem{Name: "Spectra Ventura 150", Aliases: []string{"Watermaker"}})
+	mustToolEquipment(t, docs, equipmentItem{Name: "Watermaker pre-filter"})
+	got, err := resolveSummaryEquipment(docs, []string{" watermaker "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != maker.ID {
+		t.Fatalf("got %+v, want the record aliased Watermaker", got)
+	}
+}

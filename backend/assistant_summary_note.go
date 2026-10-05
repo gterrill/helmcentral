@@ -168,6 +168,14 @@ func resolveSummaryEquipment(store *documentStore, names []string) ([]assistantS
 				break
 			}
 		}
+		for i := 0; pick == nil && i < len(items); i++ {
+			for _, alias := range items[i].Aliases {
+				if strings.EqualFold(strings.TrimSpace(alias), name) {
+					pick = &items[i]
+					break
+				}
+			}
+		}
 		if pick == nil && len(items) == 1 {
 			pick = &items[0]
 		}
