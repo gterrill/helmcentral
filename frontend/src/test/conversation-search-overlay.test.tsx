@@ -155,7 +155,7 @@ describe('ConversationSearchOverlay server search', () => {
       json: async () => ({ results: [{ id: 'z', title: 'Fuel polisher', updated_at: '2026-09-01T00:00:00Z', snippet: 'no drain on the starboard Racor' }] }),
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const list = [conversation({ id: 'a', title: 'Gloucester Island' })]
+    const list = [conversation({ id: 'a', title: 'Gloucester Island' }), conversation({ id: 'z', title: 'Fuel polisher' })]
     render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={list} onSelect={vi.fn()} />)
     expect(fetchMock).not.toHaveBeenCalled()
 
@@ -183,5 +183,58 @@ describe('ConversationSearchOverlay server search', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'racor' } })
     expect(await screen.findByRole('alert')).toHaveTextContent('Message search failed')
     expect(screen.getByText('Racor bowl')).toBeInTheDocument()
+  })
+
+  it('drops a server hit for a conversation that is no longer in the list, and uses the loaded title', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        results: [
+          { id: 'gone', title: 'Deleted chat', updated_at: '2026-09-01T00:00:00Z', snippet: 'racor gone' },
+          { id: 'a', title: 'Old title', updated_at: '2026-09-01T00:00:00Z', snippet: 'racor kept' },
+        ],
+      }),
+    })))
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={[conversation({ id: 'a', title: 'Renamed chat' })]} onSelect={vi.fn()} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'racor' } })
+    await screen.findByText('racor kept')
+    expect(screen.getByText('Renamed chat')).toBeInTheDocument()
+    expect(screen.queryByText('Old title')).not.toBeInTheDocument()
+    expect(screen.queryByText('Deleted chat')).not.toBeInTheDocument()
+  })
+
+  it('keeps the highlight on the same conversation when server results arrive and reorder rows', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await gate
+      return {
+        ok: true,
+        json: async () => ({ results: [{ id: 'm', title: 'Message hit', updated_at: '2026-09-01T00:00:00Z', snippet: 'racor in text' }] }),
+      }
+    }))
+    const onSelect = vi.fn()
+    const list = [conversation({ id: 't1', title: 'Racor one' }), conversation({ id: 't2', title: 'Racor two' }), conversation({ id: 'm', title: 'Message hit' })]
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={list} onSelect={onSelect} />)
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: 'racor' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    release()
+    await screen.findByText('racor in text')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith('t2')
+  })
+
+  it('removes a hit when its conversation is deleted while server results are showing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ results: [{ id: 'a', title: 'Racor bowl', updated_at: '2026-09-01T00:00:00Z', snippet: 'racor drain' }] }),
+    })))
+    const props = { open: true, onOpenChange: vi.fn(), onSelect: vi.fn() }
+    const { rerender } = render(<ConversationSearchOverlay {...props} conversations={[conversation({ id: 'a', title: 'Racor bowl' })]} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'racor' } })
+    await screen.findByText('racor drain')
+    rerender(<ConversationSearchOverlay {...props} conversations={[]} />)
+    expect(screen.queryByText('racor drain')).not.toBeInTheDocument()
   })
 })

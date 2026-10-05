@@ -40,7 +40,9 @@ interface ConversationSearchOverlayProps {
  */
 export function ConversationSearchOverlay({ open, onOpenChange, conversations, onSelect, onDelete }: ConversationSearchOverlayProps) {
   const [query, setQuery] = useState('')
-  const [highlighted, setHighlighted] = useState(0)
+  // The highlight follows a conversation id, not a row index, so server hits
+  // arriving after the first keystrokes cannot move it onto a different row.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const search = useConversationSearch(conversations, query)
@@ -49,11 +51,14 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
     [search.results, query],
   )
 
-  // A fresh open (or a query that changes what's visible) always starts back
-  // at the top row - carrying a stale highlight across a filter change could
-  // point Enter at a row that has since scrolled out of the list entirely.
+  const found = visible.findIndex((c) => c.id === highlightedId)
+  const highlighted = found >= 0 ? found : 0
+
+  // A fresh open or a changed query starts back at the top row; a change to
+  // the results alone keeps the highlight on its conversation (falling back
+  // to the top row only if that conversation has left the list).
   useEffect(() => {
-    setHighlighted(0)
+    setHighlightedId(null)
   }, [query, open])
 
   // The query itself resets on every close/reopen (same as
@@ -71,10 +76,10 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setHighlighted((current) => Math.min(current + 1, Math.max(visible.length - 1, 0)))
+      setHighlightedId(visible[Math.min(highlighted + 1, Math.max(visible.length - 1, 0))]?.id ?? null)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setHighlighted((current) => Math.max(current - 1, 0))
+      setHighlightedId(visible[Math.max(highlighted - 1, 0)]?.id ?? null)
     } else if (event.key === 'Enter') {
       event.preventDefault()
       const target = visible[highlighted]
@@ -118,7 +123,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                   'flex min-w-0 items-center border-b border-border last:border-b-0',
                   index === highlighted ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                 )}
-                onMouseEnter={() => setHighlighted(index)}
+                onMouseEnter={() => setHighlightedId(conversation.id)}
               >
                 <button
                   type="button"

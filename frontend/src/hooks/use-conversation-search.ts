@@ -72,7 +72,13 @@ export function useConversationSearch(
   return useMemo(() => {
     if (trimmed === '') return { results: conversations, searching: false, error: null }
     const local = filterConversationsByQuery(conversations, trimmed)
-    const serverResults = server?.query === trimmed ? server.results : []
+    // Server hits are checked against the loaded list: a conversation deleted
+    // since the response is dropped, and a renamed one shows its current title.
+    const loaded = new Map(conversations.map((c) => [c.id, c]))
+    const serverResults = (server?.query === trimmed ? server.results : []).flatMap((r) => {
+      const current = loaded.get(r.id)
+      return current ? [{ ...r, title: current.title }] : []
+    })
     const settled = server?.query === trimmed || failure?.query === trimmed
     return {
       results: mergeConversationSearchResults(serverResults, local),
