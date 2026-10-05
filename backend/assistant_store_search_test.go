@@ -159,3 +159,55 @@ func TestAssistantSearchSchema_BackfillsExistingMessages(t *testing.T) {
 		t.Fatalf("rows after second run = %d", n)
 	}
 }
+
+// VACUUM may renumber the implicit rowids of messages (its primary key is
+// TEXT). The index is keyed on the message id, so a renumbering must not
+// misalign it. Swapping rowids is the simulation.
+func TestSearchConversations_SurvivesRowidRenumbering(t *testing.T) {
+	s := newTestAssistantStore(t)
+	a := seedSearchConv(t, s, "a", [2]string{"user", "windlass remote"})
+	b := seedSearchConv(t, s, "b", [2]string{"user", "bilge alarm"})
+	if _, err := s.db.Exec(`UPDATE messages SET rowid = 1000 - rowid`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`VACUUM`); err != nil {
+		t.Fatal(err)
+	}
+	hits, _ := s.SearchConversations("windlass", assistantConversationSearchOptions{})
+	if len(hits) != 1 || hits[0].ID != a.ID || len(hits[0].Excerpts) != 1 || !strings.Contains(hits[0].Excerpts[0].Text, "windlass") {
+		t.Fatalf("hits = %+v", hits)
+	}
+	if err := s.DeleteConversation(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := s.SearchConversations("windlass", assistantConversationSearchOptions{}); len(hits) != 0 {
+		t.Fatalf("deleted conversation still found: %+v", hits)
+	}
+	if hits, _ := s.SearchConversations("bilge", assistantConversationSearchOptions{}); len(hits) != 1 || hits[0].ID != b.ID {
+		t.Fatalf("other conversation lost: %+v", hits)
+	}
+}
+
+// A database that ran the earlier shape of the index (keyed by rowid, no
+// message_id column) is rebuilt on open.
+func TestAssistantSearchSchema_ReplacesRowidKeyedIndex(t *testing.T) {
+	s := newTestAssistantStore(t)
+	c := seedSearchConv(t, s, "a", [2]string{"user", "windlass remote"})
+	for _, q := range []string{
+		`DROP TRIGGER messages_fts_insert`, `DROP TRIGGER messages_fts_delete`, `DROP TRIGGER messages_fts_update`,
+		`DROP TABLE messages_fts`,
+		`CREATE VIRTUAL TABLE messages_fts USING fts5(content, conversation_id UNINDEXED)`,
+		`INSERT INTO messages_fts (rowid, content, conversation_id) SELECT rowid, content, conversation_id FROM messages`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createAssistantSearchSchema(s.db); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.SearchConversations("windlass", assistantConversationSearchOptions{})
+	if err != nil || len(hits) != 1 || hits[0].ID != c.ID {
+		t.Fatalf("hits=%+v err=%v", hits, err)
+	}
+}

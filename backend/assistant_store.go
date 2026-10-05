@@ -498,46 +498,68 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 // with messages. Only user and assistant rows are indexed: a watch report is
 // machine output the operator never typed or asked for. The FTS table holds
 // its own copy of the text (not external content) so the role filter needs no
-// special rebuild, and its rowid is the messages rowid so a delete is a key
-// lookup rather than a scan.
+// special rebuild. It is keyed on the message id, not the rowid: messages has
+// a TEXT primary key, so its implicit rowids are not stable across VACUUM
+// (the backup method, ADR 0141).
 //
 // A database that already holds messages gets them indexed the first time
 // the table is created; once it exists the triggers carry every later write.
+// An index from the earlier rowid-keyed shape (no message_id column) is
+// dropped and rebuilt.
 func createAssistantSearchSchema(db *sql.DB) error {
 	var existing int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
 		return fmt.Errorf("check messages_fts: %w", err)
 	}
+	if existing > 0 {
+		var hasMessageID int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'`).Scan(&hasMessageID); err != nil {
+			return fmt.Errorf("inspect messages_fts: %w", err)
+		}
+		if hasMessageID == 0 {
+			for _, q := range []string{
+				`DROP TRIGGER IF EXISTS messages_fts_insert`,
+				`DROP TRIGGER IF EXISTS messages_fts_delete`,
+				`DROP TRIGGER IF EXISTS messages_fts_update`,
+				`DROP TABLE messages_fts`,
+			} {
+				if _, err := db.Exec(q); err != nil {
+					return fmt.Errorf("replace messages_fts: %w", err)
+				}
+			}
+			existing = 0
+		}
+	}
 
 	if _, err := db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-		content, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
+		content, message_id UNINDEXED, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
 		return fmt.Errorf("create messages_fts: %w", err)
 	}
 	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
 		WHEN new.role IN ('user', 'assistant')
 		BEGIN
-			INSERT INTO messages_fts (rowid, content, conversation_id) VALUES (new.rowid, new.content, new.conversation_id);
+			INSERT INTO messages_fts (content, message_id, conversation_id) VALUES (new.content, new.id, new.conversation_id);
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts insert trigger: %w", err)
 	}
 	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
 		BEGIN
-			DELETE FROM messages_fts WHERE rowid = old.rowid;
+			DELETE FROM messages_fts WHERE message_id = old.id;
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts delete trigger: %w", err)
 	}
 	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
 		BEGIN
-			DELETE FROM messages_fts WHERE rowid = old.rowid;
-			INSERT INTO messages_fts (rowid, content, conversation_id)
-				SELECT new.rowid, new.content, new.conversation_id WHERE new.role IN ('user', 'assistant');
+			DELETE FROM messages_fts WHERE message_id = old.id;
+			INSERT INTO messages_fts (content, message_id, conversation_id)
+				SELECT new.content, new.id, new.conversation_id WHERE new.role IN ('user', 'assistant');
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts update trigger: %w", err)
 	}
 
 	if existing == 0 {
-		if _, err := db.Exec(`INSERT INTO messages_fts (rowid, content, conversation_id)
-			SELECT rowid, content, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
+		if _, err := db.Exec(`INSERT INTO messages_fts (content, message_id, conversation_id)
+			SELECT content, id, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
 			return fmt.Errorf("backfill messages_fts: %w", err)
 		}
 	}
@@ -606,7 +628,7 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 
 	rows, err := s.db.Query(
 		`SELECT f.conversation_id, m.role, snippet(messages_fts, 0, '', '', '…', ?)
-		 FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
+		 FROM messages_fts f JOIN messages m ON m.id = f.message_id
 		 WHERE messages_fts MATCH ? AND f.conversation_id <> ?
 		 ORDER BY rank LIMIT ?`,
 		opts.ExcerptTokens, match, opts.ExcludeConvID, opts.CandidateMessage)
