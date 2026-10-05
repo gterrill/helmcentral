@@ -134,6 +134,10 @@ export function useAssistantChat() {
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Whether the current stream's final message frame has arrived. Reset when
+  // a send()/attach() starts; read by Stop, which must not treat a delivered
+  // answer as stopped.
+  const deliveredRef = useRef(false)
   // The conversation the current (or most recent) stream belongs to -
   // abort() needs this to know which run to POST .../run/cancel for.
   const currentConversationIdRef = useRef<string | null>(null)
@@ -204,6 +208,7 @@ export function useAssistantChat() {
       } else if (event.event === 'message') {
         const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
         resolved = mapMessage(data.message)
+        deliveredRef.current = true
         onMessage?.(resolved)
         clearDraft()
         onConversation?.(mapConversation(data.conversation))
@@ -302,6 +307,7 @@ export function useAssistantChat() {
     // since this tab has no reason to wait on an answer that will never
     // come. attach() deliberately never registers at all: rejoining a run
     // someone else started isn't "this tab asked a question".
+    deliveredRef.current = false
     registerMateWatch(conversationId)
 
     try {
@@ -378,6 +384,7 @@ export function useAssistantChat() {
     const isCurrent = () => abortRef.current === controller
     // Whatever stream this supersedes may belong to another conversation:
     // its status, draft and error must not carry over to this one.
+    deliveredRef.current = false
     setSending(false)
     setStatusText(null)
     setError(null)
@@ -425,5 +432,7 @@ export function useAssistantChat() {
     }
   }, [clearDraft, consumeStream])
 
-  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation }
+  const answerDelivered = useCallback(() => deliveredRef.current, [])
+
+  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered }
 }

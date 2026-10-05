@@ -274,11 +274,6 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // so this is the only way to tell "stopped" apart from "idle before the
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
-  // Stop after the final message has been appended must not label a finished
-  // answer as stopped; the thread ending on an assistant reply tells us so,
-  // whichever component (this one or the Mate sheet) did the sending.
-  const messagesRef = useRef(conversations.messages)
-  messagesRef.current = conversations.messages
 
   // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
   // instance per AssistantThread - it isn't threaded through as a prop
@@ -454,7 +449,8 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
 
   const handleStop = useCallback(() => {
     void chat.abort()
-    if (messagesRef.current.at(-1)?.role !== 'assistant') setStopped(true)
+    // Stop after the final message frame arrived leaves a finished answer.
+    if (!chat.answerDelivered()) setStopped(true)
   }, [chat])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

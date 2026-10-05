@@ -70,6 +70,7 @@ function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {})
     // what a given test is checking.
     attach: vi.fn().mockResolvedValue(null),
     isStreamingConversation: vi.fn().mockReturnValue(false),
+    answerDelivered: vi.fn().mockReturnValue(false),
     ...overrides,
   }
 }
@@ -1237,7 +1238,7 @@ describe('Stop after the answer has been delivered', () => {
         finish = () => resolve(null)
       }))
     const conversations = buildConversations()
-    const chat = buildChat({ send, abort: vi.fn() })
+    const chat = buildChat({ send, abort: vi.fn(), answerDelivered: vi.fn().mockReturnValue(true) })
     const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} />)
 
     const textarea = screen.getByPlaceholderText('Ask Mate')
@@ -1254,5 +1255,18 @@ describe('Stop after the answer has been delivered', () => {
     expect(chat.abort).toHaveBeenCalled()
     await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
     expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
+  })
+
+  it('still says Stopped. for a follow-up stream that has not delivered, even when the thread ends on an older reply', () => {
+    const earlier = assistantMessage({ id: 'earlier', content: "I'll watch the bilge." })
+    const conversations = buildConversations({ messages: [earlier] })
+    const abort = vi.fn()
+    // A follow-up run (after a watch ended) is streaming: no message frame yet.
+    const chat = buildChat({ sending: true, statusText: 'Checking the bilge', abort })
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
+    expect(abort).toHaveBeenCalled()
+    rerender(<AssistantThread canWrite conversations={conversations} chat={{ ...chat, sending: false }} />)
+    expect(screen.getByText('Stopped.')).toBeInTheDocument()
   })
 })
