@@ -26,6 +26,7 @@ interface FetchLike {
 interface AssistantServerOptions {
   status: { enabled: boolean; configured: boolean; model: string; problem?: string }
   conversations?: ConversationRecord[]
+  searchResults?: Array<{ id: string; title: string; updated_at: string; snippet?: string }>
   onSendMessage?: (conversationId: string, content: string) => FetchLike
 }
 
@@ -39,6 +40,10 @@ function buildAssistantFetch(opts: AssistantServerOptions) {
 
     if (url.endsWith('/api/assistant/status')) {
       return { ok: true, json: async () => opts.status }
+    }
+
+    if (url.includes('/api/assistant/conversations/search')) {
+      return { ok: true, json: async () => ({ results: opts.searchResults ?? [] }) }
     }
 
     if (url.endsWith('/api/assistant/conversations') && method === 'GET') {
@@ -234,6 +239,28 @@ describe('AssistantDrawer', () => {
 
     expect(screen.getByText('Gloucester Island Anchorages')).toBeInTheDocument()
     expect(screen.queryByText('Hamilton Island Weather')).not.toBeInTheDocument()
+  })
+
+  it('finds a conversation by words in its messages and shows the matching snippet', async () => {
+    const fetchMock = buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Fuel polisher question', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+        { id: 'c2', title: 'Hamilton Island Weather', created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z' },
+      ],
+      searchResults: [
+        { id: 'c1', title: 'Fuel polisher question', updated_at: '2026-09-11T00:00:00Z', snippet: 'the manifold on the starboard side has no sampling valve' },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+    fireEvent.change(await screen.findByPlaceholderText('Search conversations'), { target: { value: 'starboard' } })
+
+    expect(await screen.findByText(/no sampling valve/)).toBeInTheDocument()
+    expect(screen.getByText('Fuel polisher question')).toBeInTheDocument()
+    expect(screen.queryByText('Hamilton Island Weather')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => (url as string).includes('/conversations/search?q=starboard'))).toBe(true)
   })
 
   // Below lg the sidebar list is hidden (jsdom has no media queries, so this

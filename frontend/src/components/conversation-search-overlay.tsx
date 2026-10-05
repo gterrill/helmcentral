@@ -5,7 +5,8 @@ import { Trash2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { AssistantConversation } from '@/hooks/use-assistant-conversations'
-import { filterConversationsByQuery, formatConversationRelativeTime, recentConversations } from '@/lib/assistant-conversation-search'
+import { useConversationSearch } from '@/hooks/use-conversation-search'
+import { formatConversationRelativeTime, recentConversations } from '@/lib/assistant-conversation-search'
 import { cn } from '@/lib/utils'
 
 const RECENT_LIMIT = 8
@@ -25,11 +26,12 @@ interface ConversationSearchOverlayProps {
  * primitive: a search box, and below it either the 8 most recent
  * conversations (an empty query) or every title match, arrow-key/Enter
  * navigable, Esc closes (the Dialog primitive's own built-in handling - this
- * component never intercepts Escape itself). Filtering is the SAME predicate
- * the /mate page's inline "Search conversations" box uses
- * (lib/assistant-conversation-search.ts), not a second implementation, and
- * both draw on `conversations`, which the caller already has loaded - this
- * never issues a fetch of its own.
+ * component never intercepts Escape itself). Search is the SAME hook the
+ * /mate page's inline "Search conversations" box uses
+ * (hooks/use-conversation-search.ts), not a second implementation: title
+ * matches from `conversations` show at once, and a non-empty query also asks
+ * the server, which finds words anywhere in a conversation and returns a
+ * snippet shown under the title. An empty query makes no request.
  *
  * DOM focus stays on the input throughout (the same combobox-style pattern
  * shadcn's own Command component uses): arrow keys move a virtual
@@ -41,10 +43,11 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
   const [highlighted, setHighlighted] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const visible = useMemo(() => {
-    const filtered = filterConversationsByQuery(conversations, query)
-    return query.trim() === '' ? recentConversations(filtered, RECENT_LIMIT) : filtered
-  }, [conversations, query])
+  const search = useConversationSearch(conversations, query)
+  const visible = useMemo(
+    () => (query.trim() === '' ? recentConversations(search.results, RECENT_LIMIT) : search.results),
+    [search.results, query],
+  )
 
   // A fresh open (or a query that changes what's visible) always starts back
   // at the top row - carrying a stale highlight across a filter change could
@@ -102,9 +105,10 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
           onKeyDown={handleKeyDown}
           autoFocus
         />
+        {search.error && <p role="alert" className="text-xs text-destructive">Message search failed: {search.error}. Showing title matches only.</p>}
         <div role="listbox" aria-label="Conversations" className="max-h-80 min-w-0 overflow-y-auto rounded-md border border-border">
           {visible.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No matching conversations</p>
+            <p className="p-3 text-sm text-muted-foreground">{search.searching ? 'Searching…' : 'No matching conversations'}</p>
           ) : (
             visible.map((conversation, index) => (
               <div
@@ -124,6 +128,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                   className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
                 >
                   <span className="w-full truncate text-sm">{conversation.title}</span>
+                  {conversation.snippet && <span className="line-clamp-2 w-full text-xs text-muted-foreground">{conversation.snippet}</span>}
                   <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
                 </button>
                 {onDelete && (

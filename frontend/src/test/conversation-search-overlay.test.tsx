@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 
 import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
@@ -43,11 +43,13 @@ describe('ConversationSearchOverlay', () => {
     expect(screen.queryByText('Hamilton Island Weather')).not.toBeInTheDocument()
   })
 
-  it('shows a no-match state when nothing filters in', () => {
+  it('shows a no-match state when nothing filters in', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ results: [] }) })))
     render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={TWELVE_CONVERSATIONS} onSelect={vi.fn()} />)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'zzz-no-match' } })
-    expect(screen.getByText('No matching conversations')).toBeInTheDocument()
+    expect(await screen.findByText('No matching conversations')).toBeInTheDocument()
     expect(screen.queryAllByRole('option')).toHaveLength(0)
+    vi.unstubAllGlobals()
   })
 
   it('clicking a row selects it and closes the overlay', () => {
@@ -140,5 +142,46 @@ describe('ConversationSearchOverlay', () => {
     expect(onDelete).toHaveBeenCalledWith('b')
     expect(onSelect).not.toHaveBeenCalled()
     expect(screen.getAllByRole('option')).toHaveLength(2)
+  })
+})
+
+
+describe('ConversationSearchOverlay server search', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows conversations whose messages match, with the snippet, and makes no request for an empty query', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ results: [{ id: 'z', title: 'Fuel polisher', updated_at: '2026-09-01T00:00:00Z', snippet: 'no drain on the starboard Racor' }] }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const list = [conversation({ id: 'a', title: 'Gloucester Island' })]
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={list} onSelect={vi.fn()} />)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Starboard' } })
+
+    expect(await screen.findByText(/no drain on the starboard Racor/)).toBeInTheDocument()
+    expect(screen.getByText('Fuel polisher')).toBeInTheDocument()
+    expect(screen.queryByText('Gloucester Island')).not.toBeInTheDocument()
+  })
+
+  it('does not duplicate a conversation that matches by title and by message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ results: [{ id: 'a', title: 'Racor bowl', updated_at: '2026-09-01T00:00:00Z', snippet: 'racor drain' }] }),
+    })))
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={[conversation({ id: 'a', title: 'Racor bowl' })]} onSelect={vi.fn()} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'racor' } })
+    await screen.findByText('racor drain')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+  })
+
+  it('says so when the message search fails, and keeps title matches', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={[conversation({ id: 'a', title: 'Racor bowl' })]} onSelect={vi.fn()} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'racor' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Message search failed')
+    expect(screen.getByText('Racor bowl')).toBeInTheDocument()
   })
 })
