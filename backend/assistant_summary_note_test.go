@@ -313,7 +313,7 @@ func TestSummarySave_CreatesThenUpdatesTheSameNoteAndAdjustsLinks(t *testing.T) 
 	a := mustToolEquipment(t, h.docs, equipmentItem{Name: "Reverso"})
 	b := mustToolEquipment(t, h.docs, equipmentItem{Name: "Racor"})
 
-	code, out := h.save(t, `{"title":"First","body":"## What we established\n\n- one","type":"quirk","add_equipment_ids":["`+a.ID+`","`+b.ID+`"]}`)
+	code, out := h.save(t, `{"title":"First","body":"## What we established\n\n- one","type":"quirk","equipment_ids":["`+a.ID+`","`+b.ID+`"]}`)
 	if code != http.StatusOK && code != http.StatusCreated {
 		t.Fatalf("create: %d %v", code, out)
 	}
@@ -330,7 +330,7 @@ func TestSummarySave_CreatesThenUpdatesTheSameNoteAndAdjustsLinks(t *testing.T) 
 		t.Fatalf("link to a missing: %v", docsA)
 	}
 
-	code, out = h.save(t, `{"title":"Second","body":"## What we established\n\n- two","remove_equipment_ids":["`+b.ID+`"]}`)
+	code, out = h.save(t, `{"title":"Second","body":"## What we established\n\n- two","equipment_ids":["`+a.ID+`"],"remove_equipment_ids":["`+b.ID+`"]}`)
 	if code != http.StatusOK {
 		t.Fatalf("update: %d %v", code, out)
 	}
@@ -366,7 +366,7 @@ func TestSummarySave_RejectsEmptyBodyAndUnknownEquipment(t *testing.T) {
 	if code, _ := h.save(t, `{"title":"x","body":"  "}`); code != http.StatusBadRequest {
 		t.Errorf("empty body: %d", code)
 	}
-	if code, _ := h.save(t, `{"title":"x","body":"- a","add_equipment_ids":["nope"]}`); code != http.StatusNotFound {
+	if code, _ := h.save(t, `{"title":"x","body":"- a","equipment_ids":["nope"]}`); code != http.StatusNotFound {
 		t.Errorf("unknown equipment: %d", code)
 	}
 }
@@ -382,5 +382,59 @@ func TestResolveSummaryEquipment_ExactBeatsAmbiguousAndDedupes(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != exact.ID {
 		t.Fatalf("got %+v: exact match once; ambiguous and unknown names dropped", got)
+	}
+}
+
+func (h *summaryHarness) noteDoc(t *testing.T, id string) document {
+	t.Helper()
+	doc, err := h.docs.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+func TestSummarySave_SuggestedTypeIsAutomaticAndFollowsUpdatesUntilTheOperatorChangesIt(t *testing.T) {
+	h := newSummaryHarness(t)
+	_, out := h.save(t, `{"title":"T","body":"- one","type":"quirk"}`)
+	id := out["note_id"].(string)
+	if d := h.noteDoc(t, id); d.NoteType != "quirk" || d.NoteTypeSource != "auto" {
+		t.Fatalf("create: type %q source %q", d.NoteType, d.NoteTypeSource)
+	}
+	h.save(t, `{"title":"T","body":"- two","type":"procedure"}`)
+	if d := h.noteDoc(t, id); d.NoteType != "procedure" || d.NoteTypeSource != "auto" {
+		t.Fatalf("update of an auto note must take the new suggestion: %q %q", d.NoteType, d.NoteTypeSource)
+	}
+
+	// The operator re-types it in Documents (PATCH type), which must win.
+	if code, _, err := patchNoteInProcess(id, map[string]any{"type": "spec"}); err != nil || code != http.StatusOK {
+		t.Fatalf("operator patch: %d %v", code, err)
+	}
+	h.save(t, `{"title":"T","body":"- three","type":"quirk"}`)
+	if d := h.noteDoc(t, id); d.NoteType != "spec" || d.NoteTypeSource != "operator" {
+		t.Fatalf("operator type must survive an update: %q %q", d.NoteType, d.NoteTypeSource)
+	}
+}
+
+func TestSummarySave_NoteDeletedAfterDraftGetsEveryTickedLink(t *testing.T) {
+	h := newSummaryHarness(t)
+	a := mustToolEquipment(t, h.docs, equipmentItem{Name: "Reverso"})
+	b := mustToolEquipment(t, h.docs, equipmentItem{Name: "Racor"})
+	_, out := h.save(t, `{"title":"T","body":"- one","equipment_ids":["`+a.ID+`","`+b.ID+`"]}`)
+	first := out["note_id"].(string)
+	// The draft showed both as already linked (so the dialog sent no change),
+	// then the note was deleted before Save.
+	if _, err := h.docs.Delete(first); err != nil {
+		t.Fatal(err)
+	}
+	_, out = h.save(t, `{"title":"T","body":"- one","equipment_ids":["`+a.ID+`","`+b.ID+`"]}`)
+	if out["created"] != true {
+		t.Fatalf("expected a new note: %v", out)
+	}
+	for _, e := range []equipmentItem{a, b} {
+		links, _ := h.docs.EquipmentDocuments(e.ID)
+		if len(links) != 1 || links[0].DocumentID != out["note_id"] {
+			t.Errorf("%s links = %+v", e.Name, links)
+		}
 	}
 }

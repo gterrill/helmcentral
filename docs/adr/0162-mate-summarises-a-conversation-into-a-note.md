@@ -50,14 +50,18 @@ Mate's wrong guesses next to the corrections, and the whole route to the answer.
   an exact name, or none, is dropped rather than guessed. Suggestions are deduplicated and come back
   as `{id, name, linked}`; `linked` marks those already linked to the existing note.
 - **Note type.** Suggested `quirk`, or `procedure` when the procedure has more entries than facts and
-  ruled-out items together. On an update the type is left alone.
+  ruled-out items together. It is stored as an automatic classification, not the operator's choice,
+  because the dialog has no type control. An update re-applies the new suggestion only while the
+  note's type is still automatic; a type the operator set in Documents wins.
 - **Save is one server call.** `POST /api/assistant/conversations/:id/summary-note` takes
-  `{title, body, type, add_equipment_ids, remove_equipment_ids}`. It creates the note through the
+  `{title, body, type, equipment_ids, remove_equipment_ids}`. It creates the note through the
   same path as POST /api/notes, or applies the update through the same path as PATCH /api/notes/:id
   (called in process, so the frontmatter rewrite, file swap and reindex are not copied), remembers the
   note on the conversation, then adjusts the links. The note id is remembered before the links, so a
-  link failure leaves a note the retry updates rather than a second one. On update, the dialog sends
-  only the links it changed, so links the operator made elsewhere stay.
+  link failure leaves a note the retry updates rather than a second one. The dialog sends every
+  ticked equipment plus the unticked ones that were linked, and the server diffs them against the
+  note's actual links (a note just created has none), so the result matches what the dialog showed
+  even if the note was deleted between draft and Save. Links the operator made elsewhere stay.
 - Both endpoints are write tier: the draft spends the operator's OpenRouter credit, as sending a
   message does. The Mate chat model is used; there is no separate setting.
 

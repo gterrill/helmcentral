@@ -385,17 +385,19 @@ func postAssistantSummaryDraftHandler(c echo.Context) error {
 }
 
 type saveAssistantSummaryNoteRequest struct {
-	Title              string   `json:"title"`
-	Body               string   `json:"body"`
-	Type               string   `json:"type"`
-	AddEquipmentIDs    []string `json:"add_equipment_ids"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Type  string `json:"type"`
+	// EquipmentIDs is the full set the dialog shows ticked, linked already or
+	// not; the server diffs it against the note's real links.
+	EquipmentIDs       []string `json:"equipment_ids"`
 	RemoveEquipmentIDs []string `json:"remove_equipment_ids"`
 }
 
 // patchNoteInProcess runs patchNoteHandler against a synthetic request so a
 // summary update goes through exactly the note edit path (frontmatter
 // re-render, blob swap, reindex) instead of a second copy of it.
-func patchNoteInProcess(noteID string, payload map[string]any) (int, []byte, error) {
+func patchNoteInProcess(noteID string, payload map[string]any, suggestedType ...bool) (int, []byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return 0, nil, err
@@ -406,6 +408,9 @@ func patchNoteInProcess(noteID string, payload map[string]any) (int, []byte, err
 	c := echo.New().NewContext(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues(noteID)
+	if len(suggestedType) > 0 && suggestedType[0] {
+		c.Set(noteTypeIsSuggestionKey, true)
+	}
 	if err := patchNoteHandler(c); err != nil {
 		return 0, nil, err
 	}
@@ -440,7 +445,7 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 	if globalDocumentStore == nil {
 		return fail(http.StatusInternalServerError, "the document store is not available")
 	}
-	for _, eid := range req.AddEquipmentIDs {
+	for _, eid := range req.EquipmentIDs {
 		if _, err := globalDocumentStore.GetEquipment(eid); err != nil {
 			if errors.Is(err, errEquipmentNotFound) {
 				return fail(http.StatusNotFound, fmt.Sprintf("equipment %s not found", eid))
@@ -456,7 +461,7 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 
 	noteID, created := existing, false
 	if existing == "" {
-		doc, err := createNoteDocument(createNoteRequest{Body: req.Body, Title: req.Title, Type: req.Type})
+		doc, err := createNoteDocument(createNoteRequest{Body: req.Body, Title: req.Title, Type: req.Type, typeIsSuggestion: true})
 		switch {
 		case errors.Is(err, errNoteTypeInvalid):
 			return fail(http.StatusBadRequest, "invalid note type")
@@ -469,7 +474,18 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 		if t := strings.TrimSpace(req.Title); t != "" {
 			payload["title"] = t
 		}
-		status, respBody, err := patchNoteInProcess(existing, payload)
+		// Re-apply the suggested type only while the note's type is still an
+		// automatic one; an operator's own choice in Documents wins.
+		if t := strings.TrimSpace(req.Type); t != "" {
+			cur, err := globalDocumentStore.Get(existing)
+			if err != nil {
+				return fail(http.StatusInternalServerError, err.Error())
+			}
+			if cur.NoteTypeSource != "operator" {
+				payload["type"] = t
+			}
+		}
+		status, respBody, err := patchNoteInProcess(existing, payload, true)
 		if err != nil {
 			return fail(http.StatusInternalServerError, err.Error())
 		}
@@ -481,19 +497,29 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 	if err := globalAssistantStore.SetSummaryNote(id, noteID); err != nil {
 		return fail(http.StatusInternalServerError, err.Error())
 	}
-	if len(req.AddEquipmentIDs) > 0 || len(req.RemoveEquipmentIDs) > 0 {
-		// Per equipment: PatchEquipmentDocuments takes one equipment id.
-		for _, eid := range req.AddEquipmentIDs {
-			if err := globalDocumentStore.PatchEquipmentDocuments(eid, []string{noteID}, nil); err != nil {
-				log.Printf("assistant: summary note %s: link %s: %v", noteID, eid, err)
-				return fail(http.StatusInternalServerError, "The note was saved but linking it to equipment failed: "+err.Error())
-			}
+	// Links follow what the dialog showed: every ticked equipment is linked
+	// and every removal unlinked, diffed against the note's real links (a
+	// note just created has none, even if the draft showed some as linked).
+	current, err := equipmentLinkedToDocument(globalDocumentStore, noteID)
+	if err != nil {
+		return fail(http.StatusInternalServerError, err.Error())
+	}
+	for _, eid := range req.EquipmentIDs {
+		if current[eid] {
+			continue
 		}
-		for _, eid := range req.RemoveEquipmentIDs {
-			if err := globalDocumentStore.PatchEquipmentDocuments(eid, nil, []string{noteID}); err != nil {
-				log.Printf("assistant: summary note %s: unlink %s: %v", noteID, eid, err)
-				return fail(http.StatusInternalServerError, "The note was saved but unlinking it from equipment failed: "+err.Error())
-			}
+		if err := globalDocumentStore.PatchEquipmentDocuments(eid, []string{noteID}, nil); err != nil {
+			log.Printf("assistant: summary note %s: link %s: %v", noteID, eid, err)
+			return fail(http.StatusInternalServerError, "The note was saved but linking it to equipment failed: "+err.Error())
+		}
+	}
+	for _, eid := range req.RemoveEquipmentIDs {
+		if !current[eid] {
+			continue
+		}
+		if err := globalDocumentStore.PatchEquipmentDocuments(eid, nil, []string{noteID}); err != nil {
+			log.Printf("assistant: summary note %s: unlink %s: %v", noteID, eid, err)
+			return fail(http.StatusInternalServerError, "The note was saved but unlinking it from equipment failed: "+err.Error())
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"note_id": noteID, "created": created})
