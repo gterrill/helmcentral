@@ -1122,3 +1122,24 @@ func TestPinnedNotesPromptSection_AnOversizeNoteDoesNotHideTheSmallerOnesBehindI
 		t.Errorf("exactly one note was omitted, got:\n%s", got)
 	}
 }
+
+// ADR 0161: Mate checks earlier conversations before advising on equipment.
+func TestBuildAssistantSystemPrompt_RecallsEarlierConversations(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{
+		"search_conversations",
+		"read_conversation",
+		"refers to earlier work",
+		"outranks general knowledge",
+		"never suggest again something an earlier conversation ruled out",
+		"say that you are relying on it",
+		"have not confirmed is aboard",
+	} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prefix to contain %q, got:\n%s", want, stable)
+		}
+	}
+	if strings.Contains(live, "search_conversations") {
+		t.Fatalf("expected the recall guidance only in the stable prefix, got:\n%s", live)
+	}
+}
