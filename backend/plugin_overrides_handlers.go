@@ -324,6 +324,7 @@ func postPluginOverridesHandler(c echo.Context) error {
 	if err := globalPluginOverridesStore.Set(pp.Path(), req.AllowedHosts, req.AllowedSecrets); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save plugin overrides"})
 	}
+	placeSearchCache.clear()
 
 	resp, err := buildPluginInfoResponse(providerType, provider)
 	if err != nil {
@@ -356,6 +357,7 @@ func deletePluginOverridesHandler(c echo.Context) error {
 	if err := globalPluginOverridesStore.Delete(pp.Path()); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear plugin overrides"})
 	}
+	placeSearchCache.clear()
 
 	resp, err := buildPluginInfoResponse(providerType, provider)
 	if err != nil {
@@ -444,6 +446,7 @@ func postPluginConfigHandler(c echo.Context) error {
 	if err := globalPluginOverridesStore.SetConfigValues(pp.Path(), req.Values); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save plugin config"})
 	}
+	placeSearchCache.clear()
 
 	resp, err := buildPluginInfoResponse(providerType, provider)
 	if err != nil {

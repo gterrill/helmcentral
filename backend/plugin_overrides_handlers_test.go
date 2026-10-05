@@ -676,3 +676,69 @@ func TestGetPluginInfoHandler_UnknownIDForEachValidType(t *testing.T) {
 		}
 	}
 }
+
+// Saving plugin settings must drop cached find_places answers, or a result
+// fetched under the old config (a wrong mirror URL, say) outlives the fix.
+func seedPlaceSearchCache(t *testing.T) {
+	t.Helper()
+	placeSearchCache.reset()
+	t.Cleanup(placeSearchCache.reset)
+	placeSearchCache.put("seed", placeSearchResult{Search: "none"})
+}
+
+func assertPlaceSearchCacheEmpty(t *testing.T) {
+	t.Helper()
+	if _, ok := placeSearchCache.get("seed"); ok {
+		t.Error("expected the find_places cache to be cleared")
+	}
+}
+
+func TestPostPluginConfigHandler_ClearsPlaceSearchCache(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+	registerTideProvider(newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"url"}]`))
+	seedPlaceSearchCache(t)
+
+	body := `{"values":{"some_key":"https://mirror.example.com/api"}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("err=%v code=%d body=%s", err, rec.Code, rec.Body.String())
+	}
+	assertPlaceSearchCacheEmpty(t)
+}
+
+func TestPostPluginConfigHandler_RejectedSaveKeepsPlaceSearchCache(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+	registerTideProvider(newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"url"}]`))
+	seedPlaceSearchCache(t)
+
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", `{"values":{"nope":"x"}}`, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil || rec.Code != http.StatusBadRequest {
+		t.Fatalf("err=%v code=%d", err, rec.Code)
+	}
+	if _, ok := placeSearchCache.get("seed"); !ok {
+		t.Error("a rejected save must not clear the cache")
+	}
+}
+
+func TestPluginOverridesHandlers_ClearPlaceSearchCache(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+	registerTideProvider(newTestWasmTideProviderWithCompanionFiles(t, []string{"file.example.com"}, nil))
+
+	seedPlaceSearchCache(t)
+	body := `{"allowed_hosts":["override.example.com"],"allowed_secrets":[]}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/overrides", body, "tide", "valid-fixture")
+	if err := postPluginOverridesHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("err=%v code=%d", err, rec.Code)
+	}
+	assertPlaceSearchCacheEmpty(t)
+
+	seedPlaceSearchCache(t)
+	dc, drec := newPluginTestEchoContext(http.MethodDelete, "/api/plugins/tide/valid-fixture/overrides", "", "tide", "valid-fixture")
+	if err := deletePluginOverridesHandler(dc); err != nil || drec.Code != http.StatusOK {
+		t.Fatalf("err=%v code=%d", err, drec.Code)
+	}
+	assertPlaceSearchCacheEmpty(t)
+}
