@@ -188,6 +188,11 @@ type assistantToolDeps struct {
 	// globalAssistantWatches; nil (a test that never sets it) makes the tool
 	// fail plainly rather than start nothing.
 	watches *assistantWatchRegistry
+	// conversations is the chat history store search_conversations and
+	// read_conversation read (ADR 0161). Production returns
+	// globalAssistantStore; nil, or a nil store, makes both tools fail
+	// plainly.
+	conversations func() *assistantStore
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -231,6 +236,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
 		watches:                    globalAssistantWatches,
+		conversations:              func() *assistantStore { return globalAssistantStore },
 	}
 }
 
@@ -518,6 +524,50 @@ func assistantToolDefinitions() []openRouterTool {
 						}
 					},
 					"required": ["document_id"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "search_conversations",
+				Description: "Search the operator's earlier conversations with you - what they asked, what you " +
+					"answered, and what was established - by keyword. Returns each matching conversation's id, " +
+					"title and date with excerpts of the matching messages, most recent first. The current " +
+					"conversation is left out. Use it before advising on a specific piece of the boat's " +
+					"equipment, and whenever the operator refers to earlier work.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Keywords to search for, e.g. \"fuel polisher\" or \"Racor\"."
+						},
+						"limit": {
+							"type": "integer",
+							"description": "Maximum number of conversations to return (default 5, maximum 10)."
+						}
+					},
+					"required": ["query"]
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "read_conversation",
+				Description: "Read an earlier conversation's operator and assistant messages in order, with the " +
+					"names of any documents attached. Use it on a search_conversations result when its excerpts " +
+					"are not enough to tell what was established.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "A conversation id from a search_conversations result."
+						}
+					},
+					"required": ["id"]
 				}`),
 			},
 		},
@@ -831,6 +881,10 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeSearchDocuments(ctx, args)
 	case "read_document":
 		return d.executeReadDocument(ctx, args)
+	case "search_conversations":
+		return d.executeSearchConversations(ctx, args)
+	case "read_conversation":
+		return d.executeReadConversation(ctx, args)
 	case "search_web":
 		return d.executeSearchWeb(ctx, args)
 	case "get_nearby_vessels":
@@ -928,6 +982,18 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return "Reading a document…"
 		}
 		return fmt.Sprintf("Reading document %s…", id)
+	case "search_conversations":
+		var a assistantSearchConversationsArgs
+		query := ""
+		if json.Unmarshal(args, &a) == nil {
+			query = strings.TrimSpace(a.Query)
+		}
+		if query == "" {
+			return "Searching earlier conversations…"
+		}
+		return fmt.Sprintf("Searching earlier conversations for %q…", query)
+	case "read_conversation":
+		return "Reading an earlier conversation…"
 	case "search_web":
 		var a assistantSearchWebArgs
 		query := ""

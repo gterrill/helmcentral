@@ -5,7 +5,8 @@ import { Trash2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { AssistantConversation } from '@/hooks/use-assistant-conversations'
-import { filterConversationsByQuery, formatConversationRelativeTime, recentConversations } from '@/lib/assistant-conversation-search'
+import { useConversationSearch } from '@/hooks/use-conversation-search'
+import { formatConversationRelativeTime, recentConversations } from '@/lib/assistant-conversation-search'
 import { cn } from '@/lib/utils'
 
 const RECENT_LIMIT = 8
@@ -25,11 +26,12 @@ interface ConversationSearchOverlayProps {
  * primitive: a search box, and below it either the 8 most recent
  * conversations (an empty query) or every title match, arrow-key/Enter
  * navigable, Esc closes (the Dialog primitive's own built-in handling - this
- * component never intercepts Escape itself). Filtering is the SAME predicate
- * the /mate page's inline "Search conversations" box uses
- * (lib/assistant-conversation-search.ts), not a second implementation, and
- * both draw on `conversations`, which the caller already has loaded - this
- * never issues a fetch of its own.
+ * component never intercepts Escape itself). Search is the SAME hook the
+ * /mate page's inline "Search conversations" box uses
+ * (hooks/use-conversation-search.ts), not a second implementation: title
+ * matches from `conversations` show at once, and a non-empty query also asks
+ * the server, which finds words anywhere in a conversation and returns a
+ * snippet shown under the title. An empty query makes no request.
  *
  * DOM focus stays on the input throughout (the same combobox-style pattern
  * shadcn's own Command component uses): arrow keys move a virtual
@@ -38,19 +40,25 @@ interface ConversationSearchOverlayProps {
  */
 export function ConversationSearchOverlay({ open, onOpenChange, conversations, onSelect, onDelete }: ConversationSearchOverlayProps) {
   const [query, setQuery] = useState('')
-  const [highlighted, setHighlighted] = useState(0)
+  // The highlight follows a conversation id, not a row index, so server hits
+  // arriving after the first keystrokes cannot move it onto a different row.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const visible = useMemo(() => {
-    const filtered = filterConversationsByQuery(conversations, query)
-    return query.trim() === '' ? recentConversations(filtered, RECENT_LIMIT) : filtered
-  }, [conversations, query])
+  const search = useConversationSearch(conversations, query)
+  const visible = useMemo(
+    () => (query.trim() === '' ? recentConversations(search.results, RECENT_LIMIT) : search.results),
+    [search.results, query],
+  )
 
-  // A fresh open (or a query that changes what's visible) always starts back
-  // at the top row - carrying a stale highlight across a filter change could
-  // point Enter at a row that has since scrolled out of the list entirely.
+  const found = visible.findIndex((c) => c.id === highlightedId)
+  const highlighted = found >= 0 ? found : 0
+
+  // A fresh open or a changed query starts back at the top row; a change to
+  // the results alone keeps the highlight on its conversation (falling back
+  // to the top row only if that conversation has left the list).
   useEffect(() => {
-    setHighlighted(0)
+    setHighlightedId(null)
   }, [query, open])
 
   // The query itself resets on every close/reopen (same as
@@ -68,10 +76,10 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setHighlighted((current) => Math.min(current + 1, Math.max(visible.length - 1, 0)))
+      setHighlightedId(visible[Math.min(highlighted + 1, Math.max(visible.length - 1, 0))]?.id ?? null)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setHighlighted((current) => Math.max(current - 1, 0))
+      setHighlightedId(visible[Math.max(highlighted - 1, 0)]?.id ?? null)
     } else if (event.key === 'Enter') {
       event.preventDefault()
       const target = visible[highlighted]
@@ -102,9 +110,10 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
           onKeyDown={handleKeyDown}
           autoFocus
         />
+        {search.error && <p role="alert" className="text-xs text-destructive">Message search failed: {search.error}. Showing title matches only.</p>}
         <div role="listbox" aria-label="Conversations" className="max-h-80 min-w-0 overflow-y-auto rounded-md border border-border">
           {visible.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No matching conversations</p>
+            <p className="p-3 text-sm text-muted-foreground">{search.searching ? 'Searching…' : 'No matching conversations'}</p>
           ) : (
             visible.map((conversation, index) => (
               <div
@@ -114,7 +123,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                   'flex min-w-0 items-center border-b border-border last:border-b-0',
                   index === highlighted ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                 )}
-                onMouseEnter={() => setHighlighted(index)}
+                onMouseEnter={() => setHighlightedId(conversation.id)}
               >
                 <button
                   type="button"
@@ -124,6 +133,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                   className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
                 >
                   <span className="w-full truncate text-sm">{conversation.title}</span>
+                  {conversation.snippet && <span className="line-clamp-2 w-full text-xs text-muted-foreground">{conversation.snippet}</span>}
                   <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
                 </button>
                 {onDelete && (

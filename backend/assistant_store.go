@@ -4,11 +4,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/unicode/norm"
 	_ "modernc.org/sqlite"
 )
 
@@ -157,6 +161,10 @@ func createAssistantSchema(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments (message_id)`); err != nil {
 		return fmt.Errorf("index message_attachments table: %w", err)
+	}
+
+	if err := createAssistantSearchSchema(db); err != nil {
+		return err
 	}
 
 	return createAssistantProposalsSchema(db)
@@ -486,4 +494,348 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 		out[messageID] = append(out[messageID], att)
 	}
 	return out, rows.Err()
+}
+
+// createAssistantSearchSchema creates messages_fts, the full-text index
+// behind conversation search (ADR 0161), and the triggers that keep it level
+// with messages. Only user and assistant rows are indexed: a watch report is
+// machine output the operator never typed or asked for. The FTS table holds
+// its own copy of the text (not external content) so the role filter needs no
+// special rebuild. It is keyed on the message id, not the rowid: messages has
+// a TEXT primary key, so its implicit rowids are not stable across VACUUM
+// (the backup method, ADR 0141).
+//
+// A database that already holds messages gets them indexed the first time
+// the table is created; once it exists the triggers carry every later write.
+// An index from the earlier rowid-keyed shape (no message_id column) is
+// dropped and rebuilt.
+func createAssistantSearchSchema(db *sql.DB) error {
+	// One transaction: a crash or error part-way must not leave an index that
+	// exists but was never backfilled.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin messages_fts setup: %w", err)
+	}
+	defer tx.Rollback()
+	var existing int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
+		return fmt.Errorf("check messages_fts: %w", err)
+	}
+	if existing > 0 {
+		var hasMessageID int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'`).Scan(&hasMessageID); err != nil {
+			return fmt.Errorf("inspect messages_fts: %w", err)
+		}
+		if hasMessageID == 0 {
+			for _, q := range []string{
+				`DROP TRIGGER IF EXISTS messages_fts_insert`,
+				`DROP TRIGGER IF EXISTS messages_fts_delete`,
+				`DROP TRIGGER IF EXISTS messages_fts_update`,
+				`DROP TABLE messages_fts`,
+			} {
+				if _, err := tx.Exec(q); err != nil {
+					return fmt.Errorf("replace messages_fts: %w", err)
+				}
+			}
+			existing = 0
+		}
+	}
+
+	if _, err := tx.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+		content, message_id UNINDEXED, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
+		return fmt.Errorf("create messages_fts: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
+		WHEN new.role IN ('user', 'assistant')
+		BEGIN
+			INSERT INTO messages_fts (content, message_id, conversation_id) VALUES (new.content, new.id, new.conversation_id);
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts insert trigger: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
+		BEGIN
+			DELETE FROM messages_fts WHERE message_id = old.id;
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts delete trigger: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
+		BEGIN
+			DELETE FROM messages_fts WHERE message_id = old.id;
+			INSERT INTO messages_fts (content, message_id, conversation_id)
+				SELECT new.content, new.id, new.conversation_id WHERE new.role IN ('user', 'assistant');
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts update trigger: %w", err)
+	}
+
+	if existing == 0 {
+		if _, err := tx.Exec(`INSERT INTO messages_fts (content, message_id, conversation_id)
+			SELECT content, id, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
+			return fmt.Errorf("backfill messages_fts: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit messages_fts setup: %w", err)
+	}
+	return nil
+}
+
+// assistantConversationExcerpt is one matching stretch of a message.
+type assistantConversationExcerpt struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+// assistantConversationSearchHit is one conversation that matched a search:
+// by title, by message text, or both. Excerpts is empty for a title-only
+// match and holds the best-ranked matching messages first otherwise.
+type assistantConversationSearchHit struct {
+	ID        string                         `json:"id"`
+	Title     string                         `json:"title"`
+	UpdatedAt time.Time                      `json:"updated_at"`
+	Excerpts  []assistantConversationExcerpt `json:"excerpts,omitempty"`
+}
+
+// assistantConversationSearchOptions tunes SearchConversations. The zero
+// value is the list-panel shape: a short snippet, one per conversation.
+type assistantConversationSearchOptions struct {
+	Limit            int    // conversations returned, default 20
+	ExcerptsPerConv  int    // default 1
+	ExcerptTokens    int    // words of context around a match, default 16, max 64
+	ExcludeConvID    string // a conversation to leave out (the one being asked from)
+	ExcerptMaxRunes  int    // hard cap per excerpt, default 400
+	CandidateMessage int    // matching messages examined, default 300
+}
+
+// SearchConversations finds conversations whose title or user/assistant
+// message text contains every word of query (the last word as a prefix),
+// case-insensitively, most recently active first. An empty query is an
+// error: it matches everything, which is ListConversations' job.
+func (s *assistantStore) SearchConversations(query string, opts assistantConversationSearchOptions) ([]assistantConversationSearchHit, error) {
+	match, ok := ftsMatchQuery(query)
+	if !ok {
+		return nil, errors.New("search conversations: query must not be empty")
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.ExcerptsPerConv <= 0 {
+		opts.ExcerptsPerConv = 1
+	}
+	if opts.ExcerptTokens <= 0 {
+		opts.ExcerptTokens = 16
+	}
+	if opts.ExcerptTokens > 64 {
+		opts.ExcerptTokens = 64
+	}
+	if opts.ExcerptMaxRunes <= 0 {
+		opts.ExcerptMaxRunes = 400
+	}
+	if opts.CandidateMessage <= 0 {
+		opts.CandidateMessage = 300
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Conversations whose messages match. Grouped to the conversation before
+	// any limit, so a word that matches thousands of messages elsewhere cannot
+	// push a recent conversation out of the candidates.
+	matched := map[string]bool{}
+	rows, err := s.db.Query(
+		`SELECT DISTINCT conversation_id FROM messages_fts WHERE messages_fts MATCH ? AND conversation_id <> ?`,
+		match, opts.ExcludeConvID)
+	if err != nil {
+		return nil, fmt.Errorf("search conversation messages: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan conversation search row: %w", err)
+		}
+		matched[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	// Titles are few: load them all and match in Go with the tokenisation
+	// the message index uses.
+	terms := searchTerms(query)
+	crows, err := s.db.Query(`SELECT id, title, updated_at FROM conversations WHERE id <> ?`, opts.ExcludeConvID)
+	if err != nil {
+		return nil, fmt.Errorf("search conversation titles: %w", err)
+	}
+	var out []assistantConversationSearchHit
+	for crows.Next() {
+		var h assistantConversationSearchHit
+		var updated int64
+		if err := crows.Scan(&h.ID, &h.Title, &updated); err != nil {
+			crows.Close()
+			return nil, fmt.Errorf("scan conversation title match: %w", err)
+		}
+		if matched[h.ID] || titleMatchesTerms(h.Title, terms) {
+			h.UpdatedAt = time.Unix(updated, 0).UTC()
+			out = append(out, h)
+		}
+	}
+	if err := crows.Err(); err != nil {
+		crows.Close()
+		return nil, err
+	}
+	crows.Close()
+
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+
+	// Best excerpts, only for the conversations being returned.
+	for i := range out {
+		if !matched[out[i].ID] {
+			continue
+		}
+		erows, err := s.db.Query(
+			`SELECT m.role, m.content
+			 FROM messages_fts f JOIN messages m ON m.id = f.message_id
+			 WHERE messages_fts MATCH ? AND f.conversation_id = ?
+			 ORDER BY rank LIMIT ?`,
+			match, out[i].ID, opts.ExcerptsPerConv)
+		if err != nil {
+			return nil, fmt.Errorf("search conversation excerpts: %w", err)
+		}
+		for erows.Next() {
+			var role, content string
+			if err := erows.Scan(&role, &content); err != nil {
+				erows.Close()
+				return nil, fmt.Errorf("scan conversation excerpt: %w", err)
+			}
+			text := excerptAroundMatch(stripMarkdownForExcerpt(content), terms, opts.ExcerptTokens)
+			if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
+				text = string(r[:opts.ExcerptMaxRunes]) + "…"
+			}
+			out[i].Excerpts = append(out[i].Excerpts, assistantConversationExcerpt{Role: role, Text: text})
+		}
+		if err := erows.Err(); err != nil {
+			erows.Close()
+			return nil, err
+		}
+		erows.Close()
+	}
+	return out, nil
+}
+
+// searchTokens splits text into lower-cased, diacritic-folded words the way
+// the message index's tokenizer does: a run of letters or digits is a word,
+// anything else separates words.
+func searchTokens(text string) []string {
+	folded := norm.NFD.String(strings.ToLower(text))
+	return strings.FieldsFunc(folded, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.Is(unicode.Mn, r)
+	})
+}
+
+func stripMarks(tokens []string) []string {
+	out := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		out = append(out, strings.Map(func(r rune) rune {
+			if unicode.Is(unicode.Mn, r) {
+				return -1
+			}
+			return r
+		}, t))
+	}
+	return out
+}
+
+func searchTerms(query string) []string {
+	return stripMarks(searchTokens(query))
+}
+
+// titleMatchesTerms reports whether every term is a word of title, the last
+// term as a prefix - the same rule the message query applies.
+func titleMatchesTerms(title string, terms []string) bool {
+	if len(terms) == 0 {
+		return false
+	}
+	words := stripMarks(searchTokens(title))
+	for i, term := range terms {
+		found := false
+		for _, w := range words {
+			if w == term || (i == len(terms)-1 && strings.HasPrefix(w, term)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	excerptLinkPattern   = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	excerptLinePrefix    = regexp.MustCompile(`(?m)^[ \t]*(?:#{1,6}[ \t]+|>[ \t]*|[-*+][ \t]+|\d+[.)][ \t]+)`)
+	excerptEmphasisChars = strings.NewReplacer("**", "", "__", "", "`", "", "*", "")
+	excerptUnderscore    = regexp.MustCompile(`(^|[^\p{L}\p{N}])_+|_+([^\p{L}\p{N}]|$)`)
+)
+
+// stripMarkdownForExcerpt turns a message's Markdown into plain prose for a
+// search excerpt: links keep their text, emphasis, code ticks, heading marks
+// and list markers go, and whitespace collapses.
+func stripMarkdownForExcerpt(md string) string {
+	t := excerptLinkPattern.ReplaceAllString(md, "$1")
+	t = excerptLinePrefix.ReplaceAllString(t, "")
+	t = excerptEmphasisChars.Replace(t)
+	t = excerptUnderscore.ReplaceAllString(t, "$1$2")
+	return strings.Join(strings.Fields(t), " ")
+}
+
+// excerptAroundMatch returns about maxWords words of text, starting a few
+// words before the first word that matches a search term so the match is
+// visible at the start of a short clamp.
+func excerptAroundMatch(text string, terms []string, maxWords int) string {
+	if maxWords <= 0 {
+		maxWords = 16
+	}
+	words := strings.Fields(text)
+	first := 0
+	for i, w := range words {
+		matched := false
+		for _, tok := range stripMarks(searchTokens(w)) {
+			for j, term := range terms {
+				if tok == term || (j == len(terms)-1 && strings.HasPrefix(tok, term)) {
+					matched = true
+				}
+			}
+		}
+		if matched {
+			first = i
+			break
+		}
+	}
+	start := first - 3
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxWords
+	if end > len(words) {
+		end = len(words)
+	}
+	out := strings.Join(words[start:end], " ")
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(words) {
+		out += "…"
+	}
+	return out
 }

@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { History, MessageSquarePlus, Search, Trash2 } from 'lucide-react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { filterConversationsByQuery, formatConversationRelativeTime } from '@/lib/assistant-conversation-search'
+import { useConversationSearch } from '@/hooks/use-conversation-search'
+import { formatConversationRelativeTime } from '@/lib/assistant-conversation-search'
 import { cn } from '@/lib/utils'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -44,10 +45,8 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
 
-  const filteredConversations = useMemo(
-    () => filterConversationsByQuery(conversations.conversations, query),
-    [conversations.conversations, query],
-  )
+  const search = useConversationSearch(conversations.conversations, query)
+  const filteredConversations = search.results
 
   useEffect(() => {
     if (conversations.loading) return
@@ -113,10 +112,15 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
               className="h-9 pl-9"
             />
           </div>
+          {search.error && (
+            <p role="alert" className="text-xs text-destructive">
+              Message search failed: {search.error}. Showing title matches only.
+            </p>
+          )}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
             {filteredConversations.length === 0 ? (
               <div className="rounded-md border border-dashed border-border px-2 py-3 text-xs text-muted-foreground">
-                No matching conversations
+                {search.searching ? 'Searching…' : 'No matching conversations'}
               </div>
             ) : (
               filteredConversations.map((conversation) => (
@@ -133,6 +137,9 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
                     onClick={() => void conversations.select(conversation.id)}
                   >
                     <div className="truncate text-sm">{conversation.title}</div>
+                    {'snippet' in conversation && conversation.snippet && (
+                      <div className="line-clamp-2 text-xs text-muted-foreground">{conversation.snippet}</div>
+                    )}
                     <div className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</div>
                   </button>
                   <Button

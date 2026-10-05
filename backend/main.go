@@ -809,6 +809,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/assistant/status", tierRead, assistantStatusHandler},
 		{http.MethodGet, "/api/assistant/models", tierAdmin, assistantModelsHandler},
 		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
+		{http.MethodGet, "/api/assistant/conversations/search", tierRead, searchAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
 		// Rejoining a reply still being written (ADR 0105): replay-then-live
 		// SSE if a run is in flight, 204 if not - read-only, same tier as

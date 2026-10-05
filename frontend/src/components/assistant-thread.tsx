@@ -42,6 +42,7 @@ const MATE_CAPABILITIES = [
   'Bays, anchorages and marinas near you or any position',
   'Equipment, maintenance due and the service log',
   'Your documents, notes and manuals, and how Helmcentral works',
+  'What you and Mate worked out in earlier conversations',
 ] as const
 
 // While Mate is waiting on the model with no tool running, the status line

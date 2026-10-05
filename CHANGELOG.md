@@ -11,6 +11,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Searching your Mate conversations now finds a word anywhere in a
+  conversation, not just in its title. A match inside a conversation shows a
+  line of the matching text under the title, on both the Mate page and the
+  search from the Mate sheet.
+- Mate now checks your earlier conversations before it advises on a specific
+  piece of the boat's equipment, and whenever you refer to earlier work. What
+  you established then, such as a fitting you showed it is not there or a
+  procedure you ruled out, is treated as fact about your boat, so Mate stops
+  suggesting it again in a new conversation. Mate also no longer offers
+  options that depend on a valve, port or fitting it has not confirmed is
+  aboard.
+
 ### Changed
 
 - A single gauge tile no longer draws a frame inside its own border. Numeric

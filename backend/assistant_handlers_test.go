@@ -2056,3 +2056,36 @@ func TestBuildAPIRoutes_AssistantRoutesHaveExpectedTiers(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchAssistantConversationsHandler_FindsMessageText(t *testing.T) {
+	store := withTestAssistantStore(t)
+	conv, _ := store.CreateConversation("Fuel polisher")
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "Is there a drain on the starboard Racor?"}); err != nil {
+		t.Fatal(err)
+	}
+
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/conversations/search?q=Starboard", "", "")
+	if err := searchAssistantConversationsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	var resp struct {
+		Results []assistantConversationSearchResult `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].ID != conv.ID || !strings.Contains(resp.Results[0].Snippet, "starboard") {
+		t.Fatalf("unexpected results: %+v", resp.Results)
+	}
+}
+
+func TestSearchAssistantConversationsHandler_EmptyQueryIs400(t *testing.T) {
+	withTestAssistantStore(t)
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/conversations/search?q=%20", "", "")
+	if err := searchAssistantConversationsHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}

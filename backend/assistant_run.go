@@ -857,7 +857,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
 // get_tides, estimate_passage, plan_tidal_departure, read_help, search_documents, read_document,
-// get_nearby_vessels, check_signalk_paths, get_last_recorded,
+// search_conversations, read_conversation, get_nearby_vessels, check_signalk_paths, get_last_recorded,
 // get_path_history, find_equipment, list_maintenance, get_maintenance_log,
 // propose_changes) only reads: none of them writes to the
 // conversation store, settings, the document store, or any other shared
