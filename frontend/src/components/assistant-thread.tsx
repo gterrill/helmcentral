@@ -310,9 +310,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       // supersedes this call the same way a second chat.send() would - the
       // superseded attach resolves null and this local `cancelled` guard
       // keeps its resolution from doing anything further either way.
-      const reply = await chat.attach(id)
+      // Appended as the final frame lands so the streamed draft is swapped
+      // for the message in one render; see handleSend.
+      let appended = false
+      const reply = await chat.attach(id, undefined, (message) => {
+        if (cancelled || activeIdRef.current !== id) return
+        appended = true
+        conversations.appendLocal(message)
+      })
       if (cancelled || reply === null || activeIdRef.current !== id) return
-      conversations.appendLocal(reply)
+      if (!appended) conversations.appendLocal(reply)
       await conversations.refresh()
     })()
     return () => {
@@ -342,9 +349,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (id === null || chat.isStreamingConversation(id)) return
     let cancelled = false
     void (async () => {
-      const reply = await chat.attach(id)
+      let appended = false
+      const reply = await chat.attach(id, undefined, (message) => {
+        if (cancelled || activeIdRef.current !== id) return
+        appended = true
+        conversations.appendLocal(message)
+      })
       if (cancelled || activeIdRef.current !== id) return
-      if (reply !== null) conversations.appendLocal(reply)
+      if (reply !== null && !appended) conversations.appendLocal(reply)
       await conversations.refresh()
     })()
     return () => {
@@ -409,10 +421,20 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // Only included when something is actually staged - same
     // conditional-inclusion `send()` already applies to `spoken`/`screen`,
     // so a plain text-only question posts exactly the body it always has.
+    // The reply is appended as the stream's final frame lands, in the same
+    // render that drops the streamed draft. Appending only after send()
+    // resolves left a commit with neither, the thread shrank by a reply and
+    // the scroller re-anchored from the clamped position.
+    let appended = false
+    const onMessage = (message: AssistantMessage) => {
+      if (activeIdRef.current !== conversationId) return
+      appended = true
+      conversations.appendLocal(message)
+    }
     const reply =
       attachmentIds.length > 0
-        ? await chat.send(conversationId, trimmed, { attachments: attachmentIds })
-        : await chat.send(conversationId, trimmed)
+        ? await chat.send(conversationId, trimmed, { attachments: attachmentIds, onMessage })
+        : await chat.send(conversationId, trimmed, { onMessage })
 
     // A successful send has nothing left for the composer to hold onto -
     // clear() aborts nothing (everything staged already finished
@@ -423,7 +445,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // The operator may have opened another thread while this one answered;
     // appendLocal writes into whichever thread is active now.
     if (reply && activeIdRef.current === conversationId) {
-      conversations.appendLocal(reply)
+      if (!appended) conversations.appendLocal(reply)
       await conversations.refresh()
     }
   }, [content, chat, conversations, canWrite, uploads, dictation])

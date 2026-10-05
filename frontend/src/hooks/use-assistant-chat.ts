@@ -78,6 +78,10 @@ export interface AssistantSendOptions {
    * the caller actually passed them. */
   attachments?: string[]
   onConversation?: (conversation: AssistantConversation) => void
+  /** Called with the finished reply in the same tick that the streamed draft
+   * is cleared, so a caller that appends it to its thread there swaps draft
+   * for message in one render and the reply never leaves the screen. */
+  onMessage?: (message: AssistantMessage) => void
 }
 
 const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
@@ -176,6 +180,7 @@ export function useAssistantChat() {
     body: ReadableStream<Uint8Array>,
     controller: AbortController,
     onConversation?: (conversation: AssistantConversation) => void,
+    onMessage?: (message: AssistantMessage) => void,
   ): Promise<AssistantMessage | null> => {
     const isCurrent = () => abortRef.current === controller
     let resolved: AssistantMessage | null = null
@@ -199,6 +204,7 @@ export function useAssistantChat() {
       } else if (event.event === 'message') {
         const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
         resolved = mapMessage(data.message)
+        onMessage?.(resolved)
         clearDraft()
         onConversation?.(mapConversation(data.conversation))
       } else if (event.event === 'error') {
@@ -334,7 +340,7 @@ export function useAssistantChat() {
         return null
       }
 
-      return await consumeStream(response.body, controller, options?.onConversation)
+      return await consumeStream(response.body, controller, options?.onConversation, options?.onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       removeMateWatch(conversationId)
@@ -363,6 +369,7 @@ export function useAssistantChat() {
   const attach = useCallback(async (
     conversationId: string,
     onConversation?: (conversation: AssistantConversation) => void,
+    onMessage?: (message: AssistantMessage) => void,
   ): Promise<AssistantMessage | null> => {
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -401,7 +408,7 @@ export function useAssistantChat() {
       setStatusText(null)
       clearDraft()
 
-      return await consumeStream(response.body, controller, onConversation)
+      return await consumeStream(response.body, controller, onConversation, onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       if (isCurrent()) {

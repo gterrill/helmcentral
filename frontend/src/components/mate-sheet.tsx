@@ -212,9 +212,20 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
         createdAt: new Date().toISOString(),
       })
 
-      const reply = await chat.send(conversationId, initialQuestion, { spoken: true, screen })
+      // Appended as the stream's final frame lands, in the same render that
+      // drops the streamed draft; the fallback below covers a send that
+      // resolves without having called back.
+      let appended = false
+      const reply = await chat.send(conversationId, initialQuestion, {
+        spoken: true,
+        screen,
+        onMessage: (message) => {
+          appended = true
+          conversations.appendLocal(message)
+        },
+      })
       if (reply) {
-        conversations.appendLocal(reply)
+        if (!appended) conversations.appendLocal(reply)
         await conversations.refresh()
         // Read-aloud (ADR 0093 voice phase): only for a reply to a question
         // that came in by voice - the backend's `## Spoken summary` section

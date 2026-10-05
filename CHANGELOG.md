@@ -19,6 +19,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate's finished answer stays where you were reading it.** When Mate
+  finished an answer, the conversation could jump elsewhere in the thread,
+  sometimes back to the top. It now stays at the start of that answer.
 - **A switched-off radar no longer shows as present after a restart.** For the
   first few minutes after Helmcentral restarted or reconnected to the boat's
   network, a radar that was off could appear as transmitting, and the anchor

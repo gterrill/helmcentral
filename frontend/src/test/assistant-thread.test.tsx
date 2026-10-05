@@ -240,7 +240,7 @@ describe('AssistantThread', () => {
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?', { onMessage: expect.any(Function) }))
     expect(conversations.appendLocal).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'user', content: 'What about the wind tomorrow?' }),
     )
@@ -292,7 +292,7 @@ describe('AssistantThread', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
     await waitFor(() => expect(create).toHaveBeenCalled())
-    await waitFor(() => expect(send).toHaveBeenCalledWith('new-1', 'A fresh question'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith('new-1', 'A fresh question', { onMessage: expect.any(Function) }))
   })
 
   it('shows the status line while sending', () => {
@@ -361,7 +361,7 @@ describe('AssistantThread', () => {
     fireEvent.change(textarea, { target: { value: 'A follow-up' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'A follow-up'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'A follow-up', { onMessage: expect.any(Function) }))
     expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
   })
 
@@ -539,7 +539,7 @@ describe('AssistantThread', () => {
       const attach = vi.fn().mockResolvedValue(null)
       render(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={buildChat({ attach })} />)
 
-      expect(attach).toHaveBeenCalledWith('c1')
+      expect(attach).toHaveBeenCalledWith('c1', undefined, expect.any(Function))
     })
 
     it('calls chat.attach again when the active conversation switches to a different id', () => {
@@ -548,10 +548,10 @@ describe('AssistantThread', () => {
       const { rerender } = render(
         <AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />,
       )
-      expect(attach).toHaveBeenCalledWith('c1')
+      expect(attach).toHaveBeenCalledWith('c1', undefined, expect.any(Function))
 
       rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
-      expect(attach).toHaveBeenCalledWith('c2')
+      expect(attach).toHaveBeenCalledWith('c2', undefined, expect.any(Function))
     })
 
     it('does not call chat.attach when there is no active conversation yet', () => {
@@ -587,7 +587,7 @@ describe('AssistantThread', () => {
 
       rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
 
-      expect(attach).toHaveBeenCalledWith('c2')
+      expect(attach).toHaveBeenCalledWith('c2', undefined, expect.any(Function))
     })
 
     it("does not append a reply into a conversation other than the one it answers", async () => {
@@ -600,7 +600,7 @@ describe('AssistantThread', () => {
       const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'Refuge Cove or Waterloo Bay?' } })
       fireEvent.keyDown(textarea, { key: 'Enter' })
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Refuge Cove or Waterloo Bay?'))
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Refuge Cove or Waterloo Bay?', { onMessage: expect.any(Function) }))
 
       // One conversations hook across renders, as in the app: its
       // appendLocal always writes into whatever thread is active now.
@@ -686,7 +686,7 @@ describe('AssistantThread', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
       await waitFor(() =>
-        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'] }),
+        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'], onMessage: expect.any(Function) }),
       )
     })
 
@@ -701,7 +701,7 @@ describe('AssistantThread', () => {
       expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', '', { attachments: ['doc-1'] }))
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', '', { attachments: ['doc-1'], onMessage: expect.any(Function) }))
     })
 
     // Existing thread tests (above) call send with exactly two arguments for
@@ -717,7 +717,7 @@ describe('AssistantThread', () => {
       fireEvent.change(textarea, { target: { value: 'Plain question, no attachment' } })
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Plain question, no attachment'))
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Plain question, no attachment', { onMessage: expect.any(Function) }))
     })
 
     // ADR 0106 F2 follow-up: uploads dedupe by sha256 server-side, so
@@ -745,7 +745,7 @@ describe('AssistantThread', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
       await waitFor(() =>
-        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'] }),
+        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'], onMessage: expect.any(Function) }),
       )
     })
 
@@ -912,7 +912,7 @@ describe('AssistantThread', () => {
 
         fireEvent.keyDown(textarea, { key: 'Enter' })
 
-        await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?'))
+        await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?', { onMessage: expect.any(Function) }))
         expect(currentRecognition().aborted).toBe(true)
 
         act(() => { currentRecognition().emitResult('leftover words', true) })
@@ -1132,5 +1132,80 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
     await waitFor(() => expect(attach).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
     expect(conversations.refresh).toHaveBeenCalled()
+  })
+})
+
+// The reply must never leave the DOM between the streamed draft and the
+// final message: if it does, the content shrinks by a whole reply, the
+// browser clamps scrollTop, and the scroller re-anchors from the wrong spot.
+describe('reply hand-off from draft to final message', () => {
+  it('keeps the reply text on screen across completion of a streamed reply', async () => {
+    const { useAssistantChat: realUseAssistantChat } = await vi.importActual<
+      typeof import('@/hooks/use-assistant-chat')
+    >('@/hooks/use-assistant-chat')
+    const { useState, useCallback } = await import('react')
+
+    const replyText = 'Blue Pearl Bay first, on the flood.'
+    const enc = new TextEncoder()
+    let push!: (chunk: string) => void
+    let close!: () => void
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        push = (chunk) => c.enqueue(enc.encode(chunk))
+        close = () => c.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) =>
+      url.endsWith('/run') ? { ok: true, status: 204, body: null } : { ok: true, status: 200, body: stream },
+    ))
+    // rAF fires on a real timer in happy-dom; make it immediate for the draft flush.
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      queueMicrotask(() => cb(0))
+      return 1
+    })
+
+    function Harness() {
+      const [messages, setMessages] = useState<AssistantMessage[]>([])
+      const appendLocal = useCallback((m: AssistantMessage) => setMessages((p) => [...p, m]), [])
+      const chat = realUseAssistantChat()
+      const conversations = buildConversations({ messages, appendLocal })
+      return <AssistantThread canWrite conversations={conversations} chat={chat} />
+    }
+
+    const { container } = render(<Harness />)
+    const gaps: string[] = []
+    let sawReply = false
+    const observer = new MutationObserver(() => {
+      const has = container.textContent?.includes(replyText) ?? false
+      if (has) sawReply = true
+      else if (sawReply) gaps.push(container.textContent ?? '')
+    })
+    observer.observe(container, { childList: true, subtree: true, characterData: true })
+
+    fireEvent.change(screen.getByPlaceholderText('Ask Mate'), { target: { value: 'Which bay?' } })
+    fireEvent.keyDown(screen.getByPlaceholderText('Ask Mate'), { key: 'Enter' })
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/messages'), expect.anything()))
+    await act(async () => {
+      push(`event: delta\ndata: ${JSON.stringify({ text: replyText })}\n\n`)
+    })
+    await waitFor(() => expect(container.textContent).toContain(replyText))
+
+    const message = {
+      id: 'm2', conversation_id: 'c1', seq: 2, role: 'assistant', content: replyText,
+      model: 'm', created_at: '2026-10-05T00:00:00Z',
+    }
+    const conversation = { id: 'c1', title: 't', created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z' }
+    await act(async () => {
+      push(`event: message\ndata: ${JSON.stringify({ message, conversation })}\n\n`)
+      close()
+    })
+    await waitFor(() => expect(screen.queryByText('Stop')).not.toBeInTheDocument())
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    observer.disconnect()
+
+    expect(gaps).toEqual([])
+    expect(container.textContent).toContain(replyText)
+    vi.unstubAllGlobals()
   })
 })
