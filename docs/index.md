@@ -54,6 +54,7 @@ Steps for specific tasks.
 - [Add a Nearby map](how-to/add-a-nearby-map.md)
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
+- [Keep what a Mate conversation worked out](how-to/keep-what-a-mate-conversation-worked-out.md)
 - [Start a ship's manual](how-to/start-a-ships-manual.md), what belongs in one
   and what the builder's handbook already covers.
 - [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
