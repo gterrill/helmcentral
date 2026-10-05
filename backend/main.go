@@ -963,6 +963,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// just this tab's local stream. Write tier: it ends a run that
 		// spent the operator's OpenRouter credit, the same reasoning as the
 		// POST above.
+		// Summarise a conversation into a note (ADR 0162). The draft spends
+		// the operator's OpenRouter credit, so it is write tier like sending a
+		// message; the save writes a note and its links.
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-draft", tierWrite, postAssistantSummaryDraftHandler},
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-note", tierWrite, saveAssistantSummaryNoteHandler},
 		{http.MethodPost, "/api/assistant/conversations/:id/run/cancel", tierWrite, postAssistantRunCancelHandler},
 		// The watch chip's Stop (ADR 0160). Write tier, the same as Stop on a
 		// reply: it ends something a write-tier question started.

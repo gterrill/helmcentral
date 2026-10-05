@@ -678,6 +678,11 @@ func listAssistantConversationsHandler(c echo.Context) error {
 	if conversations == nil {
 		conversations = []assistantConversation{}
 	}
+	// The list is a panel of titles; whether each summary note still exists
+	// is checked only when one conversation is opened.
+	for i := range conversations {
+		conversations[i].SummaryNoteID = nil
+	}
 	return c.JSON(http.StatusOK, map[string]any{"conversations": conversations})
 }
 
@@ -745,6 +750,17 @@ func getAssistantConversationHandler(c echo.Context) error {
 	}
 	if !ok {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "conversation not found"})
+	}
+
+	// A summary note the operator has since deleted reads as no note (ADR
+	// 0162); that is state, not a masked error.
+	liveNote, err := liveAssistantSummaryNoteID(conv)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	conv.SummaryNoteID = nil
+	if liveNote != "" {
+		conv.SummaryNoteID = &liveNote
 	}
 
 	messages, err := globalAssistantStore.ListMessages(id)

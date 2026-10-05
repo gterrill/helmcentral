@@ -24,6 +24,11 @@ type assistantConversation struct {
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// SummaryNoteID is the note this conversation was last summarised into
+	// (ADR 0162), nil until the operator saves one. The stored value can
+	// outlive the note: handlers go through liveAssistantSummaryNoteID, which
+	// reports a deleted note as none.
+	SummaryNoteID *string `json:"summary_note_id,omitempty"`
 }
 
 // assistantMessage is one row of a conversation. User and assistant roles
@@ -163,6 +168,19 @@ func createAssistantSchema(db *sql.DB) error {
 		return fmt.Errorf("index message_attachments table: %w", err)
 	}
 
+	// summary_note_id (ADR 0162) arrived after the table did, and CREATE
+	// TABLE IF NOT EXISTS leaves an existing table alone, so the column is
+	// added by hand when a database from before it opens.
+	var hasSummaryNote int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'summary_note_id'`).Scan(&hasSummaryNote); err != nil {
+		return fmt.Errorf("inspect conversations table: %w", err)
+	}
+	if hasSummaryNote == 0 {
+		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN summary_note_id TEXT`); err != nil {
+			return fmt.Errorf("add conversations.summary_note_id: %w", err)
+		}
+	}
+
 	if err := createAssistantSearchSchema(db); err != nil {
 		return err
 	}
@@ -232,7 +250,7 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC`)
+	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -242,8 +260,12 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	for rows.Next() {
 		var conv assistantConversation
 		var created, updated int64
-		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated); err != nil {
+		var noteID sql.NullString
+		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID); err != nil {
 			return nil, fmt.Errorf("scan conversation: %w", err)
+		}
+		if noteID.Valid {
+			conv.SummaryNoteID = &noteID.String
 		}
 		conv.CreatedAt = time.Unix(created, 0).UTC()
 		conv.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -259,11 +281,12 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations WHERE id = ?`, id)
 
 	var conv assistantConversation
 	var created, updated int64
-	err := row.Scan(&conv.ID, &conv.Title, &created, &updated)
+	var noteID sql.NullString
+	err := row.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantConversation{}, false, nil
 	}
@@ -272,7 +295,36 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	}
 	conv.CreatedAt = time.Unix(created, 0).UTC()
 	conv.UpdatedAt = time.Unix(updated, 0).UTC()
+	if noteID.Valid {
+		conv.SummaryNoteID = &noteID.String
+	}
 	return conv, true, nil
+}
+
+// SetSummaryNote records the note a conversation was summarised into (ADR
+// 0162); an empty noteID clears it. Like SetTitle it does not bump
+// updated_at: saving a note is not conversation activity. A missing
+// conversation is errAssistantConversationNotFound.
+func (s *assistantStore) SetSummaryNote(id, noteID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var value any
+	if noteID != "" {
+		value = noteID
+	}
+	result, err := s.db.Exec(`UPDATE conversations SET summary_note_id = ? WHERE id = ?`, value, id)
+	if err != nil {
+		return fmt.Errorf("set conversation summary note: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set conversation summary note: %w", err)
+	}
+	if affected == 0 {
+		return errAssistantConversationNotFound
+	}
+	return nil
 }
 
 // SetTitle renames a conversation, e.g. from the first user message
