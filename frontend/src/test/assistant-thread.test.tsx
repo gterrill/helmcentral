@@ -719,6 +719,34 @@ describe('AssistantThread', () => {
       )
     })
 
+    it('clears the sent chips when the answer lands after the operator moved to another conversation', async () => {
+      let deliver!: () => void
+      const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
+        new Promise<AssistantMessage | null>((resolve) => {
+          deliver = () => {
+            const reply = assistantMessage({ id: 'late-1', conversationId: 'c1' })
+            options?.onMessage?.(reply)
+            resolve(reply)
+          }
+        }))
+      const chat = buildChat({ send })
+      const first = buildConversations({ activeId: 'c1' })
+      const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
+
+      fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
+      expect(await screen.findByText('manual.pdf')).toBeInTheDocument()
+      fireEvent.change(screen.getByPlaceholderText('Ask Mate'), { target: { value: 'Part number?' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      await waitFor(() => expect(send).toHaveBeenCalled())
+
+      // The operator starts a new chat and stages a fresh file there.
+      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
+      await act(async () => { deliver() })
+
+      await waitFor(() => expect(screen.queryByText('manual.pdf')).not.toBeInTheDocument())
+    })
+
     it('sends with an attachment and no text typed', async () => {
       const send = vi.fn().mockResolvedValue(null)
       render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
@@ -1313,6 +1341,15 @@ describe('scroll to the start of a delivered reply', () => {
 
   it('does not scroll for a reply that was already delivered when the thread mounted', async () => {
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ deliveredMessageId: 'm9' })} />)
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    expect(scrollToMessageSpy).not.toHaveBeenCalled()
+  })
+
+  it('leaves the view alone when the operator grabbed the scrollbar during streaming', async () => {
+    const conversations = buildConversations()
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    fireEvent.pointerDown(screen.getByTestId('assistant-thread-scroll'))
+    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
     expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })

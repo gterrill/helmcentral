@@ -466,8 +466,10 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // the scroller re-anchored from the clamped position. The answer counts
     // as delivered once that has run: Stop tapped before the stream closes
     // makes send() resolve null, but the answer is on screen.
+    let answered = false
     let delivered = false
     const onMessage = (message: AssistantMessage) => {
+      answered = true
       if (activeIdRef.current !== conversationId) return
       delivered = true
       conversations.appendLocal(message)
@@ -482,12 +484,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // clear() aborts nothing (everything staged already finished
     // uploading, since uploads.ready gated Send above) and just drops the
     // now-sent chips. A failed send (chat.error is set) leaves them staged
-    // so the operator can retry without re-uploading. Another thread may
-    // have been opened while this one answered; onMessage skips that case.
-    if (delivered) {
-      uploads.clear()
-      await conversations.refresh()
-    }
+    // so the operator can retry without re-uploading. The chips go whenever
+    // the answer landed, even if the operator opened another thread meanwhile:
+    // they would otherwise ride along with the next question there.
+    if (answered) uploads.clear()
+    if (delivered) await conversations.refresh()
   }, [content, chat, conversations, canWrite, uploads, dictation])
 
   const handleStop = useCallback(() => {
@@ -568,6 +569,8 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
             onWheel={() => { operatorScrolledRef.current = true }}
             onTouchMove={() => { operatorScrolledRef.current = true }}
             onKeyDown={() => { operatorScrolledRef.current = true }}
+            // Grabbing the scrollbar, or a touch drag, starts with a pointerdown.
+            onPointerDown={() => { operatorScrolledRef.current = true }}
           >
             <MessageScrollerContent className="gap-6">
               {!hasMessages && !showDraft ? (
