@@ -61,6 +61,7 @@ function buildConversations(
     messages: [],
     summaryNoteId: null,
     setSummaryNoteId: vi.fn(),
+    conversationLoading: false,
     loading: false,
     error: null,
     errorMessage: null,

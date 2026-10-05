@@ -24,7 +24,8 @@ export interface SaveSummaryNoteInput {
   title: string
   body: string
   type: string
-  addEquipmentIds: string[]
+  /** Every equipment ticked in the dialog, linked already or not. */
+  equipmentIds: string[]
   removeEquipmentIds: string[]
 }
 
@@ -65,7 +66,7 @@ export async function saveSummaryNote(conversationId: string, input: SaveSummary
         title: input.title,
         body: input.body,
         type: input.type,
-        add_equipment_ids: input.addEquipmentIds,
+        equipment_ids: input.equipmentIds,
         remove_equipment_ids: input.removeEquipmentIds,
       }),
     },

@@ -219,6 +219,10 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // operator has saved one. Read from the conversation when it is opened and
   // set by the summary dialog after a save.
   const [summaryNoteId, setSummaryNoteId] = useState<string | null>(null)
+  // True from the moment select() starts until its answer (or failure) is
+  // applied: the previous conversation's messages are still showing, so
+  // anything acting on "the active conversation" waits.
+  const [conversationLoading, setConversationLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -259,6 +263,8 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const select = useCallback(async (id: string) => {
     const seq = (selectionSeqRef.current += 1)
     setActiveId(id)
+    setSummaryNoteId(null)
+    setConversationLoading(true)
     try {
       const response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -267,10 +273,12 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       setMessages(Array.isArray(data.messages) ? data.messages.map(mapMessage) : [])
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
       setError(null)
+      setConversationLoading(false)
     } catch (err) {
       if (selectionSeqRef.current !== seq) return
       setError(err instanceof Error ? err.message : String(err))
       setMessages([])
+      setConversationLoading(false)
     }
   }, [])
 
@@ -350,6 +358,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setActiveId(null)
     setMessages([])
     setSummaryNoteId(null)
+    setConversationLoading(false)
     setError(null)
   }, [])
 
@@ -423,6 +432,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
           setActiveId(null)
           setMessages([])
           setSummaryNoteId(null)
+          setConversationLoading(false)
         }
       }
     } catch (err) {
@@ -457,6 +467,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     messages,
     summaryNoteId,
     setSummaryNoteId,
+    conversationLoading,
     loading,
     error,
     errorMessage,

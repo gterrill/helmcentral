@@ -62,7 +62,7 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
         title: title.trim(),
         body: bodyRef.current,
         type: draft.type,
-        addEquipmentIds: draft.equipment.filter((e) => ticked[e.id] && !e.linked).map((e) => e.id),
+        equipmentIds: draft.equipment.filter((e) => ticked[e.id]).map((e) => e.id),
         removeEquipmentIds: draft.equipment.filter((e) => !ticked[e.id] && e.linked).map((e) => e.id),
       })
       onSaved(result.noteId, result.created)

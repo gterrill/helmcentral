@@ -139,6 +139,40 @@ describe('useAssistantConversations', () => {
   // already moved on from (by pressing "New conversation") filled the
   // blank chat back in with the OLD conversation's messages, even though
   // activeId had already gone back to null.
+  it('select drops the previous conversation\'s summary note and reports loading until the new one arrives', async () => {
+    let resolveSecond: (value: unknown) => void = () => {}
+    const second = new Promise((resolve) => { resolveSecond = resolve })
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' }), conversationApi({ id: 'c2' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1', summary_note_id: 'n1' }), messages: [] }) }
+      }
+      if (url === '/api/assistant/conversations/c2') return second
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.select('c1') })
+    expect(result.current.summaryNoteId).toBe('n1')
+    expect(result.current.conversationLoading).toBe(false)
+
+    let pending: Promise<void> = Promise.resolve()
+    act(() => { pending = result.current.select('c2') })
+    expect(result.current.summaryNoteId).toBeNull()
+    expect(result.current.conversationLoading).toBe(true)
+
+    await act(async () => {
+      resolveSecond({ ok: true, json: async () => ({ conversation: conversationApi({ id: 'c2' }), messages: [] }) })
+      await pending
+    })
+    expect(result.current.conversationLoading).toBe(false)
+    expect(result.current.summaryNoteId).toBeNull()
+  })
+
   it('a late select response does not fill the chat startNew already cleared', async () => {
     let resolveDetail: (value: unknown) => void = () => {}
     const detailPromise = new Promise((resolve) => { resolveDetail = resolve })

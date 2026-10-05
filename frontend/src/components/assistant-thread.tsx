@@ -557,7 +557,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       : null
   const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
   const hasAssistantReply = conversations.messages.some((m) => m.role === 'assistant')
-  const summaryLabel = conversations.summaryNoteId !== null ? 'Update note' : 'Summarise to note'
+  const summaryLabel = conversations.summaryNoteId !== null && !conversations.conversationLoading ? 'Update note' : 'Summarise to note'
   const sendDisabled = chat.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
 
   return (
@@ -816,7 +816,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
               aria-label={summaryLabel}
               title={summaryLabel}
               size="icon-sm"
-              disabled={!canWrite || chat.sending || !hasAssistantReply || conversations.activeId === null}
+              disabled={!canWrite || chat.sending || !hasAssistantReply || conversations.activeId === null || conversations.conversationLoading}
               onClick={() => setSummaryOpen(true)}
             >
               <FileText className="h-4 w-4" />

@@ -88,7 +88,7 @@ describe('MateSummaryNoteDialog', () => {
       title: 'Polisher: no sampling port',
       body: '- edited fact',
       type: 'quirk',
-      add_equipment_ids: ['eq-1'],
+      equipment_ids: ['eq-1', 'eq-2'],
       remove_equipment_ids: [],
     })
   })
@@ -104,7 +104,7 @@ describe('MateSummaryNoteDialog', () => {
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith('n1', false))
     expect(JSON.parse(summaryCalls()[1][1].body)).toMatchObject({
-      add_equipment_ids: ['eq-1'],
+      equipment_ids: ['eq-1'],
       remove_equipment_ids: ['eq-2'],
     })
   })
@@ -136,6 +136,7 @@ function buildConversations(overrides: Partial<ReturnType<typeof useAssistantCon
     messages: [],
     summaryNoteId: null,
     setSummaryNoteId: vi.fn(),
+    conversationLoading: false,
     loading: false,
     error: null,
     errorMessage: null,
@@ -177,6 +178,12 @@ const reply: AssistantMessage = {
 }
 
 describe('Summarise to note button in the composer', () => {
+  it('is disabled while the selected conversation is still loading', () => {
+    const conversations = buildConversations({ messages: [reply], conversationLoading: true })
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
+  })
+
   it('is disabled until Mate has replied', () => {
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
     expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
