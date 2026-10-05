@@ -56,7 +56,6 @@ export const SPEECH_INPUT_FATAL_ERRORS = {
 // hooks/use-mate-voice.ts does not restart wake mode into the same loop.
 export const SPEECH_INPUT_RESTART_LOOP_ERROR = 'Voice input keeps stopping. Tap the microphone to try again.'
 
-const FATAL_CODES = new Set(['not-allowed', 'service-not-allowed', 'audio-capture'])
 const QUICK_END_MS = 1000
 const MAX_QUICK_ENDS = 3
 
@@ -211,7 +210,12 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
 
       recognition.onerror = (event) => {
         if (recognitionRef.current !== recognition) return
-        if (FATAL_CODES.has(event.error)) session.fatal = true
+        if (session.chained) {
+          // Android ends a session on silence; that is the loop's normal
+          // rhythm, not an error. Anything else ends the loop and surfaces.
+          if (event.error === 'no-speech') return
+          session.fatal = true
+        }
         const message = ERROR_MESSAGES[event.error] ?? event.error
         setError(message)
         onErrorRef.current?.(message)
@@ -286,7 +290,15 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     recognitionRef.current?.stop()
   }, [])
 
-  useEffect(() => () => { recognitionRef.current?.abort() }, [])
+  useEffect(() => () => {
+    const recognition = recognitionRef.current
+    if (!recognition) return
+    recognitionRef.current = null
+    recognition.onresult = null
+    recognition.onerror = null
+    recognition.onend = null
+    recognition.abort()
+  }, [])
 
   return { supported, unsupportedReason, listening, interim, error, start, stop, finish }
 }

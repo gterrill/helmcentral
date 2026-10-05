@@ -380,13 +380,39 @@ describe('useSpeechInput continuous requests', () => {
       expect(onError).toHaveBeenCalledTimes(1)
     })
 
-    it('restarts after a no-speech error', () => {
-      const { hook } = setup()
+    it('restarts silently after a no-speech error', () => {
+      const onError = vi.fn()
+      const { hook } = setup(onError)
       act(() => hook.result.current.start({ continuous: true }))
       act(() => instances[0].emitError('no-speech'))
       act(() => instances[0].emitEnd())
       expect(instances).toHaveLength(2)
       expect(hook.result.current.listening).toBe(true)
+      expect(hook.result.current.error).toBeNull()
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    it('stops on a network error even after a long session', () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const onError = vi.fn()
+      const { hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      vi.setSystemTime(Date.now() + 30_000)
+      act(() => instances[0].emitError('network'))
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+      expect(hook.result.current.error).toBe('The speech service could not be reached.')
+      expect(onError).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not restart after unmount', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      hook.unmount()
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(instances[0].aborted).toBe(true)
     })
 
     it('stops and reports an error when sessions keep ending at once with nothing heard', () => {
