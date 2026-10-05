@@ -226,6 +226,10 @@ type createNoteRequest struct {
 	FolderID *string  `json:"folder_id"`
 	Tags     []string `json:"tags"`
 	Type     string   `json:"type"`
+	// typeIsSuggestion marks Type as a program's suggestion, stored as an
+	// automatic classification the operator can still override, rather than
+	// as the operator's own choice. Not part of the wire format.
+	typeIsSuggestion bool
 }
 
 // createNoteHandler is POST /api/notes (plan §4): only body is required -
@@ -267,6 +271,10 @@ func createNoteHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "body": req.Body})
 }
 
+// noteTypeIsSuggestionKey is the echo context key patchNoteInProcess sets so
+// patchNoteHandler records an overriding type as automatic.
+const noteTypeIsSuggestionKey = "note-type-is-suggestion"
+
 // errNoteTypeInvalid is createNoteDocument's answer to a type the note
 // vocabulary does not contain.
 var errNoteTypeInvalid = errors.New("invalid note type")
@@ -298,6 +306,9 @@ func createNoteDocument(req createNoteRequest) (document, error) {
 			return document{}, errNoteTypeInvalid
 		}
 		noteTypeSource = "operator"
+		if req.typeIsSuggestion {
+			noteTypeSource = "auto"
+		}
 	} else {
 		noteType = classifyNoteType(req.Body)
 	}
@@ -588,6 +599,11 @@ func patchNoteHandler(c echo.Context) error {
 	switch {
 	case noteTypeOverride != nil:
 		resolvedType, resolvedSource, setType = *noteTypeOverride, "operator", true
+		// An in-process caller (the Mate summary save) passing a suggested
+		// type, not an operator's choice, keeps the classification automatic.
+		if suggestion, _ := c.Get(noteTypeIsSuggestionKey).(bool); suggestion {
+			resolvedSource = "auto"
+		}
 	case bodyPatch != nil && doc.NoteTypeSource != "operator":
 		resolvedType, resolvedSource, setType = classifyNoteType(*bodyPatch), "auto", true
 	}

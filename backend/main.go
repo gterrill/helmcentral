@@ -959,6 +959,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// state (a new message row), which a readonly session must not
 		// trigger (ADR 0093).
 		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
+		// Summarise a conversation into a note (ADR 0162). The draft spends
+		// the operator's OpenRouter credit, so it is write tier like sending a
+		// message; the save writes a note and its links.
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-draft", tierWrite, postAssistantSummaryDraftHandler},
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-note", tierWrite, saveAssistantSummaryNoteHandler},
 		// Stop, for real (ADR 0105): cancels the in-flight run itself, not
 		// just this tab's local stream. Write tier: it ends a run that
 		// spent the operator's OpenRouter credit, the same reasoning as the

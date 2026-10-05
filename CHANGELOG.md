@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- A **Summarise to note** button beside the microphone in the Mate message
+  box saves what a conversation worked out as a note. Mate writes up the facts
+  established about your boat, what was ruled out and why, and the procedure
+  that worked, and shows it to you first; nothing is saved until you press
+  Save. You can edit the title and text, and tick the equipment to link the
+  note to. A conversation keeps one note, and the button then reads **Update
+  note**.
 - Searching your Mate conversations now finds a word anywhere in a
   conversation, not just in its title. A match inside a conversation shows a
   line of the matching text under the title, on both the Mate page and the

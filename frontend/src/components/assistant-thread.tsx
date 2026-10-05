@@ -1,4 +1,4 @@
-import { ArrowUp, Eye, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Eye, FileText, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 import { toast } from 'sonner'
 
@@ -6,6 +6,7 @@ import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
+import { MateSummaryNoteDialog } from '@/components/mate-summary-note-dialog'
 import { DictateButton, DictationError, DictationStatus, useDictation } from '@/components/dictation'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker'
@@ -305,6 +306,7 @@ function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: st
  */
 export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef, onHasDraftChange, watch }: AssistantThreadProps) {
   const [content, setContent] = useState('')
+  const [summaryOpen, setSummaryOpen] = useState(false)
   // [P1, ADR 0093/impeccable critique 2026-09-12] chat.abort() already
   // cancelled a request on unmount or a superseding send, but the operator
   // had no way to cancel a question themselves. Purely a local "did the
@@ -554,6 +556,8 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       ? 'Waiting for attachments to finish reading…'
       : null
   const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
+  const hasAssistantReply = conversations.messages.some((m) => m.role === 'assistant')
+  const summaryLabel = conversations.summaryNoteId !== null && !conversations.conversationLoading ? 'Update note' : 'Summarise to note'
   const sendDisabled = chat.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
 
   return (
@@ -806,6 +810,17 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                 this addon's layout otherwise. */}
             <DictateButton dictation={dictation} disabled={!canWrite} />
             <DictationStatus dictation={dictation} />
+            {/* ADR 0162: opens the review dialog; the draft is made when it
+                opens and nothing is saved until the operator presses Save. */}
+            <InputGroupButton
+              aria-label={summaryLabel}
+              title={summaryLabel}
+              size="icon-sm"
+              disabled={!canWrite || chat.sending || !hasAssistantReply || conversations.activeId === null || conversations.conversationLoading}
+              onClick={() => setSummaryOpen(true)}
+            >
+              <FileText className="h-4 w-4" />
+            </InputGroupButton>
             {/* Send is an icon button here, matching upstream's ArrowUpIcon
                 composer control - ml-auto is what actually pushes it to the
                 far edge, since the addon itself packs its children to the
@@ -837,6 +852,25 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
             kiosk or a touchscreen helm, where nothing hovers. */}
         {canWrite && attachmentWaitMessage && (
           <p className="text-xs text-muted-foreground">{attachmentWaitMessage}</p>
+        )}
+        {conversations.activeId !== null && (
+          <MateSummaryNoteDialog
+            open={summaryOpen}
+            onOpenChange={setSummaryOpen}
+            conversationId={conversations.activeId}
+            onSaved={(noteId) => {
+              conversations.setSummaryNoteId(noteId)
+              setSummaryOpen(false)
+              toast.success(
+                <span>
+                  Saved to Notes.{' '}
+                  <a className="underline" href={documentViewerHref(noteId)}>
+                    Open note
+                  </a>
+                </span>,
+              )
+            }}
+          />
         )}
         <input
           ref={fileInputRef}

@@ -433,6 +433,36 @@ records and past conversations first.
 Mate can only recall conversations that are still in the list. Delete a
 conversation and Mate no longer knows what was in it.
 
+## Keeping what a conversation worked out
+
+Once a conversation has settled something about your boat, such as a fitting
+you showed Mate is not there, a part number, or a procedure that worked, you
+can save it as a note. Press **Summarise to note** beside the microphone in the
+message box. Mate writes a short summary and shows it to you for review.
+Nothing is saved until you press **Save**.
+
+The summary has up to three parts, and leaves out any that is empty:
+
+- **What we established**: facts about your boat, above all from your own
+  photos and observations.
+- **Ruled out**: options that were considered and why they were dropped.
+- **Procedure that worked**: the numbered steps you actually followed.
+
+It carries only what the conversation settled about your boat, not general
+advice Mate gave that nobody confirmed. Where you corrected Mate, your
+correction is what is written down. The note ends with a link back to the
+conversation. Mate also suggests the equipment the note is about; they are
+ticked, and the note is linked to each one you leave ticked, so it turns up on
+that equipment's record as well as in document search.
+
+A conversation keeps one note. Once it has one, the button reads **Update
+note**, and saving replaces that note's title and text with a fresh summary of
+the whole conversation instead of making a second note. If you deleted the
+note, the next save makes a new one. If the conversation has nothing worth
+keeping yet, Mate says so and writes nothing. The summary uses Mate's chat
+model, so each press costs one answer's worth of tokens. See
+[Keep what a Mate conversation worked out](../how-to/keep-what-a-mate-conversation-worked-out.md).
+
 ## Conversations and cost
 
 Questions and answers are kept as conversations you can return to, list, or
