@@ -17,6 +17,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from '@/components/ui/message-scroller'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -253,6 +254,42 @@ interface AssistantThreadProps {
 }
 
 /**
+ * Rests the view with the start of a freshly delivered reply at the top of
+ * the viewport. Lives inside the scroller provider because the scroll API
+ * is a hook on its context. A reply already delivered when the thread
+ * mounted is left to the scroller's own initial position, and nothing moves
+ * if the operator scrolled while the answer streamed.
+ */
+function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: string | null; operatorScrolled: { current: boolean } }) {
+  const { scrollToMessage } = useMessageScroller()
+  const scrollRef = useRef(scrollToMessage)
+  scrollRef.current = scrollToMessage
+  const seenRef = useRef(messageId)
+  useEffect(() => {
+    if (messageId === null || messageId === seenRef.current) return
+    if (operatorScrolled.current) {
+      seenRef.current = messageId
+      return
+    }
+    // The reply was appended in the same render that set this id; wait two
+    // frames so it has laid out and the scroller has settled its spacer.
+    let second = 0
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        // Marked seen only here, so StrictMode's effect re-run reschedules.
+        seenRef.current = messageId
+        if (!operatorScrolled.current) scrollRef.current(messageId, { align: 'start' })
+      })
+    })
+    return () => {
+      cancelAnimationFrame(first)
+      cancelAnimationFrame(second)
+    }
+  }, [messageId, operatorScrolled])
+  return null
+}
+
+/**
  * The message list, footer, status/error rows and composer for one Mate
  * conversation (ADR 0093, streamed per ADR 0105). Extracted from
  * AssistantDrawer so both the full panel (which also owns a
@@ -274,6 +311,12 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // so this is the only way to tell "stopped" apart from "idle before the
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
+  // Set when the operator wheels, touches or keys the thread while a reply
+  // streams; clears when the next run starts. Gates the post-delivery scroll.
+  const operatorScrolledRef = useRef(false)
+  useEffect(() => {
+    if (chat.sending) operatorScrolledRef.current = false
+  }, [chat.sending])
 
   // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
   // instance per AssistantThread - it isn't threaded through as a prop
@@ -516,9 +559,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3"
       data-testid="assistant-thread-root"
     >
-      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+      <MessageScrollerProvider defaultScrollPosition="last-anchor">
+        <ScrollToDeliveredReply messageId={chat.deliveredMessageId} operatorScrolled={operatorScrolledRef} />
         <MessageScroller className="min-h-0 flex-1" data-testid="assistant-thread-message-scroller">
-          <MessageScrollerViewport className="min-h-0 flex-1 px-1 py-2" data-testid="assistant-thread-scroll">
+          <MessageScrollerViewport
+            className="min-h-0 flex-1 px-1 py-2"
+            data-testid="assistant-thread-scroll"
+            onWheel={() => { operatorScrolledRef.current = true }}
+            onTouchMove={() => { operatorScrolledRef.current = true }}
+            onKeyDown={() => { operatorScrolledRef.current = true }}
+          >
             <MessageScrollerContent className="gap-6">
               {!hasMessages && !showDraft ? (
                 <section aria-label="What Mate can check" className="min-w-0 space-y-2">

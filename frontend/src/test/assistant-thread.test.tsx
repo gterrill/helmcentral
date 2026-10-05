@@ -13,6 +13,24 @@ import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
 // answer - Mate is often itself a sheet, so opening the capture sheet over
 // it would stack two, and capture is meant to cost nothing anyway.
 vi.mock('@/hooks/use-notes')
+// Spy on the scroller's scrollToMessage while keeping the real primitive.
+const { scrollToMessageSpy } = vi.hoisted(() => ({ scrollToMessageSpy: vi.fn() }))
+vi.mock('@/components/ui/message-scroller', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/message-scroller')>()
+  return {
+    ...actual,
+    useMessageScroller: () => {
+      const real = actual.useMessageScroller()
+      return {
+        ...real,
+        scrollToMessage: (...args: Parameters<typeof real.scrollToMessage>) => {
+          scrollToMessageSpy(...args)
+          return real.scrollToMessage(...args)
+        },
+      }
+    },
+  }
+})
 const mockedUseNotes = vi.mocked(useNotes)
 type NotesMock = ReturnType<typeof useNotes>
 function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
@@ -71,6 +89,7 @@ function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {})
     attach: vi.fn().mockResolvedValue(null),
     isStreamingConversation: vi.fn().mockReturnValue(false),
     answerDelivered: vi.fn().mockReturnValue(false),
+    deliveredMessageId: null,
     ...overrides,
   }
 }
@@ -1268,5 +1287,42 @@ describe('Stop after the answer has been delivered', () => {
     expect(abort).toHaveBeenCalled()
     rerender(<AssistantThread canWrite conversations={conversations} chat={{ ...chat, sending: false }} />)
     expect(screen.getByText('Stopped.')).toBeInTheDocument()
+  })
+})
+
+// After a reply is delivered the view rests with the start of that reply at
+// the top of the viewport, unless the operator scrolled during streaming.
+describe('scroll to the start of a delivered reply', () => {
+  beforeEach(() => {
+    scrollToMessageSpy.mockClear()
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      queueMicrotask(() => cb(0))
+      return 1
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('scrolls the delivered reply to the top of the viewport', async () => {
+    const conversations = buildConversations()
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
+    await waitFor(() => expect(scrollToMessageSpy).toHaveBeenCalledWith('m9', expect.objectContaining({ align: 'start' })))
+  })
+
+  it('does not scroll for a reply that was already delivered when the thread mounted', async () => {
+    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ deliveredMessageId: 'm9' })} />)
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    expect(scrollToMessageSpy).not.toHaveBeenCalled()
+  })
+
+  it('leaves the view alone when the operator scrolled during streaming', async () => {
+    const conversations = buildConversations()
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    fireEvent.wheel(screen.getByTestId('assistant-thread-scroll'))
+    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })
 })

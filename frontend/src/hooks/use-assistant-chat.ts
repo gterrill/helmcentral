@@ -132,6 +132,9 @@ export function useAssistantChat() {
   const [sending, setSending] = useState(false)
   const [statusText, setStatusText] = useState<string | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
+  // Id of the last reply whose final frame arrived on this hook's streams;
+  // the thread scrolls to the start of it once it is in the DOM.
+  const [deliveredMessageId, setDeliveredMessageId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // Whether the current stream's final message frame has arrived. Reset when
@@ -209,6 +212,7 @@ export function useAssistantChat() {
         const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
         resolved = mapMessage(data.message)
         deliveredRef.current = true
+        setDeliveredMessageId(resolved.id)
         onMessage?.(resolved)
         clearDraft()
         onConversation?.(mapConversation(data.conversation))
@@ -434,5 +438,5 @@ export function useAssistantChat() {
 
   const answerDelivered = useCallback(() => deliveredRef.current, [])
 
-  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered }
+  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId }
 }
