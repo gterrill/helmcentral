@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { SPEECH_INPUT_FATAL_ERRORS, useSpeechInput, type SpeechInputUnsupportedReason } from '@/hooks/use-speech-input'
+import { SPEECH_INPUT_FATAL_ERRORS, SPEECH_INPUT_RESTART_LOOP_ERROR, useSpeechInput, type SpeechInputUnsupportedReason } from '@/hooks/use-speech-input'
 import { stripWakeWord } from '@/lib/spoken-summary'
 import { getVoiceClaimSnapshot, preemptVoice, subscribeVoiceClaim } from '@/lib/voice-arbiter'
 
@@ -137,7 +137,8 @@ export function useMateVoice({
   }, [armed, armForWakeWord, clearArmTimer])
 
   const handleError = useCallback((message: string) => {
-    if (message === SPEECH_INPUT_FATAL_ERRORS.micBlocked || message === SPEECH_INPUT_FATAL_ERRORS.noMicrophone) {
+    if (message === SPEECH_INPUT_FATAL_ERRORS.micBlocked || message === SPEECH_INPUT_FATAL_ERRORS.noMicrophone ||
+      message === SPEECH_INPUT_RESTART_LOOP_ERROR) {
       wakeStoppedRef.current = true
       clearRestartTimer()
     }
