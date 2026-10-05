@@ -381,11 +381,13 @@ describe('useSpeechInput continuous requests', () => {
     })
 
     it('restarts silently after a no-speech error', () => {
+      vi.useFakeTimers()
       const onError = vi.fn()
       const { hook } = setup(onError)
       act(() => hook.result.current.start({ continuous: true }))
       act(() => instances[0].emitError('no-speech'))
       act(() => instances[0].emitEnd())
+      act(() => { vi.advanceTimersToNextTimer() })
       expect(instances).toHaveLength(2)
       expect(hook.result.current.listening).toBe(true)
       expect(hook.result.current.error).toBeNull()
@@ -415,17 +417,76 @@ describe('useSpeechInput continuous requests', () => {
       expect(instances[0].aborted).toBe(true)
     })
 
-    it('stops and reports an error when sessions keep ending at once with nothing heard', () => {
+    it('backs off and recovers from a short run of empty ends', () => {
+      vi.useFakeTimers()
+      const onError = vi.fn()
+      const { onFinal, hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      // The restart is delayed, not immediate.
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      act(() => { vi.advanceTimersByTime(250) })
+      expect(instances).toHaveLength(2)
+      // Keep interrupting for about two seconds in total.
+      const t0 = Date.now()
+      while (Date.now() - t0 < 2000) {
+        act(() => instances[instances.length - 1].emitEnd())
+        act(() => { vi.advanceTimersToNextTimer() })
+      }
+      expect(hook.result.current.listening).toBe(true)
+      expect(onError).not.toHaveBeenCalled()
+      act(() => instances[instances.length - 1].emitResult('back again', true))
+      expect(onFinal).toHaveBeenCalledWith('back again')
+      expect(hook.result.current.listening).toBe(true)
+    })
+
+    it('gives up with an error once empty ends continue past ten seconds', () => {
+      vi.useFakeTimers()
       const onError = vi.fn()
       const { hook } = setup(onError)
       act(() => hook.result.current.start({ continuous: true }))
-      for (let i = 0; i < 10 && hook.result.current.listening; i++) {
+      for (let i = 0; i < 40 && hook.result.current.listening; i++) {
         act(() => instances[instances.length - 1].emitEnd())
+        act(() => { vi.advanceTimersToNextTimer() })
       }
       expect(hook.result.current.listening).toBe(false)
-      expect(instances.length).toBeLessThan(6)
       expect(onError).toHaveBeenCalledTimes(1)
       expect(hook.result.current.error).toBeTruthy()
+      const count = instances.length
+      act(() => { vi.advanceTimersByTime(10_000) })
+      expect(instances).toHaveLength(count)
+    })
+
+    it('stop() during a pending restart creates no recognizer', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      act(() => hook.result.current.stop())
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('finish() during a pending restart ends the session', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      act(() => hook.result.current.finish())
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('unmount during a pending restart creates no recognizer', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      hook.unmount()
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
     })
 
     it('does not trip the guard when sessions produce results', () => {

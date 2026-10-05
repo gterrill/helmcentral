@@ -57,14 +57,18 @@ export const SPEECH_INPUT_FATAL_ERRORS = {
 export const SPEECH_INPUT_RESTART_LOOP_ERROR = 'Voice input keeps stopping. Tap the microphone to try again.'
 
 const QUICK_END_MS = 1000
-const MAX_QUICK_ENDS = 3
+const GIVE_UP_AFTER_MS = 10_000
+const BACKOFF_START_MS = 250
+const BACKOFF_CAP_MS = 2000
 
 interface Session {
   chained: boolean
   continuous: boolean
   finishing: boolean
   fatal: boolean
-  quickEnds: number
+  quickSince: number | null
+  backoff: number
+  timer: ReturnType<typeof setTimeout> | null
 }
 
 /** True on Android browsers, whose continuous recognition repeats text. */
@@ -149,6 +153,14 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   useEffect(() => { onFinalRef.current = onFinal }, [onFinal])
   useEffect(() => { onErrorRef.current = onError }, [onError])
 
+  const clearRestartTimer = useCallback(() => {
+    const session = sessionRef.current
+    if (session?.timer) {
+      clearTimeout(session.timer)
+      session.timer = null
+    }
+  }, [])
+
   const ctor = recognitionCtor()
   const unsupportedReason = unsupportedReasonFor(ctor)
   const supported = unsupportedReason === null
@@ -170,6 +182,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     // rather than reused - recognizers throw on a second start() against the
     // same live instance, so every start() gets its own.
     recognitionRef.current?.abort()
+    clearRestartTimer()
 
     // Android Chrome's continuous mode reports each final as the whole
     // utterance so far, so a continuous request there is served by chained
@@ -180,7 +193,9 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
       continuous: options?.continuous ?? false,
       finishing: false,
       fatal: false,
-      quickEnds: 0,
+      quickSince: null,
+      backoff: BACKOFF_START_MS,
+      timer: null,
     }
     sessionRef.current = session
 
@@ -224,21 +239,42 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
       recognition.onend = () => {
         if (recognitionRef.current !== recognition) return
         if (session.chained && !session.finishing && !session.fatal) {
-          const quick = !gotResult && Date.now() - startedAt < QUICK_END_MS
-          session.quickEnds = quick ? session.quickEnds + 1 : 0
-          if (session.quickEnds >= MAX_QUICK_ENDS) {
+          const now = Date.now()
+          const quick = !gotResult && now - startedAt < QUICK_END_MS
+          const giveUp = () => {
             setError(SPEECH_INPUT_RESTART_LOOP_ERROR)
             onErrorRef.current?.(SPEECH_INPUT_RESTART_LOOP_ERROR)
-          } else {
+            setListening(false)
             setInterim('')
+            recognitionRef.current = null
+          }
+          const relaunch = () => {
+            session.timer = null
             try {
               launch()
-              return
             } catch {
-              setError(SPEECH_INPUT_RESTART_LOOP_ERROR)
-              onErrorRef.current?.(SPEECH_INPUT_RESTART_LOOP_ERROR)
+              giveUp()
             }
           }
+          setInterim('')
+          if (!quick) {
+            // A session that ran or heard something resets the backoff.
+            session.quickSince = null
+            session.backoff = BACKOFF_START_MS
+            relaunch()
+            return
+          }
+          // A brief interruption (a notification, Mate speaking) ends
+          // sessions at once. Retry with a growing delay, and give up only
+          // once it has gone on for a sustained stretch.
+          session.quickSince ??= now
+          if (now - session.quickSince >= GIVE_UP_AFTER_MS) {
+            giveUp()
+            return
+          }
+          session.timer = setTimeout(relaunch, session.backoff)
+          session.backoff = Math.min(session.backoff * 2, BACKOFF_CAP_MS)
+          return
         }
         setListening(false)
         setInterim('')
@@ -252,7 +288,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     setInterim('')
     setListening(true)
     launch()
-  }, [lang])
+  }, [lang, clearRestartTimer])
 
   // Abort rather than the recognizer's own stop(): a caller-initiated stop
   // (Escape while listening, wake mode pausing, or the wake-word switch
@@ -264,6 +300,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   // `listening` immediately, e.g. to decide whether it's safe to start a
   // new session right away.
   const stop = useCallback(() => {
+    clearRestartTimer()
     const recognition = recognitionRef.current
     if (!recognition) return
     recognitionRef.current = null
@@ -273,7 +310,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     recognition.abort()
     setListening(false)
     setInterim('')
-  }, [])
+  }, [clearRestartTimer])
 
   // finish() ends the session the way an operator tapping the mic to stop
   // dictating expects: the recognizer's own stop(), not abort(). A real
@@ -286,11 +323,23 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   // clear themselves the ordinary way, from the recognizer's own `end`
   // event (see onend above), exactly as if it had stopped on its own.
   const finish = useCallback(() => {
-    if (sessionRef.current) sessionRef.current.finishing = true
+    const session = sessionRef.current
+    if (session) session.finishing = true
+    if (session?.timer) {
+      // Between sessions: nothing is running, so there is no last final to
+      // wait for. End now.
+      clearTimeout(session.timer)
+      session.timer = null
+      recognitionRef.current = null
+      setListening(false)
+      setInterim('')
+      return
+    }
     recognitionRef.current?.stop()
   }, [])
 
   useEffect(() => () => {
+    clearRestartTimer()
     const recognition = recognitionRef.current
     if (!recognition) return
     recognitionRef.current = null
@@ -298,7 +347,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     recognition.onerror = null
     recognition.onend = null
     recognition.abort()
-  }, [])
+  }, [clearRestartTimer])
 
   return { supported, unsupportedReason, listening, interim, error, start, stop, finish }
 }
