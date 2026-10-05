@@ -1010,6 +1010,59 @@ describe('MateSheet read-aloud', () => {
     expect(fakeSynth.spoken[0].text).toBe('Fine tomorrow, light winds.')
   })
 
+  it('still reads the answer aloud when Stop is tapped after the answer arrived but before the stream closed', async () => {
+    installFakeSpeechSynthesis()
+    const stream = controllableStream()
+    let capturedConversationId = ''
+    const inner = buildFetch((conversationId) => {
+      capturedConversationId = conversationId
+      return { ok: true, body: stream.body }
+    })
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url.endsWith('/run/cancel') ? Promise.resolve({ ok: true }) : inner(url, init))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(capturedConversationId).not.toBe(''))
+
+    await act(async () => {
+      stream.push(`data: ${JSON.stringify({
+        message: {
+          id: 'm1',
+          conversation_id: capturedConversationId,
+          seq: 1,
+          role: 'assistant',
+          content: '## Spoken summary\n\nFine tomorrow, light winds.',
+          created_at: '2026-09-12T00:00:00Z',
+        },
+        conversation: {
+          id: capturedConversationId,
+          title: 'How does tomorrow look?',
+          created_at: '2026-09-12T00:00:00Z',
+          updated_at: '2026-09-12T00:00:01Z',
+        },
+      })}\n\n`)
+      await flushMicrotasks()
+    })
+
+    // The stream is still open, so Stop is on screen; tapping it ends the
+    // stream early and send() resolves null.
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop asking' }))
+
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    expect(fakeSynth.spoken[0].text).toBe('Fine tomorrow, light winds.')
+    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
+  })
+
   // ADR 0105 ("the answer outlives the page"): the sheet only ever reads a
   // reply aloud after a send it made itself (the initialQuestion flow
   // above) - a reply that shows up because AssistantThread rejoined a run

@@ -78,6 +78,10 @@ export interface AssistantSendOptions {
    * the caller actually passed them. */
   attachments?: string[]
   onConversation?: (conversation: AssistantConversation) => void
+  /** Called with the finished reply in the same tick that the streamed draft
+   * is cleared, so a caller that appends it to its thread there swaps draft
+   * for message in one render and the reply never leaves the screen. */
+  onMessage?: (message: AssistantMessage) => void
 }
 
 const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
@@ -128,8 +132,15 @@ export function useAssistantChat() {
   const [sending, setSending] = useState(false)
   const [statusText, setStatusText] = useState<string | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
+  // Id of the last reply whose final frame arrived on this hook's streams;
+  // the thread scrolls to the start of it once it is in the DOM.
+  const [deliveredMessageId, setDeliveredMessageId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Whether the current stream's final message frame has arrived. Reset when
+  // a send()/attach() starts; read by Stop, which must not treat a delivered
+  // answer as stopped.
+  const deliveredRef = useRef(false)
   // The conversation the current (or most recent) stream belongs to -
   // abort() needs this to know which run to POST .../run/cancel for.
   const currentConversationIdRef = useRef<string | null>(null)
@@ -176,6 +187,7 @@ export function useAssistantChat() {
     body: ReadableStream<Uint8Array>,
     controller: AbortController,
     onConversation?: (conversation: AssistantConversation) => void,
+    onMessage?: (message: AssistantMessage) => void,
   ): Promise<AssistantMessage | null> => {
     const isCurrent = () => abortRef.current === controller
     let resolved: AssistantMessage | null = null
@@ -199,6 +211,9 @@ export function useAssistantChat() {
       } else if (event.event === 'message') {
         const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
         resolved = mapMessage(data.message)
+        deliveredRef.current = true
+        setDeliveredMessageId(resolved.id)
+        onMessage?.(resolved)
         clearDraft()
         onConversation?.(mapConversation(data.conversation))
       } else if (event.event === 'error') {
@@ -296,6 +311,7 @@ export function useAssistantChat() {
     // since this tab has no reason to wait on an answer that will never
     // come. attach() deliberately never registers at all: rejoining a run
     // someone else started isn't "this tab asked a question".
+    deliveredRef.current = false
     registerMateWatch(conversationId)
 
     try {
@@ -334,7 +350,7 @@ export function useAssistantChat() {
         return null
       }
 
-      return await consumeStream(response.body, controller, options?.onConversation)
+      return await consumeStream(response.body, controller, options?.onConversation, options?.onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       removeMateWatch(conversationId)
@@ -363,6 +379,7 @@ export function useAssistantChat() {
   const attach = useCallback(async (
     conversationId: string,
     onConversation?: (conversation: AssistantConversation) => void,
+    onMessage?: (message: AssistantMessage) => void,
   ): Promise<AssistantMessage | null> => {
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -371,6 +388,7 @@ export function useAssistantChat() {
     const isCurrent = () => abortRef.current === controller
     // Whatever stream this supersedes may belong to another conversation:
     // its status, draft and error must not carry over to this one.
+    deliveredRef.current = false
     setSending(false)
     setStatusText(null)
     setError(null)
@@ -401,7 +419,7 @@ export function useAssistantChat() {
       setStatusText(null)
       clearDraft()
 
-      return await consumeStream(response.body, controller, onConversation)
+      return await consumeStream(response.body, controller, onConversation, onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       if (isCurrent()) {
@@ -418,5 +436,7 @@ export function useAssistantChat() {
     }
   }, [clearDraft, consumeStream])
 
-  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation }
+  const answerDelivered = useCallback(() => deliveredRef.current, [])
+
+  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId }
 }

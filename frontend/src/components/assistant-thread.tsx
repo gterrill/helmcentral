@@ -17,6 +17,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from '@/components/ui/message-scroller'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -253,6 +254,42 @@ interface AssistantThreadProps {
 }
 
 /**
+ * Rests the view with the start of a freshly delivered reply at the top of
+ * the viewport. Lives inside the scroller provider because the scroll API
+ * is a hook on its context. A reply already delivered when the thread
+ * mounted is left to the scroller's own initial position, and nothing moves
+ * if the operator scrolled while the answer streamed.
+ */
+function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: string | null; operatorScrolled: { current: boolean } }) {
+  const { scrollToMessage } = useMessageScroller()
+  const scrollRef = useRef(scrollToMessage)
+  scrollRef.current = scrollToMessage
+  const seenRef = useRef(messageId)
+  useEffect(() => {
+    if (messageId === null || messageId === seenRef.current) return
+    if (operatorScrolled.current) {
+      seenRef.current = messageId
+      return
+    }
+    // The reply was appended in the same render that set this id; wait two
+    // frames so it has laid out and the scroller has settled its spacer.
+    let second = 0
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        // Marked seen only here, so StrictMode's effect re-run reschedules.
+        seenRef.current = messageId
+        if (!operatorScrolled.current) scrollRef.current(messageId, { align: 'start' })
+      })
+    })
+    return () => {
+      cancelAnimationFrame(first)
+      cancelAnimationFrame(second)
+    }
+  }, [messageId, operatorScrolled])
+  return null
+}
+
+/**
  * The message list, footer, status/error rows and composer for one Mate
  * conversation (ADR 0093, streamed per ADR 0105). Extracted from
  * AssistantDrawer so both the full panel (which also owns a
@@ -274,6 +311,12 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // so this is the only way to tell "stopped" apart from "idle before the
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
+  // Set when the operator wheels, touches or keys the thread while a reply
+  // streams; clears when the next run starts. Gates the post-delivery scroll.
+  const operatorScrolledRef = useRef(false)
+  useEffect(() => {
+    if (chat.sending) operatorScrolledRef.current = false
+  }, [chat.sending])
 
   // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
   // instance per AssistantThread - it isn't threaded through as a prop
@@ -310,9 +353,15 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       // supersedes this call the same way a second chat.send() would - the
       // superseded attach resolves null and this local `cancelled` guard
       // keeps its resolution from doing anything further either way.
-      const reply = await chat.attach(id)
-      if (cancelled || reply === null || activeIdRef.current !== id) return
-      conversations.appendLocal(reply)
+      // Appended as the final frame lands so the streamed draft is swapped
+      // for the message in one render; see handleSend.
+      let delivered = false
+      await chat.attach(id, undefined, (message) => {
+        if (cancelled || activeIdRef.current !== id) return
+        delivered = true
+        conversations.appendLocal(message)
+      })
+      if (!delivered) return
       await conversations.refresh()
     })()
     return () => {
@@ -342,9 +391,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (id === null || chat.isStreamingConversation(id)) return
     let cancelled = false
     void (async () => {
-      const reply = await chat.attach(id)
+        await chat.attach(id, undefined, (message) => {
+        if (cancelled || activeIdRef.current !== id) return
+        conversations.appendLocal(message)
+      })
       if (cancelled || activeIdRef.current !== id) return
-      if (reply !== null) conversations.appendLocal(reply)
       await conversations.refresh()
     })()
     return () => {
@@ -409,28 +460,41 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // Only included when something is actually staged - same
     // conditional-inclusion `send()` already applies to `spoken`/`screen`,
     // so a plain text-only question posts exactly the body it always has.
-    const reply =
-      attachmentIds.length > 0
-        ? await chat.send(conversationId, trimmed, { attachments: attachmentIds })
-        : await chat.send(conversationId, trimmed)
+    // The reply is appended as the stream's final frame lands, in the same
+    // render that drops the streamed draft. Appending only after send()
+    // resolves left a commit with neither, the thread shrank by a reply and
+    // the scroller re-anchored from the clamped position. The answer counts
+    // as delivered once that has run: Stop tapped before the stream closes
+    // makes send() resolve null, but the answer is on screen.
+    let answered = false
+    let delivered = false
+    const onMessage = (message: AssistantMessage) => {
+      answered = true
+      if (activeIdRef.current !== conversationId) return
+      delivered = true
+      conversations.appendLocal(message)
+    }
+    if (attachmentIds.length > 0) {
+      await chat.send(conversationId, trimmed, { attachments: attachmentIds, onMessage })
+    } else {
+      await chat.send(conversationId, trimmed, { onMessage })
+    }
 
-    // A successful send has nothing left for the composer to hold onto -
+    // A delivered answer has nothing left for the composer to hold onto -
     // clear() aborts nothing (everything staged already finished
     // uploading, since uploads.ready gated Send above) and just drops the
-    // now-sent chips. A failed send (reply === null, chat.error is set)
-    // leaves them staged so the operator can retry without re-uploading.
-    if (reply) uploads.clear()
-    // The operator may have opened another thread while this one answered;
-    // appendLocal writes into whichever thread is active now.
-    if (reply && activeIdRef.current === conversationId) {
-      conversations.appendLocal(reply)
-      await conversations.refresh()
-    }
+    // now-sent chips. A failed send (chat.error is set) leaves them staged
+    // so the operator can retry without re-uploading. The chips go whenever
+    // the answer landed, even if the operator opened another thread meanwhile:
+    // they would otherwise ride along with the next question there.
+    if (answered) uploads.clear()
+    if (delivered) await conversations.refresh()
   }, [content, chat, conversations, canWrite, uploads, dictation])
 
   const handleStop = useCallback(() => {
     void chat.abort()
-    setStopped(true)
+    // Stop after the final message frame arrived leaves a finished answer.
+    if (!chat.answerDelivered()) setStopped(true)
   }, [chat])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -496,9 +560,18 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3"
       data-testid="assistant-thread-root"
     >
-      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+      <MessageScrollerProvider defaultScrollPosition="last-anchor">
+        <ScrollToDeliveredReply messageId={chat.deliveredMessageId} operatorScrolled={operatorScrolledRef} />
         <MessageScroller className="min-h-0 flex-1" data-testid="assistant-thread-message-scroller">
-          <MessageScrollerViewport className="min-h-0 flex-1 px-1 py-2" data-testid="assistant-thread-scroll">
+          <MessageScrollerViewport
+            className="min-h-0 flex-1 px-1 py-2"
+            data-testid="assistant-thread-scroll"
+            onWheel={() => { operatorScrolledRef.current = true }}
+            onTouchMove={() => { operatorScrolledRef.current = true }}
+            onKeyDown={() => { operatorScrolledRef.current = true }}
+            // Grabbing the scrollbar, or a touch drag, starts with a pointerdown.
+            onPointerDown={() => { operatorScrolledRef.current = true }}
+          >
             <MessageScrollerContent className="gap-6">
               {!hasMessages && !showDraft ? (
                 <section aria-label="What Mate can check" className="min-w-0 space-y-2">

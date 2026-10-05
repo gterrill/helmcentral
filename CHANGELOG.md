@@ -19,6 +19,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate's finished answer stays where you were reading it.** When Mate
+  finished an answer, the conversation could jump elsewhere in the thread,
+  sometimes back to the top. It now stays at the start of that answer.
 - **Dictating on an Android phone no longer repeats each phrase.** Speaking
   into the message box or any dictation field used to type the growing
   sentence over and over; each phrase now appears once. The microphone keeps
