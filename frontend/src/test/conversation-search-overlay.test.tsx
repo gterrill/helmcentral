@@ -225,6 +225,28 @@ describe('ConversationSearchOverlay server search', () => {
     expect(onSelect).toHaveBeenCalledWith('t2')
   })
 
+  it('keeps instant title matches on top when message hits arrive, so Enter opens the row first shown', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await gate
+      return {
+        ok: true,
+        json: async () => ({ results: [{ id: 'm', title: 'Message hit', updated_at: '2026-09-02T00:00:00Z', snippet: 'racor in text' }] }),
+      }
+    }))
+    const onSelect = vi.fn()
+    const list = [conversation({ id: 'm', title: 'Message hit' }), conversation({ id: 't1', title: 'Racor one' })]
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={list} onSelect={onSelect} />)
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: 'racor' } })
+    release()
+    await screen.findByText('racor in text')
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Racor one')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith('t1')
+  })
+
   it('removes a hit when its conversation is deleted while server results are showing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

@@ -18,14 +18,21 @@ interface SearchResponseApi {
 
 const DEBOUNCE_MS = 200
 
-/** Merge the server's hits (title or message matches, newest first, with snippets) with
- *  the instant title matches from the loaded list, without duplicates. */
+/** Merge the instant title matches from the loaded list with the server's hits
+ *  (title or message matches, with snippets), without duplicates. Title matches
+ *  stay on top, taking a snippet if the server has one, and server-only hits
+ *  follow: rows already on screen never move when the server answers, so Enter
+ *  opens the row the operator saw highlighted. */
 export function mergeConversationSearchResults(
   server: ConversationSearchResult[],
   local: ConversationSearchResult[],
 ): ConversationSearchResult[] {
-  const seen = new Set(server.map((r) => r.id))
-  return [...server, ...local.filter((r) => !seen.has(r.id))]
+  const byId = new Map(server.map((r) => [r.id, r]))
+  const localIds = new Set(local.map((r) => r.id))
+  return [
+    ...local.map((r) => ({ ...r, snippet: byId.get(r.id)?.snippet ?? r.snippet })),
+    ...server.filter((r) => !localIds.has(r.id)),
+  ]
 }
 
 /**
