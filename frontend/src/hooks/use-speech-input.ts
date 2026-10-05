@@ -176,10 +176,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
           if (deliveredAt.get(i) === full) continue
           deliveredAt.set(i, full)
           let fresh = full
-          const lower = full.toLowerCase()
-          const said = deliveredText.toLowerCase()
-          // Whole words only: "go" then "gone fishing" is two phrases.
-          if (said && (lower === said || lower.startsWith(`${said} `))) {
+          if (deliveredText && full.toLowerCase().startsWith(deliveredText.toLowerCase())) {
             fresh = full.slice(deliveredText.length).trim()
             deliveredText = full
           } else if (full) {

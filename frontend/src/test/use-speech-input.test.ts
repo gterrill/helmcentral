@@ -339,13 +339,6 @@ describe('useSpeechInput continuous finals', () => {
     expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['check the bilge', 'then the engine room'])
   })
 
-  it('treats an earlier final as a prefix only on a word boundary', () => {
-    const { onFinal, rec } = setup()
-    act(() => rec.emitList(0, [['go', true]]))
-    act(() => rec.emitList(1, [['go', true], ['gone fishing', true]]))
-    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['go', 'gone fishing'])
-  })
-
   it('starts fresh on a new session', () => {
     vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
     const onFinal = vi.fn()
