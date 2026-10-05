@@ -155,6 +155,16 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     recognition.interimResults = true
     recognition.continuous = options?.continuous ?? false
 
+    // Android Chrome in continuous mode reports finals that each hold the
+    // whole utterance so far, and may re-deliver earlier results on later
+    // events. Per session, remember which (index, text) finals were
+    // already delivered and the text delivered so far; a final that starts with that
+    // text contributes only its new tail. Distinct finals (desktop) share no
+    // prefix and pass through whole.
+    const deliveredAt = new Map<number, string>()
+    let deliveredText = ''
+    const norm = (t: string) => t.trim().replace(/\s+/g, ' ')
+
     recognition.onresult = (event) => {
       if (recognitionRef.current !== recognition) return
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -162,7 +172,17 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
         const transcript = result[0]?.transcript ?? ''
         if (result.isFinal) {
           setInterim('')
-          onFinalRef.current(transcript.trim())
+          const full = norm(transcript)
+          if (deliveredAt.get(i) === full) continue
+          deliveredAt.set(i, full)
+          let fresh = full
+          if (deliveredText && full.toLowerCase().startsWith(deliveredText.toLowerCase())) {
+            fresh = full.slice(deliveredText.length).trim()
+            deliveredText = full
+          } else if (full) {
+            deliveredText = deliveredText ? `${deliveredText} ${full}` : full
+          }
+          if (fresh) onFinalRef.current(fresh)
         } else {
           setInterim(transcript)
         }

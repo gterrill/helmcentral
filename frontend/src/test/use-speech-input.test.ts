@@ -45,6 +45,13 @@ class FakeSpeechRecognition {
     this.onresult?.({ resultIndex: 0, results: [result] })
   }
 
+  // Emits a full results list (as a continuous recognizer does) with the
+  // event's resultIndex pointing at the first changed entry.
+  emitList(resultIndex: number, entries: Array<[string, boolean]>) {
+    const results = entries.map(([transcript, isFinal]) => Object.assign([{ transcript }], { isFinal }) as FakeResult)
+    this.onresult?.({ resultIndex, results })
+  }
+
   emitError(error: string) {
     this.onerror?.({ error })
   }
@@ -288,5 +295,58 @@ describe('useSpeechInput recognition lifecycle', () => {
     expect(first.aborted).toBe(true)
     expect(instances).toHaveLength(2)
     await waitFor(() => expect(result.current.listening).toBe(true))
+  })
+})
+
+
+describe('useSpeechInput continuous finals', () => {
+  function setup() {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    const onFinal = vi.fn()
+    const { result } = renderHook(() => useSpeechInput({ onFinal }))
+    act(() => result.current.start({ continuous: true }))
+    return { onFinal, rec: instances[0] }
+  }
+
+  it('delivers only the new suffix when each final holds the whole utterance so far (growing list)', () => {
+    const { onFinal, rec } = setup()
+    act(() => rec.emitList(0, [['I', true]]))
+    act(() => rec.emitList(0, [['I', true], ["I can't", true]]))
+    act(() => rec.emitList(0, [['I', true], ["I can't", true], ["I can't fill it", true]]))
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['I', "can't", 'fill it'])
+  })
+
+  it('delivers only the new suffix when resultIndex points at a single new cumulative final', () => {
+    const { onFinal, rec } = setup()
+    act(() => rec.emitList(0, [['how', true]]))
+    act(() => rec.emitList(1, [['how', true], ['how far', true]]))
+    act(() => rec.emitList(2, [['how', true], ['how far', true], ['How far is it', true]]))
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['how', 'far', 'is it'])
+  })
+
+  it('does not deliver a result index twice or an empty suffix', () => {
+    const { onFinal, rec } = setup()
+    act(() => rec.emitList(0, [['hello there', true]]))
+    act(() => rec.emitList(0, [['hello there', true]]))
+    act(() => rec.emitList(0, [['hello  there', true], ['', true]]))
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['hello there'])
+  })
+
+  it('still delivers distinct, non-overlapping finals in full', () => {
+    const { onFinal, rec } = setup()
+    act(() => rec.emitList(0, [['check the bilge', true]]))
+    act(() => rec.emitList(1, [['check the bilge', true], ['then the engine room', true]]))
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['check the bilge', 'then the engine room'])
+  })
+
+  it('starts fresh on a new session', () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    const onFinal = vi.fn()
+    const { result } = renderHook(() => useSpeechInput({ onFinal }))
+    act(() => result.current.start({ continuous: true }))
+    act(() => instances[0].emitList(0, [['hello', true]]))
+    act(() => result.current.start({ continuous: true }))
+    act(() => instances[1].emitList(0, [['hello again', true]]))
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['hello', 'hello again'])
   })
 })
