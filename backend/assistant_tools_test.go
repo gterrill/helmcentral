@@ -92,6 +92,8 @@ func (f *fakeSearchPlacesProvider) lastCall() placeSearchInput {
 // fixed vessel position, the given fake provider wired as the configured
 // place-names provider, and the given routes.
 func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider, routes func() []routeData) assistantToolDeps {
+	// The result cache is package-level; start every test cold.
+	placeSearchCache.reset()
 	return assistantToolDeps{
 		vesselState: func() (vesselStateData, error) {
 			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil

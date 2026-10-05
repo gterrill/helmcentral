@@ -1333,7 +1333,7 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	// cheap exact-name search runs - it's still always run, even after a
 	// waypoint hit, since it's the only way the provider's own position for
 	// the same place ever reaches the model.
-	searchResult, err := provider.SearchPlaces(placeSearchInput{
+	searchResult, err := searchPlacesCached(provider, providerID, placeSearchInput{
 		Query:      query,
 		Lat:        lat,
 		Lon:        lon,

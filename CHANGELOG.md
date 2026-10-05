@@ -30,6 +30,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.
+- Mate now remembers a place lookup for a day, so asking about the same marina
+  or anchorage again answers straight away instead of searching again. A
+  search that found nothing is remembered for six hours.
 
 ### Fixed
 
