@@ -211,3 +211,89 @@ func TestAssistantSearchSchema_ReplacesRowidKeyedIndex(t *testing.T) {
 		t.Fatalf("hits=%+v err=%v", hits, err)
 	}
 }
+
+// A common word matches many messages in old conversations; a recent
+// conversation with a single match must still be returned.
+func TestSearchConversations_RecentConversationSurvivesManyOlderMatches(t *testing.T) {
+	s := newTestAssistantStore(t)
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { t0 = t0.Add(time.Minute); return t0 }
+	for i := 0; i < 12; i++ {
+		msgs := make([][2]string, 0, 40)
+		for j := 0; j < 40; j++ {
+			msgs = append(msgs, [2]string{"user", "engine engine engine engine hours and engine checks"})
+		}
+		seedSearchConv(t, s, "old", msgs...)
+	}
+	recent := seedSearchConv(t, s, "recent", [2]string{"user", "one passing mention of the engine"})
+	hits, err := s.SearchConversations("engine", assistantConversationSearchOptions{Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 3 || hits[0].ID != recent.ID || len(hits[0].Excerpts) != 1 {
+		t.Fatalf("hits = %+v", hits)
+	}
+}
+
+func TestSearchConversations_TitleMatchIsUnicodeAndPunctuationAware(t *testing.T) {
+	s := newTestAssistantStore(t)
+	c := seedSearchConv(t, s, "Écoutille leak", [2]string{"user", "hello"})
+	other := seedSearchConv(t, s, "Racor bowl", [2]string{"user", "hello"})
+	for _, q := range []string{"écoutille", "ÉCOUTILLE", `"racor",`, `racor, bowl`} {
+		hits, err := s.SearchConversations(q, assistantConversationSearchOptions{})
+		if err != nil || len(hits) != 1 {
+			t.Fatalf("query %q: hits=%+v err=%v", q, hits, err)
+		}
+		want := c.ID
+		if strings.Contains(strings.ToLower(q), "racor") {
+			want = other.ID
+		}
+		if hits[0].ID != want {
+			t.Fatalf("query %q: got %s want %s", q, hits[0].ID, want)
+		}
+	}
+}
+
+// Setup is all-or-nothing: a failure part-way leaves no half-built index
+// (which would otherwise exist, be empty and never be backfilled).
+func TestAssistantSearchSchema_FailureLeavesNoHalfBuiltIndex(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "x.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	for _, q := range []string{
+		// No role column: the backfill, the last step, fails.
+		`CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, content TEXT NOT NULL)`,
+		`INSERT INTO messages VALUES ('m1', 'c1', 'windlass')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createAssistantSearchSchema(db); err == nil {
+		t.Fatal("expected setup to fail")
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'messages_fts'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("half-built messages_fts left behind")
+	}
+	for _, q := range []string{
+		`DROP TABLE messages`,
+		`CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL)`,
+		`INSERT INTO messages VALUES ('m1', 'c1', 'user', 'windlass')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createAssistantSearchSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	db.QueryRow(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'windlass'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("retry did not backfill, got %d", n)
+	}
+}

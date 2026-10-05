@@ -83,3 +83,6 @@ Separately, the conversation search box only matched a conversation's title, whi
 - Searching costs a tool round before equipment advice, which shows in the reply footer.
 - Photos are recalled through what was said about them. Mate still cannot see pictures from an
   earlier conversation, only the words that conversation reached.
+- Deleting a conversation looks its messages up in the index by message id, which is stored but not
+  searchable, so each deleted message scans the index. That is fine for one boat's history and is
+  left as it is.

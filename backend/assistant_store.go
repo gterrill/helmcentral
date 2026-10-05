@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/unicode/norm"
 	_ "modernc.org/sqlite"
 )
 
@@ -507,13 +509,20 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 // An index from the earlier rowid-keyed shape (no message_id column) is
 // dropped and rebuilt.
 func createAssistantSearchSchema(db *sql.DB) error {
+	// One transaction: a crash or error part-way must not leave an index that
+	// exists but was never backfilled.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin messages_fts setup: %w", err)
+	}
+	defer tx.Rollback()
 	var existing int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
 		return fmt.Errorf("check messages_fts: %w", err)
 	}
 	if existing > 0 {
 		var hasMessageID int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'`).Scan(&hasMessageID); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'`).Scan(&hasMessageID); err != nil {
 			return fmt.Errorf("inspect messages_fts: %w", err)
 		}
 		if hasMessageID == 0 {
@@ -523,7 +532,7 @@ func createAssistantSearchSchema(db *sql.DB) error {
 				`DROP TRIGGER IF EXISTS messages_fts_update`,
 				`DROP TABLE messages_fts`,
 			} {
-				if _, err := db.Exec(q); err != nil {
+				if _, err := tx.Exec(q); err != nil {
 					return fmt.Errorf("replace messages_fts: %w", err)
 				}
 			}
@@ -531,24 +540,24 @@ func createAssistantSearchSchema(db *sql.DB) error {
 		}
 	}
 
-	if _, err := db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+	if _, err := tx.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 		content, message_id UNINDEXED, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
 		return fmt.Errorf("create messages_fts: %w", err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
 		WHEN new.role IN ('user', 'assistant')
 		BEGIN
 			INSERT INTO messages_fts (content, message_id, conversation_id) VALUES (new.content, new.id, new.conversation_id);
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts insert trigger: %w", err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
 		BEGIN
 			DELETE FROM messages_fts WHERE message_id = old.id;
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts delete trigger: %w", err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
+	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
 		BEGIN
 			DELETE FROM messages_fts WHERE message_id = old.id;
 			INSERT INTO messages_fts (content, message_id, conversation_id)
@@ -558,10 +567,13 @@ func createAssistantSearchSchema(db *sql.DB) error {
 	}
 
 	if existing == 0 {
-		if _, err := db.Exec(`INSERT INTO messages_fts (content, message_id, conversation_id)
+		if _, err := tx.Exec(`INSERT INTO messages_fts (content, message_id, conversation_id)
 			SELECT content, id, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
 			return fmt.Errorf("backfill messages_fts: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit messages_fts setup: %w", err)
 	}
 	return nil
 }
@@ -624,26 +636,23 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	hits := map[string]*assistantConversationSearchHit{}
-
+	// Conversations whose messages match. Grouped to the conversation before
+	// any limit, so a word that matches thousands of messages elsewhere cannot
+	// push a recent conversation out of the candidates.
+	matched := map[string]bool{}
 	rows, err := s.db.Query(
-		`SELECT f.conversation_id, m.role, snippet(messages_fts, 0, '', '', '…', ?)
-		 FROM messages_fts f JOIN messages m ON m.id = f.message_id
-		 WHERE messages_fts MATCH ? AND f.conversation_id <> ?
-		 ORDER BY rank LIMIT ?`,
-		opts.ExcerptTokens, match, opts.ExcludeConvID, opts.CandidateMessage)
+		`SELECT DISTINCT conversation_id FROM messages_fts WHERE messages_fts MATCH ? AND conversation_id <> ?`,
+		match, opts.ExcludeConvID)
 	if err != nil {
 		return nil, fmt.Errorf("search conversation messages: %w", err)
 	}
-	type excerptRow struct{ convID, role, text string }
-	var excerpts []excerptRow
 	for rows.Next() {
-		var r excerptRow
-		if err := rows.Scan(&r.convID, &r.role, &r.text); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan conversation search row: %w", err)
 		}
-		excerpts = append(excerpts, r)
+		matched[id] = true
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -651,66 +660,32 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 	}
 	rows.Close()
 
-	// Title matches: every word of the query appears in the title.
-	var titleArgs []any
-	titleWhere := []string{"id <> ?"}
-	titleArgs = append(titleArgs, opts.ExcludeConvID)
-	for _, word := range strings.Fields(query) {
-		titleWhere = append(titleWhere, `instr(lower(title), ?) > 0`)
-		titleArgs = append(titleArgs, strings.ToLower(word))
-	}
-
-	ids := map[string]bool{}
-	for _, e := range excerpts {
-		ids[e.convID] = true
-	}
-	trows, err := s.db.Query(`SELECT id FROM conversations WHERE `+strings.Join(titleWhere, " AND "), titleArgs...)
+	// Titles are few: load them all and match in Go with the tokenisation
+	// the message index uses.
+	terms := searchTerms(query)
+	crows, err := s.db.Query(`SELECT id, title, updated_at FROM conversations WHERE id <> ?`, opts.ExcludeConvID)
 	if err != nil {
 		return nil, fmt.Errorf("search conversation titles: %w", err)
 	}
-	for trows.Next() {
-		var id string
-		if err := trows.Scan(&id); err != nil {
-			trows.Close()
+	var out []assistantConversationSearchHit
+	for crows.Next() {
+		var h assistantConversationSearchHit
+		var updated int64
+		if err := crows.Scan(&h.ID, &h.Title, &updated); err != nil {
+			crows.Close()
 			return nil, fmt.Errorf("scan conversation title match: %w", err)
 		}
-		ids[id] = true
+		if matched[h.ID] || titleMatchesTerms(h.Title, terms) {
+			h.UpdatedAt = time.Unix(updated, 0).UTC()
+			out = append(out, h)
+		}
 	}
-	if err := trows.Err(); err != nil {
-		trows.Close()
+	if err := crows.Err(); err != nil {
+		crows.Close()
 		return nil, err
 	}
-	trows.Close()
+	crows.Close()
 
-	for id := range ids {
-		var conv assistantConversationSearchHit
-		var updated int64
-		err := s.db.QueryRow(`SELECT id, title, updated_at FROM conversations WHERE id = ?`, id).Scan(&conv.ID, &conv.Title, &updated)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read conversation search hit: %w", err)
-		}
-		conv.UpdatedAt = time.Unix(updated, 0).UTC()
-		hits[id] = &conv
-	}
-	for _, e := range excerpts {
-		h, ok := hits[e.convID]
-		if !ok || len(h.Excerpts) >= opts.ExcerptsPerConv {
-			continue
-		}
-		text := strings.Join(strings.Fields(e.text), " ")
-		if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
-			text = string(r[:opts.ExcerptMaxRunes]) + "…"
-		}
-		h.Excerpts = append(h.Excerpts, assistantConversationExcerpt{Role: e.role, Text: text})
-	}
-
-	out := make([]assistantConversationSearchHit, 0, len(hits))
-	for _, h := range hits {
-		out = append(out, *h)
-	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
 			return out[i].UpdatedAt.After(out[j].UpdatedAt)
@@ -720,5 +695,87 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 	if len(out) > opts.Limit {
 		out = out[:opts.Limit]
 	}
+
+	// Best excerpts, only for the conversations being returned.
+	for i := range out {
+		if !matched[out[i].ID] {
+			continue
+		}
+		erows, err := s.db.Query(
+			`SELECT m.role, snippet(messages_fts, 0, '', '', '…', ?)
+			 FROM messages_fts f JOIN messages m ON m.id = f.message_id
+			 WHERE messages_fts MATCH ? AND f.conversation_id = ?
+			 ORDER BY rank LIMIT ?`,
+			opts.ExcerptTokens, match, out[i].ID, opts.ExcerptsPerConv)
+		if err != nil {
+			return nil, fmt.Errorf("search conversation excerpts: %w", err)
+		}
+		for erows.Next() {
+			var role, text string
+			if err := erows.Scan(&role, &text); err != nil {
+				erows.Close()
+				return nil, fmt.Errorf("scan conversation excerpt: %w", err)
+			}
+			text = strings.Join(strings.Fields(text), " ")
+			if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
+				text = string(r[:opts.ExcerptMaxRunes]) + "…"
+			}
+			out[i].Excerpts = append(out[i].Excerpts, assistantConversationExcerpt{Role: role, Text: text})
+		}
+		if err := erows.Err(); err != nil {
+			erows.Close()
+			return nil, err
+		}
+		erows.Close()
+	}
 	return out, nil
+}
+
+// searchTokens splits text into lower-cased, diacritic-folded words the way
+// the message index's tokenizer does: a run of letters or digits is a word,
+// anything else separates words.
+func searchTokens(text string) []string {
+	folded := norm.NFD.String(strings.ToLower(text))
+	return strings.FieldsFunc(folded, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.Is(unicode.Mn, r)
+	})
+}
+
+func stripMarks(tokens []string) []string {
+	out := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		out = append(out, strings.Map(func(r rune) rune {
+			if unicode.Is(unicode.Mn, r) {
+				return -1
+			}
+			return r
+		}, t))
+	}
+	return out
+}
+
+func searchTerms(query string) []string {
+	return stripMarks(searchTokens(query))
+}
+
+// titleMatchesTerms reports whether every term is a word of title, the last
+// term as a prefix - the same rule the message query applies.
+func titleMatchesTerms(title string, terms []string) bool {
+	if len(terms) == 0 {
+		return false
+	}
+	words := stripMarks(searchTokens(title))
+	for i, term := range terms {
+		found := false
+		for _, w := range words {
+			if w == term || (i == len(terms)-1 && strings.HasPrefix(w, term)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
