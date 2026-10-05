@@ -42,7 +42,7 @@ Mate's wrong guesses next to the corrections, and the whole route to the answer.
   general knowledge presented as boat fact; the operator's observations and photos outrank Mate's
   guesses; a correction by the operator wins over what Mate said; invent nothing. The server renders
   the headings itself, so the layout cannot drift, and ends the note with
-  `From the Mate conversation [title](/mate/<id>), <date>.` A model failure or a reply that is not
+  `From [a Mate conversation](/mate/<id>) on 5 Oct 2026.` (no title: it is only the clipped first message) A model failure or a reply that is not
   that JSON is a 502 carrying the reason. There is no fallback text.
 - **Equipment links.** The names the model gives are matched against inventory with the same text
   match find_equipment uses (name, manufacturer, model, aliases). A name counts when it matches a

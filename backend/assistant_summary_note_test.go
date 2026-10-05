@@ -27,7 +27,7 @@ func summaryTestDraft() assistantSummaryDraft {
 
 func TestRenderAssistantSummaryNote_AllSectionsAndBackLink(t *testing.T) {
 	when := time.Date(2026, 10, 5, 3, 0, 0, 0, time.UTC)
-	body, ok := renderAssistantSummaryNote(summaryTestDraft(), "Fuel polisher chat", "conv-1", when)
+	body, ok := renderAssistantSummaryNote(summaryTestDraft(), "conv-1", when)
 	if !ok {
 		t.Fatal("expected a note")
 	}
@@ -35,27 +35,27 @@ func TestRenderAssistantSummaryNote_AllSectionsAndBackLink(t *testing.T) {
 		"## What we established\n\n- The Reverso discharge manifold has no sampling port.",
 		"## Ruled out\n\n- Drain the port Racor bowl: It would let air into the port engine's supply.",
 		"## Procedure that worked\n\n1. Close the supply valve.\n2. Open the inspection cap.",
-		"From the Mate conversation [Fuel polisher chat](/mate/conv-1), 2026-10-05.",
+		"From [a Mate conversation](/mate/conv-1) on 5 Oct 2026.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.HasSuffix(strings.TrimSpace(body), "2026-10-05.") {
+	if !strings.HasSuffix(strings.TrimSpace(body), "5 Oct 2026.") {
 		t.Errorf("back-link should end the note:\n%s", body)
 	}
 }
 
 func TestRenderAssistantSummaryNote_OmitsEmptySectionsAndRefusesAllEmpty(t *testing.T) {
 	d := assistantSummaryDraft{Title: "t", Established: []string{"A fact."}}
-	body, ok := renderAssistantSummaryNote(d, "c", "id", time.Now())
+	body, ok := renderAssistantSummaryNote(d, "id", time.Now())
 	if !ok {
 		t.Fatal("expected a note")
 	}
 	if strings.Contains(body, "## Ruled out") || strings.Contains(body, "## Procedure that worked") {
 		t.Errorf("empty sections must be omitted:\n%s", body)
 	}
-	if _, ok := renderAssistantSummaryNote(assistantSummaryDraft{Title: "t", Established: []string{"  "}}, "c", "id", time.Now()); ok {
+	if _, ok := renderAssistantSummaryNote(assistantSummaryDraft{Title: "t", Established: []string{"  "}}, "id", time.Now()); ok {
 		t.Error("an all-blank draft must not render")
 	}
 }
@@ -435,6 +435,20 @@ func TestSummarySave_NoteDeletedAfterDraftGetsEveryTickedLink(t *testing.T) {
 		links, _ := h.docs.EquipmentDocuments(e.ID)
 		if len(links) != 1 || links[0].DocumentID != out["note_id"] {
 			t.Errorf("%s links = %+v", e.Name, links)
+		}
+	}
+}
+
+func TestAssistantSummaryPrompt_KeepsTheAssistantOutOfTheNote(t *testing.T) {
+	for _, want := range []string{
+		"Ruled out holds only actions or options for the boat",
+		"Mate's own limitations",
+		"unreadable documents",
+		"tool failures",
+		"anything about the assistant itself",
+	} {
+		if !strings.Contains(assistantSummarySystemPrompt, want) {
+			t.Errorf("prompt missing %q", want)
 		}
 	}
 }

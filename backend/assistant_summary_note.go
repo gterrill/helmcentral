@@ -46,7 +46,9 @@ Rules:
 - Skip general advice that nobody confirmed.
 - The operator's own observations and photos outrank anything Mate said earlier. If Mate said something and the operator corrected it, the correction wins, and the wrong claim is not recorded as fact.
 - Photo descriptions are given under each attachment; treat them as what the operator showed.
-- Invent nothing. If a section has nothing, return it empty.`
+- Invent nothing. If a section has nothing, return it empty.
+- Ruled out holds only actions or options for the boat that the operator or the conversation rejected, each with why. It never holds Mate's own limitations, unreadable documents, tool failures or anything about the assistant itself.
+- Leave Mate's own limitations, unreadable documents, tool failures and anything about the assistant itself out of every section.`
 
 type assistantSummaryRuledOut struct {
 	Option string `json:"option"`
@@ -87,7 +89,7 @@ func cleanSummaryRuledOut(in []assistantSummaryRuledOut) []assistantSummaryRuled
 // Empty sections are omitted; ok is false when every section is empty, so no
 // empty note is ever offered. The body ends with a link back to the
 // conversation.
-func renderAssistantSummaryNote(d assistantSummaryDraft, convTitle, convID string, when time.Time) (string, bool) {
+func renderAssistantSummaryNote(d assistantSummaryDraft, convID string, when time.Time) (string, bool) {
 	established := cleanSummaryLines(d.Established)
 	ruledOut := cleanSummaryRuledOut(d.RuledOut)
 	procedure := cleanSummaryLines(d.Procedure)
@@ -121,8 +123,8 @@ func renderAssistantSummaryNote(d assistantSummaryDraft, convTitle, convID strin
 		}
 		b.WriteString("\n")
 	}
-	title := strings.NewReplacer("[", "(", "]", ")").Replace(strings.TrimSpace(convTitle))
-	fmt.Fprintf(&b, "From the Mate conversation [%s](/mate/%s), %s.\n", title, convID, when.UTC().Format("2006-01-02"))
+	// No conversation title: it is the clipped first message and reads badly.
+	fmt.Fprintf(&b, "From [a Mate conversation](/mate/%s) on %s.\n", convID, when.UTC().Format("2 Jan 2006"))
 	return b.String(), true
 }
 
@@ -346,7 +348,7 @@ func postAssistantSummaryDraftHandler(c echo.Context) error {
 		return fail(http.StatusBadGateway, "The summary could not be read: invalid JSON reply: "+truncateRunes(raw, 200))
 	}
 
-	body, ok := renderAssistantSummaryNote(draft, conv.Title, conv.ID, conv.UpdatedAt)
+	body, ok := renderAssistantSummaryNote(draft, conv.ID, conv.UpdatedAt)
 	if !ok {
 		return fail(http.StatusUnprocessableEntity, assistantSummaryNothingToKeep)
 	}
