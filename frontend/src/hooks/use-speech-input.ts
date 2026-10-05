@@ -52,8 +52,33 @@ export const SPEECH_INPUT_FATAL_ERRORS = {
   noMicrophone: 'No microphone found.',
 } as const
 
+// Surfaced when an Android restart loop gives up (see start()). Exported so
+// hooks/use-mate-voice.ts does not restart wake mode into the same loop.
+export const SPEECH_INPUT_RESTART_LOOP_ERROR = 'Voice input keeps stopping. Tap the microphone to try again.'
+
+const QUICK_END_MS = 1000
+const GIVE_UP_AFTER_MS = 10_000
+const BACKOFF_START_MS = 250
+const BACKOFF_CAP_MS = 2000
+
+interface Session {
+  chained: boolean
+  continuous: boolean
+  finishing: boolean
+  fatal: boolean
+  quickSince: number | null
+  backoff: number
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+/** True on Android browsers, whose continuous recognition repeats text. */
+export function isAndroid(): boolean {
+  return /Android/i.test(navigator.userAgent)
+}
+
 const ERROR_MESSAGES: Record<string, string> = {
   'not-allowed': SPEECH_INPUT_FATAL_ERRORS.micBlocked,
+  'service-not-allowed': SPEECH_INPUT_FATAL_ERRORS.micBlocked,
   'no-speech': 'No speech heard.',
   network: 'The speech service could not be reached.',
   'audio-capture': SPEECH_INPUT_FATAL_ERRORS.noMicrophone,
@@ -122,10 +147,19 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   const [error, setError] = useState<string | null>(null)
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const sessionRef = useRef<Session | null>(null)
   const onFinalRef = useRef(onFinal)
   const onErrorRef = useRef(onError)
   useEffect(() => { onFinalRef.current = onFinal }, [onFinal])
   useEffect(() => { onErrorRef.current = onError }, [onError])
+
+  const clearRestartTimer = useCallback(() => {
+    const session = sessionRef.current
+    if (session?.timer) {
+      clearTimeout(session.timer)
+      session.timer = null
+    }
+  }, [])
 
   const ctor = recognitionCtor()
   const unsupportedReason = unsupportedReasonFor(ctor)
@@ -148,45 +182,113 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     // rather than reused - recognizers throw on a second start() against the
     // same live instance, so every start() gets its own.
     recognitionRef.current?.abort()
+    clearRestartTimer()
 
-    const recognition = new Ctor()
-    recognitionRef.current = recognition
-    recognition.lang = lang
-    recognition.interimResults = true
-    recognition.continuous = options?.continuous ?? false
+    // Android Chrome's continuous mode reports each final as the whole
+    // utterance so far, so a continuous request there is served by chained
+    // non-continuous sessions instead. This hook is the one owner of that
+    // restart loop; `listening` stays true across it.
+    const session: Session = {
+      chained: (options?.continuous ?? false) && isAndroid(),
+      continuous: options?.continuous ?? false,
+      finishing: false,
+      fatal: false,
+      quickSince: null,
+      backoff: BACKOFF_START_MS,
+      timer: null,
+    }
+    sessionRef.current = session
 
-    recognition.onresult = (event) => {
-      if (recognitionRef.current !== recognition) return
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        const transcript = result[0]?.transcript ?? ''
-        if (result.isFinal) {
-          setInterim('')
-          onFinalRef.current(transcript.trim())
-        } else {
-          setInterim(transcript)
+    const launch = () => {
+      const recognition = new Ctor()
+      recognitionRef.current = recognition
+      recognition.lang = lang
+      recognition.interimResults = true
+      recognition.continuous = session.chained ? false : session.continuous
+      const startedAt = Date.now()
+      let gotResult = false
+
+      recognition.onresult = (event) => {
+        if (recognitionRef.current !== recognition) return
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i]
+          const transcript = result[0]?.transcript ?? ''
+          gotResult = true
+          if (result.isFinal) {
+            setInterim('')
+            onFinalRef.current(transcript.trim())
+          } else {
+            setInterim(transcript)
+          }
         }
       }
-    }
 
-    recognition.onerror = (event) => {
-      if (recognitionRef.current !== recognition) return
-      const message = ERROR_MESSAGES[event.error] ?? event.error
-      setError(message)
-      onErrorRef.current?.(message)
-    }
+      recognition.onerror = (event) => {
+        if (recognitionRef.current !== recognition) return
+        if (session.chained) {
+          // Android ends a session on silence; that is the loop's normal
+          // rhythm, not an error. Anything else ends the loop and surfaces.
+          if (event.error === 'no-speech') return
+          session.fatal = true
+        }
+        const message = ERROR_MESSAGES[event.error] ?? event.error
+        setError(message)
+        onErrorRef.current?.(message)
+      }
 
-    recognition.onend = () => {
-      if (recognitionRef.current !== recognition) return
-      setListening(false)
-      recognitionRef.current = null
+      recognition.onend = () => {
+        if (recognitionRef.current !== recognition) return
+        if (session.chained && !session.finishing && !session.fatal) {
+          const now = Date.now()
+          const quick = !gotResult && now - startedAt < QUICK_END_MS
+          const giveUp = () => {
+            setError(SPEECH_INPUT_RESTART_LOOP_ERROR)
+            onErrorRef.current?.(SPEECH_INPUT_RESTART_LOOP_ERROR)
+            setListening(false)
+            setInterim('')
+            recognitionRef.current = null
+          }
+          const relaunch = () => {
+            session.timer = null
+            try {
+              launch()
+            } catch {
+              giveUp()
+            }
+          }
+          setInterim('')
+          if (!quick) {
+            // A session that ran or heard something resets the backoff.
+            session.quickSince = null
+            session.backoff = BACKOFF_START_MS
+            relaunch()
+            return
+          }
+          // A brief interruption (a notification, Mate speaking) ends
+          // sessions at once. Retry with a growing delay, and give up only
+          // once it has gone on for a sustained stretch.
+          session.quickSince ??= now
+          if (now - session.quickSince >= GIVE_UP_AFTER_MS) {
+            giveUp()
+            return
+          }
+          session.timer = setTimeout(relaunch, session.backoff)
+          session.backoff = Math.min(session.backoff * 2, BACKOFF_CAP_MS)
+          return
+        }
+        setListening(false)
+        setInterim('')
+        recognitionRef.current = null
+      }
+
+      recognition.start()
     }
 
     setError(null)
     setInterim('')
     setListening(true)
-    recognition.start()
-  }, [lang])
+    launch()
+  }, [lang, clearRestartTimer])
 
   // Abort rather than the recognizer's own stop(): a caller-initiated stop
   // (Escape while listening, wake mode pausing, or the wake-word switch
@@ -198,6 +300,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   // `listening` immediately, e.g. to decide whether it's safe to start a
   // new session right away.
   const stop = useCallback(() => {
+    clearRestartTimer()
     const recognition = recognitionRef.current
     if (!recognition) return
     recognitionRef.current = null
@@ -207,7 +310,7 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
     recognition.abort()
     setListening(false)
     setInterim('')
-  }, [])
+  }, [clearRestartTimer])
 
   // finish() ends the session the way an operator tapping the mic to stop
   // dictating expects: the recognizer's own stop(), not abort(). A real
@@ -220,10 +323,31 @@ export function useSpeechInput({ onFinal, onError, lang = 'en-AU' }: UseSpeechIn
   // clear themselves the ordinary way, from the recognizer's own `end`
   // event (see onend above), exactly as if it had stopped on its own.
   const finish = useCallback(() => {
+    const session = sessionRef.current
+    if (session) session.finishing = true
+    if (session?.timer) {
+      // Between sessions: nothing is running, so there is no last final to
+      // wait for. End now.
+      clearTimeout(session.timer)
+      session.timer = null
+      recognitionRef.current = null
+      setListening(false)
+      setInterim('')
+      return
+    }
     recognitionRef.current?.stop()
   }, [])
 
-  useEffect(() => () => { recognitionRef.current?.abort() }, [])
+  useEffect(() => () => {
+    clearRestartTimer()
+    const recognition = recognitionRef.current
+    if (!recognition) return
+    recognitionRef.current = null
+    recognition.onresult = null
+    recognition.onerror = null
+    recognition.onend = null
+    recognition.abort()
+  }, [clearRestartTimer])
 
   return { supported, unsupportedReason, listening, interim, error, start, stop, finish }
 }

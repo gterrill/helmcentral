@@ -290,3 +290,245 @@ describe('useSpeechInput recognition lifecycle', () => {
     await waitFor(() => expect(result.current.listening).toBe(true))
   })
 })
+
+describe('useSpeechInput continuous requests', () => {
+  const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0 Mobile Safari/537.36'
+  const originalUA = navigator.userAgent
+
+  function stubUA(ua: string) {
+    Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true })
+  }
+
+  afterEach(() => {
+    stubUA(originalUA)
+    vi.useRealTimers()
+  })
+
+  function setup(onError?: (m: string) => void) {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    const onFinal = vi.fn()
+    const hook = renderHook(() => useSpeechInput({ onFinal, onError }))
+    return { onFinal, hook }
+  }
+
+  describe('on Android', () => {
+    beforeEach(() => stubUA(ANDROID_UA))
+
+    it('runs non-continuous recognizers for a continuous request', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      expect(instances).toHaveLength(1)
+      expect(instances[0].continuous).toBe(false)
+      expect(instances[0].started).toBe(true)
+    })
+
+    it('starts a fresh recognizer on each end, stays listening, delivers each final once', () => {
+      const { onFinal, hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitResult('I can', false))
+      expect(hook.result.current.interim).toBe('I can')
+      act(() => instances[0].emitResult("I can't fill it", true))
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(2)
+      expect(instances[1].started).toBe(true)
+      expect(instances[1].continuous).toBe(false)
+      expect(hook.result.current.listening).toBe(true)
+      expect(hook.result.current.interim).toBe('')
+      act(() => instances[1].emitResult('how far is it', true))
+      act(() => instances[1].emitEnd())
+      expect(onFinal.mock.calls.map((c) => c[0])).toEqual(["I can't fill it", 'how far is it'])
+    })
+
+    it('delivers repeated phrases in full', () => {
+      const { onFinal, hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitResult('yes', true))
+      act(() => instances[0].emitEnd())
+      act(() => instances[1].emitResult('yes', true))
+      expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['yes', 'yes'])
+    })
+
+    it('does not restart after stop()', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => hook.result.current.stop())
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('finish() lets the last final through and does not restart', () => {
+      const { onFinal, hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => hook.result.current.finish())
+      expect(instances[0].stopped).toBe(true)
+      act(() => instances[0].emitResult('last words', true))
+      act(() => instances[0].emitEnd())
+      expect(onFinal).toHaveBeenCalledWith('last words')
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it.each(['not-allowed', 'service-not-allowed', 'audio-capture'])('does not restart after a %s error', (code) => {
+      const onError = vi.fn()
+      const { hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitError(code))
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+      expect(onError).toHaveBeenCalledTimes(1)
+    })
+
+    it('restarts silently after a no-speech error', () => {
+      vi.useFakeTimers()
+      const onError = vi.fn()
+      const { hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitError('no-speech'))
+      act(() => instances[0].emitEnd())
+      act(() => { vi.advanceTimersToNextTimer() })
+      expect(instances).toHaveLength(2)
+      expect(hook.result.current.listening).toBe(true)
+      expect(hook.result.current.error).toBeNull()
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    it('stops on a network error even after a long session', () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const onError = vi.fn()
+      const { hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      vi.setSystemTime(Date.now() + 30_000)
+      act(() => instances[0].emitError('network'))
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+      expect(hook.result.current.error).toBe('The speech service could not be reached.')
+      expect(onError).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not restart after unmount', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      hook.unmount()
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(instances[0].aborted).toBe(true)
+    })
+
+    it('backs off and recovers from a short run of empty ends', () => {
+      vi.useFakeTimers()
+      const onError = vi.fn()
+      const { onFinal, hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      // The restart is delayed, not immediate.
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      act(() => { vi.advanceTimersByTime(250) })
+      expect(instances).toHaveLength(2)
+      // Keep interrupting for about two seconds in total.
+      const t0 = Date.now()
+      while (Date.now() - t0 < 2000) {
+        act(() => instances[instances.length - 1].emitEnd())
+        act(() => { vi.advanceTimersToNextTimer() })
+      }
+      expect(hook.result.current.listening).toBe(true)
+      expect(onError).not.toHaveBeenCalled()
+      act(() => instances[instances.length - 1].emitResult('back again', true))
+      expect(onFinal).toHaveBeenCalledWith('back again')
+      expect(hook.result.current.listening).toBe(true)
+    })
+
+    it('gives up with an error once empty ends continue past ten seconds', () => {
+      vi.useFakeTimers()
+      const onError = vi.fn()
+      const { hook } = setup(onError)
+      act(() => hook.result.current.start({ continuous: true }))
+      for (let i = 0; i < 40 && hook.result.current.listening; i++) {
+        act(() => instances[instances.length - 1].emitEnd())
+        act(() => { vi.advanceTimersToNextTimer() })
+      }
+      expect(hook.result.current.listening).toBe(false)
+      expect(onError).toHaveBeenCalledTimes(1)
+      expect(hook.result.current.error).toBeTruthy()
+      const count = instances.length
+      act(() => { vi.advanceTimersByTime(10_000) })
+      expect(instances).toHaveLength(count)
+    })
+
+    it('stop() during a pending restart creates no recognizer', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      act(() => hook.result.current.stop())
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('finish() during a pending restart ends the session', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      act(() => hook.result.current.finish())
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('unmount during a pending restart creates no recognizer', () => {
+      vi.useFakeTimers()
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitEnd())
+      hook.unmount()
+      act(() => { vi.advanceTimersByTime(5000) })
+      expect(instances).toHaveLength(1)
+    })
+
+    it('does not trip the guard when sessions produce results', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      for (let i = 0; i < 8; i++) {
+        act(() => instances[instances.length - 1].emitResult(`word ${i}`, true))
+        act(() => instances[instances.length - 1].emitEnd())
+      }
+      expect(hook.result.current.listening).toBe(true)
+      expect(instances).toHaveLength(9)
+    })
+
+    it('leaves a non-continuous request as a single session', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: false }))
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+  })
+
+  describe('off Android', () => {
+    beforeEach(() => stubUA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15'))
+
+    it('keeps one continuous recognizer and does not restart on end', () => {
+      const { hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      expect(instances[0].continuous).toBe(true)
+      act(() => instances[0].emitEnd())
+      expect(instances).toHaveLength(1)
+      expect(hook.result.current.listening).toBe(false)
+    })
+
+    it('delivers distinct finals and repeats in full', () => {
+      const { onFinal, hook } = setup()
+      act(() => hook.result.current.start({ continuous: true }))
+      act(() => instances[0].emitResult('yes', true))
+      act(() => instances[0].emitResult('yes', true))
+      act(() => instances[0].emitResult('check the bilge', true))
+      act(() => instances[0].emitResult('check the bilge pump', true))
+      expect(onFinal.mock.calls.map((c) => c[0])).toEqual(['yes', 'yes', 'check the bilge', 'check the bilge pump'])
+    })
+  })
+})
