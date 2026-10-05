@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -157,6 +158,10 @@ func createAssistantSchema(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments (message_id)`); err != nil {
 		return fmt.Errorf("index message_attachments table: %w", err)
+	}
+
+	if err := createAssistantSearchSchema(db); err != nil {
+		return err
 	}
 
 	return createAssistantProposalsSchema(db)
@@ -486,4 +491,212 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 		out[messageID] = append(out[messageID], att)
 	}
 	return out, rows.Err()
+}
+
+// createAssistantSearchSchema creates messages_fts, the full-text index
+// behind conversation search (ADR 0161), and the triggers that keep it level
+// with messages. Only user and assistant rows are indexed: a watch report is
+// machine output the operator never typed or asked for. The FTS table holds
+// its own copy of the text (not external content) so the role filter needs no
+// special rebuild, and its rowid is the messages rowid so a delete is a key
+// lookup rather than a scan.
+//
+// A database that already holds messages gets them indexed the first time
+// the table is created; once it exists the triggers carry every later write.
+func createAssistantSearchSchema(db *sql.DB) error {
+	var existing int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
+		return fmt.Errorf("check messages_fts: %w", err)
+	}
+
+	if _, err := db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+		content, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
+		return fmt.Errorf("create messages_fts: %w", err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
+		WHEN new.role IN ('user', 'assistant')
+		BEGIN
+			INSERT INTO messages_fts (rowid, content, conversation_id) VALUES (new.rowid, new.content, new.conversation_id);
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts insert trigger: %w", err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
+		BEGIN
+			DELETE FROM messages_fts WHERE rowid = old.rowid;
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts delete trigger: %w", err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
+		BEGIN
+			DELETE FROM messages_fts WHERE rowid = old.rowid;
+			INSERT INTO messages_fts (rowid, content, conversation_id)
+				SELECT new.rowid, new.content, new.conversation_id WHERE new.role IN ('user', 'assistant');
+		END`); err != nil {
+		return fmt.Errorf("create messages_fts update trigger: %w", err)
+	}
+
+	if existing == 0 {
+		if _, err := db.Exec(`INSERT INTO messages_fts (rowid, content, conversation_id)
+			SELECT rowid, content, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
+			return fmt.Errorf("backfill messages_fts: %w", err)
+		}
+	}
+	return nil
+}
+
+// assistantConversationExcerpt is one matching stretch of a message.
+type assistantConversationExcerpt struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+// assistantConversationSearchHit is one conversation that matched a search:
+// by title, by message text, or both. Excerpts is empty for a title-only
+// match and holds the best-ranked matching messages first otherwise.
+type assistantConversationSearchHit struct {
+	ID        string                         `json:"id"`
+	Title     string                         `json:"title"`
+	UpdatedAt time.Time                      `json:"updated_at"`
+	Excerpts  []assistantConversationExcerpt `json:"excerpts,omitempty"`
+}
+
+// assistantConversationSearchOptions tunes SearchConversations. The zero
+// value is the list-panel shape: a short snippet, one per conversation.
+type assistantConversationSearchOptions struct {
+	Limit            int    // conversations returned, default 20
+	ExcerptsPerConv  int    // default 1
+	ExcerptTokens    int    // words of context around a match, default 16, max 64
+	ExcludeConvID    string // a conversation to leave out (the one being asked from)
+	ExcerptMaxRunes  int    // hard cap per excerpt, default 400
+	CandidateMessage int    // matching messages examined, default 300
+}
+
+// SearchConversations finds conversations whose title or user/assistant
+// message text contains every word of query (the last word as a prefix),
+// case-insensitively, most recently active first. An empty query is an
+// error: it matches everything, which is ListConversations' job.
+func (s *assistantStore) SearchConversations(query string, opts assistantConversationSearchOptions) ([]assistantConversationSearchHit, error) {
+	match, ok := ftsMatchQuery(query)
+	if !ok {
+		return nil, errors.New("search conversations: query must not be empty")
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.ExcerptsPerConv <= 0 {
+		opts.ExcerptsPerConv = 1
+	}
+	if opts.ExcerptTokens <= 0 {
+		opts.ExcerptTokens = 16
+	}
+	if opts.ExcerptTokens > 64 {
+		opts.ExcerptTokens = 64
+	}
+	if opts.ExcerptMaxRunes <= 0 {
+		opts.ExcerptMaxRunes = 400
+	}
+	if opts.CandidateMessage <= 0 {
+		opts.CandidateMessage = 300
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	hits := map[string]*assistantConversationSearchHit{}
+
+	rows, err := s.db.Query(
+		`SELECT f.conversation_id, m.role, snippet(messages_fts, 0, '', '', '…', ?)
+		 FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
+		 WHERE messages_fts MATCH ? AND f.conversation_id <> ?
+		 ORDER BY rank LIMIT ?`,
+		opts.ExcerptTokens, match, opts.ExcludeConvID, opts.CandidateMessage)
+	if err != nil {
+		return nil, fmt.Errorf("search conversation messages: %w", err)
+	}
+	type excerptRow struct{ convID, role, text string }
+	var excerpts []excerptRow
+	for rows.Next() {
+		var r excerptRow
+		if err := rows.Scan(&r.convID, &r.role, &r.text); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan conversation search row: %w", err)
+		}
+		excerpts = append(excerpts, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	// Title matches: every word of the query appears in the title.
+	var titleArgs []any
+	titleWhere := []string{"id <> ?"}
+	titleArgs = append(titleArgs, opts.ExcludeConvID)
+	for _, word := range strings.Fields(query) {
+		titleWhere = append(titleWhere, `instr(lower(title), ?) > 0`)
+		titleArgs = append(titleArgs, strings.ToLower(word))
+	}
+
+	ids := map[string]bool{}
+	for _, e := range excerpts {
+		ids[e.convID] = true
+	}
+	trows, err := s.db.Query(`SELECT id FROM conversations WHERE `+strings.Join(titleWhere, " AND "), titleArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("search conversation titles: %w", err)
+	}
+	for trows.Next() {
+		var id string
+		if err := trows.Scan(&id); err != nil {
+			trows.Close()
+			return nil, fmt.Errorf("scan conversation title match: %w", err)
+		}
+		ids[id] = true
+	}
+	if err := trows.Err(); err != nil {
+		trows.Close()
+		return nil, err
+	}
+	trows.Close()
+
+	for id := range ids {
+		var conv assistantConversationSearchHit
+		var updated int64
+		err := s.db.QueryRow(`SELECT id, title, updated_at FROM conversations WHERE id = ?`, id).Scan(&conv.ID, &conv.Title, &updated)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read conversation search hit: %w", err)
+		}
+		conv.UpdatedAt = time.Unix(updated, 0).UTC()
+		hits[id] = &conv
+	}
+	for _, e := range excerpts {
+		h, ok := hits[e.convID]
+		if !ok || len(h.Excerpts) >= opts.ExcerptsPerConv {
+			continue
+		}
+		text := strings.Join(strings.Fields(e.text), " ")
+		if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
+			text = string(r[:opts.ExcerptMaxRunes]) + "…"
+		}
+		h.Excerpts = append(h.Excerpts, assistantConversationExcerpt{Role: e.role, Text: text})
+	}
+
+	out := make([]assistantConversationSearchHit, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, *h)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
 }

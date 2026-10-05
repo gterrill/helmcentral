@@ -681,6 +681,39 @@ func listAssistantConversationsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"conversations": conversations})
 }
 
+// assistantConversationSearchResult is one row of the conversation search
+// response: the list panel's fields plus a short snippet of the best matching
+// message, absent when only the title matched.
+type assistantConversationSearchResult struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Snippet   string    `json:"snippet,omitempty"`
+}
+
+// GET /api/assistant/conversations/search?q=...
+// Matches words in the title or in any user or assistant message. An empty
+// query is a 400: the list endpoint is the way to ask for everything.
+func searchAssistantConversationsHandler(c echo.Context) error {
+	q := strings.TrimSpace(c.QueryParam("q"))
+	if q == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "q is required"})
+	}
+	hits, err := globalAssistantStore.SearchConversations(q, assistantConversationSearchOptions{Limit: 30})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	results := make([]assistantConversationSearchResult, 0, len(hits))
+	for _, h := range hits {
+		r := assistantConversationSearchResult{ID: h.ID, Title: h.Title, UpdatedAt: h.UpdatedAt}
+		if len(h.Excerpts) > 0 {
+			r.Snippet = h.Excerpts[0].Text
+		}
+		results = append(results, r)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"results": results})
+}
+
 // POST /api/assistant/conversations
 func createAssistantConversationHandler(c echo.Context) error {
 	var body struct {
