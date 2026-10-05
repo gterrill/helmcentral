@@ -274,6 +274,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // so this is the only way to tell "stopped" apart from "idle before the
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
+  // Stop after the final message has been appended must not label a finished
+  // answer as stopped; the thread ending on an assistant reply tells us so,
+  // whichever component (this one or the Mate sheet) did the sending.
+  const messagesRef = useRef(conversations.messages)
+  messagesRef.current = conversations.messages
 
   // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
   // instance per AssistantThread - it isn't threaded through as a prop
@@ -312,14 +317,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       // keeps its resolution from doing anything further either way.
       // Appended as the final frame lands so the streamed draft is swapped
       // for the message in one render; see handleSend.
-      let appended = false
-      const reply = await chat.attach(id, undefined, (message) => {
+      let delivered = false
+      await chat.attach(id, undefined, (message) => {
         if (cancelled || activeIdRef.current !== id) return
-        appended = true
+        delivered = true
         conversations.appendLocal(message)
       })
-      if (cancelled || reply === null || activeIdRef.current !== id) return
-      if (!appended) conversations.appendLocal(reply)
+      if (!delivered) return
       await conversations.refresh()
     })()
     return () => {
@@ -349,14 +353,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (id === null || chat.isStreamingConversation(id)) return
     let cancelled = false
     void (async () => {
-      let appended = false
-      const reply = await chat.attach(id, undefined, (message) => {
+        await chat.attach(id, undefined, (message) => {
         if (cancelled || activeIdRef.current !== id) return
-        appended = true
         conversations.appendLocal(message)
       })
       if (cancelled || activeIdRef.current !== id) return
-      if (reply !== null && !appended) conversations.appendLocal(reply)
       await conversations.refresh()
     })()
     return () => {
@@ -424,35 +425,36 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     // The reply is appended as the stream's final frame lands, in the same
     // render that drops the streamed draft. Appending only after send()
     // resolves left a commit with neither, the thread shrank by a reply and
-    // the scroller re-anchored from the clamped position.
-    let appended = false
+    // the scroller re-anchored from the clamped position. The answer counts
+    // as delivered once that has run: Stop tapped before the stream closes
+    // makes send() resolve null, but the answer is on screen.
+    let delivered = false
     const onMessage = (message: AssistantMessage) => {
       if (activeIdRef.current !== conversationId) return
-      appended = true
+      delivered = true
       conversations.appendLocal(message)
     }
-    const reply =
-      attachmentIds.length > 0
-        ? await chat.send(conversationId, trimmed, { attachments: attachmentIds, onMessage })
-        : await chat.send(conversationId, trimmed, { onMessage })
+    if (attachmentIds.length > 0) {
+      await chat.send(conversationId, trimmed, { attachments: attachmentIds, onMessage })
+    } else {
+      await chat.send(conversationId, trimmed, { onMessage })
+    }
 
-    // A successful send has nothing left for the composer to hold onto -
+    // A delivered answer has nothing left for the composer to hold onto -
     // clear() aborts nothing (everything staged already finished
     // uploading, since uploads.ready gated Send above) and just drops the
-    // now-sent chips. A failed send (reply === null, chat.error is set)
-    // leaves them staged so the operator can retry without re-uploading.
-    if (reply) uploads.clear()
-    // The operator may have opened another thread while this one answered;
-    // appendLocal writes into whichever thread is active now.
-    if (reply && activeIdRef.current === conversationId) {
-      if (!appended) conversations.appendLocal(reply)
+    // now-sent chips. A failed send (chat.error is set) leaves them staged
+    // so the operator can retry without re-uploading. Another thread may
+    // have been opened while this one answered; onMessage skips that case.
+    if (delivered) {
+      uploads.clear()
       await conversations.refresh()
     }
   }, [content, chat, conversations, canWrite, uploads, dictation])
 
   const handleStop = useCallback(() => {
     void chat.abort()
-    setStopped(true)
+    if (messagesRef.current.at(-1)?.role !== 'assistant') setStopped(true)
   }, [chat])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

@@ -592,7 +592,13 @@ describe('AssistantThread', () => {
 
     it("does not append a reply into a conversation other than the one it answers", async () => {
       let resolveSend!: (message: AssistantMessage | null) => void
-      const send = vi.fn(() => new Promise<AssistantMessage | null>((resolve) => { resolveSend = resolve }))
+      const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
+        new Promise<AssistantMessage | null>((resolve) => {
+          resolveSend = (message) => {
+            if (message) options?.onMessage?.(message)
+            resolve(message)
+          }
+        }))
       const chat = buildChat({ send })
       const first = buildConversations({ activeId: 'c1' })
       const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
@@ -616,7 +622,10 @@ describe('AssistantThread', () => {
 
     it('appends the rejoined reply and refreshes the conversation once attach resolves a message', async () => {
       const reply = assistantMessage({ id: 'rejoined-1', content: 'Blue Pearl Bay first, on the flood.' })
-      const attach = vi.fn().mockResolvedValue(reply)
+      const attach = vi.fn(async (_id: string, _c?: unknown, onMessage?: (m: AssistantMessage) => void) => {
+        onMessage?.(reply)
+        return reply
+      })
       const conversations = buildConversations({ activeId: 'c1' })
 
       render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ attach })} />)
@@ -1121,7 +1130,12 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
 
   it('rejoins Mate\'s follow-up and reloads the thread when the watch ends', async () => {
     const reply = assistantMessage({ id: 'm9', content: 'Port load spiked twice.' })
-    const attach = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(reply)
+    const attach = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockImplementationOnce(async (_id: string, _c?: unknown, onMessage?: (m: AssistantMessage) => void) => {
+        onMessage?.(reply)
+        return reply
+      })
     const chat = buildChat({ attach })
     const conversations = buildConversations()
     const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch()} />)
@@ -1207,5 +1221,38 @@ describe('reply hand-off from draft to final message', () => {
     expect(gaps).toEqual([])
     expect(container.textContent).toContain(replyText)
     vi.unstubAllGlobals()
+  })
+})
+
+// Stop tapped after the final message frame but before the stream closes: the
+// answer is already on screen, so it is a delivered answer, not a stopped one.
+describe('Stop after the answer has been delivered', () => {
+  it('keeps the answer a success: no Stopped line, chips cleared, thread refreshed', async () => {
+    const reply = assistantMessage({ id: 'done-1', content: 'Delivered answer.' })
+    let finish!: () => void
+    const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
+      new Promise<AssistantMessage | null>((resolve) => {
+        options?.onMessage?.(reply)
+        // Stop makes the stream end early, so send() resolves null.
+        finish = () => resolve(null)
+      }))
+    const conversations = buildConversations()
+    const chat = buildChat({ send, abort: vi.fn() })
+    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} />)
+
+    const textarea = screen.getByPlaceholderText('Ask Mate')
+    fireEvent.change(textarea, { target: { value: 'Which bay?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
+
+    const withReply = { ...conversations, messages: [reply] }
+    rerender(<AssistantThread canWrite conversations={withReply} chat={{ ...chat, sending: true }} />)
+    fireEvent.click(screen.getByRole('button', { name: /stop/i }))
+    rerender(<AssistantThread canWrite conversations={withReply} chat={{ ...chat, sending: false }} />)
+    await act(async () => { finish() })
+
+    expect(chat.abort).toHaveBeenCalled()
+    await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
+    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
   })
 })

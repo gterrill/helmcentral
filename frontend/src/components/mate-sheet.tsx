@@ -6,7 +6,7 @@ import { ConversationSearchOverlay } from '@/components/conversation-search-over
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAssistantChat, type AssistantScreenContext } from '@/hooks/use-assistant-chat'
-import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { useAssistantConversations, type AssistantMessage } from '@/hooks/use-assistant-conversations'
 import { useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { extractSpokenSummary } from '@/lib/spoken-summary'
@@ -213,19 +213,20 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
       })
 
       // Appended as the stream's final frame lands, in the same render that
-      // drops the streamed draft; the fallback below covers a send that
-      // resolves without having called back.
-      let appended = false
-      const reply = await chat.send(conversationId, initialQuestion, {
+      // drops the streamed draft. That is also when the answer counts as
+      // delivered: Stop tapped before the stream closes makes send() resolve
+      // null, but the answer is on screen and should still be read aloud.
+      let delivered: AssistantMessage | null = null
+      await chat.send(conversationId, initialQuestion, {
         spoken: true,
         screen,
         onMessage: (message) => {
-          appended = true
+          delivered = message
           conversations.appendLocal(message)
         },
       })
+      const reply = delivered as AssistantMessage | null
       if (reply) {
-        if (!appended) conversations.appendLocal(reply)
         await conversations.refresh()
         // Read-aloud (ADR 0093 voice phase): only for a reply to a question
         // that came in by voice - the backend's `## Spoken summary` section
