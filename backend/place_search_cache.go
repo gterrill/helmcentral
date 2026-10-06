@@ -135,6 +135,13 @@ func searchPlacesCached(provider placeNameProvider, providerID string, in placeS
 	// An empty result carrying a Note is how a provider reports a degraded
 	// search; remembering it would repeat the failure for hours. A
 	// genuinely empty result has no Note and is cached.
+	//
+	// This is an inference, not a contract: the search_places output the
+	// plugins return (wasmSearchPlacesOutput) has no explicit "degraded"
+	// field, and the plugins live outside this repository, so the host cannot
+	// add one that they set. A provider that attaches a Note to a genuinely
+	// empty answer is judged by this rule alone. Replace it with an explicit
+	// flag if the plugin ABI gains one.
 	if len(result.Results) == 0 && result.Note != "" {
 		return result, nil
 	}
