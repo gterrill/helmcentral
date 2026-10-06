@@ -234,6 +234,8 @@ type sourceHealth struct {
 	// EngineBound is true when the source ever published a propulsion.<id>.*
 	// path: an engine computer, which loses power with the ignition.
 	EngineBound bool
+	// EngineIDs are the propulsion.<id> engines this source publishes.
+	EngineIDs []string
 	// Plugin is true for a SignalK server plugin's own output (a bare
 	// $source id that never carried a bus type). Plugins report on events,
 	// not on a schedule, and are software rather than devices.
@@ -277,12 +279,7 @@ func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration
 			continue
 		}
 
-		threshold := silentSourceQuietFor
-		if avgGap := s.Last.Sub(s.First) / time.Duration(s.Count-1); avgGap*silentSourceCadenceMultiple > threshold {
-			threshold = avgGap * silentSourceCadenceMultiple
-		}
-
-		if now.Sub(s.Last) > threshold {
+		if now.Sub(s.Last) > sourceQuietThreshold(s) {
 			out = append(out, s)
 		}
 	}
@@ -301,12 +298,28 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			Last:        entry.Last,
 			Count:       entry.Count,
 			EngineBound: entry.EngineBound,
+			EngineIDs:   entry.EngineIDs,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
 		})
 	}
 	return health
+}
+
+// sourceQuietThreshold is how long s may go without an update before it is
+// quiet: silentSourceQuietFor, scaled up to silentSourceCadenceMultiple times
+// the source's own observed average gap when that is slower. A source with
+// fewer than two updates has no gap to scale from and gets the floor.
+func sourceQuietThreshold(s sourceHealth) time.Duration {
+	threshold := silentSourceQuietFor
+	if s.Count < 2 {
+		return threshold
+	}
+	if avgGap := s.Last.Sub(s.First) / time.Duration(s.Count-1); avgGap*silentSourceCadenceMultiple > threshold {
+		threshold = avgGap * silentSourceCadenceMultiple
+	}
+	return threshold
 }
 
 // sourceConnection is the part of a $source id before its first ".": the

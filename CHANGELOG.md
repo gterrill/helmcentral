@@ -34,6 +34,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- An engine cluster tile for an engine you have switched off now reads **OFF**
+  in grey, with no amber edge, instead of **STALE** with the hours since the
+  engine went quiet. Hover over it for the time it was switched off. If the
+  network feeding the engine goes quiet as well, the tile still shows amber
+  **STALE**, since that is a failed link.
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.

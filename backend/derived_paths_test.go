@@ -1015,11 +1015,9 @@ func TestFuelFiguresUseRunningEngineWhenOtherEngineRateIsStale(t *testing.T) {
 	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
 	// The port engine computer is silent but its connection is alive: a tank
 	// sender on the same gateway published seconds ago.
-	setEngineRateSource(t, snapshot, "port", "YachtDevices.129")
-	setEngineRateSource(t, snapshot, "starboard", "YachtDevices.128")
-	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-150*time.Minute), true)
-	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), true)
-	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second), false)
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
 
 	values, ages := computeDerivedPaths(now)
 
@@ -1048,22 +1046,16 @@ func TestFuelFiguresUseRunningEngineWhenOtherEngineRateIsStale(t *testing.T) {
 	}
 }
 
-// setEngineRateSource sets the $source recorded on an engine's fuel rate node.
-func setEngineRateSource(t *testing.T, snapshot *signalKSnapshot, engine, source string) {
-	t.Helper()
-	propulsion := snapshot.contexts["vessels.self"]["propulsion"].(map[string]any)
-	rate, ok := propulsion[engine].(map[string]any)["fuel"].(map[string]any)["rate"].(map[string]any)
-	if !ok {
-		t.Fatalf("fixture snapshot has no %s fuel rate node", engine)
-	}
-	rate["$source"] = source
-}
-
 // markSourceSeen records a $source's publishing history under the self
-// context, as applyDelta would have.
-func markSourceSeen(snapshot *signalKSnapshot, source string, last time.Time, engineBound bool) {
+// context, as applyDelta would have, with the engines it publishes (none for
+// a non-engine device). The stream itself is marked live at last.
+func markSourceSeen(snapshot *signalKSnapshot, source string, last time.Time, engineIDs ...string) {
 	snapshot.sourceSeen["vessels.self|"+source] = sourceSeenEntry{
-		First: last.Add(-time.Hour), Last: last, Count: 100, EngineBound: engineBound, BusTyped: true,
+		First: last.Add(-time.Hour), Last: last, Count: 100,
+		EngineBound: len(engineIDs) > 0, EngineIDs: engineIDs, BusTyped: true,
+	}
+	if last.After(snapshot.lastMessage) {
+		snapshot.lastMessage = last
 	}
 }
 
@@ -1088,23 +1080,20 @@ func TestFuelFiguresBlankWhenStaleEngineConnectionIsDead(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
 	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
 	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
-	setEngineRateSource(t, snapshot, "port", "GX.12")
-	setEngineRateSource(t, snapshot, "starboard", "YachtDevices.128")
-	markSourceSeen(snapshot, "GX.12", now.Add(-150*time.Minute), true)
-	markSourceSeen(snapshot, "GX.40", now.Add(-149*time.Minute), false) // same connection, also quiet
-	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), true)
+	markSourceSeen(snapshot, "GX.12", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "GX.40", now.Add(-149*time.Minute)) // same connection, also quiet
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
 	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
 }
 
-// A stale rate with no recorded source gives no evidence of key-off, so it
-// stays in the total.
-func TestFuelFiguresBlankWhenStaleEngineSourceUnknown(t *testing.T) {
+// A stale rate from an engine no recorded source publishes gives no evidence
+// of key-off, so it stays in the total.
+func TestFuelFiguresBlankWhenStaleEngineHasNoKnownSource(t *testing.T) {
 	snapshot := fuelFixtureSnapshot(t)
 	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
 	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
 	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
-	setEngineRateSource(t, snapshot, "port", "Unrecorded.1")
-	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second), false)
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
 	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
 }
 
@@ -1116,11 +1105,9 @@ func TestFuelFiguresBlankWhenStaleRateSourceIsStillPublishing(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
 	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
 	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
-	setEngineRateSource(t, snapshot, "port", "YachtDevices.129")
-	setEngineRateSource(t, snapshot, "starboard", "YachtDevices.128")
-	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-3*time.Second), true)
-	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), true)
-	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second), false)
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-3*time.Second), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
 
 	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
 }

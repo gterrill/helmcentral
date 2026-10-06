@@ -62,7 +62,7 @@ once, unlike the built-ins above:
 | --- | --- |
 | Gauge | Any single value the boat's instrument network publishes, as a number, radial dial, bar, lamp or trend. Coloured bands double as alarm rules. |
 | Gauge group | Several gauges clustered under one title, for duplicating onto a second engine or generator. See [Duplicate a gauge group](../how-to/duplicate-a-gauge-group.md). |
-| Engine cluster | A fixed layout of engine readings for one engine. Fills the tile you give it, up to twice its usual size. |
+| Engine cluster | A fixed layout of engine readings for one engine. Fills the tile you give it, up to twice its usual size. When the engine is switched off the tile reads `OFF` instead of going stale; see [Staleness](#staleness). |
 | Indicators | A row of status lamps, either pinned as the vessel-wide ribbon or placed on one page. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
 | Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile; layout mode still draws the frame so an embed is never impossible to reconfigure. |
 | Nearby map | Points of interest around the vessel. See [Add a Nearby map](../how-to/add-a-nearby-map.md) and [POI categories](poi-categories.md). |
@@ -205,6 +205,16 @@ number is deliberate: a stale reading shown as current is worse than none.
 - A gauge group or engine cluster badges the one reading that stopped and
   keeps reporting the rest; the tile as a whole only goes stale once every
   reading on it has.
+- An engine cluster for an engine that has been switched off reads `OFF`
+  in place of `STALE`, in plain grey with no amber edge, and its readings go
+  to `--`. Switching the key off powers the engine's own electronics down, so
+  its readings simply stop. Hover over the marker for the time it went quiet.
+  Helmcentral takes it as off when the rest of that engine's network is still
+  reporting. If the whole network feeding the engine goes quiet, the tile
+  stays amber `STALE`, because that is a failed link rather than an engine
+  switched off. The one case it cannot tell apart: an engine's electronics
+  dropping out while the engine runs, on a network that is otherwise healthy,
+  also reads `OFF`.
 - A lamp goes dark with the same age marker rather than staying lit on an
   old value.
 - A number worked out from more than one reading, fuel economy for example,

@@ -14,6 +14,7 @@ import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/li
 import { majorStepFor } from '@/components/gauge-tile'
 import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge } from '@/lib/staleness'
+import type { EngineStates } from '@/hooks/use-gauge-values'
 
 /**
  * An engine cluster (ADR 0054).
@@ -222,13 +223,47 @@ interface EngineClusterTileProps {
   values: Record<string, number | null>
   /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
   ages?: Record<string, number | null>
+  /**
+   * Whether each engine reads as switched off (its computer powers down with
+   * the key, so its readings just stop). Absent or unknown changes nothing.
+   */
+  engines?: EngineStates
   editing: boolean
   onConfigure: () => void
 }
 
+/** The `<id>` of a `propulsion.<id>.*` path, or null. */
+function propulsionId(path: string): string | null {
+  const match = /^propulsion\.([^.]+)\./.exec(path)
+  return match ? match[1] : null
+}
+
+/** `map` with every `propulsion.<id>.*` path removed: those readings are unknown while the engine is off. */
+function withoutEnginePaths<T>(map: Record<string, T> | undefined, id: string): Record<string, T> | undefined {
+  if (!map) return map
+  const prefix = `propulsion.${id}.`
+  return Object.fromEntries(Object.entries(map).filter(([path]) => !path.startsWith(prefix)))
+}
+
+/** "Off since 04:30" in the browser's local time, or just "Off" when the time is unusable. */
+function offSinceLabel(lastUpdate: string | undefined): string {
+  const at = lastUpdate ? new Date(lastUpdate) : null
+  if (!at || Number.isNaN(at.getTime())) return 'Off'
+  return `Off since ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
+}
+
 export const EngineClusterTile = memo(function EngineClusterTile({
-  config, values, ages, editing, onConfigure,
+  config, values: liveValues, ages: liveAges, engines, editing, onConfigure,
 }: EngineClusterTileProps) {
+  // A switched-off engine's last readings are idle numbers, not facts: its
+  // own paths read as absent (the dash) and carry no age, so nothing on the
+  // tile is stale. Other bound paths, such as the fuel rail's tank, are live.
+  const engineId = propulsionId(config.ring.path)
+  const engineStatus = engineId ? engines?.[engineId] : undefined
+  const off = engineStatus?.state === 'off'
+  const values = off && engineId ? withoutEnginePaths(liveValues, engineId)! : liveValues
+  const ages = off && engineId ? withoutEnginePaths(liveAges, engineId) : liveAges
+
   // The rail widens only the design the canvas is scaled against. The body
   // keeps its own 520-wide coordinate space, which is what every corner mask
   // was computed in.
@@ -288,6 +323,8 @@ export const EngineClusterTile = memo(function EngineClusterTile({
       state={state}
       stale={tileStale}
       staleLabel={staleLabel}
+      off={off}
+      offLabel={off ? offSinceLabel(engineStatus?.lastUpdate) : undefined}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (

@@ -281,12 +281,13 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 //
 // N2K stops sending a rate when an engine shuts down rather than sending
 // zero, so SignalK keeps the last positive value indefinitely. A rate older
-// than derivedInputMaxAge is left out of the total when it reads as that
-// engine being off: at least one other engine has a fresh positive rate, and
-// the stale rate's $source passes engineKeyOff (its connection still carries
-// other live devices, or it is a dedicated engine connection). Otherwise the
-// rate stays in, so a single engine run does not blank every burn-derived
-// figure, but a dead connection, or a source with no record, still does.
+// than derivedInputMaxAge is left out of the total when at least one other
+// engine has a fresh positive rate and engineStates reads that engine as off,
+// the same reading the Engine Cluster tile shows (ADR 0163), so the tile and
+// these figures never disagree. Otherwise the rate stays in, so a single
+// engine run does not blank every burn-derived figure, but an engine reading
+// as running (only its rate frozen), lost (its connection quiet) or unknown
+// still does.
 // When no engine is fresh every positive rate is summed and the oldest age
 // reported, so the figures go absent and the age says why.
 func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (total float64, age float64, ok bool) {
@@ -310,13 +311,14 @@ func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths
 			anyStale = true
 		}
 	}
-	var health []sourceHealth
+	var states map[string]engineStateInfo
 	if anyFresh && anyStale {
-		health = sourceHealthFor(snapshot, snapshot.selfContext())
+		_, lastMessage := snapshot.status()
+		states = engineStates(sourceHealthFor(snapshot, snapshot.selfContext()), now, now.Sub(lastMessage))
 	}
 	var ages []float64
 	for _, c := range all {
-		if health != nil && !freshEnoughToPublish(c.age) && rateReadsAsKeyOff(snapshot, health, c.path, now) {
+		if !freshEnoughToPublish(c.age) && states[fuelRateEngineID(c.path)].State == engineStateOff {
 			continue
 		}
 		total += c.value
@@ -856,21 +858,7 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 	}
 }
 
-// rateReadsAsKeyOff reports whether the silence of the engine rate at path
-// reads as a key-off: its source has itself gone quiet, and engineKeyOff
-// reads that as the engine being turned off. A source still publishing (rpm,
-// temperatures) with only its rate frozen is not a key-off. A rate with no
-// $source, or whose source is not in health, is no evidence of key-off and
-// reports false.
-func rateReadsAsKeyOff(snapshot *signalKSnapshot, health []sourceHealth, path string, now time.Time) bool {
-	source, _ := snapshot.nodeAt(path)["$source"].(string)
-	if source == "" {
-		return false
-	}
-	for _, h := range health {
-		if h.Source == source {
-			return now.Sub(h.Last) > silentSourceQuietFor && engineKeyOff(h, health, now)
-		}
-	}
-	return false
+// fuelRateEngineID is the propulsion id in a propulsion.<id>.fuel.rate path.
+func fuelRateEngineID(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
 }
