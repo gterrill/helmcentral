@@ -646,3 +646,92 @@ describe('staleness (ADR 0083)', () => {
     expect(screen.getByText('698')).toBeInTheDocument()
   })
 })
+
+/**
+ * Switching the key off powers the engine computer down, so its readings just
+ * stop. The backend says which engines read as switched off; the tile then
+ * shows OFF in muted chrome instead of a stale alarm, and a lost feed keeps
+ * the amber stale treatment.
+ */
+describe('engine off', () => {
+  const staleAges = Object.fromEntries(Object.keys(values).map((path) => [path, 9000]))
+  const since = '2026-10-06T04:30:00Z'
+
+  test('shows OFF instead of STALE, with dashes and no amber edge', () => {
+    const { container } = render(
+      <EngineClusterTile
+        config={port} values={values} ages={staleAges}
+        engines={{ port: { state: 'off', lastUpdate: since } }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    const badge = screen.getByTestId('tile-off-badge')
+    expect(badge).toHaveTextContent(/off/i)
+    expect(badge.className).not.toMatch(/amber/)
+    expect(badge.getAttribute('title')).toMatch(/^Off since \d{1,2}:\d{2}/)
+    expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Stale/)).not.toBeInTheDocument()
+    const card = container.querySelector('[data-slot="card"]')
+    expect(card).not.toHaveAttribute('data-stale')
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('--')
+    expect(screen.queryByText('22.0')).not.toBeInTheDocument()
+  })
+
+  test('blanks the readings even when no ages are known', () => {
+    render(
+      <EngineClusterTile
+        config={port} values={values}
+        engines={{ port: { state: 'off', lastUpdate: since } }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('tile-off-badge')).toBeInTheDocument()
+    expect(screen.queryByText('698')).not.toBeInTheDocument()
+  })
+
+  test('a lost engine keeps the amber stale treatment', () => {
+    const { container } = render(
+      <EngineClusterTile
+        config={port} values={values} ages={staleAges}
+        engines={{ port: { state: 'lost', lastUpdate: since } }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
+    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
+    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+  })
+
+  test('an off engine still shows STALE when a non-engine slot on the tile is genuinely stale', () => {
+    const tank = 'tanks.fuel.0.currentLevel'
+    const config: EngineClusterConfig = {
+      ...port,
+      corners: [
+        { label: 'Fuel', rows: [{ path: tank, label: 'Fuel', display: 'numeric', quantity: 'ratio', unit: '%' }] },
+        ...port.corners.slice(1),
+      ],
+    }
+    const { container } = render(
+      <EngineClusterTile
+        config={config} values={{ ...values, [tank]: 0.5 }} ages={{ ...staleAges, [tank]: 9000 }}
+        engines={{ port: { state: 'off', lastUpdate: since } }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
+    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
+    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+  })
+
+  test('a running engine, or one the backend says nothing about, is unchanged', () => {
+    render(
+      <EngineClusterTile
+        config={port} values={values}
+        engines={{ port: { state: 'running' }, starboard: { state: 'off', lastUpdate: since } }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+    expect(screen.getByText('698')).toBeInTheDocument()
+  })
+})

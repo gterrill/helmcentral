@@ -41,6 +41,13 @@ interface TileProps {
   /** Age of the last update, already formatted (`1h 39m`). */
   staleLabel?: string
   /**
+   * What the tile shows is switched off, not failing: an engine whose key is
+   * out. Draws a muted OFF badge in place of the amber stale treatment, with
+   * `offLabel` as its tooltip. Ignored while `stale`.
+   */
+  off?: boolean
+  offLabel?: string
+  /**
    * The worst zone state among this tile's readings (ADR 0081), from
    * `worstZoneState` in lib/severity.ts. `null` or `normal` draw nothing —
    * colour is spent only once a tile actually has something to say. Ignored
@@ -76,6 +83,8 @@ export function Tile({
   titleExtra,
   stale = false,
   staleLabel,
+  off = false,
+  offLabel,
   state = null,
   fill = false,
   shrinkToContent = false,
@@ -132,6 +141,15 @@ export function Tile({
               className="ml-1 shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400"
             >
               Stale{staleLabel ? ` ${staleLabel}` : ''}
+            </span>
+          )}
+          {off && !stale && (
+            <span
+              data-testid="tile-off-badge"
+              title={offLabel ?? 'Switched off'}
+              className="ml-1 shrink-0 rounded-xs border border-border bg-muted px-1.5 py-0.5 text-xs leading-none text-muted-foreground"
+            >
+              Off
             </span>
           )}
         </CardTitle>
