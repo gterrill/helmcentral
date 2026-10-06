@@ -289,6 +289,26 @@ func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration
 	return out
 }
 
+// sourceHealthFor lists every $source seen under context as sourceHealth, the
+// full list engineKeyOff and silentSources expect.
+func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
+	sources := snapshot.sourcesFor(context)
+	health := make([]sourceHealth, 0, len(sources))
+	for source, entry := range sources {
+		health = append(health, sourceHealth{
+			Source:      source,
+			First:       entry.First,
+			Last:        entry.Last,
+			Count:       entry.Count,
+			EngineBound: entry.EngineBound,
+			// A server plugin publishes under its bare id with no bus type;
+			// hardware inputs are dotted or carry a source.type.
+			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
+		})
+	}
+	return health
+}
+
 // sourceConnection is the part of a $source id before its first ".": the
 // connection (a bus gateway, a GX) the source arrives through. A bare id is
 // its own connection.

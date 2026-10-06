@@ -153,3 +153,30 @@ writes): `GET /api/tanks-state` carries the five new fields. With this
 vessel's own fuel-rate feeds still reporting a day-old timestamp, volume
 read live while range and time to empty read absent with an age near a day,
 the same frozen input ADR 0083 found.
+
+## Addendum 2026-10-06: a silent engine counts as off
+
+With one engine shut down, N2K stops sending its fuel rate rather than
+sending zero, so SignalK keeps the last positive value and the engine's state
+still reads "started". That frozen rate was summed into the total burn, its
+age became hours, and the two-minute guard blanked economy, time to empty and
+range on every single-engine run.
+
+An engine whose rate is older than the two-minute limit is now left out of
+the total burn only when its silence reads as a key-off, using the test from
+ADR 0147: the rate's `$source` is found in the source list, that source has
+itself been quiet for longer than the silent-source threshold (an engine
+computer still sending rpm with only its rate frozen is not a key-off), and
+either its
+connection still carries other live devices or it is a dedicated engine
+connection. At least one engine must also have a fresh positive rate. A dead
+connection keeps the stale rate in the total, so its age blanks the figures,
+as does a rate with no recorded `$source`. With no fresh rate anywhere, every
+positive rate is summed and the oldest age is reported as before, so the
+figures still go absent and the age still says why.
+
+The trade-off, inherited from ADR 0147: an engine computer dropping out while
+running, or a dedicated engine connection failing, cannot be told from a
+key-off. Its burn drops out after two minutes and range and time to empty
+read high. Everything else, a gateway going quiet included, still blanks the
+figures.
