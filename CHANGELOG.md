@@ -34,6 +34,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Nearby tile's tour of places no longer loses the boat off the edge of
+  the map. A place close by still gets a street-level view centred on it; for
+  one further off, the view slides toward the boat so both stay on screen.
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.
