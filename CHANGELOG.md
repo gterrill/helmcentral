@@ -34,6 +34,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Nearby tile's tour of places no longer loses the boat off the edge of
+  the map. A place close by still gets a street-level view centred on it; for
+  one further off, the view slides toward the boat so both stay on screen.
 - An engine cluster tile for an engine you have switched off now reads **OFF**
   in grey, with no amber edge, instead of **STALE** with the hours since the
   engine went quiet. Hover over it for the time it was switched off. If the

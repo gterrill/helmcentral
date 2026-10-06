@@ -10,7 +10,7 @@ import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { fitCameraAroundPoint, formatBearing, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { fitCameraAroundPoint, formatBearing, framePlaceWithBoat, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -99,13 +99,19 @@ const FOLLOW_EASE_DURATION_MS = 500
 // overview and pause there before the cycle wraps to the first place. The
 // wall display is the only home of this tile, so the motion is wanted.
 // flyTo keeps MapLibre's default arc (curve 1.42: zoom out, travel, zoom in).
-// The place zoom is a fixed street-level close-up, never less than two levels
-// in from the overview. POI_MAP_MAX_ZOOM caps only the overview fit; the
+// The place zoom is a street-level close-up, two levels in from the overview
+// where that is tighter, but the boat never leaves the frame: once it won't
+// fit around a centred place, the camera pans toward the boat and zooms only
+// as far out as it must to hold both inside the fit padding, less
+// PLACE_PITCH_ZOOM_HEADROOM because the tilt magnifies the near half of the
+// view. It never goes wider than the overview, which already has the boat in
+// frame from any ranked place. POI_MAP_MAX_ZOOM caps only the overview fit; the
 // overview never passes 16, so this tops out at 18, which both the basemap
 // and OpenSeaMap still draw.
 const PLACE_ZOOM = 17
 const PLACE_ZOOM_MIN_STEP = 2
 const PLACE_PITCH_DEG = 30
+const PLACE_PITCH_ZOOM_HEADROOM = 0.25
 const DIVE_TARGET_MS = 2800
 const HOP_TARGET_MS = 3500
 const PULL_OUT_TARGET_MS = 2500
@@ -384,8 +390,8 @@ export default function PoiMapTileImpl({
   // the follow effect is deliberately not released by this effect's cleanup,
   // since the next place continues the tour; only the pull-out, a cleared
   // highlight or an unmount ends it. Reduced motion jumps and never tilts.
-  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId })
-  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId }
+  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId, box: { width: widthPx, height: heightPx } })
+  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId, box: { width: widthPx, height: heightPx } }
   const previousHighlightRef = useRef(expandedPoiId)
   // True while the camera is left tilted by a dive or hop, so a path that
   // skips the pull-out can still level it.
@@ -419,7 +425,7 @@ export default function PoiMapTileImpl({
       return
     }
     if (expandedPoiId === previous) return
-    const { cameraTarget: overview, rankedList: places, gnssCriticalAlert: gnss, summaryCycleSeconds: cycle, layout } = latestRef.current
+    const { cameraTarget: overview, rankedList: places, gnssCriticalAlert: gnss, summaryCycleSeconds: cycle, layout, box } = latestRef.current
     const map = mapRef.current
     const level = () => {
       holdingPlaceRef.current = false
@@ -438,9 +444,15 @@ export default function PoiMapTileImpl({
     const hopping = holdingPlaceRef.current
     holdingPlaceRef.current = true
     tiltedRef.current = !reduced
-    const placeZoom = Math.max(PLACE_ZOOM, overview.zoom + PLACE_ZOOM_MIN_STEP)
+    // The overview is centred on the boat.
+    const frame = framePlaceWithBoat(
+      place, overview.center, box.width, box.height, POI_MAP_FIT_PADDING_PX,
+      Math.max(PLACE_ZOOM, overview.zoom + PLACE_ZOOM_MIN_STEP),
+      reduced ? 0 : PLACE_PITCH_ZOOM_HEADROOM,
+      overview.zoom,
+    )
     travelTo(
-      map, reduced, place, placeZoom, reduced ? 0 : PLACE_PITCH_DEG,
+      map, reduced, frame.center, frame.zoom, reduced ? 0 : PLACE_PITCH_DEG,
       hopping ? timings.hopMs : timings.diveMs,
       hopping ? overview.zoom : undefined,
     )
