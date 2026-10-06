@@ -245,12 +245,14 @@ func (s *assistantStore) CreateConversation(title string) (assistantConversation
 }
 
 // ListConversations returns every conversation, most recently active first -
-// the order the conversation list panel renders in.
+// the order the conversation list panel renders in. It leaves SummaryNoteID
+// unset: whether a summary note still exists is checked when one
+// conversation is opened (GetConversation).
 func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations ORDER BY updated_at DESC, id DESC`)
+	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -260,12 +262,8 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	for rows.Next() {
 		var conv assistantConversation
 		var created, updated int64
-		var noteID sql.NullString
-		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID); err != nil {
+		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated); err != nil {
 			return nil, fmt.Errorf("scan conversation: %w", err)
-		}
-		if noteID.Valid {
-			conv.SummaryNoteID = &noteID.String
 		}
 		conv.CreatedAt = time.Unix(created, 0).UTC()
 		conv.UpdatedAt = time.Unix(updated, 0).UTC()

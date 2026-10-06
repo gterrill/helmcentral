@@ -678,11 +678,6 @@ func listAssistantConversationsHandler(c echo.Context) error {
 	if conversations == nil {
 		conversations = []assistantConversation{}
 	}
-	// The list is a panel of titles; whether each summary note still exists
-	// is checked only when one conversation is opened.
-	for i := range conversations {
-		conversations[i].SummaryNoteID = nil
-	}
 	return c.JSON(http.StatusOK, map[string]any{"conversations": conversations})
 }
 
