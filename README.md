@@ -109,6 +109,9 @@ http://<this-machine>:8080/display/flybridge # a wall display, by its name
 Docker, manual binaries and upgrade instructions:
 [docs/how-to/install.md](docs/how-to/install.md).
 
+Stuck, or not sure it suits your boat? Ask in
+[Discussions](https://github.com/gterrill/helmcentral/discussions).
+
 > [!WARNING]
 > **Authentication is off by default** (`auth.mode: none`). A fresh install's
 > API can control connected equipment, including generator start/stop and CZone
@@ -263,6 +266,24 @@ move between panels, an unsaved Settings page still asks before you leave it,
 and a tapped alarm notification opens the Alarms panel rather than the
 dashboard.
 
+**[Documents](docs/features/documents.md) and [notes](docs/features/notes-and-the-manual.md).**
+Manuals, receipts, service logs and photos of data plates, kept on the boat and
+searchable from it. Text is extracted and indexed on upload; with Mate on, scans
+get proper OCR, a short summary and suggested tags, and Mate answers from your
+own manuals. Notes capture in one action, and a folder of them becomes the
+boat's own manual.
+
+**[Inventory](docs/features/inventory-tracking.md).** One record per piece of
+gear, from a bilge pump to a main engine, with where it is stowed, its spares,
+its manuals and photos. Bins carry QR or NFC labels a phone can scan, deck plans
+show where each bin is, and a stocktake walks the boat locker by locker.
+
+**[Maintenance](docs/features/maintenance.md).** What every system needs done,
+on running hours read live from the engines, on calendar dates, or both. One
+list of what is due, overdue and done, with the service log kept against the
+equipment it belongs to. Records already in YachtWave
+[import](docs/features/import.md) rather than being retyped.
+
 Other features include route planning that pushes an active route to SignalK for your
 autopilot, autopilot control on SignalK's v2 API, ARPA radar targets, and an
 embedded weather radar.
@@ -408,11 +429,14 @@ memory isolation, host allowlists and hard execution timeouts.
 
 ## Roadmap
 
-- **Inventory tracking**, with stocktakes done by walking the boat with an RFID
-  reader rather than opening lockers. Designed and documented, not yet built:
-  [docs/features/inventory-tracking.md](docs/features/inventory-tracking.md).
-- **Maintenance and service history**, tied to live engine hours so a service
-  falling due raises an ordinary alarm and logging the work clears it.
+- **Guided first-run setup**, walking through engines, battery banks and tanks
+  from what the boat is already reporting, so a new install reaches a working
+  dashboard without hand configuration.
+- **Automatic backups** to a drive or network share of your choosing, including
+  the key that unlocks stored credentials.
+- **RFID stocktakes**, walking the boat with a reader rather than opening
+  lockers. Designed and documented, not yet built:
+  [docs/features/inventory-tracking.md](docs/features/inventory-tracking.md#rfid-tags).
 - **`auth.mode: signalk` as the default.** Delegated login is implemented and
   opt-in, but stays off by default for this release so upgrading an existing
   install cannot lock anyone out of a running boat. A later major version can
@@ -421,6 +445,10 @@ memory isolation, host allowlists and hard execution timeouts.
   container networking that ruled it out no longer applies.
 
 ## Contributing
+
+Questions, install help, ideas and photos of Helmcentral on your own boat go in
+[Discussions](https://github.com/gterrill/helmcentral/discussions). Issues are
+for bugs and changes ready to be worked on.
 
 Issues and pull requests are welcome. CI runs `go vet`, the Go and frontend test
 suites, lint, and a full cross-platform release build on every PR, so run those
