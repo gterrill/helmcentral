@@ -315,7 +315,9 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
   // Set when the operator wheels, touches or keys the thread while a reply
-  // streams; clears when the next run starts. Gates the post-delivery scroll.
+  // streams; clears when the next run starts, a run is rejoined or the
+  // thread switches conversation (a rejoined run never sets `sending`).
+  // Gates the post-delivery scroll.
   const operatorScrolledRef = useRef(false)
   useEffect(() => {
     if (chat.sending) operatorScrolledRef.current = false
@@ -349,6 +351,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   activeIdRef.current = conversations.activeId
   useEffect(() => {
     const id = conversations.activeId
+    operatorScrolledRef.current = false
     if (id === null || chat.isStreamingConversation(id)) return
     let cancelled = false
     void (async () => {
@@ -390,6 +393,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   const watchEnded = watch?.ended ?? 0
   useEffect(() => {
     if (watchEnded === 0) return
+    operatorScrolledRef.current = false
     const id = conversations.activeId
     if (id === null || chat.isStreamingConversation(id)) return
     let cancelled = false
@@ -484,13 +488,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     }
 
     // A delivered answer has nothing left for the composer to hold onto -
-    // clear() aborts nothing (everything staged already finished
-    // uploading, since uploads.ready gated Send above) and just drops the
-    // now-sent chips. A failed send (chat.error is set) leaves them staged
+    // the chips that went with the question are dropped (everything sent
+    // had finished uploading, since uploads.ready gated Send above), and
+    // only those: a file staged for the next question while this one
+    // streamed stays. A failed send (chat.error is set) leaves them staged
     // so the operator can retry without re-uploading. The chips go whenever
     // the answer landed, even if the operator opened another thread meanwhile:
     // they would otherwise ride along with the next question there.
-    if (answered) uploads.clear()
+    if (answered) uploads.removeByDocumentIds(attachmentIds)
     if (delivered) await conversations.refresh()
   }, [content, chat, conversations, canWrite, uploads, dictation])
 

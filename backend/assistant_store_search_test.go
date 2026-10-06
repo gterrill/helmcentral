@@ -328,3 +328,77 @@ func TestSearchConversations_ExcerptIsPlainTextWithMatchEarly(t *testing.T) {
 		t.Fatalf("match not early in %q (at %d)", text, i)
 	}
 }
+
+// The index shape that keyed on message_id (a column scanned on delete) is
+// replaced by the id-mapped one, keeping every hit.
+func TestAssistantSearchSchema_ReplacesMessageIDKeyedIndex(t *testing.T) {
+	s := newTestAssistantStore(t)
+	c := seedSearchConv(t, s, "a", [2]string{"user", "windlass remote"})
+	for _, q := range []string{
+		`DROP TRIGGER messages_fts_insert`, `DROP TRIGGER messages_fts_delete`, `DROP TRIGGER messages_fts_update`,
+		`DROP TABLE messages_fts`, `DROP TABLE messages_fts_map`,
+		`CREATE VIRTUAL TABLE messages_fts USING fts5(content, message_id UNINDEXED, conversation_id UNINDEXED)`,
+		`INSERT INTO messages_fts (content, message_id, conversation_id) SELECT content, id, conversation_id FROM messages`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createAssistantSearchSchema(s.db); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.SearchConversations("windlass", assistantConversationSearchOptions{})
+	if err != nil || len(hits) != 1 || hits[0].ID != c.ID {
+		t.Fatalf("hits=%+v err=%v", hits, err)
+	}
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM messages_fts_map`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("map rows = %d", n)
+	}
+}
+
+func TestSearchConversations_DeleteAndUpdateKeepIndexLevel(t *testing.T) {
+	s := newTestAssistantStore(t)
+	c := seedSearchConv(t, s, "a", [2]string{"user", "windlass remote"}, [2]string{"assistant", "windlass fuse"})
+	if _, err := s.db.Exec(`UPDATE messages SET content = 'bilge pump' WHERE role = 'user'`); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := s.SearchConversations("bilge", assistantConversationSearchOptions{}); len(hits) != 1 {
+		t.Fatalf("updated text not indexed: %+v", hits)
+	}
+	if err := s.DeleteConversation(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n, m int
+	s.db.QueryRow(`SELECT COUNT(*) FROM messages_fts`).Scan(&n)
+	s.db.QueryRow(`SELECT COUNT(*) FROM messages_fts_map`).Scan(&m)
+	if n != 0 || m != 0 {
+		t.Fatalf("fts=%d map=%d after delete", n, m)
+	}
+}
+
+func TestSearchConversations_ExcerptsPerConversationInRankOrder(t *testing.T) {
+	s := newTestAssistantStore(t)
+	a := seedSearchConv(t, s, "a",
+		[2]string{"user", "windlass"},
+		[2]string{"assistant", "windlass windlass windlass"},
+		[2]string{"user", "other words entirely windlass"})
+	b := seedSearchConv(t, s, "b", [2]string{"user", "the windlass motor"})
+	hits, err := s.SearchConversations("windlass", assistantConversationSearchOptions{ExcerptsPerConv: 2})
+	if err != nil || len(hits) != 2 {
+		t.Fatalf("hits=%+v err=%v", hits, err)
+	}
+	for _, h := range hits {
+		switch h.ID {
+		case a.ID:
+			if len(h.Excerpts) != 2 {
+				t.Fatalf("a excerpts = %+v", h.Excerpts)
+			}
+		case b.ID:
+			if len(h.Excerpts) != 1 {
+				t.Fatalf("b excerpts = %+v", h.Excerpts)
+			}
+		}
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -407,8 +408,10 @@ func TestSummarySave_SuggestedTypeIsAutomaticAndFollowsUpdatesUntilTheOperatorCh
 	}
 
 	// The operator re-types it in Documents (PATCH type), which must win.
-	if code, _, err := patchNoteInProcess(id, map[string]any{"type": "spec"}); err != nil || code != http.StatusOK {
-		t.Fatalf("operator patch: %d %v", code, err)
+	spec := "spec"
+	cur := h.noteDoc(t, id)
+	if _, _, err := patchNote(cur, notePatch{Type: &spec}, false); err != nil {
+		t.Fatalf("operator patch: %v", err)
 	}
 	h.save(t, `{"title":"T","body":"- three","type":"quirk"}`)
 	if d := h.noteDoc(t, id); d.NoteType != "spec" || d.NoteTypeSource != "operator" {
@@ -463,5 +466,80 @@ func TestResolveSummaryEquipment_ExactAliasBeatsLongerNames(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != maker.ID {
 		t.Fatalf("got %+v, want the record aliased Watermaker", got)
+	}
+}
+
+func TestResolveSummaryEquipment_SameExactNameOnTwoRecordsIsAmbiguous(t *testing.T) {
+	docs := newTestDocumentStore(t)
+	mustToolEquipment(t, docs, equipmentItem{Name: "Racor filter"})
+	mustToolEquipment(t, docs, equipmentItem{Name: "Racor filter"})
+	got, err := resolveSummaryEquipment(docs, []string{"Racor filter"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v: two records share the name, so it is ambiguous", got)
+	}
+}
+
+func TestResolveSummaryEquipment_AliasOnTwoRecordsIsAmbiguous(t *testing.T) {
+	docs := newTestDocumentStore(t)
+	mustToolEquipment(t, docs, equipmentItem{Name: "Port pump", Aliases: []string{"Bilge pump"}})
+	mustToolEquipment(t, docs, equipmentItem{Name: "Stbd pump", Aliases: []string{"Bilge pump"}})
+	got, err := resolveSummaryEquipment(docs, []string{"bilge pump"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v: the alias names two records", got)
+	}
+}
+
+func TestAssistantSummaryTranscript_CapsTotalKeepingOpeningAndRecent(t *testing.T) {
+	var msgs []assistantMessage
+	for i := 0; i < 60; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, assistantMessage{Role: role, Content: fmt.Sprintf("MSG%02d ", i) + strings.Repeat("x", 3500)})
+	}
+	got, err := assistantSummaryTranscript(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len([]rune(got)); n > assistantSummaryTranscriptRunes+500 {
+		t.Fatalf("transcript is %d runes, cap %d", n, assistantSummaryTranscriptRunes)
+	}
+	for _, want := range []string{"MSG00", "MSG59", "earlier messages left out"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("transcript lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "MSG10 ") {
+		t.Fatal("a middle message should have been left out")
+	}
+	short, _ := assistantSummaryTranscript(msgs[:3])
+	if strings.Contains(short, "left out") {
+		t.Fatal("a short conversation must not be marked")
+	}
+}
+
+func TestAssistantStore_ListConversationsLeavesSummaryNoteUnset(t *testing.T) {
+	s := newTestAssistantStore(t)
+	conv, err := s.CreateConversation("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSummaryNote(conv.ID, "note-1"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListConversations()
+	if err != nil || len(list) != 1 || list[0].SummaryNoteID != nil {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+	got, ok, err := s.GetConversation(conv.ID)
+	if err != nil || !ok || got.SummaryNoteID == nil || *got.SummaryNoteID != "note-1" {
+		t.Fatalf("get=%+v ok=%v err=%v", got, ok, err)
 	}
 }

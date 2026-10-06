@@ -271,10 +271,6 @@ func createNoteHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, map[string]any{"document": toDocumentJSON(inserted), "body": req.Body})
 }
 
-// noteTypeIsSuggestionKey is the echo context key patchNoteInProcess sets so
-// patchNoteHandler records an overriding type as automatic.
-const noteTypeIsSuggestionKey = "note-type-is-suggestion"
-
 // errNoteTypeInvalid is createNoteDocument's answer to a type the note
 // vocabulary does not contain.
 var errNoteTypeInvalid = errors.New("invalid note type")
@@ -581,6 +577,49 @@ func patchNoteHandler(c echo.Context) error {
 		pinned = &p
 	}
 
+	updated, body, err := patchNote(doc, notePatch{
+		Title: title, Body: bodyPatch, Tags: tags, FolderID: folderID, MoveFolder: moveFolder,
+		Type: noteTypeOverride, SortIndex: sortIndex, Pinned: pinned,
+	}, false)
+	if err != nil {
+		var se *noteStatusError
+		if errors.As(err, &se) {
+			return c.JSON(se.status, map[string]string{"error": se.msg})
+		}
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(updated), "body": body})
+}
+
+// noteStatusError is a patchNote failure that carries its own client
+// response; any other error is mapped by writeDocumentError.
+type noteStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *noteStatusError) Error() string { return e.msg }
+
+// notePatch is a validated note edit. A nil field is left alone.
+type notePatch struct {
+	Title      *string
+	Body       *string
+	Tags       []string
+	FolderID   *string
+	MoveFolder bool
+	Type       *string
+	SortIndex  *int
+	Pinned     *bool
+}
+
+// patchNote applies a validated edit to a note and returns the updated
+// document and body: the edit protocol patchNoteHandler describes. The Mate
+// summary save calls it too. typeIsSuggestion records an overriding Type as
+// an automatic classification rather than the operator's own choice.
+func patchNote(doc document, p notePatch, typeIsSuggestion bool) (document, string, error) {
+	title, tags, folderID, moveFolder := p.Title, p.Tags, p.FolderID, p.MoveFolder
+	noteTypeOverride, bodyPatch, sortIndex, pinned := p.Type, p.Body, p.SortIndex, p.Pinned
+	var err error
 	needsRender := title != nil || tags != nil || noteTypeOverride != nil || bodyPatch != nil
 
 	// resolvedType/resolvedSource is what SetNoteTypeIfNotOperator
@@ -599,9 +638,9 @@ func patchNoteHandler(c echo.Context) error {
 	switch {
 	case noteTypeOverride != nil:
 		resolvedType, resolvedSource, setType = *noteTypeOverride, "operator", true
-		// An in-process caller (the Mate summary save) passing a suggested
-		// type, not an operator's choice, keeps the classification automatic.
-		if suggestion, _ := c.Get(noteTypeIsSuggestionKey).(bool); suggestion {
+		// A caller passing a suggested type (the Mate summary save), not an
+		// operator's choice, keeps the classification automatic.
+		if typeIsSuggestion {
 			resolvedSource = "auto"
 		}
 	case bodyPatch != nil && doc.NoteTypeSource != "operator":
@@ -631,12 +670,12 @@ func patchNoteHandler(c echo.Context) error {
 			effectiveBody, err = readNoteBody(doc)
 			if err != nil {
 				log.Printf("notes: patch %s: %v", doc.ID, err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "note file missing or unreadable on disk"})
+				return document{}, "", &noteStatusError{http.StatusInternalServerError, "note file missing or unreadable on disk"}
 			}
 		}
 		rendered = renderNoteFile(noteFileMeta{ID: doc.ID, Title: effectiveTitle, Type: effectiveType, Tags: effectiveTags, Created: doc.CreatedAt}, effectiveBody)
 		if noteRenderedTooLarge(rendered) {
-			return writeDocumentError(c, errNoteBodyTooLarge)
+			return document{}, "", errNoteBodyTooLarge
 		}
 		newSHA = sha256Hex(rendered)
 	}
@@ -646,7 +685,7 @@ func patchNoteHandler(c echo.Context) error {
 		// function's own doc comment on why. Only the database side of
 		// whatever was actually patched needs to land.
 		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource, pinned); err != nil {
-			return writeDocumentError(c, err)
+			return document{}, "", err
 		}
 	} else {
 		// A genuine content edit: plan §1's edit protocol, steps 2-6.
@@ -670,9 +709,9 @@ func patchNoteHandler(c echo.Context) error {
 		// no. Checking first means a collision is rejected without this
 		// note's edit ever touching a byte that belongs to the other row.
 		if existing, ok, err := globalDocumentStore.GetBySHA(newSHA); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return document{}, "", &noteStatusError{http.StatusInternalServerError, err.Error()}
 		} else if ok {
-			return writeDocumentError(c, fmt.Errorf("note edit collides with existing document %s: %w", existing.ID, errDocumentDuplicate))
+			return document{}, "", fmt.Errorf("note edit collides with existing document %s: %w", existing.ID, errDocumentDuplicate)
 		}
 
 		dir := documentsDirPath()
@@ -684,7 +723,7 @@ func patchNoteHandler(c echo.Context) error {
 		// temp file, with no new sweep logic required.
 		tmp, err := os.CreateTemp(dir, "upload-*.tmp")
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file"})
+			return document{}, "", &noteStatusError{http.StatusInternalServerError, "failed to create temp file"}
 		}
 		tmpPath := tmp.Name()
 		removeTemp := func() {
@@ -695,17 +734,17 @@ func patchNoteHandler(c echo.Context) error {
 		if _, err := tmp.Write(rendered); err != nil {
 			tmp.Close()
 			removeTemp()
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write note"})
+			return document{}, "", &noteStatusError{http.StatusInternalServerError, "failed to write note"}
 		}
 		if err := tmp.Close(); err != nil {
 			removeTemp()
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write note"})
+			return document{}, "", &noteStatusError{http.StatusInternalServerError, "failed to write note"}
 		}
 
 		finalPath := filepath.Join(dir, newSHA)
 		if err := os.Rename(tmpPath, finalPath); err != nil {
 			removeTemp()
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to store note"})
+			return document{}, "", &noteStatusError{http.StatusInternalServerError, "failed to store note"}
 		}
 		tmpPath = ""
 
@@ -723,11 +762,11 @@ func patchNoteHandler(c echo.Context) error {
 			// nothing else can have claimed newSHA's path between the
 			// rename above and here.
 			os.Remove(finalPath)
-			return writeDocumentError(c, err)
+			return document{}, "", err
 		}
 
 		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource, pinned); err != nil {
-			return writeDocumentError(c, err)
+			return document{}, "", err
 		}
 
 		// Step 5's success branch: the old blob is now superseded. A
@@ -752,12 +791,12 @@ func patchNoteHandler(c echo.Context) error {
 
 	updated, err := globalDocumentStore.Get(doc.ID)
 	if err != nil {
-		return writeDocumentError(c, err)
+		return document{}, "", err
 	}
 	body, err := readNoteBody(updated)
 	if err != nil {
 		log.Printf("notes: patch %s: %v", doc.ID, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "note file missing or unreadable on disk"})
+		return document{}, "", &noteStatusError{http.StatusInternalServerError, "note file missing or unreadable on disk"}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(updated), "body": body})
+	return updated, body, nil
 }

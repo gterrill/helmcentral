@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -22,12 +20,15 @@ import (
 const (
 	assistantSummaryNothingToKeep = "Nothing in this conversation to keep yet."
 	assistantSummaryTimeout       = 120 * time.Second
-	// Per-message and per-attachment caps keep a long conversation inside the
-	// model's context; the oldest material is what a conversation settled
-	// least recently, so nothing is dropped silently - a message is cut with
-	// a visible marker.
+	// Caps keep a long conversation inside the model's context and the
+	// timeout. A message over the per-message cap is cut with a visible
+	// marker. Over the total cap, the opening exchange (what the operator
+	// came to ask) and the most recent messages (where it was settled) are
+	// kept and the middle is replaced by a marker saying how many were left
+	// out; nothing is dropped silently.
 	assistantSummaryMessageRunes    = 4000
 	assistantSummaryAttachmentRunes = 1500
+	assistantSummaryTranscriptRunes = 60000
 )
 
 const assistantSummarySystemPrompt = `You write the record of what one conversation between a boat's operator and the onboard assistant (Mate) established about THIS boat, so the operator can keep it as a note.
@@ -161,22 +162,32 @@ func resolveSummaryEquipment(store *documentStore, names []string) ([]assistantS
 		if err != nil {
 			return nil, fmt.Errorf("match equipment %q: %w", name, err)
 		}
-		var pick *equipmentItem
+		// Several records with the same exact name, or the same alias, are
+		// ambiguous: dropped, never guessed.
+		var exact, aliased []*equipmentItem
 		for i := range items {
-			if strings.EqualFold(items[i].Name, name) {
-				pick = &items[i]
-				break
+			if strings.EqualFold(strings.TrimSpace(items[i].Name), name) {
+				exact = append(exact, &items[i])
+				continue
 			}
-		}
-		for i := 0; pick == nil && i < len(items); i++ {
 			for _, alias := range items[i].Aliases {
 				if strings.EqualFold(strings.TrimSpace(alias), name) {
-					pick = &items[i]
+					aliased = append(aliased, &items[i])
 					break
 				}
 			}
 		}
-		if pick == nil && len(items) == 1 {
+		var pick *equipmentItem
+		switch {
+		case len(exact) > 0:
+			if len(exact) == 1 {
+				pick = exact[0]
+			}
+		case len(aliased) > 0:
+			if len(aliased) == 1 {
+				pick = aliased[0]
+			}
+		case len(items) == 1:
 			pick = &items[0]
 		}
 		if pick == nil || seen[pick.ID] {
@@ -235,11 +246,12 @@ func liveAssistantSummaryNoteID(conv assistantConversation) (string, error) {
 }
 
 func assistantSummaryTranscript(messages []assistantMessage) (string, error) {
-	var b strings.Builder
+	var blocks []string
 	for _, m := range messages {
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
 		}
+		var b strings.Builder
 		who := "Operator"
 		if m.Role == "assistant" {
 			who = "Mate"
@@ -271,8 +283,37 @@ func assistantSummaryTranscript(messages []assistantMessage) (string, error) {
 			}
 		}
 		b.WriteString("\n")
+		blocks = append(blocks, b.String())
 	}
-	return b.String(), nil
+
+	size := func(s string) int { return len([]rune(s)) }
+	total := 0
+	for _, blk := range blocks {
+		total += size(blk)
+	}
+	if total <= assistantSummaryTranscriptRunes {
+		return strings.Join(blocks, ""), nil
+	}
+	// Keep the opening message, then as many of the latest as fit.
+	budget := assistantSummaryTranscriptRunes - size(blocks[0])
+	start := len(blocks)
+	for start > 1 {
+		n := size(blocks[start-1])
+		if n > budget {
+			break
+		}
+		budget -= n
+		start--
+	}
+	if start <= 1 {
+		return strings.Join(blocks, ""), nil
+	}
+	omitted := start - 1
+	marker := fmt.Sprintf("[%d earlier messages left out to keep this short]\n\n", omitted)
+	if omitted == 1 {
+		marker = "[1 earlier message left out to keep this short]\n\n"
+	}
+	return blocks[0] + marker + strings.Join(blocks[start:], ""), nil
 }
 
 func nonEmptyStrings(in ...string) []string {
@@ -404,29 +445,6 @@ type saveAssistantSummaryNoteRequest struct {
 	RemoveEquipmentIDs []string `json:"remove_equipment_ids"`
 }
 
-// patchNoteInProcess runs patchNoteHandler against a synthetic request so a
-// summary update goes through exactly the note edit path (frontmatter
-// re-render, blob swap, reindex) instead of a second copy of it.
-func patchNoteInProcess(noteID string, payload map[string]any, suggestedType ...bool) (int, []byte, error) {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return 0, nil, err
-	}
-	req := httptest.NewRequest(http.MethodPatch, "/api/notes/"+noteID, bytes.NewReader(raw))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("id")
-	c.SetParamValues(noteID)
-	if len(suggestedType) > 0 && suggestedType[0] {
-		c.Set(noteTypeIsSuggestionKey, true)
-	}
-	if err := patchNoteHandler(c); err != nil {
-		return 0, nil, err
-	}
-	return rec.Code, rec.Body.Bytes(), nil
-}
-
 // POST /api/assistant/conversations/:id/summary-note
 // The Save button: creates the conversation's note, or replaces the one it
 // already has, adjusts the equipment links and remembers the note on the
@@ -480,27 +498,28 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 		}
 		noteID, created = doc.ID, true
 	} else {
-		payload := map[string]any{"body": req.Body}
-		if t := strings.TrimSpace(req.Title); t != "" {
-			payload["title"] = t
-		}
-		// Re-apply the suggested type only while the note's type is still an
-		// automatic one; an operator's own choice in Documents wins.
-		if t := strings.TrimSpace(req.Type); t != "" {
-			cur, err := globalDocumentStore.Get(existing)
-			if err != nil {
-				return fail(http.StatusInternalServerError, err.Error())
-			}
-			if cur.NoteTypeSource != "operator" {
-				payload["type"] = t
-			}
-		}
-		status, respBody, err := patchNoteInProcess(existing, payload, true)
+		cur, err := globalDocumentStore.Get(existing)
 		if err != nil {
 			return fail(http.StatusInternalServerError, err.Error())
 		}
-		if status != http.StatusOK {
-			return c.JSONBlob(status, respBody)
+		patch := notePatch{Body: &req.Body}
+		if t := strings.TrimSpace(req.Title); t != "" {
+			patch.Title = &t
+		}
+		// Re-apply the suggested type only while the note's type is still an
+		// automatic one; an operator's own choice in Documents wins.
+		if t := strings.TrimSpace(req.Type); t != "" && cur.NoteTypeSource != "operator" {
+			if !validNoteType(t) {
+				return fail(http.StatusBadRequest, "invalid note type")
+			}
+			patch.Type = &t
+		}
+		if _, _, err := patchNote(cur, patch, true); err != nil {
+			var se *noteStatusError
+			if errors.As(err, &se) {
+				return fail(se.status, se.msg)
+			}
+			return writeDocumentError(c, err)
 		}
 	}
 

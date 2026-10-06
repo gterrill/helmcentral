@@ -251,6 +251,18 @@ export function useDocumentUploads(folderId?: string | null, options?: UseDocume
     setItems((previous) => previous.filter((item) => item.key !== key))
   }, [])
 
+  // Drops the items already sent with a question, by the document ids that
+  // went with it, leaving anything staged since for the next one.
+  const removeByDocumentIds = useCallback((documentIds: string[]) => {
+    const gone = new Set(documentIds)
+    for (const item of itemsRef.current) {
+      if (item.documentId === null || !gone.has(item.documentId)) continue
+      xhrsRef.current.get(item.key)?.abort()
+      xhrsRef.current.delete(item.key)
+    }
+    setItems((previous) => previous.filter((item) => item.documentId === null || !gone.has(item.documentId)))
+  }, [])
+
   const clear = useCallback(() => {
     for (const xhr of xhrsRef.current.values()) xhr.abort()
     xhrsRef.current.clear()
@@ -314,5 +326,5 @@ export function useDocumentUploads(folderId?: string | null, options?: UseDocume
   // told it failed), so only `uploading`/`pending` hold Send back.
   const ready = items.every((item) => item.status === 'indexed' || item.status === 'failed')
 
-  return { items, add, remove, clear, ready, error }
+  return { items, add, remove, removeByDocumentIds, clear, ready, error }
 }
