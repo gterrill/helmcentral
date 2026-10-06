@@ -1114,4 +1114,53 @@ describe('MateSheet read-aloud', () => {
     // never be read aloud.
     expect(fakeSynth.spoken).toHaveLength(0)
   })
+
+  it('neither shows nor speaks a reply when the operator moved to another conversation meanwhile', async () => {
+    installFakeSpeechSynthesis()
+    const stream = controllableStream()
+    let sentTo = ''
+    vi.stubGlobal('fetch', buildFetch(
+      (conversationId) => {
+        sentTo = conversationId
+        return { ok: true, body: stream.body }
+      },
+      [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '', updated_at: '' }],
+    ))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(sentTo).not.toBe(''))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+    fireEvent.click(await screen.findByText('Hook Reef anchorages'))
+
+    // Switching threads supersedes the send's stream, so it may already be
+    // cancelled; a frame that still slips through must not be appended.
+    await act(async () => {
+      try { stream.push(`data: ${JSON.stringify({
+        message: {
+          id: 'm1',
+          conversation_id: sentTo,
+          seq: 1,
+          role: 'assistant',
+          content: '## Spoken summary\n\nFine tomorrow, light winds.',
+          created_at: '2026-09-12T00:00:00Z',
+        },
+        conversation: { id: sentTo, title: 'How does tomorrow look?', created_at: '2026-09-12T00:00:00Z', updated_at: '2026-09-12T00:00:01Z' },
+      })}\n\n`) } catch { /* stream already closed */ }
+      await flushMicrotasks()
+    })
+
+    expect(screen.queryByText(/Fine tomorrow, light winds\./)).not.toBeInTheDocument()
+    expect(fakeSynth.spoken).toHaveLength(0)
+  })
 })
