@@ -234,8 +234,9 @@ type sourceHealth struct {
 	// EngineBound is true when the source ever published a propulsion.<id>.*
 	// path: an engine computer, which loses power with the ignition.
 	EngineBound bool
-	// EngineIDs are the propulsion.<id> engines this source publishes.
-	EngineIDs []string
+	// EngineLast is the newest update of each propulsion.<id> engine this
+	// source publishes, by id.
+	EngineLast map[string]time.Time
 	// Plugin is true for a SignalK server plugin's own output (a bare
 	// $source id that never carried a bus type). Plugins report on events,
 	// not on a schedule, and are software rather than devices.
@@ -298,7 +299,7 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			Last:        entry.Last,
 			Count:       entry.Count,
 			EngineBound: entry.EngineBound,
-			EngineIDs:   entry.EngineIDs,
+			EngineLast:  entry.EngineLast,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,

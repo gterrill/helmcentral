@@ -543,3 +543,32 @@ func TestAssistantStore_ListConversationsLeavesSummaryNoteUnset(t *testing.T) {
 		t.Fatalf("get=%+v ok=%v err=%v", got, ok, err)
 	}
 }
+
+// An opening message with many attachments can exceed the whole transcript
+// budget; the latest messages must still reach the model.
+func TestCapSummaryBlocks_HugeOpeningStillKeepsLatest(t *testing.T) {
+	blocks := []string{"OPEN " + strings.Repeat("o", assistantSummaryTranscriptRunes+5000)}
+	for i := 0; i < 20; i++ {
+		blocks = append(blocks, fmt.Sprintf("MSG%02d ", i)+strings.Repeat("x", 3000)+"\n\n")
+	}
+	got := capSummaryBlocks(blocks)
+	if n := len([]rune(got)); n > assistantSummaryTranscriptRunes {
+		t.Fatalf("transcript is %d runes, cap %d", n, assistantSummaryTranscriptRunes)
+	}
+	for _, want := range []string{"OPEN", "MSG19", "MSG18", "earlier messages left out", "opening message cut"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("transcript lacks %q", want)
+		}
+	}
+}
+
+func TestCapSummaryBlocks_LatestAloneOverBudgetIsCutNotDropped(t *testing.T) {
+	blocks := []string{"OPEN short\n\n", "LATEST " + strings.Repeat("y", assistantSummaryTranscriptRunes*2)}
+	got := capSummaryBlocks(blocks)
+	if !strings.Contains(got, "OPEN") || !strings.Contains(got, "LATEST") || !strings.Contains(got, "latest message cut") {
+		t.Fatalf("got %d runes lacking opening, latest or cut marker", len([]rune(got)))
+	}
+	if n := len([]rune(got)); n > assistantSummaryTranscriptRunes {
+		t.Fatalf("transcript is %d runes, cap %d", n, assistantSummaryTranscriptRunes)
+	}
+}

@@ -268,8 +268,7 @@ func fuelRateInstancesFromSnapshot() []string {
 
 	var instances []string
 	for _, path := range fuelRatePaths(tree) {
-		instance := strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
-		if instance != "" {
+		if instance := propulsionEngineID(path); instance != "" {
 			instances = append(instances, instance)
 		}
 	}

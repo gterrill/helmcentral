@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"slices"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -93,13 +93,15 @@ type sourceSeenEntry struct {
 	Count       int
 	EngineBound bool
 	BusTyped    bool
-	// EngineIDs are the <id> of every propulsion.<id>.* path this source has
-	// published, sorted. Never mutated in place (always replaced), so the
-	// copies sourcesFor hands out share it safely.
-	EngineIDs []string
+	// EngineLast is, for every <id> in a propulsion.<id>.* path this source
+	// has published, the newest declared timestamp of an update carrying it
+	// (the same event time as Last). One source relaying several engines
+	// (a gateway) is told apart per engine this way. Never mutated in place
+	// (always replaced), so the copies sourcesFor hands out share it safely.
+	EngineLast map[string]time.Time
 }
 
-// signalKSourceMaxEngineIDs bounds EngineIDs so a hostile stream inventing
+// signalKSourceMaxEngineIDs bounds EngineLast so a hostile stream inventing
 // propulsion ids cannot grow one source's entry without limit.
 const signalKSourceMaxEngineIDs = 8
 
@@ -377,11 +379,16 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				if strings.HasPrefix(val.Path, "propulsion.") {
 					entry.EngineBound = true
 				}
-				if id := propulsionEngineID(val.Path); id != "" && !slices.Contains(entry.EngineIDs, id) &&
-					len(entry.EngineIDs) < signalKSourceMaxEngineIDs {
-					ids := append(slices.Clone(entry.EngineIDs), id)
-					slices.Sort(ids)
-					entry.EngineIDs = ids
+				if id := propulsionEngineID(val.Path); id != "" {
+					prev, known := entry.EngineLast[id]
+					if (known || len(entry.EngineLast) < signalKSourceMaxEngineIDs) && (!known || eventAt.After(prev)) {
+						next := maps.Clone(entry.EngineLast)
+						if next == nil {
+							next = map[string]time.Time{}
+						}
+						next[id] = eventAt
+						entry.EngineLast = next
+					}
 				}
 			}
 			s.sourceSeen[key] = entry

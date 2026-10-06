@@ -34,6 +34,11 @@ type alarmSample struct {
 	Value    float64
 	Present  bool
 	LastSeen time.Time
+	// EngineOff marks a propulsion path of an engine that is switched off
+	// (engine_state.go). Its readings stopped because the engine computer
+	// powered down, so the path is neither a live value nor a failed sensor:
+	// Present is false, and a stale-data rule does not fire on it either.
+	EngineOff bool
 }
 
 // alarmSampleStale applies a rule's staleness threshold.
@@ -47,7 +52,7 @@ type alarmSample struct {
 // the same fault as one that stopped, and it surfaces a mistyped path rather
 // than hiding it.
 func alarmSampleStale(rule alarmRule, sample alarmSample, now time.Time) bool {
-	if rule.StaleAfterSeconds <= 0 {
+	if rule.StaleAfterSeconds <= 0 || sample.EngineOff {
 		return false
 	}
 	if !sample.Present || sample.LastSeen.IsZero() {

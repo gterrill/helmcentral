@@ -209,12 +209,15 @@ number is deliberate: a stale reading shown as current is worse than none.
   in place of `STALE`, in plain grey with no amber edge, and its readings go
   to `--`. Switching the key off powers the engine's own electronics down, so
   its readings simply stop. Hover over the marker for the time it went quiet.
-  Helmcentral takes it as off when the rest of that engine's network is still
-  reporting. If the whole network feeding the engine goes quiet, the tile
-  stays amber `STALE`, because that is a failed link rather than an engine
-  switched off. The one case it cannot tell apart: an engine's electronics
-  dropping out while the engine runs, on a network that is otherwise healthy,
-  also reads `OFF`.
+  Helmcentral takes an engine as off once it has sent nothing for more than
+  two minutes while the rest of its network is still reporting. Any gauge,
+  gauge group or lamp bound to that engine's readings shows `--` with no
+  `STALE` marker too, so the tiles on a page agree. If the whole network
+  feeding the engine goes quiet, the tile stays amber `STALE`, because that is
+  a failed link rather than an engine switched off. Two cases it cannot tell
+  apart from a switch-off: an engine's electronics dropping out while the
+  engine runs, on a network that is otherwise healthy, and an engine wired to
+  a network of its own that fails while the engine runs. Both read `OFF`.
 - A lamp goes dark with the same age marker rather than staying lit on an
   old value.
 - A number worked out from more than one reading, fuel economy for example,

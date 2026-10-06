@@ -236,7 +236,8 @@ covers no distance per litre", which is a measurement rather than the absence
 of one, and an infinity would render as a plausible-looking enormous range.
 */
 func vesselFuelEconomy(read alarmReader, ratePaths []string) (float64, bool) {
-	value, _, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, time.Now().UTC())
+	now := time.Now().UTC()
+	value, _, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, memoEngineStates(globalSignalKSnapshot, now), now)
 	return value, ok
 }
 
@@ -256,14 +257,14 @@ func vesselFuelEconomy(read alarmReader, ratePaths []string) (float64, bool) {
 //
 // Only computed alongside a real figure: an age for an undefined economy
 // would say nothing an operator could act on.
-func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (value float64, age float64, ok bool) {
+func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (value float64, age float64, ok bool) {
 	const speedOverGroundPath = "navigation.speedOverGround"
 	speed := read(speedOverGroundPath)
 	if !speed.Present || speed.Value <= 0 {
 		return 0, -1, false
 	}
 
-	total, burnAge, burning := totalFuelBurnWithAge(snapshot, read, ratePaths, now)
+	total, burnAge, burning := totalFuelBurnWithAge(snapshot, read, ratePaths, states, now)
 	if !burning {
 		return 0, -1, false
 	}
@@ -290,7 +291,7 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 // still does.
 // When no engine is fresh every positive rate is summed and the oldest age
 // reported, so the figures go absent and the age says why.
-func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (total float64, age float64, ok bool) {
+func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (total float64, age float64, ok bool) {
 	type contribution struct {
 		path  string
 		value float64
@@ -311,14 +312,13 @@ func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths
 			anyStale = true
 		}
 	}
-	var states map[string]engineStateInfo
+	var offEngines map[string]engineStateInfo
 	if anyFresh && anyStale {
-		_, lastMessage := snapshot.status()
-		states = engineStates(sourceHealthFor(snapshot, snapshot.selfContext()), now, now.Sub(lastMessage))
+		offEngines = states()
 	}
 	var ages []float64
 	for _, c := range all {
-		if !freshEnoughToPublish(c.age) && states[fuelRateEngineID(c.path)].State == engineStateOff {
+		if !freshEnoughToPublish(c.age) && offEngines[propulsionEngineID(c.path)].State == engineStateOff {
 			continue
 		}
 		total += c.value
@@ -520,6 +520,13 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 // their own collectSignalKPaths call; collectFuelPaths does both in one
 // walk.
 func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree map[string]any, now time.Time) (map[string]*float64, map[string]float64) {
+	return computeDerivedPathsWithStates(snapshot, context, tree, memoEngineStates(snapshot, now), now)
+}
+
+// computeDerivedPathsWithStates is computeDerivedPathsFromTree with the engine
+// states supplied, so a caller that also publishes them (the gauge-values
+// payload) scans the source history once per build, not once per consumer.
+func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tree map[string]any, states engineStateFunc, now time.Time) (map[string]*float64, map[string]float64) {
 	values := map[string]*float64{
 		vesselFuelEconomyPath:        nil,
 		pressureRatePath:             nil,
@@ -579,7 +586,7 @@ func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree
 	// number) when that age clears derivedInputMaxAge. Below the guard the
 	// figure stays absent rather than a rule silently evaluating arithmetic
 	// done against a source that stopped reporting hours or days ago.
-	economy, economyAge, economyOK := vesselFuelEconomyWithAge(snapshot, read, ratePaths, now)
+	economy, economyAge, economyOK := vesselFuelEconomyWithAge(snapshot, read, ratePaths, states, now)
 	if economyOK {
 		ages[vesselFuelEconomyPath] = economyAge
 		if freshEnoughToPublish(economyAge) {
@@ -595,7 +602,7 @@ func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree
 		}
 	}
 
-	burn, burnAge, burnOK := totalFuelBurnWithAge(snapshot, read, ratePaths, now)
+	burn, burnAge, burnOK := totalFuelBurnWithAge(snapshot, read, ratePaths, states, now)
 
 	if timeToEmpty, ttAge, ttOK := fuelTimeToEmptyWithAge(volume, volumeAge, volumeOK, burn, burnAge, burnOK); ttOK {
 		ages[fuelTimeToEmptyPath] = ttAge
@@ -828,6 +835,7 @@ extra from this).
 func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 	published := snapshotAlarmReader(snapshot)
 	now := time.Now().UTC()
+	engineStateOf := memoEngineStates(snapshot, now)
 
 	var (
 		once   sync.Once
@@ -837,6 +845,11 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 
 	return func(path string) alarmSample {
 		if !isDerivedPath(path) {
+			// A switched-off engine's paths read the way the Engine Cluster
+			// tile shows them, so a rule bound to one agrees with the tile.
+			if id := propulsionEngineID(path); id != "" && engineStateOf()[id].State == engineStateOff {
+				return alarmSample{EngineOff: true}
+			}
 			return published(path)
 		}
 
@@ -856,9 +869,4 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 
 		return alarmSample{Value: *value, Present: true, LastSeen: lastSeen}
 	}
-}
-
-// fuelRateEngineID is the propulsion id in a propulsion.<id>.fuel.rate path.
-func fuelRateEngineID(path string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
 }

@@ -393,9 +393,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   const watchEnded = watch?.ended ?? 0
   useEffect(() => {
     if (watchEnded === 0) return
-    operatorScrolledRef.current = false
     const id = conversations.activeId
     if (id === null || chat.isStreamingConversation(id)) return
+    // Only a run this effect actually rejoins starts a fresh scroll; a reply
+    // already streaming keeps the operator's scroll-away.
+    operatorScrolledRef.current = false
     let cancelled = false
     void (async () => {
         await chat.attach(id, undefined, (message) => {

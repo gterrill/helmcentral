@@ -25,7 +25,8 @@ const (
 	// marker. Over the total cap, the opening exchange (what the operator
 	// came to ask) and the most recent messages (where it was settled) are
 	// kept and the middle is replaced by a marker saying how many were left
-	// out; nothing is dropped silently.
+	// out; nothing is dropped silently. The opening exchange gets at most a
+	// quarter of the total, so a large one cannot crowd out the latest.
 	assistantSummaryMessageRunes    = 4000
 	assistantSummaryAttachmentRunes = 1500
 	assistantSummaryTranscriptRunes = 60000
@@ -286,16 +287,34 @@ func assistantSummaryTranscript(messages []assistantMessage) (string, error) {
 		blocks = append(blocks, b.String())
 	}
 
+	return capSummaryBlocks(blocks), nil
+}
+
+// capSummaryBlocks joins the message blocks, keeping the opening block and as
+// many of the latest as fit within assistantSummaryTranscriptRunes. The opening
+// block (a message with many attachments can be large) gets at most a quarter
+// of the budget, so it can never push every later message out; the latest
+// message is always kept, cut with a visible marker if it alone is over.
+func capSummaryBlocks(blocks []string) string {
 	size := func(s string) int { return len([]rune(s)) }
 	total := 0
 	for _, blk := range blocks {
 		total += size(blk)
 	}
 	if total <= assistantSummaryTranscriptRunes {
-		return strings.Join(blocks, ""), nil
+		return strings.Join(blocks, "")
 	}
-	// Keep the opening message, then as many of the latest as fit.
-	budget := assistantSummaryTranscriptRunes - size(blocks[0])
+
+	opening := blocks[0]
+	if openingCap := assistantSummaryTranscriptRunes / 4; size(opening) > openingCap {
+		opening = truncateRunes(opening, openingCap) + "\n[opening message cut to keep this short]\n\n"
+	}
+	if len(blocks) == 1 {
+		return opening
+	}
+	// Room for the marker lines, which are not part of any block.
+	const markerRunes = 100
+	budget := assistantSummaryTranscriptRunes - size(opening) - markerRunes
 	start := len(blocks)
 	for start > 1 {
 		n := size(blocks[start-1])
@@ -305,15 +324,22 @@ func assistantSummaryTranscript(messages []assistantMessage) (string, error) {
 		budget -= n
 		start--
 	}
-	if start <= 1 {
-		return strings.Join(blocks, ""), nil
+	tail := strings.Join(blocks[start:], "")
+	if start == len(blocks) {
+		// Not even the latest message fits whole: keep its opening part.
+		cut := max(budget, 0)
+		tail = truncateRunes(blocks[start-1], cut) + "\n[latest message cut to keep this short]\n\n"
+		start--
 	}
 	omitted := start - 1
+	if omitted == 0 {
+		return opening + tail
+	}
 	marker := fmt.Sprintf("[%d earlier messages left out to keep this short]\n\n", omitted)
 	if omitted == 1 {
 		marker = "[1 earlier message left out to keep this short]\n\n"
 	}
-	return blocks[0] + marker + strings.Join(blocks[start:], ""), nil
+	return opening + marker + tail
 }
 
 func nonEmptyStrings(in ...string) []string {

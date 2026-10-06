@@ -64,6 +64,11 @@ figures go absent as above. An engine on a connection of its own cannot be
 told apart this way: if that connection fails while the engine runs, it counts
 as off and range and time to empty read high.
 
+A rule bound to one of a switched-off engine's own readings (revolutions, oil
+pressure and so on) is treated the same way: it sees no value, and a stale-data
+rule does not fire for it. If the engine's whole connection has gone quiet
+instead, the rule sees the readings go stale as usual.
+
 ## Heavy-weather rule set
 
 From *Surviving the Storm*. Both arrive switched off; see

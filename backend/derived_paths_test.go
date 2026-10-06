@@ -292,7 +292,7 @@ func TestVesselFuelEconomyWithAgeReportsOldestContributingInput(t *testing.T) {
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
@@ -324,7 +324,7 @@ func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
@@ -335,7 +335,7 @@ func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
 
 func TestVesselFuelEconomyWithAgeIsUnknownWhenAbsent(t *testing.T) {
 	read := fakeReader(map[string]float64{"navigation.speedOverGround": 0})
-	if _, age, ok := vesselFuelEconomyWithAge(newSignalKSnapshot(), read, []string{"propulsion.port.fuel.rate"}, time.Now().UTC()); ok || age != -1 {
+	if _, age, ok := vesselFuelEconomyWithAge(newSignalKSnapshot(), read, []string{"propulsion.port.fuel.rate"}, func() map[string]engineStateInfo { return nil }, time.Now().UTC()); ok || age != -1 {
 		t.Fatalf("expected no figure and -1 age, got age=%v ok=%v", age, ok)
 	}
 }
@@ -1050,9 +1050,16 @@ func TestFuelFiguresUseRunningEngineWhenOtherEngineRateIsStale(t *testing.T) {
 // context, as applyDelta would have, with the engines it publishes (none for
 // a non-engine device). The stream itself is marked live at last.
 func markSourceSeen(snapshot *signalKSnapshot, source string, last time.Time, engineIDs ...string) {
+	var engineLast map[string]time.Time
+	for _, id := range engineIDs {
+		if engineLast == nil {
+			engineLast = map[string]time.Time{}
+		}
+		engineLast[id] = last
+	}
 	snapshot.sourceSeen["vessels.self|"+source] = sourceSeenEntry{
 		First: last.Add(-time.Hour), Last: last, Count: 100,
-		EngineBound: len(engineIDs) > 0, EngineIDs: engineIDs, BusTyped: true,
+		EngineBound: len(engineIDs) > 0, EngineLast: engineLast, BusTyped: true,
 	}
 	if last.After(snapshot.lastMessage) {
 		snapshot.lastMessage = last

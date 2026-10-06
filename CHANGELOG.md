@@ -37,11 +37,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - The Nearby tile's tour of places no longer loses the boat off the edge of
   the map. A place close by still gets a street-level view centred on it; for
   one further off, the view slides toward the boat so both stay on screen.
-- An engine cluster tile for an engine you have switched off now reads **OFF**
-  in grey, with no amber edge, instead of **STALE** with the hours since the
-  engine went quiet. Hover over it for the time it was switched off. If the
-  network feeding the engine goes quiet as well, the tile still shows amber
-  **STALE**, since that is a failed link.
+- An engine you have switched off now reads **OFF** in grey on its engine
+  cluster tile, with no amber edge, instead of **STALE** with the hours since
+  the engine went quiet. Hover over it for the time it was switched off.
+  Gauges, gauge groups and lamps bound to that engine's readings show **--**
+  with no **STALE** marker, so the tiles agree, and a stale-data alarm rule
+  on those readings stays quiet. If the network feeding the engine goes quiet
+  as well, the tile still shows amber **STALE**, since that is a failed link.
+  The exception is an engine wired to a network of its own: if that network
+  fails while the engine runs, it reads **OFF**.
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.
