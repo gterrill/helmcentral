@@ -20,14 +20,21 @@ whole connection is dead and it is a data loss.
 ## Decision
 
 1. **The tile uses ADR 0147's reading.** `engineStates`
-   (`backend/engine_state.go`) classifies each propulsion id as `running` (a
-   source for it is reporting, using the same per-source quiet threshold as
-   `quietSources`, now `sourceQuietThreshold`), `off` (all its sources are
-   quiet and `engineKeyOff` holds for the newest) or `lost` (quiet and its
-   connection is quiet too). It calls `engineKeyOff` rather than restating it.
-2. **Which source belongs to which engine** comes from deltas.
-   `sourceSeenEntry` gains `EngineIDs`, the `<id>` of every
-   `propulsion.<id>.*` path the source has published (capped at 8).
+   (`backend/engine_state.go`) classifies each propulsion id as `running` (the
+   engine's own newest reading, from any source, is within 120 s: a fixed
+   `silentSourceQuietFor`, not the source's cadence), `off` (quiet longer, and
+   `engineKeyOff` holds for the source that carried that newest reading) or
+   `lost` (quiet and its connection is quiet too). It calls `engineKeyOff`
+   rather than restating it. The newest source is picked by timestamp, ties
+   broken by lowest source key, so the answer never depends on map order.
+   The source's whole-history cadence (`sourceQuietThreshold`) is not used
+   here: it includes key-off periods and replayed first timestamps and put
+   OFF six to eight minutes after the engine stopped.
+2. **Which source belongs to which engine, and when it last spoke**, comes
+   from deltas. `sourceSeenEntry` gains `EngineLast`, the newest update time of
+   every `propulsion.<id>.*` path the source has published, per `<id>` (capped
+   at 8). One gateway relaying both engines is therefore told apart per
+   engine: the stopped one reads off while the other keeps the source fresh.
 3. **Channel.** The existing `gauge-values` event gains an `engines` map,
    `{ "<id>": { "state", "last_update" } }`. `last_update` is sent only for
    `off` and `lost`; a running engine's would change every tick and defeat the
@@ -46,9 +53,17 @@ whole connection is dead and it is a data loss.
 ## Consequences
 
 An engine computer dropping out while the engine runs, on an otherwise healthy
-bus, shows `OFF`. ADR 0147 accepted the same limitation for the alarm. Other
-tiles bound to engine paths (gauges, groups, lamps) still show `STALE`; only
-the cluster reads the engine state.
+bus, shows `OFF`, and so does a failing dedicated engine connection (one that
+carries no non-engine source), which cannot be told from a key-off. ADR 0147
+accepted the same limitation for the alarm.
+
+The state is shared rather than special-cased in the cluster: the gauge-values
+payload sends an off engine's `propulsion.<id>.*` paths as absent with no age,
+so gauges, groups and lamps agree with the cluster, and the alarm reader marks
+those paths `EngineOff` (absent, and never stale), so a rule bound to one
+neither fires on the frozen value nor raises a stale alarm. A `lost` engine is
+left alone, so a failed link still shows `STALE` and still fires stale rules.
+The fuel totals use the same states (computed once per build).
 
 ## Rejected
 
