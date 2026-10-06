@@ -964,6 +964,7 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 			Last:        entry.Last,
 			Count:       entry.Count,
 			EngineBound: entry.EngineBound,
+			EngineIDs:   entry.EngineIDs,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,

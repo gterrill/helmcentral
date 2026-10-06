@@ -312,5 +312,11 @@ func buildGaugeValuesPayload() map[string]any {
 		}
 	}
 
-	return map[string]any{"values": values, "ages": ages}
+	payload := map[string]any{"values": values, "ages": ages}
+	// Whether each engine is running, switched off or lost (engine_state.go),
+	// so the Engine Cluster tile can say OFF instead of STALE.
+	if engines := engineStatesPayload(globalSignalKSnapshot, now); len(engines) > 0 {
+		payload["engines"] = engines
+	}
+	return payload
 }

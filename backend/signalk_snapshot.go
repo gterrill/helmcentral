@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -92,6 +93,27 @@ type sourceSeenEntry struct {
 	Count       int
 	EngineBound bool
 	BusTyped    bool
+	// EngineIDs are the <id> of every propulsion.<id>.* path this source has
+	// published, sorted. Never mutated in place (always replaced), so the
+	// copies sourcesFor hands out share it safely.
+	EngineIDs []string
+}
+
+// signalKSourceMaxEngineIDs bounds EngineIDs so a hostile stream inventing
+// propulsion ids cannot grow one source's entry without limit.
+const signalKSourceMaxEngineIDs = 8
+
+// propulsionEngineID is the <id> of a propulsion.<id>.* path, or "".
+func propulsionEngineID(path string) string {
+	rest, ok := strings.CutPrefix(path, "propulsion.")
+	if !ok {
+		return ""
+	}
+	id, _, ok := strings.Cut(rest, ".")
+	if !ok {
+		return ""
+	}
+	return id
 }
 
 // vesselContextPrefix separates vessel contexts from the other trees a
@@ -351,12 +373,15 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			if t, _ := update.Source["type"].(string); t != "" {
 				entry.BusTyped = true
 			}
-			if !entry.EngineBound {
-				for _, val := range update.Values {
-					if strings.HasPrefix(val.Path, "propulsion.") {
-						entry.EngineBound = true
-						break
-					}
+			for _, val := range update.Values {
+				if strings.HasPrefix(val.Path, "propulsion.") {
+					entry.EngineBound = true
+				}
+				if id := propulsionEngineID(val.Path); id != "" && !slices.Contains(entry.EngineIDs, id) &&
+					len(entry.EngineIDs) < signalKSourceMaxEngineIDs {
+					ids := append(slices.Clone(entry.EngineIDs), id)
+					slices.Sort(ids)
+					entry.EngineIDs = ids
 				}
 			}
 			s.sourceSeen[key] = entry
