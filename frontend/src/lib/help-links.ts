@@ -125,7 +125,18 @@ export type HelpLink =
 // HTTP-Referer, webpush_notify.go's webPushSubscriber) - one canonical
 // spelling of "this project on GitHub" rather than a second copy that can
 // drift from it.
-const REPO_URL = 'https://github.com/gterrill/helmcentral'
+export const REPO_URL = 'https://github.com/gterrill/helmcentral'
+
+const RELEASE_TAG = /^v\d+\.\d+\.\d+$/
+
+/**
+ * Where the notes for `version` live, or null when it is not a release tag.
+ * A dev or between-release build has no published notes, so it gets no link
+ * rather than one that 404s.
+ */
+export function releaseNotesUrl(version: string): string | null {
+  return RELEASE_TAG.test(version) ? `${REPO_URL}/releases/tag/${version}` : null
+}
 
 function splitHash(href: string): [string, string | undefined] {
   const index = href.indexOf('#')

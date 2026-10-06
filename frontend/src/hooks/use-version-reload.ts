@@ -3,6 +3,9 @@ import { useEffect, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import type { AppVersion } from '@/hooks/use-app-version'
 
+/** sessionStorage key carrying `{ from, to }` across the reload, read once by useUpdatedToast. */
+export const UPDATED_TO_KEY = 'helmcentral.updatedTo'
+
 export const VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000
 // A timer can fire a few ms ahead of the wall clock; it must not skip a whole hour for that.
 const TIMER_TOLERANCE_MS = 5000
@@ -47,6 +50,8 @@ export function useVersionReload(options: VersionReloadOptions = {}): void {
     let lastCheck = now()
     let checking = false
     let reloadWaiting = false
+    // The build that triggered the reload; held with the wait so a deferred reload still announces the right version.
+    let pending: AppVersion | null = null
     let cancelled = false
 
     const reloadIfSafe = () => {
@@ -55,6 +60,14 @@ export function useVersionReload(options: VersionReloadOptions = {}): void {
         return
       }
       reloadWaiting = false
+      // Best effort: a toast is not worth blocking the update, so storage failure only warns.
+      if (baseline && pending) {
+        try {
+          sessionStorage.setItem(UPDATED_TO_KEY, JSON.stringify({ from: baseline.version, to: pending.version }))
+        } catch (err) {
+          console.warn('Could not record the update for the post-reload message', err)
+        }
+      }
       ;(optionsRef.current.reload ?? (() => window.location.reload()))()
     }
 
@@ -67,6 +80,7 @@ export function useVersionReload(options: VersionReloadOptions = {}): void {
         if (baseline === null) {
           baseline = build
         } else if (build.version !== baseline.version || build.revision !== baseline.revision) {
+          pending = build
           reloadIfSafe()
         }
       } catch (err) {

@@ -66,6 +66,42 @@ describe('SidebarVersion', () => {
     expect(await screen.findByText('version unavailable')).toBeInTheDocument()
   })
 
+  it('links a release version to its release notes, opening in a new tab', async () => {
+    stubHealth({ status: 'ok', version: 'v0.42.0', revision: 'deadbeef' })
+
+    render(<SidebarVersion />)
+
+    const link = await screen.findByRole('link', { name: 'Release notes for v0.42.0' })
+    expect(link).toHaveAttribute('href', 'https://github.com/gterrill/helmcentral/releases/tag/v0.42.0')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAttribute('data-testid', 'sidebar-version')
+    expect(link).toHaveAttribute('title', 'Helmcentral v0.42.0 (deadbeef)')
+    expect(link).toHaveTextContent('v0.42.0')
+  })
+
+  it('leaves non-release versions as plain text', async () => {
+    stubHealth({ status: 'ok', version: 'v0.42.0-3-gabc', revision: 'deadbeef' })
+
+    render(<SidebarVersion />)
+
+    await screen.findByText('v0.42.0-3-gabc')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('does not link a dev build or the unavailable state', async () => {
+    stubHealth({ status: 'ok', version: 'dev', revision: 'unknown' })
+    const { unmount } = render(<SidebarVersion />)
+    await screen.findByText('dev')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    unmount()
+
+    stubHealth({}, false)
+    render(<SidebarVersion />)
+    await screen.findByText('version unavailable')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('renders nothing until the probe answers, so no placeholder flashes', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
 

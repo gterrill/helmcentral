@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 
-import { VERSION_CHECK_INTERVAL_MS, useVersionReload } from '@/hooks/use-version-reload'
+import { UPDATED_TO_KEY, VERSION_CHECK_INTERVAL_MS, useVersionReload } from '@/hooks/use-version-reload'
 
 function health(version: string, revision: string) {
   return { ok: true, status: 200, json: async () => ({ version, revision }) }
@@ -16,6 +16,7 @@ describe('useVersionReload', () => {
     clock = 1_000_000
     reload.mockReset()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
+    sessionStorage.clear()
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -164,6 +165,61 @@ describe('useVersionReload', () => {
     await focus()
     expect(reload).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('records the old and new version for the toast just before reloading', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(health('v0.41.0', 'aaa')).mockResolvedValueOnce(health('v0.42.0', 'bbb'))
+    vi.stubGlobal('fetch', fetchMock)
+    let markerAtReload: string | null = null
+    const reloadSpy = vi.fn(() => { markerAtReload = sessionStorage.getItem(UPDATED_TO_KEY) })
+    renderHook(() => useVersionReload({ now, reload: reloadSpy }))
+    await settle()
+
+    clock += VERSION_CHECK_INTERVAL_MS
+    await focus()
+    expect(reloadSpy).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(markerAtReload ?? 'null')).toEqual({ from: 'v0.41.0', to: 'v0.42.0' })
+  })
+
+  it('writes no marker when nothing changed or the read failed', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v1', 'aaa')).mockRejectedValueOnce(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    renderHook(() => useVersionReload({ now, reload }))
+    await settle()
+    clock += VERSION_CHECK_INTERVAL_MS
+    await focus()
+    clock += VERSION_CHECK_INTERVAL_MS
+    await focus()
+    expect(sessionStorage.getItem(UPDATED_TO_KEY)).toBeNull()
+  })
+
+  it('writes no marker while the reload is held back, and records the triggering build when it proceeds', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v2', 'bbb'))
+    vi.stubGlobal('fetch', fetchMock)
+    let unsaved = true
+    renderHook(() => useVersionReload({ now, reload, hasUnsavedWork: () => unsaved }))
+    await settle()
+    clock += VERSION_CHECK_INTERVAL_MS
+    await focus()
+    expect(sessionStorage.getItem(UPDATED_TO_KEY)).toBeNull()
+
+    unsaved = false
+    await focus()
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(sessionStorage.getItem(UPDATED_TO_KEY) ?? 'null')).toEqual({ from: 'v1', to: 'v2' })
+  })
+
+  it('still reloads, with a warning, when storage is unavailable', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v2', 'bbb'))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('sessionStorage', { setItem: () => { throw new Error('quota') } })
+    renderHook(() => useVersionReload({ now, reload }))
+    await settle()
+
+    clock += VERSION_CHECK_INTERVAL_MS
+    await focus()
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(console.warn).toHaveBeenCalled()
   })
 
   describe('hourly timer (wall displays that are never refocused)', () => {
