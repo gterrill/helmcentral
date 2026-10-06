@@ -127,6 +127,7 @@ function makeUploadsMock(overrides: Partial<UploadsMock> = {}): UploadsMock {
     items: [],
     add: vi.fn(),
     remove: vi.fn(),
+    removeByDocumentIds: vi.fn(),
     clear: vi.fn(),
     ready: true,
     error: null,

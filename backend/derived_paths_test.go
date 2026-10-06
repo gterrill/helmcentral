@@ -671,11 +671,17 @@ func fuelFixtureSnapshot(t *testing.T) *signalKSnapshot {
 // freshness window while leaving the tank and SOG timestamps alone.
 func restampFuelRate(t *testing.T, snapshot *signalKSnapshot, ts string) {
 	t.Helper()
+	restampEngineFuelRate(t, snapshot, ts, "port", "starboard")
+}
+
+// restampEngineFuelRate restamps the rate timestamp of only the named engines.
+func restampEngineFuelRate(t *testing.T, snapshot *signalKSnapshot, ts string, engines ...string) {
+	t.Helper()
 	propulsion, ok := snapshot.contexts["vessels.self"]["propulsion"].(map[string]any)
 	if !ok {
 		t.Fatal("fixture snapshot has no propulsion tree")
 	}
-	for _, engine := range []string{"port", "starboard"} {
+	for _, engine := range engines {
 		rate, ok := propulsion[engine].(map[string]any)["fuel"].(map[string]any)["rate"].(map[string]any)
 		if !ok {
 			t.Fatalf("fixture snapshot has no %s fuel rate node", engine)
@@ -992,4 +998,116 @@ func TestDerivedAwareAlarmReader_LastSeenIsThePathsOwnAge(t *testing.T) {
 	if alarmSampleStale(longRule, sample, now) {
 		t.Fatalf("expected a 5-minute-old sample to read fresh against a 600s threshold, LastSeen=%v now=%v", sample.LastSeen, now)
 	}
+}
+
+// A stopped engine's last rate stays in SignalK at a positive value. With the
+// other engine still reporting, the stale one drops out of the burn total
+// instead of blanking every burn-derived figure.
+func TestFuelFiguresUseRunningEngineWhenOtherEngineRateIsStale(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	withGlobalSnapshot(t, snapshot)
+
+	now, err := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	if err != nil {
+		t.Fatalf("parsing now: %v", err)
+	}
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
+	// The port engine computer is silent but its connection is alive: a tank
+	// sender on the same gateway published seconds ago.
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
+
+	values, ages := computeDerivedPaths(now)
+
+	// Volume ~3.0987 m3 over the starboard burn alone, 4.1667e-7 m3/s.
+	timeToEmpty := values[fuelTimeToEmptyPath]
+	if timeToEmpty == nil {
+		t.Fatal("expected time to empty from the running engine alone")
+	}
+	if math.Abs(*timeToEmpty-7.437e6) > 10000 {
+		t.Fatalf("expected about 7.437e6 s (volume over one engine's burn), got %v", *timeToEmpty)
+	}
+	rangeM := values[fuelRangeAtCurrentBurnPath]
+	if rangeM == nil {
+		t.Fatal("expected a range figure from the running engine alone")
+	}
+	if math.Abs(*rangeM-4.514e5) > 4000 {
+		t.Fatalf("expected about 4.514e5 m, got %v", *rangeM)
+	}
+	if values[vesselFuelEconomyPath] == nil {
+		t.Fatal("expected fuel economy from the running engine alone")
+	}
+	for _, path := range []string{fuelTimeToEmptyPath, fuelRangeAtCurrentBurnPath, vesselFuelEconomyPath} {
+		if age := ages[path]; age < 0 || age > 120 {
+			t.Fatalf("%s: expected a fresh age, got %v", path, age)
+		}
+	}
+}
+
+// markSourceSeen records a $source's publishing history under the self
+// context, as applyDelta would have, with the engines it publishes (none for
+// a non-engine device). The stream itself is marked live at last.
+func markSourceSeen(snapshot *signalKSnapshot, source string, last time.Time, engineIDs ...string) {
+	snapshot.sourceSeen["vessels.self|"+source] = sourceSeenEntry{
+		First: last.Add(-time.Hour), Last: last, Count: 100,
+		EngineBound: len(engineIDs) > 0, EngineIDs: engineIDs, BusTyped: true,
+	}
+	if last.After(snapshot.lastMessage) {
+		snapshot.lastMessage = last
+	}
+}
+
+func assertFuelFiguresAbsentWithStaleAge(t *testing.T, now time.Time, snapshot *signalKSnapshot) {
+	t.Helper()
+	withGlobalSnapshot(t, snapshot)
+	values, ages := computeDerivedPaths(now)
+	for _, path := range []string{fuelTimeToEmptyPath, fuelRangeAtCurrentBurnPath, vesselFuelEconomyPath} {
+		if values[path] != nil {
+			t.Fatalf("%s: expected no figure, got %v", path, *values[path])
+		}
+		if ages[path] < 120 {
+			t.Fatalf("%s: expected the stale age to be reported, got %v", path, ages[path])
+		}
+	}
+}
+
+// A stale rate whose connection has also gone quiet is a dead gateway, not a
+// key-off: it stays in the total and the figures go absent.
+func TestFuelFiguresBlankWhenStaleEngineConnectionIsDead(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
+	markSourceSeen(snapshot, "GX.12", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "GX.40", now.Add(-149*time.Minute)) // same connection, also quiet
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
+	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
+}
+
+// A stale rate from an engine no recorded source publishes gives no evidence
+// of key-off, so it stays in the total.
+func TestFuelFiguresBlankWhenStaleEngineHasNoKnownSource(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
+	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
+}
+
+// The engine computer is still publishing (rpm, temperatures) but its fuel
+// rate alone has frozen: that is not a key-off, so the stale rate stays in
+// and the figures go absent rather than reading off one engine's burn.
+func TestFuelFiguresBlankWhenStaleRateSourceIsStillPublishing(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-3*time.Second), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-10*time.Second), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
+
+	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
 }

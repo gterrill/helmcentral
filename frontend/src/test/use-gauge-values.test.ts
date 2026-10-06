@@ -16,7 +16,7 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   },
 }))
 
-import { useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
+import { useEngineStates, useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
 
 function emit(payload: unknown) {
   act(() => {
@@ -153,5 +153,30 @@ describe('useGaugeValues/useGaugeAges stable identity and shared subscription', 
 
     expect(result.current.values).toEqual({ 'a.path': 1 })
     expect(result.current.ages).toEqual({ 'a.path': 3 })
+  })
+})
+
+describe('useEngineStates', () => {
+  it('starts empty', () => {
+    const { result } = renderHook(() => useEngineStates())
+    expect(result.current).toEqual({})
+  })
+
+  it('reads the engines map off the payload, mapping last_update', () => {
+    const { result } = renderHook(() => useEngineStates())
+    emit({
+      values: {}, ages: {},
+      engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' }, starboard: { state: 'running' } },
+    })
+    expect(result.current).toEqual({
+      port: { state: 'off', lastUpdate: '2026-10-06T04:30:00Z' },
+      starboard: { state: 'running' },
+    })
+  })
+
+  it('drops an unrecognised state rather than guessing', () => {
+    const { result } = renderHook(() => useEngineStates())
+    emit({ values: {}, ages: {}, engines: { port: { state: 'asleep' } } })
+    expect(result.current).toEqual({})
   })
 })

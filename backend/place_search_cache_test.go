@@ -196,3 +196,32 @@ func TestPlaceSearchCache_EvictsOldestAtBound(t *testing.T) {
 		t.Errorf("size = %d, want %d", len(s.data), placeSearchCacheMaxEntries)
 	}
 }
+
+// A provider reports a degraded search (mirror trouble, partial coverage) as
+// an empty result with a Note; remembering it would repeat the failure for
+// six hours.
+func TestFindPlacesCache_EmptyResultWithNoteIsNotCached(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "p", result: placeSearchResult{Search: "none", RadiusNm: 50, Note: "the place-name service did not answer"}}
+	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	for i := 0; i < 2; i++ {
+		if _, err := findPlacesRaw(t, deps, `{"query":"Nowhere Cove"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if provider.callCount() != 2 {
+		t.Fatalf("provider called %d times, want 2: a noted empty answer must not be cached", provider.callCount())
+	}
+}
+
+func TestFindPlacesCache_GenuinelyEmptyResultIsCached(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "p", result: placeSearchResult{Search: "none", RadiusNm: 50}}
+	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	for i := 0; i < 2; i++ {
+		if _, err := findPlacesRaw(t, deps, `{"query":"Nowhere Cove"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if provider.callCount() != 1 {
+		t.Fatalf("provider called %d times, want 1", provider.callCount())
+	}
+}

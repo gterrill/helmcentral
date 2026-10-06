@@ -955,20 +955,7 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 
 	// Silent source: no setup needed either.
 	self := snapshot.selfContext()
-	sources := snapshot.sourcesFor(self)
-	health := make([]sourceHealth, 0, len(sources))
-	for source, entry := range sources {
-		health = append(health, sourceHealth{
-			Source:      source,
-			First:       entry.First,
-			Last:        entry.Last,
-			Count:       entry.Count,
-			EngineBound: entry.EngineBound,
-			// A server plugin publishes under its bare id with no bus type;
-			// hardware inputs are dotted or carry a source.type.
-			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
-		})
-	}
+	health := sourceHealthFor(snapshot, self)
 	_, lastMessage := snapshot.status()
 	silent := silentSources(health, now, now.Sub(lastMessage), ignored)
 	reading.Values[anomalySensorSilentSourceCountPath] = float64(len(silent))

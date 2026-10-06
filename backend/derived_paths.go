@@ -278,18 +278,53 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 // time-to-empty and range paths (ADR 0084), all three of which need "the
 // boat's total current burn" as an input. An engine that is off contributes
 // nothing to the total; it does not make the total unknowable.
+//
+// N2K stops sending a rate when an engine shuts down rather than sending
+// zero, so SignalK keeps the last positive value indefinitely. A rate older
+// than derivedInputMaxAge is left out of the total when at least one other
+// engine has a fresh positive rate and engineStates reads that engine as off,
+// the same reading the Engine Cluster tile shows (ADR 0163), so the tile and
+// these figures never disagree. Otherwise the rate stays in, so a single
+// engine run does not blank every burn-derived figure, but an engine reading
+// as running (only its rate frozen), lost (its connection quiet) or unknown
+// still does.
+// When no engine is fresh every positive rate is summed and the oldest age
+// reported, so the figures go absent and the age says why.
 func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (total float64, age float64, ok bool) {
-	var ages []float64
+	type contribution struct {
+		path  string
+		value float64
+		age   float64
+	}
+	var all []contribution
+	anyFresh, anyStale := false, false
 	for _, path := range ratePaths {
 		rate := read(path)
 		if !rate.Present || rate.Value <= 0 {
 			continue
 		}
-		total += rate.Value
-		ok = true
-		ages = append(ages, pathAge(snapshot, rate, path, now))
+		c := contribution{path: path, value: rate.Value, age: pathAge(snapshot, rate, path, now)}
+		all = append(all, c)
+		if freshEnoughToPublish(c.age) {
+			anyFresh = true
+		} else {
+			anyStale = true
+		}
 	}
-	if !ok || total <= 0 {
+	var states map[string]engineStateInfo
+	if anyFresh && anyStale {
+		_, lastMessage := snapshot.status()
+		states = engineStates(sourceHealthFor(snapshot, snapshot.selfContext()), now, now.Sub(lastMessage))
+	}
+	var ages []float64
+	for _, c := range all {
+		if !freshEnoughToPublish(c.age) && states[fuelRateEngineID(c.path)].State == engineStateOff {
+			continue
+		}
+		total += c.value
+		ages = append(ages, c.age)
+	}
+	if len(ages) == 0 || total <= 0 {
 		return 0, -1, false
 	}
 	return total, derivedInputAge(ages...), true
@@ -821,4 +856,9 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 
 		return alarmSample{Value: *value, Present: true, LastSeen: lastSeen}
 	}
+}
+
+// fuelRateEngineID is the propulsion id in a propulsion.<id>.fuel.rate path.
+func fuelRateEngineID(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
 }

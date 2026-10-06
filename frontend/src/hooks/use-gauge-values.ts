@@ -26,8 +26,25 @@ type PathMap = Record<string, number | null>
 
 const EMPTY: PathMap = {}
 
+/**
+ * Whether an engine reads as running, switched off or lost, per propulsion id
+ * (`port`, `starboard`). Off means its computer powered down with the key;
+ * lost means its whole connection went quiet. `lastUpdate` is set for both.
+ */
+export type EngineState = 'running' | 'off' | 'lost'
+export interface EngineStatus {
+  state: EngineState
+  lastUpdate?: string
+}
+export type EngineStates = Record<string, EngineStatus>
+
+const EMPTY_ENGINES: EngineStates = {}
+const ENGINE_STATES: readonly string[] = ['running', 'off', 'lost']
+
 let valuesSnapshot: PathMap = EMPTY
 let agesSnapshot: PathMap = EMPTY
+let enginesSnapshot: EngineStates = EMPTY_ENGINES
+const enginesListeners = new Set<() => void>()
 let subscriberCount = 0
 let unsubscribeVesselStream: (() => void) | null = null
 const valuesListeners = new Set<() => void>()
@@ -40,10 +57,18 @@ function shallowEqual(a: PathMap, b: PathMap): boolean {
   return aKeys.every((key) => a[key] === b[key])
 }
 
+function enginesEqual(a: EngineStates, b: EngineStates): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => a[key]?.state === b[key]?.state && a[key]?.lastUpdate === b[key]?.lastUpdate)
+}
+
+type EnginesPayload = Record<string, { state?: string; last_update?: string }>
+
 function applyGaugeValuesEvent(raw: string): void {
-  let payload: { values?: PathMap; ages?: Record<string, number> }
+  let payload: { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
   try {
-    payload = JSON.parse(raw) as { values?: PathMap; ages?: Record<string, number> }
+    payload = JSON.parse(raw) as { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
   } catch (err) {
     console.error('Failed to parse gauge-values event:', err)
     return
@@ -66,6 +91,18 @@ function applyGaugeValuesEvent(raw: string): void {
     agesSnapshot = nextAges
     for (const listener of agesListeners) listener()
   }
+
+  const nextEngines: EngineStates = {}
+  for (const [id, entry] of Object.entries(payload.engines ?? {})) {
+    if (!entry || typeof entry.state !== 'string' || !ENGINE_STATES.includes(entry.state)) continue
+    nextEngines[id] = entry.last_update
+      ? { state: entry.state as EngineState, lastUpdate: entry.last_update }
+      : { state: entry.state as EngineState }
+  }
+  if (!enginesEqual(enginesSnapshot, nextEngines)) {
+    enginesSnapshot = Object.keys(nextEngines).length === 0 ? EMPTY_ENGINES : nextEngines
+    for (const listener of enginesListeners) listener()
+  }
 }
 
 function acquire(): void {
@@ -84,6 +121,7 @@ function release(): void {
     // the next subscriber starts exactly like a fresh mount would.
     valuesSnapshot = EMPTY
     agesSnapshot = EMPTY
+    enginesSnapshot = EMPTY_ENGINES
   }
 }
 
@@ -103,6 +141,19 @@ function subscribeAges(callback: () => void): () => void {
     agesListeners.delete(callback)
     release()
   }
+}
+
+function subscribeEngines(callback: () => void): () => void {
+  enginesListeners.add(callback)
+  acquire()
+  return () => {
+    enginesListeners.delete(callback)
+    release()
+  }
+}
+
+function getEnginesSnapshot(): EngineStates {
+  return enginesSnapshot
 }
 
 function getValuesSnapshot(): PathMap {
@@ -126,4 +177,12 @@ export function useGaugeValues(): Record<string, number | null> {
  */
 export function useGaugeAges(): Record<string, number | null> {
   return useSyncExternalStore(subscribeAges, getAgesSnapshot)
+}
+
+/**
+ * Whether each engine reads as running, switched off or lost, from the same
+ * gauge-values event. An engine the backend cannot classify has no entry.
+ */
+export function useEngineStates(): EngineStates {
+  return useSyncExternalStore(subscribeEngines, getEnginesSnapshot)
 }

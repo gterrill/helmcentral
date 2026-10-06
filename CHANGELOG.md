@@ -37,6 +37,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - The Nearby tile's tour of places no longer loses the boat off the edge of
   the map. A place close by still gets a street-level view centred on it; for
   one further off, the view slides toward the boat so both stay on screen.
+- An engine cluster tile for an engine you have switched off now reads **OFF**
+  in grey, with no amber edge, instead of **STALE** with the hours since the
+  engine went quiet. Hover over it for the time it was switched off. If the
+  network feeding the engine goes quiet as well, the tile still shows amber
+  **STALE**, since that is a failed link.
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.
@@ -59,6 +64,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   map could fail to load its radar overlay for the rest of the session. A
   radar now appears once it is actually reporting, which can take a short
   while after Helmcentral connects.
+- **Fuel economy, time to empty and range show with only one engine running.**
+  They used to stay blank because the stopped engine's last reading was still
+  being counted as current. An engine that has gone completely quiet for more
+  than two minutes, while the other engine and the rest of the network are
+  still reporting, now counts as off. If only its fuel rate has stopped, or
+  everything on its connection has gone quiet, the figures stay blank. An
+  engine wired to its own separate connection is the exception: if that
+  connection fails while the engine runs, it counts as off and range reads
+  high.
 
 ## [0.41.0] - 2026-10-04
 

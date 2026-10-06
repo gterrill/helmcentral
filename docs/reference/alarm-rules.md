@@ -54,6 +54,16 @@ that is no longer telling the truth. A rule bound to one of these paths never
 fires on stale arithmetic; it simply sees no value, the same as if the path
 had never been published at all.
 
+The exception is an engine that has been shut down. Engines stop sending
+anything when they are turned off, so with one engine still reporting, an
+engine that has gone completely quiet for more than two minutes counts as off
+and is left out of the total burn, provided other devices on the same
+connection are still live. If only its fuel rate has stopped, if every
+engine's rate is that old, or if its whole connection has gone quiet, the
+figures go absent as above. An engine on a connection of its own cannot be
+told apart this way: if that connection fails while the engine runs, it counts
+as off and range and time to empty read high.
+
 ## Heavy-weather rule set
 
 From *Surviving the Storm*. Both arrive switched off; see
