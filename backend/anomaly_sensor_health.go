@@ -286,6 +286,27 @@ func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration
 	return out
 }
 
+// sourceHealthFor lists every $source seen under context as sourceHealth, the
+// full list engineKeyOff and silentSources expect.
+func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
+	sources := snapshot.sourcesFor(context)
+	health := make([]sourceHealth, 0, len(sources))
+	for source, entry := range sources {
+		health = append(health, sourceHealth{
+			Source:      source,
+			First:       entry.First,
+			Last:        entry.Last,
+			Count:       entry.Count,
+			EngineBound: entry.EngineBound,
+			EngineIDs:   entry.EngineIDs,
+			// A server plugin publishes under its bare id with no bus type;
+			// hardware inputs are dotted or carry a source.type.
+			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
+		})
+	}
+	return health
+}
+
 // sourceQuietThreshold is how long s may go without an update before it is
 // quiet: silentSourceQuietFor, scaled up to silentSourceCadenceMultiple times
 // the source's own observed average gap when that is slower. A source with

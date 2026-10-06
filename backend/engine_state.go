@@ -83,18 +83,7 @@ func engineStates(sources []sourceHealth, now time.Time, streamAge time.Duration
 // engineStatesPayload is engineStates over the live snapshot, shaped for the
 // gauge-values event. Nil when there is nothing to say.
 func engineStatesPayload(snapshot *signalKSnapshot, now time.Time) map[string]engineStateJSON {
-	sources := snapshot.sourcesFor(snapshot.selfContext())
-	health := make([]sourceHealth, 0, len(sources))
-	for source, entry := range sources {
-		health = append(health, sourceHealth{
-			Source:      source,
-			First:       entry.First,
-			Last:        entry.Last,
-			Count:       entry.Count,
-			EngineBound: entry.EngineBound,
-			EngineIDs:   entry.EngineIDs,
-		})
-	}
+	health := sourceHealthFor(snapshot, snapshot.selfContext())
 	_, lastMessage := snapshot.status()
 	states := engineStates(health, now, now.Sub(lastMessage))
 	if len(states) == 0 {

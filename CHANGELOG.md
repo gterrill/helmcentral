@@ -61,6 +61,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   map could fail to load its radar overlay for the rest of the session. A
   radar now appears once it is actually reporting, which can take a short
   while after Helmcentral connects.
+- **Fuel economy, time to empty and range show with only one engine running.**
+  They used to stay blank because the stopped engine's last reading was still
+  being counted as current. An engine that has gone completely quiet for more
+  than two minutes, while the other engine and the rest of the network are
+  still reporting, now counts as off. If only its fuel rate has stopped, or
+  everything on its connection has gone quiet, the figures stay blank. An
+  engine wired to its own separate connection is the exception: if that
+  connection fails while the engine runs, it counts as off and range reads
+  high.
 
 ## [0.41.0] - 2026-10-04
 
