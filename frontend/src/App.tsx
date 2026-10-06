@@ -219,6 +219,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { UpdatedToast } from '@/components/updated-toast'
 import {
   parseAppLocation,
   formatAppLocation,
@@ -3991,6 +3992,7 @@ export function App() {
       )}
 
       <Toaster isDarkTheme={isDarkTheme} />
+      <UpdatedToast />
     </SidebarProvider>
   )
 }

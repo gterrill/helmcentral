@@ -11,6 +11,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- The version in the sidebar footer now opens that release's notes.
+- After Helmcentral updates itself, a message says which version it is now
+  running, with a link to that release's notes.
+
 ## [0.42.0] - 2026-10-06
 
 ### Added
