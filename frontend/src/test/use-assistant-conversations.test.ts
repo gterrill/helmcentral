@@ -571,4 +571,43 @@ describe('describeLoadError', () => {
     })
     expect(result.current.messages[0].proposals![0].status).toBe('dismissed')
   })
+  // ADR 0165: a reloaded thread carries each reply's filled-in forms with the
+  // status they have now.
+  it('maps a message\'s form drafts, with their stored status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/assistant/conversations') {
+          return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            conversation: conversationApi(),
+            messages: [
+              messageApi({
+                id: 'm2',
+                role: 'assistant',
+                form_drafts: [
+                  { id: 'd1', message_id: 'm2', source_document_id: 'doc0', title: 'Storm declaration', folder: 'Insurance/2026', filename: 'x.pdf', page_count: 2, status: 'saved', document_id: 'doc9' },
+                ],
+              }),
+            ],
+          }),
+        }
+      }),
+    )
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'c1' }))
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+    expect(result.current.messages[0].formDrafts).toEqual([
+      { id: 'd1', messageId: 'm2', sourceDocumentId: 'doc0', title: 'Storm declaration', folder: 'Insurance/2026', filename: 'x.pdf', pageCount: 2, status: 'saved', documentId: 'doc9' },
+    ])
+
+    act(() => {
+      result.current.updateFormDraft({ ...result.current.messages[0].formDrafts![0], status: 'dismissed' })
+    })
+    expect(result.current.messages[0].formDrafts![0].status).toBe('dismissed')
+  })
 })

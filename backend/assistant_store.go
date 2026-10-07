@@ -61,6 +61,10 @@ type assistantMessage struct {
 	// in the same transaction as the row; ListMessages reads them back. Always
 	// empty on a user row.
 	Proposals []assistantProposal `json:"proposals,omitempty"`
+	// FormDrafts are the filled-in forms (ADR 0165) Mate attached to this
+	// assistant message, each with the status it has right now (draft, saved
+	// or dismissed). Saved with the row, read back by ListMessages.
+	FormDrafts []assistantFormDraft `json:"form_drafts,omitempty"`
 }
 
 // assistantAttachment is one row of message_attachments: a document (ADR
@@ -185,7 +189,10 @@ func createAssistantSchema(db *sql.DB) error {
 		return err
 	}
 
-	return createAssistantProposalsSchema(db)
+	if err := createAssistantProposalsSchema(db); err != nil {
+		return err
+	}
+	return createAssistantFormDraftsSchema(db)
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at
@@ -245,12 +252,14 @@ func (s *assistantStore) CreateConversation(title string) (assistantConversation
 }
 
 // ListConversations returns every conversation, most recently active first -
-// the order the conversation list panel renders in.
+// the order the conversation list panel renders in. It leaves SummaryNoteID
+// unset: whether a summary note still exists is checked when one
+// conversation is opened (GetConversation).
 func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations ORDER BY updated_at DESC, id DESC`)
+	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -260,12 +269,8 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	for rows.Next() {
 		var conv assistantConversation
 		var created, updated int64
-		var noteID sql.NullString
-		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID); err != nil {
+		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated); err != nil {
 			return nil, fmt.Errorf("scan conversation: %w", err)
-		}
-		if noteID.Valid {
-			conv.SummaryNoteID = &noteID.String
 		}
 		conv.CreatedAt = time.Unix(created, 0).UTC()
 		conv.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -450,6 +455,15 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		}
 	}
 
+	if len(m.FormDrafts) > 0 {
+		if m.Role != "assistant" {
+			return assistantMessage{}, fmt.Errorf("attach form drafts: only an assistant message can carry them, got role %q", m.Role)
+		}
+		if err := attachFormDraftsTx(tx, m.ID, m.FormDrafts); err != nil {
+			return assistantMessage{}, err
+		}
+	}
+
 	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now.Unix(), m.ConversationID); err != nil {
 		return assistantMessage{}, fmt.Errorf("bump conversation updated_at: %w", err)
 	}
@@ -501,9 +515,14 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	if err != nil {
 		return nil, err
 	}
+	draftsByMessage, err := formDraftsForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i].Attachments = attachmentsByMessage[out[i].ID]
 		out[i].Proposals = proposalsByMessage[out[i].ID]
+		out[i].FormDrafts = draftsByMessage[out[i].ID]
 	}
 
 	return out, nil
@@ -553,14 +572,18 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 // with messages. Only user and assistant rows are indexed: a watch report is
 // machine output the operator never typed or asked for. The FTS table holds
 // its own copy of the text (not external content) so the role filter needs no
-// special rebuild. It is keyed on the message id, not the rowid: messages has
-// a TEXT primary key, so its implicit rowids are not stable across VACUUM
-// (the backup method, ADR 0141).
+// special rebuild.
+//
+// messages has a TEXT primary key, so its implicit rowids are not stable
+// across VACUUM (the backup method, ADR 0141) and cannot key the index.
+// messages_fts_map gives every indexed message its own integer id, used as
+// the FTS rowid: a delete is then a rowid lookup, not a scan of the
+// UNINDEXED columns, and nothing depends on the messages rowid.
 //
 // A database that already holds messages gets them indexed the first time
 // the table is created; once it exists the triggers carry every later write.
-// An index from the earlier rowid-keyed shape (no message_id column) is
-// dropped and rebuilt.
+// An index from an earlier shape (no messages_fts_map) is dropped and
+// rebuilt, in the same transaction.
 func createAssistantSearchSchema(db *sql.DB) error {
 	// One transaction: a crash or error part-way must not leave an index that
 	// exists but was never backfilled.
@@ -569,59 +592,73 @@ func createAssistantSearchSchema(db *sql.DB) error {
 		return fmt.Errorf("begin messages_fts setup: %w", err)
 	}
 	defer tx.Rollback()
-	var existing int
+	var existing, hasMap int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&existing); err != nil {
 		return fmt.Errorf("check messages_fts: %w", err)
 	}
-	if existing > 0 {
-		var hasMessageID int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'`).Scan(&hasMessageID); err != nil {
-			return fmt.Errorf("inspect messages_fts: %w", err)
-		}
-		if hasMessageID == 0 {
-			for _, q := range []string{
-				`DROP TRIGGER IF EXISTS messages_fts_insert`,
-				`DROP TRIGGER IF EXISTS messages_fts_delete`,
-				`DROP TRIGGER IF EXISTS messages_fts_update`,
-				`DROP TABLE messages_fts`,
-			} {
-				if _, err := tx.Exec(q); err != nil {
-					return fmt.Errorf("replace messages_fts: %w", err)
-				}
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts_map'`).Scan(&hasMap); err != nil {
+		return fmt.Errorf("check messages_fts_map: %w", err)
+	}
+	if existing > 0 && hasMap == 0 {
+		for _, q := range []string{
+			`DROP TRIGGER IF EXISTS messages_fts_insert`,
+			`DROP TRIGGER IF EXISTS messages_fts_delete`,
+			`DROP TRIGGER IF EXISTS messages_fts_update`,
+			`DROP TABLE messages_fts`,
+		} {
+			if _, err := tx.Exec(q); err != nil {
+				return fmt.Errorf("replace messages_fts: %w", err)
 			}
-			existing = 0
 		}
+		existing = 0
 	}
 
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS messages_fts_map (
+		fts_id INTEGER PRIMARY KEY AUTOINCREMENT,
+		message_id TEXT NOT NULL UNIQUE)`); err != nil {
+		return fmt.Errorf("create messages_fts_map: %w", err)
+	}
 	if _, err := tx.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-		content, message_id UNINDEXED, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
+		content, conversation_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')`); err != nil {
 		return fmt.Errorf("create messages_fts: %w", err)
 	}
 	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
 		WHEN new.role IN ('user', 'assistant')
 		BEGIN
-			INSERT INTO messages_fts (content, message_id, conversation_id) VALUES (new.content, new.id, new.conversation_id);
+			INSERT INTO messages_fts_map (message_id) VALUES (new.id);
+			INSERT INTO messages_fts (rowid, content, conversation_id)
+				SELECT fts_id, new.content, new.conversation_id FROM messages_fts_map WHERE message_id = new.id;
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts insert trigger: %w", err)
 	}
 	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
 		BEGIN
-			DELETE FROM messages_fts WHERE message_id = old.id;
+			DELETE FROM messages_fts WHERE rowid IN (SELECT fts_id FROM messages_fts_map WHERE message_id = old.id);
+			DELETE FROM messages_fts_map WHERE message_id = old.id;
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts delete trigger: %w", err)
 	}
 	if _, err := tx.Exec(`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content, role, conversation_id ON messages
 		BEGIN
-			DELETE FROM messages_fts WHERE message_id = old.id;
-			INSERT INTO messages_fts (content, message_id, conversation_id)
-				SELECT new.content, new.id, new.conversation_id WHERE new.role IN ('user', 'assistant');
+			DELETE FROM messages_fts WHERE rowid IN (SELECT fts_id FROM messages_fts_map WHERE message_id = old.id);
+			DELETE FROM messages_fts_map WHERE message_id = old.id;
+			INSERT INTO messages_fts_map (message_id) SELECT new.id WHERE new.role IN ('user', 'assistant');
+			INSERT INTO messages_fts (rowid, content, conversation_id)
+				SELECT fts_id, new.content, new.conversation_id FROM messages_fts_map WHERE message_id = new.id;
 		END`); err != nil {
 		return fmt.Errorf("create messages_fts update trigger: %w", err)
 	}
 
 	if existing == 0 {
-		if _, err := tx.Exec(`INSERT INTO messages_fts (content, message_id, conversation_id)
-			SELECT content, id, conversation_id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
+		if _, err := tx.Exec(`DELETE FROM messages_fts_map`); err != nil {
+			return fmt.Errorf("reset messages_fts_map: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO messages_fts_map (message_id) SELECT id FROM messages WHERE role IN ('user', 'assistant')`); err != nil {
+			return fmt.Errorf("backfill messages_fts_map: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO messages_fts (rowid, content, conversation_id)
+			SELECT g.fts_id, m.content, m.conversation_id
+			FROM messages_fts_map g JOIN messages m ON m.id = g.message_id`); err != nil {
 			return fmt.Errorf("backfill messages_fts: %w", err)
 		}
 	}
@@ -749,37 +786,52 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 		out = out[:opts.Limit]
 	}
 
-	// Best excerpts, only for the conversations being returned.
+	// Best excerpts, only for the conversations being returned: one query,
+	// the top ExcerptsPerConv messages of each by rank.
+	var ids []string
+	idx := map[string]int{}
 	for i := range out {
-		if !matched[out[i].ID] {
-			continue
+		if matched[out[i].ID] {
+			ids = append(ids, out[i].ID)
+			idx[out[i].ID] = i
 		}
+	}
+	if len(ids) > 0 {
+		args := []any{match}
+		marks := make([]string, len(ids))
+		for i, id := range ids {
+			marks[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, opts.ExcerptsPerConv)
 		erows, err := s.db.Query(
-			`SELECT m.role, m.content
-			 FROM messages_fts f JOIN messages m ON m.id = f.message_id
-			 WHERE messages_fts MATCH ? AND f.conversation_id = ?
-			 ORDER BY rank LIMIT ?`,
-			match, out[i].ID, opts.ExcerptsPerConv)
+			`SELECT conversation_id, role, content FROM (
+				SELECT f.conversation_id AS conversation_id, m.role AS role, m.content AS content,
+					ROW_NUMBER() OVER (PARTITION BY f.conversation_id ORDER BY f.rank) AS rn
+				FROM messages_fts f
+				JOIN messages_fts_map g ON g.fts_id = f.rowid
+				JOIN messages m ON m.id = g.message_id
+				WHERE messages_fts MATCH ? AND f.conversation_id IN (`+strings.Join(marks, ",")+`)
+			) WHERE rn <= ? ORDER BY conversation_id, rn`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("search conversation excerpts: %w", err)
 		}
+		defer erows.Close()
 		for erows.Next() {
-			var role, content string
-			if err := erows.Scan(&role, &content); err != nil {
-				erows.Close()
+			var convID, role, content string
+			if err := erows.Scan(&convID, &role, &content); err != nil {
 				return nil, fmt.Errorf("scan conversation excerpt: %w", err)
 			}
 			text := excerptAroundMatch(stripMarkdownForExcerpt(content), terms, opts.ExcerptTokens)
 			if r := []rune(text); len(r) > opts.ExcerptMaxRunes {
 				text = string(r[:opts.ExcerptMaxRunes]) + "…"
 			}
+			i := idx[convID]
 			out[i].Excerpts = append(out[i].Excerpts, assistantConversationExcerpt{Role: role, Text: text})
 		}
 		if err := erows.Err(); err != nil {
-			erows.Close()
 			return nil, err
 		}
-		erows.Close()
 	}
 	return out, nil
 }

@@ -146,6 +146,7 @@ function buildConversations(overrides: Partial<ReturnType<typeof useAssistantCon
     remove: vi.fn(),
     appendLocal: vi.fn(),
     updateProposal: vi.fn(),
+    updateFormDraft: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
     reload: vi.fn().mockResolvedValue(undefined),
     ...overrides,

@@ -165,6 +165,24 @@ const renderTileDefaultProps: Omit<React.ComponentProps<typeof PoiMapTile>, 'con
   distanceUnits: 'metric',
 }
 
+// Pixel offset of `p` from the camera centre on a flat (untilted) map at
+// `zoom`, against the 240 px fallback box the tests render into.
+const offsetPx = (centre: [number, number], zoom: number, p: { lat: number; lon: number }) => {
+  const world = 512 * 2 ** zoom
+  const mx = (lon: number) => ((lon + 180) / 360) * world
+  const my = (lat: number) => {
+    const r = (lat * Math.PI) / 180
+    return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * world
+  }
+  return { dx: Math.abs(mx(p.lon) - mx(centre[0])), dy: Math.abs(my(p.lat) - my(centre[1])) }
+}
+
+// Both inside the fit padding of the 240 px box, the way the camera frames them.
+const inFrame = (centre: [number, number], zoom: number, p: { lat: number; lon: number }) => {
+  const { dx, dy } = offsetPx(centre, zoom, p)
+  return Math.max(dx, dy) <= 120 - POI_MAP_FIT_PADDING_PX + 1e-6
+}
+
 async function renderTile(props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}) {
   const result = render(
     <PoiMapTile
@@ -592,11 +610,8 @@ describe('PoiMapTile', () => {
       const call = flyToMock.mock.calls[0][0] as {
         center: [number, number]; zoom: number; duration: number; pitch: number; bearing: number; easing: (t: number) => number
       }
-      expect(call.center).toEqual([148.97, -20.26])
-      // Street-level close-up: past the overview's own zoom cap, which only
-      // limits how tight the boat-centred fit may go.
-      expect(call.zoom).toBeCloseTo(Math.max(17, zoom + 2), 6)
-      expect(call.zoom).toBeGreaterThan(POI_MAP_MAX_ZOOM)
+      expect(inFrame(call.center, call.zoom, { lat: -20.26, lon: 148.97 })).toBe(true)
+      expect(call.zoom).toBeGreaterThan(zoom)
       expect(call.pitch).toBe(30)
       expect(call.bearing).toBe(0)
       expect(call.duration).toBe(placeTourTimings(10).diveMs)
@@ -604,6 +619,48 @@ describe('PoiMapTile', () => {
       expect(call.easing(1)).toBe(1)
       expect(call.easing(0.25)).toBeLessThan(0.25)
       expect(call.easing(0.75)).toBeGreaterThan(0.75)
+    })
+
+    it('pans toward the boat to keep it in frame when it dives to a place far off', async () => {
+      usePoiMock.mockReturnValue(poiResult({ features }))
+      const { rerender } = await renderTile()
+
+      moveHighlightToB(rerender)
+
+      const place = { lat: -20.26, lon: 148.97 }
+      const call = flyToMock.mock.calls[0][0] as { center: [number, number]; zoom: number }
+      expect(inFrame(call.center, call.zoom, vessel)).toBe(true)
+      expect(inFrame(call.center, call.zoom, place)).toBe(true)
+      // The tilt magnifies the near half of the view, so the boat is held a
+      // quarter-level inside the padding edge, not on it.
+      const boat = offsetPx(call.center, call.zoom, vessel)
+      expect(Math.max(boat.dx, boat.dy)).toBeLessThanOrEqual((120 - POI_MAP_FIT_PADDING_PX) * 2 ** -0.25 + 1e-6)
+      // Off the place, toward the boat, rather than backing off with the
+      // place centred: that would sit a level wider.
+      expect(call.center).not.toEqual([place.lon, place.lat])
+      const atZero = offsetPx([place.lon, place.lat], 0, vessel)
+      const centredZoom = Math.log2((120 - POI_MAP_FIT_PADDING_PX) / Math.max(atZero.dx, atZero.dy))
+      expect(call.zoom).toBeGreaterThan(centredZoom)
+      expect(call.zoom).toBeLessThan(17)
+    })
+
+    it('dives to the street-level close-up when the place is beside the boat', async () => {
+      usePoiMock.mockReturnValue(poiResult({
+        features: [
+          feature({ id: 'a', name: 'A', lat: -20.2701, lon: 148.9401 }),
+          feature({ id: 'b', name: 'B', lat: -20.2702, lon: 148.9402 }),
+        ],
+      }))
+      const { rerender } = await renderTile()
+
+      moveHighlightToB(rerender)
+
+      const call = flyToMock.mock.calls[0][0] as { center: [number, number]; zoom: number }
+      // Centred on the place, no pan needed. Past the overview's own zoom
+      // cap, which only limits how tight the boat-centred fit may go.
+      expect(call.center).toEqual([148.9402, -20.2702])
+      expect(call.zoom).toBe(17)
+      expect(call.zoom).toBeGreaterThan(POI_MAP_MAX_ZOOM)
     })
 
     it('pulls out to the boat-centred overview, level, ending 1.5 s before the next highlight', async () => {
@@ -790,7 +847,9 @@ describe('PoiMapTile', () => {
         moveHighlightToB(rerender)
         expect(flyToMock).not.toHaveBeenCalled()
         expect(jumpToMock).toHaveBeenCalledTimes(2)
-        expect((jumpToMock.mock.calls[1][0] as { center: [number, number] }).center).toEqual([148.97, -20.26])
+        const jumped = jumpToMock.mock.calls[1][0] as { center: [number, number]; zoom: number }
+        expect(inFrame(jumped.center, jumped.zoom, { lat: -20.26, lon: 148.97 })).toBe(true)
+        expect(inFrame(jumped.center, jumped.zoom, vessel)).toBe(true)
         expect((jumpToMock.mock.calls[1][0] as { pitch: number }).pitch).toBe(0)
 
         act(() => { vi.advanceTimersByTime(placeTourTimings(10).pullOutStartMs + 100) })
@@ -858,9 +917,10 @@ describe('PoiMapTile', () => {
 
       goto(rerender, 2)
       expect(flyToMock).toHaveBeenCalledTimes(2)
-      expect(fly(1).center).toEqual([148.98, -20.25])
+      expect(inFrame(fly(1).center, fly(1).zoom, { lat: -20.25, lon: 148.98 })).toBe(true)
+      expect(inFrame(fly(1).center, fly(1).zoom, vessel)).toBe(true)
       expect(fly(1).minZoom).toBeCloseTo(overview.zoom, 6)
-      expect(fly(1).zoom).toBeCloseTo(Math.max(17, overview.zoom + 2), 6)
+      expect(fly(1).zoom).toBeGreaterThanOrEqual(overview.zoom)
       expect(fly(1).pitch).toBe(30)
       expect(fly(1).duration).toBe(t.hopMs)
       expect(t.hopMs).toBeGreaterThan(t.diveMs)
@@ -997,9 +1057,14 @@ describe('PoiMapTile', () => {
 
       goto(rerender, 4)
       expect(flyToMock).toHaveBeenCalledTimes(2)
-      expect(fly(1).center).toEqual([149.0, -20.23])
+      expect(inFrame(fly(1).center, fly(1).zoom, { lat: -20.23, lon: 149.0 })).toBe(true)
       // The overview now fits five places, so its zoom is the current one.
-      expect(fly(1).minZoom).toBeLessThan(fly(1).zoom)
+      const points = five.map((f) => ({ lat: f.lat, lon: f.lon }))
+      const overviewZoom = Math.min(
+        fitCameraAroundPoint(vessel, points, 240, 240, POI_MAP_FIT_PADDING_PX).zoom,
+        zoomForRangeNm(5, vessel.lat, 240),
+      )
+      expect(fly(1).minZoom).toBeCloseTo(overviewZoom, 6)
       expect(fly(1).duration).toBe(t.hopMs)
     })
 
@@ -1021,7 +1086,8 @@ describe('PoiMapTile', () => {
         goto(rerender, 2)
         expect(flyToMock).not.toHaveBeenCalled()
         expect(jumpToMock).toHaveBeenCalledTimes(3)
-        expect((jumpToMock.mock.calls[2][0] as { center: [number, number]; pitch: number }).center).toEqual([148.98, -20.25])
+        const jumped = jumpToMock.mock.calls[2][0] as { center: [number, number]; zoom: number }
+        expect(inFrame(jumped.center, jumped.zoom, { lat: -20.25, lon: 148.98 })).toBe(true)
         expect((jumpToMock.mock.calls[2][0] as { pitch: number }).pitch).toBe(0)
         act(() => { vi.advanceTimersByTime(60000) })
         expect(jumpToMock).toHaveBeenCalledTimes(3)

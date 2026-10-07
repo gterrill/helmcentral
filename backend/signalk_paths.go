@@ -280,7 +280,8 @@ func buildGaugeValuesPayload() map[string]any {
 	// Tier 1 #2), once per second via the hub even before this fix.
 	context := globalSignalKSnapshot.selfContext()
 	tree := globalSignalKSnapshot.selfTree()
-	derivedValues, derivedAges := computeDerivedPathsFromTree(globalSignalKSnapshot, context, tree, now)
+	engineStateOf := memoEngineStates(globalSignalKSnapshot, now)
+	derivedValues, derivedAges := computeDerivedPathsWithStates(globalSignalKSnapshot, context, tree, engineStateOf, now)
 
 	if len(paths) > 0 {
 		read := alarmReaderFromTree(globalSignalKSnapshot, context, tree)
@@ -294,6 +295,16 @@ func buildGaugeValuesPayload() map[string]any {
 					values[path] = nil
 				}
 				ages[path] = derivedAges[path]
+				continue
+			}
+
+			// A switched-off engine's paths carry no value and no age, the way
+			// the Engine Cluster tile shows them, so a gauge, group or lamp
+			// bound to one agrees with it instead of marking a frozen reading
+			// STALE.
+			if id := propulsionEngineID(path); id != "" && engineStateOf()[id].State == engineStateOff {
+				values[path] = nil
+				ages[path] = -1
 				continue
 			}
 
@@ -312,5 +323,11 @@ func buildGaugeValuesPayload() map[string]any {
 		}
 	}
 
-	return map[string]any{"values": values, "ages": ages}
+	payload := map[string]any{"values": values, "ages": ages}
+	// Whether each engine is running, switched off or lost (engine_state.go),
+	// so the Engine Cluster tile can say OFF instead of STALE.
+	if engines := engineStatesJSON(engineStateOf()); len(engines) > 0 {
+		payload["engines"] = engines
+	}
+	return payload
 }

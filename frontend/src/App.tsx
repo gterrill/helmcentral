@@ -192,7 +192,7 @@ import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { EngineProfileDialog } from '@/components/engine-profile-dialog'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { LampStripTile } from '@/components/lamp-strip-tile'
-import { useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
+import { useEngineStates, useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -219,6 +219,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { UpdatedToast } from '@/components/updated-toast'
 import {
   parseAppLocation,
   formatAppLocation,
@@ -442,6 +443,8 @@ export function App() {
   // Age behind each bound path (ADR 0083), riding the same gauge-values event
   // rather than a stream of its own -- see hooks/use-gauge-values.ts.
   const gaugeAges = useGaugeAges()
+  // Which engines read as switched off, so a cluster says OFF, not stale.
+  const engineStates = useEngineStates()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   // ADR 0115 §2 review finding: the Details page holds its own explicit
@@ -2104,6 +2107,7 @@ export function App() {
           config={widget.cluster}
           values={gaugeValues}
           ages={gaugeAges}
+          engines={engineStates}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
         />
@@ -3990,6 +3994,7 @@ export function App() {
       )}
 
       <Toaster isDarkTheme={isDarkTheme} />
+      <UpdatedToast />
     </SidebarProvider>
   )
 }

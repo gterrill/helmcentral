@@ -45,7 +45,24 @@ least two.
    your bank needs a different number than the profile gives.
 6. Choose **Save** in the bar across the top of the screen.
 
-Engines and the house bank save together with the rest of Settings. The bar
+## Battery names
+
+1. Still under **Settings → Vessel**, find **Battery names**.
+2. Every battery number the boat reports is listed with its live voltage,
+   current and state of charge. Under the name box, a line says what the boat
+   itself calls it, if anything: that is also the grey hint in the box.
+3. Type the name you use for it, for example "Port Engine Starter Battery".
+   Leave the box empty to keep using the boat's own name.
+4. A number that only chargers report, where those chargers also feed another
+   battery number, is marked "Charger input, not a battery". Its readings are
+   not checked as a battery, so a solar panel array's high voltage does not
+   raise an impossible-reading alarm.
+5. Choose **Save** in the bar across the top of the screen.
+
+Alarms and the Ignored sensors list use these names. An engine's name
+is the one you gave it under **Engines**.
+
+Engines, battery names and the house bank save together with the rest of Settings. The bar
 appears as soon as you change anything, **Discard** puts it all back, and if
 you try to leave Settings with changes unsaved you are asked first. **Apply
 gauge zones** is not part of that: it adds the gauge tile to your first
@@ -59,6 +76,24 @@ so you always know what saving will turn on.
 A sender that has failed outright (a stuck or open-circuit reading) can
 trip the frozen or impossible-reading check forever. Rather than a
 settings list, this is handled from the alarm itself: open the alarm card
-for that check and choose **Ignore this sensor** next to the reading you
-want excluded. To see everything currently ignored, or to bring one back,
+for that check and choose **Ignore** followed by the sensor's name (for example
+**Ignore Port engine exhaust temperature**) for the reading you want
+excluded. To see everything currently ignored, or to bring one back,
 open **Settings → Alarms** and look under **Ignored sensors**.
+
+## Owner and insurance
+
+Mate fills in insurance declarations and marina applications from these, so
+they are worth entering once. None of them is needed for anomaly detection.
+
+1. Open **Settings → Vessel** and find **Owner & insurance**.
+2. Enter the owner's name, phone and email, the insurer and policy number, the
+   home marina and berth, and the storm delegate: whoever prepares the boat
+   when you are away, with how to reach them.
+3. Under **Particulars**, enter the length overall and beam in metres. The
+   boat's live instruments supply a length too when they publish one, shown
+   at the top of the section; this figure is the one kept for forms.
+4. Choose **Save** in the bar across the top of the screen.
+
+Leave a field blank if you do not want Mate to use it. It asks instead. See
+[Fill in a form with Mate](fill-in-a-form-with-mate.md).

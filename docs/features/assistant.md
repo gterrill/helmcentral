@@ -263,6 +263,57 @@ question is obviously about one manual in particular.
 See [Documents](documents.md) for what gets indexed, what it costs, file
 types and limits, and how folders and tags work.
 
+## Filling in forms
+
+Insurers and marinas send the same PDF again and again: owner, boat, policy number,
+which marina, who looks after the boat when you are away. Attach the blank PDF
+to a message in Mate and ask it to fill it in. Mate reads the form, takes what
+it needs from what Helmcentral already holds about the boat and its owner, and
+asks you in a single message for anything that is missing. It then fills the
+form in and shows it under its reply as a card.
+
+What Mate fills from is on **Settings, Vessel**: the owner's name, phone and
+email, the insurer and policy number, the home marina and berth, the storm
+delegate (the person who prepares the boat when you are away), and the boat's
+length and beam, next to the hull details already there. The boat's name and
+its length and draft come from the live instruments when they are connected.
+Nothing is pre-filled, and Mate never makes up a value to fill a gap. When you
+give it answers in the chat that belong in that record, it offers to save them,
+as a card with **Apply**, so the next form needs no questions.
+
+Mate works with two kinds of PDF. A fillable form has named fields, and Mate
+sets them. A flat form has none: it is a page with questions, blanks and boxes
+drawn on it, and Mate writes the answer after the question and draws a tick
+inside a box. It can tell which box belongs to which marina or option by the
+words beside it. Both come back as a new PDF; the blank you attached is left
+alone.
+
+The card under Mate's reply is where you check the result. **Open the form**
+shows the PDF, **Download** saves it to your device, and **Save to Documents**
+files it in the library under a title and folder you can change before you
+save. Mate suggests a folder such as Insurance/2026, and makes it if it is not
+there yet. Until you save, the filled form is not in Documents, and **Dismiss**
+throws it away. Saving twice gives you the same document, not two.
+
+Limits worth knowing:
+
+- **Signatures stay yours.** Mate never fills a signature line or a signature
+  field. It leaves the date alone too unless you tell it to put in today's.
+- **Plain text only.** On a flat form the answers are written in one plain
+  font, in Latin letters. A name with characters it cannot write is refused,
+  and Mate tells you which.
+- **It needs text to read.** A form that is a scan or a photograph has no text
+  for Mate to find the blanks by, so it cannot fill it in. A flat form whose
+  tick boxes it cannot find is read for its text only, and Mate asks you what
+  to tick instead of guessing.
+- **A blank with no words next to it** (a row of small boxes for single letters,
+  a cell under a heading) cannot be named. Mate fills what it can and tells you
+  what is left for you to write in by hand.
+- **Check it before you send it.** Mate puts in only what you or the record
+  gave it, but you are the one who signs.
+
+Steps are in [Fill in a form with Mate](../how-to/fill-in-a-form-with-mate.md).
+
 ## Talking to Mate
 
 Voice is push-to-talk: tap the microphone in the header, or press `Alt+M`

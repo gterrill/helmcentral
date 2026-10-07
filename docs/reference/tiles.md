@@ -62,8 +62,8 @@ once, unlike the built-ins above:
 | --- | --- |
 | Gauge | Any single value the boat's instrument network publishes, as a number, radial dial, bar, lamp or trend. Coloured bands double as alarm rules. |
 | Gauge group | Several gauges clustered under one title, for duplicating onto a second engine or generator. See [Duplicate a gauge group](../how-to/duplicate-a-gauge-group.md). |
-| Engine cluster | A fixed layout of engine readings for one engine. Fills the tile you give it, up to twice its usual size. |
-| Indicators | A row of labelled status cells, either pinned as the vessel-wide ribbon or placed on one page. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
+| Engine cluster | A fixed layout of engine readings for one engine. Fills the tile you give it, up to twice its usual size. When the engine is switched off the tile reads `OFF` instead of going stale; see [Staleness](#staleness). |
+| Indicators | A row of status lamps, either pinned as the vessel-wide ribbon or placed on one page. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
 | Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile; layout mode still draws the frame so an embed is never impossible to reconfigure. |
 | Nearby map | Points of interest around the vessel. See [Add a Nearby map](../how-to/add-a-nearby-map.md) and [POI categories](poi-categories.md). |
 
@@ -163,9 +163,12 @@ three figures:
 
 Any of the three blanks out with a small stale marker if the reading it
 depends on stops updating, rather than showing a number built on a burn
-rate or tank level that stopped being true. With one engine stopped and the
-other still reporting, the stopped engine is counted as off, so range and time
-to empty reflect the running engine alone. If only its fuel rate has stopped,
+rate or tank level that stopped being true. A stopped engine is counted as
+off, so with one engine running range and time to empty reflect it alone, and
+with every engine off they read `--` with no stale marker. Engines on a
+connection of their own, with nothing else on it, are the exception: with
+all of them quiet the figures show stale, since a failed connection looks the
+same. If only its fuel rate has stopped,
 or everything on its connection has gone quiet, the figures stay blank. An
 engine on a connection of its own is the exception: if that connection fails
 while the engine runs, it counts as off and the figures read high.
@@ -207,6 +210,21 @@ number is deliberate: a stale reading shown as current is worse than none.
   reading on it has.
 - An indicator cell drops to the dashed no-data look rather than staying lit
   on an old value.
+- An engine cluster for an engine that has been switched off reads `OFF`
+  in place of `STALE`, in plain grey with no amber edge, and its readings go
+  to `--`. Switching the key off powers the engine's own electronics down, so
+  its readings simply stop. Hover over the marker for the time it went quiet.
+  Helmcentral takes an engine as off once it has sent nothing for more than
+  two minutes while the rest of its network is still reporting. Any gauge,
+  gauge group or lamp bound to that engine's readings shows `--` with no
+  `STALE` marker too, so the tiles on a page agree. If the whole network
+  feeding the engine goes quiet, the tile stays amber `STALE`, because that is
+  a failed link rather than an engine switched off. Two cases it cannot tell
+  apart from a switch-off: an engine's electronics dropping out while the
+  engine runs, on a network that is otherwise healthy, and an engine wired to
+  a network of its own that fails while the engine runs. Both read `OFF`.
+- A lamp goes dark with the same age marker rather than staying lit on an
+  old value.
 - A number worked out from more than one reading, fuel economy for example,
   goes stale with whichever input stopped first.
 

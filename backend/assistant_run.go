@@ -104,6 +104,9 @@ type assistantReply struct {
 	// order. The handler saves them with the assistant message in one
 	// transaction, so a run that fails or is cancelled saves none.
 	Proposals []assistantProposal
+	// FormDrafts are the filled-in forms (ADR 0165) fill_form made during
+	// this run, in call order. Saved with the assistant message like Proposals.
+	FormDrafts []assistantFormDraft
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -821,6 +824,15 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 					reply.Proposals = append(reply.Proposals, *proposal)
 				}
 			}
+			if call.Function.Name == assistantFillFormToolName {
+				draft, derr := assistantFormDraftFromToolResult(result)
+				if derr != nil {
+					return assistantReply{}, derr
+				}
+				if draft != nil {
+					reply.FormDrafts = append(reply.FormDrafts, *draft)
+				}
+			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 				Name:   call.Function.Name,
 				Args:   string(call.Function.Arguments),
@@ -858,7 +870,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
 // get_tides, estimate_passage, plan_tidal_departure, read_help, search_documents, read_document,
 // search_conversations, read_conversation, get_nearby_vessels, check_signalk_paths, get_last_recorded,
-// get_path_history, find_equipment, list_maintenance, get_maintenance_log,
+// get_path_history, list_passages, find_equipment, list_maintenance, get_maintenance_log,
 // propose_changes) only reads: none of them writes to the
 // conversation store, settings, the document store, or any other shared
 // state, so running a round's calls in parallel needs no locking beyond
@@ -1136,6 +1148,9 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 		// not decided.
 		for _, p := range m.Proposals {
 			content += assistantProposalHistoryBlock(p)
+		}
+		for _, d := range m.FormDrafts {
+			content += formDraftHistoryBlock(d)
 		}
 		role := m.Role
 		if role == "watch" {

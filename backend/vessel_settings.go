@@ -28,6 +28,17 @@ import (
 type vesselSettings struct {
 	Engines   []vesselEngineSetting   `yaml:"engines" json:"engines"`
 	HouseBank *vesselHouseBankSetting `yaml:"house_bank" json:"house_bank"`
+	// Batteries are the operator's own names for electrical.batteries.<id>
+	// instances (sensor_names.go). An instance with no entry, or an empty
+	// name, simply has no operator name.
+	Batteries []vesselBatterySetting `yaml:"batteries" json:"batteries"`
+}
+
+// vesselBatterySetting names one electrical.batteries.<id> instance, e.g.
+// instance "3" as "Port Engine Starter Battery".
+type vesselBatterySetting struct {
+	Instance string `yaml:"instance" json:"instance"`
+	Name     string `yaml:"name" json:"name"`
 }
 
 // vesselEngineSetting is one propulsion.<id> instance the operator has

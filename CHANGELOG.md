@@ -21,6 +21,54 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   alarms are active and the worst one's title. Lamps can be given an icon and
   a group heading in the ribbon dialog; existing ribbons pick up icons
   automatically and need no change.
+- Mate fills in PDF forms. Attach an insurer's declaration or a marina's
+  application and ask it to fill it in. Mate reads the form, takes what it needs
+  from your vessel details, asks you once for anything missing, and puts the
+  filled-in form under its reply to open, download, save to Documents under a
+  title and folder you choose, or dismiss. It works on fillable forms and on
+  flat ones, where it writes after the question and ticks the box beside the
+  right marina or option. It never fills a signature, and never puts the form
+  in Documents until you save it. A form that is a scan cannot be read.
+- Settings, Vessel has a new **Owner & insurance** section: owner name, phone
+  and email, insurer, policy number, home marina, berth and storm delegate, and
+  Particulars gains length overall and beam. Mate reads these for forms and can
+  offer to save answers you give it in a chat.
+- **Mate answers history questions from the logged instrument history.** Ask
+  "when do the alternators cut off charging on the last few passages" and Mate
+  finds the recent passages from the logged speed, then reads what that reading
+  did on each one, instead of answering from documents and old conversations.
+  It needs the history log set up.
+- **Battery names** in Settings → Vessel. Each battery number the boat reports
+  is listed with what the boat calls it; type your own name for it, such as
+  "Port Engine Starter Battery". Alarms use it. Leave it empty to keep
+  the boat's own name.
+- The version in the sidebar footer now opens that release's notes.
+- After Helmcentral updates itself, a message says which version it is now
+  running, with a link to that release's notes.
+
+### Changed
+
+- The impossible, frozen and silent sensor alarms now name each sensor and say
+  what is wrong, for example "Port Engine Starter Battery voltage 75.7 V ·
+  above the 70 V any 12, 24 or 48 V bank reaches", instead of a count and a
+  raw SignalK path. The Ignore button and the Ignored sensors list in Settings
+  use the same names. Notifications carry the same text.
+
+### Fixed
+
+- **Fuel economy, range and time to empty no longer show stale with the
+  engines off.** With every engine switched off they read `--`, the same as
+  when stopped. A stale marker now means a reading has actually stopped, such
+  as a gateway going quiet.
+- A solar charger's panel voltage, which the boat's network reports under a
+  battery number, no longer raises an Impossible sensor reading alarm. Battery
+  numbers that only chargers report, where those chargers also feed another
+  battery number, are not checked as batteries.
+
+## [0.42.0] - 2026-10-06
+
+### Added
+
 - A **Summarise to note** button beside the microphone in the Mate message
   box saves what a conversation worked out as a note. Mate writes up the facts
   established about your boat, what was ruled out and why, and the procedure
@@ -42,6 +90,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Nearby tile's tour of places no longer loses the boat off the edge of
+  the map. A place close by still gets a street-level view centred on it; for
+  one further off, the view slides toward the boat so both stay on screen.
+- An engine you have switched off now reads **OFF** in grey on its engine
+  cluster tile, with no amber edge, instead of **STALE** with the hours since
+  the engine went quiet. Hover over it for the time it was switched off.
+  Gauges, gauge groups and lamps bound to that engine's readings show **--**
+  with no **STALE** marker, so the tiles agree, and a stale-data alarm rule
+  on those readings stays quiet. If the network feeding the engine goes quiet
+  as well, the tile still shows amber **STALE**, since that is a failed link.
+  The exception is an engine wired to a network of its own: if that network
+  fails while the engine runs, it reads **OFF**.
 - A single gauge tile no longer draws a frame inside its own border. Numeric
   and lamp gauge tiles can be made as short as two rows, and their reading
   grows and stays centred as the tile is made bigger.
@@ -919,7 +979,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/gterrill/helmcentral/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/gterrill/helmcentral/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/gterrill/helmcentral/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/gterrill/helmcentral/compare/v0.38.0...v0.39.0

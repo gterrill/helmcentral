@@ -1143,3 +1143,33 @@ func TestBuildAssistantSystemPrompt_RecallsEarlierConversations(t *testing.T) {
 		t.Fatalf("expected the recall guidance only in the stable prefix, got:\n%s", live)
 	}
 }
+
+func TestBuildAssistantSystemPrompt_FormsRule(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"inspect_form", "get_vessel_particulars", "ask for all of it in one message",
+		"propose_changes on the vessel_particulars record", "fill_form once with every entry",
+		"A signature is always left blank for the operator", "never say it is",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the forms rule to contain %q", want)
+		}
+	}
+}
+
+// TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry pins ADR
+// 0165's rule: a question about what a reading did over time is answered
+// from the logged telemetry, not from documents or past chats.
+func TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"list_passages",
+		"what a reading did over time",
+		"get_path_history for each window",
+		"secondary context",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the history rule to mention %q, got:\n%s", want, prompt)
+		}
+	}
+}

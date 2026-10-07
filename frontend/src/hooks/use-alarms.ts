@@ -8,6 +8,16 @@ export type AlarmState = (typeof ALARM_STATES)[number]
 
 export type AlarmPhase = 'normal' | 'pending' | 'active' | 'acknowledged'
 
+export interface SensorHealthEntry {
+  identifier: string
+  name: string
+  quantity?: string
+  /** The thing and the quantity: "Port Engine Starter Battery voltage". */
+  label: string
+  /** The whole line: label, reading and why it is wrong. */
+  text: string
+}
+
 export interface ActiveAlarm {
   rule_id: string
   label: string
@@ -82,6 +92,18 @@ export interface ActiveAlarm {
    * tripped the alarm.
    */
   live_evidence?: string
+
+  /**
+   * One named line per failing sensor, for the three sensor-health count
+   * alarms (frozen, impossible reading, silent source) only. Built on the
+   * server (backend/sensor_names.go) so the card, the banner, Mate and every
+   * notification say the same thing. `sensors` is the set at the moment the
+   * alarm raised; `live_sensors` is re-read on every poll and is what the card
+   * shows and what the ignore actions are built from. `identifier` is the raw
+   * path or $source id the ignore action submits; it is never displayed.
+   */
+  sensors?: SensorHealthEntry[]
+  live_sensors?: SensorHealthEntry[]
 
   /**
    * SignalK's own alert status and capabilities (ADR 0038). Silencing stops the

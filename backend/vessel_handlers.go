@@ -36,10 +36,20 @@ type vesselEngineCandidate struct {
 // how an operator resolves ambiguity like two IDs that are really the same
 // physical bank reported two ways.
 type vesselBatteryCandidate struct {
-	Path    string   `json:"path"`
-	Voltage *float64 `json:"voltage"`
-	Current *float64 `json:"current"`
-	SoC     *float64 `json:"soc"`
+	Path string `json:"path"`
+	// Instance is the <id> in electrical.batteries.<id>, the key an operator
+	// battery name is stored under. BusName is what the bus itself calls it
+	// (its .name path, or its device's installation or product name), shown
+	// as the hint beside the operator's own name field; empty when the bus
+	// says nothing. ChargerInput marks an instance that is a charger's
+	// own input (published only by chargers that feed another
+	// bank), which the impossible-reading check does not treat as a battery.
+	Instance     string   `json:"instance"`
+	BusName      string   `json:"bus_name"`
+	ChargerInput bool     `json:"charger_input"`
+	Voltage      *float64 `json:"voltage"`
+	Current      *float64 `json:"current"`
+	SoC          *float64 `json:"soc"`
 }
 
 // vesselDetectorStatus is one detector's setup state for the Settings page:
@@ -99,10 +109,16 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 	}
 	sort.Slice(engines, func(i, j int) bool { return engines[i].Instance < engines[j].Instance })
 
+	namer := newSensorNamer(snapshot, vessel, globalSourceDevices.get())
 	batteries := make([]vesselBatteryCandidate, 0, len(batteryInstances))
 	for instance := range batteryInstances {
 		path := "electrical.batteries." + instance
-		candidate := vesselBatteryCandidate{Path: path}
+		candidate := vesselBatteryCandidate{
+			Path:         path,
+			Instance:     instance,
+			BusName:      namer.busBatteryName(instance),
+			ChargerInput: namer.isChargerInstance(instance),
+		}
 		if v, ok := numericFromPath(snapshot, path+".voltage"); ok {
 			candidate.Voltage = &v
 		}

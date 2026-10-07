@@ -174,6 +174,57 @@ export function fitCameraAroundPoint(
 }
 
 /**
+ * The camera that shows `place` as close as `targetZoom` allows while keeping
+ * `boat` in a `widthPx` x `heightPx` viewport, both inside `paddingPx` of
+ * clearance. The place stays centred while the boat fits around it; once it
+ * doesn't, the camera pans off the place toward the boat, just far enough to
+ * bring the boat inside the padding edge, rather than zooming out with the
+ * place still centred. That holds the view about a level tighter for a far-off
+ * place. A tilted view magnifies its near half, so `headroomZoom` comes off
+ * both the zoom (never tighter than both points fit, less the headroom) and
+ * the box the boat is panned into (the padded box shrunk by the same factor);
+ * otherwise the pan would put the boat on the edge whatever the zoom. The
+ * zoom never goes wider than `minZoom`.
+ * Same Web Mercator projection as fitCameraAroundPoint.
+ */
+export function framePlaceWithBoat(
+  place: MapPoint,
+  boat: MapPoint,
+  widthPx: number,
+  heightPx: number,
+  paddingPx: number,
+  targetZoom: number,
+  headroomZoom: number,
+  minZoom: number,
+): { center: MapPoint; zoom: number } {
+  const offsetX = mercatorX(boat.lon) - mercatorX(place.lon)
+  const offsetY = mercatorY(boat.lat) - mercatorY(place.lat)
+  const availableWidthPx = Math.max(1, widthPx - 2 * paddingPx)
+  const availableHeightPx = Math.max(1, heightPx - 2 * paddingPx)
+
+  const worldSizeCandidates: number[] = []
+  if (offsetX !== 0) worldSizeCandidates.push(availableWidthPx / Math.abs(offsetX))
+  if (offsetY !== 0) worldSizeCandidates.push(availableHeightPx / Math.abs(offsetY))
+  const bothFitZoom = worldSizeCandidates.length === 0
+    ? Infinity
+    : Math.log2(Math.min(...worldSizeCandidates) / MERCATOR_TILE_SIZE_PX)
+  const zoom = Math.max(minZoom, Math.min(targetZoom, bothFitZoom - headroomZoom))
+
+  // Pan only by however far the boat would sit past the headroom-shrunk box.
+  const worldSizePx = MERCATOR_TILE_SIZE_PX * 2 ** zoom
+  const boxScale = 2 ** -headroomZoom
+  const pan = (offset: number, halfPx: number) =>
+    Math.sign(offset) * Math.max(0, Math.abs(offset) * worldSizePx - halfPx) / worldSizePx
+  const cx = mercatorX(place.lon) + pan(offsetX, (availableWidthPx / 2) * boxScale)
+  const cy = mercatorY(place.lat) + pan(offsetY, (availableHeightPx / 2) * boxScale)
+  if (cx === mercatorX(place.lon) && cy === mercatorY(place.lat)) return { center: place, zoom }
+  return {
+    center: { lat: (Math.atan(Math.sinh(Math.PI * (1 - 2 * cy))) * 180) / Math.PI, lon: cx * 360 - 180 },
+    zoom,
+  }
+}
+
+/**
  * The top `n` features for the ranked list, one per name. The server already
  * sorts by distance ascending (decorateAndRankPOIFeatures in
  * backend/poi_providers.go), so this only needs to fold near-duplicate names

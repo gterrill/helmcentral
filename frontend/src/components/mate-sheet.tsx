@@ -77,6 +77,8 @@ interface MateSheetProps {
  */
 export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
+  const activeIdRef = useRef(conversations.activeId)
+  activeIdRef.current = conversations.activeId
   const chat = useAssistantChat()
   const watch = useMateTelemetryWatch(conversations.activeId)
   const speechOutput = useSpeechOutput()
@@ -201,6 +203,9 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
       if (newConversation || conversationId === null) {
         conversationId = await conversations.create()
         if (conversationId === null) return
+        // The sheet now shows the new conversation, even before the render
+        // that carries its id lands.
+        activeIdRef.current = conversationId
       }
 
       conversations.appendLocal({
@@ -216,11 +221,16 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
       // drops the streamed draft. That is also when the answer counts as
       // delivered: Stop tapped before the stream closes makes send() resolve
       // null, but the answer is on screen and should still be read aloud.
+      // A reply is only appended, and read aloud, while the sheet still
+      // shows the conversation the question went to: the operator may have
+      // opened another one from the search overlay meanwhile.
       let delivered: AssistantMessage | null = null
+      const askedIn = conversationId
       await chat.send(conversationId, initialQuestion, {
         spoken: true,
         screen,
         onMessage: (message) => {
+          if (activeIdRef.current !== askedIn) return
           delivered = message
           conversations.appendLocal(message)
         },

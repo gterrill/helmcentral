@@ -269,6 +269,28 @@ describe('useDocumentUploads', () => {
     expect(xhr.aborted).toBe(true)
   })
 
+  it('removes only the items whose document ids are given and leaves the rest staged', () => {
+    const { result } = renderHook(() => useDocumentUploads())
+
+    act(() => {
+      result.current.add([
+        new File(['hello'], 'a.pdf', { type: 'application/pdf' }),
+        new File(['world'], 'b.pdf', { type: 'application/pdf' }),
+      ])
+    })
+    act(() => {
+      FakeXHR.instances[0].emitLoad(201, { document: documentPayload({ id: 'doc-a', filename: 'a.pdf' }), duplicate: false })
+    })
+    expect(result.current.items.find((i) => i.filename === 'a.pdf')?.documentId).toBe('doc-a')
+
+    act(() => {
+      result.current.removeByDocumentIds(['doc-a'])
+    })
+
+    expect(result.current.items.map((i) => i.filename)).toEqual(['b.pdf'])
+    expect(FakeXHR.instances[1].aborted).toBe(false)
+  })
+
   it('clears every staged item and aborts anything still uploading', () => {
     const { result } = renderHook(() => useDocumentUploads())
 

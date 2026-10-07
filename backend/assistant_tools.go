@@ -268,8 +268,7 @@ func fuelRateInstancesFromSnapshot() []string {
 
 	var instances []string
 	for _, path := range fuelRatePaths(tree) {
-		instance := strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
-		if instance != "" {
+		if instance := propulsionEngineID(path); instance != "" {
 			instances = append(instances, instance)
 		}
 	}
@@ -663,7 +662,8 @@ func assistantToolDefinitions() []openRouterTool {
 					"follows the span that holds data, not the span asked for: if the data covers an hour or less " +
 					"you get 1-minute buckets, so a short range gives the finest detail. Each bucket's min/max " +
 					"show transients shorter than the bucket. Use " +
-					"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source.",
+					"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source. " +
+					"For \"the last passage\" style questions, get the time windows from list_passages.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -678,6 +678,24 @@ func assistantToolDefinitions() []openRouterTool {
 						"start": {"type": "string", "description": "Range start, RFC3339 (e.g. \"2026-09-20T00:00:00Z\"). Give with end, or use hours_back instead."},
 						"end": {"type": "string", "description": "Range end, RFC3339. Give with start, or use hours_back instead."},
 						"hours_back": {"type": "number", "description": "Hours back from now, instead of start/end. Default 24 when none of start/end/hours_back is given."}
+					}
+				}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "list_passages",
+				Description: "From InfluxDB's logged speed over ground, list the recent periods the vessel was " +
+					"underway (start, end, duration, approximate distance, mean and max speed), most recent first. " +
+					"Use it to turn \"the last passage\", \"the last few passages\" or \"when we were last underway\" " +
+					"into time windows, then call get_path_history for each window: a short window gives finer " +
+					"buckets. If no speed was logged in the range it says so explicitly.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"days_back": {"type": "integer", "description": "How many days back to look. Default 14, at most 60."},
+						"limit": {"type": "integer", "description": "How many passages to return, most recent first. Default 5, at most 20."}
 					}
 				}`),
 			},
@@ -845,6 +863,9 @@ func assistantToolDefinitions() []openRouterTool {
 			},
 		},
 		assistantStartWatchToolDefinition(),
+		assistantVesselParticularsToolDefinition(),
+		assistantInspectFormToolDefinition(),
+		assistantFillFormToolDefinition(),
 	}
 }
 
@@ -895,6 +916,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetLastRecorded(ctx, args)
 	case "get_path_history":
 		return d.executeGetPathHistory(ctx, args)
+	case "list_passages":
+		return d.executeListPassages(ctx, args)
 	case "find_equipment":
 		return d.executeFindEquipment(ctx, args)
 	case "list_maintenance":
@@ -911,6 +934,12 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeProposeChanges(ctx, args)
 	case "start_watch":
 		return d.executeStartWatch(ctx, args)
+	case "get_vessel_particulars":
+		return d.executeGetVesselParticulars(ctx, args)
+	case assistantInspectFormToolName:
+		return d.executeInspectForm(ctx, args)
+	case assistantFillFormToolName:
+		return d.executeFillForm(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -1037,6 +1066,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			label = "the log"
 		}
 		return fmt.Sprintf("Checking InfluxDB for when %s last reported…", label)
+	case "list_passages":
+		return "Finding recent passages in the log…"
 	case "get_path_history":
 		var a assistantGetPathHistoryArgs
 		path := ""
@@ -1071,6 +1102,12 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Preparing the changes…"
 	case "start_watch":
 		return "Starting a watch…"
+	case "get_vessel_particulars":
+		return "Reading the vessel details…"
+	case assistantInspectFormToolName:
+		return "Reading the form…"
+	case assistantFillFormToolName:
+		return "Filling in the form…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

@@ -1,0 +1,826 @@
+{
+ "0": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 28.3,
+   "$source": "YachtDevices.228",
+   "timestamp": "2026-10-07T00:17:02.016Z",
+   "pgn": 127508,
+   "values": {
+    "YachtDevices.42": {
+     "value": 28.42,
+     "pgn": 127508,
+     "timestamp": "2026-10-07T00:17:01.014Z"
+    },
+    "YachtDevices.36": {
+     "value": 28.3,
+     "timestamp": "2026-10-07T00:17:01.313Z",
+     "pgn": 127508
+    },
+    "YachtDevices.225": {
+     "value": 28.3,
+     "timestamp": "2026-10-07T00:17:01.364Z",
+     "pgn": 127508
+    },
+    "YachtDevices.39": {
+     "value": 28.29,
+     "timestamp": "2026-10-07T00:17:01.765Z",
+     "pgn": 127508
+    },
+    "YachtDevices.228": {
+     "value": 28.3,
+     "timestamp": "2026-10-07T00:17:02.016Z",
+     "pgn": 127508
+    },
+    "YachtDevices.37": {
+     "value": 28.31,
+     "timestamp": "2026-10-07T00:17:00.613Z",
+     "pgn": 127508
+    },
+    "YachtDevices.38": {
+     "value": 28.3,
+     "timestamp": "2026-10-07T00:17:01.814Z",
+     "pgn": 127508
+    }
+   }
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0.5,
+   "$source": "YachtDevices.228",
+   "timestamp": "2026-10-07T00:17:02.016Z",
+   "pgn": 127508,
+   "values": {
+    "YachtDevices.42": {
+     "value": 25.8,
+     "pgn": 127508,
+     "timestamp": "2026-10-07T00:17:01.014Z"
+    },
+    "YachtDevices.36": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:01.313Z",
+     "pgn": 127508
+    },
+    "YachtDevices.225": {
+     "value": -12.4,
+     "timestamp": "2026-10-07T00:17:01.364Z",
+     "pgn": 127508
+    },
+    "YachtDevices.39": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:01.765Z",
+     "pgn": 127508
+    },
+    "YachtDevices.228": {
+     "value": 0.5,
+     "timestamp": "2026-10-07T00:17:02.016Z",
+     "pgn": 127508
+    },
+    "YachtDevices.37": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:00.613Z",
+     "pgn": 127508
+    },
+    "YachtDevices.38": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:01.814Z",
+     "pgn": 127508
+    }
+   }
+  },
+  "capacity": {
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "YachtDevices.228",
+    "timestamp": "2026-10-07T00:17:02.017Z",
+    "pgn": 127506,
+    "values": {
+     "YachtDevices.42": {
+      "value": null,
+      "pgn": 127506,
+      "timestamp": "2026-10-07T00:17:01.015Z"
+     },
+     "YachtDevices.36": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:01.315Z",
+      "pgn": 127506
+     },
+     "YachtDevices.39": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:01.768Z",
+      "pgn": 127506
+     },
+     "YachtDevices.228": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:02.017Z",
+      "pgn": 127506
+     },
+     "YachtDevices.37": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:00.615Z",
+      "pgn": 127506
+     },
+     "YachtDevices.38": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:01.816Z",
+      "pgn": 127506
+     }
+    }
+   },
+   "stateOfCharge": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 1,
+    "$source": "YachtDevices.228",
+    "timestamp": "2026-10-07T00:17:02.017Z",
+    "pgn": 127506
+   },
+   "stateOfHealth": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 1,
+    "$source": "YachtDevices.228",
+    "timestamp": "2026-10-07T00:17:02.017Z",
+    "pgn": 127506
+   }
+  },
+  "temperature": {
+   "meta": {
+    "description": "Temperature measured within or on the device",
+    "units": "K",
+    "displayUnits": {
+     "category": "temperature",
+     "targetUnit": "C",
+     "formula": "value - 273.15",
+     "inverseFormula": "value + 273.15",
+     "symbol": "\u00b0C",
+     "displayFormat": "0.0"
+    }
+   },
+   "value": 302.15,
+   "$source": "YachtDevices.228",
+   "timestamp": "2026-10-07T00:17:02.016Z",
+   "pgn": 127508
+  }
+ },
+ "1": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 76.71,
+   "$source": "YachtDevices.38",
+   "timestamp": "2026-10-07T00:17:01.815Z",
+   "pgn": 127508,
+   "values": {
+    "YachtDevices.36": {
+     "value": 76.81,
+     "pgn": 127508,
+     "timestamp": "2026-10-07T00:17:01.314Z"
+    },
+    "YachtDevices.39": {
+     "value": 76.98,
+     "timestamp": "2026-10-07T00:17:01.767Z",
+     "pgn": 127508
+    },
+    "YachtDevices.37": {
+     "value": 76.85,
+     "timestamp": "2026-10-07T00:17:00.614Z",
+     "pgn": 127508
+    },
+    "YachtDevices.38": {
+     "value": 76.71,
+     "timestamp": "2026-10-07T00:17:01.815Z",
+     "pgn": 127508
+    }
+   }
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "YachtDevices.38",
+   "timestamp": "2026-10-07T00:17:01.815Z",
+   "pgn": 127508,
+   "values": {
+    "YachtDevices.36": {
+     "value": 0,
+     "pgn": 127508,
+     "timestamp": "2026-10-07T00:17:01.314Z"
+    },
+    "YachtDevices.39": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:01.767Z",
+     "pgn": 127508
+    },
+    "YachtDevices.37": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:00.614Z",
+     "pgn": 127508
+    },
+    "YachtDevices.38": {
+     "value": 0,
+     "timestamp": "2026-10-07T00:17:01.815Z",
+     "pgn": 127508
+    }
+   }
+  },
+  "capacity": {
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "YachtDevices.38",
+    "timestamp": "2026-10-07T00:17:01.817Z",
+    "pgn": 127506,
+    "values": {
+     "YachtDevices.36": {
+      "value": null,
+      "pgn": 127506,
+      "timestamp": "2026-10-07T00:17:01.316Z"
+     },
+     "YachtDevices.39": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:01.768Z",
+      "pgn": 127506
+     },
+     "YachtDevices.37": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:00.616Z",
+      "pgn": 127506
+     },
+     "YachtDevices.38": {
+      "value": null,
+      "timestamp": "2026-10-07T00:17:01.817Z",
+      "pgn": 127506
+     }
+    }
+   }
+  }
+ },
+ "2": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 26.02,
+   "$source": "YachtDevices.227",
+   "timestamp": "2026-10-07T00:17:01.716Z",
+   "pgn": 127508
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "YachtDevices.227",
+   "timestamp": "2026-10-07T00:17:01.716Z",
+   "pgn": 127508
+  },
+  "capacity": {
+   "stateOfCharge": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 0.99,
+    "$source": "YachtDevices.227",
+    "timestamp": "2026-10-07T00:17:01.718Z",
+    "pgn": 127506
+   },
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "YachtDevices.227",
+    "timestamp": "2026-10-07T00:17:01.718Z",
+    "pgn": 127506
+   }
+  }
+ },
+ "3": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 25.98,
+   "$source": "YachtDevices.224",
+   "timestamp": "2026-10-07T00:17:00.712Z",
+   "pgn": 127508
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "YachtDevices.224",
+   "timestamp": "2026-10-07T00:17:00.712Z",
+   "pgn": 127508
+  },
+  "capacity": {
+   "stateOfCharge": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 0.99,
+    "$source": "YachtDevices.224",
+    "timestamp": "2026-10-07T00:17:00.713Z",
+    "pgn": 127506
+   },
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "YachtDevices.224",
+    "timestamp": "2026-10-07T00:17:00.713Z",
+    "pgn": 127506
+   }
+  }
+ },
+ "278": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 26.020000457763672,
+   "$source": "venus.com.victronenergy.battery.278",
+   "timestamp": "2026-10-07T00:16:38.886Z"
+  },
+  "capacity": {
+   "dischargedEnergy": {
+    "meta": {
+     "description": "",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": 61415.99807739258,
+    "$source": "venus.com.victronenergy.battery.278",
+    "timestamp": "2026-10-07T00:16:53.363Z"
+   },
+   "consumedCharge": {
+    "meta": {
+     "description": "",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": -15840.000343322754,
+    "$source": "venus.com.victronenergy.battery.278",
+    "timestamp": "2026-10-07T00:16:53.363Z"
+   },
+   "dischargeSinceFull": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": -15840.000343322754,
+    "$source": "venus.com.victronenergy.battery.278",
+    "timestamp": "2026-10-07T00:16:53.363Z"
+   },
+   "stateOfCharge": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 0.9869999694824219,
+    "$source": "venus.com.victronenergy.battery.278",
+    "timestamp": "2026-10-07T00:16:53.363Z"
+   },
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "venus.com.victronenergy.battery.278",
+    "timestamp": "2026-10-07T00:16:53.364Z"
+   }
+  },
+  "name": {
+   "meta": {
+    "description": "Unique ID of device (houseBattery, alternator, Generator, solar1, inverter, charger, combiner, etc.)"
+   },
+   "value": "STBD START BATT",
+   "$source": "venus.com.victronenergy.battery.278",
+   "timestamp": "2026-10-07T00:16:53.363Z"
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "venus.com.victronenergy.battery.278",
+   "timestamp": "2026-10-07T00:16:53.363Z"
+  },
+  "power": {
+   "meta": {
+    "description": "",
+    "units": "W",
+    "displayUnits": {
+     "category": "power",
+     "targetUnit": "W",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "W",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "venus.com.victronenergy.battery.278",
+   "timestamp": "2026-10-07T00:16:53.364Z"
+  },
+  "lifetimeDischarge": {
+   "meta": {
+    "description": "Cumulative charge discharged from battery over operational lifetime of battery",
+    "units": "C",
+    "displayUnits": {
+     "category": "charge",
+     "targetUnit": "Ah",
+     "formula": "value * 0.0002777777777777778",
+     "inverseFormula": "value / 0.0002777777777777778",
+     "symbol": "Ah",
+     "displayFormat": "0.0"
+    }
+   },
+   "value": -2443320.0439453125,
+   "$source": "venus.com.victronenergy.battery.278",
+   "timestamp": "2026-10-07T00:16:53.364Z"
+  }
+ },
+ "292": {
+  "voltage": {
+   "meta": {
+    "description": "Voltage measured at or as close as possible to the device",
+    "units": "V",
+    "displayUnits": {
+     "category": "voltage",
+     "targetUnit": "V",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "V",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 25.989999771118164,
+   "$source": "venus.com.victronenergy.battery.292",
+   "timestamp": "2026-10-07T00:16:47.356Z"
+  },
+  "capacity": {
+   "dischargedEnergy": {
+    "meta": {
+     "description": "",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": 463860.02197265625,
+    "$source": "venus.com.victronenergy.battery.292",
+    "timestamp": "2026-10-07T00:16:47.356Z"
+   },
+   "consumedCharge": {
+    "meta": {
+     "description": "",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": -13679.999828338623,
+    "$source": "venus.com.victronenergy.battery.292",
+    "timestamp": "2026-10-07T00:16:47.357Z"
+   },
+   "dischargeSinceFull": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "C",
+     "displayUnits": {
+      "category": "charge",
+      "targetUnit": "Ah",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "Ah",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": -13679.999828338623,
+    "$source": "venus.com.victronenergy.battery.292",
+    "timestamp": "2026-10-07T00:16:47.357Z"
+   },
+   "stateOfCharge": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "ratio",
+     "displayUnits": {
+      "category": "percentage",
+      "targetUnit": "percent",
+      "formula": "value * 100",
+      "inverseFormula": "value * 0.01",
+      "symbol": "%",
+      "displayFormat": "0"
+     }
+    },
+    "value": 0.99,
+    "$source": "venus.com.victronenergy.battery.292",
+    "timestamp": "2026-10-07T00:16:47.357Z"
+   },
+   "timeRemaining": {
+    "meta": {
+     "description": "Data should be of type number.",
+     "units": "s",
+     "displayUnits": {
+      "category": "time",
+      "targetUnit": "hour",
+      "formula": "value * 0.0002777777777777778",
+      "inverseFormula": "value / 0.0002777777777777778",
+      "symbol": "hour",
+      "displayFormat": "0.0"
+     }
+    },
+    "value": null,
+    "$source": "venus.com.victronenergy.battery.292",
+    "timestamp": "2026-10-07T00:16:47.358Z"
+   }
+  },
+  "name": {
+   "meta": {
+    "description": "Unique ID of device (houseBattery, alternator, Generator, solar1, inverter, charger, combiner, etc.)"
+   },
+   "value": "PORT START BATT",
+   "$source": "venus.com.victronenergy.battery.292",
+   "timestamp": "2026-10-07T00:16:47.357Z"
+  },
+  "current": {
+   "meta": {
+    "description": "Current flowing out (+ve) or in (-ve) to the device. Reversed for batteries (+ve = charging).",
+    "units": "A",
+    "displayUnits": {
+     "category": "current",
+     "targetUnit": "A",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "A",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "venus.com.victronenergy.battery.292",
+   "timestamp": "2026-10-07T00:16:47.358Z"
+  },
+  "power": {
+   "meta": {
+    "description": "",
+    "units": "W",
+    "displayUnits": {
+     "category": "power",
+     "targetUnit": "W",
+     "formula": "value",
+     "inverseFormula": "value",
+     "symbol": "W",
+     "displayFormat": "0.00"
+    }
+   },
+   "value": 0,
+   "$source": "venus.com.victronenergy.battery.292",
+   "timestamp": "2026-10-07T00:16:47.358Z"
+  },
+  "lifetimeDischarge": {
+   "meta": {
+    "description": "Cumulative charge discharged from battery over operational lifetime of battery",
+    "units": "C",
+    "displayUnits": {
+     "category": "charge",
+     "targetUnit": "Ah",
+     "formula": "value * 0.0002777777777777778",
+     "inverseFormula": "value / 0.0002777777777777778",
+     "symbol": "Ah",
+     "displayFormat": "0.0"
+    }
+   },
+   "value": -2007359.912109375,
+   "$source": "venus.com.victronenergy.battery.292",
+   "timestamp": "2026-10-07T00:16:47.358Z"
+  }
+ }
+}

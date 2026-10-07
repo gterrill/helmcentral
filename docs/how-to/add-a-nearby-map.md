@@ -16,7 +16,11 @@ With write access, in layout mode:
    to the next one - 3 to 120 seconds, 10 by default. Its description shows
    too if it has one; many points of interest don't. The map dives in to the
    first match and tilts, holds there, then flies on to each next one in a
-   high arc that shows the boat and the whole area on the way. After the last
+   high arc that shows the boat and the whole area on the way. Each close-up
+   keeps the boat in the picture: a place right beside you gets a street-level
+   view centred on it, and for one further off the view slides toward the boat
+   so both stay on screen.
+   After the last
    match it pulls back out to the view centred on the boat and rests on it
    for a moment before starting again. A longer cycle, 15 to 20 seconds,
    gives each place a longer hold; a very short one shortens the moves to

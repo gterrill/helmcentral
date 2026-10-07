@@ -122,7 +122,7 @@ func (s *placeSearchCacheStore) put(key string, result placeSearchResult) {
 }
 
 // searchPlacesCached answers from the cache when it can and otherwise
-// calls the provider, caching only a successful answer.
+// calls the provider, caching only a successful, non-degraded answer.
 func searchPlacesCached(provider placeNameProvider, providerID string, in placeSearchInput) (placeSearchResult, error) {
 	key := placeSearchCacheKey(providerID, in)
 	if cached, ok := placeSearchCache.get(key); ok {
@@ -131,6 +131,19 @@ func searchPlacesCached(provider placeNameProvider, providerID string, in placeS
 	result, err := provider.SearchPlaces(in)
 	if err != nil {
 		return placeSearchResult{}, err
+	}
+	// An empty result carrying a Note is how a provider reports a degraded
+	// search; remembering it would repeat the failure for hours. A
+	// genuinely empty result has no Note and is cached.
+	//
+	// This is an inference, not a contract: the search_places output the
+	// plugins return (wasmSearchPlacesOutput) has no explicit "degraded"
+	// field, and the plugins live outside this repository, so the host cannot
+	// add one that they set. A provider that attaches a Note to a genuinely
+	// empty answer is judged by this rule alone. Replace it with an explicit
+	// flag if the plugin ABI gains one.
+	if len(result.Results) == 0 && result.Note != "" {
+		return result, nil
 	}
 	placeSearchCache.put(key, result)
 	return result, nil

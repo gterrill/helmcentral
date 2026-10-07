@@ -55,13 +55,16 @@ Steps for specific tasks.
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
 - [Keep what a Mate conversation worked out](how-to/keep-what-a-mate-conversation-worked-out.md)
+- [Fill in a form with Mate](how-to/fill-in-a-form-with-mate.md), insurer and
+  marina paperwork from the details the boat already holds.
 - [Start a ship's manual](how-to/start-a-ships-manual.md), what belongs in one
   and what the builder's handbook already covers.
 - [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
   filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
-  house bank anomaly detection watches.
+  house bank anomaly detection watches, and entering owner and insurance
+  details.
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
 - [Tag bins and equipment](how-to/tag-bins-and-equipment.md), writing and
   using an NFC tag, and the iPhone Copy route.

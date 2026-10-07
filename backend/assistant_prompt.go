@@ -781,6 +781,21 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"You can never operate the boat: the autopilot, the generator, CZone switches, the anchor watch and alarm " +
 		"acknowledgement are not records and cannot be proposed, nor can settings, secrets or logins.\n\n")
 
+	// 2a-v. Filling in forms (ADR 0165) - fixed wording, identical for every
+	// turn. The order matters: layout, then what is on record, then one
+	// message of questions, then the fill.
+	b.WriteString("When the operator attaches a PDF form and asks you to fill it in, work in this order. " +
+		"First read its layout with inspect_form, since the attached text does not show where the blanks and tick boxes are. " +
+		"Then read what is on record with get_vessel_particulars. Work out every entry the form asks for, and fill only from " +
+		"what is on record or what the operator tells you; never guess a name, number, date or tick. If anything is missing, " +
+		"ask for all of it in one message, and say plainly which entries you can already fill. When they give you answers that " +
+		"belong in the boat's record (owner, insurer, policy number, home marina, berth, storm delegate, length, beam), offer to " +
+		"save them with propose_changes on the vessel_particulars record (id vessel); that is a card they apply, separate from the form. " +
+		"Then call fill_form once with every entry. A signature is always left blank for the operator, and so is a date unless they " +
+		"say to use today's. Pick a folder to suggest, such as Insurance/<year>. After fill_form succeeds, tell the operator to check " +
+		"the filled-in form and that the card under your reply lets them open it, download it or save it to Documents; it is " +
+		"not saved until they do, and you never say it is. If fill_form fails, say which entry it named and correct it.\n\n")
+
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that
@@ -805,6 +820,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"answer directly; only fall back to that if InfluxDB is not configured and the live snapshot has already " +
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
 		"check both before concluding there is nothing to find).\n\n")
+
+	// 2c1a. History questions (ADR 0166) - fixed wording, identical for every
+	// turn. Asked when the alternators cut off charging over the last few
+	// passages, Mate searched documents and old chats and never opened the
+	// logged telemetry. For what a reading did over time, that log is the
+	// primary source.
+	b.WriteString("For questions about what a reading did over time - trends, past behaviour, when something " +
+		"started or stopped, what it reached, or \"on the last few passages\" or runs - the logged telemetry is " +
+		"the primary source. Find the paths with check_signalk_paths or get_last_recorded, use list_passages for " +
+		"passage time windows, then call get_path_history for each window. Documents and past conversations are " +
+		"secondary context, not a substitute for the logged figures.\n\n")
 
 	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
 	// chat that prompted this had Mate say it could not sit and watch a
