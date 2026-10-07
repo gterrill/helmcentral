@@ -237,13 +237,9 @@ shows and how the Dawn figure is worked out.
 
 ## Tanks
 
-Below the tank bars, a footer adds three fuel figures once at least one tank
-is configured: fuel aboard, and range and time to empty at the current burn
-rate. Any of the three goes blank, rather than showing a plausible-looking
-number built on a reading that stopped arriving, if the figure behind it
-stops updating. See [Tanks footer
-fields](../reference/tiles.md#tanks-footer-fields) for exactly what each one
-sums and when it goes blank.
+A bar for each tank with its level, in percent, and a state word that
+stays readable in glare. Fuel and water warn as they run low, and waste warns
+as it fills.
 
 ## Nearby map
 
