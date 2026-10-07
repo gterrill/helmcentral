@@ -1156,3 +1156,20 @@ func TestBuildAssistantSystemPrompt_FormsRule(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry pins ADR
+// 0165's rule: a question about what a reading did over time is answered
+// from the logged telemetry, not from documents or past chats.
+func TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"list_passages",
+		"what a reading did over time",
+		"get_path_history for each window",
+		"secondary context",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the history rule to mention %q, got:\n%s", want, prompt)
+		}
+	}
+}
