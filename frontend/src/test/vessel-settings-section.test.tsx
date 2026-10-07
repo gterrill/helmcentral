@@ -53,9 +53,9 @@ function stubFetch() {
             { instance: 'starboard', rpm: 1810, coolant_c: 75 },
           ],
           batteries: [
-            { path: 'electrical.batteries.0', instance: '0', bus_name: 'Batrium-BMS (Victron profile)', solar_charger: false, voltage: 27.2, current: 15.6, soc: 0.79 },
-            { path: 'electrical.batteries.1', instance: '1', bus_name: 'BlueSolar Charger MPPT 100/50 re', solar_charger: true, voltage: 76.7, current: 0, soc: null },
-            { path: 'electrical.batteries.512', instance: '512', bus_name: '', solar_charger: false, voltage: 27.21, current: 267.6, soc: 0.79 },
+            { path: 'electrical.batteries.0', instance: '0', bus_name: 'Batrium-BMS (Victron profile)', charger_input: false, voltage: 27.2, current: 15.6, soc: 0.79 },
+            { path: 'electrical.batteries.1', instance: '1', bus_name: 'BlueSolar Charger MPPT 100/50 re', charger_input: true, voltage: 76.7, current: 0, soc: null },
+            { path: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, voltage: 27.21, current: 267.6, soc: 0.79 },
           ],
           detectors: {
             frozen: { ready: false, missing: 'Tick at least one engine' },
@@ -275,11 +275,11 @@ describe('Settings -> Vessel: Battery names', () => {
     expect(screen.getByText('The boat gives it no name')).toBeInTheDocument()
   })
 
-  it('marks a solar charger input as not a battery', async () => {
+  it('marks a charger input as not a battery', async () => {
     renderSection()
 
     await screen.findByLabelText('Name for battery 1')
-    expect(screen.getAllByText('Solar charger input, not a battery')).toHaveLength(1)
+    expect(screen.getAllByText('Charger input, not a battery')).toHaveLength(1)
   })
 
   it('saves a typed name with the Save bar patch and leaves an empty one out', async () => {

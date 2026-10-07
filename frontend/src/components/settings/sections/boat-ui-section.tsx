@@ -123,7 +123,7 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     const byInstance = new Map<string, VesselBatteryCandidate>()
     for (const b of candidates.batteries) byInstance.set(b.instance, b)
     for (const instance of Object.keys(vessel?.batteryNames ?? {})) {
-      if (!byInstance.has(instance)) byInstance.set(instance, { path: `electrical.batteries.${instance}`, instance, bus_name: '', solar_charger: false, voltage: null, current: null, soc: null })
+      if (!byInstance.has(instance)) byInstance.set(instance, { path: `electrical.batteries.${instance}`, instance, bus_name: '', charger_input: false, voltage: null, current: null, soc: null })
     }
     return [...byInstance.values()].sort((a, b) => a.instance.localeCompare(b.instance, undefined, { numeric: true }))
   }, [candidates.batteries, vessel])
@@ -263,7 +263,7 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
 
       <FormSection
         title="Battery names"
-        description="Name each battery the way you talk about it. Alarms and Mate use your name; leave it empty to use what the boat's instruments call it. Solar charger inputs are not batteries and are not range-checked."
+        description="Name each battery the way you talk about it. Alarms use your name; leave it empty to use what the boat's instruments call it. Charger inputs are not batteries and are not range-checked."
       >
         <div className="flex flex-col gap-2">
           {batteryInstances.length === 0 && (
@@ -386,8 +386,8 @@ function BatteryNameRow({ candidate, name, onNameChange }: BatteryNameRowProps) 
         <p className="truncate text-xs text-muted-foreground tabular-nums">
           Instance {candidate.instance}{reading === '' ? '' : ` · ${reading}`}
         </p>
-        {candidate.solar_charger && (
-          <p className="truncate text-xs text-muted-foreground">Solar charger input, not a battery</p>
+        {candidate.charger_input && (
+          <p className="truncate text-xs text-muted-foreground">Charger input, not a battery</p>
         )}
       </div>
     </div>

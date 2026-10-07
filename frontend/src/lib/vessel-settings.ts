@@ -47,8 +47,8 @@ export interface VesselBatteryCandidate {
   instance: string
   /** What the bus itself calls this instance; '' when it says nothing. */
   bus_name: string
-  /** Published only by chargers (a solar array's input), not a battery. */
-  solar_charger: boolean
+  /** A charger's own input (a solar array's voltage), not a battery. */
+  charger_input: boolean
   voltage: number | null
   current: number | null
   soc: number | null

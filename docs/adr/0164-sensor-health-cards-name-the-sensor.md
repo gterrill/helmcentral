@@ -1,4 +1,4 @@
-# ADR 0164: Sensor-health cards name the sensor, and solar chargers are not batteries
+# ADR 0164: Sensor-health cards name the sensor, and charger inputs are not batteries
 
 ## Status
 
@@ -33,14 +33,17 @@ monitors, 153 for the Quattro.
 
 ## Decision
 
-1. **A battery instance published only by chargers is not range-checked.**
+1. **A charger's input is not range-checked.**
    `electrical.batteries.<id>` is skipped by the impossible-reading check when
    every source that has published it is an NMEA 2000 device of class
-   "Electrical Generation" with device function 160 (charger). The device
-   class alone is not used, because on this bus it matches every battery
-   monitor too and would switch the check off for the whole bank.
-   Instance 0, which the chargers share with the BMS and the Quattro, is still
-   checked.
+   "Electrical Generation" with device function 160 (charger), and each of those
+   chargers also publishes another instance that a known non-charger publishes
+   (the bank it really feeds). The device class alone is not used, because on
+   this bus it matches every battery monitor too. Function 160 alone is not
+   enough either: it covers mains chargers like the Skylla, and a charger that
+   is alone on an instance, or only with other chargers, could be reporting a
+   real battery. Instance 1 (the four MPPTs, which also publish instance 0 with
+   the BMS and the Quattro) is skipped; instance 0 is checked.
 2. **Unknown means checked.** The set of publishers of each instance is
    remembered by the snapshot (the tree leaf only keeps the last writer), and
    the device details come from `GET /signalk/v1/api/sources`, refreshed every
@@ -74,8 +77,10 @@ monitors, 153 for the Quattro.
      side. Figures are in the operator's units.
    - Frozen: `Port engine oil pressure has not changed in 15 minutes while rpm
      varied`.
-   - Silent source: `PORT START BATT has stopped sending`. A source that
-     reports a single battery instance takes that battery's name.
+   - Silent source: `PORT START BATT has stopped sending`. A source takes a
+     battery's name only when it is the sole publisher of its one instance;
+     otherwise its own installation or product name is used, so a quiet charger
+     is not reported as the bank it feeds.
    Lines that would read identically (four chargers with one product name) are
    numbered "(1 of 4)".
 6. **Ignore stays on identifiers.** The button reads "Ignore <name> <quantity>"
@@ -86,9 +91,10 @@ monitors, 153 for the Quattro.
 
 - The false alarm on the boat is gone without touching the 70 V limit, which is
   still right for a battery.
-- A charger-only instance that is a real battery on someone else's boat (a
-  charger that is the only publisher of its own bank) would not be checked.
-  Chargers do not measure a bank on their own, so this was judged acceptable.
+- The sources tree is read at start and every ten minutes, retried every 30
+  seconds until the first read succeeds, so a SignalK that is slow at boot
+  leaves the check treating every instance as a battery for at most that long.
+- The Ignored sensors list numbers identical names "(1 of 2)" like the card.
 - Pressures print in millibars, the unit the alarm table already uses for
   pascals, so an oil pressure limit reads as thousands of millibars. A kPa or
   psi alarm unit is a separate change.

@@ -43,9 +43,10 @@ card uses what the boat's own instruments call it.
 The impossible-reading check looks at batteries, not at chargers. A solar
 charger reports its panel array's voltage under a battery number on some
 boats, and 76 volts is a normal array and an impossible battery. Where
-every device reporting a battery number is a charger, Helmcentral does not
-treat that number as a battery. If it cannot tell what is reporting, it
-checks it as a battery.
+every device reporting a battery number is a charger, and each of those
+chargers also feeds another battery number that a non-charger reports,
+Helmcentral does not treat that number as a battery. A charger on its own is
+still checked, and so is anything Helmcentral cannot identify.
 
 A sensor you know is dead and don't want watched (a broken exhaust
 temperature sender, say) can be excluded from its own alarm card with an

@@ -53,9 +53,10 @@ least two.
    itself calls it, if anything: that is also the grey hint in the box.
 3. Type the name you use for it, for example "Port Engine Starter Battery".
    Leave the box empty to keep using the boat's own name.
-4. A number reported only by solar chargers is marked "Solar charger input,
-   not a battery". Its readings are not checked as a battery, so a panel
-   array's high voltage does not raise an impossible-reading alarm.
+4. A number that only chargers report, where those chargers also feed another
+   battery number, is marked "Charger input, not a battery". Its readings are
+   not checked as a battery, so a solar panel array's high voltage does not
+   raise an impossible-reading alarm.
 5. Choose **Save** in the bar across the top of the screen.
 
 Alarms and the Ignored sensors list use these names. An engine's name

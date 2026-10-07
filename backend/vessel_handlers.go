@@ -41,11 +41,12 @@ type vesselBatteryCandidate struct {
 	// battery name is stored under. BusName is what the bus itself calls it
 	// (its .name path, or its device's installation or product name), shown
 	// as the hint beside the operator's own name field; empty when the bus
-	// says nothing. SolarCharger marks an instance published only by
-	// chargers, which the impossible-reading check does not treat as a battery.
+	// says nothing. ChargerInput marks an instance that is a charger's
+	// own input (published only by chargers that feed another
+	// bank), which the impossible-reading check does not treat as a battery.
 	Instance     string   `json:"instance"`
 	BusName      string   `json:"bus_name"`
-	SolarCharger bool     `json:"solar_charger"`
+	ChargerInput bool     `json:"charger_input"`
 	Voltage      *float64 `json:"voltage"`
 	Current      *float64 `json:"current"`
 	SoC          *float64 `json:"soc"`
@@ -116,7 +117,7 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 			Path:         path,
 			Instance:     instance,
 			BusName:      namer.busBatteryName(instance),
-			SolarCharger: namer.isChargerInstance(instance),
+			ChargerInput: namer.isChargerInstance(instance),
 		}
 		if v, ok := numericFromPath(snapshot, path+".voltage"); ok {
 			candidate.Voltage = &v

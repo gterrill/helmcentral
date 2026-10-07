@@ -93,11 +93,17 @@ func unignoreSensor(identifier string) error {
 func ignoredSensorsResponse() map[string]any {
 	identifiers := listIgnoredSensors()
 	namer := newSensorNamer(globalSignalKSnapshot, vesselSettingsForNaming(), globalSourceDevices.get())
+	return map[string]any{"identifiers": identifiers, "sensors": ignoredSensorEntries(namer, identifiers)}
+}
+
+// ignoredSensorEntries names each identifier, numbering identical names the
+// way the alarm card does so the rows can be told apart.
+func ignoredSensorEntries(namer *sensorNamer, identifiers []string) []sensorHealthEntry {
 	sensors := make([]sensorHealthEntry, 0, len(identifiers))
 	for _, id := range identifiers {
 		sensors = append(sensors, namer.identifierEntry(id))
 	}
-	return map[string]any{"identifiers": identifiers, "sensors": sensors}
+	return disambiguateSensorEntries(sensors)
 }
 
 // vesselSettingsForNaming loads the vessel block for naming only. A block

@@ -33,7 +33,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - A solar charger's panel voltage, which the boat's network reports under a
   battery number, no longer raises an Impossible sensor reading alarm. Battery
-  numbers reported only by chargers are not checked as batteries.
+  numbers that only chargers report, where those chargers also feed another
+  battery number, are not checked as batteries.
 
 ## [0.42.0] - 2026-10-06
 

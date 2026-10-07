@@ -132,27 +132,38 @@ func fetchSourceDevices() (map[string]sourceDevice, error) {
 	return parseSourceDevices(body)
 }
 
-// startSourceDeviceRefresher keeps globalSourceDevices current. A failed
-// fetch is logged and the previous copy kept: nothing is guessed in its
-// place, and the readers already treat a missing device as unknown.
+// sourceDeviceRetryInterval is how soon a failed read is retried while no
+// read has ever succeeded: until then chargers are unknown and the check
+// keeps treating every battery instance as a battery.
+const sourceDeviceRetryInterval = 30 * time.Second
+
+// startSourceDeviceRefresher keeps globalSourceDevices current.
 func startSourceDeviceRefresher(ctx context.Context, interval time.Duration) {
-	refresh := func() {
-		devices, err := fetchSourceDevices()
+	runSourceDeviceRefresher(ctx, fetchSourceDevices, globalSourceDevices.set, sourceDeviceRetryInterval, interval)
+}
+
+// runSourceDeviceRefresher reads at once, retries every retry until the first
+// success, then reads every interval. Each failed read is logged and the
+// previous copy kept: nothing is guessed in its place, and the readers already
+// treat a missing device as unknown.
+func runSourceDeviceRefresher(ctx context.Context, fetch func() (map[string]sourceDevice, error), set func(map[string]sourceDevice), retry, interval time.Duration) {
+	succeeded := false
+	for {
+		devices, err := fetch()
+		wait := interval
 		if err != nil {
 			log.Printf("sensor names: could not read the SignalK sources tree, device names and the charger test stay as they were: %v", err)
-			return
+			if !succeeded {
+				wait = retry
+			}
+		} else {
+			set(devices)
+			succeeded = true
 		}
-		globalSourceDevices.set(devices)
-	}
-	refresh()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			refresh()
+		case <-time.After(wait):
 		}
 	}
 }
@@ -210,24 +221,45 @@ func (n *sensorNamer) publishers(id string) []string {
 	return sources
 }
 
-// isChargerInstance reports whether EVERY source that has published battery
-// instance id is a known NMEA 2000 charger, so the instance is a charger's
-// own input (a solar array's voltage) and not a battery. A source the sources
-// tree does not know, or an instance nothing has published, is not proof of
-// anything: the instance then keeps being checked as a battery, the
-// conservative choice, rather than skipped on a guess.
+// isChargerInstance reports whether battery instance id is a charger's own
+// input (a solar array's voltage) and not a battery. Two things must hold.
+// EVERY source that has published it is a known NMEA 2000 charger. And each of
+// those chargers also publishes another instance that has at least one known
+// non-charger publisher, the bank the charger really feeds: a charger on its
+// own, or only alongside other chargers, has no such bank and its instance
+// could be a real battery reading. A source the sources tree does not know, or
+// an instance nothing has published, is not proof of anything: the instance
+// then keeps being checked as a battery, the conservative choice, rather than
+// skipped on a guess.
 func (n *sensorNamer) isChargerInstance(id string) bool {
-	sources := n.snapshot.batteryPublishersFor(n.snapshot.selfContext(), id)
+	context := n.snapshot.selfContext()
+	sources := n.snapshot.batteryPublishersFor(context, id)
 	if len(sources) == 0 {
 		return false
 	}
 	for _, source := range sources {
 		device, known := n.devices[source]
-		if !known || !device.isCharger() {
+		if !known || !device.isCharger() || !n.feedsAnotherBank(context, source, id) {
 			return false
 		}
 	}
 	return true
+}
+
+// feedsAnotherBank reports whether source publishes a battery instance other
+// than skip that a known non-charger device also publishes.
+func (n *sensorNamer) feedsAnotherBank(context, source, skip string) bool {
+	for _, other := range n.snapshot.batteryInstancesPublishedBy(context, source) {
+		if other == skip {
+			continue
+		}
+		for _, publisher := range n.snapshot.batteryPublishersFor(context, other) {
+			if d, known := n.devices[publisher]; known && !d.isCharger() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // busBatteryName is what the bus itself calls battery instance id, with no
@@ -360,13 +392,15 @@ func (n *sensorNamer) pathEntry(path string) sensorHealthEntry {
 }
 
 // sourceName names a $source id for the silent-source card and the ignore
-// list. A source that is the only publisher of battery instances shares the
+// list. A source that is the sole publisher of its one battery instance takes the
 // name of the bank it reports (the operator's own name, if given). Otherwise
 // the device's installation name, then its product name. A source nothing is
 // known about is a server plugin's own id, readable as it stands, or a bus
 // address shown as a plain device.
 func (n *sensorNamer) sourceName(source string) string {
-	if instances := n.snapshot.batteryInstancesPublishedBy(n.snapshot.selfContext(), source); len(instances) == 1 {
+	context := n.snapshot.selfContext()
+	if instances := n.snapshot.batteryInstancesPublishedBy(context, source); len(instances) == 1 &&
+		len(n.snapshot.batteryPublishersFor(context, instances[0])) == 1 {
 		return n.batteryName(instances[0])
 	}
 	if d, ok := n.devices[source]; ok {

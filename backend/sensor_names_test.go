@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +77,7 @@ func newSensorNamesFixtureNamer(t *testing.T, vessel vesselSettings) (*sensorNam
 	return newSensorNamer(snapshot, vessel, loadSensorSourcesFixture(t)), snapshot
 }
 
-func TestSolarChargerInstanceIsSkippedButBanksAreNot(t *testing.T) {
+func TestChargerInputInstanceIsSkippedButBanksAreNot(t *testing.T) {
 	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
 
 	// Instance 1 is published only by YachtDevices.36-39, the four BlueSolar
@@ -109,7 +111,7 @@ func TestChargerInstanceWithUnknownSourceInfoStaysChecked(t *testing.T) {
 	}
 }
 
-func TestImpossibleReadingSkipsSolarChargerInstanceInTheDetector(t *testing.T) {
+func TestImpossibleReadingSkipsChargerInputInstanceInTheDetector(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
 	loadSensorBatteriesFixture(t, snapshot)
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
@@ -315,11 +317,11 @@ func TestVesselCandidatesListBatteryInstancesWithBusNamesAndSolarFlag(t *testing
 	for _, b := range resp.Batteries {
 		byInstance[b.Instance] = b
 	}
-	if b := byInstance["1"]; !b.SolarCharger || b.BusName != "BlueSolar Charger MPPT 100/50 re" {
+	if b := byInstance["1"]; !b.ChargerInput || b.BusName != "BlueSolar Charger MPPT 100/50 re" {
 		t.Errorf("instance 1 = %+v", b)
 	}
 	// The bus name is what the BUS calls it, even when the operator has named it.
-	if b := byInstance["3"]; b.SolarCharger || b.BusName != "PORT START BATT" {
+	if b := byInstance["3"]; b.ChargerInput || b.BusName != "PORT START BATT" {
 		t.Errorf("instance 3 = %+v", b)
 	}
 	if b := byInstance["292"]; b.BusName != "PORT START BATT" {
@@ -362,5 +364,82 @@ func TestIdentifierEntryNamesPathsAndSources(t *testing.T) {
 	}
 	if e := namer.identifierEntry("YachtDevices.36"); e.Label != "BlueSolar Charger MPPT 100/50 re" {
 		t.Errorf("source entry = %+v", e)
+	}
+}
+
+// A mains charger (function 160 like the MPPTs) that is the only thing on its
+// instance, and publishes nothing else, has no output bank to point at: the
+// instance stays in the battery check.
+func TestLoneChargerInstanceStaysChecked(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+		SourceRef: "YachtDevices.42", Timestamp: sensorNamesTestNow.Format(time.RFC3339),
+		Values: []signalKValue{{Path: "electrical.batteries.9.voltage", Value: 76.0}},
+	}}}, sensorNamesTestNow)
+	namer := newSensorNamer(snapshot, vesselSettings{}, loadSensorSourcesFixture(t))
+	if namer.isChargerInstance("9") {
+		t.Errorf("a lone Skylla-like source on its only instance must still be range-checked")
+	}
+	// Publishing a second instance that only chargers publish is not an output bank either.
+	snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+		SourceRef: "YachtDevices.42", Timestamp: sensorNamesTestNow.Format(time.RFC3339),
+		Values: []signalKValue{{Path: "electrical.batteries.8.voltage", Value: 28.0}},
+	}}}, sensorNamesTestNow)
+	if namer.isChargerInstance("9") {
+		t.Errorf("an output instance with no non-charger publisher does not qualify")
+	}
+}
+
+func TestSilentSourceTakesABankNameOnlyAsItsSolePublisher(t *testing.T) {
+	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	// YachtDevices.224 is the only publisher of instance 3: it takes the bank's name.
+	if got := namer.silentSourceEntry("YachtDevices.224").Name; got != "PORT START BATT" {
+		t.Errorf("sole publisher name = %q", got)
+	}
+	// A charger that publishes only instance 7 alongside a shunt must not be named after the bank.
+	snapshot := newAnomalyTestSnapshot()
+	for _, src := range []string{"YachtDevices.36", "YachtDevices.228"} {
+		snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+			SourceRef: src, Timestamp: sensorNamesTestNow.Format(time.RFC3339),
+			Values: []signalKValue{{Path: "electrical.batteries.7.voltage", Value: 27.0}},
+		}}}, sensorNamesTestNow)
+	}
+	n := newSensorNamer(snapshot, vesselSettings{Batteries: []vesselBatterySetting{{Instance: "7", Name: "House Bank"}}}, loadSensorSourcesFixture(t))
+	if got := n.silentSourceEntry("YachtDevices.36").Text; got != "BlueSolar Charger MPPT 100/50 re has stopped sending" {
+		t.Errorf("shared-instance charger text = %q", got)
+	}
+}
+
+func TestSourceDeviceRefresherRetriesQuicklyUntilFirstRead(t *testing.T) {
+	calls := 0
+	got := make(chan map[string]sourceDevice, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fetch := func() (map[string]sourceDevice, error) {
+		calls++
+		if calls < 3 {
+			return nil, errors.New("signalk down")
+		}
+		return map[string]sourceDevice{"a": {}}, nil
+	}
+	go runSourceDeviceRefresher(ctx, fetch, func(m map[string]sourceDevice) { got <- m }, 5*time.Millisecond, time.Hour)
+	select {
+	case <-got:
+		if calls != 3 {
+			t.Errorf("calls = %d, want 3", calls)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("no successful read after %d calls: the retry interval was not used", calls)
+	}
+}
+
+func TestIgnoredSensorEntriesNumberIdenticalNames(t *testing.T) {
+	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	out := ignoredSensorEntries(namer, []string{"YachtDevices.36", "YachtDevices.37", "YachtDevices.224"})
+	if out[0].Label != "BlueSolar Charger MPPT 100/50 re (1 of 2)" || out[1].Label != "BlueSolar Charger MPPT 100/50 re (2 of 2)" || out[2].Label != "PORT START BATT" {
+		t.Errorf("labels = %q %q %q", out[0].Label, out[1].Label, out[2].Label)
+	}
+	if out[1].Identifier != "YachtDevices.37" {
+		t.Errorf("identifier must stay raw: %q", out[1].Identifier)
 	}
 }
