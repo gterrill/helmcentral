@@ -64,7 +64,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({ useVesselState: () => ({ vesselLeng
 
 // Stable identity per test: the mocked hook hands this back on every render.
 const defaultSettings = () => ({
-  vessel: { engines: [{ instance: 'port', name: 'Port', equipment_id: '' }], house_bank: null },
+  vessel: { engines: [{ instance: 'port', name: 'Port', equipment_id: '' }], house_bank: null, batteries: [] },
 }) as Record<string, unknown>
 let settingsFixture = defaultSettings()
 
@@ -243,7 +243,7 @@ describe('the vessel part of the settings draft', () => {
   it('is left out of the patch when the server block was never read, so a save cannot wipe it', async () => {
     const { buildRegularSettingsPatch, hydrateDraftFromSettings } = await import('@/components/settings/settings-draft')
     expect(buildRegularSettingsPatch(hydrateDraftFromSettings({})).vessel).toBeUndefined()
-    expect(buildRegularSettingsPatch(hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null } })).vessel)
-      .toEqual({ engines: [], house_bank: null })
+    expect(buildRegularSettingsPatch(hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [] } })).vessel)
+      .toEqual({ engines: [], house_bank: null, batteries: [] })
   })
 })

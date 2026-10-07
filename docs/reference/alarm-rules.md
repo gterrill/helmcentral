@@ -28,7 +28,7 @@ rather than zero when there is not enough history to answer:
 | `helmcentral.environment.forecastWindWarningLevel` | none | The official wind warning in force for the vessel's zone, ranked: 0 none, 1 strong wind or small craft, 2 gale, 3 storm. Absent until the first fetch lands, and again after thirty minutes without one. |
 | `helmcentral.environment.forecastSurfWarning` | none | 1 when a hazardous surf warning is in force for the zone, 0 otherwise. Absent under the same conditions as the wind level. |
 | `helmcentral.anomaly.sensor.frozenCount` | none | How many engine-correlated readings are stuck while the engine is clearly working. 0 means the check ran and found nothing; needs at least one engine set up in Settings → Vessel. |
-| `helmcentral.anomaly.sensor.outOfRangeCount` | none | How many engine or battery readings are outside anything physically possible. Needs no setup. |
+| `helmcentral.anomaly.sensor.outOfRangeCount` | none | How many engine or battery readings are outside anything physically possible. Battery numbers reported only by chargers are not counted. Needs no setup. |
 | `helmcentral.anomaly.sensor.silentSourceCount` | none | How many previously steady sources on the instrument network have gone quiet. Leaves out engine computers, equipment that switches off with the engines, and SignalK plugin outputs, so turning the engines off does not raise it. A network gateway going quiet is still raised. Needs no setup. |
 | `helmcentral.anomaly.battery.fullBankCharging` | none | 0, 1 or 2: whether the house bank is being charged past where it needs to be, and how far. Needs a house bank picked in Settings → Vessel. |
 | `helmcentral.anomaly.engines.<name>.<reading>Residual` | °C, kPa or none | One engine's gap from its peers for one reading (coolant temperature, oil pressure, boost pressure, engine load, or the transmission's own oil pressure/temperature), less the gap that engine normally runs. Absent until several weeks of history have taught Helmcentral what normal is for your boat. Needs at least two engines set up. |
@@ -113,6 +113,10 @@ normal gap.
 | Charging into a full house bank | Full-bank charging level 1 or higher | warn |
 | House bank overcharge risk | Full-bank charging level 2 (switched off until tuned) | alarm |
 | Engine running hotter/cooler, oil/boost pressure high/low, load high/low | That reading's residual past its learned band (switched off until a baseline is learned) | alert |
+
+The three sensor rules do not show their count. Their cards, banner and
+notifications name each failing sensor and say what is wrong with it, one line
+each, using the names from Settings → Vessel. The title is the rule's own.
 
 ## Forecast warning rule set
 

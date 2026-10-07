@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensorIdentifiers } from '@/lib/alarm-display'
+import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { groupRulesByDomain } from '@/lib/alarm-rules-view'
 import { severityClass } from '@/lib/severity'
@@ -80,11 +80,11 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   const { identifiers: ignoredSensors, ignore: ignoreSensor } = useIgnoredSensors()
   const [ignoringSensor, setIgnoringSensor] = useState<string | null>(null)
 
-  const handleIgnoreSensor = useCallback(async (identifier: string) => {
+  const handleIgnoreSensor = useCallback(async (identifier: string, label: string) => {
     setIgnoringSensor(identifier)
     try {
       await ignoreSensor(identifier)
-      toast.success(`Ignoring ${identifier}`, { description: 'This sensor no longer counts toward the frozen, impossible or silent-source check.' })
+      toast.success(`Ignoring ${label}`, { description: 'This sensor no longer counts toward the frozen, impossible or silent-source check.' })
     } catch (err) {
       toast.error('Could not ignore this sensor', { description: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -204,6 +204,9 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
               // bulletin, in which case the sentence keeps its own
               // "Details on the Forecast page." clause.
               const forecastDetailsUrl = forecastWarningDetailsUrl(forecastWarnings, alarm.path)
+              // The three sensor-health alarms say what is wrong with each
+              // sensor, one line each; they have no count sentence.
+              const sensorLines = sensorHealthLines(alarm)
               const conditionSentence = alarmConditionSentence(alarm, { forecastDetailsLinked: forecastDetailsUrl !== null })
 
               return (
@@ -213,7 +216,14 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       <p className={`wrap-break-word font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
                         {alarm.label}
                       </p>
-                      {(conditionSentence !== '' || forecastDetailsUrl) && (
+                      {sensorLines.length > 0 && (
+                        <div className="mt-1.5 flex flex-col gap-0.5 text-sm text-foreground/90">
+                          {sensorLines.map((line) => (
+                            <p key={line.identifier}>{line.text}</p>
+                          ))}
+                        </div>
+                      )}
+                      {sensorLines.length === 0 && (conditionSentence !== '' || forecastDetailsUrl) && (
                       <p className="mt-1.5 text-sm text-foreground/90">
                         {conditionSentence}
                         {forecastDetailsUrl && (
@@ -253,7 +263,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         condition sentence above rather than another
                         headline, so it renders muted.
                       */}
-                      {alarm.evidence && (
+                      {alarm.evidence && !isSensorHealthPath(alarm.path) && (
                         <p className="mt-1.5 text-xs text-muted-foreground">{alarm.evidence}</p>
                       )}
                       {/*
@@ -264,19 +274,20 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         broken exhaust sender) stops counting toward the
                         check without touching a settings file.
                       */}
-                      {ignorableSensorIdentifiers(alarm).filter((id) => !ignoredSensors.includes(id)).length > 0 && (
+                      {ignorableSensors(alarm).filter((sensor) => !ignoredSensors.includes(sensor.identifier)).length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1.5">
-                          {ignorableSensorIdentifiers(alarm).filter((id) => !ignoredSensors.includes(id)).map((identifier) => (
+                          {ignorableSensors(alarm).filter((sensor) => !ignoredSensors.includes(sensor.identifier)).map((sensor) => (
                             <Button
-                              key={identifier}
+                              key={sensor.identifier}
                               type="button"
                               size="sm"
                               variant="outline"
-                              className="h-6 gap-1 px-2 text-[10px] uppercase tracking-wider"
-                              disabled={ignoringSensor === identifier}
-                              onClick={() => void handleIgnoreSensor(identifier)}
+                              className="h-6 gap-1 px-2 text-xs"
+                              disabled={ignoringSensor === sensor.identifier}
+                              onClick={() => void handleIgnoreSensor(sensor.identifier, sensor.label)}
+                              aria-label={`Ignore ${sensor.label}`}
                             >
-                              Ignore {identifier}
+                              Ignore {sensor.label}
                             </Button>
                           ))}
                         </div>

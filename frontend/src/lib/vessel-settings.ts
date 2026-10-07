@@ -21,12 +21,19 @@ export interface VesselHouseBankSetting {
   high_voltage?: number
 }
 
+/** The operator's own name for one electrical.batteries.<id> instance. */
+export interface VesselBatterySetting {
+  instance: string
+  name: string
+}
+
 export interface VesselSettings {
   engines: VesselEngineSetting[]
   house_bank: VesselHouseBankSetting | null
+  batteries: VesselBatterySetting[]
 }
 
-export const emptyVesselSettings: VesselSettings = { engines: [], house_bank: null }
+export const emptyVesselSettings: VesselSettings = { engines: [], house_bank: null, batteries: [] }
 
 export interface VesselEngineCandidate {
   instance: string
@@ -36,6 +43,12 @@ export interface VesselEngineCandidate {
 
 export interface VesselBatteryCandidate {
   path: string
+  /** The <id> in electrical.batteries.<id>, the key an operator name is saved under. */
+  instance: string
+  /** What the bus itself calls this instance; '' when it says nothing. */
+  bus_name: string
+  /** A charger's own input (a solar array's voltage), not a battery. */
+  charger_input: boolean
   voltage: number | null
   current: number | null
   soc: number | null

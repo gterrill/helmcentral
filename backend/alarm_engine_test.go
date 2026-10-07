@@ -757,3 +757,33 @@ func TestEngineClearsEvidenceWhenTheAlarmClears(t *testing.T) {
 		t.Fatalf("expected evidence cleared once the alarm returns to normal, got %q", got)
 	}
 }
+
+// A sensor-health alarm raises with the named lines and a plain-text message
+// built from them: no count sentence, no raw path (ADR 0164).
+func TestSensorHealthAlarmRaisesWithNamedLinesAndPlainMessage(t *testing.T) {
+	rule := alarmRule{ID: "anomaly-out-of-range", Label: "Impossible sensor reading", Enabled: true,
+		Path: anomalySensorOutOfRangeCountPath, Op: alarmOpAbove, Value: 0.5, State: alarmStateAlert}
+	line := "Port Engine Starter Battery voltage 75.7 V · above the 70 V any 12, 24 or 48 V bank reaches"
+	globalAnomalySlot.set(anomalyReading{
+		Evidence: map[string]string{anomalySensorOutOfRangeCountPath: "electrical.batteries.3.voltage"},
+		Sensors: map[string][]sensorHealthEntry{anomalySensorOutOfRangeCountPath: {
+			{Identifier: "electrical.batteries.3.voltage", Name: "Port Engine Starter Battery", Quantity: "voltage", Label: "Port Engine Starter Battery voltage", Text: line},
+		}},
+		ComputedAt: alarmNow,
+	})
+	t.Cleanup(func() { globalAnomalySlot.set(anomalyReading{}) })
+
+	engine := newAlarmEngine()
+	engine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow)
+	status := engine.statusFor("anomaly-out-of-range")
+
+	if want := "Impossible sensor reading: " + line; status.Message != want {
+		t.Fatalf("message = %q, want %q", status.Message, want)
+	}
+	if len(status.Sensors) != 1 || status.Sensors[0].Identifier != "electrical.batteries.3.voltage" {
+		t.Fatalf("sensors at raise = %+v", status.Sensors)
+	}
+	if strings.Contains(status.Message, "clears below") || strings.Contains(status.Message, "electrical.") {
+		t.Fatalf("message leaks the count sentence or a path: %q", status.Message)
+	}
+}

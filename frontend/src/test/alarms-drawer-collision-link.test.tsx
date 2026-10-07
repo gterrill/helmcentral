@@ -169,50 +169,79 @@ describe('AlarmsDrawer anomaly evidence line', () => {
   })
 })
 
-// "Ignore this sensor" (round 2, then code review finding 9): the
-// frozen/impossible/silent-source count alarms name their offending
-// paths/sources in live_evidence (comma-separated), read fresh from the
-// live detector state on every poll rather than from the evidence frozen
-// at raise -- a long-running count alarm's specific offenders can drift
-// while the count itself stays above threshold, and the ignore action must
-// offer what is failing now, not whatever first tripped the alarm. Each
-// identifier gets its own small action calling POST
-// /api/alarms/ignored-sensors.
+// "Ignore this sensor": the frozen/impossible/silent-source count alarms carry
+// one named line per failing sensor (live_sensors, read fresh from the live
+// detector state on every poll; sensors is the set at raise). The card shows
+// those lines and never the raw path or the count sentence, and each sensor
+// gets its own small action reading "Ignore <name> <quantity>" that POSTs the
+// raw identifier to /api/alarms/ignored-sensors.
 describe('AlarmsDrawer ignore-this-sensor action', () => {
+  const PORT_EXHAUST = {
+    identifier: 'propulsion.port.exhaustTemperature',
+    name: 'Port engine',
+    quantity: 'exhaust temperature',
+    label: 'Port engine exhaust temperature',
+    text: 'Port engine exhaust temperature has not changed in 15 minutes while rpm varied',
+  }
+  const STBD_EXHAUST = {
+    identifier: 'propulsion.stbd.exhaustTemperature',
+    name: 'Starboard engine',
+    quantity: 'exhaust temperature',
+    label: 'Starboard engine exhaust temperature',
+    text: 'Starboard engine exhaust temperature has not changed in 15 minutes while rpm varied',
+  }
+
   function frozenAlarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
     return makeAlarm({
       rule_id: 'helmcentral:anomaly-frozen-sensor',
       label: 'Frozen sensor reading',
       path: 'helmcentral.anomaly.sensor.frozenCount',
-      message: 'Frozen sensor reading: 1, clears below 0.5',
+      message: 'Frozen sensor reading: Port engine exhaust temperature has not changed in 15 minutes while rpm varied',
+      op: 'above',
+      value: 1,
+      clear_value: 0.5,
       state: 'alert',
+      evidence: 'propulsion.port.exhaustTemperature',
       live_evidence: 'propulsion.port.exhaustTemperature',
+      sensors: [PORT_EXHAUST],
+      live_sensors: [PORT_EXHAUST],
       ...overrides,
     })
   }
 
-  it('renders one ignore action per offending identifier named in live_evidence', () => {
+  it('says what is wrong with each sensor and shows neither the count sentence nor a raw path', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ identifiers: [] }) })))
 
-    renderDrawer([frozenAlarm({ live_evidence: 'propulsion.port.exhaustTemperature, propulsion.stbd.exhaustTemperature' })], null)
+    renderDrawer([frozenAlarm({ live_sensors: [PORT_EXHAUST, STBD_EXHAUST] })], null)
 
-    expect(screen.getByRole('button', { name: 'Ignore propulsion.port.exhaustTemperature' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Ignore propulsion.stbd.exhaustTemperature' })).toBeInTheDocument()
+    expect(screen.getByText(PORT_EXHAUST.text)).toBeInTheDocument()
+    expect(screen.getByText(STBD_EXHAUST.text)).toBeInTheDocument()
+    expect(screen.queryByText(/Clears below/)).toBeNull()
+    expect(screen.queryByText(/Now 1/)).toBeNull()
+    expect(screen.queryByText(/propulsion\.port/)).toBeNull()
   })
 
-  it('follows live_evidence rather than the frozen evidence when they differ', () => {
-    // A long-running count alarm: port's exhaust sensor (named in the
-    // frozen evidence, from whenever this first raised) has since
-    // recovered, and starboard's is the one actually failing now.
+  it('renders one ignore action per failing sensor, named in plain sentence case', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ identifiers: [] }) })))
 
-    renderDrawer([frozenAlarm({
-      evidence: 'propulsion.port.exhaustTemperature',
-      live_evidence: 'propulsion.stbd.exhaustTemperature',
-    })], null)
+    renderDrawer([frozenAlarm({ live_sensors: [PORT_EXHAUST, STBD_EXHAUST] })], null)
 
-    expect(screen.getByRole('button', { name: 'Ignore propulsion.stbd.exhaustTemperature' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Ignore propulsion.port.exhaustTemperature' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Ignore Port engine exhaust temperature' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ignore Starboard engine exhaust temperature' })).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'Ignore Port engine exhaust temperature' })
+    expect(button.className).not.toMatch(/uppercase|tracking-wider|text-\[10px\]/)
+  })
+
+  it('follows live_sensors rather than the sensors frozen at raise when they differ', () => {
+    // A long-running count alarm: port's sensor (in the raise-time list) has
+    // since recovered, and starboard's is the one actually failing now.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ identifiers: [] }) })))
+
+    renderDrawer([frozenAlarm({ sensors: [PORT_EXHAUST], live_sensors: [STBD_EXHAUST] })], null)
+
+    expect(screen.getByRole('button', { name: 'Ignore Starboard engine exhaust temperature' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ignore Port engine exhaust temperature' })).toBeNull()
+    expect(screen.queryByText(PORT_EXHAUST.text)).toBeNull()
   })
 
   it('POSTs the identifier when clicked', async () => {
@@ -226,7 +255,7 @@ describe('AlarmsDrawer ignore-this-sensor action', () => {
 
     renderDrawer([frozenAlarm()], null)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Ignore propulsion.port.exhaustTemperature' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Ignore Port engine exhaust temperature' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/alarms/ignored-sensors', expect.objectContaining({
       method: 'POST',
@@ -241,7 +270,7 @@ describe('AlarmsDrawer ignore-this-sensor action', () => {
       rule_id: 'helmcentral:anomaly-full-bank-charging-warn',
       label: 'Charging into a full house bank',
       path: 'helmcentral.anomaly.battery.fullBankCharging',
-      live_evidence: 'House bank 96% SoC, 28.90 V, charging 42 A',
+      live_sensors: [PORT_EXHAUST],
     })], null)
 
     expect(screen.queryByRole('button', { name: /^Ignore /i })).toBeNull()
