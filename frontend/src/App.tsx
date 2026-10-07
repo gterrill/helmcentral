@@ -1559,11 +1559,6 @@ export function App() {
     tanks,
     loading: tanksLoading,
     lastUpdateAgeS: tanksAgeS,
-    fuelVolumeM3,
-    fuelVolumeAgeS,
-    fuelTimeToEmptyS,
-    fuelRangeM,
-    fuelDerivedAgeS,
   } = useTanksState()
   const {
     lastUpdateAgeS: electricalLastUpdateAgeS,
@@ -2332,11 +2327,6 @@ export function App() {
             tanks={tanks}
             loading={tanksLoading}
             lastUpdateAgeS={tanksAgeS}
-            fuelVolumeM3={fuelVolumeM3}
-            fuelVolumeAgeS={fuelVolumeAgeS}
-            fuelTimeToEmptyS={fuelTimeToEmptyS}
-            fuelRangeM={fuelRangeM}
-            fuelDerivedAgeS={fuelDerivedAgeS}
           />
         )
       case 'route':

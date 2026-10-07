@@ -48,6 +48,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Tanks tile no longer shows fuel aboard, range and time to empty under
+  the tank bars. It was showing STALE on range and time to empty with the
+  engines off.
 - The impossible, frozen and silent sensor alarms now name each sensor and say
   what is wrong, for example "Port Engine Starter Battery voltage 75.7 V ·
   above the 70 V any 12, 24 or 48 V bank reaches", instead of a count and a
