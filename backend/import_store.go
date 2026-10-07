@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,16 @@ var importSchema = []string{
 		imo             TEXT NOT NULL DEFAULT '',
 		epirb_id        TEXT NOT NULL DEFAULT '',
 		date_acquired   TEXT NOT NULL DEFAULT '',
+		loa_m           REAL CHECK (loa_m IS NULL OR loa_m >= 0),
+		beam_m          REAL CHECK (beam_m IS NULL OR beam_m >= 0),
+		owner_name      TEXT NOT NULL DEFAULT '',
+		owner_phone     TEXT NOT NULL DEFAULT '',
+		owner_email     TEXT NOT NULL DEFAULT '',
+		insurer         TEXT NOT NULL DEFAULT '',
+		policy_number   TEXT NOT NULL DEFAULT '',
+		home_marina     TEXT NOT NULL DEFAULT '',
+		berth           TEXT NOT NULL DEFAULT '',
+		storm_delegate  TEXT NOT NULL DEFAULT '',
 		updated_at      INTEGER NOT NULL
 	)`,
 
@@ -86,7 +97,28 @@ func createImportSchema(db *sql.DB) error {
 			return fmt.Errorf("create import schema: %w", err)
 		}
 	}
+	// The owner and insurance columns arrived after the table did. Single
+	// operator, no installed base: a guarded ADD COLUMN is the whole of the
+	// migration story (AGENTS.md), as for the document store.
+	for _, stmt := range vesselParticularsAddedColumns {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("create import schema: %w", err)
+		}
+	}
 	return nil
+}
+
+var vesselParticularsAddedColumns = []string{
+	`ALTER TABLE vessel_particulars ADD COLUMN loa_m REAL CHECK (loa_m IS NULL OR loa_m >= 0)`,
+	`ALTER TABLE vessel_particulars ADD COLUMN beam_m REAL CHECK (beam_m IS NULL OR beam_m >= 0)`,
+	`ALTER TABLE vessel_particulars ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN owner_email TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN insurer TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN policy_number TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN home_marina TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN berth TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE vessel_particulars ADD COLUMN storm_delegate TEXT NOT NULL DEFAULT ''`,
 }
 
 // ── runs ─────────────────────────────────────────────────────────────────

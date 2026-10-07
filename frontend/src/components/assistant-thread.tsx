@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type Keyboard
 import { toast } from 'sonner'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
+import { AssistantFormDraftCard } from '@/components/assistant-form-draft-card'
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
@@ -645,6 +646,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 proposal={proposal}
                                 canWrite={canWrite}
                                 onChange={conversations.updateProposal}
+                              />
+                            ))}
+                            {/* ADR 0164: a form Mate filled in. A draft until
+                                the operator saves it to Documents. */}
+                            {message.formDrafts?.map((draft) => (
+                              <AssistantFormDraftCard
+                                key={draft.id}
+                                draft={draft}
+                                canWrite={canWrite}
+                                onChange={conversations.updateFormDraft}
                               />
                             ))}
                             <div className="flex items-center gap-2">

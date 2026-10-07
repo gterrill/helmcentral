@@ -119,3 +119,71 @@ func TestVesselParticularsHandlers(t *testing.T) {
 		t.Fatalf("expected a 400 naming year, got %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestVesselParticulars_OwnerAndInsuranceRoundTrip(t *testing.T) {
+	store := newTestDocumentStore(t)
+	loa, beam := 18.3, 9.1
+	saved, err := store.SetVesselParticulars(vesselParticulars{
+		OwnerName: " Sam Example ", OwnerPhone: "+61 400 000 000", OwnerEmail: "sam@example.test",
+		Insurer: "Example Marine", PolicyNumber: "POL-123", HomeMarina: "Example Marina", Berth: "C14",
+		StormDelegate: "Pat Delegate", LOAM: &loa, BeamM: &beam,
+	})
+	if err != nil {
+		t.Fatalf("SetVesselParticulars: %v", err)
+	}
+	if saved.OwnerName != "Sam Example" {
+		t.Fatalf("owner name is trimmed, got %q", saved.OwnerName)
+	}
+	got, err := store.GetVesselParticulars()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.OwnerPhone != "+61 400 000 000" || got.OwnerEmail != "sam@example.test" || got.Insurer != "Example Marine" ||
+		got.PolicyNumber != "POL-123" || got.HomeMarina != "Example Marina" || got.Berth != "C14" ||
+		got.StormDelegate != "Pat Delegate" || got.LOAM == nil || *got.LOAM != 18.3 || got.BeamM == nil || *got.BeamM != 9.1 {
+		t.Fatalf("round trip = %+v", got)
+	}
+	// Left out, the lengths are unset again, never zero.
+	cleared, err := store.SetVesselParticulars(vesselParticulars{Model: "x"})
+	if err != nil || cleared.LOAM != nil || cleared.BeamM != nil || cleared.OwnerName != "" {
+		t.Fatalf("expected unset lengths, got %+v err=%v", cleared, err)
+	}
+	neg := -1.0
+	for field, v := range map[string]vesselParticulars{"loa_m": {LOAM: &neg}, "beam_m": {BeamM: &neg}} {
+		_, err := store.SetVesselParticulars(v)
+		var verr *vesselParticularsError
+		if !asVesselParticularsError(err, &verr) || verr.Field != field {
+			t.Fatalf("%s: expected a field error, got %v", field, err)
+		}
+	}
+}
+
+func TestVesselParticulars_ColumnsAddedToAnOlderTable(t *testing.T) {
+	store := newTestDocumentStore(t)
+	// A database made before the owner columns existed.
+	if _, err := store.db.Exec(`DROP TABLE vessel_particulars`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`CREATE TABLE vessel_particulars (
+		id INTEGER PRIMARY KEY CHECK (id = 1), builder TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+		year INTEGER, hin TEXT NOT NULL DEFAULT '', flag TEXT NOT NULL DEFAULT '', hailing_port TEXT NOT NULL DEFAULT '',
+		hull_type TEXT NOT NULL DEFAULT '', hull_material TEXT NOT NULL DEFAULT '', displacement_kg REAL,
+		shore_power TEXT NOT NULL DEFAULT '', system_voltage TEXT NOT NULL DEFAULT '', registration TEXT NOT NULL DEFAULT '',
+		imo TEXT NOT NULL DEFAULT '', epirb_id TEXT NOT NULL DEFAULT '', date_acquired TEXT NOT NULL DEFAULT '',
+		updated_at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO vessel_particulars (id, builder, updated_at) VALUES (1, 'Kept', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := createImportSchema(store.db); err != nil {
+		t.Fatalf("createImportSchema on an old table: %v", err)
+	}
+	if err := createImportSchema(store.db); err != nil {
+		t.Fatalf("createImportSchema is repeatable: %v", err)
+	}
+	got, err := store.GetVesselParticulars()
+	if err != nil || got.Builder != "Kept" || got.OwnerName != "" || got.LOAM != nil {
+		t.Fatalf("expected the old row with empty new fields, got %+v err=%v", got, err)
+	}
+}

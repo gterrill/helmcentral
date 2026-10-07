@@ -13,6 +13,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Mate fills in PDF forms. Attach an insurer's declaration or a marina's
+  application and ask it to fill it in. Mate reads the form, takes what it needs
+  from your vessel details, asks you once for anything missing, and puts the
+  filled-in form under its reply to open, download, save to Documents under a
+  title and folder you choose, or dismiss. It works on fillable forms and on
+  flat ones, where it writes after the question and ticks the box beside the
+  right marina or option. It never fills a signature, and never puts the form
+  in Documents until you save it. A form that is a scan cannot be read.
+- Settings, Vessel has a new **Owner & insurance** section: owner name, phone
+  and email, insurer, policy number, home marina, berth and storm delegate, and
+  Particulars gains length overall and beam. Mate reads these for forms and can
+  offer to save answers you give it in a chat.
 - The version in the sidebar footer now opens that release's notes.
 - After Helmcentral updates itself, a message says which version it is now
   running, with a link to that release's notes.

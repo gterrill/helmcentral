@@ -844,6 +844,9 @@ func assistantToolDefinitions() []openRouterTool {
 			},
 		},
 		assistantStartWatchToolDefinition(),
+		assistantVesselParticularsToolDefinition(),
+		assistantInspectFormToolDefinition(),
+		assistantFillFormToolDefinition(),
 	}
 }
 
@@ -910,6 +913,12 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeProposeChanges(ctx, args)
 	case "start_watch":
 		return d.executeStartWatch(ctx, args)
+	case "get_vessel_particulars":
+		return d.executeGetVesselParticulars(ctx, args)
+	case assistantInspectFormToolName:
+		return d.executeInspectForm(ctx, args)
+	case assistantFillFormToolName:
+		return d.executeFillForm(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -1070,6 +1079,12 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return "Preparing the changes…"
 	case "start_watch":
 		return "Starting a watch…"
+	case "get_vessel_particulars":
+		return "Reading the vessel details…"
+	case assistantInspectFormToolName:
+		return "Reading the form…"
+	case assistantFillFormToolName:
+		return "Filling in the form…"
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}

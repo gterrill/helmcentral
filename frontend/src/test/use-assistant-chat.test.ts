@@ -226,6 +226,23 @@ describe('useAssistantChat', () => {
     expect(result.current.sending).toBe(false)
   })
 
+  it('maps a reply\'s filled-in form so its card shows without a reload', async () => {
+    const draft = { id: 'd1', message_id: 'm2', source_document_id: 'doc0', title: 'Storm declaration', folder: 'Insurance', filename: 'x.pdf', page_count: 2, status: 'draft' }
+    const body = sseStream([`data: ${JSON.stringify({ message: { ...messageApi, form_drafts: [draft] }, conversation: conversationApi })}\n\n`])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body }))
+
+    const { result } = renderHook(() => useAssistantChat())
+
+    let reply: AssistantMessage | null = null
+    await act(async () => {
+      reply = await result.current.send('c1', 'fill this in')
+    })
+
+    expect(reply!.formDrafts).toEqual([
+      { id: 'd1', messageId: 'm2', sourceDocumentId: 'doc0', title: 'Storm declaration', folder: 'Insurance', filename: 'x.pdf', pageCount: 2, status: 'draft', documentId: undefined },
+    ])
+  })
+
   it('sets error and resolves null on an error frame', async () => {
     const body = sseStream(['event: error\ndata: {"error":"upstream 401: invalid API key"}\n\n'])
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })

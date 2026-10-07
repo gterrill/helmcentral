@@ -16,6 +16,7 @@ const stored = {
   hull_type: 'Catamaran', hull_material: 'Fiberglass', displacement_kg: 24500,
   shore_power: 'Dual x 125/250 volt | 30/50 amp', system_voltage: '24v',
   registration: '', imo: '', epirb_id: '', date_acquired: '2025-01-27',
+  loa_m: null, beam_m: null, owner_name: 'Sam Example', owner_phone: '', owner_email: '', insurer: 'Example Marine', policy_number: '', home_marina: '', berth: '', storm_delegate: '',
   updated_at: '2026-10-01T05:00:00Z',
 }
 
@@ -39,6 +40,18 @@ describe('VesselParticularsForm', () => {
     expect(screen.getByLabelText('Displacement (kg)')).toHaveValue(24500)
     expect(screen.getByText('M/V Pikorua')).toBeInTheDocument()
     expect(screen.getByText('17.9 m')).toBeInTheDocument()
+  })
+
+  it('has an Owner & insurance section holding the details forms ask for', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => stored })
+    renderForm()
+
+    expect(await screen.findByRole('heading', { name: 'Owner & insurance' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Owner name')).toHaveValue('Sam Example')
+    expect(screen.getByLabelText('Insurer')).toHaveValue('Example Marine')
+    for (const label of ['Owner phone', 'Owner email', 'Policy number', 'Home marina', 'Berth', 'Storm delegate', 'Length overall (m)', 'Beam (m)']) {
+      expect(screen.getByLabelText(label)).toHaveValue(label.endsWith('(m)') ? null : '')
+    }
   })
 
   it('has no Save button of its own: the page Save bar owns it', async () => {
