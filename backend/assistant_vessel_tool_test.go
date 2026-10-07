@@ -109,3 +109,17 @@ func TestGetVesselParticulars_DifferingLengthsAreFlaggedAndLiveFailureIsReported
 		t.Fatalf("stored data is still returned: %+v", res.Present)
 	}
 }
+
+func TestGetVesselParticulars_LiveZeroIsNotAFigure(t *testing.T) {
+	env := newProposalEnv(t)
+	env.deps.vesselState = func() (vesselStateData, error) { return vesselStateData{LengthOverallM: 0, DraftM: 0}, nil }
+	res := vesselToolResult(t, env.deps)
+	if len(res.Present) != 0 {
+		t.Fatalf("a live 0 is not a design figure: %+v", res.Present)
+	}
+	for _, f := range []string{"draft_m", "loa_m"} {
+		if !res.absent(f) {
+			t.Errorf("%s must be absent for a live 0", f)
+		}
+	}
+}

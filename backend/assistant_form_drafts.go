@@ -226,7 +226,7 @@ func (s *assistantStore) DismissFormDraft(id string) (assistantFormDraft, error)
 func (s *assistantStore) markFormDraftSaved(id, documentID, title, folder string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE assistant_form_drafts SET status = 'saved', document_id = ?, title = ?, folder = ? WHERE id = ? AND status = 'draft'`, documentID, title, folder, id)
+	res, err := s.db.Exec(`UPDATE assistant_form_drafts SET status = 'saved', document_id = ?, title = ?, folder = ? WHERE id = ? AND status IN ('draft', 'saved')`, documentID, title, folder, id)
 	if err != nil {
 		return err
 	}
