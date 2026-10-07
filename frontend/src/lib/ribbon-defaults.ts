@@ -15,6 +15,8 @@ interface RibbonCatalogueEntry {
   sortInstances: (instances: string[]) => string[]
   /** The lamp's label for one matched instance, at its position after sorting. */
   label: (instance: string, index: number) => string
+  group: string
+  icon: string
 }
 
 /** Numeric-aware ascending sort, so instance "10" does not sort before "2". */
@@ -67,13 +69,13 @@ function onlyFirst(instances: string[]): string[] {
 
 const RIBBON_CATALOGUE: RibbonCatalogueEntry[] = [
   // Engines: one lamp per propulsion instance, non-zero while running.
-  { pattern: 'propulsion.*.revolutions', sortInstances: sortEngineInstances, label: engineLabel },
+  { pattern: 'propulsion.*.revolutions', sortInstances: sortEngineInstances, label: engineLabel, group: 'Propulsion', icon: 'engine' },
   // Generator: 0 stopped, non-zero running.
-  { pattern: 'electrical.generator.*.stateNumber', sortInstances: sortNatural, label: firstThenNumbered('Gen') },
+  { pattern: 'electrical.generator.*.stateNumber', sortInstances: sortNatural, label: firstThenNumbered('Gen'), group: 'Power', icon: 'generator' },
   // Shore power: 1 when AC-in is present. Only one lamp, even with multiple inverters.
-  { pattern: 'electrical.inverters.*.acState.acIn1Available', sortInstances: onlyFirst, label: () => 'Shore' },
+  { pattern: 'electrical.inverters.*.acState.acIn1Available', sortInstances: onlyFirst, label: () => 'Shore', group: 'Power', icon: 'plug' },
   // Alternators: 0 off, non-zero charging (bulk/absorption/float).
-  { pattern: 'electrical.alternator.*.chargingModeNumber', sortInstances: sortNatural, label: numbered('Alt') },
+  { pattern: 'electrical.alternator.*.chargingModeNumber', sortInstances: sortNatural, label: numbered('Alt'), group: 'Power', icon: 'alternator' },
 ]
 
 /** Builds a `^segment\.segment\.…$` matcher, with `*` capturing one dotted instance segment. */
@@ -110,7 +112,7 @@ export function suggestRibbonLamps(paths: SignalKPath[]): LampConfig[] {
     instances.forEach((instance, index) => {
       const path = pathByInstance.get(instance)
       if (path === undefined) return
-      lamps.push({ path, label: entry.label(instance, index).slice(0, LAMP_LABEL_MAX_LENGTH) })
+      lamps.push({ path, label: entry.label(instance, index).slice(0, LAMP_LABEL_MAX_LENGTH), group: entry.group, icon: entry.icon })
     })
   }
 

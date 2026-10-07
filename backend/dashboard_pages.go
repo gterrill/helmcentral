@@ -101,7 +101,17 @@ const lampStripWidgetIDPrefix = "lamps:"
 const (
 	lampStripMaxLamps    = 16
 	lampStripLabelMaxLen = 12
+	lampStripGroupMaxLen = 16
 )
+
+// lampIconNames mirrors frontend/src/lib/lamp-icons.ts. A closed set, so a
+// saved ribbon can never name an icon the renderer does not have.
+var lampIconNames = map[string]bool{
+	"engine": true, "generator": true, "plug": true, "inverter": true,
+	"alternator": true, "battery": true, "fridge": true, "thermometer": true,
+	"droplet": true, "watermaker": true, "bilge": true, "flame": true,
+	"lightbulb": true, "anchor": true, "navlight": true, "generic": true,
+}
 
 type dashboardLamp struct {
 	Path  string `json:"path"`
@@ -109,6 +119,11 @@ type dashboardLamp struct {
 	// Invert lights the lamp when the value is zero or absent, for a signal
 	// whose healthy state is "off" (a bilge float, a fault line).
 	Invert bool `json:"invert,omitempty"`
+	// Icon is a name from the ribbon's icon set; inferred from the path when unset.
+	Icon string `json:"icon,omitempty"`
+	// Group is a short operator label; consecutive lamps sharing one render
+	// under a single heading.
+	Group string `json:"group,omitempty"`
 }
 
 type dashboardLampStripConfig struct {
@@ -1468,6 +1483,12 @@ func validateLampStripConfig(cfg *dashboardLampStripConfig, where string) string
 		}
 		if len(lamp.Label) > lampStripLabelMaxLen {
 			return "lamp label too long: " + where
+		}
+		if len(lamp.Group) > lampStripGroupMaxLen {
+			return "lamp group too long: " + where
+		}
+		if lamp.Icon != "" && !lampIconNames[lamp.Icon] {
+			return "unknown lamp icon: " + where
 		}
 	}
 	return ""

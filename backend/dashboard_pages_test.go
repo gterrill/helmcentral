@@ -3693,3 +3693,28 @@ func TestEmbedWidgetRejectsSameOriginURL(t *testing.T) {
 		t.Fatalf("expected the same url to pass with no own-origin, got %q", msg)
 	}
 }
+
+func TestValidateLampStripAcceptsGroupAndIcon(t *testing.T) {
+	cfg := validLampStripConfig()
+	cfg.Lamps[0].Group = "Propulsion"
+	cfg.Lamps[0].Icon = "engine"
+	if msg := validateLampStripConfig(cfg, "ribbon"); msg != "" {
+		t.Fatalf("expected group and icon to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateLampStripRejectsLongGroup(t *testing.T) {
+	cfg := validLampStripConfig()
+	cfg.Lamps[0].Group = strings.Repeat("g", lampStripGroupMaxLen+1)
+	if msg := validateLampStripConfig(cfg, "ribbon"); msg == "" {
+		t.Fatal("expected an over-long group to be rejected")
+	}
+}
+
+func TestValidateLampStripRejectsUnknownIcon(t *testing.T) {
+	cfg := validLampStripConfig()
+	cfg.Lamps[0].Icon = "not-an-icon"
+	if msg := validateLampStripConfig(cfg, "ribbon"); msg == "" {
+		t.Fatal("expected an unknown icon to be rejected")
+	}
+}

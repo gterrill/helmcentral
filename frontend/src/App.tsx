@@ -2118,6 +2118,7 @@ export function App() {
           values={gaugeValues}
           ages={gaugeAges}
           worstAlarmState={worstAlarmState}
+          alarms={alarms}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setLampStripDraft)}
           onOpenAlarms={openAlarmsPanel}
@@ -2614,6 +2615,7 @@ export function App() {
             values={gaugeValues}
             ages={gaugeAges}
             worstAlarmState={worstAlarmState}
+            alarms={alarms}
             editing={layoutEditing}
             onConfigure={openRibbonDialog}
             onOpenAlarms={openAlarmsPanel}

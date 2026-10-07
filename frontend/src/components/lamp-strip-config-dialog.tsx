@@ -15,11 +15,13 @@ import { Input } from '@/components/ui/input'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
   GAUGE_GROUP_TITLE_MAX_LENGTH,
+  LAMP_GROUP_MAX_LENGTH,
   LAMP_LABEL_MAX_LENGTH,
   LAMP_STRIP_MAX_LAMPS,
   type DashboardLayoutItem,
   type LampStripWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { LAMP_ICON_NAMES } from '@/lib/lamp-icons'
 import { suggestRibbonLamps } from '@/lib/ribbon-defaults'
 
 /**
@@ -110,7 +112,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
         <DialogHeader>
           <DialogTitle>Indicators</DialogTitle>
           <DialogDescription>
-            A row of status lamps. Duplicate the tile onto your other pages so the same strip reads
+            A row of labelled status cells. Duplicate the tile onto your other pages so the same strip reads
             the same everywhere.
           </DialogDescription>
         </DialogHeader>
@@ -135,7 +137,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
             Show the CHK indicator
           </label>
           <FieldDescription>
-            CHK takes the colour of the worst active alarm, including the ones your gauge zones raise.
+            CHK takes the colour of the worst active alarm, including the ones your gauge zones raise. A cell turns amber or red while an active alarm is on its path.
           </FieldDescription>
 
           <datalist id="lamp-path-options">
@@ -143,7 +145,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
           </datalist>
 
           {config.lamps.map((lamp, index) => (
-            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_auto_auto]">
+            <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_1fr_1fr_auto_auto]">
               <Field>
                 <FieldLabel htmlFor={`lamp-${index}-path`}>Path</FieldLabel>
                 <Input
@@ -163,6 +165,28 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
                   onChange={(e) => setLamp(index, { label: e.target.value })}
                   placeholder="GEN"
                 />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`lamp-${index}-group`}>Group</FieldLabel>
+                <Input
+                  id={`lamp-${index}-group`}
+                  maxLength={LAMP_GROUP_MAX_LENGTH}
+                  value={lamp.group ?? ''}
+                  onChange={(e) => setLamp(index, { group: e.target.value || undefined })}
+                  placeholder="Power"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`lamp-${index}-icon`}>Icon</FieldLabel>
+                <select
+                  id={`lamp-${index}-icon`}
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={lamp.icon ?? ''}
+                  onChange={(e) => setLamp(index, { icon: e.target.value || undefined })}
+                >
+                  <option value="">Automatic</option>
+                  {LAMP_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
               </Field>
               <label className="flex h-9 items-center gap-1 text-xs text-muted-foreground">
                 <input

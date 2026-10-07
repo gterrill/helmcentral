@@ -10,7 +10,7 @@ With write access, in layout mode:
    pinned until you choose Save, so it's still fine to change or clear any of
    this before it's kept.
 3. Add a lamp by hand: give it a SignalK path and a short label (12
-   characters or fewer). Use "Lit when off" for a signal whose healthy state
+   characters or fewer; the whole label is always shown). Use "Lit when off" for a signal whose healthy state
    is off, such as a bilge float or a fault line. For a CZone bilge circuit,
    the path is `electrical.switches.bank.<n>.<m>.state`, using the bank and
    circuit numbers CZone assigned it, with "Lit when off" checked if the
@@ -20,14 +20,19 @@ With write access, in layout mode:
    edited the ribbon, or an engine the vessel didn't have before. It only
    appends what's missing; a lamp already in the list, whether you added it
    by hand or it came from an earlier suggestion, is left alone.
-5. Reorder lamps with the up and down arrows, or remove one with the trash
+5. Optionally give a lamp a **Group**, such as Propulsion or Power (16
+   characters or fewer): neighbouring lamps with the same group share one
+   heading. Choose an **Icon** for it, or leave **Automatic** and one is picked
+   from the path.
+6. Reorder lamps with the up and down arrows, or remove one with the trash
    icon.
-6. Toggle **Show the CHK indicator** on or off. CHK colours from the worst
-   currently active alarm and opens the alarms panel when clicked.
-7. Choose **Save**.
+7. Toggle **Show the CHK indicator** on or off. CHK colours from the worst
+   currently active alarm, shows how many are active and the worst one's title,
+   and opens the alarms panel when clicked.
+8. Choose **Save**.
 
 The ribbon now appears above the grid on every dashboard page, inside
-whatever skin that page uses, with sixteen lamps as the maximum and one lamp
+whatever skin that page uses, with sixteen lamps as the maximum, wrapping onto more lines when the screen is narrow, and one lamp
 or the CHK indicator required. A strip with neither is rejected: it would
 draw nothing at all, which is a mistake, not a choice.
 
