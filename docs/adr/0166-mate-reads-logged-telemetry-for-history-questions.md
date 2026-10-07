@@ -1,4 +1,4 @@
-# ADR 0165: Mate reads logged telemetry for history questions
+# ADR 0166: Mate reads logged telemetry for history questions
 
 ## Status
 

@@ -648,7 +648,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 onChange={conversations.updateProposal}
                               />
                             ))}
-                            {/* ADR 0164: a form Mate filled in. A draft until
+                            {/* ADR 0165: a form Mate filled in. A draft until
                                 the operator saves it to Documents. */}
                             {message.formDrafts?.map((draft) => (
                               <AssistantFormDraftCard

@@ -571,7 +571,7 @@ describe('describeLoadError', () => {
     })
     expect(result.current.messages[0].proposals![0].status).toBe('dismissed')
   })
-  // ADR 0164: a reloaded thread carries each reply's filled-in forms with the
+  // ADR 0165: a reloaded thread carries each reply's filled-in forms with the
   // status they have now.
   it('maps a message\'s form drafts, with their stored status', async () => {
     vi.stubGlobal(

@@ -104,7 +104,7 @@ type assistantReply struct {
 	// order. The handler saves them with the assistant message in one
 	// transaction, so a run that fails or is cancelled saves none.
 	Proposals []assistantProposal
-	// FormDrafts are the filled-in forms (ADR 0164) fill_form made during
+	// FormDrafts are the filled-in forms (ADR 0165) fill_form made during
 	// this run, in call order. Saved with the assistant message like Proposals.
 	FormDrafts []assistantFormDraft
 }
