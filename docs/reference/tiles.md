@@ -163,9 +163,12 @@ three figures:
 
 Any of the three blanks out with a small stale marker if the reading it
 depends on stops updating, rather than showing a number built on a burn
-rate or tank level that stopped being true. With one engine stopped and the
-other still reporting, the stopped engine is counted as off, so range and time
-to empty reflect the running engine alone. If only its fuel rate has stopped,
+rate or tank level that stopped being true. A stopped engine is counted as
+off, so with one engine running range and time to empty reflect it alone, and
+with every engine off they read `--` with no stale marker. Engines on a
+connection of their own, with nothing else on it, are the exception: with
+all of them quiet the figures show stale, since a failed connection looks the
+same. If only its fuel rate has stopped,
 or everything on its connection has gone quiet, the figures stay blank. An
 engine on a connection of its own is the exception: if that connection fails
 while the engine runs, it counts as off and the figures read high.

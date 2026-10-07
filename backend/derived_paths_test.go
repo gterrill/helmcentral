@@ -1118,3 +1118,52 @@ func TestFuelFiguresBlankWhenStaleRateSourceIsStillPublishing(t *testing.T) {
 
 	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
 }
+
+// Both engines shut down: every rate is frozen at its last positive value and
+// both engine computers have gone quiet, while a tank sender on the same
+// gateway is still live. That is the boat with its engines off, not a fault,
+// so the burn-derived figures are simply undefined: absent with no age,
+// rather than absent with the frozen rates' age reading as stale.
+func TestFuelFiguresAbsentWithoutStaleAgeWhenEveryEngineIsOff(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	withGlobalSnapshot(t, snapshot)
+
+	now, err := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	if err != nil {
+		t.Fatalf("parsing now: %v", err)
+	}
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-90*time.Minute).Format(time.RFC3339), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-90*time.Minute), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.36", now.Add(-5*time.Second))
+
+	values, ages := computeDerivedPaths(now)
+	for _, path := range []string{fuelTimeToEmptyPath, fuelRangeAtCurrentBurnPath, vesselFuelEconomyPath} {
+		if values[path] != nil {
+			t.Fatalf("%s: expected no figure with both engines off, got %v", path, *values[path])
+		}
+		if ages[path] != -1 {
+			t.Fatalf("%s: expected no age with both engines off, got %v", path, ages[path])
+		}
+	}
+	if values[fuelVolumePath] == nil {
+		t.Fatal("expected fuel aboard still reported with the engines off")
+	}
+}
+
+// Every engine stale on a connection that carries nothing but engines: the
+// engines read as off, but so would a failed connection, and with no engine
+// fresh there is nothing to tell the two apart. The frozen rates stay in and
+// the figures go absent with their age.
+func TestFuelFiguresBlankWhenEveryEngineIsQuietOnAnEngineOnlyConnection(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	now, _ := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	restampEngineFuelRate(t, snapshot, now.Add(-150*time.Minute).Format(time.RFC3339), "port")
+	restampEngineFuelRate(t, snapshot, now.Add(-90*time.Minute).Format(time.RFC3339), "starboard")
+	markSourceSeen(snapshot, "YachtDevices.129", now.Add(-150*time.Minute), "port")
+	markSourceSeen(snapshot, "YachtDevices.128", now.Add(-90*time.Minute), "starboard")
+	// The stream itself is live on another connection.
+	markSourceSeen(snapshot, "GX.40", now.Add(-5*time.Second))
+	assertFuelFiguresAbsentWithStaleAge(t, now, snapshot)
+}

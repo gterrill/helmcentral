@@ -282,15 +282,18 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 //
 // N2K stops sending a rate when an engine shuts down rather than sending
 // zero, so SignalK keeps the last positive value indefinitely. A rate older
-// than derivedInputMaxAge is left out of the total when at least one other
-// engine has a fresh positive rate and engineStates reads that engine as off,
-// the same reading the Engine Cluster tile shows (ADR 0163), so the tile and
-// these figures never disagree. Otherwise the rate stays in, so a single
-// engine run does not blank every burn-derived figure, but an engine reading
-// as running (only its rate frozen), lost (its connection quiet) or unknown
-// still does.
-// When no engine is fresh every positive rate is summed and the oldest age
-// reported, so the figures go absent and the age says why.
+// than derivedInputMaxAge is left out of the total when engineStates reads
+// that engine as off, the same reading the Engine Cluster tile shows (ADR
+// 0163), so the tile and these figures never disagree. Otherwise the rate
+// stays in, so a single engine run does not blank every burn-derived figure,
+// but an engine reading as running (only its rate frozen), lost (its
+// connection quiet) or unknown still does, and the age says why.
+// With every engine off nothing is burning: the figures are absent with no
+// age, undefined rather than stale, the same as a boat lying at anchor. With
+// no engine fresh, an off reading counts only when it is witnessed (a live
+// non-engine device on its connection): an engine-only connection failing
+// looks the same as its engines switching off, and with nothing running to
+// show the feed is alive the figures must blank with their age.
 func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (total float64, age float64, ok bool) {
 	type contribution struct {
 		path  string
@@ -313,13 +316,16 @@ func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths
 		}
 	}
 	var offEngines map[string]engineStateInfo
-	if anyFresh && anyStale {
+	if anyStale {
 		offEngines = states()
 	}
 	var ages []float64
 	for _, c := range all {
-		if !freshEnoughToPublish(c.age) && offEngines[propulsionEngineID(c.path)].State == engineStateOff {
-			continue
+		if !freshEnoughToPublish(c.age) {
+			state := offEngines[propulsionEngineID(c.path)]
+			if state.State == engineStateOff && (anyFresh || state.Witnessed) {
+				continue
+			}
 		}
 		total += c.value
 		ages = append(ages, c.age)
