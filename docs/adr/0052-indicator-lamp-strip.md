@@ -1,7 +1,7 @@
 # ADR 0052: Indicator Lamp Strip
 
 ## Status
-Accepted
+Accepted. Dot presentation superseded in part by ADR 0163.
 
 The fourth multi-instance widget, following ADR 0031 (embed), ADR 0039 (gauge) and ADR 0049 (gauge group). Depends on ADR 0050 to include gauge-zone alarms in the CHK rollup.
 

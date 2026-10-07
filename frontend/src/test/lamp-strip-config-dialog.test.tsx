@@ -113,6 +113,32 @@ describe('LampStripConfigDialog', () => {
     expect(onSave).toHaveBeenCalledWith(statusStrip)
   })
 
+  test('icon and group round-trip through the dialog', () => {
+    const onSave = vi.fn()
+    render(
+      <LampStripConfigDialog
+        widget={{ id: 'ribbon', lamps: { ...statusStrip, lamps: [{ path: 'electrical.generator.state', label: 'GEN', group: 'Power', icon: 'generator' }] } }}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+    expect((screen.getByLabelText('Group') as HTMLInputElement).value).toBe('Power')
+    expect((screen.getByLabelText('Icon') as HTMLSelectElement).value).toBe('generator')
+
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'Propulsion' } })
+    fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'engine' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onSave.mock.calls[0][0].lamps[0]).toMatchObject({ group: 'Propulsion', icon: 'engine' })
+  })
+
+  test('leaving icon on automatic saves no icon', () => {
+    const onSave = vi.fn()
+    render(<LampStripConfigDialog widget={{ id: 'ribbon', lamps: statusStrip }} onCancel={vi.fn()} onSave={onSave} />)
+    expect((screen.getByLabelText('Icon') as HTMLSelectElement).value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onSave.mock.calls[0][0].lamps[0].icon).toBeUndefined()
+  })
+
   // ADR 0085: a fresh ribbon prefills from what the vessel actually publishes.
   describe('suggested lamps (ADR 0085)', () => {
     test('a fresh ribbon prefills from the suggestions once paths have loaded', () => {

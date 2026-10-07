@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- The indicator ribbon now shows labelled cells instead of small dots. Each
+  cell has an icon, the full name and a reading (On, Off, or `--` with no
+  data), and fills green when on. A cell turns amber or red while an active
+  alarm is on its signal, and tapping it opens the alarms panel. A dashed
+  outline means no data or a silent source. The CHK cell now shows how many
+  alarms are active and the worst one's title. Lamps can be given an icon and
+  a group heading in the ribbon dialog; existing ribbons pick up icons
+  automatically and need no change.
 - Mate fills in PDF forms. Attach an insurer's declaration or a marina's
   application and ask it to fill it in. Mate reads the form, takes what it needs
   from your vessel details, asks you once for anything missing, and puts the

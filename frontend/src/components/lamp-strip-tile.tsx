@@ -1,72 +1,81 @@
 import { LampCeiling, Settings2 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
+import { ALARM_STATES, type ActiveAlarm } from '@/hooks/use-alarms'
 import type { LampConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
-import { severityFill } from '@/lib/severity'
+import { LAMP_ICONS, lampIconName } from '@/lib/lamp-icons'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { cn } from '@/lib/utils'
 
 /**
- * Four states. An absent path is not a zero — a lamp lit or darkened because
- * nothing has reported is the same failure the gauges' structural dash
- * exists to prevent. `stale` (ADR 0083) is a fifth reason a lamp goes dark:
- * a source that stopped reporting must never be left showing its last "on".
+ * The state ladder (ADR 0163). An absent path is not a zero: a cell lit or
+ * darkened because nothing has reported is the failure the gauges' structural
+ * dash exists to prevent. `stale` (ADR 0083) is a second reason a cell goes
+ * to the no-data look: a source that stopped reporting must never be left
+ * showing its last "on". `alert`..`emergency` come from an active alarm on
+ * the lamp's own path, never from a threshold on the lamp.
  */
-type LampState = 'on' | 'off' | 'no data' | 'stale'
+type LampState = 'on' | 'off' | 'no data' | 'stale' | 'alert' | 'warn' | 'alarm' | 'emergency'
 
-function lampState(lamp: LampConfig, value: number | null | undefined, stale: boolean): LampState {
+function lampState(lamp: LampConfig, value: number | null | undefined, stale: boolean): 'on' | 'off' | 'no data' | 'stale' {
   if (stale) return 'stale'
   if (value === null || value === undefined) return 'no data'
   const lit = value !== 0
   return (lamp.invert ? !lit : lit) ? 'on' : 'off'
 }
 
-/**
- * "on" is the healthy green, not Signal Blue (ADR 0080). Signal Blue is
- * interactive chrome (DESIGN.md) — buttons, toggles, the active state of a
- * control — and a lamp is not a control; it is a reading with two states.
- * severityFill('normal') is the same green a gauge zone in its normal band
- * draws, so "everything is fine" reads the same way across the dashboard.
- *
- * "no data" and "stale" share the same unlit border colour: a frozen source
- * reads exactly like one that has never reported at all.
- */
-function lampFill(state: LampState): string {
+function severityRank(state: string): number {
+  return ALARM_STATES.indexOf(state as (typeof ALARM_STATES)[number])
+}
+
+/** Colours for the whole cell. "On" is the healthy green, not Signal Blue (ADR 0080). */
+function cellClass(state: LampState): string {
   switch (state) {
     case 'on':
-      return severityFill('normal')
+      return 'border-emerald-700 bg-emerald-600 text-white dark:border-emerald-500 dark:bg-emerald-700'
+    case 'alert':
+      return 'border-sky-700 bg-sky-600 text-white dark:border-sky-500 dark:bg-sky-700'
+    case 'warn':
+      return 'border-amber-600 bg-amber-500 text-black dark:border-amber-400 dark:bg-amber-500'
+    case 'alarm':
+      return 'border-red-700 bg-red-600 text-white dark:border-red-500 dark:bg-red-700'
+    case 'emergency':
+      return 'border-red-900 bg-red-800 text-white dark:border-red-500 dark:bg-red-900'
     case 'off':
-      return 'hsl(var(--muted-foreground))'
+      return 'border-border bg-card text-muted-foreground'
     default:
-      return 'hsl(var(--border))'
+      return 'border-dashed border-border bg-transparent text-muted-foreground'
   }
 }
 
-function Lamp({ label, state, fill, opacity, onClick, ariaLabel }: {
-  label: string
-  state: string
-  fill: string
-  opacity: number
+const CELL_BASE = 'flex min-w-0 shrink-0 grow-0 items-center gap-1.5 rounded-md border px-1.5 py-1.5 text-left'
+
+function Cell({ name, reading, icon, state, className, onClick, ariaLabel }: {
+  name: string
+  reading?: string
+  icon: string
+  state: LampState
+  className?: string
   onClick?: () => void
   ariaLabel: string
 }) {
+  const Icon = LAMP_ICONS[icon] ?? LAMP_ICONS.generic
   const body = (
     <>
-      <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" fill={fill} opacity={opacity} />
-      </svg>
-      <span className="max-w-[6ch] truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
+      <Icon className="size-4 shrink-0" aria-hidden="true" />
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="truncate whitespace-nowrap text-xs font-semibold" title={name}>{name}</span>
+        {reading !== undefined && <span className="truncate font-display text-xs tabular-nums">{reading}</span>}
       </span>
     </>
   )
-
-  const className = 'flex min-w-0 shrink-0 flex-col items-center gap-1'
+  const classes = cn(CELL_BASE, cellClass(state), className)
   if (!onClick) {
-    return <div className={className} aria-label={ariaLabel} data-state={state}>{body}</div>
+    return <div className={classes} aria-label={ariaLabel} data-state={state} role="group">{body}</div>
   }
   return (
-    <button type="button" onClick={onClick} className={`${className} rounded-xs hover:opacity-80`} aria-label={ariaLabel} data-state={state}>
+    <button type="button" onClick={onClick} className={cn(classes, 'hover:opacity-90')} aria-label={ariaLabel} data-state={state}>
       {body}
     </button>
   )
@@ -79,19 +88,93 @@ interface LampStripTileProps {
   ages?: Record<string, number | null>
   /** The worst currently-active alarm severity, driving the CHK rollup. */
   worstAlarmState: string
+  /** Active alarms: a lamp takes the worst one on its path, CHK counts them all. */
+  alarms?: ActiveAlarm[]
   editing: boolean
   onConfigure: () => void
   onOpenAlarms: () => void
 }
 
+interface Run {
+  group: string | undefined
+  cells: ReactNode[]
+}
+
 /**
- * The indicator ribbon (ADR 0052): one glance tells you whether anything wants
- * attention, and the CHK lamp says whether to go looking.
+ * The indicator ribbon (ADR 0052, cells per ADR 0163): one glance tells you
+ * whether anything wants attention, and the CHK cell says whether to go
+ * looking.
  */
 export const LampStripTile = memo(function LampStripTile({
-  config, values, ages, worstAlarmState, editing, onConfigure, onOpenAlarms,
+  config, values, ages, worstAlarmState, alarms = [], editing, onConfigure, onOpenAlarms,
 }: LampStripTileProps) {
   const title = config.title.trim() || 'Indicators'
+
+  const live = useMemo(() => alarms.filter((a) => severityRank(a.state) > 0), [alarms])
+  const worstByPath = useMemo(() => {
+    const map = new Map<string, ActiveAlarm['state']>()
+    for (const a of live) {
+      const current = map.get(a.path)
+      if (current === undefined || severityRank(a.state) > severityRank(current)) map.set(a.path, a.state)
+    }
+    return map
+  }, [live])
+  const worstAlarm = useMemo(
+    () => live.reduce<ActiveAlarm | null>((w, a) => (w === null || severityRank(a.state) > severityRank(w.state) ? a : w), null),
+    [live],
+  )
+
+  const runs: Run[] = []
+  if (config.showCheck) {
+    const lit = worstAlarmState !== 'normal'
+    runs.push({
+      group: 'Alerts',
+      cells: [
+        <Cell
+          key="chk"
+          name={lit && worstAlarm ? `CHK · ${live.length} · ${worstAlarm.label}` : 'CHK'}
+          icon="generic"
+          state={(lit ? worstAlarmState : 'off') as LampState}
+          className={lit ? 'max-w-full' : 'w-32'}
+          onClick={onOpenAlarms}
+          ariaLabel={`CHK: ${worstAlarmState}`}
+        />,
+      ],
+    })
+  }
+  const lampRunsStart = runs.length
+
+  config.lamps.forEach((lamp, index) => {
+    const age = ages?.[lamp.path] ?? null
+    const stale = isStale(age)
+    const base = lampState(lamp, values[lamp.path], stale)
+    // Alarms raised elsewhere on the network carry a "notifications." prefix.
+    const onPath = worstByPath.get(lamp.path)
+    const onNotification = worstByPath.get(`notifications.${lamp.path}`)
+    const alarmState = (onPath !== undefined && onNotification !== undefined
+      ? (severityRank(onNotification) > severityRank(onPath) ? onNotification : onPath)
+      : onPath ?? onNotification) as Exclude<ActiveAlarm['state'], 'normal'> | undefined
+    const state: LampState = alarmState ?? base
+    const name = lamp.label.trim() || lamp.path.split('.').slice(-1)[0]
+    const reading = base === 'on' ? 'On' : base === 'off' ? 'Off' : '--'
+    const ariaLabel = !alarmState && stale ? `${name}: stale ${formatDataAge(age)}` : `${name}: ${state}`
+    const group = lamp.group?.trim() || undefined
+    const cell = (
+      <Cell
+        key={index}
+        name={name}
+        reading={reading}
+        icon={lampIconName(lamp)}
+        state={state}
+        className="w-32"
+        onClick={alarmState ? onOpenAlarms : undefined}
+        ariaLabel={ariaLabel}
+      />
+    )
+    const last = runs[runs.length - 1]
+    if (runs.length > lampRunsStart && last.group === group) last.cells.push(cell)
+    else runs.push({ group, cells: [cell] })
+  })
 
   return (
     <Tile
@@ -105,40 +188,17 @@ export const LampStripTile = memo(function LampStripTile({
         ) : undefined
       }
     >
-      {/* Scrolls rather than stretching: sixteen lamps must never widen the
-          tile and break the grid. */}
-      <div data-testid="lamp-strip-row" className="flex items-start gap-3 overflow-x-auto pb-1">
-        {config.lamps.map((lamp, index) => {
-          const age = ages?.[lamp.path] ?? null
-          const stale = isStale(age)
-          const state = lampState(lamp, values[lamp.path], stale)
-          const label = lamp.label.trim() || lamp.path.split('.').slice(-1)[0]
-          return (
-            <Lamp
-              key={index}
-              label={label}
-              state={state}
-              fill={lampFill(state)}
-              opacity={state === 'on' ? 1 : 0.3}
-              ariaLabel={stale ? `${label}: stale ${formatDataAge(age)}` : `${label}: ${state}`}
-            />
-          )
-        })}
-
-        {config.showCheck && (
-          <Lamp
-            label="CHK"
-            state={worstAlarmState}
-            // normal stays this tile's own muted grey rather than
-            // severityFill's green: the lamp already drops to 0.3 opacity for
-            // it, and a dim grey dot reads as "nothing to report" more
-            // plainly than a dim green one does.
-            fill={worstAlarmState === 'normal' ? 'hsl(var(--muted-foreground))' : severityFill(worstAlarmState)}
-            opacity={worstAlarmState === 'normal' ? 0.3 : 1}
-            onClick={onOpenAlarms}
-            ariaLabel={`CHK: ${worstAlarmState}`}
-          />
-        )}
+      {/* One cell shape at every width: wraps to more rows rather than
+          scrolling or widening the tile. */}
+      <div data-testid="lamp-strip-row" className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2">
+        {runs.map((run, i) => (
+          <div key={i} data-testid="lamp-group" className="flex min-w-0 max-w-full flex-col gap-1">
+            {run.group && (
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{run.group}</span>
+            )}
+            <div className="flex min-w-0 flex-wrap gap-1.5">{run.cells}</div>
+          </div>
+        ))}
       </div>
     </Tile>
   )

@@ -10,12 +10,12 @@ describe('suggestRibbonLamps', () => {
   test('resolves the live vessel fixture to the expected default set, in order', () => {
     const paths = (fixture as { paths: SignalKPath[] }).paths
     expect(suggestRibbonLamps(paths)).toEqual([
-      { path: 'propulsion.port.revolutions', label: 'Port' },
-      { path: 'propulsion.starboard.revolutions', label: 'Stbd' },
-      { path: 'electrical.generator.0.stateNumber', label: 'Gen' },
-      { path: 'electrical.inverters.276.acState.acIn1Available', label: 'Shore' },
-      { path: 'electrical.alternator.0.chargingModeNumber', label: 'Alt 0' },
-      { path: 'electrical.alternator.1.chargingModeNumber', label: 'Alt 1' },
+      { path: 'propulsion.port.revolutions', label: 'Port', group: 'Propulsion', icon: 'engine' },
+      { path: 'propulsion.starboard.revolutions', label: 'Stbd', group: 'Propulsion', icon: 'engine' },
+      { path: 'electrical.generator.0.stateNumber', label: 'Gen', group: 'Power', icon: 'generator' },
+      { path: 'electrical.inverters.276.acState.acIn1Available', label: 'Shore', group: 'Power', icon: 'plug' },
+      { path: 'electrical.alternator.0.chargingModeNumber', label: 'Alt 0', group: 'Power', icon: 'alternator' },
+      { path: 'electrical.alternator.1.chargingModeNumber', label: 'Alt 1', group: 'Power', icon: 'alternator' },
     ])
   })
 
@@ -25,7 +25,7 @@ describe('suggestRibbonLamps', () => {
 
   test('a single-engine boat with only propulsion.0.revolutions yields "Eng 0"', () => {
     const paths: SignalKPath[] = [{ path: 'propulsion.0.revolutions', value: 1200 }]
-    expect(suggestRibbonLamps(paths)).toEqual([{ path: 'propulsion.0.revolutions', label: 'Eng 0' }])
+    expect(suggestRibbonLamps(paths)).toEqual([{ path: 'propulsion.0.revolutions', label: 'Eng 0', group: 'Propulsion', icon: 'engine' }])
   })
 
   test('a path list with 20 engines is capped at 16', () => {

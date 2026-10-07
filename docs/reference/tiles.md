@@ -208,6 +208,8 @@ number is deliberate: a stale reading shown as current is worse than none.
 - A gauge group or engine cluster badges the one reading that stopped and
   keeps reporting the rest; the tile as a whole only goes stale once every
   reading on it has.
+- An indicator cell drops to the dashed no-data look rather than staying lit
+  on an old value.
 - An engine cluster for an engine that has been switched off reads `OFF`
   in place of `STALE`, in plain grey with no amber edge, and its readings go
   to `--`. Switching the key off powers the engine's own electronics down, so

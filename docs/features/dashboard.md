@@ -43,13 +43,28 @@ for the full catalog and every tile's fields.
 
 ## The indicator ribbon
 
-One strip of status lamps and a CHK rollup, pinned above the grid on every
+One strip of labelled status cells and a CHK cell, pinned above the grid on every
 dashboard page, inside whatever skin that page uses. The strip belongs to the
 vessel, not to the page: same lamps, same order, wherever you look, so a
 glance always means the same thing. It stays off the Forecast, Routes, Radar,
 Anchor Watch and Settings panels, which rely on the alarm banner instead, and
 off wall displays, where it would spend a third of a 360px-tall strip on the
 least page-specific information on screen.
+
+Each cell shows an icon, the full name of the system and a short reading: On,
+Off, or `--` when nothing is reporting. A cell fills green when the system is
+on and stays dark when it is off. A dashed outline means the boat is not
+getting data for it, which is not the same as off, and a source that goes
+quiet never keeps showing its last "on". While an active alarm is on a cell's
+signal it turns amber or red to match the alarm, whether the system is running
+or not, so the ribbon never disagrees with the alarm card. Tapping a cell
+with an alarm opens the alarms panel. Cells can be given a group such as
+Propulsion or Power; neighbouring cells in the same group share one heading.
+The row wraps onto more lines on a narrow screen instead of scrolling.
+
+The CHK cell sits first. Quiet, it reads CHK. With alarms active it widens,
+takes the colour of the worst one and reads the number active and that
+alarm's title.
 
 Its order never changes on its own: a lamp that trips does not jump to the
 front, and a lamp that clears does not vanish, because a ribbon earns its

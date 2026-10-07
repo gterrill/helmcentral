@@ -291,6 +291,10 @@ export interface LampConfig {
   label: string
   /** Lights when the value is zero or absent, for a signal whose healthy state is off. */
   invert?: boolean
+  /** A name from LAMP_ICONS; inferred from the path when unset. */
+  icon?: string
+  /** Short heading; consecutive lamps sharing one render under it. */
+  group?: string
 }
 
 /**
@@ -414,6 +418,7 @@ export const CLUSTER_MAX_FUEL_BARS = 4
 
 export const LAMP_STRIP_MAX_LAMPS = 16
 export const LAMP_LABEL_MAX_LENGTH = 12
+export const LAMP_GROUP_MAX_LENGTH = 16
 
 /** Caps mirroring gaugeGroupMaxGauges / gaugeGroupTitleMaxLen in backend/dashboard_pages.go. */
 export const GAUGE_GROUP_MAX_GAUGES = 12
