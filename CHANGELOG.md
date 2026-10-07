@@ -25,6 +25,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and email, insurer, policy number, home marina, berth and storm delegate, and
   Particulars gains length overall and beam. Mate reads these for forms and can
   offer to save answers you give it in a chat.
+- **Mate answers history questions from the logged instrument history.** Ask
+  "when do the alternators cut off charging on the last few passages" and Mate
+  finds the recent passages from the logged speed, then reads what that reading
+  did on each one, instead of answering from documents and old conversations.
+  It needs the history log set up.
 - **Battery names** in Settings → Vessel. Each battery number the boat reports
   is listed with what the boat calls it; type your own name for it, such as
   "Port Engine Starter Battery". Alarms use it. Leave it empty to keep

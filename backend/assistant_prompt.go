@@ -821,6 +821,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
 		"check both before concluding there is nothing to find).\n\n")
 
+	// 2c1a. History questions (ADR 0165) - fixed wording, identical for every
+	// turn. Asked when the alternators cut off charging over the last few
+	// passages, Mate searched documents and old chats and never opened the
+	// logged telemetry. For what a reading did over time, that log is the
+	// primary source.
+	b.WriteString("For questions about what a reading did over time - trends, past behaviour, when something " +
+		"started or stopped, what it reached, or \"on the last few passages\" or runs - the logged telemetry is " +
+		"the primary source. Find the paths with check_signalk_paths or get_last_recorded, use list_passages for " +
+		"passage time windows, then call get_path_history for each window. Documents and past conversations are " +
+		"secondary context, not a substitute for the logged figures.\n\n")
+
 	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
 	// chat that prompted this had Mate say it could not sit and watch a
 	// reading; it can now, and must never claim to without one running.
