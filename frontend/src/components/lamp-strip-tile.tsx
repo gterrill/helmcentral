@@ -156,7 +156,10 @@ export const LampStripTile = memo(function LampStripTile({
       : onPath ?? onNotification) as Exclude<ActiveAlarm['state'], 'normal'> | undefined
     const state: LampState = alarmState ?? base
     const name = lamp.label.trim() || lamp.path.split('.').slice(-1)[0]
-    const reading = base === 'on' ? 'On' : base === 'off' ? 'Off' : '--'
+    // The reading says what the signal is doing; the colour says whether that
+    // is good, which `invert` flips.
+    const raw = values[lamp.path]
+    const reading = base === 'no data' || base === 'stale' || raw === null || raw === undefined ? '--' : raw !== 0 ? 'On' : 'Off'
     const ariaLabel = !alarmState && stale ? `${name}: stale ${formatDataAge(age)}` : `${name}: ${state}`
     const group = lamp.group?.trim() || undefined
     const cell = (
@@ -179,6 +182,7 @@ export const LampStripTile = memo(function LampStripTile({
   return (
     <Tile
       title={title}
+      fill
       icon={<LampCeiling className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
@@ -189,8 +193,9 @@ export const LampStripTile = memo(function LampStripTile({
       }
     >
       {/* One cell shape at every width: wraps to more rows rather than
-          scrolling or widening the tile. */}
-      <div data-testid="lamp-strip-row" className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2">
+          widening the tile. When the saved tile height is too short for every
+          row, the cells scroll vertically so no lamp is ever cut off. */}
+      <div data-testid="lamp-strip-row" className="flex min-h-0 min-w-0 flex-1 flex-wrap content-start items-start gap-x-4 gap-y-2 overflow-y-auto">
         {runs.map((run, i) => (
           <div key={i} data-testid="lamp-group" className="flex min-w-0 max-w-full flex-col gap-1">
             {run.group && (
