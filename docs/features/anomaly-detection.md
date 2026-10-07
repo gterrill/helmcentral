@@ -32,9 +32,24 @@ watch whatever engines and batteries the boat is already publishing. The
 frozen check needs at least one engine ticked in Settings → Vessel, since it
 checks a stuck reading against that engine's own rpm.
 
+Each of these alarms tells you which sensor it is about, by name, and what
+is wrong with it, one line per sensor. For example: "Port Engine Starter
+Battery voltage 75.7 V · above the 70 V any 12, 24 or 48 V bank reaches", or
+"Port engine oil pressure has not changed in 15 minutes while rpm varied", or
+"PORT START BATT has stopped sending". The names are the ones you give your
+batteries and engines in Settings → Vessel; where you have not named one, the
+card uses what the boat's own instruments call it.
+
+The impossible-reading check looks at batteries, not at chargers. A solar
+charger reports its panel array's voltage under a battery number on some
+boats, and 76 volts is a normal array and an impossible battery. Where
+every device reporting a battery number is a charger, Helmcentral does not
+treat that number as a battery. If it cannot tell what is reporting, it
+checks it as a battery.
+
 A sensor you know is dead and don't want watched (a broken exhaust
 temperature sender, say) can be excluded from its own alarm card with an
-**Ignore this sensor** action. See
+**Ignore** action named for that sensor. See
 [Set up your vessel](../how-to/set-up-your-vessel.md#excluding-a-sensor-you-know-is-dead).
 
 ## Charging into a full house bank

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,9 +87,34 @@ func unignoreSensor(identifier string) error {
 	return saveAlarmRulesLocked()
 }
 
+// ignoredSensorsResponse is the body of every ignored-sensors endpoint:
+// the raw identifiers (what DELETE takes) and, for each, the name the
+// operator knows it by -- the settings list shows names and never an id.
+func ignoredSensorsResponse() map[string]any {
+	identifiers := listIgnoredSensors()
+	namer := newSensorNamer(globalSignalKSnapshot, vesselSettingsForNaming(), globalSourceDevices.get())
+	sensors := make([]sensorHealthEntry, 0, len(identifiers))
+	for _, id := range identifiers {
+		sensors = append(sensors, namer.identifierEntry(id))
+	}
+	return map[string]any{"identifiers": identifiers, "sensors": sensors}
+}
+
+// vesselSettingsForNaming loads the vessel block for naming only. A block
+// that cannot be read is logged and names fall back to the bus's own: this
+// is a label, and the settings page shows the read error itself.
+func vesselSettingsForNaming() vesselSettings {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		log.Printf("sensor names: vessel settings unreadable, using the bus's own names: %v", err)
+		return vesselSettings{}
+	}
+	return vessel
+}
+
 // GET /api/alarms/ignored-sensors
 func listIgnoredSensorsHandler(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{"identifiers": listIgnoredSensors()})
+	return c.JSON(http.StatusOK, ignoredSensorsResponse())
 }
 
 // POST /api/alarms/ignored-sensors — the alarm card's "Ignore this sensor" action.
@@ -102,7 +128,7 @@ func ignoreSensorHandler(c echo.Context) error {
 	if err := ignoreSensor(req.Identifier); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"identifiers": listIgnoredSensors()})
+	return c.JSON(http.StatusOK, ignoredSensorsResponse())
 }
 
 // DELETE /api/alarms/ignored-sensors/:identifier

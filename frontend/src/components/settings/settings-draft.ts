@@ -1,6 +1,7 @@
 import type { DeepPartial, SettingsPayload } from '@/hooks/use-settings-form'
 import {
   titleCaseInstance,
+  type VesselBatterySetting,
   type VesselEngineSetting,
   type VesselHouseBankSetting,
 } from '@/lib/vessel-settings'
@@ -40,6 +41,16 @@ export interface VesselEngineRowDraft {
 export interface VesselDraft {
   engineRows: Record<string, VesselEngineRowDraft>
   houseBank: VesselHouseBankSetting | null
+  /** Operator names for battery instances, keyed by instance id. */
+  batteryNames: Record<string, string>
+}
+
+/** The battery names a draft saves: non-empty names only, in instance order. */
+export function vesselBatteriesFromDraft(vessel: VesselDraft): VesselBatterySetting[] {
+  return Object.keys(vessel.batteryNames)
+    .filter((instance) => vessel.batteryNames[instance].trim() !== '')
+    .sort()
+    .map((instance) => ({ instance, name: vessel.batteryNames[instance].trim() }))
 }
 
 /** The engines a draft saves: ticked rows only, in instance order, names defaulted. */
@@ -73,6 +84,12 @@ function vesselDraftsEqual(a: VesselDraft | null, b: VesselDraft | null): boolea
   if (ea.length !== eb.length) return false
   for (let i = 0; i < ea.length; i++) {
     if (ea[i].instance !== eb[i].instance || ea[i].name !== eb[i].name || ea[i].equipment_id !== eb[i].equipment_id) return false
+  }
+  const ba = vesselBatteriesFromDraft(a)
+  const bb = vesselBatteriesFromDraft(b)
+  if (ba.length !== bb.length) return false
+  for (let i = 0; i < ba.length; i++) {
+    if (ba[i].instance !== bb[i].instance || ba[i].name !== bb[i].name) return false
   }
   return houseBanksEqual(a.houseBank, b.houseBank)
 }
@@ -291,7 +308,11 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
     for (const e of Array.isArray(settings.vessel.engines) ? settings.vessel.engines : []) {
       engineRows[e.instance] = { name: e.name || titleCaseInstance(e.instance), equipmentId: e.equipment_id, included: true }
     }
-    draft.vessel = { engineRows, houseBank: settings.vessel.house_bank ?? null }
+    const batteryNames: Record<string, string> = {}
+    for (const b of Array.isArray(settings.vessel.batteries) ? settings.vessel.batteries : []) {
+      batteryNames[b.instance] = b.name
+    }
+    draft.vessel = { engineRows, houseBank: settings.vessel.house_bank ?? null, batteryNames }
   }
 
   return draft
@@ -452,6 +473,6 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     // Omitted while the vessel block was never read (see the draft field).
     ...(draft.vessel === null
       ? {}
-      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank } }),
+      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank, batteries: vesselBatteriesFromDraft(draft.vessel) } }),
   }
 }

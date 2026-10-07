@@ -650,6 +650,7 @@ func main() {
 	} else if len(b.Engines) > 0 {
 		globalEngineBaselineCache.set(b)
 	}
+	go startSourceDeviceRefresher(streamCtx, sourceDeviceRefreshInterval)
 	go startAnomalyDetector(streamCtx, anomalyDetectorInterval)
 	go startTwinBaselineRefresher(streamCtx, anomalyBaselineRefreshInterval)
 	// Gust ladder + solar Influx queries (Tier 1 #1): buildVesselStatePayload

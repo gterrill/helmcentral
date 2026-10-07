@@ -7,7 +7,7 @@
  * one place that translates a rule condition into operator language, so the
  * card and the banner say the same thing.
  */
-import type { ActiveAlarm } from '@/hooks/use-alarms'
+import type { ActiveAlarm, SensorHealthEntry } from '@/hooks/use-alarms'
 import { formatQuantity, quantityForSIUnit, unitOption } from '@/lib/quantities'
 
 // SI unit -> the unit id an alarm reading is shown in. Not every quantity's
@@ -33,8 +33,8 @@ export const SEVERE_THUNDERSTORM_INDEX_PATH = 'helmcentral.environment.severeThu
 
 // The three sensor-health count paths (anomaly_detector.go): a count alarm
 // on its own gives the operator nothing to act on, so its evidence names
-// the offending SignalK paths or $source ids (comma-separated) - the alarm
-// card's "Ignore this sensor" action splits that list back out.
+// the offending sensors, one named line each (live_sensors), and the ignore
+// action submits the raw identifier carried beside each line.
 export const ANOMALY_SENSOR_FROZEN_COUNT_PATH = 'helmcentral.anomaly.sensor.frozenCount'
 export const ANOMALY_SENSOR_OUT_OF_RANGE_COUNT_PATH = 'helmcentral.anomaly.sensor.outOfRangeCount'
 export const ANOMALY_SENSOR_SILENT_SOURCE_COUNT_PATH = 'helmcentral.anomaly.sensor.silentSourceCount'
@@ -44,26 +44,35 @@ const IGNORABLE_SENSOR_PATHS: readonly string[] = [
   ANOMALY_SENSOR_SILENT_SOURCE_COUNT_PATH,
 ]
 
+export function isSensorHealthPath(path: string): boolean {
+  return IGNORABLE_SENSOR_PATHS.includes(path)
+}
+
+function isSensorHealthAlarm(alarm: ActiveAlarm): boolean {
+  return isSensorHealthPath(alarm.path)
+}
+
 /**
- * The identifiers (SignalK paths or $source ids) an "Ignore this sensor"
- * action could offer for this alarm, or [] when it isn't one of the three
- * sensor-health count alarms, or when nothing is currently flagged
- * (live_evidence absent - the count is 0 right now, so there's nothing to
- * ignore).
+ * The named lines for a sensor-health count alarm: what is failing right now,
+ * in the words the server wrote (backend/sensor_names.go). [] for any other
+ * alarm, or when nothing is failing at this moment.
  *
- * Reads `live_evidence`, not the alarm's own `evidence` -- `evidence` is
- * frozen at the moment the alarm first raised, while a count alarm like
- * this one can stay continuously active for a long time as its specific
- * offenders drift (one sensor recovers, another starts failing, and the
- * count itself never drops enough to clear and re-raise). Offering to
- * ignore whatever tripped the alarm originally, rather than whatever is
- * actually failing now, would be offering the wrong sensor.
+ * Reads `live_sensors`, not `sensors` (the set at raise): a count alarm can
+ * stay active for a long time while its specific offenders drift, and showing
+ * or offering to ignore whatever tripped it first would name the wrong sensor.
  */
-export function ignorableSensorIdentifiers(alarm: ActiveAlarm): string[] {
-  if (!IGNORABLE_SENSOR_PATHS.includes(alarm.path)) return []
-  const evidence = (alarm.live_evidence ?? '').trim()
-  if (evidence === '') return []
-  return evidence.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+export function sensorHealthLines(alarm: ActiveAlarm): SensorHealthEntry[] {
+  if (!isSensorHealthAlarm(alarm)) return []
+  return alarm.live_sensors ?? []
+}
+
+/**
+ * The sensors an "Ignore" action could offer for this alarm: the identifier
+ * to submit (a SignalK path or $source id, never shown) and the label the
+ * button reads.
+ */
+export function ignorableSensors(alarm: ActiveAlarm): { identifier: string; label: string }[] {
+  return sensorHealthLines(alarm).map((e) => ({ identifier: e.identifier, label: e.label }))
 }
 
 // The English word for each tendency path's window, used in the card
@@ -246,6 +255,12 @@ export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastD
     const trimmedMessage = message?.trim()
     const extra = trimmedMessage && trimmedMessage !== 'No data.' ? ` ${trimmedMessage}` : ''
     return `No data.${extra}`
+  }
+
+  // The three sensor-health count alarms read as one line per failing sensor,
+  // never "Now 1. Clears below 0.5." -- a count tells the watchkeeper nothing.
+  if (isSensorHealthAlarm(alarm)) {
+    return sensorHealthLines(alarm).map((e) => e.text).join('; ')
   }
 
   // Forecast wind warnings on 'stale' fall through the branch above (a

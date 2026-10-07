@@ -21,6 +21,13 @@ type signalKSnapshot struct {
 	contexts   map[string]map[string]any  // context string → nested tree
 	pathSeen   map[string]time.Time       // "<context>|<dotted path>" → last update time
 	sourceSeen map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	// batteryPublishers is, per "<context>|<battery id>", every $source that
+	// has published any electrical.batteries.<id>.* path. The tree leaf only
+	// keeps whoever wrote last, but several devices can share one instance
+	// (a bank's shunt plus the chargers feeding it), and the impossible-
+	// reading check must know all of them to tell a battery from a charger's
+	// own input (sensor_names.go).
+	batteryPublishers map[string]map[string]struct{}
 	// controlStamps tracks mayara radar controls ("<context>|radars.<id>.controls.<name>"):
 	// the mayara timestamp last held and when, on our clock, it last advanced.
 	controlStamps map[string]controlStampEntry
@@ -244,6 +251,7 @@ func newSignalKSnapshot() *signalKSnapshot {
 		controlStamps:     make(map[string]controlStampEntry),
 		controlStampCount: make(map[string]int),
 		sourceSeen:        make(map[string]sourceSeenEntry),
+		batteryPublishers: make(map[string]map[string]struct{}),
 		sentenceSeen:      make(map[string]time.Time),
 	}
 }
@@ -475,6 +483,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 
 			s.pathSeen[d.Context+"|"+val.Path] = now
+			if update.SourceRef != "" {
+				s.noteBatteryPublisherLocked(d.Context, val.Path, update.SourceRef)
+			}
 			if radarControlPath(val.Path) {
 				s.noteControlStamp(d.Context, d.Context+"|"+val.Path, val.Value, update.Timestamp, now)
 			}
@@ -810,6 +821,77 @@ func (s *signalKSnapshot) sourcesFor(context string) map[string]sourceSeenEntry 
 	return result
 }
 
+// Caps on batteryPublishers, in the spirit of signalKSentenceSeenMaxDistinct:
+// a real boat has a dozen battery instances and a few devices on each.
+const (
+	signalKBatteryMaxInstances  = 64
+	signalKBatteryMaxPublishers = 16
+)
+
+// noteBatteryPublisherLocked records source as a publisher of the
+// electrical.batteries.<id> instance path names, if it names one. Must be
+// called with s.mu held for writing. Past a cap a new entry is dropped, not
+// an old one evicted.
+func (s *signalKSnapshot) noteBatteryPublisherLocked(context, path, source string) {
+	rest, ok := strings.CutPrefix(path, "electrical.batteries.")
+	if !ok {
+		return
+	}
+	id, _, ok := strings.Cut(rest, ".")
+	if !ok || id == "" {
+		return
+	}
+	key := context + "|" + id
+	set := s.batteryPublishers[key]
+	if set == nil {
+		if len(s.batteryPublishers) >= signalKBatteryMaxInstances {
+			return
+		}
+		set = make(map[string]struct{})
+		s.batteryPublishers[key] = set
+	}
+	if _, known := set[source]; known || len(set) >= signalKBatteryMaxPublishers {
+		return
+	}
+	set[source] = struct{}{}
+}
+
+// batteryPublishersFor lists, sorted, every $source that has published any
+// path of electrical.batteries.<id> under context since this process started.
+func (s *signalKSnapshot) batteryPublishersFor(context, id string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	set := s.batteryPublishers[context+"|"+id]
+	out := make([]string, 0, len(set))
+	for source := range set {
+		out = append(out, source)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// batteryInstancesPublishedBy lists, sorted, the battery instances under
+// context that source has published to.
+func (s *signalKSnapshot) batteryInstancesPublishedBy(context, source string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	prefix := context + "|"
+	var out []string
+	for key, set := range s.batteryPublishers {
+		id, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+		if _, published := set[source]; published {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // lastSeen reports when a path last carried an update, or the zero time if it
 // never has. Alarm rules use it to tell a live sensor from a frozen one.
 func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
@@ -920,6 +1002,11 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 		for key := range s.sourceSeen {
 			if strings.HasPrefix(key, prefix) {
 				delete(s.sourceSeen, key)
+			}
+		}
+		for key := range s.batteryPublishers {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.batteryPublishers, key)
 			}
 		}
 	}

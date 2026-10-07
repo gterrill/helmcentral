@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -158,6 +159,16 @@ type alarmStatus struct {
 	// this field exists so the ignore action does not have to overload that
 	// meaning into "what is failing at this exact moment" too.
 	LiveEvidence string `json:"live_evidence,omitempty"`
+
+	// Sensors and LiveSensors carry the named lines for the three sensor-
+	// health count alarms (sensor_names.go): Sensors as they stood at raise,
+	// LiveSensors re-read on every list, the same split Evidence and
+	// LiveEvidence make. Each entry holds the display text the card, banner
+	// and notifications show, plus the raw identifier the "Ignore" action
+	// submits. Evidence and LiveEvidence stay as the identifier lists; the
+	// operator never reads them.
+	Sensors     []sensorHealthEntry `json:"sensors,omitempty"`
+	LiveSensors []sensorHealthEntry `json:"live_sensors,omitempty"`
 
 	// Silenced and the two capability flags mirror the SignalK Notifications
 	// API's own status object. Silencing is not acknowledging — a silenced
@@ -321,6 +332,7 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 			status.escalated = false
 			status.Message = fmt.Sprintf("%s cleared", rule.Label)
 			status.Evidence = ""
+			status.Sensors = nil
 			return alarmEvent{Kind: alarmEventCleared, Rule: rule, Status: *status}, true
 		}
 
@@ -357,6 +369,12 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	status.escalated = false
 	status.Evidence = evidenceFor(rule.Path, now)
 	status.Message = alarmMessageFor(rule, sample, status.Unit, status.Evidence)
+	if sensorHealthCountPaths[rule.Path] {
+		status.Sensors = sensorEntriesFor(rule.Path, now)
+		if len(status.Sensors) > 0 {
+			status.Message = sensorHealthMessage(rule.Label, status.Sensors)
+		}
+	}
 	return alarmEvent{Kind: alarmEventRaised, Rule: rule, Status: *status}, true
 }
 
@@ -510,6 +528,26 @@ func evidenceFor(path string, now time.Time) string {
 	return reading.Evidence[path]
 }
 
+// sensorEntriesFor is evidenceFor's counterpart for the named sensor lines.
+func sensorEntriesFor(path string, now time.Time) []sensorHealthEntry {
+	reading, ok := globalAnomalySlot.get()
+	if !ok || now.Sub(reading.ComputedAt) > anomalySlotMaxAge {
+		return nil
+	}
+	return reading.Sensors[path]
+}
+
+// sensorHealthMessage is the plain-text line every non-browser notification
+// carries for a sensor-health alarm: the rule's title, then one clause per
+// failing sensor, with none of the count arithmetic or raw identifiers.
+func sensorHealthMessage(label string, entries []sensorHealthEntry) string {
+	texts := make([]string, len(entries))
+	for i, e := range entries {
+		texts[i] = e.Text
+	}
+	return label + ": " + strings.Join(texts, "; ")
+}
+
 // sensorHealthCountPaths are the three anomaly detector paths the alarm
 // card's "Ignore this sensor" action targets (anomaly_sensor_health.go;
 // alarm-display.ts's IGNORABLE_SENSOR_PATHS mirrors this list client-side).
@@ -533,6 +571,7 @@ func withLiveSensorEvidence(statuses []alarmStatus, now time.Time) []alarmStatus
 			continue
 		}
 		statuses[i].LiveEvidence = evidenceFor(statuses[i].Path, now)
+		statuses[i].LiveSensors = sensorEntriesFor(statuses[i].Path, now)
 	}
 	return statuses
 }

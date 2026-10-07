@@ -19,7 +19,7 @@ import {
 // through one mock, the same pattern equipment-editor.test.tsx uses for its
 // own multi-endpoint component.
 
-type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown }
+type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown; batteries: { instance: string; name: string }[] }
 let latestDraft: RegularSettingsDraft
 // What the next Save would send as `vessel`.
 const pendingVessel = () => buildRegularSettingsPatch(latestDraft).vessel as unknown as SavedVessel
@@ -53,8 +53,9 @@ function stubFetch() {
             { instance: 'starboard', rpm: 1810, coolant_c: 75 },
           ],
           batteries: [
-            { path: 'electrical.batteries.0', voltage: 27.2, current: 15.6, soc: 0.79 },
-            { path: 'electrical.batteries.512', voltage: 27.21, current: 267.6, soc: 0.79 },
+            { path: 'electrical.batteries.0', instance: '0', bus_name: 'Batrium-BMS (Victron profile)', solar_charger: false, voltage: 27.2, current: 15.6, soc: 0.79 },
+            { path: 'electrical.batteries.1', instance: '1', bus_name: 'BlueSolar Charger MPPT 100/50 re', solar_charger: true, voltage: 76.7, current: 0, soc: null },
+            { path: 'electrical.batteries.512', instance: '512', bus_name: '', solar_charger: false, voltage: 27.21, current: 267.6, soc: 0.79 },
           ],
           detectors: {
             frozen: { ready: false, missing: 'Tick at least one engine' },
@@ -65,7 +66,7 @@ function stubFetch() {
       })
     }
     if (u.endsWith('/api/settings')) {
-      return Promise.resolve({ ok: true, json: async () => ({ vessel: { engines: [], house_bank: null } }) })
+      return Promise.resolve({ ok: true, json: async () => ({ vessel: { engines: [], house_bank: null, batteries: [] } }) })
     }
     if (u.endsWith('/api/vessel/particulars')) {
       return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'not under test' }) })
@@ -115,7 +116,7 @@ beforeEach(() => {
 })
 
 function SectionHarness() {
-  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null } }))
+  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [] } }))
   latestDraft = draft
   return <BoatUiSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
 }
@@ -259,5 +260,35 @@ describe('Settings -> Vessel: Engines and Power', () => {
     const titles = dashboardPage.widgets.map((w) => w.gaugeGroup?.title)
     expect(titles).toContain('Port')
     expect(titles).toContain('Starboard')
+  })
+})
+
+describe('Settings -> Vessel: Battery names', () => {
+  it('lists each battery instance with what the boat calls it as the hint', async () => {
+    renderSection()
+
+    const bms = await screen.findByLabelText('Name for battery 0')
+    expect(bms).toHaveAttribute('placeholder', 'Batrium-BMS (Victron profile)')
+    expect(screen.getByText('The boat calls it Batrium-BMS (Victron profile)')).toBeInTheDocument()
+    // No bus name at all: a plain placeholder and an honest hint.
+    expect(screen.getByLabelText('Name for battery 512')).toHaveAttribute('placeholder', 'Battery 512')
+    expect(screen.getByText('The boat gives it no name')).toBeInTheDocument()
+  })
+
+  it('marks a solar charger input as not a battery', async () => {
+    renderSection()
+
+    await screen.findByLabelText('Name for battery 1')
+    expect(screen.getAllByText('Solar charger input, not a battery')).toHaveLength(1)
+  })
+
+  it('saves a typed name with the Save bar patch and leaves an empty one out', async () => {
+    renderSection()
+
+    const input = await screen.findByLabelText('Name for battery 512')
+    fireEvent.change(input, { target: { value: 'Port Engine Starter Battery' } })
+    fireEvent.change(screen.getByLabelText('Name for battery 0'), { target: { value: '   ' } })
+
+    await waitFor(() => expect(pendingVessel().batteries).toEqual([{ instance: '512', name: 'Port Engine Starter Battery' }]))
   })
 })

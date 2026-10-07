@@ -45,7 +45,23 @@ least two.
    your bank needs a different number than the profile gives.
 6. Choose **Save** in the bar across the top of the screen.
 
-Engines and the house bank save together with the rest of Settings. The bar
+## Battery names
+
+1. Still under **Settings → Vessel**, find **Battery names**.
+2. Every battery number the boat reports is listed with its live voltage,
+   current and state of charge. Under the name box, a line says what the boat
+   itself calls it, if anything: that is also the grey hint in the box.
+3. Type the name you use for it, for example "Port Engine Starter Battery".
+   Leave the box empty to keep using the boat's own name.
+4. A number reported only by solar chargers is marked "Solar charger input,
+   not a battery". Its readings are not checked as a battery, so a panel
+   array's high voltage does not raise an impossible-reading alarm.
+5. Choose **Save** in the bar across the top of the screen.
+
+Alarms and the Ignored sensors list use these names. An engine's name
+is the one you gave it under **Engines**.
+
+Engines, battery names and the house bank save together with the rest of Settings. The bar
 appears as soon as you change anything, **Discard** puts it all back, and if
 you try to leave Settings with changes unsaved you are asked first. **Apply
 gauge zones** is not part of that: it adds the gauge tile to your first
@@ -59,6 +75,7 @@ so you always know what saving will turn on.
 A sender that has failed outright (a stuck or open-circuit reading) can
 trip the frozen or impossible-reading check forever. Rather than a
 settings list, this is handled from the alarm itself: open the alarm card
-for that check and choose **Ignore this sensor** next to the reading you
-want excluded. To see everything currently ignored, or to bring one back,
+for that check and choose **Ignore** followed by the sensor's name (for example
+**Ignore Port engine exhaust temperature**) for the reading you want
+excluded. To see everything currently ignored, or to bring one back,
 open **Settings → Alarms** and look under **Ignored sensors**.
