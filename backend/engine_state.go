@@ -28,9 +28,15 @@ const (
 // any of its sources, set only for off and lost: a running engine's last
 // update is "now", and carrying it would change the gauge-values payload on
 // every tick.
+//
+// Witnessed is set for off only, when a live device that is not an engine
+// shares the engine's connection. Without one (an engine-only connection) off
+// rests on the connection carrying nothing else, which a failed connection
+// also looks like. Not carried in the payload.
 type engineStateInfo struct {
 	State      string
 	LastUpdate time.Time
+	Witnessed  bool
 }
 
 // engineStateJSON is engineStateInfo as the gauge-values payload carries it.
@@ -85,12 +91,24 @@ func engineStates(sources []sourceHealth, now time.Time, streamAge time.Duration
 		case now.Sub(newest.last) <= silentSourceQuietFor:
 			out[id] = engineStateInfo{State: engineStateRunning}
 		case engineKeyOff(newest.health, sources, now):
-			out[id] = engineStateInfo{State: engineStateOff, LastUpdate: newest.last}
+			out[id] = engineStateInfo{State: engineStateOff, LastUpdate: newest.last, Witnessed: connectionCarriesOthers(newest.health, sources)}
 		default:
 			out[id] = engineStateInfo{State: engineStateLost, LastUpdate: newest.last}
 		}
 	}
 	return out
+}
+
+// connectionCarriesOthers reports whether any source that is not engine-bound
+// shares e's connection, live or not.
+func connectionCarriesOthers(e sourceHealth, sources []sourceHealth) bool {
+	conn := sourceConnection(e.Source)
+	for _, s := range sources {
+		if !s.EngineBound && sourceConnection(s.Source) == conn {
+			return true
+		}
+	}
+	return false
 }
 
 // engineStateFunc yields the engine states of one build, computed on first use

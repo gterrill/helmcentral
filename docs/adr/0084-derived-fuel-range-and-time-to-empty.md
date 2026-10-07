@@ -168,16 +168,38 @@ the same reading that puts `OFF` on the Engine Cluster tile, so the tile and
 these figures never disagree. That state is ADR 0147's key-off test applied
 per propulsion id: every source publishing that engine has gone quiet, and
 its connection still carries other live devices or is a dedicated engine
-connection. At least one engine must also have a fresh positive rate. An
-engine that reads as running (its computer still sending rpm with only the
-rate frozen), as lost (its connection quiet too), or that no recorded source
-publishes keeps its stale rate in the total, so the figures blank. With no
-fresh rate anywhere, every positive rate is summed and the oldest age is
-reported as before, so the figures still go absent and the age still says
-why.
+connection. An engine that reads as running (its computer still sending rpm
+with only the rate frozen), as lost (its connection quiet too), or that no
+recorded source publishes keeps its stale rate in the total, so the figures
+blank.
 
 The trade-off, inherited from ADR 0147: an engine computer dropping out while
 running, or a dedicated engine connection failing, cannot be told from a
 key-off. Its burn drops out after two minutes and range and time to empty
 read high. Everything else, a gateway going quiet included, still blanks the
 figures.
+
+## Addendum 2026-10-07: every engine off is not stale
+
+The first addendum also required one engine to have a fresh rate before a
+stale one could drop out. With both engines shut down, nothing was fresh, so
+both frozen rates were summed, the oldest age was reported, and economy, time
+to empty and range showed a stale marker on a boat that was simply not
+burning. A stale marker means a reading stopped being true; here nothing had
+gone wrong.
+
+That requirement is gone. Every stale rate whose engine reads as off drops
+out, so with all engines off there is no burn: the figures are absent with no
+age, the same as a boat stopped with nothing ever reported. An engine reading
+as running, lost or unknown still keeps its frozen rate in, so a gateway that
+dies with the engines off still blanks the figures with its age.
+
+One case needs more than the off state. ADR 0147 reads an engine as off when
+its connection carries nothing but engines, since there is no other device to
+show the connection alive. With one engine still fresh that is the accepted
+trade-off above. With none fresh, a failed engine-only connection would read
+as every engine off and drop the stale marker on a real fault. So when no
+engine is fresh, a stale rate drops out only if a live device that is not an
+engine shares its connection (`Witnessed` on the engine state). An engine-only
+connection with every engine quiet keeps the old behaviour: the figures blank
+with their age.

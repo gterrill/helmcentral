@@ -55,12 +55,15 @@ fires on stale arithmetic; it simply sees no value, the same as if the path
 had never been published at all.
 
 The exception is an engine that has been shut down. Engines stop sending
-anything when they are turned off, so with one engine still reporting, an
-engine that has gone completely quiet for more than two minutes counts as off
-and is left out of the total burn, provided other devices on the same
-connection are still live. If only its fuel rate has stopped, if every
-engine's rate is that old, or if its whole connection has gone quiet, the
-figures go absent as above. An engine on a connection of its own cannot be
+anything when they are turned off, so an engine that has gone completely quiet
+for more than two minutes counts as off and is left out of the total burn,
+provided other devices on the same connection are still live. With every
+engine off there is no burn, and the figures have no value and no age, so a
+stale-data rule does not fire for them. That needs another device on the
+engines' connection still reporting; if the engines are on a connection of
+their own, they read as stale instead, because a failed connection looks the
+same. If only its fuel rate has stopped, or
+if its whole connection has gone quiet, the figures go absent as above. An engine on a connection of its own cannot be
 told apart this way: if that connection fails while the engine runs, it counts
 as off and range and time to empty read high.
 

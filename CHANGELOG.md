@@ -43,6 +43,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Fuel economy, range and time to empty no longer show stale with the
+  engines off.** With every engine switched off they read `--`, the same as
+  when stopped. A stale marker now means a reading has actually stopped, such
+  as a gateway going quiet.
 - A solar charger's panel voltage, which the boat's network reports under a
   battery number, no longer raises an Impossible sensor reading alarm. Battery
   numbers that only chargers report, where those chargers also feed another
