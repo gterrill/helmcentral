@@ -25,9 +25,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and email, insurer, policy number, home marina, berth and storm delegate, and
   Particulars gains length overall and beam. Mate reads these for forms and can
   offer to save answers you give it in a chat.
+- **Battery names** in Settings → Vessel. Each battery number the boat reports
+  is listed with what the boat calls it; type your own name for it, such as
+  "Port Engine Starter Battery". Alarms use it. Leave it empty to keep
+  the boat's own name.
 - The version in the sidebar footer now opens that release's notes.
 - After Helmcentral updates itself, a message says which version it is now
   running, with a link to that release's notes.
+
+### Changed
+
+- The impossible, frozen and silent sensor alarms now name each sensor and say
+  what is wrong, for example "Port Engine Starter Battery voltage 75.7 V ·
+  above the 70 V any 12, 24 or 48 V bank reaches", instead of a count and a
+  raw SignalK path. The Ignore button and the Ignored sensors list in Settings
+  use the same names. Notifications carry the same text.
+
+### Fixed
+
+- A solar charger's panel voltage, which the boat's network reports under a
+  battery number, no longer raises an Impossible sensor reading alarm. Battery
+  numbers that only chargers report, where those chargers also feed another
+  battery number, are not checked as batteries.
 
 ## [0.42.0] - 2026-10-06
 

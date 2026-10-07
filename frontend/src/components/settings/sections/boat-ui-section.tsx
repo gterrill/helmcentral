@@ -16,7 +16,7 @@ import { readErrorMessage } from '@/lib/api-error'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
 import { useVesselCandidates } from '@/hooks/use-vessel-candidates'
 import { newGaugeGroupWidgetId, type GaugeWidgetConfig } from '@/lib/dashboard-widgets'
-import { titleCaseInstance, type VesselHouseBankSetting } from '@/lib/vessel-settings'
+import { titleCaseInstance, type VesselBatteryCandidate, type VesselHouseBankSetting } from '@/lib/vessel-settings'
 
 interface BoatUiSectionProps {
   draft: RegularSettingsDraft
@@ -116,6 +116,17 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     () => new Map(candidates.engines.map((c) => [c.instance, c])),
     [candidates.engines],
   )
+
+  // Every battery instance the boat is publishing, plus every one the
+  // operator has already named (even one that has gone quiet since).
+  const batteryInstances = useMemo(() => {
+    const byInstance = new Map<string, VesselBatteryCandidate>()
+    for (const b of candidates.batteries) byInstance.set(b.instance, b)
+    for (const instance of Object.keys(vessel?.batteryNames ?? {})) {
+      if (!byInstance.has(instance)) byInstance.set(instance, { path: `electrical.batteries.${instance}`, instance, bus_name: '', charger_input: false, voltage: null, current: null, soc: null })
+    }
+    return [...byInstance.values()].sort((a, b) => a.instance.localeCompare(b.instance, undefined, { numeric: true }))
+  }, [candidates.batteries, vessel])
 
   const setRow = (instance: string, patch: Partial<VesselEngineRowDraft>) => {
     if (vessel === null) return
@@ -250,6 +261,25 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
         {detectorLine('Engine differential check', candidates.detectors.engines)}
       </FormSection>
 
+      <FormSection
+        title="Battery names"
+        description="Name each battery the way you talk about it. Alarms use your name; leave it empty to use what the boat's instruments call it. Charger inputs are not batteries and are not range-checked."
+      >
+        <div className="flex flex-col gap-2">
+          {batteryInstances.length === 0 && (
+            <p className="text-sm text-muted-foreground">No batteries published yet.</p>
+          )}
+          {batteryInstances.map((b) => (
+            <BatteryNameRow
+              key={b.instance}
+              candidate={b}
+              name={vessel.batteryNames[b.instance] ?? ''}
+              onNameChange={(name) => onChange({ vessel: { ...vessel, batteryNames: { ...vessel.batteryNames, [b.instance]: name } } })}
+            />
+          ))}
+        </div>
+      </FormSection>
+
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
 
       <EngineProfileDialog
@@ -319,6 +349,45 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
           <Button type="button" size="sm" variant="outline" onClick={() => onApplyGaugeZones(linkedProfileId)}>
             Apply gauge zones
           </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface BatteryNameRowProps {
+  candidate: VesselBatteryCandidate
+  name: string
+  onNameChange: (name: string) => void
+}
+
+function BatteryNameRow({ candidate, name, onNameChange }: BatteryNameRowProps) {
+  const reading = [
+    candidate.voltage === null ? null : `${candidate.voltage.toFixed(1)} V`,
+    candidate.current === null ? null : `${candidate.current.toFixed(1)} A`,
+    candidate.soc === null ? null : `${(candidate.soc * 100).toFixed(0)}%`,
+  ].filter((part): part is string => part !== null).join(' · ')
+
+  return (
+    <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-md border border-border/60 bg-background/40 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="min-w-0">
+        <Input
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder={candidate.bus_name || `Battery ${candidate.instance}`}
+          className="h-8 text-sm"
+          aria-label={`Name for battery ${candidate.instance}`}
+        />
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {candidate.bus_name ? `The boat calls it ${candidate.bus_name}` : 'The boat gives it no name'}
+        </p>
+      </div>
+      <div className="min-w-0 pt-1.5">
+        <p className="truncate text-xs text-muted-foreground tabular-nums">
+          Instance {candidate.instance}{reading === '' ? '' : ` · ${reading}`}
+        </p>
+        {candidate.charger_input && (
+          <p className="truncate text-xs text-muted-foreground">Charger input, not a battery</p>
         )}
       </div>
     </div>

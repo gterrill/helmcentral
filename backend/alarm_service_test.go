@@ -108,6 +108,38 @@ func TestActiveAlarmsCarriesLiveSensorEvidenceSeparatelyFromFrozenEvidence(t *te
 	}
 }
 
+func TestActiveAlarmsCarriesLiveSensorLines(t *testing.T) {
+	withTempAlarmRules(t)
+	withGlobalSnapshot(t, snapshotWithSelfDelta("electrical.batteries.house.voltage", 11.0, alarmNow))
+
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	withAnomalySlot(t, anomalySensorOutOfRangeCountPath, "propulsion.port.temperature", alarmNow)
+	rule := alarmRule{ID: "anomaly-out-of-range", Label: "Impossible sensor reading", Enabled: true,
+		Path: anomalySensorOutOfRangeCountPath, Op: alarmOpAbove, Value: 0.5, State: alarmStateAlert}
+	globalAlarmEngine.evaluate([]alarmRule{rule}, staticReader(1), alarmNow)
+
+	globalAnomalySlot.set(anomalyReading{
+		Evidence: map[string]string{anomalySensorOutOfRangeCountPath: "propulsion.starboard.oilPressure"},
+		Sensors: map[string][]sensorHealthEntry{anomalySensorOutOfRangeCountPath: {
+			{Identifier: "propulsion.starboard.oilPressure", Label: "Starboard engine oil pressure", Text: "Starboard engine oil pressure -1 mb"},
+		}},
+		ComputedAt: time.Now().UTC(),
+	})
+	for _, s := range activeAlarms() {
+		if s.RuleID != "anomaly-out-of-range" {
+			continue
+		}
+		if len(s.LiveSensors) != 1 || s.LiveSensors[0].Identifier != "propulsion.starboard.oilPressure" {
+			t.Fatalf("live sensors = %+v", s.LiveSensors)
+		}
+		return
+	}
+	t.Fatalf("expected the out-of-range alarm to be active")
+}
+
 // The reported bug, end to end: an alarm raised by another producer on the bus
 // (here a course-provider arrival-circle notification) answered 409 "alarm is
 // not acknowledgeable", because acknowledgeAlarmHandler only ever consulted

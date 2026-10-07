@@ -230,6 +230,9 @@ func getSettingsHandler(c echo.Context) error {
 	if vessel.Engines == nil {
 		vessel.Engines = []vesselEngineSetting{}
 	}
+	if vessel.Batteries == nil {
+		vessel.Batteries = []vesselBatterySetting{}
+	}
 	payload.Vessel = &vessel
 
 	return c.JSON(http.StatusOK, payload)
@@ -867,6 +870,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		if vessel.Engines == nil {
 			vessel.Engines = []vesselEngineSetting{}
 		}
+		vessel.Batteries = normalizeVesselBatteries(vessel.Batteries)
 		normalized.Vessel = &vessel
 	}
 

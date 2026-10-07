@@ -6,6 +6,7 @@ import {
   alarmDisplayUnitId,
   formatAlarmReading,
   formatAlarmTime,
+  ignorableSensors,
   FORECAST_SURF_WARNING_PATH,
   FORECAST_WIND_WARNING_PATH,
   PRESSURE_CHANGE_3H_PATH,
@@ -433,5 +434,44 @@ describe('formatAlarmTime', () => {
   it('returns null for missing or invalid input', () => {
     expect(formatAlarmTime(undefined)).toBeNull()
     expect(formatAlarmTime('not a date')).toBeNull()
+  })
+})
+
+describe('sensor-health alarms (impossible, frozen, silent source)', () => {
+  const LINE = 'Port Engine Starter Battery voltage 75.7 V · above the 70 V any 12, 24 or 48 V bank reaches'
+  const entry = {
+    identifier: 'electrical.batteries.3.voltage',
+    name: 'Port Engine Starter Battery',
+    quantity: 'voltage',
+    label: 'Port Engine Starter Battery voltage',
+    text: LINE,
+  }
+  const alarm = makeAlarm({
+    rule_id: 'helmcentral:anomaly-impossible-reading',
+    label: 'Impossible sensor reading',
+    path: 'helmcentral.anomaly.sensor.outOfRangeCount',
+    op: 'above',
+    value: 1,
+    clear_value: 0.5,
+    live_sensors: [entry],
+    sensors: [entry],
+  })
+
+  it('reads the sensor lines, never the count sentence', () => {
+    expect(alarmConditionSentence(alarm)).toBe(LINE)
+  })
+
+  it('joins several failing sensors into one banner sentence', () => {
+    const other = { ...entry, identifier: 'propulsion.port.temperature', label: 'Port engine coolant temperature', text: 'Port engine coolant temperature -40 °C · below the -23 °C a running or resting engine reads' }
+    expect(alarmConditionSentence({ ...alarm, live_sensors: [entry, other] })).toBe(`${LINE}; ${other.text}`)
+  })
+
+  it('says nothing when no sensor is failing right now', () => {
+    expect(alarmConditionSentence({ ...alarm, live_sensors: undefined })).toBe('')
+  })
+
+  it('offers one ignore action per live sensor, labelled by name and quantity', () => {
+    expect(ignorableSensors(alarm)).toEqual([{ identifier: 'electrical.batteries.3.voltage', label: 'Port Engine Starter Battery voltage' }])
+    expect(ignorableSensors(makeAlarm())).toEqual([])
   })
 })

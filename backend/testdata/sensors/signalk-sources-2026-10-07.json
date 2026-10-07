@@ -1,0 +1,295 @@
+{
+ "YachtDevices": {
+  "36": {
+   "n2k": {
+    "uniqueNumber": 509,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 160,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046a0002cc001fd",
+    "nmea2000Version": 1.301,
+    "modelId": "BlueSolar Charger MPPT 100/50 re",
+    "softwareVersionCode": "v1.74",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000509",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "36"
+   }
+  },
+  "37": {
+   "n2k": {
+    "uniqueNumber": 510,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 160,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046a0002cc001fe",
+    "nmea2000Version": 1.301,
+    "modelId": "BlueSolar Charger MPPT 100/50 re",
+    "softwareVersionCode": "v1.74",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000510",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "37"
+   }
+  },
+  "38": {
+   "n2k": {
+    "uniqueNumber": 511,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 160,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046a0002cc001ff",
+    "nmea2000Version": 1.301,
+    "modelId": "BlueSolar Charger MPPT 100/50 re",
+    "softwareVersionCode": "v1.74",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000511",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "38"
+   }
+  },
+  "39": {
+   "n2k": {
+    "uniqueNumber": 512,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 160,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046a0002cc00200",
+    "nmea2000Version": 1.301,
+    "modelId": "BlueSolar Charger MPPT 100/50 re",
+    "softwareVersionCode": "v1.74",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000512",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "39"
+   }
+  },
+  "42": {
+   "n2k": {
+    "uniqueNumber": 505,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 160,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046a0002cc001f9",
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "nmea2000Version": 1.301,
+    "modelId": "Skylla-i 24/80A (1+1)",
+    "softwareVersionCode": "v2.07",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000505",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "src": "42"
+   }
+  },
+  "224": {
+   "n2k": {
+    "uniqueNumber": 501,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 170,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046aa002cc001f5",
+    "nmea2000Version": 2,
+    "modelId": "SmartShunt 500A/50mV",
+    "softwareVersionCode": "v4.19",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000501",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "installationDescription1": "PORT START BATT",
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "224"
+   }
+  },
+  "225": {
+   "n2k": {
+    "uniqueNumber": 503,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 153,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c04699002cc001f7",
+    "nmea2000Version": 1.301,
+    "modelId": "Quattro 24/8000/200-2x100",
+    "softwareVersionCode": "1.0",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000503",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "installationDescription2": "Multi - Inverter / Charger",
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "225"
+   }
+  },
+  "227": {
+   "n2k": {
+    "uniqueNumber": 506,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 170,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046aa002cc001fa",
+    "nmea2000Version": 2,
+    "modelId": "SmartShunt 500A/50mV",
+    "softwareVersionCode": "v4.19",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000506",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "installationDescription1": "STBD START BATT",
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "227"
+   }
+  },
+  "228": {
+   "n2k": {
+    "uniqueNumber": 507,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 0,
+    "deviceInstanceUpper": 0,
+    "deviceFunction": 170,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 0,
+    "canName": "c046aa002cc001fb",
+    "nmea2000Version": 2,
+    "modelId": "Batrium-BMS (Victron profile)",
+    "softwareVersionCode": "v0.58",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000507",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "228"
+   }
+  },
+  "229": {
+   "n2k": {
+    "uniqueNumber": 508,
+    "manufacturerCode": "Victron Energy",
+    "deviceInstanceLower": 7,
+    "deviceInstanceUpper": 29,
+    "deviceFunction": 170,
+    "spare": 0,
+    "deviceClass": "Electrical Generation",
+    "systemInstance": 0,
+    "industryGroup": "Marine Industry",
+    "arbitraryAddressCapable": "Yes",
+    "deviceInstance": 239,
+    "canName": "c046aaef2cc001fc",
+    "nmea2000Version": 2,
+    "modelId": "System battery",
+    "softwareVersionCode": "1.0",
+    "modelVersion": "1.0",
+    "modelSerialCode": "0000508",
+    "certificationLevel": "Level B",
+    "loadEquivalency": 0,
+    "installationDescription1": "System battery",
+    "installationDescription2": "System battery",
+    "manufacturerInformation": "Victron Energy (www.victronenergy.com)",
+    "src": "229"
+   }
+  }
+ },
+ "venus": {
+  "com": {
+   "victronenergy": {
+    "solarcharger": {
+     "288": {},
+     "289": {},
+     "290": {},
+     "291": {}
+    },
+    "battery": {
+     "278": {},
+     "292": {},
+     "512": {}
+    },
+    "temperature": {
+     "24": {},
+     "25": {}
+    },
+    "system": {
+     "0": {}
+    },
+    "generator": {
+     "0": {}
+    },
+    "settings": {
+     "0": {}
+    },
+    "vebus": {
+     "276": {}
+    },
+    "charger": {
+     "0": {}
+    }
+   }
+  }
+ }
+}

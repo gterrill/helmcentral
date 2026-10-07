@@ -151,8 +151,13 @@ const anomalySlotMaxAge = 5 * time.Second
 // sentence behind each alarm-worthy path, which inputs were trusted this
 // tick, and when it was computed.
 type anomalyReading struct {
-	Values     map[string]float64
-	Evidence   map[string]string
+	Values   map[string]float64
+	Evidence map[string]string
+	// Sensors is, for the three sensor-health count paths, one named line
+	// per failing sensor (sensor_names.go) -- what the alarm card, banner and
+	// notifications say in place of the raw identifiers Evidence carries for
+	// the ignore action.
+	Sensors    map[string][]sensorHealthEntry
 	Validity   map[string]bool
 	ComputedAt time.Time
 }
@@ -912,6 +917,7 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	reading := anomalyReading{
 		Values:     map[string]float64{},
 		Evidence:   map[string]string{},
+		Sensors:    map[string][]sensorHealthEntry{},
 		Validity:   map[string]bool{},
 		ComputedAt: now,
 	}
@@ -926,12 +932,19 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	// alarm card's "Ignore this sensor" action (alarm_ignored_sensors.go) --
 	// Pikorua's dead exhaust senders, on the boat, never shipped config.
 	ignored := ignoredSensorSet()
+	namer := newSensorNamer(snapshot, vessel, globalSourceDevices.get())
 
 	// Impossible readings: no setup needed, scans whatever the boat
 	// publishes under a known engine/battery quantity.
 	var outOfRangePaths []string
+	outOfRangeValues := map[string]float64{}
 	for _, path := range discoveredEngineBatteryPaths(snapshot) {
 		if ignored[path] {
+			continue
+		}
+		// A battery instance published only by chargers is the charger's own
+		// input (a solar array at 76 V), not a battery: nothing to range-check.
+		if m := sensorBatteryPathRe.FindStringSubmatch(path); m != nil && namer.isChargerInstance(m[1]) {
 			continue
 		}
 		v, ok := numericFromPath(snapshot, path)
@@ -942,9 +955,17 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 		reading.Validity[path] = ok
 		if !ok {
 			outOfRangePaths = append(outOfRangePaths, path)
+			outOfRangeValues[path] = v
 		}
 	}
 	sort.Strings(outOfRangePaths)
+	var outOfRangeEntries []sensorHealthEntry
+	for _, path := range outOfRangePaths {
+		outOfRangeEntries = append(outOfRangeEntries, namer.rangeEntry(path, outOfRangeValues[path]))
+	}
+	if len(outOfRangeEntries) > 0 {
+		reading.Sensors[anomalySensorOutOfRangeCountPath] = disambiguateSensorEntries(outOfRangeEntries)
+	}
 	reading.Values[anomalySensorOutOfRangeCountPath] = float64(len(outOfRangePaths))
 	// Evidence names the offending paths -- a bare count gives the operator
 	// nothing to act on, and the "Ignore this sensor" alarm-card action
@@ -961,6 +982,11 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	reading.Values[anomalySensorSilentSourceCountPath] = float64(len(silent))
 	if len(silent) > 0 {
 		reading.Evidence[anomalySensorSilentSourceCountPath] = strings.Join(silent, ", ")
+		var entries []sensorHealthEntry
+		for _, source := range silent {
+			entries = append(entries, namer.silentSourceEntry(source))
+		}
+		reading.Sensors[anomalySensorSilentSourceCountPath] = disambiguateSensorEntries(entries)
 	}
 
 	// Frozen: needs at least one configured engine.
@@ -1016,6 +1042,11 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	reading.Values[anomalySensorFrozenCountPath] = float64(frozenCount)
 	if len(frozenPaths) > 0 {
 		reading.Evidence[anomalySensorFrozenCountPath] = strings.Join(frozenPaths, ", ")
+		var entries []sensorHealthEntry
+		for _, path := range frozenPaths {
+			entries = append(entries, namer.frozenEntry(path))
+		}
+		reading.Sensors[anomalySensorFrozenCountPath] = disambiguateSensorEntries(entries)
 	}
 
 	// The sensor-health verdicts above gate the battery and engine-
