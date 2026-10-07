@@ -30,6 +30,7 @@ import (
 // device. Only fields the naming and the charger test read are kept.
 type sourceDevice struct {
 	DeviceClass              string
+	Manufacturer             string
 	DeviceFunction           int
 	InstallationDescription1 string
 	ModelID                  string
@@ -71,6 +72,7 @@ func parseSourceDevices(body []byte) (map[string]sourceDevice, error) {
 			}
 			device := sourceDevice{
 				DeviceClass:              strings.TrimSpace(asString(n2k["deviceClass"])),
+				Manufacturer:             strings.TrimSpace(asString(n2k["manufacturerCode"])),
 				InstallationDescription1: strings.TrimSpace(asString(n2k["installationDescription1"])),
 				ModelID:                  strings.TrimSpace(asString(n2k["modelId"])),
 			}
@@ -394,9 +396,11 @@ func (n *sensorNamer) pathEntry(path string) sensorHealthEntry {
 // sourceName names a $source id for the silent-source card and the ignore
 // list. A source that is the sole publisher of its one battery instance takes the
 // name of the bank it reports (the operator's own name, if given). Otherwise
-// the device's installation name, then its product name. A source nothing is
-// known about is a server plugin's own id, readable as it stands, or a bus
-// address shown as a plain device.
+// the device's installation name, then its product name, then its
+// manufacturer. A source nothing readable is known about is called a plain
+// "An instrument": a bus address or plugin id is not for the watchkeeper.
+const unnamedSourceName = "An instrument"
+
 func (n *sensorNamer) sourceName(source string) string {
 	context := n.snapshot.selfContext()
 	if instances := n.snapshot.batteryInstancesPublishedBy(context, source); len(instances) == 1 &&
@@ -410,11 +414,12 @@ func (n *sensorNamer) sourceName(source string) string {
 		if d.ModelID != "" {
 			return d.ModelID
 		}
+		if d.Manufacturer != "" {
+			return d.Manufacturer + " device"
+		}
 	}
-	if !strings.Contains(source, ".") {
-		return source
-	}
-	return "Device " + source
+	// The $source id stays in Identifier for Ignore; it never reaches a card.
+	return unnamedSourceName
 }
 
 func (n *sensorNamer) silentSourceEntry(source string) sensorHealthEntry {

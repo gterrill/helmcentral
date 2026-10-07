@@ -272,8 +272,15 @@ func TestFrozenAndSilentSourceTexts(t *testing.T) {
 	if want := "STBD START BATT has stopped sending"; venus.Text != want {
 		t.Errorf("venus battery source text = %q, want %q (named from the bus's own .name path)", venus.Text, want)
 	}
-	if got := namer.silentSourceEntry("derived-data").Text; got != "derived-data has stopped sending" {
-		t.Errorf("plugin source text = %q", got)
+	// Nothing readable is known: a plugin id or a bus address is not shown.
+	for _, src := range []string{"derived-data", "ydwg.12"} {
+		e := namer.silentSourceEntry(src)
+		if e.Text != "An instrument has stopped sending" || e.Name != "An instrument" || e.Label != "An instrument" {
+			t.Errorf("%s: name %q label %q text %q, want a plain phrase", src, e.Name, e.Label, e.Text)
+		}
+		if e.Identifier != src {
+			t.Errorf("%s: identifier = %q, ignore needs the $source id", src, e.Identifier)
+		}
 	}
 }
 
@@ -441,5 +448,14 @@ func TestIgnoredSensorEntriesNumberIdenticalNames(t *testing.T) {
 	}
 	if out[1].Identifier != "YachtDevices.37" {
 		t.Errorf("identifier must stay raw: %q", out[1].Identifier)
+	}
+}
+
+func TestSourceNameFallsBackToManufacturer(t *testing.T) {
+	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer.devices = map[string]sourceDevice{"ydwg.12": {Manufacturer: "Victron Energy", DeviceClass: "Electrical Generation"}}
+	e := namer.silentSourceEntry("ydwg.12")
+	if e.Name != "Victron Energy device" || e.Text != "Victron Energy device has stopped sending" || e.Identifier != "ydwg.12" {
+		t.Errorf("entry = %+v", e)
 	}
 }
