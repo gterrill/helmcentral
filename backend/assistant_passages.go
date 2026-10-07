@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// This file is the list_passages tool (ADR 0165). Asked about "the last few
+// This file is the list_passages tool (ADR 0166). Asked about "the last few
 // passages", Mate had no way to turn that into time windows, so it never
 // reached the logged telemetry that holds the answer. list_passages reads the
 // vessel's own speed-over-ground history and returns the recent periods the

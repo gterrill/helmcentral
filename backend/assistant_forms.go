@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// inspect_form and fill_form (ADR 0164): Mate reads a PDF form attached to the
+// inspect_form and fill_form (ADR 0165): Mate reads a PDF form attached to the
 // chat and fills it in. Mate sees a document's extracted text only, which does
 // not say where the blanks and boxes are; inspect_form says. fill_form makes
 // the filled PDF as a draft under Mate's reply. It writes nothing to the

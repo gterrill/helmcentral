@@ -781,7 +781,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"You can never operate the boat: the autopilot, the generator, CZone switches, the anchor watch and alarm " +
 		"acknowledgement are not records and cannot be proposed, nor can settings, secrets or logins.\n\n")
 
-	// 2a-v. Filling in forms (ADR 0164) - fixed wording, identical for every
+	// 2a-v. Filling in forms (ADR 0165) - fixed wording, identical for every
 	// turn. The order matters: layout, then what is on record, then one
 	// message of questions, then the fill.
 	b.WriteString("When the operator attaches a PDF form and asks you to fill it in, work in this order. " +
@@ -821,7 +821,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
 		"check both before concluding there is nothing to find).\n\n")
 
-	// 2c1a. History questions (ADR 0165) - fixed wording, identical for every
+	// 2c1a. History questions (ADR 0166) - fixed wording, identical for every
 	// turn. Asked when the alternators cut off charging over the last few
 	// passages, Mate searched documents and old chats and never opened the
 	// logged telemetry. For what a reading did over time, that log is the

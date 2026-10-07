@@ -83,7 +83,7 @@ export interface FormDraftApi {
   document_id?: string
 }
 
-/** A form Mate filled in (ADR 0164). It is a draft until the operator saves
+/** A form Mate filled in (ADR 0165). It is a draft until the operator saves
  * it to Documents; `status` is the stored one, so a reloaded thread shows a
  * saved or dismissed card as it was left. */
 export interface AssistantFormDraft {
@@ -172,7 +172,7 @@ export interface AssistantMessage {
   attachments?: AssistantMessageAttachment[]
   /** Change cards (ADR 0146, ADR 0158) - only ever on an assistant reply. */
   proposals?: AssistantProposal[]
-  /** Filled-in forms (ADR 0164) - only ever on an assistant reply. */
+  /** Filled-in forms (ADR 0165) - only ever on an assistant reply. */
   formDrafts?: AssistantFormDraft[]
 }
 

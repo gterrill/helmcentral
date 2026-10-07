@@ -61,7 +61,7 @@ type assistantMessage struct {
 	// in the same transaction as the row; ListMessages reads them back. Always
 	// empty on a user row.
 	Proposals []assistantProposal `json:"proposals,omitempty"`
-	// FormDrafts are the filled-in forms (ADR 0164) Mate attached to this
+	// FormDrafts are the filled-in forms (ADR 0165) Mate attached to this
 	// assistant message, each with the status it has right now (draft, saved
 	// or dismissed). Saved with the row, read back by ListMessages.
 	FormDrafts []assistantFormDraft `json:"form_drafts,omitempty"`

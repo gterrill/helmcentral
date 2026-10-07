@@ -18,7 +18,7 @@ interface AssistantFormDraftCardProps {
 }
 
 /**
- * The card under a Mate reply that filled in a PDF form (ADR 0164). The form
+ * The card under a Mate reply that filled in a PDF form (ADR 0165). The form
  * is a draft: the operator opens it, checks it, and either saves it to
  * Documents under a title and folder they can change, or dismisses it. Nothing
  * reaches Documents until Save. The card renders from the stored status, so a
