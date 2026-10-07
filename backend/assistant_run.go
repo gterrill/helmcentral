@@ -104,6 +104,9 @@ type assistantReply struct {
 	// order. The handler saves them with the assistant message in one
 	// transaction, so a run that fails or is cancelled saves none.
 	Proposals []assistantProposal
+	// FormDrafts are the filled-in forms (ADR 0164) fill_form made during
+	// this run, in call order. Saved with the assistant message like Proposals.
+	FormDrafts []assistantFormDraft
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -821,6 +824,15 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 					reply.Proposals = append(reply.Proposals, *proposal)
 				}
 			}
+			if call.Function.Name == assistantFillFormToolName {
+				draft, derr := assistantFormDraftFromToolResult(result)
+				if derr != nil {
+					return assistantReply{}, derr
+				}
+				if draft != nil {
+					reply.FormDrafts = append(reply.FormDrafts, *draft)
+				}
+			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 				Name:   call.Function.Name,
 				Args:   string(call.Function.Arguments),
@@ -1136,6 +1148,9 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 		// not decided.
 		for _, p := range m.Proposals {
 			content += assistantProposalHistoryBlock(p)
+		}
+		for _, d := range m.FormDrafts {
+			content += formDraftHistoryBlock(d)
 		}
 		role := m.Role
 		if role == "watch" {

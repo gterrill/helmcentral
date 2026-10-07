@@ -71,7 +71,7 @@ let settingsFixture = defaultSettings()
 const particularsStored = {
   builder: 'Granocean', model: 'W-60', year: 2024, hin: '', flag: 'Cook Islands', hailing_port: '',
   hull_type: '', hull_material: '', displacement_kg: null, shore_power: '', system_voltage: '',
-  registration: '', imo: '', epirb_id: '', date_acquired: '', updated_at: '2026-10-01T05:00:00Z',
+  registration: '', imo: '', epirb_id: '', date_acquired: '', loa_m: null, beam_m: null, owner_name: '', owner_phone: '', owner_email: '', insurer: '', policy_number: '', home_marina: '', berth: '', storm_delegate: '', updated_at: '2026-10-01T05:00:00Z',
 }
 
 let particularsPut: (body: Record<string, unknown>) => { ok: boolean; status?: number; body: unknown }

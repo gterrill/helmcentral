@@ -781,6 +781,21 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"You can never operate the boat: the autopilot, the generator, CZone switches, the anchor watch and alarm " +
 		"acknowledgement are not records and cannot be proposed, nor can settings, secrets or logins.\n\n")
 
+	// 2a-v. Filling in forms (ADR 0164) - fixed wording, identical for every
+	// turn. The order matters: layout, then what is on record, then one
+	// message of questions, then the fill.
+	b.WriteString("When the operator attaches a PDF form and asks you to fill it in, work in this order. " +
+		"First read its layout with inspect_form, since the attached text does not show where the blanks and tick boxes are. " +
+		"Then read what is on record with get_vessel_particulars. Work out every entry the form asks for, and fill only from " +
+		"what is on record or what the operator tells you; never guess a name, number, date or tick. If anything is missing, " +
+		"ask for all of it in one message, and say plainly which entries you can already fill. When they give you answers that " +
+		"belong in the boat's record (owner, insurer, policy number, home marina, berth, storm delegate, length, beam), offer to " +
+		"save them with propose_changes on the vessel_particulars record (id vessel); that is a card they apply, separate from the form. " +
+		"Then call fill_form once with every entry. A signature is always left blank for the operator, and so is a date unless they " +
+		"say to use today's. Pick a folder to suggest, such as Insurance/<year>. After fill_form succeeds, tell the operator to check " +
+		"the filled-in form and that the card under your reply lets them open it, download it or save it to Documents; it is " +
+		"not saved until they do, and you never say it is. If fill_form fails, say which entry it named and correct it.\n\n")
+
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that

@@ -816,6 +816,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// SSE if a run is in flight, 204 if not - read-only, same tier as
 		// the conversation read above.
 		{http.MethodGet, "/api/assistant/conversations/:id/run", tierRead, getAssistantRunHandler},
+		{http.MethodGet, "/api/assistant/form-drafts/:id/content", tierRead, formDraftContentHandler},
 		// The running watch for the chat's chip (ADR 0160), or 204. Read
 		// tier: it only reports what is already running.
 		{http.MethodGet, "/api/assistant/conversations/:id/watch", tierRead, getAssistantWatchHandler},
@@ -979,6 +980,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// schedule exactly as the Maintenance forms do.
 		{http.MethodPost, "/api/assistant/proposals/:id/apply", tierWrite, applyAssistantProposalHandler},
 		{http.MethodPost, "/api/assistant/proposals/:id/dismiss", tierWrite, dismissAssistantProposalHandler},
+		{http.MethodPost, "/api/assistant/form-drafts/:id/save", tierWrite, saveFormDraftHandler},
+		{http.MethodPost, "/api/assistant/form-drafts/:id/dismiss", tierWrite, dismissFormDraftHandler},
 
 		// Document library writes (ADR 0106). "move" and "tags" ahead of the
 		// "/:id" routes purely for readability - see the read-tier comment

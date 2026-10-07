@@ -16,11 +16,20 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/tetratelabs/wazero v1.9.0
 	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.53.0
-	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.21.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.58.0
+	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.4
+)
+
+require (
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/hhrutter/tiff v1.0.7 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/pdfcpu/pdfcpu v0.16.1
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/image v0.46.0 // indirect
 )
 
 require (
@@ -45,8 +54,8 @@ require (
 	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect

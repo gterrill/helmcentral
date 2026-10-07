@@ -1167,6 +1167,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 			CostUSD:          reply.CostUSD,
 			ToolRounds:       reply.ToolRounds,
 			Proposals:        reply.Proposals,
+			FormDrafts:       reply.FormDrafts,
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)

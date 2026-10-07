@@ -80,3 +80,20 @@ for that check and choose **Ignore** followed by the sensor's name (for example
 **Ignore Port engine exhaust temperature**) for the reading you want
 excluded. To see everything currently ignored, or to bring one back,
 open **Settings → Alarms** and look under **Ignored sensors**.
+
+## Owner and insurance
+
+Mate fills in insurance declarations and marina applications from these, so
+they are worth entering once. None of them is needed for anomaly detection.
+
+1. Open **Settings → Vessel** and find **Owner & insurance**.
+2. Enter the owner's name, phone and email, the insurer and policy number, the
+   home marina and berth, and the storm delegate: whoever prepares the boat
+   when you are away, with how to reach them.
+3. Under **Particulars**, enter the length overall and beam in metres. The
+   boat's live instruments supply a length too when they publish one, shown
+   at the top of the section; this figure is the one kept for forms.
+4. Choose **Save** in the bar across the top of the screen.
+
+Leave a field blank if you do not want Mate to use it. It asks instead. See
+[Fill in a form with Mate](fill-in-a-form-with-mate.md).

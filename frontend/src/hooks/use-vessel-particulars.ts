@@ -23,6 +23,21 @@ export interface VesselParticulars {
   imo: string
   epirb_id: string
   date_acquired: string
+  /** Length overall and beam in metres, as the paperwork wants them. Live
+   * instrument data supplies the length too when the boat publishes it. */
+  loa_m: number | null
+  beam_m: number | null
+  /** Owner and insurance: what every insurer declaration and berth
+   * application asks again. */
+  owner_name: string
+  owner_phone: string
+  owner_email: string
+  insurer: string
+  policy_number: string
+  home_marina: string
+  berth: string
+  /** Who prepares the boat when the owner is away, with how to reach them. */
+  storm_delegate: string
   updated_at: string | null
 }
 
