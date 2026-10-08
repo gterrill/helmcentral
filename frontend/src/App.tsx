@@ -454,6 +454,8 @@ export function App() {
   // the same guard settingsDirty/settingsPageRef already give Settings,
   // generalized below rather than reinvented.
   const [documentDetailsDirty, setDocumentDetailsDirty] = useState(false)
+  // The Details page's document name, for the Mate sheet's screen context.
+  const [documentDetailsTitle, setDocumentDetailsTitle] = useState<string | null>(null)
   const documentDetailsPageRef = useRef<DocumentDetailsPageHandle>(null)
   // ADR 0123: the Equipment editor's own half of the same guard, wired
   // through InventoryPanel the same way documentDetailsDirty/
@@ -1108,8 +1110,12 @@ export function App() {
     setMateSheetOpen(true)
   }, [])
   const mateScreen = useMemo(
-    () => screenContextFor({ panel: activePanel, section: settingsSection }, activePage?.name ?? null),
-    [activePanel, settingsSection, activePage],
+    () => screenContextFor(
+      { panel: activePanel, section: settingsSection, documentEditId: activePanel === 'documents' ? documentsEditId : null },
+      activePage?.name ?? null,
+      documentDetailsTitle,
+    ),
+    [activePanel, settingsSection, activePage, documentsEditId, documentDetailsTitle],
   )
 
   // mate-answer-toast plan: which conversation(s), if any, are actually on
@@ -2939,7 +2945,14 @@ export function App() {
               // site stays on the 'documents' panel, so requestNavigate's
               // own targetPanel check (used everywhere else) would never
               // catch a dirty Details page being left this way.
-              onBack={() => { requestBackFromDocumentDetails(() => setDocumentsEditId(null)) }}
+              onOpenFolder={(folderId) => {
+                requestBackFromDocumentDetails(() => {
+                  setDocumentsFolderId(folderId)
+                  setDocumentsEditId(null)
+                })
+              }}
+              onFolderContextChange={setDocumentsFolderId}
+              onTitleChange={setDocumentDetailsTitle}
             />
           )
         }

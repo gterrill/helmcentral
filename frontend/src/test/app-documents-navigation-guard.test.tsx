@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { App } from '../App'
-import { useDocument, useDocuments, type DocumentRecord } from '@/hooks/use-documents'
+import { useDocument, useDocuments, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
 
 // This test renders the dashboard, not the auth gate. State the precondition
@@ -34,6 +34,7 @@ vi.mock('@/hooks/use-auth', () => ({
 
 // ── stub fetch so components that call it don't throw ─────────────────────────
 beforeEach(() => {
+  mockedUseFolderPath.mockReturnValue({ path: [], error: null })
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
     if (url.endsWith('/api/health')) {
@@ -255,6 +256,7 @@ vi.mock('@/hooks/use-document-uploads')
 
 const mockedUseDocuments = vi.mocked(useDocuments)
 const mockedUseDocument = vi.mocked(useDocument)
+const mockedUseFolderPath = vi.mocked(useFolderPath)
 const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
 
 type DocumentsMock = ReturnType<typeof useDocuments>
@@ -298,6 +300,7 @@ function makeDocumentMock(overrides: Partial<DocumentMock> = {}): DocumentMock {
     error: null,
     refresh: vi.fn(),
     patch: vi.fn(),
+    move: vi.fn(),
     ...overrides,
   }
 }

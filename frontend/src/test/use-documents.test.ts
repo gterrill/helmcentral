@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
-import { useDocument, useDocuments } from '@/hooks/use-documents'
+import { useDocument, useDocuments, useFolderPath } from '@/hooks/use-documents'
 
 // ADR 0106 F1: use-documents.ts owns folder browsing, search, tags and every
 // document/folder write for the Documents panel. Fetch is stubbed with a
@@ -895,5 +895,39 @@ describe('useDocument', () => {
     calls.length = 0
     await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('useDocument.move', () => {
+  it('POSTs the single id to the shared move endpoint, then reloads the document', async () => {
+    let folder: string | null = null
+    const { fn, calls } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', folder_id: folder })),
+      'POST /api/documents/move': (_url, init) => { folder = (JSON.parse(init?.body as string) as { folder_id: string }).folder_id; return ok({}) },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocument('doc-1'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.move('f-9') })
+
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ ids: ['doc-1'], folder_id: 'f-9' })
+    await waitFor(() => expect(result.current.document?.folder_id).toBe('f-9'))
+  })
+})
+
+describe('useFolderPath', () => {
+  it('reads the folder chain for a folder and nothing for the top level', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload({ path: [{ id: 'f1', name: 'Boat', parent_id: null }, { id: 'f2', name: 'Manuals', parent_id: 'f1' }] })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const top = renderHook(() => useFolderPath(null))
+    expect(top.result.current.path).toEqual([])
+    expect(calls).toHaveLength(0)
+
+    const { result } = renderHook(() => useFolderPath('f2'))
+    await waitFor(() => expect(result.current.path.map((f) => f.name)).toEqual(['Boat', 'Manuals']))
   })
 })
