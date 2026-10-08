@@ -176,6 +176,25 @@ describe('LampStripTile', () => {
     expect(screen.getByLabelText('WING: on')).toBeInTheDocument()
   })
 
+  test('an inverted lamp reads what the signal does, not whether it is healthy', () => {
+    renderStrip({
+      ...ribbon,
+      lamps: [{ path: 'propulsion.wing.revolutions', label: 'WING', invert: true }, { path: 'electrical.generator.state', label: 'GEN', invert: true }],
+      showCheck: false,
+    })
+    // Signal 0: healthy (lit) but the reading is Off.
+    const wing = screen.getByLabelText('WING: on')
+    expect(wing).toHaveTextContent('Off')
+    // Signal 1: not healthy (unlit) and the reading is On.
+    const gen = screen.getByLabelText('GEN: off')
+    expect(gen).toHaveTextContent('On')
+  })
+
+  test('the cell row scrolls vertically so a short tile never hides a lamp', () => {
+    renderStrip()
+    expect(screen.getByTestId('lamp-strip-row').className).toContain('overflow-y-auto')
+  })
+
   test('the check lamp takes its colour from the worst active alarm', () => {
     const { unmount } = render(
       <LampStripTile config={ribbon} values={values} worstAlarmState="normal" editing={false} onConfigure={vi.fn()} onOpenAlarms={vi.fn()} />,

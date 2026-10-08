@@ -365,6 +365,29 @@ func TestSaveFormDraft_CreatesExactlyOneDocumentAndSavingTwiceReturnsIt(t *testi
 	}
 }
 
+func TestSaveFormDraft_SavesAgainAfterItsDocumentWasDeleted(t *testing.T) {
+	e := newFormEnv(t)
+	draft := savedDraft(t, e)
+	first, err := saveFormDraft(e.asst, e.docs, draft.ID, "Storm declaration", "")
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if _, err := e.docs.Delete(first.Document.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := saveFormDraft(e.asst, e.docs, draft.ID, "Storm declaration", "")
+	if err != nil {
+		t.Fatalf("saving again after the document was deleted must succeed, got %v", err)
+	}
+	if second.Document.ID == first.Document.ID {
+		t.Fatalf("expected a new document, got the deleted one %s", second.Document.ID)
+	}
+	got, _ := e.asst.GetFormDraft(draft.ID)
+	if got.Status != formDraftSaved || got.DocumentID != second.Document.ID {
+		t.Fatalf("the draft must point at the new document %s, got %+v", second.Document.ID, got)
+	}
+}
+
 func TestSaveFormDraft_NeedsATitleAndRefusesADismissedDraft(t *testing.T) {
 	e := newFormEnv(t)
 	draft := savedDraft(t, e)

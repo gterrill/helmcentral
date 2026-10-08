@@ -67,6 +67,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   battery number, no longer raises an Impossible sensor reading alarm. Battery
   numbers that only chargers report, where those chargers also feed another
   battery number, are not checked as batteries.
+- An indicator cell for an inverted lamp, such as a bilge float where off is
+  healthy, now reads what the signal is doing. A signal at zero reads Off and a
+  signal present reads On, while the colour still shows whether that is
+  healthy.
+- Indicator ribbon cells no longer get cut off on a tile that is too short for
+  every row. The cells scroll inside the tile, so a lamp with an active alarm is
+  always reachable.
+- A silent-device alarm for a device with no name set now reads "An
+  instrument has stopped sending", or the maker's name when it is known,
+  instead of showing a network address or plugin name.
+- Saving a filled-in form from Mate again, after you deleted the document it
+  made, now makes a new document instead of failing with an error.
 
 ## [0.42.0] - 2026-10-06
 

@@ -104,13 +104,13 @@ func (d assistantToolDeps) executeGetVesselParticulars(ctx context.Context, _ js
 	if liveName != "" {
 		res.Present = append(res.Present, assistantVesselValue{Field: "vessel_name", Label: "Boat name", Value: liveName, Source: vesselSourceLive})
 	}
-	if liveLOA >= 0 {
+	if liveLOA > 0 {
 		res.Present = append(res.Present, assistantVesselValue{Field: "loa_m", Label: "Length overall (m)", Value: liveLOA, Source: vesselSourceLive + " (design length)"})
 		if v.LOAM != nil && *v.LOAM != liveLOA {
 			res.Notes = append(res.Notes, fmt.Sprintf("Length overall differs: %.1f m stored, %.1f m from live instruments. Ask the operator which the form should carry.", *v.LOAM, liveLOA))
 		}
 	}
-	if liveDraft >= 0 {
+	if liveDraft > 0 {
 		res.Present = append(res.Present, assistantVesselValue{Field: "draft_m", Label: "Draft (m)", Value: liveDraft, Source: vesselSourceLive + " (maximum draft)"})
 	}
 
