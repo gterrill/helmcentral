@@ -264,6 +264,17 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+const { mockWakeLock, mockServedOverHttps, mockRunningFromHomeScreen } = vi.hoisted(() => ({
+  mockWakeLock: vi.fn(() => ({ status: 'off' as const })),
+  mockServedOverHttps: vi.fn(() => true),
+  mockRunningFromHomeScreen: vi.fn(() => false),
+}))
+vi.mock('@/hooks/use-screen-wake-lock', () => ({
+  useScreenWakeLock: mockWakeLock,
+  servedOverHttps: mockServedOverHttps,
+  runningFromHomeScreen: mockRunningFromHomeScreen,
+}))
+
 describe('App full screen', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -274,6 +285,9 @@ describe('App full screen', () => {
     stubFullscreenElement(null)
     mockActivePageId = 'p1'
     mockSetActivePageId.mockClear()
+    mockWakeLock.mockClear()
+    mockServedOverHttps.mockReturnValue(true)
+    mockRunningFromHomeScreen.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -290,6 +304,61 @@ describe('App full screen', () => {
     render(<App />)
 
     expect(screen.getByRole('button', { name: 'Full screen' })).toBeInTheDocument()
+  })
+
+  it('keeps the screen awake while full screen over HTTPS', () => {
+    stubFullscreenEnabled(true)
+    render(<App />)
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
+
+    fireFullscreenChange(document.documentElement)
+    expect(mockWakeLock).toHaveBeenLastCalledWith(true)
+
+    fireFullscreenChange(null)
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
+  })
+
+  it('does not ask for a wake lock over plain HTTP', () => {
+    mockServedOverHttps.mockReturnValue(false)
+    stubFullscreenEnabled(true)
+    render(<App />)
+
+    fireFullscreenChange(document.documentElement)
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
+  })
+
+  it('keeps the screen awake when opened from the Home Screen, which has no full screen', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(undefined)
+    render(<App />)
+
+    expect(mockWakeLock).toHaveBeenLastCalledWith(true)
+  })
+
+  it('leaves a Home Screen app that has full screen to use it (Android, desktop)', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(true)
+    render(<App />)
+
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
+  })
+
+  it('releases the Home Screen wake lock when leaving the dashboard for a panel', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(undefined)
+    render(<App />)
+    expect(mockWakeLock).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /forecast/i }))
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
+  })
+
+  it('does not ask for a wake lock from the Home Screen over plain HTTP', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    mockServedOverHttps.mockReturnValue(false)
+    render(<App />)
+
+    expect(mockWakeLock).toHaveBeenLastCalledWith(false)
   })
 
   it('has no "Full screen" button when the Fullscreen API is unavailable (iPhone Safari)', () => {

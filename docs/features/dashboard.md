@@ -140,8 +140,17 @@ next or previous page, the same order they're listed in normally. A page
 name and its position ("2 / 4") show briefly in the middle of the screen so
 you know where you landed. A map or a chart keeps its own drag for panning
 or reading values off it, so swiping across one of those moves the map or
-the chart instead of the page. Full screen isn't offered on an iPhone, which
-doesn't support it.
+the chart instead of the page. While full screen is on, the screen stays
+awake instead of dimming and locking on its usual timeout, as long as you
+reached Helmcentral by an `https://` address (the Tailscale name, for
+example). Over a plain `http://` address the browser won't hold the screen
+on, and it sleeps as it normally would. A phone in low-power mode may still
+dim it. Full screen isn't offered on an iPhone, which doesn't support it, or
+in Helmcentral opened from an iPad's Home Screen icon. A Home Screen copy on
+either already fills the screen with no browser bars, and it keeps the screen
+awake while it shows the dashboard, again only over an `https://` address.
+Open another section, such as Settings or Forecast, and the screen sleeps on
+its usual timeout again.
 
 ## Wall displays
 
