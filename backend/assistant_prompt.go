@@ -400,6 +400,10 @@ type assistantScreenContext struct {
 	Panel   string `json:"panel"`
 	Section string `json:"section"`
 	Page    string `json:"page"`
+	// DocumentID and DocumentTitle name the document open on its Details
+	// page (ADR 0167). Only meaningful when Panel=="documents".
+	DocumentID    string `json:"document_id"`
+	DocumentTitle string `json:"document_title"`
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -577,6 +581,17 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 	panel := strings.TrimSpace(screen.Panel)
 	section := strings.TrimSpace(screen.Section)
 	page := strings.TrimSpace(screen.Page)
+
+	if docID := strings.TrimSpace(screen.DocumentID); docID != "" && panel == "documents" {
+		name := "a document"
+		if title := strings.TrimSpace(screen.DocumentTitle); title != "" {
+			name = fmt.Sprintf("the document %q", title)
+		}
+		return fmt.Sprintf("The operator is viewing %s (document_id %s) on its Details page in the Documents panel. "+
+			"Questions that say \"this\" or \"it\", or that ask about a period, figure or section without naming "+
+			"a source, most likely refer to that document. Read it with read_document using that document_id "+
+			"before answering, rather than asking which source they mean.\n\n", name, docID)
+	}
 
 	if panel == "" && section == "" && page == "" {
 		return ""

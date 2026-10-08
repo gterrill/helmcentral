@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- A document's Details page now shows where it is filed as a trail of
+  clickable folders (**Documents** > folder > document), so there is an obvious
+  way back to the list. It also has a **Move** button that files the document
+  in another folder, and the **About the file** column shows its current
+  folder.
+- Mate knows which document you are looking at. Open Mate from a document's
+  Details page and "what period does this cover?" is taken to mean that
+  document; Mate reads it instead of asking which source you mean.
 - The screen stays awake while the dashboard is full screen, so a tablet at
   the helm no longer dims and locks mid-watch. This works only when you open
   Helmcentral by an `https://` address such as the Tailscale name; over plain
