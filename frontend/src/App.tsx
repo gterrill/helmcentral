@@ -151,7 +151,7 @@ import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { useFullscreen } from '@/hooks/use-fullscreen'
-import { servedOverHttps, useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
+import { runningFromHomeScreen, servedOverHttps, useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
 import { useSwipePaging } from '@/hooks/use-swipe-paging'
 import { useVersionReload } from '@/hooks/use-version-reload'
 import {
@@ -414,9 +414,6 @@ export function App() {
   // dashboard in a non-interactive state with no way back out.
   const layoutEditing = layoutEditingRequested && canEditLayout
   const fullscreen = useFullscreen()
-  // Full screen at the helm means the operator is watching, so the screen
-  // shouldn't sleep. HTTPS only: the browser offers no wake lock elsewhere.
-  useScreenWakeLock(fullscreen.isFullscreen && servedOverHttps())
   // Chrome only hides for the dashboard grid itself, not a panel - if the
   // operator reaches a panel while fullscreen (an alarm banner tap, say),
   // the sidebar and header have to come back so it's reachable. Fullscreen
@@ -548,6 +545,14 @@ export function App() {
   // has it in scope. isDisplay depends only on activePanel, which is already
   // set by this point, so nothing about moving it changes what it means.
   const isDisplay = activePanel === 'display'
+  // Full screen at the helm means the operator is watching, so the screen
+  // shouldn't sleep. A Home Screen app on iPad or iPhone has no full screen
+  // but is already free of browser bars, so its dashboard holds the lock
+  // instead; one that does have full screen (Android, desktop) waits for it.
+  // A wall display keeps its own wake-lock setting in DisplayShell. HTTPS
+  // only: the browser offers no wake lock elsewhere.
+  const homeScreenDashboard = runningFromHomeScreen() && !fullscreen.supported && activePanel === null
+  useScreenWakeLock((fullscreen.isFullscreen || homeScreenDashboard) && !isDisplay && servedOverHttps())
   // The forecast hook is called here, ahead of the theme, because Auto mode
   // reads the same sunrise and sunset the Clock tile shows.
   const {

@@ -313,6 +313,15 @@ vi.mock('@/hooks/use-server-trails', () => ({
 // inspected after the fact.
 const { mockToggleDarkMode } = vi.hoisted(() => ({ mockToggleDarkMode: vi.fn() }))
 
+// Pretend every wall display was opened from a Home Screen icon over HTTPS,
+// so the dashboard's own Home Screen wake lock would fire if it were not
+// gated off for displays. The hook itself stays real.
+vi.mock('@/hooks/use-screen-wake-lock', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-screen-wake-lock')>()),
+  runningFromHomeScreen: () => true,
+  servedOverHttps: () => true,
+}))
+
 vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, mockToggleDarkMode],
 }))
@@ -390,6 +399,21 @@ describe('App at /display/<slug>', () => {
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
     expect(screen.queryByText('Dashboard')).not.toBeInTheDocument() // sidebar nav item
     expect(screen.queryByText(/Server connection unavailable/)).not.toBeInTheDocument()
+  })
+
+  it("leaves the screen to sleep when the display's own wake lock is off, even from a Home Screen icon", () => {
+    const request = vi.fn().mockResolvedValue({ release: vi.fn().mockResolvedValue(undefined) })
+    Object.defineProperty(navigator, 'wakeLock', { value: { request }, configurable: true })
+    try {
+      window.history.replaceState({}, '', '/display/flybridge')
+      render(<App />)
+
+      expect(screen.getByTestId('display-shell-outer')).toBeInTheDocument()
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      // @ts-expect-error - test-only cleanup of a property we defined ourselves
+      delete navigator.wakeLock
+    }
   })
 
   it("rotates the outer box under the display's own rotate field", () => {

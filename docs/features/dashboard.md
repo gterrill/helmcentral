@@ -145,7 +145,12 @@ awake instead of dimming and locking on its usual timeout, as long as you
 reached Helmcentral by an `https://` address (the Tailscale name, for
 example). Over a plain `http://` address the browser won't hold the screen
 on, and it sleeps as it normally would. A phone in low-power mode may still
-dim it. Full screen isn't offered on an iPhone, which doesn't support it.
+dim it. Full screen isn't offered on an iPhone, which doesn't support it, or
+in Helmcentral opened from an iPad's Home Screen icon. A Home Screen copy on
+either already fills the screen with no browser bars, and it keeps the screen
+awake while it shows the dashboard, again only over an `https://` address.
+Open another section, such as Settings or Forecast, and the screen sleeps on
+its usual timeout again.
 
 ## Wall displays
 

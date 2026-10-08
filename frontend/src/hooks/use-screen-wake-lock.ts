@@ -16,6 +16,15 @@ export function servedOverHttps(): boolean {
 }
 
 /**
+ * True when Helmcentral was opened from a Home Screen icon (the manifest's
+ * `standalone` display). iPadOS gives such an app no Fullscreen API, so the
+ * dashboard holds the wake lock there instead of waiting for full screen.
+ */
+export function runningFromHomeScreen(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches
+}
+
+/**
  * Best-effort screen wake lock for a wall display (ADR 0110 §5c). Per
  * AGENTS.md's fallback policy, a best-effort feature has to report when it
  * isn't working rather than silently doing nothing — hence the returned
