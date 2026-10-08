@@ -95,7 +95,7 @@ comes back is a stumble. One now and then is nothing. A run of them, with
 the throttle untouched, is an engine that is not getting what it asks for.
 Helmcentral counts the stumbles on each engine over the last ten minutes and
 raises a warning, titled with the engine's name (for example "Port Engine
-Stumbling"), when the count reaches three. The card gives the count and the
+RPM Dips"), when the count reaches three. The card gives the count and the
 worst dip, for example "6 RPM dips in 10 min · up to 140 rpm below 1170 rpm".
 It clears once ten minutes pass without a stumble. Helmcentral reports what
 the engine did; it does not know why.

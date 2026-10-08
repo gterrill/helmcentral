@@ -111,7 +111,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   set** instead of pointing at an item that no longer exists.
 - Helmcentral now warns when an engine stumbles. If rpm at a steady throttle
   repeatedly dips and recovers (three times in ten minutes on one engine), a
-  warning such as "Port Engine Stumbling" is raised, with the count and the
+  warning such as "Port Engine RPM Dips" is raised, with the count and the
   deepest dip on the card. It needs no setup: every engine that reports rpm is
   watched, the warning arrives switched on, and it clears once the engine has
   gone ten minutes without a stumble. Dips that hit both engines of a twin at

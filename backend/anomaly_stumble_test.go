@@ -179,10 +179,10 @@ func TestStumbleEvidenceWording(t *testing.T) {
 
 func TestStumbleRuleTitle(t *testing.T) {
 	cases := []struct{ name, instance, want string }{
-		{"Port", "port", "Port Engine Stumbling"},
-		{"Port Engine", "port", "Port Engine Stumbling"},
-		{"", "port", "Port Engine Stumbling"},
-		{"", "0", "Engine 0 Stumbling"},
+		{"Port", "port", "Port Engine RPM Dips"},
+		{"Port Engine", "port", "Port Engine RPM Dips"},
+		{"", "port", "Port Engine RPM Dips"},
+		{"", "0", "Engine 0 RPM Dips"},
 	}
 	for _, c := range cases {
 		if got := stumbleRuleTitle(c.name, c.instance); got != c.want {
@@ -212,7 +212,7 @@ func TestSeedEngineStumbleRuleIsEnabledWarnAndIdempotent(t *testing.T) {
 	if r.Path != anomalyEngineStumbleCountPath("port") {
 		t.Fatalf("path %q", r.Path)
 	}
-	if r.Label != "Port Engine Stumbling" {
+	if r.Label != "Port Engine RPM Dips" {
 		t.Fatalf("label %q", r.Label)
 	}
 	// Fires at 3, clears at 0.

@@ -264,7 +264,7 @@ func stumbleRuleTitle(name, instance string) string {
 	if name == "" {
 		name = strings.TrimSpace(instance)
 		if name != "" && strings.IndexFunc(name, func(r rune) bool { return !unicode.IsDigit(r) }) < 0 {
-			return "Engine " + name + " Stumbling"
+			return "Engine " + name + " RPM Dips"
 		}
 		if name != "" {
 			r := []rune(name)
@@ -273,12 +273,12 @@ func stumbleRuleTitle(name, instance string) string {
 		}
 	}
 	if name == "" {
-		return "Engine Stumbling"
+		return "Engine RPM Dips"
 	}
 	if strings.HasSuffix(strings.ToLower(name), "engine") {
-		return name + " Stumbling"
+		return name + " RPM Dips"
 	}
-	return name + " Engine Stumbling"
+	return name + " Engine RPM Dips"
 }
 
 // --- Tick wiring ----------------------------------------------------------------

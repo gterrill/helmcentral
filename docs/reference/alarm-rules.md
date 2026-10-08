@@ -116,7 +116,7 @@ normal gap.
 | Silent sensor source | Any silent-source count above 0 | warn |
 | Charging into a full house bank | Full-bank charging level 1 or higher | warn |
 | House bank overcharge risk | Full-bank charging level 2 (switched off until tuned) | alarm |
-| Engine stumbling (one per engine, titled with its name) | Stumble count of 3 or more; clears when it falls back to 0 | warn |
+| Engine RPM dips (one per engine, titled with its name, for example "Port Engine RPM Dips") | Stumble count of 3 or more; clears when it falls back to 0 | warn |
 | Engine running hotter/cooler, oil/boost pressure high/low, load high/low | That reading's residual past its learned band (switched off until a baseline is learned) | alert |
 
 The three sensor rules do not show their count. Their cards, banner and

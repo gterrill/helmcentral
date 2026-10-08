@@ -71,7 +71,10 @@ seeding path in this file that runs from the tick rather than from startup and
 vessel-settings saves, because the engines are not known at either moment. An
 engine that appears later gets its rule then, and a rule the operator deletes
 stays deleted. The title is the operator's engine name from Settings -> Vessel
-when set, else the instance id made readable, giving "Port Engine Stumbling".
+when set, else the instance id made readable, giving "Port Engine RPM Dips". The operator chose that wording over "Engine
+Stumbling". "Hunting" was also considered and rejected: it means a rhythmic
+swing above and below the set speed, while this alarm counts drops from steady
+rpm that recover.
 The body is the evidence line. Per [ADR 0157](0157-alarm-cards-say-what-happened-not-where-it-came-from.md)
 it states no cause: Helmcentral knows the engine dipped, not why.
 
