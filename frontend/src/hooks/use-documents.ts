@@ -495,6 +495,8 @@ export function useDocument(id: string | null): {
   error: string | null
   refresh: () => Promise<void>
   patch: (patch: DocumentPatch) => Promise<DocumentRecord>
+  /** Files the document into a folder (null for the top level) and reloads it. */
+  move: (folderId: string | null) => Promise<void>
 } {
   const [document, setDocument] = useState<DocumentRecord | null>(null)
   const [loading, setLoading] = useState(id !== null)
@@ -570,5 +572,44 @@ export function useDocument(id: string | null): {
     return updated
   }, [id])
 
-  return { document, loading, error, refresh, patch }
+  // Same endpoint the Documents listing's Move uses. A rejection reaches the
+  // caller, which shows the server's message.
+  const move = useCallback(async (folderId: string | null) => {
+    if (id === null) throw new Error('useDocument: no document id to move')
+    await submitJSON<void>(`${apiBaseUrl}/api/documents/move`, 'POST', { ids: [id], folder_id: folderId })
+    await refresh()
+  }, [id, refresh])
+
+  return { document, loading, error, refresh, patch, move }
+}
+
+/** The folder chain from the top level down to `folderId`, for a breadcrumb.
+ * Empty for the top level. A failed lookup is reported, not hidden. */
+export function useFolderPath(folderId: string | null): { path: DocumentFolder[]; error: string | null } {
+  const [path, setPath] = useState<DocumentFolder[]>([])
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (folderId === null) {
+      setPath([])
+      setError(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/document-folders?parent=${encodeURIComponent(folderId)}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = (await res.json()) as FolderListingResponse
+        if (cancelled) return
+        setPath(data.path ?? [])
+        setError(null)
+      } catch (err) {
+        if (cancelled) return
+        setPath([])
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [folderId])
+  return { path, error }
 }

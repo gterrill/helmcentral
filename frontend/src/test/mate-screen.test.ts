@@ -32,4 +32,23 @@ describe('screenContextFor', () => {
   it('returns an empty context on the dashboard before any page name is known', () => {
     expect(screenContextFor({ panel: null }, null)).toEqual({})
   })
+
+  it('names the document open on its Details page', () => {
+    expect(screenContextFor({ panel: 'documents', documentEditId: 'doc-1' }, null, 'Tide tables')).toEqual({
+      panel: 'documents',
+      document_id: 'doc-1',
+      document_title: 'Tide tables',
+    })
+  })
+
+  it('sends the document id alone while its title has not loaded', () => {
+    expect(screenContextFor({ panel: 'documents', documentEditId: 'doc-1' }, null, null)).toEqual({
+      panel: 'documents',
+      document_id: 'doc-1',
+    })
+  })
+
+  it('does not name a document on the ordinary Documents listing', () => {
+    expect(screenContextFor({ panel: 'documents' }, null, 'Stale title')).toEqual({ panel: 'documents' })
+  })
 })

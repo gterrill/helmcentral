@@ -1,17 +1,13 @@
 /**
- * Covers App.tsx's navigation guard as extended for a dirty Details page
- * (ADR 0115 §2, review finding): while a document's Details page is open and
- * holds an unsaved title/notes/tags edit, leaving it - a sidebar click, the
- * page's own breadcrumb Back, or the browser's Back button - should
- * intercept the navigation with the same confirmation AlertDialog (Cancel /
- * Discard / Save and Continue) the dirty-Settings guard already uses, rather
- * than silently discarding the draft. Mirrors
- * app-settings-navigation-guard.test.tsx's hook-mocking shape (same App
- * tree), swapping the Settings-only hook mocks for the Documents ones
- * app-deep-link.test.tsx already uses to reach the Documents panel.
+ * Covers how the document Details page's folder crumbs and Move change the
+ * Documents listing App.tsx returns to: a folder change drops the manual
+ * section left over from the old folder, and a Move rewrites the current
+ * history entry rather than pushing one Back would land on with the
+ * document's old folder. Harness copied from
+ * app-documents-navigation-guard.test.tsx.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from '../App'
 import { useDocument, useDocuments, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
@@ -351,168 +347,65 @@ function doc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/**
- * Navigates to Documents, opens "receipt.pdf"'s Details page via the row
- * menu, and dirties its title field. Async throughout - DocumentsPanel and
- * DocumentDetailsPage are both lazy chunks (React.lazy), so each step's
- * target doesn't exist in the DOM until its own chunk resolves.
- */
-async function navigateToDirtyDocumentDetails() {
-  fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
-  // The panel is a lazy chunk (now carrying the pattern library and TanStack
-  // Table), so a cold first load can outlast findBy's default 1s.
+// The picker itself is covered by move-to-folder-dialog's own tests; here it
+// only needs to hand back a destination.
+vi.mock('@/components/documents/move-to-folder-dialog', () => ({
+  MoveToFolderDialog: ({ open, onPick }: { open: boolean; onPick: (id: string | null) => void }) =>
+    open ? <button onClick={() => onPick('f-b')}>Pick folder B</button> : null,
+}))
+
+/** Opens receipt.pdf's Details page from folder A's listing, with a manual
+ * section from folder A still selected in App state. */
+async function openDetailsFromFolderA() {
+  window.history.replaceState({}, '', '/documents?folder=f-a&section=sec-a')
+  render(<App />)
   fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }, { timeout: 5000 }))
   fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }))
   await screen.findByLabelText('Title', {}, { timeout: 5000 })
-  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 }
 
-describe('App navigation guard on a dirty Documents Details page', () => {
-  const patchMock = vi.fn(async (patch: unknown) => {
-    void patch
-    return doc({ title: 'Impeller kit v2' })
-  })
-
+describe('Document Details folder changes', () => {
   beforeEach(() => {
-    patchMock.mockReset().mockResolvedValue(doc({ title: 'Impeller kit v2' }))
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc()] }))
-    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc(), patch: patchMock }))
     mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
   })
 
-  it('opens the confirmation dialog instead of navigating immediately when leaving a dirty Details page', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    // Still on the Details page - the Forecast panel content did not take over.
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
-    expect(screen.getByText(/unsaved changes on the details page/i)).toBeInTheDocument()
-  })
-
-  it('Cancel closes the dialog and stays on the Details page', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-  })
-
-  it('Discard navigates away without saving', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+  it('a folder crumb opens that folder without the old folder\'s manual section', async () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f-b' }) }))
+    mockedUseFolderPath.mockReturnValue({ path: [{ id: 'f-b', name: 'Boat', parent_id: null }], error: null })
+    await openDetailsFromFolderA()
+    fireEvent.click(screen.getByRole('link', { name: 'Boat' }))
 
     await waitFor(() => {
       expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
     })
-    expect(patchMock).not.toHaveBeenCalled()
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('folder')).toBe('f-b')
+    expect(params.get('section')).toBeNull()
   })
 
-  it('Save and Continue saves then navigates on success', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
-
-    await waitFor(() => {
-      expect(patchMock).toHaveBeenCalledTimes(1)
-    })
-    expect(patchMock).toHaveBeenCalledWith({ title: 'Impeller kit v2', notes: '', tags: [] })
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
-    })
-    expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
-  })
-
-  it('Save and Continue does NOT navigate away if the save fails', async () => {
-    patchMock.mockRejectedValueOnce(new Error('title already used'))
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
+  it('a Move replaces the history entry and drops the old folder\'s manual section', async () => {
+    const move = vi.fn(async () => {})
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f-a' }), move }))
+    await openDetailsFromFolderA()
+    const pushState = vi.spyOn(window.history, 'pushState')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick folder B' }))
 
     await waitFor(() => {
-      expect(patchMock).toHaveBeenCalledTimes(1)
+      expect(new URLSearchParams(window.location.search).get('folder')).toBe('f-b')
     })
-
-    // Still on the Details page - save failed, so navigation must not have happened.
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByText('title already used')).toBeInTheDocument()
-  })
-
-  // ADR 0115 §2 review finding: the page's own breadcrumb Back
-  // (onBack) stays on the 'documents' panel - only documentsEditId changes -
-  // so it can't be caught by the same targetPanel check every other call
-  // site above relies on. It needs its own path through the guard.
-  it('the page\'s own breadcrumb Back also asks before leaving a dirty Details page', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-
-    // Two things share the accessible name "Documents" here: App's own top
-    // breadcrumb ("current page", rendered as a non-interactive
-    // aria-disabled span) and DocumentDetailsPage's own breadcrumb link
-    // (onBack) - only the latter is an actual <a>.
-    const documentsLink = screen.getAllByRole('link', { name: 'Documents' }).find((el) => el.tagName === 'A')
-    expect(documentsLink).toBeDefined()
-    fireEvent.click(documentsLink!)
-
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
-    })
-  })
-
-  // Mirrors app-settings-navigation-guard.test.tsx's own Back/Forward
-  // coverage: Back is the browser's native button, not the page's own
-  // breadcrumb link above - it moves window.location on its own and only
-  // fires popstate, so the guard has to intercept it there instead.
-  it('Back on a dirty Details page opens the confirmation dialog and re-pushes its own URL', async () => {
-    window.history.replaceState({}, '', '/documents/doc-1')
-    render(<App />)
-
-    await screen.findByLabelText('Title')
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
-
-    window.history.replaceState({}, '', '/documents')
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
-
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
+    expect(move).toHaveBeenCalledWith('f-b')
+    expect(new URLSearchParams(window.location.search).get('section')).toBeNull()
     expect(window.location.pathname).toBe('/documents/doc-1')
-    // The modal dialog marks the rest of the tree inert, so this reads the
-    // still-mounted Details page back with getByDisplayValue (unfiltered)
-    // rather than a role-based query.
-    expect(screen.getByDisplayValue('Impeller kit v2')).toBeInTheDocument()
-  })
+    expect(pushState).not.toHaveBeenCalled()
 
-  it('Discard on that guarded Back navigates to the listing and the bar goes to /documents', async () => {
-    window.history.replaceState({}, '', '/documents/doc-1')
-    render(<App />)
-
-    await screen.findByLabelText('Title')
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
-
-    window.history.replaceState({}, '', '/documents')
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    expect(window.location.pathname).toBe('/documents')
+    // Back from the moved document goes to the folder A listing it was
+    // opened from, not to a Details entry still claiming folder A.
+    window.history.back()
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
+    })
   })
 })

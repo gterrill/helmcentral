@@ -1173,3 +1173,32 @@ func TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry(t *testin
 		}
 	}
 }
+
+// ADR 0167: on a document's Details page the screen context names the
+// document, so "what period does this cover?" is read as a question about it.
+func TestAssistantScreenSentence_NamesTheDocumentBeingViewed(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "documents", DocumentID: "doc-42", DocumentTitle: "Tide tables 2026"})
+	for _, want := range []string{
+		`The operator is viewing the document "Tide tables 2026" (document_id doc-42)`,
+		`"this" or "it"`,
+		"read_document",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in %q", want, got)
+		}
+	}
+}
+
+func TestAssistantScreenSentence_DocumentWithoutTitleStillGivesTheID(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "documents", DocumentID: "doc-42"})
+	if !strings.Contains(got, "(document_id doc-42)") || !strings.Contains(got, "read_document") {
+		t.Fatalf("expected the id and tool in %q", got)
+	}
+}
+
+func TestAssistantScreenSentence_DocumentsPanelWithoutDocumentIsUnchanged(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "documents"})
+	if got != "The operator is looking at the documents panel.\n\n" {
+		t.Fatalf("unexpected sentence %q", got)
+	}
+}

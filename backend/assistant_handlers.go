@@ -992,6 +992,9 @@ func postAssistantMessageHandler(c echo.Context) error {
 			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
 			Section: trimmedAssistantScreenField(body.Screen.Section),
 			Page:    trimmedAssistantScreenField(body.Screen.Page),
+			// Same 80-rune cap as the other fields; an id is 36 runes.
+			DocumentID:    trimmedAssistantScreenField(body.Screen.DocumentID),
+			DocumentTitle: trimmedAssistantScreenField(body.Screen.DocumentTitle),
 		}
 	}
 

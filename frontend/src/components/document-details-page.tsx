@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react'
+import { FolderInput, Plus, X } from 'lucide-react'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -7,13 +7,16 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+import { MoveToFolderDialog } from '@/components/documents/move-to-folder-dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { useDocument, type DocumentRecord } from '@/hooks/use-documents'
+import { useDocument, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
 
 // ADR 0115: a full-panel page for one document's metadata,
@@ -32,7 +35,18 @@ import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumen
 
 export interface DocumentDetailsPageProps {
   documentId: string
+  /** Opens a folder in the Documents index (null for the top level). App.tsx
+   * routes it through the same unsaved-changes guard the old Back used. */
+  onOpenFolder: (folderId: string | null) => void
+  /** The Documents crumb: back to the listing the operator came from (the
+   * folder they were browsing, or the one a Move just filed it in). */
   onBack: () => void
+  /** Told the folder the document now lives in after a Move, so the index
+   * the operator returns to is that folder. */
+  onFolderContextChange?: (folderId: string | null) => void
+  /** Told the document's display name once loaded (null on leaving), so the
+   * Mate sheet can say which document is on screen. */
+  onTitleChange?: (title: string | null) => void
   /** Reported the same way SettingsPage reports settingsDirty - App.tsx
    * tracks it as documentDetailsDirty and clears it once this page is no
    * longer what's rendered. */
@@ -113,10 +127,10 @@ function readByLabel(doc: DocumentRecord): string {
 }
 
 export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, DocumentDetailsPageProps>(function DocumentDetailsPage(
-  { documentId, onBack, onDirtyChange },
+  { documentId, onOpenFolder, onBack, onFolderContextChange, onTitleChange, onDirtyChange },
   ref,
 ) {
-  const { document, loading, error, patch } = useDocument(documentId)
+  const { document, loading, error, patch, move } = useDocument(documentId)
 
   const [draft, setDraft] = useState<DocumentDraft | null>(null)
   // Re-seeds only when a *different* document has loaded (its id changes),
@@ -174,6 +188,29 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
+  const { path: folderPath, error: folderPathError } = useFolderPath(document?.folder_id ?? null)
+
+  const displayName = document ? documentDisplayName(document) : null
+  useEffect(() => {
+    onTitleChange?.(displayName)
+    return () => onTitleChange?.(null)
+  }, [displayName, onTitleChange])
+
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveError, setMoveError] = useState<string | null>(null)
+  const submitMove = async (destination: string | null) => {
+    setMoveError(null)
+    try {
+      await move(destination)
+      setMoveOpen(false)
+      onFolderContextChange?.(destination)
+    } catch (err) {
+      // The server's own message; the dialog closes so it is visible on the page.
+      setMoveOpen(false)
+      setMoveError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const pageClassName = 'h-full min-h-0 overflow-y-auto p-4'
   const breadcrumb = (
     <Breadcrumb>
@@ -183,6 +220,24 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
             Documents
           </BreadcrumbLink>
         </BreadcrumbItem>
+        {folderPath.map((folder) => (
+          <span key={folder.id} className="contents">
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(folder.id) }}>
+                {folder.name}
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+          </span>
+        ))}
+        {displayName && (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage className="truncate">{displayName}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        )}
       </BreadcrumbList>
     </Breadcrumb>
   )
@@ -267,6 +322,11 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
           <dt className="text-muted-foreground">File</dt>
           <dd className="break-words">{document.filename}</dd>
 
+          <dt className="text-muted-foreground">Folder</dt>
+          <dd className="break-words">
+            {folderPathError ? `Unavailable (${folderPathError})` : (folderPath.at(-1)?.name ?? (document.folder_id === null ? 'Documents' : '--'))}
+          </dd>
+
           <dt className="text-muted-foreground">Type</dt>
           <dd>{mimeLabel(document.mime)}</dd>
 
@@ -333,7 +393,24 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
   )
 
   return (
-    <Page title={documentDisplayName(document)} breadcrumb={breadcrumb} className={pageClassName}>
+    <Page
+      title={documentDisplayName(document)}
+      breadcrumb={breadcrumb}
+      className={pageClassName}
+      primaryAction={{ label: 'Move', icon: <FolderInput className="h-4 w-4" aria-hidden="true" />, onClick: () => setMoveOpen(true) }}
+    >
+      {moveError && (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {moveError}
+        </p>
+      )}
+      <MoveToFolderDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        label={documentDisplayName(document)}
+        onPick={(destination) => { void submitMove(destination) }}
+        onFolderCreated={() => {}}
+      />
       <DetailsLayout aside={aside}>
         <FormSection title="Details">
           <FieldGroup>

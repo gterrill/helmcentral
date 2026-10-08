@@ -66,6 +66,9 @@ export interface AssistantScreenContext {
   panel?: string
   section?: string
   page?: string
+  /** The document open on its Details page (ADR 0167). */
+  document_id?: string
+  document_title?: string
 }
 
 export interface AssistantSendOptions {

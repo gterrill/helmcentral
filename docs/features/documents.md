@@ -107,8 +107,20 @@ anything, a save bar takes over the top of the screen with **Save** and
 **Discard**, and **Discard** puts the page back the way you found it. **Rename** on the row menu is still there for
 when the title is all you want to change.
 
+Across the top of the page, a trail shows where the document is filed:
+**Documents**, then each folder it sits in, then the document's name. Every
+folder in the trail opens that folder in the Documents list. **Documents**
+takes you back to the folder you were browsing, or to the new folder after a
+move. If you have unsaved
+edits, the page asks before it lets you leave.
+
+**Move** at the top right files the document in another folder, using the
+same folder picker as the list, including **Create folder**. The trail
+and the **Folder** line under **About the file** update as soon as the move
+lands, and going back to the list takes you to the new folder.
+
 The column beside the form (below it on a phone) is the document itself, read-only: its status
-and, if it failed, why; the file's own name, type, size and page count;
+and, if it failed, why; the folder it's filed in; the file's own name, type, size and page count;
 what read it and which model, if Mate did; when it was uploaded and last
 indexed; the summary; and the **Indexing cost**, what reading this one
 document has cost so far, added up across every reindex. A document read

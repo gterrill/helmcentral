@@ -5,7 +5,7 @@ import type { ReactElement } from 'react'
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 
 import { DocumentDetailsPage, type DocumentDetailsPageHandle } from '@/components/document-details-page'
-import { useDocument } from '@/hooks/use-documents'
+import { useDocument, useFolderPath } from '@/hooks/use-documents'
 
 // ADR 0115 §3: DocumentDetailsPage is tested against a mocked
 // useDocument, the same way documents-panel.test.tsx mocks useDocuments -
@@ -15,6 +15,13 @@ import { useDocument } from '@/hooks/use-documents'
 vi.mock('@/hooks/use-documents')
 
 const mockedUseDocument = vi.mocked(useDocument)
+const mockedUseFolderPath = vi.mocked(useFolderPath)
+
+// The Move dialog's picker browses folders through useDocuments.
+vi.mock('@/components/documents/move-to-folder-dialog', () => ({
+  MoveToFolderDialog: ({ open, onPick }: { open: boolean; onPick: (id: string | null) => void }) =>
+    open ? <button onClick={() => onPick('f-new')}>Pick f-new</button> : null,
+}))
 
 type DocumentMock = ReturnType<typeof useDocument>
 
@@ -25,6 +32,7 @@ function makeDocumentMock(overrides: Partial<DocumentMock> = {}): DocumentMock {
     error: null,
     refresh: vi.fn(),
     patch: vi.fn(),
+    move: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -77,6 +85,7 @@ function renderPage(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks()
   mockedUseDocument.mockReturnValue(makeDocumentMock())
+  mockedUseFolderPath.mockReturnValue({ path: [], error: null })
 })
 
 describe('DocumentDetailsPage', () => {
@@ -85,7 +94,7 @@ describe('DocumentDetailsPage', () => {
       document: doc({ created_at: '2026-09-20T06:28:00', indexed_at: '2026-09-20T06:28:00' }),
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     // formatAlarmTime would print a bare "06:28" for a same-day timestamp -
     // the Details page needs formatDocumentTime's full date instead, since
@@ -99,7 +108,7 @@ describe('DocumentDetailsPage', () => {
       document: doc({ indexed_at: null }),
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText('Not yet')).toBeInTheDocument()
   })
@@ -114,7 +123,7 @@ describe('DocumentDetailsPage', () => {
       }),
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     // Scoped to the Status row specifically: the raw error legitimately
     // does still appear elsewhere on the page, collapsed under "Error
@@ -134,7 +143,7 @@ describe('DocumentDetailsPage', () => {
       }),
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     const summary = screen.getByText('Error details')
     expect(summary.closest('details')).not.toHaveAttribute('open')
@@ -144,20 +153,20 @@ describe('DocumentDetailsPage', () => {
   it('has no "Error details" disclosure for a document that has not failed', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ status: 'indexed' }) }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.queryByText('Error details')).not.toBeInTheDocument()
   })
 
   it('labels the reader row "Read by" and translates indexed_with to operator wording', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ indexed_with: 'mate' }) }))
-    const { rerender } = renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    const { rerender } = renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText('Read by')).toBeInTheDocument()
     expect(screen.getByText('Mate')).toBeInTheDocument()
 
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ indexed_with: 'local' }) }))
-    rerender(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    rerender(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText('On board')).toBeInTheDocument()
   })
@@ -165,7 +174,7 @@ describe('DocumentDetailsPage', () => {
   it('shows the indexing cost to four places', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ index_cost_usd: 0.0123 }) }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText('$0.0123')).toBeInTheDocument()
   })
@@ -173,7 +182,7 @@ describe('DocumentDetailsPage', () => {
   it('shows the save bar in the header only once something changes', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }) }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument()
@@ -187,7 +196,7 @@ describe('DocumentDetailsPage', () => {
 
   it('Discard restores the loaded values and takes the bar away', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }) }))
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
@@ -199,7 +208,7 @@ describe('DocumentDetailsPage', () => {
   // Main column edits; the aside holds the read-only facts about the file.
   it('puts the editable fields in the main column and the file and indexing facts in the aside', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit', size_bytes: 2048, page_count: 5 }) }))
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     const aside = screen.getByRole('complementary')
     for (const label of ['File', 'Type', 'Size', 'Pages', 'Uploaded', 'Status', 'Read by', 'Model', 'Indexing cost', 'Last indexed']) {
@@ -213,7 +222,7 @@ describe('DocumentDetailsPage', () => {
 
   it('titles the page with the document name', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }) }))
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
     expect(screen.getByRole('heading', { name: 'Impeller kit' })).toBeInTheDocument()
   })
 
@@ -221,7 +230,7 @@ describe('DocumentDetailsPage', () => {
     const patch = vi.fn().mockResolvedValue(doc())
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc(), patch }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit' } })
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'spares aboard' } })
@@ -245,7 +254,7 @@ describe('DocumentDetailsPage', () => {
       patch,
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     // Remove an existing operator tag.
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag old' }))
@@ -270,7 +279,7 @@ describe('DocumentDetailsPage', () => {
       document: doc({ tags: [{ tag: 'engine', source: 'operator' }] }),
     }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Add tag'), { target: { value: '   ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -287,7 +296,7 @@ describe('DocumentDetailsPage', () => {
     const patch = vi.fn().mockRejectedValue(new Error('title already used'))
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }), patch }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -299,21 +308,91 @@ describe('DocumentDetailsPage', () => {
     expect(within(screen.getByTestId('header')).getByRole('alert')).toHaveTextContent('title already used')
   })
 
-  it('the breadcrumb\'s Documents link calls onBack', () => {
+  it('shows the full folder path as a breadcrumb ending at the document', () => {
+    mockedUseFolderPath.mockReturnValue({ path: [
+      { id: 'f1', name: 'Boat', parent_id: null },
+      { id: 'f2', name: 'Manuals', parent_id: 'f1' },
+    ], error: null })
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f2', title: 'Impeller kit' }) }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
+
+    const nav = screen.getByRole('navigation', { name: 'breadcrumb' })
+    expect(within(nav).getAllByRole('link').filter((l) => !l.hasAttribute('aria-current')).map((l) => l.textContent)).toEqual(['Documents', 'Boat', 'Manuals'])
+    expect(within(nav).getByText('Impeller kit')).toBeInTheDocument()
+  })
+
+  it('the Documents crumb goes back to where the operator came from and a folder crumb opens that folder', () => {
+    const onOpenFolder = vi.fn()
     const onBack = vi.fn()
-    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc() }))
+    mockedUseFolderPath.mockReturnValue({ path: [{ id: 'f1', name: 'Boat', parent_id: null }], error: null })
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f1' }) }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={onBack} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={onOpenFolder} onBack={onBack} />)
 
+    fireEvent.click(screen.getByRole('link', { name: 'Boat' }))
+    expect(onOpenFolder).toHaveBeenLastCalledWith('f1')
     fireEvent.click(screen.getByRole('link', { name: 'Documents' }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+    expect(onOpenFolder).toHaveBeenCalledTimes(1)
+  })
 
-    expect(onBack).toHaveBeenCalled()
+  it('shows the current folder in the About the file column', () => {
+    mockedUseFolderPath.mockReturnValue({ path: [{ id: 'f1', name: 'Boat', parent_id: null }], error: null })
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f1' }) }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
+
+    expect(screen.getByText('Folder').nextElementSibling).toHaveTextContent('Boat')
+  })
+
+  it('says Documents for a document filed at the top level', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: null }) }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
+
+    expect(screen.getByText('Folder').nextElementSibling).toHaveTextContent('Documents')
+  })
+
+  it('Move opens the folder picker and moves the document, then reports the new folder', async () => {
+    const move = vi.fn().mockResolvedValue(undefined)
+    const onFolderContextChange = vi.fn()
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc(), move }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} onFolderContextChange={onFolderContextChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick f-new' }))
+
+    await waitFor(() => expect(move).toHaveBeenCalledWith('f-new'))
+    await waitFor(() => expect(onFolderContextChange).toHaveBeenCalledWith('f-new'))
+  })
+
+  it('a rejected move shows the server message and stays put', async () => {
+    const move = vi.fn().mockRejectedValue(new Error('folder not found'))
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc(), move }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick f-new' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('folder not found')
+  })
+
+  it('reports the document name so Mate knows what is on screen', () => {
+    const onTitleChange = vi.fn()
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Tide tables' }) }))
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} onTitleChange={onTitleChange} />)
+
+    expect(onTitleChange).toHaveBeenLastCalledWith('Tide tables')
   })
 
   it('shows a quiet loading state while the document has not arrived yet', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ loading: true, document: null }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
   })
@@ -321,7 +400,7 @@ describe('DocumentDetailsPage', () => {
   it('shows the server\'s error message on a failed fetch', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ loading: false, document: null, error: 'document not found' }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByRole('alert')).toHaveTextContent('document not found')
   })
@@ -329,7 +408,7 @@ describe('DocumentDetailsPage', () => {
   it('shows a not-found message when the fetch resolved to nothing', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ loading: false, document: null, error: null }))
 
-    renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} />)
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByText('This document could not be found.')).toBeInTheDocument()
   })
@@ -342,7 +421,7 @@ describe('DocumentDetailsPage', () => {
       const onDirtyChange = vi.fn()
       mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }) }))
 
-      renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} onDirtyChange={onDirtyChange} />)
+      renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} onDirtyChange={onDirtyChange} />)
 
       expect(onDirtyChange).toHaveBeenLastCalledWith(false)
 
@@ -366,7 +445,7 @@ describe('DocumentDetailsPage', () => {
       })
       mockedUseDocument.mockImplementation(() => makeDocumentMock({ document: currentDoc, patch }))
 
-      renderPage(<DocumentDetailsPage documentId="doc-1" onBack={vi.fn()} onDirtyChange={onDirtyChange} />)
+      renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} onDirtyChange={onDirtyChange} />)
 
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
       expect(onDirtyChange).toHaveBeenLastCalledWith(true)
@@ -387,7 +466,7 @@ describe('DocumentDetailsPage', () => {
       mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }), patch }))
       const ref = createRef<DocumentDetailsPageHandle>()
 
-      renderPage(<DocumentDetailsPage ref={ref} documentId="doc-1" onBack={vi.fn()} />)
+      renderPage(<DocumentDetailsPage ref={ref} documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 
       await expect(ref.current!.save()).rejects.toThrow('title already used')
@@ -399,7 +478,7 @@ describe('DocumentDetailsPage', () => {
       mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }), patch }))
       const ref = createRef<DocumentDetailsPageHandle>()
 
-      renderPage(<DocumentDetailsPage ref={ref} documentId="doc-1" onBack={vi.fn()} />)
+      renderPage(<DocumentDetailsPage ref={ref} documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 
       await ref.current!.save()
