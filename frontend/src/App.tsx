@@ -811,6 +811,12 @@ export function App() {
   // it's a document with kind='note', addressed the same way any other one
   // is.
   const [documentsSectionId, setDocumentsSectionId] = useState<string | null>(initialLocation.documentSectionId ?? null)
+  // A section belongs to its manual's folder, so the Details page's folder
+  // crumbs and Move drop it when they land the listing somewhere else.
+  const changeDocumentsFolder = (folderId: string | null) => {
+    if (folderId !== documentsFolderId) setDocumentsSectionId(null)
+    setDocumentsFolderId(folderId)
+  }
   // ADR 0112: which display the management panel is editing, or null for its
   // index. Seeded from the deep link the same way documentsFolderId is.
   const [wallDisplaysSlug, setWallDisplaysSlug] = useState<string | null>(initialLocation.displayEditSlug ?? null)
@@ -1234,6 +1240,11 @@ export function App() {
   // not it actually writes) — see that effect's own comment for why the
   // write path needs to know this.
   const locationInitialisedRef = useRef(false)
+  // Set by a change that corrects the current location rather than going
+  // somewhere new (a Move refiling the open document), so the sync effect
+  // below rewrites this history entry instead of pushing one Back would
+  // land on with the document's old folder still in it.
+  const replaceNextLocationRef = useRef(false)
   const previousFirstPageIdRef = useRef<string | null>(null)
 
   // Applies a parsed location to the shell's own state. Separate from
@@ -1340,7 +1351,8 @@ export function App() {
     // effect didn't itself write — that only ever happens on first load, or
     // when the page list/admin role resolve to something that makes the
     // current bar non-canonical.
-    const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
+    const replace = replaceNextLocationRef.current || first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
+    replaceNextLocationRef.current = false
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
   }, [
     shellVisible, isDisplay, activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId,
@@ -2947,14 +2959,17 @@ export function App() {
               // catch a dirty Details page being left this way.
               onOpenFolder={(folderId) => {
                 requestBackFromDocumentDetails(() => {
-                  setDocumentsFolderId(folderId)
+                  changeDocumentsFolder(folderId)
                   setDocumentsEditId(null)
                 })
               }}
               onBack={() => {
                 requestBackFromDocumentDetails(() => setDocumentsEditId(null))
               }}
-              onFolderContextChange={setDocumentsFolderId}
+              onFolderContextChange={(folderId) => {
+                replaceNextLocationRef.current = true
+                changeDocumentsFolder(folderId)
+              }}
               onTitleChange={setDocumentDetailsTitle}
             />
           )
