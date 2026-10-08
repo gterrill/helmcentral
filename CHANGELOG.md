@@ -109,6 +109,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   rules that watch it. An item nothing uses asks nothing more than before.
   Deleting an item also clears the roles that named it, so they show **Not
   set** instead of pointing at an item that no longer exists.
+- Helmcentral now warns when an engine stumbles. If rpm at a steady throttle
+  repeatedly dips and recovers (three times in ten minutes on one engine), a
+  warning such as "Port Engine Stumbling" is raised, with the count and the
+  deepest dip on the card. It needs no setup: every engine that reports rpm is
+  watched, the warning arrives switched on, and it clears once the engine has
+  gone ten minutes without a stumble. Dips that hit both engines of a twin at
+  the same moment are treated as sea state and ignored.
 - **Settings → SignalK → Discovery** lists what the boat reports (engines,
   batteries, alternators, solar controllers, tanks, generators, chargers and
   inverters) with live readings and the equipment item each belongs to. Assign
