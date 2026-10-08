@@ -2951,6 +2951,9 @@ export function App() {
                   setDocumentsEditId(null)
                 })
               }}
+              onBack={() => {
+                requestBackFromDocumentDetails(() => setDocumentsEditId(null))
+              }}
               onFolderContextChange={setDocumentsFolderId}
               onTitleChange={setDocumentDetailsTitle}
             />

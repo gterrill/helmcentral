@@ -109,8 +109,9 @@ when the title is all you want to change.
 
 Across the top of the page, a trail shows where the document is filed:
 **Documents**, then each folder it sits in, then the document's name. Every
-step in the trail is a link that takes you back to that folder in the
-Documents list; **Documents** goes to the top level. If you have unsaved
+folder in the trail opens that folder in the Documents list. **Documents**
+takes you back to the folder you were browsing, or to the new folder after a
+move. If you have unsaved
 edits, the page asks before it lets you leave.
 
 **Move** at the top right files the document in another folder, using the

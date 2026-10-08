@@ -38,6 +38,9 @@ export interface DocumentDetailsPageProps {
   /** Opens a folder in the Documents index (null for the top level). App.tsx
    * routes it through the same unsaved-changes guard the old Back used. */
   onOpenFolder: (folderId: string | null) => void
+  /** The Documents crumb: back to the listing the operator came from (the
+   * folder they were browsing, or the one a Move just filed it in). */
+  onBack: () => void
   /** Told the folder the document now lives in after a Move, so the index
    * the operator returns to is that folder. */
   onFolderContextChange?: (folderId: string | null) => void
@@ -124,7 +127,7 @@ function readByLabel(doc: DocumentRecord): string {
 }
 
 export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, DocumentDetailsPageProps>(function DocumentDetailsPage(
-  { documentId, onOpenFolder, onFolderContextChange, onTitleChange, onDirtyChange },
+  { documentId, onOpenFolder, onBack, onFolderContextChange, onTitleChange, onDirtyChange },
   ref,
 ) {
   const { document, loading, error, patch, move } = useDocument(documentId)
@@ -213,7 +216,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     <Breadcrumb>
       <BreadcrumbList>
         <BreadcrumbItem>
-          <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(null) }}>
+          <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onBack() }}>
             Documents
           </BreadcrumbLink>
         </BreadcrumbItem>
