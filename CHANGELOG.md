@@ -13,6 +13,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- The screen stays awake while the dashboard is full screen, so a tablet at
+  the helm no longer dims and locks mid-watch. This works only when you open
+  Helmcentral by an `https://` address such as the Tailscale name; over plain
+  `http://` the screen sleeps as before.
 - The indicator ribbon now shows labelled cells instead of small dots. Each
   cell has an icon, the full name and a reading (On, Off, or `--` with no
   data), and fills green when on. A cell turns amber or red while an active

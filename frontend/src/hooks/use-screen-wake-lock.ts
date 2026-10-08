@@ -7,6 +7,15 @@ export interface ScreenWakeLockState {
 }
 
 /**
+ * True when the page was loaded over HTTPS. The full-screen dashboard only
+ * asks for a wake lock then: over plain HTTP on the boat LAN the browser
+ * withholds the API, and the dashboard has no badge to say so.
+ */
+export function servedOverHttps(): boolean {
+  return window.location.protocol === 'https:'
+}
+
+/**
  * Best-effort screen wake lock for a wall display (ADR 0110 §5c). Per
  * AGENTS.md's fallback policy, a best-effort feature has to report when it
  * isn't working rather than silently doing nothing — hence the returned

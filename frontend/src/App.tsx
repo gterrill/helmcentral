@@ -151,6 +151,7 @@ import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { useFullscreen } from '@/hooks/use-fullscreen'
+import { servedOverHttps, useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
 import { useSwipePaging } from '@/hooks/use-swipe-paging'
 import { useVersionReload } from '@/hooks/use-version-reload'
 import {
@@ -413,6 +414,9 @@ export function App() {
   // dashboard in a non-interactive state with no way back out.
   const layoutEditing = layoutEditingRequested && canEditLayout
   const fullscreen = useFullscreen()
+  // Full screen at the helm means the operator is watching, so the screen
+  // shouldn't sleep. HTTPS only: the browser offers no wake lock elsewhere.
+  useScreenWakeLock(fullscreen.isFullscreen && servedOverHttps())
   // Chrome only hides for the dashboard grid itself, not a panel - if the
   // operator reaches a panel while fullscreen (an alarm banner tap, say),
   // the sidebar and header have to come back so it's reachable. Fullscreen
