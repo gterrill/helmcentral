@@ -22,7 +22,12 @@ import (
 // one is sound, ranking a set of thirteen (the 5000m ring at Lindeman) is
 // guesswork better left to the provider's own place_name_at, which does
 // exactly that ranking itself (see docs/adr/0056, docs/adr/0101).
-var placeNameRadiiMeters = []int{400, 1500, 5000}
+//
+// The 10000m ring exists for open water near a coast: a bay mapped as a
+// single point well offshore, or an island whose nearest edge is further
+// than 5 km, leaves the first three rings empty and the position tile
+// blank (docs/adr/0168).
+var placeNameRadiiMeters = []int{400, 1500, 5000, 10000}
 
 // resolvePlaceName resolves the currently configured place-names provider
 // (resolve) once, then walks placeNameRadiiMeters, tightest first, calling

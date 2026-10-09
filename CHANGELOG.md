@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The place name on the position tile now shows the marina or harbour when
+  you are alongside, where it used to show a dash. A marina within about
+  500 m ranks below an anchorage and above a bay. The lookup also reaches about 10 km
+  from the boat, up from about 5 km, so open water off a coast is more likely
+  to get a bay or island name.
+
 ## [0.43.0] - 2026-10-08
 
 ### Added
