@@ -31,8 +31,86 @@ func TestBuildPlaceNameQuery_EmbedsRadiusPositionAndTimeout(t *testing.T) {
 	if !strings.Contains(q, `nwr["place"~"^(island|islet|rock)$"](around:1500,-20.446700,149.035300)`) {
 		t.Fatalf("expected the island/islet/rock clause, got: %s", q)
 	}
-	if !strings.Contains(q, "out tags center 20;") {
-		t.Fatalf("expected the same cap (20) backend/place_name.go uses, got: %s", q)
+	// No output cap: Overpass returns elements in type-and-id order, not by
+	// rank or distance, so a cap could drop the winner before ranking runs.
+	if !strings.Contains(q, "out tags center;") {
+		t.Fatalf("expected an uncapped out statement, got: %s", q)
+	}
+}
+
+func TestBuildPlaceNameQuery_IncludesMarinaAndHarbourClauses(t *testing.T) {
+	q := buildPlaceNameQuery(-19.252139, 146.823806, 400)
+
+	if !strings.Contains(q, `nwr["leisure"="marina"](around:400,-19.252139,146.823806)`) {
+		t.Fatalf("expected the marina clause, got: %s", q)
+	}
+	if !strings.Contains(q, `nwr["seamark:type"="harbour"](around:400,-19.252139,146.823806)`) {
+		t.Fatalf("expected the harbour clause, got: %s", q)
+	}
+}
+
+func TestBuildPlaceNameQuery_MarinaClausesNeverReachPastBerthRadius(t *testing.T) {
+	q := buildPlaceNameQuery(-19.252139, 146.823806, 5000)
+
+	if !strings.Contains(q, `nwr["leisure"="marina"](around:500,-19.252139,146.823806)`) {
+		t.Fatalf("expected the marina clause capped at the berth radius, got: %s", q)
+	}
+	if !strings.Contains(q, `nwr["seamark:type"="harbour"](around:500,-19.252139,146.823806)`) {
+		t.Fatalf("expected the harbour clause capped at the berth radius, got: %s", q)
+	}
+	if !strings.Contains(q, `nwr["natural"="bay"](around:5000,-19.252139,146.823806)`) {
+		t.Fatalf("expected the bay clause at the full ring, got: %s", q)
+	}
+}
+
+func TestPlaceFeatureKind_MarinaAndHarbour(t *testing.T) {
+	for _, tags := range []map[string]string{
+		{"leisure": "marina"},
+		{"seamark:type": "harbour"},
+		{"leisure": "marina", "seamark:type": "harbour"},
+	} {
+		if got := placeFeatureKind(tags); got != "marina" {
+			t.Fatalf("tags %v: expected kind marina, got %q", tags, got)
+		}
+	}
+}
+
+func TestBestNamedPlaceFeature_RanksMarinaBetweenAnchorageAndBay(t *testing.T) {
+	bay := overpassElement{Type: "node", ID: 1, Lat: f64p(-20.440), Lon: f64p(149.035), Tags: map[string]string{"name": "Near Bay", "natural": "bay"}}
+	marina := overpassElement{Type: "node", ID: 2, Lat: f64p(-20.4495), Lon: f64p(149.035), Tags: map[string]string{"name": "Far Marina", "leisure": "marina"}}
+	anchorage := overpassElement{Type: "node", ID: 3, Lat: f64p(-20.480), Lon: f64p(149.035), Tags: map[string]string{"name": "Far Anchorage", "seamark:type": "anchorage"}}
+
+	winner, ok := bestNamedPlaceFeature([]overpassElement{bay, marina}, -20.4467, 149.0353)
+	if !ok || winner.Name != "Far Marina" || winner.Kind != "marina" {
+		t.Fatalf("expected the marina to beat a nearer bay, got %+v ok=%v", winner, ok)
+	}
+	winner, ok = bestNamedPlaceFeature([]overpassElement{bay, marina, anchorage}, -20.4467, 149.0353)
+	if !ok || winner.Name != "Far Anchorage" {
+		t.Fatalf("expected the anchorage to beat the marina, got %+v ok=%v", winner, ok)
+	}
+}
+
+// A marina names the boat only when the boat is in it. Past the berth
+// radius it must not outrank the bay the boat is actually anchored in.
+func TestBestNamedPlaceFeature_MarinaBeyondBerthRadiusLosesToBay(t *testing.T) {
+	bay := overpassElement{Type: "node", ID: 1, Lat: f64p(-20.4413), Lon: f64p(149.0353), Tags: map[string]string{"name": "Anchored Bay", "natural": "bay"}}
+	marina := overpassElement{Type: "node", ID: 2, Lat: f64p(-20.4593), Lon: f64p(149.0353), Tags: map[string]string{"name": "Port Marina", "leisure": "marina"}}
+
+	winner, ok := bestNamedPlaceFeature([]overpassElement{marina, bay}, -20.4467, 149.0353)
+	if !ok || winner.Name != "Anchored Bay" {
+		t.Fatalf("expected the bay to beat a marina 1.4 km off, got %+v ok=%v", winner, ok)
+	}
+	if _, ok := bestNamedPlaceFeature([]overpassElement{marina}, -20.4467, 149.0353); ok {
+		t.Fatalf("a marina past the berth radius must not name the boat on its own")
+	}
+}
+
+func TestBestNamedPlaceFeature_UnnamedMarinaDiscarded(t *testing.T) {
+	elements := []overpassElement{
+		{Type: "node", ID: 1, Lat: f64p(-20.44), Lon: f64p(149.03), Tags: map[string]string{"leisure": "marina"}},
+	}
+	if _, ok := bestNamedPlaceFeature(elements, -20.4467, 149.0353); ok {
+		t.Fatalf("an unnamed marina must not win")
 	}
 }
 

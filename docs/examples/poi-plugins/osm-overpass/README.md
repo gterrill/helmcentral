@@ -419,6 +419,10 @@ apart (the mirror returns 503 on a tighter burst):
   unnamed islet) - the same count `backend/place_name_test.go`'s own
   Lindeman fixture carries, real OSM data captured independently. Turtle Bay
   wins the ranking here (nearest of three bays in range).
+- `testdata/overpass_place_name_townsville_400m.json` -
+  `place_name_at`'s 400m ring alongside Breakwater Marina, Townsville
+  (`-19.252139, 146.823806`), captured 2026-10-10. 200 OK in 1.5s, 1 element
+  (the marina way, tagged both `leisure=marina` and `seamark:type=harbour`).
 - `testdata/overpass_search_places_exact_hill_inlet.json` -
   `search_places` rung 1, exact name "Hill Inlet", centred on Lindeman
   Island. 200 OK in 0.45s, 1 element.

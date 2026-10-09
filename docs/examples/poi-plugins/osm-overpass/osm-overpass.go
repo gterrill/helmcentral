@@ -780,9 +780,10 @@ type overpassQueryFunc func(query string) ([]overpassElement, error)
 
 // ── place_name_at ──────────────────────────────────────────────────────
 //
-// Ports backend/place_name.go's ring query and ranking (ADR 0056): the same
-// three-clause tag set (anchorage, bay, island/islet/rock), ranked
-// anchorage-first with ties broken by distance. Unlike place_name.go, this
+// Ports backend/place_name.go's ring query and ranking (ADR 0056), extended
+// with marinas and harbours: a five-clause tag set (anchorage, marina,
+// harbour, bay, island/islet/rock), ranked anchorage-first with ties broken
+// by distance. Unlike place_name.go, this
 // export does not itself walk a widening ladder of rings - the host passes
 // one radius per call and is expected to call again with a wider radius
 // when this one comes back with no name, exactly as backend/place_name.go's
@@ -790,24 +791,36 @@ type overpassQueryFunc func(query string) ([]overpassElement, error)
 
 // placeFeatureRank orders candidate kinds within place_name_at's ring:
 // anchorage first (a human already decided this is where you anchor), then
-// bay, then island/islet/rock by descending size-implication - mirrors
-// backend/place_name.go's featureRank exactly. A tagged element whose kind
-// isn't one of these five is discarded before ranking, as is any element
-// with no name tag.
+// marina (a named berth, and only within placeNameMarinaMaxMeters, where
+// the boat is almost certainly in it), then bay, then island/islet/rock by descending size-implication.
+// A tagged element whose kind isn't one of these six is discarded before
+// ranking, as is any element with no name tag.
 var placeFeatureRank = map[string]int{
 	"anchorage": 0,
-	"bay":       1,
-	"island":    2,
-	"islet":     3,
-	"rock":      4,
+	"marina":    1,
+	"bay":       2,
+	"island":    3,
+	"islet":     4,
+	"rock":      5,
 }
+
+// placeNameMarinaMaxMeters is how close a marina or harbour must be to name
+// the boat. Inside it the boat is berthed there; past it a marina ranked
+// ahead of bays would name a boat anchored in a nearby bay after the port
+// across the water. 500 m allows for a large marina whose centre sits a few
+// hundred metres from the outer pontoons.
+const placeNameMarinaMaxMeters = 500
 
 // placeFeatureKind classifies a place_name_at element's tags into one of
 // placeFeatureRank's keys, or "" if it matches none of buildPlaceNameQuery's
-// three clauses - mirrors backend/place_name.go's featureKind.
+// clauses. leisure=marina and seamark:type=harbour are one kind, so an
+// element carrying both is a single candidate.
 func placeFeatureKind(tags map[string]string) string {
 	if tags["seamark:type"] == "anchorage" {
 		return "anchorage"
+	}
+	if tags["leisure"] == "marina" || tags["seamark:type"] == "harbour" {
+		return "marina"
 	}
 	if tags["natural"] == "bay" {
 		return "bay"
@@ -820,24 +833,29 @@ func placeFeatureKind(tags map[string]string) string {
 }
 
 // buildPlaceNameQuery builds the Overpass QL for one place_name_at ring at
-// radiusM around (lat, lon): the same three clauses
-// backend/place_name.go's buildOverpassQuery uses, plus this plugin's own
+// radiusM around (lat, lon): the anchorage, marina, harbour, bay and
+// island/islet/rock clauses, plus this plugin's own
 // global [bbox:...] setting (overpassBoundingBox) when the ring doesn't
 // cross the antimeridian or a pole - see overpassBoundingBox's doc comment
 // for why that materially speeds up some mirrors. The 12s server-side
 // timeout matches buildOverpassPOIQuery's own budget below the host's 15s
 // WASM plugin call ceiling (backend/wasm_plugin.go's
 // WASM_PLUGIN_TIMEOUT_MS): place_name_at is a single Overpass round trip
-// per call, so it can use the same budget fetch_poi does.
+// per call, so it can use the same budget fetch_poi does. The marina and
+// harbour clauses never reach past placeNameMarinaMaxMeters, since
+// bestNamedPlaceFeature discards anything further anyway. There is no
+// output cap: Overpass returns elements in type-and-id order, not by rank
+// or distance, so a cap could drop the winner before ranking sees it.
 func buildPlaceNameQuery(lat, lon float64, radiusM int) string {
 	around := fmt.Sprintf("around:%d,%.6f,%.6f", radiusM, lat, lon)
+	berth := fmt.Sprintf("around:%d,%.6f,%.6f", min(radiusM, placeNameMarinaMaxMeters), lat, lon)
 
 	var b strings.Builder
 	b.WriteString("[out:json][timeout:12]")
 	if south, west, north, east, ok := overpassBoundingBox(lat, lon, radiusM); ok {
 		fmt.Fprintf(&b, "[bbox:%.6f,%.6f,%.6f,%.6f]", south, west, north, east)
 	}
-	fmt.Fprintf(&b, `;(nwr["seamark:type"="anchorage"](%s);nwr["natural"="bay"](%s);nwr["place"~"^(island|islet|rock)$"](%s););out tags center 20;`, around, around, around)
+	fmt.Fprintf(&b, `;(nwr["seamark:type"="anchorage"](%s);nwr["leisure"="marina"](%s);nwr["seamark:type"="harbour"](%s);nwr["natural"="bay"](%s);nwr["place"~"^(island|islet|rock)$"](%s););out tags center;`, around, berth, berth, around, around)
 	return b.String()
 }
 
@@ -856,7 +874,7 @@ type placeNameWinner struct {
 // backend/place_name_test.go's ranking tests, ported above). Elements with
 // no name tag are discarded before ranking, so an unnamed feature can never
 // win; ok is false when nothing in elements carries both a name and one of
-// the five recognised kinds, which is a legitimate empty result, not a
+// the six recognised kinds, which is a legitimate empty result, not a
 // failure.
 func bestNamedPlaceFeature(elements []overpassElement, lat, lon float64) (placeNameWinner, bool) {
 	type candidate struct {
@@ -880,10 +898,14 @@ func bestNamedPlaceFeature(elements []overpassElement, lat, lon float64) (placeN
 		if !ok {
 			continue
 		}
+		dist := haversineMeters(lat, lon, elLat, elLon)
+		if kind == "marina" && dist > placeNameMarinaMaxMeters {
+			continue
+		}
 		candidates = append(candidates, candidate{
 			winner: placeNameWinner{Name: name, Kind: kind, Lat: elLat, Lon: elLon},
 			rank:   rank,
-			dist:   haversineMeters(lat, lon, elLat, elLon),
+			dist:   dist,
 		})
 	}
 	if len(candidates) == 0 {

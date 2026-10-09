@@ -144,3 +144,24 @@ func TestLiveFixture_SearchPlacesRung2Ladder(t *testing.T) {
 		t.Errorf("expected Whitehaven Beach (the way, natural=beach) classified as beach, got %+v", names)
 	}
 }
+
+// Breakwater Marina, Townsville: alongside, nothing but a marina/harbour
+// within 400m. Captured live from overpass.openstreetmap.fr with
+// buildPlaceNameQuery's output (see README fixtures section).
+func TestLiveFixture_PlaceNameAtTownsvilleMarina400m(t *testing.T) {
+	const lat, lon = -19.252139, 146.823806
+	raw := loadFixture(t, "overpass_place_name_townsville_400m.json")
+	var parsed overpassResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	post := func(query string) ([]overpassElement, error) { return parsed.Elements, nil }
+
+	out, err := runPlaceNameAt(post, lat, lon, 400)
+	if err != nil {
+		t.Fatalf("runPlaceNameAt: %v", err)
+	}
+	if out.Name != "Breakwater Marina" || out.Kind != "marina" {
+		t.Fatalf("expected Breakwater Marina (marina), got %+v", out)
+	}
+}
