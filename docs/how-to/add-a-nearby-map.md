@@ -84,3 +84,14 @@ does (Google Places, for instance, is Nearby-only). Its gear icon opens the
 same settings as the matching Nearby card, since it's the same plugin
 either way - the **Overpass server** field above is one and the same
 setting from both tabs.
+
+With the OpenStreetMap plugin, the name is the nearest named anchorage,
+marina or harbour, bay or island. An anchorage wins over a marina, a marina
+over a bay, and a bay over an island, so alongside you see the marina's name
+and at anchor you see the anchorage's. A marina only counts when the boat is
+within about 500 m of it, so anchored in a bay near a port you see the bay,
+not the port. The lookup starts close to the boat
+and widens in steps up to about 10 km, so open water near a coast still gets
+a name. Near a headland the nearest bay can be one across the water rather
+than the one you are in. Towns and suburbs are never used: if nothing named
+lies within about 10 km, the tile shows a dash.
