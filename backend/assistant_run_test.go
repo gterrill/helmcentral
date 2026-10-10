@@ -2205,3 +2205,37 @@ func TestAssistantRunner_MarkerSplitAcrossChunksNeverLeaksIntoDeltas(t *testing.
 		}
 	}
 }
+
+func TestAssistantRunner_SessionIDIsConversationIDOnEveryRoundAndCacheTokensSum(t *testing.T) {
+	toolRound := func() *http.Response {
+		return chatResponse(t, http.StatusOK, openRouterChatResponse{
+			Model: "m",
+			Choices: []openRouterChoice{{Message: openRouterMessage{Role: "assistant", ToolCalls: []openRouterToolCall{
+				{ID: "c1", Type: "function", Function: openRouterToolCallFunction{Name: "find_places", Arguments: openRouterArguments(`{"query":"x"}`)}},
+			}}}},
+			Usage: openRouterUsage{PromptTokens: 100, PromptTokensDetails: openRouterPromptTokensDetails{CacheWriteTokens: 80}},
+		})
+	}
+	final := finalResponse(t, "done", "m", openRouterUsage{PromptTokens: 150, PromptTokensDetails: openRouterPromptTokensDetails{CachedTokens: 80}})
+	doer := &queuedChatDoer{responses: []*http.Response{toolRound(), final}, errs: []error{nil, nil}}
+	tools := &fakeToolExecutor{results: map[string]string{"find_places": `{}`}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
+	ctx := withAssistantConversationID(context.Background(), "conv-42")
+	reply, err := runner.run(ctx, "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(doer.requests))
+	}
+	for i, req := range doer.requests {
+		if req.SessionID != "conv-42" {
+			t.Fatalf("request %d session_id = %q, want conv-42", i, req.SessionID)
+		}
+	}
+	if reply.CachedTokens != 80 || reply.CacheWriteTokens != 80 || reply.PromptTokens != 250 {
+		t.Fatalf("unexpected totals: %+v", reply)
+	}
+}

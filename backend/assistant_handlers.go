@@ -1168,6 +1168,8 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 			PromptTokens:     reply.PromptTokens,
 			CompletionTokens: reply.CompletionTokens,
 			CostUSD:          reply.CostUSD,
+			CachedTokens:     reply.CachedTokens,
+			CacheWriteTokens: reply.CacheWriteTokens,
 			ToolRounds:       reply.ToolRounds,
 			Proposals:        reply.Proposals,
 			FormDrafts:       reply.FormDrafts,

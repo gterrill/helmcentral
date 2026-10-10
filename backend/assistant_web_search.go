@@ -97,6 +97,8 @@ func (s *assistantUsageSink) add(u openRouterUsage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.usage.PromptTokens += u.PromptTokens
+	s.usage.PromptTokensDetails.CachedTokens += u.PromptTokensDetails.CachedTokens
+	s.usage.PromptTokensDetails.CacheWriteTokens += u.PromptTokensDetails.CacheWriteTokens
 	s.usage.CompletionTokens += u.CompletionTokens
 	s.usage.TotalTokens += u.TotalTokens
 	s.usage.Cost += u.Cost

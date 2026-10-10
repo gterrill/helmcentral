@@ -80,6 +80,9 @@ function formatMessageFooter(message: AssistantMessage): string {
   if (typeof message.toolRounds === 'number') {
     parts.push(`${message.toolRounds} tool round${message.toolRounds === 1 ? '' : 's'}`)
   }
+  if (typeof message.cachedTokens === 'number' && message.cachedTokens > 0) {
+    parts.push(`${message.cachedTokens.toLocaleString()} cached`)
+  }
   return parts.join(' · ')
 }
 
@@ -106,7 +109,11 @@ function formatMessageFooterTitle(message: AssistantMessage): string {
     typeof message.promptTokens === 'number' && typeof message.completionTokens === 'number'
       ? (message.promptTokens + message.completionTokens).toLocaleString()
       : '--'
-  return `${model} · ${tokens} tokens`
+  const cached =
+    typeof message.cachedTokens === 'number' && message.cachedTokens > 0
+      ? ` · ${message.cachedTokens.toLocaleString()} cached`
+      : ''
+  return `${model} · ${tokens} tokens${cached}`
 }
 
 // ADR 0106 F1: the small filename chips shown under a past user message's

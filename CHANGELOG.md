@@ -11,6 +11,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- Mate's reply footer now shows how many tokens of the prompt came from the cache, when any did. Follow-up questions in a conversation stay with the same provider, so the cache is reused more often and replies cost less.
+
 ## [0.43.0] - 2026-10-08
 
 ### Added

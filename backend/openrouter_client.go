@@ -403,6 +403,10 @@ type openRouterChatRequest struct {
 	Plugins    []openRouterPlugin     `json:"plugins,omitempty"`
 	ToolChoice string                 `json:"tool_choice,omitempty"`
 	Usage      *openRouterUsageOption `json:"usage,omitempty"`
+	// SessionID is the Mate conversation id. OpenRouter keys provider sticky
+	// routing on it when present, so every turn and tool round of one
+	// conversation lands on the same provider and reuses its prompt cache.
+	SessionID string `json:"session_id,omitempty"`
 	// Stream is always set explicitly by whichever function actually sends
 	// the request, never by a caller building this struct: true by
 	// openRouterChatCompletion (its own doc comment), false by
@@ -426,6 +430,15 @@ type openRouterUsage struct {
 	CompletionTokens int     `json:"completion_tokens"`
 	TotalTokens      int     `json:"total_tokens"`
 	Cost             float64 `json:"cost"`
+	// PromptTokensDetails reports prompt-cache use: CachedTokens were read
+	// from the provider's cache, CacheWriteTokens were written to it. Both
+	// are zero for a model that does no caching.
+	PromptTokensDetails openRouterPromptTokensDetails `json:"prompt_tokens_details"`
+}
+
+type openRouterPromptTokensDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 // openRouterAPIError is OpenRouter's error envelope, returned either as the

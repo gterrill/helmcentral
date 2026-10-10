@@ -537,6 +537,13 @@ if you want them, in the tooltip you get from hovering the footer (or a
 long press on a touchscreen) - detail worth having on hand, not something
 you need at a glance every time.
 
+When part of what Mate sent to the model was served from the provider's cache
+instead of being read afresh, the footer adds the count, for example
+`$0.012 · 9,820 cached`. Those tokens are billed at a fraction of the usual
+price, so a high figure on a follow-up question is a good sign. Nothing is
+shown when none were cached. Follow-up questions in one conversation stay with
+the same provider, which is what lets the cache be reused.
+
 ## What it is not
 
 It is not a navigational authority. It reasons from the forecast and tide

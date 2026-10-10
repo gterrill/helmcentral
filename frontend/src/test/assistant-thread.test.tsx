@@ -192,6 +192,18 @@ describe('AssistantThread', () => {
     expect(footer).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5 · 1,200 tokens')
   })
 
+  it('shows how many prompt tokens came from the cache, only when there were some', () => {
+    const cached = buildConversations({ messages: [assistantMessage({ cachedTokens: 9820 })] })
+    const { unmount } = render(<AssistantThread canWrite conversations={cached} chat={buildChat()} />)
+    const footer = screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 9,820 cached')
+    expect(footer).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5 · 1,200 tokens · 9,820 cached')
+    unmount()
+
+    const none = buildConversations({ messages: [assistantMessage({ cachedTokens: 0 })] })
+    render(<AssistantThread canWrite conversations={none} chat={buildChat()} />)
+    expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5')).toBeInTheDocument()
+  })
+
   it('omits the tool-round part of the footer when tool_rounds was not reported', () => {
     const conversations = buildConversations({ messages: [assistantMessage()] })
 
