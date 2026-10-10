@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -365,5 +366,40 @@ func TestAssistantStore_ReopeningSamePathIsIdempotentAndPersists(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Title != "Persisted" {
 		t.Fatalf("expected the conversation created before reopening to persist, got %+v", list)
+	}
+}
+
+func TestAssistantStore_CacheTokensRoundTripAndOldSchemaOpens(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, err := store.CreateConversation("t")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a", PromptTokens: 100, CachedTokens: 60, CacheWriteTokens: 30}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	msgs, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].CachedTokens != 60 || msgs[0].CacheWriteTokens != 30 {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+
+	// A database from before the columns existed still opens and gains them.
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "old.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0, tool_rounds INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := createAssistantSchema(db); err != nil {
+		t.Fatalf("schema on old db: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name IN ('cached_tokens','cache_write_tokens')`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("expected both columns added, got %d (%v)", n, err)
 	}
 }

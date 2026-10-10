@@ -60,6 +60,7 @@ interface MessageApi {
   content: string
   model?: string
   prompt_tokens?: number
+  cached_tokens?: number
   completion_tokens?: number
   cost_usd?: number
   tool_rounds?: number
@@ -163,6 +164,8 @@ export interface AssistantMessage {
   content: string
   model?: string
   promptTokens?: number
+  /** Part of promptTokens the provider served from its prompt cache. */
+  cachedTokens?: number
   completionTokens?: number
   costUsd?: number
   toolRounds?: number
@@ -209,6 +212,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     content: api.content,
     model: api.model,
     promptTokens: api.prompt_tokens,
+    cachedTokens: api.cached_tokens,
     completionTokens: api.completion_tokens,
     costUsd: api.cost_usd,
     toolRounds: api.tool_rounds,

@@ -47,6 +47,8 @@ type assistantMessage struct {
 	PromptTokens     int       `json:"prompt_tokens,omitempty"`
 	CompletionTokens int       `json:"completion_tokens,omitempty"`
 	CostUSD          float64   `json:"cost_usd,omitempty"`
+	CachedTokens     int       `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int       `json:"cache_write_tokens,omitempty"`
 	ToolRounds       int       `json:"tool_rounds,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	// Attachments are the documents (ADR 0106) attached to this message,
@@ -145,6 +147,8 @@ func createAssistantSchema(db *sql.DB) error {
 			prompt_tokens     INTEGER NOT NULL DEFAULT 0,
 			completion_tokens INTEGER NOT NULL DEFAULT 0,
 			cost_usd          REAL NOT NULL DEFAULT 0,
+			cached_tokens     INTEGER NOT NULL DEFAULT 0,
+			cache_write_tokens INTEGER NOT NULL DEFAULT 0,
 			tool_rounds       INTEGER NOT NULL DEFAULT 0,
 			created_at        INTEGER NOT NULL
 		)`); err != nil {
@@ -170,6 +174,20 @@ func createAssistantSchema(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments (message_id)`); err != nil {
 		return fmt.Errorf("index message_attachments table: %w", err)
+	}
+
+	// cached_tokens and cache_write_tokens arrived after the table did, for
+	// the same reason as summary_note_id below.
+	for _, col := range []string{"cached_tokens", "cache_write_tokens"} {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = ?`, col).Scan(&has); err != nil {
+			return fmt.Errorf("inspect messages table: %w", err)
+		}
+		if has == 0 {
+			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN ` + col + ` INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("add messages.%s: %w", col, err)
+			}
+		}
 	}
 
 	// summary_note_id (ADR 0162) arrived after the table did, and CREATE
@@ -427,9 +445,9 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 	m.CreatedAt = now
 
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, tool_rounds, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.ToolRounds, m.CreatedAt.Unix()); err != nil {
+		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.CreatedAt.Unix()); err != nil {
 		return assistantMessage{}, fmt.Errorf("insert message: %w", err)
 	}
 
@@ -481,7 +499,7 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(
-		`SELECT id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, tool_rounds, created_at
+		`SELECT id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, created_at
 		 FROM messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
@@ -493,7 +511,7 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 		var m assistantMessage
 		var created int64
 		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Seq, &m.Role, &m.Content, &m.Model,
-			&m.PromptTokens, &m.CompletionTokens, &m.CostUSD, &m.ToolRounds, &created); err != nil {
+			&m.PromptTokens, &m.CompletionTokens, &m.CostUSD, &m.CachedTokens, &m.CacheWriteTokens, &m.ToolRounds, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.CreatedAt = time.Unix(created, 0).UTC()

@@ -98,6 +98,10 @@ type assistantReply struct {
 	PromptTokens     int
 	CompletionTokens int
 	CostUSD          float64
+	// CachedTokens and CacheWriteTokens are the parts of PromptTokens read
+	// from and written to the provider's prompt cache, summed like the rest.
+	CachedTokens     int
+	CacheWriteTokens int
 	ToolRounds       int
 	// Proposals are the change proposals (ADR 0146, ADR 0158) Mate's
 	// propose_changes calls produced during this run, in call
@@ -656,11 +660,16 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	for round := 0; ; round++ {
 		r.emit("status", assistantWaitingStatus())
 
+		// session_id makes OpenRouter keep this conversation on one
+		// provider, so its prompt cache is reused. Without it the routing
+		// key is a hash of the system message, whose live suffix changes
+		// every round.
 		req := openRouterChatRequest{
-			Model:    r.model,
-			Messages: messages,
-			Tools:    assistantToolDefinitionsFor(r.webSearch),
-			Usage:    &openRouterUsageOption{Include: true},
+			Model:     r.model,
+			Messages:  messages,
+			Tools:     assistantToolDefinitionsFor(r.webSearch),
+			Usage:     &openRouterUsageOption{Include: true},
+			SessionID: assistantConversationIDFrom(ctx),
 		}
 		if plugin := autoRouterPluginForModel(r.model, r.autoRouter); plugin != nil {
 			req.Plugins = []openRouterPlugin{*plugin}
@@ -743,6 +752,8 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 
 		reply.PromptTokens += resp.Usage.PromptTokens
+		reply.CachedTokens += resp.Usage.PromptTokensDetails.CachedTokens
+		reply.CacheWriteTokens += resp.Usage.PromptTokensDetails.CacheWriteTokens
 		reply.CompletionTokens += resp.Usage.CompletionTokens
 		reply.CostUSD += resp.Usage.Cost
 		reply.Model = resp.Model
@@ -799,6 +810,8 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		if reporter, ok := r.tools.(assistantUsageReporter); ok {
 			u := reporter.drainUsage()
 			reply.PromptTokens += u.PromptTokens
+			reply.CachedTokens += u.PromptTokensDetails.CachedTokens
+			reply.CacheWriteTokens += u.PromptTokensDetails.CacheWriteTokens
 			reply.CompletionTokens += u.CompletionTokens
 			reply.CostUSD += u.Cost
 		}

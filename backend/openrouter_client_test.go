@@ -1155,3 +1155,35 @@ func TestOpenRouterEmbeddings_RejectsEmptyInputWithoutCallingDoer(t *testing.T) 
 		t.Fatalf("expected the doer to never be called for an empty batch, got %d requests", len(doer.requests))
 	}
 }
+
+// TestOpenRouterChatCompletion_UsageFixturesCarryPromptCacheDetails decodes
+// three real streamed usage chunks captured live (a long Anthropic system
+// prompt sent twice with the same session_id, then a non-Anthropic model):
+// the first Anthropic call writes the cache, the second reads it, and a
+// model with no cache control reports zeros.
+func TestOpenRouterChatCompletion_UsageFixturesCarryPromptCacheDetails(t *testing.T) {
+	cases := []struct {
+		file            string
+		prompt          int
+		cached, written int
+	}{
+		{"testdata/openrouter_stream_usage_anthropic_cache_write.txt", 12817, 0, 12801},
+		{"testdata/openrouter_stream_usage_anthropic_cache_read.txt", 12817, 12801, 0},
+		{"testdata/openrouter_stream_usage_openai.txt", 12017, 0, 0},
+	}
+	for _, tc := range cases {
+		body, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatalf("read fixture: %v", err)
+		}
+		doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+		resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		u := resp.Usage
+		if u.PromptTokens != tc.prompt || u.PromptTokensDetails.CachedTokens != tc.cached || u.PromptTokensDetails.CacheWriteTokens != tc.written {
+			t.Fatalf("%s: unexpected usage %+v", tc.file, u)
+		}
+	}
+}

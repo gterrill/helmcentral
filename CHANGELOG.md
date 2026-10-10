@@ -13,6 +13,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- Mate's reply footer now shows how many tokens of the prompt came from the cache, when any did. Follow-up questions in a conversation stay with the same provider, so the cache is reused more often and replies cost less.
 - The place name on the position tile now shows the marina or harbour when
   you are alongside, where it used to show a dash. A marina within about
   500 m ranks below an anchorage and above a bay. The lookup also reaches about 10 km
