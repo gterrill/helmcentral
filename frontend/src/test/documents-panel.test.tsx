@@ -2158,6 +2158,23 @@ describe('DocumentsPanel listing columns', () => {
     expect(rows[0]).toContain('A-file.pdf')
   })
 
+  it('keeps the latest sort when the listing remounts after Unfiled notes', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [
+        doc({ id: 'a', filename: 'b-file.pdf', created_at: '2026-03-01T12:00:00' }),
+        doc({ id: 'b', filename: 'A-file.pdf', created_at: '2025-01-01T12:00:00' }),
+      ],
+    }))
+    setFolderTree([])
+    render(<DocumentsPanel />)
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /name/i })).getByRole('button'))
+    expect(rowNames().filter((t) => /-file\.pdf/.test(t))[0]).toContain('A-file.pdf')
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Unfiled notes/ }))
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Documents' }))
+    expect(rowNames().filter((t) => /-file\.pdf/.test(t))[0]).toContain('A-file.pdf')
+  })
+
   it('marks a pending document with Reading and a failed one with Failed in its icon', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({
       documents: [
@@ -2252,6 +2269,22 @@ describe('DocumentsPanel folder pane', () => {
     fireEvent.click(within(pane).getByRole('treeitem', { name: /Manuals/ }).querySelector('[data-slot="tree-chevron"]')!)
     expect(within(pane).getByRole('treeitem', { name: /Engine/ })).toHaveTextContent('2')
     expect(within(pane).getByRole('treeitem', { name: /Engine/ })).toHaveAttribute('aria-level', '2')
+  })
+
+  it('waits for the folder tree before choosing between a listing and a manual', () => {
+    mockedUseFolderTree.mockReturnValue({ folders: [], loading: true, error: null, refresh: refreshFolderTree })
+    render(<DocumentsPanel initialFolderId="m1" />)
+
+    expect(screen.queryByRole('columnheader', { name: /name/i })).not.toBeInTheDocument()
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+  })
+
+  it('says so when the folder tree failed instead of treating a manual as a plain folder', () => {
+    mockedUseFolderTree.mockReturnValue({ folders: [], loading: false, error: 'HTTP 500', refresh: refreshFolderTree })
+    render(<DocumentsPanel initialFolderId="m1" />)
+
+    expect(screen.queryByRole('columnheader', { name: /name/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/Cannot tell whether this folder is a manual \(HTTP 500\)/)).toBeInTheDocument()
   })
 
   it('opens with the selected folder\'s ancestors expanded', () => {

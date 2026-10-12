@@ -370,6 +370,11 @@ export function DocumentsPanel({
   // The tree is the one source of truth for which folders are manuals;
   // useManuals above is kept only for flag/clear.
   const isCurrentFolderManual = folderId !== null && folderTree.folders.some((f) => f.id === folderId && f.is_manual)
+  // Until the tree has said what this folder is, the content area must not
+  // guess: a manual deep link would flash a plain listing, and a failed tree
+  // would silently treat a manual as a plain folder.
+  const folderKindUnknown = folderId !== null && !folderTree.folders.some((f) => f.id === folderId)
+    && (folderTree.loading || folderTree.error !== null)
 
   // ── Unfiled notes saved view + the viewer's note editing (revision) ────
   // One useNotes() instance serves three things: the "Unfiled notes" view
@@ -813,7 +818,14 @@ export function DocumentsPanel({
   // ── the listing: documents only; folders live in the pane ──────────────
   const listRows = documents.documents
   const { patchNote: patchUnfiledNote } = unfiled
-  const [initialSorting] = useState<SortingState>(loadSort)
+  // IndexTable reads its initial sort once at mount, and it remounts on each
+  // switch between the listing and Unfiled notes / a manual - so the latest
+  // chosen sort lives here, not in a snapshot taken at panel mount.
+  const sortingRef = useRef<SortingState>(loadSort())
+  const rememberSorting = useCallback((sorting: SortingState) => {
+    sortingRef.current = sorting
+    saveSort(sorting)
+  }, [])
   const columns = useMemo<ColumnDef<DocumentRecord, unknown>[]>(() => [
     {
       id: 'name',
@@ -1162,6 +1174,14 @@ export function DocumentsPanel({
               onFile={(id, title) => setMoveTarget({ ids: [id], label: title })}
             />
           </div>
+        ) : folderKindUnknown && folderTree.loading ? (
+          <div className={bordered}>
+            <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+          </div>
+        ) : folderKindUnknown && folderTree.error !== null ? (
+          <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            Cannot tell whether this folder is a manual ({folderTree.error}).
+          </p>
         ) : isCurrentFolderManual && folderId !== null ? (
           <div className={bordered}>
             <ManualFolderView
@@ -1182,9 +1202,9 @@ export function DocumentsPanel({
             onOpen={(doc) => setViewerId(doc.id)}
             rowActions={rowActions}
             rowActionsLabel={(item) => `Actions for ${rowName(item)}`}
-            initialSorting={initialSorting}
+            initialSorting={sortingRef.current}
             twoStateSort
-            onSortingChange={saveSort}
+            onSortingChange={rememberSorting}
             selectable
             onRowDragStart={startDocumentDrag}
             selectedIds={selectedIds}
