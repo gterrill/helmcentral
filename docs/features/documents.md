@@ -193,7 +193,22 @@ model above. Leaving it blank turns semantic search off entirely and
 leaves word search as the library's only retriever. See
 [Configuration](../reference/configuration.md).
 
+## The listing
+
+Each row shows the document's name, its tags, when it was **Added** and its
+size. Added is the day the file came into Helmcentral, shown as "12 Oct" for
+this year and "3 Jan 2025" for earlier ones. Click **Name**, **Added** or
+**Size** to sort by it; click again to reverse. Folders always stay above
+documents, whatever the sort. The list opens newest first, and Helmcentral
+remembers your choice on that device. A row shows its first three tags, with a
+"+2" style count for the rest; hover it to see them all.
+
 ## Status and Reindex
+
+In the listing, the document's icon carries its state: the normal grey
+icon means it is indexed, amber means it is still being read (hover for
+"Reading…"), and red means it failed (hover for
+"Failed"), with the reason on a line under its name.
 
 A document is one of three things:
 

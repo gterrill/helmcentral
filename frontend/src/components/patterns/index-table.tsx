@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -167,6 +167,13 @@ export interface IndexTableProps<T> {
   /** Shown beside "N selected" while any row is selected. */
   bulkActions?: ReactNode
   className?: string
+  /** Sort in force on first render. Read once; the table owns the state after. */
+  initialSorting?: SortingState
+  /** Called whenever the operator changes the sort, so a caller can remember it. */
+  onSortingChange?: (sorting: SortingState) => void
+  /** Make the header toggle strictly ascending/descending: no third click
+   * that clears the sort, and no shift-click multi-sort. */
+  twoStateSort?: boolean
 }
 
 export function IndexTable<T>({
@@ -190,8 +197,21 @@ export function IndexTable<T>({
   rowSelectLabel,
   bulkActions,
   className,
+  initialSorting,
+  onSortingChange,
+  twoStateSort = false,
 }: IndexTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>([])
+  const [sorting, setSorting] = useState<SortingState>(initialSorting ?? [])
+  const onSortingChangeRef = useRef(onSortingChange)
+  onSortingChangeRef.current = onSortingChange
+  const firstSortRender = useRef(true)
+  useEffect(() => {
+    if (firstSortRender.current) {
+      firstSortRender.current = false
+      return
+    }
+    onSortingChangeRef.current?.(sorting)
+  }, [sorting])
   const isMobile = useIsMobile()
 
   // The actions column's cell must have a STABLE identity: TanStack's
@@ -215,6 +235,7 @@ export function IndexTable<T>({
     columns: mergedColumns,
     state: { sorting },
     onSortingChange: setSorting,
+    ...(twoStateSort ? { enableSortingRemoval: false, enableMultiSort: false } : {}),
     getRowId: (row) => getRowId(row),
     meta: { rowActions, rowActionsLabel, getRowId } satisfies RowActionsMeta<T>,
     getCoreRowModel: getCoreRowModel(),

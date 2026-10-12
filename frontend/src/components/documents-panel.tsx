@@ -16,7 +16,7 @@ import {
   X,
   Sparkles,
 } from 'lucide-react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, SortingState } from '@tanstack/react-table'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -78,7 +78,7 @@ import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { downloadDocument } from '@/lib/document-download'
-import { documentDisplayName, documentFailureMessage, formatBytes } from '@/lib/document-display'
+import { documentDisplayName, documentFailureMessage, formatAdded, formatBytes, formatDocumentTime } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
@@ -196,15 +196,45 @@ function renderSnippet(snippet: string): ReactNode[] {
   return parts
 }
 
-function statusBadge(doc: DocumentRecord) {
+/** The document's state, carried by its type icon rather than a column:
+ * indexed is the ordinary muted icon; pending is amber; failed is red. */
+function docStateIcon(doc: DocumentRecord): { className?: string; label?: string } {
   switch (doc.status) {
     case 'pending':
-      return <Badge variant="outline">Reading…</Badge>
+      return { className: 'text-amber-600 dark:text-amber-400', label: 'Reading…' }
     case 'failed':
-      return <Badge variant="destructive">Failed</Badge>
-    case 'indexed':
+      return { className: 'text-destructive', label: 'Failed' }
     default:
-      return <Badge variant="secondary">Indexed</Badge>
+      return {}
+  }
+}
+
+const MAX_LISTED_TAGS = 3
+const SORT_KEY = 'helmcentral.documents.sort'
+const SORTABLE_COLUMNS = ['name', 'added', 'size']
+const DEFAULT_SORT: SortingState = [{ id: 'added', desc: true }]
+
+function loadSort(): SortingState {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(SORT_KEY) ?? 'null')
+    if (
+      Array.isArray(parsed) && parsed.length === 1 &&
+      typeof parsed[0]?.id === 'string' && SORTABLE_COLUMNS.includes(parsed[0].id) &&
+      typeof parsed[0].desc === 'boolean'
+    ) {
+      return [{ id: parsed[0].id, desc: parsed[0].desc }]
+    }
+  } catch {
+    // Unavailable or unreadable storage: fall back to the default sort.
+  }
+  return DEFAULT_SORT
+}
+
+function saveSort(sorting: SortingState): void {
+  try {
+    localStorage.setItem(SORT_KEY, JSON.stringify(sorting))
+  } catch {
+    // Best-effort only.
   }
 }
 
@@ -771,11 +801,12 @@ export function DocumentsPanel({
     [documents.folders, documents.documents],
   )
   const { patchNote: patchUnfiledNote } = unfiled
+  const [initialSorting] = useState<SortingState>(loadSort)
   const columns = useMemo<ColumnDef<ListRow, unknown>[]>(() => [
     {
       id: 'name',
       header: 'Name',
-      enableSorting: false,
+      sortingFn: 'alphanumeric',
       accessorFn: rowName,
       cell: ({ row }) => {
         const item = row.original
@@ -801,6 +832,7 @@ export function DocumentsPanel({
         }
         const doc = item.doc
         const MimeIcon = rowIcon(doc.mime)
+        const state = docStateIcon(doc)
         return (
           <div className="flex items-center gap-2">
             {/* The pre-attentive type icon column (revision "Note types as a
@@ -812,10 +844,13 @@ export function DocumentsPanel({
                 from also opening the row. */}
             {doc.kind === 'note' ? (
               <span className="inline-flex" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                <NoteTypeIconButton noteType={doc.note_type} onSetType={(type) => { void runAction(() => patchUnfiledNote(doc.id, { type })) }} />
+                <NoteTypeIconButton noteType={doc.note_type} iconClassName={state.className} statusLabel={state.label} onSetType={(type) => { void runAction(() => patchUnfiledNote(doc.id, { type })) }} />
               </span>
             ) : (
-              <MimeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="inline-flex shrink-0" title={state.label}>
+                <MimeIcon className={cn('h-4 w-4', state.className ?? 'text-muted-foreground')} aria-hidden="true" />
+                {state.label && <span className="sr-only">{state.label}</span>}
+              </span>
             )}
             <button
               type="button"
@@ -839,11 +874,16 @@ export function DocumentsPanel({
       },
     },
     {
-      id: 'status',
-      header: 'Status',
-      enableSorting: false,
-      accessorFn: (item) => (item.kind === 'document' ? item.doc.status : ''),
-      cell: ({ row }) => (row.original.kind === 'document' ? statusBadge(row.original.doc) : null),
+      id: 'added',
+      header: 'Added',
+      sortDescFirst: true,
+      accessorFn: (item) => (item.kind === 'document' ? Date.parse(item.doc.created_at) || undefined : undefined),
+      cell: ({ row }) =>
+        row.original.kind === 'document' ? (
+          <span className="text-xs tabular-nums text-muted-foreground" title={formatDocumentTime(row.original.doc.created_at) ?? undefined}>
+            {formatAdded(row.original.doc.created_at) ?? '--'}
+          </span>
+        ) : null,
     },
     {
       id: 'tags',
@@ -852,21 +892,32 @@ export function DocumentsPanel({
       accessorFn: (item) => (item.kind === 'document' ? item.doc.tags.map((t) => t.tag).join(', ') : ''),
       cell: ({ row }) =>
         row.original.kind === 'document' ? (
-          <div className="flex flex-wrap gap-1">
-            {row.original.doc.tags.map((t) => (
-              <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'}>
-                {t.tag}
-              </Badge>
-            ))}
+          <div
+            className="flex min-w-0 flex-nowrap gap-1"
+            title={row.original.doc.tags.map((t) => t.tag).join(', ')}
+          >
+            <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
+              {row.original.doc.tags.slice(0, MAX_LISTED_TAGS).map((t) => (
+                <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'} className="min-w-0 max-w-32 shrink">
+                  <span className="truncate">{t.tag}</span>
+                </Badge>
+              ))}
+            </div>
+            {row.original.doc.tags.length > MAX_LISTED_TAGS && (
+              <Badge variant="outline" className="shrink-0">+{row.original.doc.tags.length - MAX_LISTED_TAGS}</Badge>
+            )}
           </div>
         ) : null,
     },
     {
       id: 'size',
       header: 'Size',
-      enableSorting: false,
-      accessorFn: (item) => (item.kind === 'document' ? formatBytes(item.doc.size_bytes) : ''),
-      cell: ({ getValue }) => getValue<string>(),
+      sortDescFirst: false,
+      accessorFn: (item) => (item.kind === 'document' ? item.doc.size_bytes : undefined),
+      cell: ({ getValue }) => {
+        const bytes = getValue<number | undefined>()
+        return bytes === undefined ? null : formatBytes(bytes)
+      },
     },
   ], [manualFolderIds, navigate, runAction, patchUnfiledNote])
 
@@ -1104,6 +1155,9 @@ export function DocumentsPanel({
             onOpen={(item) => { if (item.kind === 'folder') navigate(item.folder.id); else setViewerId(item.doc.id) }}
             rowActions={rowActions}
             rowActionsLabel={(item) => `Actions for ${rowName(item)}`}
+            initialSorting={initialSorting}
+            twoStateSort
+            onSortingChange={saveSort}
             groupBy={(item) => (item.kind === 'folder' ? 'folders' : 'documents')}
             groupOrder={['folders', 'documents']}
             groupLabel={(key) => (key === 'folders' ? 'Folders' : 'Documents')}
