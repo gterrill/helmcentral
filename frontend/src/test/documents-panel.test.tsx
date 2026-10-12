@@ -2068,3 +2068,146 @@ describe('DocumentsPanel', () => {
     })
   })
 })
+
+describe('DocumentsPanel listing columns', () => {
+  const rowNames = () =>
+    screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+
+  it('has no Status column and no Indexed badge', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc()] }))
+    render(<DocumentsPanel />)
+    expect(screen.queryByRole('columnheader', { name: /status/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('Indexed')).not.toBeInTheDocument()
+  })
+
+  it('shows Added as day and month this year, and with the year otherwise', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-12T12:00:00'))
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [
+        doc({ id: 'a', filename: 'this-year.pdf', created_at: '2026-10-12T12:00:00' }),
+        doc({ id: 'b', filename: 'last-year.pdf', created_at: '2025-01-03T12:00:00' }),
+      ],
+    }))
+    render(<DocumentsPanel />)
+    expect(screen.getByRole('columnheader', { name: /added/i })).toBeInTheDocument()
+    expect(screen.getByText('12 Oct')).toBeInTheDocument()
+    expect(screen.getByText('3 Jan 2025')).toBeInTheDocument()
+  })
+
+  it('sorts newest added first by default', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [
+        doc({ id: 'a', filename: 'old.pdf', created_at: '2025-01-01T12:00:00' }),
+        doc({ id: 'b', filename: 'new.pdf', created_at: '2026-03-01T12:00:00' }),
+      ],
+    }))
+    render(<DocumentsPanel />)
+    const rows = rowNames().filter((t) => /\.pdf/.test(t))
+    expect(rows[0]).toContain('new.pdf')
+    expect(rows[1]).toContain('old.pdf')
+  })
+
+  it('sorts Size numerically and keeps folders above documents', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      folders: [{ id: 'f1', name: 'Zed folder', parent_id: null }],
+      documents: [
+        doc({ id: 'a', filename: 'nine.pdf', size_bytes: 9 * 1024 }),
+        doc({ id: 'b', filename: 'ten.pdf', size_bytes: 10 * 1024 * 1024 }),
+        doc({ id: 'c', filename: 'hundred.pdf', size_bytes: 100 * 1024 }),
+      ],
+    }))
+    render(<DocumentsPanel />)
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /size/i })).getByRole('button'))
+    let rows = rowNames()
+    const order = (names: string[]) => names.map((n) => rows.findIndex((r) => r.includes(n)))
+    expect(order(['Zed folder', 'nine.pdf', 'hundred.pdf', 'ten.pdf'])).toEqual(
+      [...order(['Zed folder', 'nine.pdf', 'hundred.pdf', 'ten.pdf'])].sort((x, y) => x - y),
+    )
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /size/i })).getByRole('button'))
+    rows = rowNames()
+    const idx = order(['Zed folder', 'ten.pdf', 'hundred.pdf', 'nine.pdf'])
+    expect(idx).toEqual([...idx].sort((x, y) => x - y))
+  })
+
+  it('remembers the chosen sort', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [
+        doc({ id: 'a', filename: 'b-file.pdf' }),
+        doc({ id: 'b', filename: 'A-file.pdf' }),
+      ],
+    }))
+    const { unmount } = render(<DocumentsPanel />)
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /name/i })).getByRole('button'))
+    unmount()
+    render(<DocumentsPanel />)
+    const rows = rowNames().filter((t) => /-file\.pdf/.test(t))
+    expect(rows[0]).toContain('A-file.pdf')
+  })
+
+  it('marks a pending document with Reading and a failed one with Failed in its icon', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [
+        doc({ id: 'a', filename: 'wait.pdf', status: 'pending' }),
+        doc({ id: 'b', filename: 'bad.pdf', status: 'failed', error: 'boom' }),
+      ],
+    }))
+    render(<DocumentsPanel />)
+    expect(screen.getByText('Reading…')).toBeInTheDocument()
+    expect(screen.getByText('Failed', { selector: '.sr-only' })).toBeInTheDocument()
+  })
+
+  it('shows at most three tags then a +N badge, with the full list in a title', () => {
+    const names = ['one', 'two', 'three', 'four', 'five']
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ tags: names.map((tag) => ({ tag, source: 'operator' as const })) })],
+    }))
+    render(<DocumentsPanel />)
+    expect(screen.getByText('three')).toBeInTheDocument()
+    expect(screen.queryByText('four')).not.toBeInTheDocument()
+    const more = screen.getByText('+2')
+    expect(more.closest('[title]')).toHaveAttribute('title', 'one, two, three, four, five')
+  })
+
+  it('toggles Name between two states only, and restores the second after a remount', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ id: 'a', filename: 'b-file.pdf' }), doc({ id: 'b', filename: 'a-file.pdf' })],
+    }))
+    const click = () => fireEvent.click(within(screen.getByRole('columnheader', { name: /name/i })).getByRole('button'))
+    const first = () => rowNames().filter((t) => /-file\.pdf/.test(t))[0]
+    const { unmount } = render(<DocumentsPanel />)
+    click()
+    expect(first()).toContain('a-file.pdf')
+    click()
+    expect(first()).toContain('b-file.pdf')
+    click()
+    expect(first()).toContain('a-file.pdf')
+    click()
+    expect(first()).toContain('b-file.pdf')
+    unmount()
+    render(<DocumentsPanel />)
+    expect(first()).toContain('b-file.pdf')
+  })
+
+  it('shows -- when Added is missing or unparseable', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc({ created_at: 'nonsense' })] }))
+    render(<DocumentsPanel />)
+    expect(screen.getByText('--')).toBeInTheDocument()
+  })
+
+  it('puts the state in the note icon button accessible name', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ kind: 'note', note_type: 'general', status: 'pending', filename: 'n.md' })],
+    }))
+    render(<DocumentsPanel />)
+    expect(screen.getByRole('button', { name: /Change type: currently .*\(Reading…\)/ })).toBeInTheDocument()
+  })
+
+  it('keeps the +N badge outside the clipped tag region', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ tags: ['a', 'b', 'c', 'd'].map((tag) => ({ tag, source: 'operator' as const })) })],
+    }))
+    render(<DocumentsPanel />)
+    expect(screen.getByText('+1').parentElement!.closest('.overflow-hidden')).toBeNull()
+  })
+})

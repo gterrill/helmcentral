@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Documents list now has an **Added** column showing when each file came
+  into Helmcentral, and Name, Added and Size sort when you click their headers.
+  The list opens newest first and remembers your sort. Folders stay above
+  documents.
+- The Documents list no longer has a Status column. A document still being read
+  shows an amber icon, a failed one a red icon, and the reason stays under its
+  name. Tags show three to a row with a "+N" count for the rest.
 - Mate's reply footer now shows how many tokens of the prompt came from the cache, when any did. Follow-up questions in a conversation stay with the same provider, so the cache is reused more often and replies cost less.
 - The place name on the position tile now shows the marina or harbour when
   you are alongside, where it used to show a dash. A marina within about

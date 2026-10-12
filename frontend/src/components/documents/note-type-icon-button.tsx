@@ -21,10 +21,16 @@ export function NoteTypeIconButton({
   noteType,
   onSetType,
   size = 'sm',
+  iconClassName,
+  statusLabel,
 }: {
   noteType: string
   onSetType: (type: NoteType) => void
   size?: 'sm' | 'lg'
+  /** Overrides the type's own colour, e.g. to show a pending or failed document. */
+  iconClassName?: string
+  /** Accessible and tooltip text for a state carried by the icon colour. */
+  statusLabel?: string
 }) {
   const meta = noteTypeMeta(noteType)
   const Icon = meta.icon
@@ -34,7 +40,8 @@ export function NoteTypeIconButton({
         render={
           <button
             type="button"
-            aria-label={`Change type: currently ${meta.label}`}
+            aria-label={`Change type: currently ${meta.label}${statusLabel ? ` (${statusLabel})` : ''}`}
+            title={statusLabel}
             className={cn(
               'flex shrink-0 items-center justify-center hover:bg-accent',
               // `sm` keeps the full h-8 w-8 (32px) hit target - shrinking it
@@ -49,7 +56,7 @@ export function NoteTypeIconButton({
               size === 'lg' ? 'h-11 w-11' : 'h-8 w-8 -mx-2 rounded',
             )}
           >
-            <Icon className={cn(size === 'lg' ? 'h-5 w-5' : 'h-4 w-4', meta.className)} aria-hidden="true" />
+            <Icon className={cn(size === 'lg' ? 'h-5 w-5' : 'h-4 w-4', meta.className, iconClassName)} aria-hidden="true" />
           </button>
         }
       />

@@ -161,3 +161,12 @@ export function documentTypeBadge(doc: { mime?: string; filename: string; kind: 
   if (ext) return ext.slice(0, 5).toUpperCase()
   return 'FILE'
 }
+
+/** "12 Oct" for this year, "3 Jan 2025" otherwise; null when missing or unparseable. */
+export function formatAdded(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  const base = `${date.getDate()} ${MONTHS[date.getMonth()]}`
+  return date.getFullYear() === new Date().getFullYear() ? base : `${base} ${date.getFullYear()}`
+}
