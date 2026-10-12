@@ -1,7 +1,7 @@
 # ADR 0059: Always-on anchor map, a labelled Drop/Raise control, and a scope method setting
 
 ## Status
-Accepted
+Accepted. §3 (the Scope row on the map) superseded by [ADR 0169](0169-anchor-map-drops-the-scope-row.md).
 
 Extends ADR 0047 (rode planner replaces the Rode & Scope tile).
 

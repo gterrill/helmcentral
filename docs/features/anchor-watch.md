@@ -27,9 +27,8 @@ clearance warning sits right there too, so everything about the water
 you're anchored in reads from one place. If depth hasn't updated recently,
 the reading is marked stale rather than left looking current.
 
-Distance from the anchor, bearing to it, the alarm radius, current set and
-drift, and the rode planner's recommended scope all live in the compact
-readout panel on the map itself instead. That is where you check how far
+Distance from the anchor, bearing to it, the alarm radius, and current set and
+drift live in the compact readout panel on the map itself instead. That is where you check how far
 you've swung and how much room is left before the alarm sounds, while the
 header above keeps its attention on the water.
 

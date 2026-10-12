@@ -4,7 +4,6 @@ import { vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // Same maplibre-gl / react-map-gl stubs as anchor-watch-map-radar-markers.test.tsx.
 vi.mock('maplibre-gl', () => ({
@@ -49,13 +48,6 @@ const aisVessels: NearbyVessel[] = [
   { id: KESTREL_ID, name: 'KESTREL', lat: -25.2929, lon: 152.9093, range_m: 210, age_seconds: 6 },
 ]
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'Depth 3.2 m (sounder only) · Wind 15 kts · 5:1',
-}
 
 function renderMap(aisCollisionAlarms?: ReadonlyMap<string, AlarmState>) {
   return render(
@@ -71,7 +63,6 @@ function renderMap(aisCollisionAlarms?: ReadonlyMap<string, AlarmState>) {
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={aisVessels}

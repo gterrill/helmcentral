@@ -1,4 +1,4 @@
-import type { AnchorConfig, HullType } from '@/config/app-config'
+import type { HullType } from '@/config/app-config'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
@@ -298,8 +298,8 @@ function depthAndBowHeightNote(planningDepthM: number, tideCorrected: boolean, b
 /**
  * Shared by both methods' unavailable-depth branch: anchored with nothing
  * recorded is a different, more actionable reason than simply having no
- * reading at all — the map's Scope row and the planner both print reasons in
- * the value slot, so this needs no new rendering, only the right words.
+ * reading at all — the planner prints the reason in the value slot, so this
+ * needs no new rendering, only the right words.
  */
 function depthUnavailableReason(isAnchored: boolean): string {
   return isAnchored ? 'no depth entered' : 'no depth reading'
@@ -498,10 +498,7 @@ export function windBandForKts(kts: number | null): WindBand | null {
 }
 
 /**
- * The single band-selection rule shared by the Rode Planner's dropdown and
- * computeScopeRecommendation (below), so an operator's pick in one view
- * reaches the other rather than each deriving its own band and quietly
- * disagreeing. An explicit `selectedBandId` — the operator's own choice —
+ * The single band-selection rule behind the Rode Planner's dropdown. An explicit `selectedBandId` — the operator's own choice —
  * always wins, even one that doesn't name a real band: that falls back to
  * the live-seeded band rather than throwing or silently landing on the
  * calmest one. With no selection at all, the live seed (seedPlanningWindKts
@@ -517,65 +514,4 @@ export function resolvePlanningWindBand(
   const seededBand = windBandForKts(seedKts)
   if (selectedBandId === null) return seededBand
   return WIND_BANDS.find((band) => band.id === selectedBandId) ?? seededBand
-}
-
-/**
- * The single recommendation a host renders (map overlay's Scope row, née the
- * tile's below-map readout — ADR 0059 §3): resolves the shared wind band the
- * same way the Rode Planner does (resolvePlanningWindBand), resolves the
- * planning depth the same way the planner does (resolvePlanningDepth — ADR
- * 0063), builds the RodePlanInput, and picks catenaryMethod vs ratioMethod
- * from anchorConfig.scopeMethod. Extracted so the tile and drawer hosts,
- * which both already hold every one of these inputs, don't duplicate this
- * composition.
- *
- * selectedWindBandId is required, not defaulted: a silent default here is
- * exactly how the tile's raw-seed plan and the planner's banded plan drifted
- * apart before this function existed — every caller must say explicitly
- * which band (if any) the operator has chosen. isAnchored/planningDepthM/
- * planningTideHeightFt are the same discipline applied to depth (ADR 0063):
- * callers must say explicitly what they know rather than this function
- * guessing a fallback.
- */
-export function computeScopeRecommendation(args: {
-  isAnchored: boolean
-  liveDepthM: number | null
-  planningDepthM: number | null
-  planningTideHeightFt: number | null
-  tide: TideToday | null
-  maxGustKts: Record<GustWindow, number | null>
-  windSpeedApparentKts: number | null
-  seaState: SeaState
-  seabedType: SeabedType
-  anchorConfig: AnchorConfig
-  selectedWindBandId: string | null
-}): RodeMethodResult {
-  const windKts = resolvePlanningWindBand(args.maxGustKts, args.windSpeedApparentKts, args.selectedWindBandId)?.planKts ?? null
-  const depth = resolvePlanningDepth({
-    isAnchored: args.isAnchored,
-    liveDepthM: args.liveDepthM,
-    planningDepthM: args.planningDepthM,
-    planningTideHeightFt: args.planningTideHeightFt,
-    tide: args.tide,
-  })
-  const planInput: RodePlanInput = {
-    depth,
-    isAnchored: args.isAnchored,
-    bowRollerHeightM: args.anchorConfig.bowRollerHeightM,
-    tide: args.tide,
-    windKts,
-    seaState: args.seaState,
-    seabedType: args.seabedType,
-    chainSizeMm: args.anchorConfig.chainSizeMm,
-    chainOnboardM: args.anchorConfig.chainOnboardM,
-    windageAreaM2: args.anchorConfig.windageAreaM2,
-    hullType: args.anchorConfig.hullType,
-  }
-  const method = args.anchorConfig.scopeMethod === 'catenary' ? catenaryMethod : ratioMethod
-  // catenaryMethod/ratioMethod never actually return null — both always
-  // answer with either a figure or an unavailableReason (see their bodies
-  // above) — but RodeMethod's signature stays broader for a future method
-  // that might genuinely have nothing to say. The assertion documents that
-  // guarantee rather than widening this function's return type to match.
-  return method(planInput)!
 }

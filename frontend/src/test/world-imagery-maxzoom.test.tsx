@@ -32,7 +32,6 @@ describe('World imagery source config', () => {
         currentSetDeg={0}
         distanceMeters={26}
         bearingDeg={83}
-        scopeRecommendation={null}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={[]}

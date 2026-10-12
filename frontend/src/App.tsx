@@ -1668,20 +1668,16 @@ export function App() {
       setToastMessage('Anchor watch raised automatically: engines running, under way outside the zone')
     }
   }, [anchorWatch.lastAutoRaise])
-  // The forecast wind band shared by the Rode Planner, the tile's Scope row,
-  // and the drawer's Scope row (frontend/src/lib/rode-plan.ts's
-  // resolvePlanningWindBand) — one operator choice, not three independent
-  // seeds. Deliberately not persisted: a band chosen for last night's
+  // The Rode Planner's forecast wind band (frontend/src/lib/rode-plan.ts's
+  // resolvePlanningWindBand), held here so it outlives the planner closing
+  // and reopening. Deliberately not persisted: a band chosen for last night's
   // forecast must not silently drive tonight's recommendation. A reload
   // returns to the live seed.
   const [windBandId, setWindBandId] = useState<string | null>(null)
   // The planning depth is seeded from the depth at drop and editable from
-  // there (ADR 0063). Hoisted here for the same reason windBandId is (ADR
-  // 0059 §3): three surfaces (tile, drawer's map Scope row, and the Rode
-  // Planner) plan off this number, and a component-local copy is how the
-  // tile and planner drifted apart before computeScopeRecommendation
-  // existed. While anchored the planning depth lives on the watch record
-  // (anchorWatch.planningDepthM, persisted server-side); this state only
+  // there (ADR 0063). Hoisted here because the drawer and the Rode Planner
+  // both plan off this number, and a component-local copy is how surfaces drifted apart. While anchored the
+  // planning depth lives on the watch record (anchorWatch.planningDepthM, persisted server-side); this state only
   // covers the not-anchored "what-if" case, which has nowhere else to live
   // and is deliberately lost on reload. Cleared on every hasActiveAnchorWatch
   // transition below — without that, a pre-drop what-if would reappear once
@@ -2339,12 +2335,6 @@ export function App() {
             onPlacemarkCreate={createPlacemark}
             onPlacemarkRemove={removePlacemark}
             tide={tide}
-            windSpeedApparentKts={windSpeedApparentKts}
-            maxGustKts={maxGustKts}
-            anchorConfig={anchorConfig}
-            selectedWindBandId={windBandId}
-            planningDepthM={resolvedPlanningDepthM}
-            planningTideHeightFt={resolvedPlanningTideHeightFt}
             interactive={!isDisplay}
           />
         )

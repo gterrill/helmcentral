@@ -73,9 +73,7 @@ export interface AnchorRodePlannerProps {
   // SignalK's design.length.overall (ADR 0047). Null when unpublished — this
   // is the LOA fallback source when settings.anchor.loa_m is unset (0).
   vesselLengthOverallM: number | null
-  // The forecast band, controlled by the host (App.tsx) so the tile's and
-  // drawer's Scope rows can plan against the same band the operator picked
-  // here instead of each seeding its own raw wind. Null means "no explicit
+  // The forecast band, controlled by the host (App.tsx). Null means "no explicit
   // pick yet" — resolvePlanningWindBand falls back to the live seed.
   windBandId: string | null
   onWindBandChange: (bandId: string) => void
@@ -195,9 +193,7 @@ export function AnchorRodePlanner({
   // The dropdown starts on whichever band the live seed (1h gust, else
   // apparent) falls in, and stays there until the operator picks another —
   // planning for the forecast band, not the reading at this instant.
-  // resolvePlanningWindBand is the one place this rule lives, shared with
-  // the map's Scope row (computeScopeRecommendation) so a band picked here
-  // reaches it instead of it seeding its own raw wind.
+  // resolvePlanningWindBand is the one place this rule lives.
   const selectedBand = resolvePlanningWindBand(maxGustKts, windSpeedApparentKts, windBandId)
   // Null only when there is no wind reading and no choice yet, which the
   // methods below report as "no wind data" rather than inventing a band.

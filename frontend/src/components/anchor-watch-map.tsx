@@ -11,7 +11,6 @@ import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -333,11 +332,6 @@ export interface AnchorWatchMapProps {
   // Distance KPI showed before Depth took over as the page's hero.
   distanceMeters: number | null
   bearingDeg: number | null
-  // Rendered as the Scope row in the metric overlay, under Current (ADR 0059
-  // §3). Null when the host has nothing to say yet (e.g. no map at all) —
-  // distinct from a RodeMethodResult carrying its own unavailableReason,
-  // which still renders the row with the reason visible.
-  scopeRecommendation: RodeMethodResult | null
   isImperial: boolean
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
@@ -465,7 +459,6 @@ export function AnchorWatchMap({
   currentDriftImpactKts = null,
   distanceMeters,
   bearingDeg: bearingDegProp,
-  scopeRecommendation,
   isImperial,
   vesselTrail,
   aisVessels,
@@ -869,15 +862,6 @@ export function AnchorWatchMap({
   }, [])
 
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
-  // Scope row (ADR 0059 §3): unavailable covers both a null prop (host has
-  // nothing to say) and a RodeMethodResult carrying its own unavailableReason
-  // — either way the row shows the reason, never a bare dash.
-  const scopeUnit = isImperial ? 'ft' : 'm'
-  const scopeAvailable = scopeRecommendation !== null && !scopeRecommendation.unavailableReason
-  const scopeReason = scopeRecommendation?.unavailableReason ?? null
-  const scopeRodeDisplay = scopeAvailable
-    ? Math.round(isImperial ? scopeRecommendation!.recommendedRodeM * 3.28084 : scopeRecommendation!.recommendedRodeM)
-    : null
   const formatRange = useCallback(
     (distanceM: number) => {
       if (isImperial) {
@@ -1976,8 +1960,8 @@ export function AnchorWatchMap({
           KPI showed. Distance, Bearing and Radius are dropped from the row
           list outright with no anchor set (none of the three mean anything
           without one) rather than rendering a dashed placeholder at full
-          visual weight; Current/Scope can be genuinely absent for reasons
-          that have nothing to do with anchor state, so they keep rendering
+          visual weight; Current can be genuinely absent for reasons
+          that have nothing to do with anchor state, so it keeps rendering
           (and dashing) as before.
           The background is a flat, near-opaque scrim rather than the old
           bg-black/50 (bg-black/35 while editing): measured contrast against
@@ -2024,29 +2008,9 @@ export function AnchorWatchMap({
             unit: 'kts',
             setDeg: currentSetDeg,
           },
-          {
-            label: 'Scope',
-            value: scopeRodeDisplay !== null ? `${scopeRodeDisplay}` : '—',
-            // Just the recommended rode and its unit, same as Radius/Depth
-            // above. The ratio and the MIN_SCOPE_RATIO floor marker used to
-            // ride in this suffix too; they're only reachable via the row's
-            // tooltip now (rowTitle below), which already carried the full
-            // note regardless.
-            unit: scopeAvailable ? scopeUnit : '',
-            // The reason (not the unit) renders in the unit slot when
-            // unavailable — see the render branch below — so the fallback
-            // policy's "surface the reason, never a bare dash" holds here too.
-            reason: scopeReason,
-            // The full note (depth source, wind, ratio, and the
-            // MIN_SCOPE_RATIO floor marker when it binds) rides along as a
-            // row tooltip rather than crowding the overlay — only set when
-            // there's a result to describe.
-            rowTitle: scopeAvailable ? scopeRecommendation!.note : undefined,
-          },
-        ].map(({ label, value, unit, setDeg, reason, rowTitle }, index) => (
+        ].map(({ label, value, unit, setDeg }, index) => (
           <div
             key={label}
-            title={rowTitle}
             className={cn(
               'flex items-center justify-between gap-4 px-3 py-1.5',
               index > 0 && 'border-t border-white/10',
@@ -2055,8 +2019,8 @@ export function AnchorWatchMap({
             <p className="text-[9px] uppercase tracking-[0.16em] text-white/80">
               {label}
             </p>
-            {label === 'Current' ? (
-              <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
+              {label === 'Current' && (
                 <ArrowUp
                   className={cn(
                     'shrink-0 text-white',
@@ -2067,26 +2031,12 @@ export function AnchorWatchMap({
                   style={{ transform: `rotate(${setDeg ?? 0}deg)` }}
                   aria-hidden="true"
                 />
-                <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
-                  {value}
-                  <span className="ml-0.5 text-xs text-white/80">{unit}</span>
-                </p>
-              </div>
-            ) : (
+              )}
               <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                 {value}
-                {reason ? (
-                  <span
-                    className="ml-1 inline-block max-w-[9rem] truncate align-bottom text-xs text-white/80"
-                    title={reason}
-                  >
-                    {reason}
-                  </span>
-                ) : (
-                  <span className="ml-0.5 text-xs text-white/80">{unit}</span>
-                )}
+                <span className="ml-0.5 text-xs text-white/80">{unit}</span>
               </p>
-            )}
+            </div>
           </div>
         ))}
       </div>

@@ -2,7 +2,6 @@ import { act, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // Kiosk maps are display-only (the operator can put e.g. Nearby on the wall
 // display, but there's no touchscreen to zoom/pan/rotate it with). These
@@ -64,13 +63,6 @@ const defaultAisVessels: NearbyVessel[] = [
   { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
 ]
 
-const defaultScopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'note',
-}
 
 function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
   return render(
@@ -86,7 +78,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={defaultScopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={defaultAisVessels}

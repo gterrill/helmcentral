@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { RadarTarget } from '@/hooks/use-radar-targets'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // Same maplibre-gl / react-map-gl stubs as anchor-watch-map-ui.test.tsx: this
 // suite only needs the marker layer, not a live map canvas.
@@ -72,13 +71,6 @@ const radarTargetNoPosition: RadarTarget = {
   lon: undefined,
 }
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'Depth 3.2 m (sounder only) · Wind 15 kts · 5:1',
-}
 
 function renderMap(radarTargets: RadarTarget[]) {
   return render(
@@ -94,7 +86,6 @@ function renderMap(radarTargets: RadarTarget[]) {
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={aisVessels}
