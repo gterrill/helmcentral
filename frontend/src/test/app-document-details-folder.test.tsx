@@ -248,6 +248,9 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 // navigation guard reacting to whatever these hooks report. ────────────────
 
 vi.mock('@/hooks/use-documents')
+vi.mock('@/hooks/use-document-folder-tree', () => ({
+  useDocumentFolderTree: () => ({ folders: [], loading: false, error: null, refresh: () => {} }),
+}))
 vi.mock('@/hooks/use-document-uploads')
 
 const mockedUseDocuments = vi.mocked(useDocuments)
@@ -407,5 +410,35 @@ describe('Document Details folder changes', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('Document Details Move that keeps the folder', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc()] }))
+    mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
+  })
+
+  it('a Move into the folder already browsed does not make the next navigation replace history', async () => {
+    const move = vi.fn(async () => {})
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f-a' }), move }))
+    // Browsing folder B already, Move files the document into B again.
+    window.history.replaceState({}, '', '/documents?folder=f-b')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }, { timeout: 5000 }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }))
+    await screen.findByLabelText('Title', {}, { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick folder B' }))
+    await waitFor(() => expect(move).toHaveBeenCalledWith('f-b'))
+
+    const pushState = vi.spyOn(window.history, 'pushState')
+    const replaceState = vi.spyOn(window.history, 'replaceState')
+    // An unrelated navigation: the Documents crumb back to the listing.
+    fireEvent.click(screen.getAllByRole('link', { name: 'Documents' }).at(-1)!)
+    await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument())
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(pushState).toHaveBeenCalled()
   })
 })

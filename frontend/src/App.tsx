@@ -2939,6 +2939,7 @@ export function App() {
         if (documentsEditId !== null) {
           return (
             <DocumentDetailsPage
+              key={documentsEditId}
               ref={documentDetailsPageRef}
               documentId={documentsEditId}
               onDirtyChange={setDocumentDetailsDirty}
@@ -2957,7 +2958,10 @@ export function App() {
                 requestBackFromDocumentDetails(() => setDocumentsEditId(null))
               }}
               onFolderContextChange={(folderId) => {
-                replaceNextLocationRef.current = true
+                // Only a change of folder makes the sync effect write a new
+                // location; if it stays the same nothing would clear the
+                // flag and it would leak onto the next unrelated navigation.
+                if (folderId !== documentsFolderId) replaceNextLocationRef.current = true
                 changeDocumentsFolder(folderId)
               }}
               onTitleChange={setDocumentDetailsTitle}

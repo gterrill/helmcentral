@@ -812,6 +812,27 @@ describe('useDocument', () => {
     expect(calls.some((c) => c.method === 'GET' && c.url === '/api/documents/doc-1')).toBe(true)
   })
 
+  it('never reports the previous document while a new id loads', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const { fn } = routedFetch({
+      'GET /api/documents/doc-1': () => ok(docPayload({ id: 'doc-1', title: 'First' })),
+      'GET /api/documents/doc-2': async () => { await gate; return ok(docPayload({ id: 'doc-2', title: 'Second' })) },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result, rerender } = renderHook(({ id }) => useDocument(id), { initialProps: { id: 'doc-1' } })
+    await waitFor(() => expect(result.current.document?.id).toBe('doc-1'))
+
+    rerender({ id: 'doc-2' })
+    expect(result.current.document).toBeNull()
+    expect(result.current.loading).toBe(true)
+
+    release()
+    await waitFor(() => expect(result.current.document?.id).toBe('doc-2'))
+    expect(result.current.loading).toBe(false)
+  })
+
   // AGENTS.md fallback policy: the server's own message, not an invented
   // "document not found" string - documentByIDHandler (backend/documents_handlers.go)
   // already returns exactly this body for an unknown id.

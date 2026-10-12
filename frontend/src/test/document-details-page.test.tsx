@@ -6,6 +6,7 @@ import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 
 import { DocumentDetailsPage, type DocumentDetailsPageHandle } from '@/components/document-details-page'
 import { useDocument, useFolderPath } from '@/hooks/use-documents'
+import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 
 // ADR 0115 §3: DocumentDetailsPage is tested against a mocked
 // useDocument, the same way documents-panel.test.tsx mocks useDocuments -
@@ -13,9 +14,15 @@ import { useDocument, useFolderPath } from '@/hooks/use-documents'
 // this file is about what the page does with whatever the hook reports.
 
 vi.mock('@/hooks/use-documents')
+vi.mock('@/hooks/use-document-folder-tree')
 
 const mockedUseDocument = vi.mocked(useDocument)
 const mockedUseFolderPath = vi.mocked(useFolderPath)
+const mockedUseFolderTree = vi.mocked(useDocumentFolderTree)
+
+function treeNode(id: string, name: string, parent_id: string | null, is_manual = false) {
+  return { id, name, parent_id, is_manual, document_count: 0, subtree_document_count: 0 }
+}
 
 // The Move dialog's picker browses folders through useDocuments.
 vi.mock('@/components/documents/move-to-folder-dialog', () => ({
@@ -86,6 +93,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockedUseDocument.mockReturnValue(makeDocumentMock())
   mockedUseFolderPath.mockReturnValue({ path: [], error: null })
+  mockedUseFolderTree.mockReturnValue({ folders: [], loading: false, error: null, refresh: vi.fn() })
 })
 
 describe('DocumentDetailsPage', () => {
@@ -320,6 +328,37 @@ describe('DocumentDetailsPage', () => {
     const nav = screen.getByRole('navigation', { name: 'breadcrumb' })
     expect(within(nav).getAllByRole('link').filter((l) => !l.hasAttribute('aria-current')).map((l) => l.textContent)).toEqual(['Documents', 'Boat', 'Manuals'])
     expect(within(nav).getByText('Impeller kit')).toBeInTheDocument()
+  })
+
+  it('a crumb inside a manual opens the manual, not the chapter as a plain folder', () => {
+    const onOpenFolder = vi.fn()
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'ch' }) }))
+    mockedUseFolderPath.mockReturnValue({
+      path: [{ id: 'man', name: 'Handbook', parent_id: null }, { id: 'ch', name: 'Engines', parent_id: 'man' }],
+      error: null,
+    })
+    mockedUseFolderTree.mockReturnValue({
+      folders: [treeNode('man', 'Handbook', null, true), treeNode('ch', 'Engines', 'man')],
+      loading: false, error: null, refresh: vi.fn(),
+    })
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={onOpenFolder} onBack={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Engines' }))
+    expect(onOpenFolder).toHaveBeenLastCalledWith('man')
+    fireEvent.click(screen.getByRole('link', { name: 'Handbook' }))
+    expect(onOpenFolder).toHaveBeenLastCalledWith('man')
+  })
+
+  it('does not link folder crumbs until the folder tree has loaded, and says when it failed', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f1' }) }))
+    mockedUseFolderPath.mockReturnValue({ path: [{ id: 'f1', name: 'Boat', parent_id: null }], error: null })
+    mockedUseFolderTree.mockReturnValue({ folders: [], loading: false, error: 'HTTP 500', refresh: vi.fn() })
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
+
+    expect(screen.queryByRole('link', { name: 'Boat' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 500')
   })
 
   it('the Documents crumb goes back to where the operator came from and a folder crumb opens that folder', () => {
