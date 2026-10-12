@@ -8,7 +8,6 @@ import {
   type ScreenRect,
 } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // Design critique item 4: the detector found real AIS-label occlusion —
 // "KINGFISH" half-covered by an opaque map control, a vessel label
@@ -117,13 +116,6 @@ vi.mock('react-map-gl/maplibre', async () => {
   }
 })
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'note',
-}
 
 function renderMap(aisVessels: NearbyVessel[]) {
   return render(
@@ -139,7 +131,6 @@ function renderMap(aisVessels: NearbyVessel[]) {
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={aisVessels}
@@ -224,7 +215,6 @@ describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
         currentSetDeg={120}
         distanceMeters={10}
         bearingDeg={80}
-        scopeRecommendation={scopeRecommendation}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={vessels}

@@ -3,7 +3,6 @@ import { calculateCatenary } from '@/lib/catenary'
 import {
   buildRodePlan,
   catenaryMethod,
-  computeScopeRecommendation,
   computeSwingRadiusM,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
@@ -23,7 +22,6 @@ import {
   type RodePlanInput,
 } from '@/lib/rode-plan'
 import type { TideToday } from '@/hooks/use-tide-today'
-import type { AnchorConfig } from '@/config/app-config'
 import type { GustWindow } from '@/lib/gust-windows'
 
 // Mirrors the unexported constant of the same name in rode-plan.ts — used
@@ -774,172 +772,6 @@ describe('seedPlanningWindKts', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// computeScopeRecommendation — the single recommendation the map overlay's
-// Scope row renders (ADR 0059 §3), shared by the tile and drawer hosts.
-// ---------------------------------------------------------------------------
-describe('computeScopeRecommendation', () => {
-  const baseAnchorConfig: AnchorConfig = {
-    bowRollerHeightM: 1,
-    chainSizeMm: 10,
-    chainOnboardM: 50,
-    hullType: 'power_mono',
-    scopeMethod: 'ratio',
-    windageAreaM2: 20,
-    gpsFromBowM: 0,
-    loaM: 0,
-    minClearanceAtLowM: 0.5,
-  }
-
-  const baseArgs = {
-    isAnchored: false,
-    liveDepthM: 5,
-    planningDepthM: null as number | null,
-    planningTideHeightFt: null as number | null,
-    tide: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null } as Record<GustWindow, number | null>,
-    windSpeedApparentKts: 15,
-    seaState: 'calm' as const,
-    seabedType: 'sand' as const,
-    anchorConfig: baseAnchorConfig,
-    // No operator override in the base case — every case below sets this
-    // explicitly (the field is required, not defaulted; see
-    // resolvePlanningWindBand below for why a silent default is the trap).
-    selectedWindBandId: null as string | null,
-  }
-
-  it('picks ratioMethod when anchorConfig.scopeMethod is "ratio"', () => {
-    const result = computeScopeRecommendation(baseArgs)
-    expect(result.id).toBe('ratio')
-    // The 15kt apparent seed lands in the 15-20 band, which plans at its top
-    // (20kt) — right at the ratio method's >=20kt threshold, so 7:1, not the
-    // 5:1 a raw 15kt reading would have given pre-banding.
-    expect(result.recommendedRodeM).toBeCloseTo(42, 6) // (5 + 1) * 7
-    expect(result.scopeRatio).toBe(7)
-  })
-
-  it('picks catenaryMethod when anchorConfig.scopeMethod is "catenary"', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      anchorConfig: { ...baseAnchorConfig, scopeMethod: 'catenary' },
-    })
-    expect(result.id).toBe('catenary')
-    // Matches the case-1 characterization above (5m/20kt would give a
-    // different figure) — this uses the 15-20 band's planKts (20), the band
-    // the seeded 15kt apparent wind falls in, not the raw 15kt reading.
-    const expected = catenaryMethod({
-      depth: { depthM: 5, tideHeightFt: null },
-      isAnchored: false,
-      bowRollerHeightM: 1,
-      tide: null,
-      windKts: 20,
-      seaState: 'calm',
-      seabedType: 'sand',
-      chainSizeMm: 10,
-      chainOnboardM: 50,
-      windageAreaM2: 20,
-      hullType: 'power_mono',
-    })
-    expect(result.recommendedRodeM).toBeCloseTo(expected!.recommendedRodeM, 6)
-  })
-
-  it('seeds wind from the 1h max gust ahead of apparent wind, same as the Rode Planner', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      maxGustKts: { '10m': null, '30m': null, '1h': 25, '24h': null },
-      windSpeedApparentKts: 10,
-    })
-    // The seeded 25kt gust clears the ratio method's 20kt threshold even
-    // though the apparent wind alone (10kt) would not have.
-    expect(result.scopeRatio).toBe(7)
-  })
-
-  it('falls back to apparent wind when no 1h gust is recorded', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
-      windSpeedApparentKts: 25,
-    })
-    expect(result.scopeRatio).toBe(7)
-  })
-
-  it('passes through the unavailableReason when depth is missing, rather than throwing or masking it', () => {
-    const result = computeScopeRecommendation({ ...baseArgs, liveDepthM: null })
-    expect(result.unavailableReason).toBe('no depth reading')
-  })
-
-  it('names "no depth entered" when anchored with nothing recorded', () => {
-    const result = computeScopeRecommendation({ ...baseArgs, isAnchored: true, liveDepthM: 99 })
-    expect(result.unavailableReason).toBe('no depth entered')
-  })
-
-  it('plans off the recorded planning depth, not the live sounder, once anchored', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      isAnchored: true,
-      liveDepthM: 99,
-      planningDepthM: 5,
-      planningTideHeightFt: null,
-    })
-    // Same 5m depth as the not-anchored baseline case above, proving the
-    // 99m live reading was ignored once a watch is active.
-    expect(result.recommendedRodeM).toBeCloseTo(42, 6)
-  })
-
-  it('passes through the unavailableReason when neither gust nor apparent wind is available', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
-      windSpeedApparentKts: null,
-    })
-    expect(result.unavailableReason).toBe('no wind data')
-  })
-
-  // The Rode Planner plans in bands, not raw continuous readings — this is
-  // the guarantee that the map's Scope row now agrees with it (previously
-  // this function seeded the raw gust straight through, so the two views of
-  // the same night could recommend different rode).
-  it('plans at the band\'s planKts rather than the raw seed, with no explicit selection', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      anchorConfig: { ...baseAnchorConfig, scopeMethod: 'catenary' },
-      maxGustKts: { '10m': null, '30m': null, '1h': 12.3, '24h': null },
-    })
-    // 12.3kt falls in the 10-15 band, which plans at its top (15kt) — not
-    // the raw 12.3kt reading. Catenary's load term is v², so the two would
-    // produce visibly different figures if the raw seed leaked through.
-    const inputAtBandTop: RodePlanInput = {
-      depth: { depthM: 5, tideHeightFt: null },
-      isAnchored: false,
-      bowRollerHeightM: 1,
-      tide: null,
-      windKts: 15,
-      seaState: 'calm',
-      seabedType: 'sand',
-      chainSizeMm: 10,
-      chainOnboardM: 50,
-      windageAreaM2: 20,
-      hullType: 'power_mono',
-    }
-    const atBandTop = catenaryMethod(inputAtBandTop)
-    const atRawSeed = catenaryMethod({ ...inputAtBandTop, windKts: 12.3 })
-    expect(result.recommendedRodeM).toBeCloseTo(atBandTop!.recommendedRodeM, 6)
-    expect(result.recommendedRodeM).not.toBeCloseTo(atRawSeed!.recommendedRodeM, 1)
-  })
-
-  it('lets an explicit band id override a calm seed', () => {
-    const result = computeScopeRecommendation({
-      ...baseArgs,
-      maxGustKts: { '10m': null, '30m': null, '1h': 3, '24h': null }, // calm — seeds the 0-10 band alone
-      selectedWindBandId: '20-25',
-    })
-    // The explicit 20-25 selection plans at 25kt regardless of the calm 3kt
-    // seed: (5 + 1) * 7 = 42, ratio 7:1, at/over the ratio method's threshold.
-    expect(result.recommendedRodeM).toBeCloseTo(42, 6)
-    expect(result.scopeRatio).toBe(7)
-  })
-})
-
 // ─────────────────────────────────────────────────────────────
 // Wind bands — the planner picks a forecast band rather than typing a figure
 // ─────────────────────────────────────────────────────────────
@@ -1001,9 +833,8 @@ describe('WIND_BANDS', () => {
 })
 
 // ─────────────────────────────────────────────────────────────
-// resolvePlanningWindBand — the single band-selection rule the Rode Planner's
-// dropdown and computeScopeRecommendation both defer to, so an operator's
-// pick in one view reaches the other instead of each deriving its own band.
+// resolvePlanningWindBand — the single band-selection rule behind the Rode
+// Planner's dropdown.
 // ─────────────────────────────────────────────────────────────
 describe('resolvePlanningWindBand', () => {
   const noGust: Record<GustWindow, number | null> = { '10m': null, '30m': null, '1h': null, '24h': null }

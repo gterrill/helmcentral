@@ -4,7 +4,6 @@ import { AnchorWatchMap, resolveRadarEchoAvailability } from '@/components/ancho
 import type { RadarInfo } from '@/hooks/use-radar-targets'
 import type { RadarCapabilities } from '@/lib/radar-echo/legend'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // The toggle must never be a switch that silently does nothing: this suite
 // covers the precedence chain resolveRadarEchoAvailability implements (no
@@ -134,13 +133,6 @@ vi.mock('@/hooks/use-radar-capabilities', () => ({
 
 import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'note',
-}
 
 const defaultAisVessels: NearbyVessel[] = []
 
@@ -158,7 +150,6 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={defaultAisVessels}

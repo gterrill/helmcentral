@@ -3,7 +3,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { PLACE_LABEL_LAYER_IDS } from '@/components/map-place-labels'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -104,14 +103,6 @@ const defaultAisVessels: NearbyVessel[] = [
   { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
 ]
 
-const defaultScopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'Depth 3.2 m (sounder only) · Wind 15 kts · 5:1',
-}
-
 function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
   return (
     <AnchorWatchMap
@@ -126,7 +117,6 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={defaultScopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={aisVessels}
@@ -499,104 +489,30 @@ describe('AnchorWatchMap with no anchor set', () => {
     expect(within(metrics).queryByText('Radius')).not.toBeInTheDocument()
   })
 
-  // Current/Scope can be genuinely unavailable for reasons that have nothing
-  // to do with anchor state (no scope recommendation yet) — those rows must
-  // keep rendering, dash and all, rather than being swept up by the
-  // no-anchor suppression above. Depth is no longer one of them — see the
-  // "drops the Depth row entirely" test below.
-  it('keeps Current and Scope rendering with no anchor set', () => {
+  // Current can be genuinely unavailable for reasons that have nothing to do
+  // with anchor state — that row must keep rendering, dash and all, rather
+  // than being swept up by the no-anchor suppression above. Depth is no
+  // longer one of them — see the "drops the Depth row entirely" test below.
+  it('keeps Current rendering with no anchor set', () => {
     renderMap(defaultAisVessels, {
       anchorLat: null,
       anchorLon: null,
       currentDriftKts: null,
-      scopeRecommendation: null,
     })
 
     const metrics = screen.getByTestId('anchor-watch-metrics')
     expect(within(metrics).getByText('Current')).toBeInTheDocument()
-    expect(within(metrics).getByText('Scope')).toBeInTheDocument()
   })
 })
 
-// The recommended-scope readout used to live in a box below the map (ADR
-// 0059 §3); it now renders as a Scope row inside this metric overlay,
-// directly under Current, so both hosts (tile and fullscreen drawer) get it
-// for free by passing scopeRecommendation through.
-describe('AnchorWatchMap Scope row', () => {
-  function scopeRow() {
+// The recommended-rode readout lives in the Rode Planner only; the map's
+// metric overlay carries no Scope row.
+describe('AnchorWatchMap metric overlay rows', () => {
+  it('has no Scope row', () => {
+    renderMap()
+
     const metrics = screen.getByTestId('anchor-watch-metrics')
-    const currentRow = within(metrics).getByText('Current').parentElement as HTMLElement
-    return currentRow.nextElementSibling as HTMLElement
-  }
-
-  it('renders Scope directly under Current with the recommended rode figure and its plain unit', () => {
-    renderMap()
-
-    const row = scopeRow()
-    expect(within(row).getByText('Scope')).toBeInTheDocument()
-    expect(row).toHaveTextContent('30')
-    expect(row).toHaveTextContent('m')
-    expect(row).not.toHaveTextContent('5:1')
-    expect(row).not.toHaveTextContent('min')
-  })
-
-  // The merged "3:1 min" tag is gone from the row itself — the ratio and the
-  // MIN_SCOPE_RATIO floor marker are only reachable via the row's tooltip now,
-  // riding along on the same `note` the row already carried as its title.
-  it('still surfaces the ratio and the floor marker for a floored recommendation, via the row tooltip', () => {
-    const floored: RodeMethodResult = {
-      id: 'catenary',
-      label: 'Catenary Method',
-      recommendedRodeM: 34.5,
-      scopeRatio: 3,
-      note: 'Depth 10.0 m (tide-corrected) · Wind 3 kts · Chain 12mm · Hull power cat · 3:1 minimum',
-    }
-    renderMap(defaultAisVessels, { scopeRecommendation: floored })
-
-    const row = scopeRow()
-    expect(row).toHaveAttribute('title', floored.note)
-    expect(row).not.toHaveTextContent('3:1 minimum')
-    expect(row).not.toHaveTextContent('min')
-  })
-
-  it('converts the Scope rode figure to feet under imperial units', () => {
-    renderMap(defaultAisVessels, { isImperial: true })
-
-    const row = scopeRow()
-    // 30 m * 3.28084 = 98.4 ft, rounded to 98.
-    expect(row).toHaveTextContent('98')
-    expect(row).toHaveTextContent('ft')
-    expect(row).not.toHaveTextContent('5:1')
-  })
-
-  it('carries the full note as a tooltip on the row when the recommendation is available', () => {
-    renderMap()
-
-    expect(scopeRow()).toHaveAttribute('title', defaultScopeRecommendation.note)
-  })
-
-  it('shows the reason instead of a dash — never a bare dash — when the recommendation is unavailable', () => {
-    const unavailable: RodeMethodResult = {
-      id: 'ratio',
-      label: 'Ratio Method',
-      recommendedRodeM: 0,
-      scopeRatio: 0,
-      note: '',
-      unavailableReason: 'bow roller height not configured',
-    }
-    renderMap(defaultAisVessels, { scopeRecommendation: unavailable })
-
-    const row = scopeRow()
-    expect(within(row).getByText('—')).toBeInTheDocument()
-    const reasonEl = within(row).getByText('bow roller height not configured')
-    expect(reasonEl).toHaveAttribute('title', 'bow roller height not configured')
-    expect(reasonEl.className).toContain('truncate')
-  })
-
-  it('shows a dash with no crash when the scopeRecommendation prop itself is null', () => {
-    renderMap(defaultAisVessels, { scopeRecommendation: null })
-
-    expect(within(scopeRow()).getByText('—')).toBeInTheDocument()
+    expect(within(metrics).queryByText('Scope')).not.toBeInTheDocument()
   })
 })
 

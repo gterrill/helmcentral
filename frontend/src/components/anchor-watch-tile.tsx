@@ -1,5 +1,5 @@
 import { Anchor, Volume2 } from 'lucide-react'
-import { lazy, memo, Suspense, useCallback, useMemo } from 'react'
+import { lazy, memo, Suspense, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
@@ -11,9 +11,7 @@ import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
-import type { GustWindow } from '@/lib/gust-windows'
-import type { AnchorConfig } from '@/config/app-config'
-import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
+import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
 // anchor-watch-map.tsx imports maplibre-gl and react-map-gl at module scope
@@ -86,21 +84,6 @@ interface AnchorWatchTileProps {
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void
   tide: TideToday | null
-  windSpeedApparentKts: number | null
-  maxGustKts: Record<GustWindow, number | null>
-  anchorConfig: AnchorConfig
-  // The band the operator picked in the Rode Planner (App.tsx owns it), so
-  // this tile's Scope row plans against the same band the planner shows
-  // rather than seeding its own raw wind. Null when there's no explicit pick
-  // — computeScopeRecommendation falls back to the live seed.
-  selectedWindBandId: string | null
-  // The resolved planning depth (App.tsx owns it — ADR 0063): the persisted
-  // watch record while anchored, the not-anchored session what-if otherwise.
-  // This tile has no control to set it, only to plan against it — the same
-  // resolved figure reaching the drawer and the planner is what keeps all
-  // three surfaces in agreement.
-  planningDepthM: number | null
-  planningTideHeightFt: number | null
   /**
    * False on the wall kiosk (ADR: kiosk maps are display-only) - passed
    * straight through to AnchorWatchMap, which then hides its own on-map
@@ -148,12 +131,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   onPlacemarkCreate,
   onPlacemarkRemove,
   tide,
-  windSpeedApparentKts,
-  maxGustKts,
-  anchorConfig,
-  selectedWindBandId,
-  planningDepthM,
-  planningTideHeightFt,
   interactive = true,
   lastUpdateAgeS,
 }: AnchorWatchTileProps) {
@@ -169,8 +146,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     distanceMeters,
     bearingDeg,
     setAnchorHere,
-    seaState,
-    seabedType,
   } = watch
 
   // Drag detection is server-side (ADR 0038); this renders the audible half and
@@ -198,40 +173,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   // after the anchor was already set) rather than fabricating 0,0.
   const vesselLat = lat ?? anchorLat
   const vesselLon = lon ?? anchorLon
-
-  const isAnchored = anchorState !== 'none'
-
-  // Rendered by the map's metric overlay as the Scope row, under Current
-  // (ADR 0059 §3) — this tile no longer renders the readout itself.
-  const rodeResult = useMemo(
-    () =>
-      computeScopeRecommendation({
-        isAnchored,
-        liveDepthM: depthMeters,
-        planningDepthM,
-        planningTideHeightFt,
-        tide,
-        maxGustKts,
-        windSpeedApparentKts,
-        seaState,
-        seabedType,
-        anchorConfig,
-        selectedWindBandId,
-      }),
-    [
-      isAnchored,
-      depthMeters,
-      planningDepthM,
-      planningTideHeightFt,
-      tide,
-      maxGustKts,
-      windSpeedApparentKts,
-      seaState,
-      seabedType,
-      anchorConfig,
-      selectedWindBandId,
-    ],
-  )
 
   return (
     <Tile
@@ -352,7 +293,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               currentDriftImpactKts={currentDriftImpactKts}
               distanceMeters={distanceMeters}
               bearingDeg={bearingDeg}
-              scopeRecommendation={rodeResult}
               isImperial={isImperial}
               vesselTrail={vesselTrail}
               aisVessels={aisVessels}

@@ -42,7 +42,6 @@ describe('AnchorWatchMap stacking', () => {
         currentSetDeg={120}
         distanceMeters={10}
         bearingDeg={80}
-        scopeRecommendation={null}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={[]}

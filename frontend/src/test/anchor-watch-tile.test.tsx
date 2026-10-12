@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { TideToday } from '@/hooks/use-tide-today'
-import { catenaryMethod, type RodeMethodResult, type RodePlanInput } from '@/lib/rode-plan'
 
 // The tile computes `now` itself (`new Date()`, live at render time — see
 // ADR 0135), so datetime/low_tide_time below are built relative to the real
@@ -29,10 +28,7 @@ function makeTide(overrides: Partial<TideToday> = {}): TideToday {
 
 // Same shallow-mock approach as anchor-imagery-toggle.test.tsx (~lines 22-37):
 // the map itself is covered by its own dedicated tests, so here it's stubbed
-// down to the props this tile is responsible for feeding it. scopeRecommendation
-// is surfaced as data attributes (rather than rendered as the real Scope row —
-// that formatting is the map's job, covered by anchor-watch-map-ui.test.tsx)
-// so these tests can assert on exactly what the tile computed and handed down.
+// down to the props this tile is responsible for feeding it.
 //
 // anchor-watch-tile.tsx now lazy-loads the real AnchorWatchMap (kiosk
 // bundle-split follow-up), but vi.mock intercepts the module regardless of
@@ -45,7 +41,6 @@ vi.mock('@/components/anchor-watch-map', () => ({
   AnchorWatchMap: (props: {
     vesselLat: number
     vesselLon: number
-    scopeRecommendation: RodeMethodResult | null
     aisCollisionAlarms?: ReadonlyMap<string, string>
     interactive?: boolean
     anchorSetAt?: string | null
@@ -61,13 +56,6 @@ vi.mock('@/components/anchor-watch-map', () => ({
       data-has-radius-change={String(props.onRadiusChange !== undefined)}
     >
       {`${props.vesselLat},${props.vesselLon}`}
-      <div
-        data-testid="scope-recommendation"
-        data-id={props.scopeRecommendation?.id ?? ''}
-        data-rode-m={props.scopeRecommendation?.recommendedRodeM ?? ''}
-        data-scope-ratio={props.scopeRecommendation?.scopeRatio ?? ''}
-        data-unavailable-reason={props.scopeRecommendation?.unavailableReason ?? ''}
-      />
     </div>
   ),
 }))
@@ -159,22 +147,6 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     onPlacemarkCreate: vi.fn(),
     onPlacemarkRemove: vi.fn(),
     tide: null,
-    windSpeedApparentKts: 15,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
-    anchorConfig: {
-      bowRollerHeightM: 1,
-      chainSizeMm: 10,
-      chainOnboardM: 50,
-      hullType: 'power_cat' as const,
-      scopeMethod: 'ratio' as const,
-      windageAreaM2: 20,
-      gpsFromBowM: 0,
-      loaM: 0,
-      minClearanceAtLowM: 0.5,
-    },
-    selectedWindBandId: null,
-    planningDepthM: null,
-    planningTideHeightFt: null,
     lastUpdateAgeS: null,
     ...overrides,
   }
@@ -323,121 +295,6 @@ describe('AnchorWatchTile', () => {
 
     expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Raise' })).toBeNull()
-  })
-
-  // The recommendation itself now renders in the map's metric overlay (ADR
-  // 0059 §3) — that formatting, including the imperial conversion, is
-  // covered by anchor-watch-map-ui.test.tsx. These tests cover what remains
-  // the tile's job: computing the right RodeMethodResult and handing it to
-  // the map via scopeRecommendation.
-  describe('scope recommendation', () => {
-    it('computes the ratio-method rode figure for a normal (< 20kt) wind', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 5,
-            // 12kt apparent seeds the 10-15 band, which plans at its top
-            // (15kt) — clear of the ratio method's 20kt threshold.
-            windSpeedApparentKts: 12,
-            anchorConfig: { ...baseProps().anchorConfig, bowRollerHeightM: 1, scopeMethod: 'ratio' },
-          })}
-        />,
-      )
-
-      // (5 + 1) * 5 = 30, ratio 5:1 below the 20kt threshold.
-      const scope = screen.getByTestId('scope-recommendation')
-      expect(scope.dataset.id).toBe('ratio')
-      expect(Number(scope.dataset.rodeM)).toBeCloseTo(30, 6)
-      expect(scope.dataset.scopeRatio).toBe('5')
-    })
-
-    it('computes the ratio-method rode figure for a strong (>= 20kt) wind', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 5,
-            windSpeedApparentKts: 25,
-            anchorConfig: { ...baseProps().anchorConfig, bowRollerHeightM: 1, scopeMethod: 'ratio' },
-          })}
-        />,
-      )
-
-      // (5 + 1) * 7 = 42, ratio 7:1 at/above the 20kt threshold.
-      const scope = screen.getByTestId('scope-recommendation')
-      expect(scope.dataset.id).toBe('ratio')
-      expect(Number(scope.dataset.rodeM)).toBeCloseTo(42, 6)
-      expect(scope.dataset.scopeRatio).toBe('7')
-    })
-
-    // Proves the tile's Scope row now shares the same band selection as the
-    // Rode Planner (frontend/src/components/anchor-rode-planner.tsx) rather
-    // than seeding its own raw wind — an explicit stronger band must win
-    // over a calm live gust, the same rule resolvePlanningWindBand applies
-    // for the planner's own dropdown.
-    it('follows the shared selectedWindBandId even when the live gust is calm', () => {
-      render(
-        <AnchorWatchTile
-          {...baseProps({
-            depthMeters: 5,
-            maxGustKts: { '10m': null, '30m': null, '1h': 3, '24h': null }, // calm — seeds the 0-10 band alone
-            windSpeedApparentKts: null,
-            selectedWindBandId: '20-25',
-            anchorConfig: { ...baseProps().anchorConfig, bowRollerHeightM: 1, scopeMethod: 'ratio' },
-          })}
-        />,
-      )
-
-      // The explicit 20-25 band plans at 25kt regardless of the calm 3kt
-      // gust: (5 + 1) * 7 = 42, ratio 7:1, at/over the 20kt threshold.
-      const scope = screen.getByTestId('scope-recommendation')
-      expect(Number(scope.dataset.rodeM)).toBeCloseTo(42, 6)
-      expect(scope.dataset.scopeRatio).toBe('7')
-    })
-
-    it('computes the catenary-method figure instead when scopeMethod is catenary', () => {
-      const anchorConfig = {
-        ...baseProps().anchorConfig,
-        scopeMethod: 'catenary' as const,
-        bowRollerHeightM: 1,
-      }
-      const input: RodePlanInput = {
-        depth: { depthM: 5, tideHeightFt: null },
-        isAnchored: false,
-        bowRollerHeightM: anchorConfig.bowRollerHeightM,
-        tide: null,
-        // 12kt apparent (the wind fed to the tile below) seeds the 10-15
-        // band, which plans at its top — 15kt, not the raw 12kt reading.
-        windKts: 15,
-        seaState: 'calm',
-        seabedType: 'sand',
-        chainSizeMm: anchorConfig.chainSizeMm,
-        chainOnboardM: anchorConfig.chainOnboardM,
-        windageAreaM2: anchorConfig.windageAreaM2,
-        hullType: anchorConfig.hullType,
-      }
-      const expected = catenaryMethod(input)
-      expect(expected).not.toBeNull()
-
-      render(<AnchorWatchTile {...baseProps({ depthMeters: 5, windSpeedApparentKts: 12, anchorConfig })} />)
-
-      const scope = screen.getByTestId('scope-recommendation')
-      expect(scope.dataset.id).toBe('catenary')
-      expect(Number(scope.dataset.rodeM)).toBeCloseTo(expected!.recommendedRodeM, 6)
-    })
-
-    it('passes the literal unavailable reason — never a bare dash — when depth is missing', () => {
-      render(<AnchorWatchTile {...baseProps({ depthMeters: null })} />)
-
-      expect(screen.getByTestId('scope-recommendation').dataset.unavailableReason).toBe('no depth reading')
-    })
-
-    it('never renders a pass/fail scope badge (ADR 0047 retired it)', () => {
-      render(<AnchorWatchTile {...baseProps()} />)
-
-      expect(screen.queryByText(/Scope OK/)).toBeNull()
-      expect(screen.queryByText(/Scope Low/)).toBeNull()
-      expect(screen.queryByText(/Scope Insufficient/)).toBeNull()
-    })
   })
 
   describe('banners', () => {
@@ -591,7 +448,6 @@ describe('AnchorWatchTile', () => {
             {...baseProps({
               depthMeters,
               tide: makeTide(),
-              anchorConfig: { ...baseProps().anchorConfig, minClearanceAtLowM: 0.5 },
             })}
           />,
         )

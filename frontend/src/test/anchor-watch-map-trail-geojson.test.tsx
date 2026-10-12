@@ -2,7 +2,6 @@ import { act, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 
 // react-map-gl re-uploads a Source's `data` to maplibre whenever the prop's
@@ -44,13 +43,6 @@ vi.mock('react-map-gl/maplibre', async () => {
   }
 })
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'note',
-}
 
 function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
   return render(
@@ -66,7 +58,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={[]}

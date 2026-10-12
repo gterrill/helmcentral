@@ -86,7 +86,6 @@ const baseProps = {
   currentSetDeg: null,
   distanceMeters: 10,
   bearingDeg: 80,
-  scopeRecommendation: null,
   isImperial: false,
   vesselTrail: () => [],
   aisVessels: [],

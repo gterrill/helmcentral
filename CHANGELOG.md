@@ -19,6 +19,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   500 m ranks below an anchorage and above a bay. The lookup also reaches about 10 km
   from the boat, up from about 5 km, so open water off a coast is more likely
   to get a bay or island name.
+- The Anchor Watch map no longer shows a Scope row in its readout panel. The
+  rode planner still gives the recommended rode.
 
 ## [0.43.0] - 2026-10-08
 

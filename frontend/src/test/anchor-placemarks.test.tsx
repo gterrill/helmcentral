@@ -71,7 +71,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={null}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={[]}
@@ -196,7 +195,6 @@ describe('anchor-watch placemarks', () => {
         currentSetDeg={120}
         distanceMeters={10}
         bearingDeg={80}
-        scopeRecommendation={null}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={[]}

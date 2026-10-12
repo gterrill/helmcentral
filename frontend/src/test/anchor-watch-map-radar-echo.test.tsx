@@ -4,7 +4,6 @@ import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { RadarCapabilities } from '@/lib/radar-echo/legend'
 import type { RadarInfo } from '@/hooks/use-radar-targets'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // Extends the react-map-gl/maplibre mock used by anchor-watch-map-ui.test.tsx
 // (~L40) with the imperative addSource/addLayer/removeLayer/removeSource/
@@ -165,13 +164,6 @@ const transmittingRadar: RadarInfo = { id: 'fur6424A', name: 'Furuno DRS4D-NXT',
 
 const defaultAisVessels: NearbyVessel[] = []
 
-const scopeRecommendation: RodeMethodResult = {
-  id: 'ratio',
-  label: 'Ratio Method',
-  recommendedRodeM: 30,
-  scopeRatio: 5,
-  note: 'note',
-}
 
 function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
   return (
@@ -187,7 +179,6 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
-      scopeRecommendation={scopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={defaultAisVessels}

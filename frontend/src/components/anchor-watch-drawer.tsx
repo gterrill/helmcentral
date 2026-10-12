@@ -21,7 +21,7 @@ import { useAnchorAdjustCommit, type AnchorAdjustTarget } from '@/hooks/use-anch
 import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM, type AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
 import { haversineMeters } from '@/lib/geo'
-import { computeScopeRecommendation, resolveLoaM } from '@/lib/rode-plan'
+import { resolveLoaM } from '@/lib/rode-plan'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { formatDataAge, isStale } from '@/lib/staleness'
@@ -148,16 +148,14 @@ interface AnchorWatchDrawerProps {
   // reads as the warning's own "No draft from the boat" state rather than a
   // silent zero-draft substitution.
   vesselDraftM: number | null
-  // Shared with the tile and the Rode Planner (App.tsx owns the state) so
-  // all three plan against the same forecast band. Null when there's no
-  // explicit pick — computeScopeRecommendation falls back to the live seed.
+  // The band picked in the Rode Planner (App.tsx owns the state). Null when
+  // there's no explicit pick — the planner falls back to the live seed.
   windBandId: string | null
   onWindBandChange: (bandId: string) => void
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   // The resolved planning depth (App.tsx owns it — ADR 0063): the persisted
   // watch record while anchored, the not-anchored session what-if otherwise.
-  // Feeds both the map's Scope row here and the Rode Planner below it, so the
-  // two can't disagree.
+  // Feeds the Rode Planner below.
   planningDepthM: number | null
   planningTideHeightFt: number | null
   onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
@@ -248,43 +246,9 @@ export function AnchorWatchDrawer({
     })
   }, [onRadiusChange])
 
-  // Rendered by the map's metric overlay as the Scope row, under Current
-  // (ADR 0059 §3) — shared with the tile via computeScopeRecommendation, and
-  // with the Rode Planner below via windBandId, so all three plan against
-  // the same forecast band and the same resolved depth (ADR 0063).
-  const scopeRecommendation = useMemo(
-    () =>
-      computeScopeRecommendation({
-        isAnchored,
-        liveDepthM: depthMeters,
-        planningDepthM,
-        planningTideHeightFt,
-        tide,
-        maxGustKts,
-        windSpeedApparentKts,
-        seaState,
-        seabedType,
-        anchorConfig,
-        selectedWindBandId: windBandId,
-      }),
-    [
-      isAnchored,
-      depthMeters,
-      planningDepthM,
-      planningTideHeightFt,
-      tide,
-      maxGustKts,
-      windSpeedApparentKts,
-      seaState,
-      seabedType,
-      anchorConfig,
-      windBandId,
-    ],
-  )
-
   // Anchor Watch's low-water clearance warning (ADR 0135): projects the
   // depth at the boat's current position (the live sounder, not the
-  // resolved planning depth scopeRecommendation above uses) forward to the
+  // resolved planning depth) forward to the
   // next low tide and compares it against the operator's configured margin.
   const lowWaterClearance = useMemo(
     () =>
@@ -698,7 +662,6 @@ export function AnchorWatchDrawer({
                 currentDriftImpactKts={currentDriftImpactKts}
                 distanceMeters={distanceMeters}
                 bearingDeg={bearingDeg}
-                scopeRecommendation={scopeRecommendation}
                 isImperial={isImperial}
                 vesselTrail={vesselTrail}
                 aisVessels={aisVessels}
