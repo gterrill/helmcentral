@@ -3,8 +3,10 @@ import { render, screen, fireEvent, within, act, waitFor } from '@testing-librar
 import { forwardRef, useImperativeHandle } from 'react'
 
 import { DocumentsPanel } from '@/components/documents-panel'
+import { setViewportWidth } from '@/test/viewport'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useDocuments } from '@/hooks/use-documents'
+import { useDocumentFolderTree, type DocumentFolderTreeNode } from '@/hooks/use-document-folder-tree'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes } from '@/hooks/use-notes'
@@ -25,6 +27,20 @@ import type { NoteRecord } from '@/hooks/use-notes'
 // directly), same reasoning as the deleted files' own comment on it.
 
 vi.mock('@/hooks/use-documents')
+vi.mock('@/hooks/use-document-folder-tree')
+// Wraps the real capture sheet only to capture the panel's onCaptured prop, so
+// a test can fire it without driving the editor.
+let captureSheetProps: { onCaptured?: (id: string) => void } | null = null
+vi.mock('@/components/documents/note-capture-sheet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/documents/note-capture-sheet')>()
+  return {
+    ...actual,
+    NoteCaptureSheet: (props: React.ComponentProps<typeof actual.NoteCaptureSheet>) => {
+      captureSheetProps = props
+      return <actual.NoteCaptureSheet {...props} />
+    },
+  }
+})
 vi.mock('@/hooks/use-document-uploads')
 vi.mock('@/hooks/use-notes')
 // Ask Mate about a selection (ask-mate-selection.tsx) gates on this same
@@ -85,6 +101,17 @@ vi.mock('@/components/documents/checklist-runner', () => ({
 
 const mockedUseDocuments = vi.mocked(useDocuments)
 const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
+const mockedUseFolderTree = vi.mocked(useDocumentFolderTree)
+const refreshFolderTree = vi.fn()
+
+/** The folder pane's whole-library tree (ADR 0170), as the hook reports it. */
+function setFolderTree(folders: DocumentFolderTreeNode[]) {
+  mockedUseFolderTree.mockReturnValue({ folders, loading: false, error: null, refresh: refreshFolderTree })
+}
+function treeFolder(overrides: Partial<DocumentFolderTreeNode> & { id: string; name: string }): DocumentFolderTreeNode {
+  const base = { parent_id: null, is_manual: false, document_count: 0, ...overrides }
+  return { subtree_document_count: base.document_count, ...base }
+}
 const mockedUseManuals = vi.mocked(useManuals)
 const mockedUseNotes = vi.mocked(useNotes)
 const mockedUseAssistantStatus = vi.mocked(useAssistantStatus)
@@ -271,6 +298,8 @@ beforeEach(() => {
   try { localStorage.clear() } catch { /* not available in this env */ }
   mockedUseDocuments.mockReturnValue(makeDocumentsMock())
   mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
+  refreshFolderTree.mockReset()
+  setFolderTree([])
   mockedUseManuals.mockReturnValue(makeManualsMock())
   mockedUseNotes.mockReturnValue(makeNotesMock())
   // Available by default (enabled/configured, no problem) - the panel's
@@ -627,16 +656,11 @@ describe('DocumentsPanel', () => {
 
   it('navigating into a folder calls onFolderChange with its id', () => {
     const onFolderChange = vi.fn()
-    mockedUseDocuments.mockImplementation((folderId) => {
-      if (folderId === null) {
-        return makeDocumentsMock({ folders: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
-      }
-      return makeDocumentsMock({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
-    })
+    setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
 
     render(<DocumentsPanel onFolderChange={onFolderChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Manuals' }))
+    fireEvent.click(screen.getByRole('treeitem', { name: /Manuals/ }))
 
     expect(onFolderChange).toHaveBeenCalledWith('f1')
   })
@@ -648,20 +672,18 @@ describe('DocumentsPanel', () => {
     // instance - not a fresh mount - the same way AssistantDrawer picks up
     // a changed `initialConversationId`. `rerender` with a new prop is
     // exactly that.
-    mockedUseDocuments.mockImplementation((folderId) => {
-      if (folderId === null) {
-        return makeDocumentsMock({ folders: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
-      }
-      return makeDocumentsMock({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
-    })
+    setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
+    mockedUseDocuments.mockImplementation((folderId) =>
+      makeDocumentsMock(folderId === 'f1' ? { path: [{ id: 'f1', name: 'Manuals', parent_id: null }] } : {}),
+    )
     const onFolderChange = vi.fn()
 
     const { rerender } = render(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Manuals' }))
+    fireEvent.click(screen.getByRole('treeitem', { name: /Manuals/ }))
     expect(onFolderChange).toHaveBeenCalledWith('f1')
     expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
-    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).getByText('Manuals')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
 
     // App.tsx's onFolderChange handler mirrors the new folder into its own
     // documentsFolderId state (and the URL) synchronously, so the panel's
@@ -673,17 +695,17 @@ describe('DocumentsPanel', () => {
     // URL and hands it back down as a prop, without remounting the panel.
     rerender(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
     expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
-    // At the root there is no trail to show: the page title is "Documents".
-    expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Documents' })).toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: 'Documents' })).toHaveAttribute('aria-selected', 'true')
 
     // Forward: back to f1.
     rerender(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
     expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
-    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).getByText('Manuals')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: /Manuals/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('the breadcrumb reflects the folder path reported for the current folder', () => {
+  it('titles the page with the current folder and has no breadcrumb', () => {
     mockedUseDocuments.mockImplementation((folderId) =>
       makeDocumentsMock(
         folderId === 'f1' ? { path: [{ id: 'f1', name: 'Manuals', parent_id: null }] } : {},
@@ -692,11 +714,8 @@ describe('DocumentsPanel', () => {
 
     render(<DocumentsPanel initialFolderId="f1" />)
 
-    const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i })
-    expect(within(breadcrumb).getByText('Manuals')).toBeInTheDocument()
-    // The page title is the current folder, its trail above it.
+    expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
-    expect(within(breadcrumb).getByRole('link', { name: 'Documents' })).toBeInTheDocument()
   })
 
   it('uploads into the current folder', () => {
@@ -786,19 +805,18 @@ describe('DocumentsPanel', () => {
   // dropped one <TableHead> but two placeholder <TableCell />s from the
   // folder row, so a folder row emitted 5 cells against the header's 6 -
   // the kebab menu landed under "Size" and the actions column sat empty.
-  it('a folder row has as many cells as the header has columns, with the actions button in the last cell', () => {
-    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-      folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
-    }))
+  it('lists documents only: folders are in the pane, with no Folders or Documents group rows', () => {
+    setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc({ filename: 'receipt.pdf' })] }))
 
     render(<DocumentsPanel />)
 
-    const headerCells = screen.getAllByRole('columnheader')
-    const folderRow = screen.getByRole('button', { name: 'Manuals' }).closest('tr')
-    expect(folderRow).not.toBeNull()
-    const rowCells = within(folderRow!).getAllByRole('cell')
-    expect(rowCells).toHaveLength(headerCells.length)
-    expect(within(rowCells[rowCells.length - 1]).getByRole('button', { name: /actions for manuals/i })).toBeInTheDocument()
+    const table = screen.getByRole('table')
+    expect(within(table).queryByText('Manuals')).not.toBeInTheDocument()
+    expect(within(table).queryByText('Folders')).not.toBeInTheDocument()
+    expect(within(table).getByText('receipt.pdf')).toBeInTheDocument()
+    const dataRow = within(table).getByText('receipt.pdf').closest('tr')!
+    expect(within(dataRow).getAllByRole('cell').length).toBeGreaterThanOrEqual(screen.getAllByRole('columnheader').length)
   })
 
   it('shows an operator-facing message for a failed document, keeping the raw error as a title attribute', () => {
@@ -1189,10 +1207,8 @@ describe('DocumentsPanel', () => {
 
   it('shows the server\'s 409 message when a folder delete is refused', async () => {
     const deleteFolder = vi.fn().mockRejectedValue(new Error('folder is not empty'))
-    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-      folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
-      deleteFolder,
-    }))
+    setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ deleteFolder }))
 
     render(<DocumentsPanel />)
 
@@ -1449,8 +1465,9 @@ describe('DocumentsPanel', () => {
 
       render(<DocumentsPanel />)
 
-      const toggle = screen.getByRole('button', { name: /unfiled notes/i })
+      const toggle = screen.getByRole('treeitem', { name: /unfiled notes/i })
       expect(toggle).toHaveTextContent('2')
+      expect(screen.queryByRole('button', { name: /unfiled notes/i })).not.toBeInTheDocument()
       expect(screen.getByText('Filed doc')).toBeInTheDocument()
 
       fireEvent.click(toggle)
@@ -1466,7 +1483,7 @@ describe('DocumentsPanel', () => {
       }))
 
       render(<DocumentsPanel />)
-      fireEvent.click(screen.getByRole('button', { name: /unfiled notes/i }))
+      fireEvent.click(screen.getByRole('treeitem', { name: /unfiled notes/i }))
       fireEvent.click(screen.getByRole('button', { name: 'File "Ring Dave"' }))
 
       expect(screen.getByRole('dialog')).toHaveTextContent('Move')
@@ -1481,7 +1498,7 @@ describe('DocumentsPanel', () => {
       }))
 
       render(<DocumentsPanel />)
-      fireEvent.click(screen.getByRole('button', { name: /unfiled notes/i }))
+      fireEvent.click(screen.getByRole('treeitem', { name: /unfiled notes/i }))
 
       const button = screen.getByRole('button', { name: /change type: currently contact/i })
       expect(button.className).toContain('h-11 w-11')
@@ -1500,6 +1517,7 @@ describe('DocumentsPanel', () => {
         tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [docNode()] },
       }))
 
+      setFolderTree([treeFolder({ id: 'm1', name: 'Operations Manual', is_manual: true })])
       const { rerender } = render(<DocumentsPanel initialFolderId="m1" />)
       expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument()
       expect(screen.getByText('Genset start-up')).toBeInTheDocument()
@@ -1515,15 +1533,28 @@ describe('DocumentsPanel', () => {
     it('promoting a top-level folder calls flagManual', async () => {
       const flagManual = vi.fn().mockResolvedValue({ id: 'f1', name: 'Contacts', document_count: 0, updated_at: '2026-01-01T00:00:00Z' })
       mockedUseManuals.mockReturnValue(makeManualsMock({ flagManual }))
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        folders: [{ id: 'f1', name: 'Contacts', parent_id: null }],
-      }))
+      setFolderTree([treeFolder({ id: 'f1', name: 'Contacts' })])
 
       render(<DocumentsPanel />)
       fireEvent.click(screen.getByRole('button', { name: /actions for contacts/i }))
       fireEvent.click(screen.getByRole('menuitem', { name: /treat as a manual/i }))
 
       await waitFor(() => expect(flagManual).toHaveBeenCalledWith('f1'))
+      await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
+    })
+
+    it('offers no "Treat as a manual" on a folder that is not top-level', () => {
+      setFolderTree([
+        treeFolder({ id: 'f1', name: 'Contacts' }),
+        treeFolder({ id: 'f2', name: 'Yards', parent_id: 'f1' }),
+      ])
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ path: [{ id: 'f2', name: 'Yards', parent_id: 'f1' }] }))
+
+      render(<DocumentsPanel initialFolderId="f2" />)
+      fireEvent.click(screen.getByRole('button', { name: /actions for yards/i }))
+
+      expect(screen.getByRole('menuitem', { name: /rename/i })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: /treat as a manual/i })).not.toBeInTheDocument()
     })
 
     it('demoting from inside the manual view calls clearManual', async () => {
@@ -1533,6 +1564,7 @@ describe('DocumentsPanel', () => {
         tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [] },
         clearManual,
       }))
+      setFolderTree([treeFolder({ id: 'm1', name: 'Operations Manual', is_manual: true })])
 
       render(<DocumentsPanel initialFolderId="m1" />)
       fireEvent.click(screen.getByRole('button', { name: 'Stop treating as manual' }))
@@ -1540,15 +1572,13 @@ describe('DocumentsPanel', () => {
       await waitFor(() => expect(clearManual).toHaveBeenCalledWith('m1'))
     })
 
-    it('demoting from the folder row menu (browsing the root) also calls clearManual', async () => {
+    it('demoting from the folder pane menu also calls clearManual', async () => {
       const clearManual = vi.fn().mockResolvedValue(undefined)
       mockedUseManuals.mockReturnValue(makeManualsMock({
         manuals: [{ id: 'm1', name: 'Operations Manual', document_count: 0, updated_at: '2026-01-01T00:00:00Z' }],
         clearManual,
       }))
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        folders: [{ id: 'm1', name: 'Operations Manual', parent_id: null }],
-      }))
+      setFolderTree([treeFolder({ id: 'm1', name: 'Operations Manual', is_manual: true })])
 
       render(<DocumentsPanel />)
       fireEvent.click(screen.getByRole('button', { name: /actions for operations manual/i }))
@@ -1937,30 +1967,15 @@ describe('DocumentsPanel', () => {
       expect(click).toHaveBeenCalled()
     })
 
-    it('lists Folders, then Documents, in one table under group headings', () => {
+    it('clicking a folder in the pane opens it; clicking a document row opens the viewer', async () => {
+      setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
-        documents: [doc({ filename: 'receipt.pdf' })],
-      }))
-      render(<DocumentsPanel />)
-      const cells = screen.getAllByRole('cell').map((c) => c.textContent)
-      const folders = cells.findIndex((t) => t === 'Folders')
-      const documents = cells.findIndex((t) => t === 'Documents')
-      expect(folders).toBeGreaterThanOrEqual(0)
-      expect(documents).toBeGreaterThan(folders)
-      expect(cells.findIndex((t) => t?.includes('Manuals'))).toBeLessThan(cells.findIndex((t) => t?.includes('receipt.pdf')))
-    })
-
-    it('clicking a folder row opens the folder; clicking a document row opens the viewer', async () => {
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
         documents: [doc({ id: 'doc-1', filename: 'receipt.pdf', mime: 'text/plain' })],
       }))
       const onFolderChange = vi.fn()
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ text: 'body' }) }))
       render(<DocumentsPanel onFolderChange={onFolderChange} />)
-      const folderRow = screen.getByRole('button', { name: 'Manuals' }).closest('tr') as HTMLElement
-      fireEvent.click(within(folderRow).getAllByRole('cell')[3])
+      fireEvent.click(screen.getByRole('treeitem', { name: /Manuals/ }))
       expect(onFolderChange).toHaveBeenCalledWith('f1')
       expect(onFolderChange).toHaveBeenCalledTimes(1)
       fireEvent.click(screen.getByText('receipt.pdf'))
@@ -1973,13 +1988,11 @@ describe('DocumentsPanel', () => {
       expect(screen.getByText('Upload a file or create a folder.')).toBeInTheDocument()
     })
 
-    it('folders are not selectable; documents are, with the bulk bar naming the count', () => {
+    it('documents are selectable, with the bulk bar naming the count', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        folders: [{ id: 'f1', name: 'Manuals', parent_id: null }],
         documents: [doc({ id: 'doc-1', filename: 'a.pdf' }), doc({ id: 'doc-2', filename: 'b.pdf' })],
       }))
       render(<DocumentsPanel />)
-      expect(screen.queryByRole('checkbox', { name: 'Select Manuals' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }))
       expect(screen.getByText('2 selected')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Move to…' })).toBeInTheDocument()
@@ -1995,7 +2008,8 @@ describe('DocumentsPanel', () => {
     it('a delete in flight keeps the dialog open and locked, and a refusal shows inside it', async () => {
       let reject!: (e: Error) => void
       const deleteFolder = vi.fn().mockReturnValue(new Promise((_, r) => { reject = r }))
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ folders: [{ id: 'f1', name: 'Manuals', parent_id: null }], deleteFolder }))
+      setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ deleteFolder }))
       render(<DocumentsPanel />)
       fireEvent.click(screen.getByRole('button', { name: /actions for manuals/i }))
       fireEvent.click(screen.getByRole('menuitem', { name: /delete/i }))
@@ -2108,9 +2122,8 @@ describe('DocumentsPanel listing columns', () => {
     expect(rows[1]).toContain('old.pdf')
   })
 
-  it('sorts Size numerically and keeps folders above documents', () => {
+  it('sorts Size numerically', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-      folders: [{ id: 'f1', name: 'Zed folder', parent_id: null }],
       documents: [
         doc({ id: 'a', filename: 'nine.pdf', size_bytes: 9 * 1024 }),
         doc({ id: 'b', filename: 'ten.pdf', size_bytes: 10 * 1024 * 1024 }),
@@ -2121,12 +2134,12 @@ describe('DocumentsPanel listing columns', () => {
     fireEvent.click(within(screen.getByRole('columnheader', { name: /size/i })).getByRole('button'))
     let rows = rowNames()
     const order = (names: string[]) => names.map((n) => rows.findIndex((r) => r.includes(n)))
-    expect(order(['Zed folder', 'nine.pdf', 'hundred.pdf', 'ten.pdf'])).toEqual(
-      [...order(['Zed folder', 'nine.pdf', 'hundred.pdf', 'ten.pdf'])].sort((x, y) => x - y),
+    expect(order(['nine.pdf', 'hundred.pdf', 'ten.pdf'])).toEqual(
+      [...order(['nine.pdf', 'hundred.pdf', 'ten.pdf'])].sort((x, y) => x - y),
     )
     fireEvent.click(within(screen.getByRole('columnheader', { name: /size/i })).getByRole('button'))
     rows = rowNames()
-    const idx = order(['Zed folder', 'ten.pdf', 'hundred.pdf', 'nine.pdf'])
+    const idx = order(['ten.pdf', 'hundred.pdf', 'nine.pdf'])
     expect(idx).toEqual([...idx].sort((x, y) => x - y))
   })
 
@@ -2209,5 +2222,266 @@ describe('DocumentsPanel listing columns', () => {
     }))
     render(<DocumentsPanel />)
     expect(screen.getByText('+1').parentElement!.closest('.overflow-hidden')).toBeNull()
+  })
+})
+
+describe('DocumentsPanel folder pane', () => {
+  // The Move dialog's folder picker mounts a ScrollArea, which calls
+  // getAnimations on mount - see the 'search overlay' block's comment.
+  beforeEach(() => { Element.prototype.getAnimations = () => [] })
+  afterEach(() => { delete (Element.prototype as { getAnimations?: unknown }).getAnimations })
+
+  const tree = [
+    treeFolder({ id: 'f1', name: 'Manuals', document_count: 3 }),
+    treeFolder({ id: 'f2', name: 'Engine', parent_id: 'f1', document_count: 2 }),
+    // A manual is a leaf in the pane, so its count covers the whole manual.
+    treeFolder({ id: 'm1', name: 'Operations Manual', is_manual: true, document_count: 1, subtree_document_count: 4 }),
+    treeFolder({ id: 'm2', name: 'Section', parent_id: 'm1', document_count: 3 }),
+  ]
+
+  it('shows Documents, the folder hierarchy with counts, then Unfiled notes', () => {
+    setFolderTree(tree)
+    mockedUseNotes.mockReturnValue(makeNotesMock({ notes: [note({ id: 'n1' }), note({ id: 'n2' })] }))
+    render(<DocumentsPanel />)
+
+    const pane = screen.getByRole('tree', { name: 'Folders' })
+    const names = within(pane).getAllByRole('treeitem').map((el) => el.textContent)
+    // Engine is collapsed under Manuals; a manual's sections are never listed.
+    expect(names).toEqual(['Documents', 'Manuals3', 'Operations Manual4', 'Unfiled notes2'])
+    expect(within(pane).getByRole('treeitem', { name: /Manuals/ })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(within(pane).getByRole('treeitem', { name: /Manuals/ }).querySelector('[data-slot="tree-chevron"]')!)
+    expect(within(pane).getByRole('treeitem', { name: /Engine/ })).toHaveTextContent('2')
+    expect(within(pane).getByRole('treeitem', { name: /Engine/ })).toHaveAttribute('aria-level', '2')
+  })
+
+  it('opens with the selected folder\'s ancestors expanded', () => {
+    setFolderTree(tree)
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }, { id: 'f2', name: 'Engine', parent_id: 'f1' }] }))
+    render(<DocumentsPanel initialFolderId="f2" />)
+
+    expect(screen.getByRole('treeitem', { name: /Engine/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('treeitem', { name: /Manuals/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('selecting a node navigates and mirrors the folder into the URL callback', () => {
+    setFolderTree(tree)
+    const onFolderChange = vi.fn()
+    render(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Operations Manual/ }))
+    expect(onFolderChange).toHaveBeenLastCalledWith('m1')
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Documents' }))
+    expect(onFolderChange).toHaveBeenLastCalledWith(null)
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
+  })
+
+  it('the Unfiled notes node switches the view without touching the folder', () => {
+    setFolderTree(tree)
+    mockedUseNotes.mockReturnValue(makeNotesMock({ notes: [note({ id: 'n1', title: 'Ring Dave' })] }))
+    const onFolderChange = vi.fn()
+    render(<DocumentsPanel onFolderChange={onFolderChange} />)
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Unfiled notes/ }))
+    expect(screen.getByText('Ring Dave')).toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: /Unfiled notes/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: 'Unfiled notes' })).toBeInTheDocument()
+    expect(onFolderChange).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Documents' }))
+    expect(screen.queryByText('Ring Dave')).not.toBeInTheDocument()
+  })
+
+  it('the folder menu renames a folder and refreshes the tree', async () => {
+    setFolderTree(tree)
+    const renameFolder = vi.fn().mockResolvedValue({})
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ renameFolder }))
+    render(<DocumentsPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Manuals' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /rename/i }))
+    const input = screen.getByDisplayValue('Manuals')
+    fireEvent.change(input, { target: { value: 'Handbooks' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(renameFolder).toHaveBeenCalledWith('f1', 'Handbooks'))
+    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
+  })
+
+  it('Move… on a folder moves the folder, not documents', async () => {
+    setFolderTree(tree)
+    const moveFolder = vi.fn().mockResolvedValue({})
+    const moveDocuments = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ moveFolder, moveDocuments }))
+    render(<DocumentsPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Manuals' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /move/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /move here/i }))
+
+    await waitFor(() => expect(moveFolder).toHaveBeenCalledWith('f1', null))
+    expect(moveDocuments).not.toHaveBeenCalled()
+    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
+  })
+
+  it('deleting the folder being browsed steps out to its parent and refreshes the tree', async () => {
+    setFolderTree(tree)
+    const deleteFolder = vi.fn().mockResolvedValue(undefined)
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ deleteFolder, path: [{ id: 'f1', name: 'Manuals', parent_id: null }, { id: 'f2', name: 'Engine', parent_id: 'f1' }] }))
+    const onFolderChange = vi.fn()
+    render(<DocumentsPanel initialFolderId="f2" onFolderChange={onFolderChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Engine' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /delete/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(deleteFolder).toHaveBeenCalledWith('f2'))
+    await waitFor(() => expect(onFolderChange).toHaveBeenLastCalledWith('f1'))
+    expect(refreshFolderTree).toHaveBeenCalled()
+  })
+
+  it('New folder still creates inside the current folder and refreshes the tree', async () => {
+    setFolderTree(tree)
+    const createFolder = vi.fn().mockResolvedValue({ id: 'new', name: 'Spares', parent_id: 'f1' })
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ createFolder, path: [{ id: 'f1', name: 'Manuals', parent_id: null }] }))
+    render(<DocumentsPanel initialFolderId="f1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /new folder/i }))
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Spares' } })
+    fireEvent.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => expect(createFolder).toHaveBeenCalledWith('Spares', 'f1'))
+    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
+  })
+
+  it('dragging a document row onto a folder moves it', async () => {
+    setFolderTree(tree)
+    const moveDocuments = vi.fn().mockResolvedValue(undefined)
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ moveDocuments, documents: [doc({ id: 'd1', filename: 'a.pdf' })] }))
+    render(<DocumentsPanel />)
+
+    const row = screen.getByText('a.pdf').closest('tr')!
+    const store: Record<string, string> = {}
+    const dt = {
+      get types() { return Object.keys(store) },
+      getData: (t: string) => store[t] ?? '',
+      setData: (t: string, v: string) => { store[t] = v },
+      effectAllowed: '',
+      dropEffect: '',
+    }
+    fireEvent.dragStart(row, { dataTransfer: dt })
+    const target = screen.getByRole('treeitem', { name: /Operations Manual/ })
+    fireEvent.dragOver(target, { dataTransfer: dt })
+    expect(target.className).toContain('ring-primary')
+    fireEvent.drop(target, { dataTransfer: dt })
+
+    await waitFor(() => expect(moveDocuments).toHaveBeenCalledWith(['d1'], 'm1'))
+    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
+  })
+
+  it('dragging a selected row carries the whole selection; Documents is the root', async () => {
+    setFolderTree(tree)
+    const moveDocuments = vi.fn().mockResolvedValue(undefined)
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      moveDocuments,
+      documents: [doc({ id: 'd1', filename: 'a.pdf' }), doc({ id: 'd2', filename: 'b.pdf' }), doc({ id: 'd3', filename: 'c.pdf' })],
+    }))
+    render(<DocumentsPanel />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select a.pdf' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select b.pdf' }))
+    const store: Record<string, string> = {}
+    const dt = {
+      get types() { return Object.keys(store) },
+      getData: (t: string) => store[t] ?? '',
+      setData: (t: string, v: string) => { store[t] = v },
+      effectAllowed: '',
+      dropEffect: '',
+    }
+    fireEvent.dragStart(screen.getByText('a.pdf').closest('tr')!, { dataTransfer: dt })
+    fireEvent.drop(screen.getByRole('treeitem', { name: 'Documents' }), { dataTransfer: dt })
+
+    await waitFor(() => expect(moveDocuments).toHaveBeenCalledWith(expect.arrayContaining(['d1', 'd2']), null))
+    expect(moveDocuments.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('does not accept a drop of something that is not a document row', () => {
+    setFolderTree(tree)
+    const moveDocuments = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ moveDocuments }))
+    render(<DocumentsPanel />)
+
+    const dt = { types: ['Files'], getData: () => '', dropEffect: '' }
+    fireEvent.drop(screen.getByRole('treeitem', { name: /Operations Manual/ }), { dataTransfer: dt })
+    expect(moveDocuments).not.toHaveBeenCalled()
+  })
+
+  it('on a phone the pane is behind a Folders button in a sheet that closes on selection', () => {
+    setViewportWidth(500)
+    setFolderTree(tree)
+    const onFolderChange = vi.fn()
+    render(<DocumentsPanel onFolderChange={onFolderChange} />)
+
+    expect(screen.queryByRole('tree', { name: 'Folders' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Folders' }))
+    fireEvent.click(screen.getByRole('treeitem', { name: /Operations Manual/ }))
+
+    expect(onFolderChange).toHaveBeenCalledWith('m1')
+    return waitFor(() => expect(screen.queryByRole('tree', { name: 'Folders' })).not.toBeInTheDocument())
+  })
+
+  it('a note captured from New → Note refreshes the tree counts', async () => {
+    setFolderTree(tree)
+    render(<DocumentsPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
+    await waitFor(() => expect(captureSheetProps).not.toBeNull())
+    refreshFolderTree.mockClear()
+
+    act(() => { captureSheetProps!.onCaptured?.('note-1') })
+
+    expect(refreshFolderTree).toHaveBeenCalled()
+  })
+
+  it('ignores a drop whose payload is not a non-empty list of ids', async () => {
+    setFolderTree(tree)
+    const moveDocuments = vi.fn()
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ moveDocuments }))
+    render(<DocumentsPanel />)
+
+    const target = screen.getByRole('treeitem', { name: /Operations Manual/ })
+    for (const payload of ['[]', '[1,2]', '"x"', '{"a":1}']) {
+      const dt = { types: ['application/x-helmcentral-documents'], getData: () => payload, dropEffect: '' }
+      fireEvent.drop(target, { dataTransfer: dt })
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    expect(moveDocuments).not.toHaveBeenCalled()
+  })
+
+  it('keeps the highlight while a drag crosses a child of the row', () => {
+    setFolderTree(tree)
+    render(<DocumentsPanel />)
+    const target = screen.getByRole('treeitem', { name: /Operations Manual/ })
+    const dt = { types: ['application/x-helmcentral-documents'], getData: () => '', dropEffect: '' }
+    fireEvent.dragOver(target, { dataTransfer: dt })
+    fireEvent(target, new MouseEvent('dragleave', { bubbles: true, relatedTarget: target.querySelector('span')! }))
+    expect(target.className).toContain('ring-primary')
+    fireEvent(target, new MouseEvent('dragleave', { bubbles: true, relatedTarget: document.body }))
+    expect(target.className).not.toContain('ring-primary')
+  })
+
+  it('treats a folder as a manual by the tree\'s is_manual, not the manuals list', () => {
+    setFolderTree(tree)
+    mockedUseManuals.mockReturnValue(makeManualsMock({
+      tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [docNode()] },
+    }))
+    render(<DocumentsPanel initialFolderId="m1" />)
+    expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument()
+  })
+
+  it('shows the tree\'s error instead of an empty pane', () => {
+    mockedUseFolderTree.mockReturnValue({ folders: [], loading: false, error: 'HTTP 500', refresh: refreshFolderTree })
+    render(<DocumentsPanel />)
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 500')
   })
 })

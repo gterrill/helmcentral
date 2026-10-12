@@ -848,6 +848,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/documents/:id/content", tierRead, documentContentHandler},
 		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
 		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
+		{http.MethodGet, "/api/document-folders/tree", tierRead, documentFolderTreeHandler},
 
 		// Notes (plan "Notes and the Boat's Manual", ADR 0114): a note is a
 		// documents row with kind='note' (notes_store.go), so it shares the

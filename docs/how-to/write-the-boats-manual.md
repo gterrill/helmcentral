@@ -33,8 +33,8 @@ library it offers a **Manual** checkbox - check it, give the manual a name,
 and it opens empty. That is deliberate: a manual is assembled from notes you
 have already captured, not typed into a blank outline.
 
-An existing top-level folder can become a manual the same way, from its row
-menu: **Treat as a manual**. Nothing inside it moves.
+An existing top-level folder can become a manual the same way, from its menu
+in the folder pane: **Treat as a manual**. Nothing inside it moves.
 
 Most boats end up with more than one manual. An operations manual for
 running the boat and a crew training manual for teaching someone are
@@ -43,7 +43,7 @@ different documents with different readers.
 ## 3. File notes into it
 
 Every note's row carries a **File…** button - in **Unfiled notes**
-(Documents' own filter for the pile still waiting to be dealt with), or
+(in the folder pane, Documents' own filter for the pile still waiting to be dealt with), or
 wherever else it is currently filed. It opens the same Move dialog you would
 use to move any document: choose the manual, or a folder inside it, creating
 one on the spot if it does not exist yet.

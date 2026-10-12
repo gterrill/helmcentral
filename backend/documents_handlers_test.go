@@ -1262,6 +1262,82 @@ func TestDocumentFolderHandlers_CreateNestAndBrowse(t *testing.T) {
 	}
 }
 
+func TestDocumentFolderTreeHandler_ListsEveryFolderWithManualFlagAndCounts(t *testing.T) {
+	withTestDocumentStore(t)
+	manuals, err := globalDocumentStore.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	engine, err := globalDocumentStore.CreateFolder("Engine", &manuals.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder nested: %v", err)
+	}
+	empty, err := globalDocumentStore.CreateFolder("Empty", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder empty: %v", err)
+	}
+	if _, err := globalDocumentStore.FlagManual(manuals.ID); err != nil {
+		t.Fatalf("FlagManual: %v", err)
+	}
+	for i, fid := range []*string{&engine.ID, &engine.ID, &manuals.ID, nil} {
+		if _, err := globalDocumentStore.Insert(document{SHA256: fmt.Sprintf("sha-tree-%d", i), Filename: fmt.Sprintf("d%d.pdf", i), MIME: "application/pdf", FolderID: fid}); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/document-folders/tree", "", "")
+	if err := documentFolderTreeHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Folders []struct {
+			ID            string  `json:"id"`
+			Name          string  `json:"name"`
+			ParentID      *string `json:"parent_id"`
+			IsManual      bool    `json:"is_manual"`
+			DocumentCount int     `json:"document_count"`
+			SubtreeCount  int     `json:"subtree_document_count"`
+		} `json:"folders"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Folders) != 3 {
+		t.Fatalf("expected 3 folders, got %+v", resp.Folders)
+	}
+	byID := map[string]int{}
+	for i, f := range resp.Folders {
+		byID[f.ID] = i
+	}
+	m := resp.Folders[byID[manuals.ID]]
+	// Manuals are leaves in the pane, so the figure shown for one is its whole
+	// subtree: 1 filed directly plus 2 in Engine.
+	if !m.IsManual || m.DocumentCount != 1 || m.SubtreeCount != 3 || m.ParentID != nil {
+		t.Fatalf("Manuals row wrong: %+v", m)
+	}
+	e := resp.Folders[byID[engine.ID]]
+	if e.IsManual || e.DocumentCount != 2 || e.SubtreeCount != 2 || e.ParentID == nil || *e.ParentID != manuals.ID {
+		t.Fatalf("Engine row wrong: %+v", e)
+	}
+	if em := resp.Folders[byID[empty.ID]]; em.DocumentCount != 0 {
+		t.Fatalf("Empty row wrong: %+v", em)
+	}
+}
+
+func TestDocumentFolderTreeHandler_NoFoldersIsEmptyArray(t *testing.T) {
+	withTestDocumentStore(t)
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/document-folders/tree", "", "")
+	if err := documentFolderTreeHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if strings.TrimSpace(rec.Body.String()) != `{"folders":[]}` {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
 func TestDocumentFolderHandlers_CreateDuplicateNameReturns409(t *testing.T) {
 	withTestDocumentStore(t)
 	if _, err := globalDocumentStore.CreateFolder("Manuals", nil); err != nil {

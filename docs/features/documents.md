@@ -11,11 +11,11 @@ summary and a few suggested tags.
 The sidebar's **Documents** panel is where this happens day to day: browse
 folders, upload by button or drag-and-drop, search, and open, download,
 rename, move, reindex or edit the details of anything already in the
-library. The page is titled with the folder you are in, with the path back
-up above it. **Upload** is the button at the top right; **New folder** and
-**New note** are under the menu beside it (**More actions**). Folders come
-first in the list, then documents, and each row has its own menu for the
-things you can do to it. A file can also be
+library. The page is titled with the folder you are in. **Upload** is the
+button at the top right; **New folder** and **New note** are under the menu
+beside it (**More actions**). The list holds documents only, and each row has
+its own menu for the things you can do to it. Folders live in the pane on the
+left, described next. A file can also be
 attached straight from Mate's composer - see
 [Documents](assistant.md#documents) on the Mate page - and a chip on a past
 message opens the same viewer this panel uses.
@@ -63,6 +63,44 @@ if you want that read properly now. Its already-read text does join search
 by meaning automatically, the moment Mate is ready, alongside everything
 else in the library. See Searching, below.
 
+## The folder pane
+
+The pane on the left shows every folder in the library as a tree, so you can
+see where things are filed and jump straight to any of them without stepping
+through the levels. **Documents** is at the top and shows the documents filed at the
+root of the library. The folders sit below it, with a count on the right of how many
+documents are filed directly in each one. A chevron opens or closes a folder
+that has subfolders, and Helmcentral remembers which ones you left open on
+that device. Open a document's folder from a link and its parents open
+themselves, with the folder highlighted.
+
+A folder marked as a manual shows a book icon. Its sections are read inside
+the manual, so they are not listed as folders in the pane, and its count is
+every document anywhere inside it.
+
+Below a divider, **Unfiled notes** shows how many captured notes are not
+filed anywhere yet, and switches the list to just those.
+
+Every folder has a menu (the three dots at the right of its line, always
+showing on a touch screen and appearing on hover or focus elsewhere) with
+**Rename**, **Move…**, **Treat as a manual** or **Stop treating as manual**
+(top-level folders only) and **Delete**. A folder has to be empty before it
+can be deleted. **New folder** in the page menu creates the folder inside
+the one you are viewing.
+
+To file documents quickly, drag a row from the list onto a folder in the
+pane; the folder lights up as you pass over it. If several rows are ticked,
+dragging any one of them moves all of them. Drop onto **Documents** to
+take them out of their folder. **Move…** and **Move to…** do the same job
+without dragging, which is the way to do it on a touch screen.
+
+The pane has a **Hide folders** button when you want the whole width for the
+list, and **Show folders** brings it back. On a phone the pane is not on the
+page: tap **Folders** to open it, and it closes as soon as you pick a folder.
+You can use the keyboard in the pane: the up and down arrows move between
+folders, right opens a folder and left closes it, and Enter opens the folder
+you are on.
+
 ## Folders, tags, notes and title
 
 Folders group documents - `Receipts/2026`, `Manuals/Engine` - the way any
@@ -71,8 +109,7 @@ file manager's folders do. A document sits in exactly one folder, or none
 where it's filed; the file itself is untouched, so refiling something
 never means re-uploading it.
 
-**Move…** opens a folder picker you can browse the same way you browse the
-panel, and the destination doesn't have to exist yet: type a name, click
+**Move…** opens a folder picker you can browse one level at a time, and the destination doesn't have to exist yet: type a name, click
 **Create folder**, and the picker makes it inside whatever folder it's
 showing and drops straight into it, so **Move here** means the folder you
 just made. Filing the first receipt of a new year is one trip, not three.
@@ -198,8 +235,7 @@ leaves word search as the library's only retriever. See
 Each row shows the document's name, its tags, when it was **Added** and its
 size. Added is the day the file came into Helmcentral, shown as "12 Oct" for
 this year and "3 Jan 2025" for earlier ones. Click **Name**, **Added** or
-**Size** to sort by it; click again to reverse. Folders always stay above
-documents, whatever the sort. The list opens newest first, and Helmcentral
+**Size** to sort by it; click again to reverse. The list opens newest first, and Helmcentral
 remembers your choice on that device. A row shows its first three tags, with a
 "+2" style count for the rest; hover it to see them all.
 
