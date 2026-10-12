@@ -2981,6 +2981,68 @@ func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []docume
 	return folders, docs, nil
 }
 
+// documentFolderTreeNode is one folder in the whole-library tree the
+// Documents page's folder pane draws: enough to render the hierarchy, tell
+// manuals from plain folders, and show a count, without a request per level.
+type documentFolderTreeNode struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	ParentID      *string `json:"parent_id"`
+	IsManual      bool    `json:"is_manual"`
+	DocumentCount int     `json:"document_count"`
+	// SubtreeDocumentCount is DocumentCount plus every document in the
+	// folder's descendants. The pane shows it for a manual, which it draws
+	// as a leaf.
+	SubtreeDocumentCount int `json:"subtree_document_count"`
+}
+
+// FolderTree returns every folder, flat, in sibling order (sort_index then
+// name), with the number of documents filed directly in each.
+func (s *documentStore) FolderTree() ([]documentFolderTreeNode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT f.id, f.parent_id, f.name, f.role = 'manual',
+		(SELECT COUNT(*) FROM documents d WHERE d.folder_id = f.id)
+		FROM document_folders f ORDER BY f.sort_index, lower(f.name)`)
+	if err != nil {
+		return nil, fmt.Errorf("folder tree: %w", err)
+	}
+	defer rows.Close()
+	out := []documentFolderTreeNode{}
+	for rows.Next() {
+		var n documentFolderTreeNode
+		var pid sql.NullString
+		if err := rows.Scan(&n.ID, &pid, &n.Name, &n.IsManual, &n.DocumentCount); err != nil {
+			return nil, fmt.Errorf("folder tree: scan: %w", err)
+		}
+		if pid.Valid {
+			v := pid.String
+			n.ParentID = &v
+		}
+		out = append(out, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("folder tree: %w", err)
+	}
+	parentOf := make(map[string]*string, len(out))
+	for i := range out {
+		out[i].SubtreeDocumentCount = out[i].DocumentCount
+		parentOf[out[i].ID] = out[i].ParentID
+	}
+	byID := make(map[string]int, len(out))
+	for i := range out {
+		byID[out[i].ID] = i
+	}
+	for i := range out {
+		// Add this folder's own count to every ancestor.
+		for p := out[i].ParentID; p != nil; p = parentOf[*p] {
+			out[byID[*p]].SubtreeDocumentCount += out[i].DocumentCount
+		}
+	}
+	return out, nil
+}
+
 // FolderPath returns id's ancestor chain root-first, id last.
 // errFolderNotFound if id does not exist.
 func (s *documentStore) FolderPath(id string) ([]documentFolder, error) {

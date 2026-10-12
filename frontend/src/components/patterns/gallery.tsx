@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { FileText, Plus, Unlink, Wrench } from 'lucide-react'
+import { FileText, Folder, Library, Plus, Unlink, Wrench } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,7 @@ import {
   ConfirmDelete,
   DetailsLayout,
   EmptyState,
+  FolderTree,
   FormRow,
   FormSection,
   IndexFilters,
@@ -20,7 +21,9 @@ import {
   SaveBar,
   SaveBarSlot,
   SettingsLayout,
+  TreeLayout,
   type IndexFilter,
+  type TreeNode,
   type RowAction,
 } from '@/components/patterns'
 
@@ -84,7 +87,25 @@ function GallerySection({ title, description, children }: { title: string; descr
 
 const SETTINGS_FIXTURE = { vesselName: 'Fixture Vessel', distanceUnits: 'metric', autoRaise: true }
 
+const TREE_FIXTURE: TreeNode[] = [
+  { id: 'all', label: 'All documents', droppable: true },
+  {
+    id: 'manuals',
+    label: 'Manuals',
+    count: 4,
+    icon: <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    droppable: true,
+    actions: [{ label: 'Rename', onSelect: () => {} }, { label: 'Delete', destructive: true, onSelect: () => {} }],
+    children: [
+      { id: 'engines', label: 'Engines', count: 2, icon: <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />, droppable: true },
+    ],
+  },
+  { id: 'ops', label: 'Operations Manual', count: 1, icon: <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />, droppable: true },
+  { id: 'unfiled', label: 'Unfiled notes', count: 3, separatorBefore: true },
+]
+
 export function PatternsGallery() {
+  const [treeSelected, setTreeSelected] = useState('all')
   const [settingsDraft, setSettingsDraft] = useState(SETTINGS_FIXTURE)
   const [settingsSaved, setSettingsSaved] = useState(SETTINGS_FIXTURE)
   const settingsDirty = JSON.stringify(settingsDraft) !== JSON.stringify(settingsSaved)
@@ -357,6 +378,20 @@ export function PatternsGallery() {
           onSave={() => { setSaving(true); setTimeout(() => { setSaving(false); setDirty(false) }, 600) }}
           onDiscard={() => setDirty(false)}
         />
+      </GallerySection>
+
+      <Separator />
+
+      <GallerySection title="TreeLayout + FolderTree" description="A navigation pane beside the content: nested nodes with counts, a per-node menu, arrow-key navigation and drop targets. On a phone the pane moves into a sheet behind a Folders button.">
+        <div className="flex h-72 rounded-md border border-border p-2">
+          <TreeLayout
+            pane={({ dismiss }) => (
+              <FolderTree label="Folders" nodes={TREE_FIXTURE} selectedId={treeSelected} onSelect={setTreeSelected} storageKey="helmcentral.gallery.tree" onDismiss={dismiss} />
+            )}
+          >
+            <div className="rounded-md border border-border bg-card p-4 text-sm">Selected: {treeSelected}</div>
+          </TreeLayout>
+        </div>
       </GallerySection>
 
       <Separator />

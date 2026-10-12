@@ -13,10 +13,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- The Documents page now has a folder pane on the left. It shows every folder
+  as a tree with the number of documents in each, so you can jump to any folder
+  in one click instead of stepping through the levels. The breadcrumb and the
+  folder rows in the list are gone, and the list shows documents only.
+  A manual's count covers every document inside it. **Unfiled notes** moved from a button in the toolbar to the bottom of the
+  pane. Rename, Move, Treat as a manual and Delete for a folder are now on the
+  menu beside the folder in the pane. Drag a document, or several ticked
+  documents, onto a folder to file them. On a phone, tap **Folders** to open
+  the pane.
 - The Documents list now has an **Added** column showing when each file came
   into Helmcentral, and Name, Added and Size sort when you click their headers.
-  The list opens newest first and remembers your sort. Folders stay above
-  documents.
+  The list opens newest first and remembers your sort.
 - The Documents list no longer has a Status column. A document still being read
   shows an amber icon, a failed one a red icon, and the reason stays under its
   name. Tags show three to a row with a "+N" count for the rest.

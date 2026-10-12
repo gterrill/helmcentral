@@ -11,6 +11,7 @@
 export { ConfirmDelete, type ConfirmDeleteProps } from './confirm-delete'
 export { DetailsLayout, type DetailsLayoutProps } from './details-layout'
 export { EmptyState, type EmptyStateProps } from './empty-state'
+export { FolderTree, type FolderTreeProps, type TreeNode } from './folder-tree'
 export { FormRow, type FormRowProps } from './form-row'
 export { FormSection, type FormSectionProps } from './form-section'
 export {
@@ -26,4 +27,5 @@ export { ResourceList, type ResourceListProps } from './resource-list'
 export { Page, type PageAction, type PageProps } from './page'
 export { SettingsLayout, type SettingsLayoutProps } from './settings-layout'
 export { SaveBar, type SaveBarProps } from './save-bar'
+export { TreeLayout, type TreeLayoutProps } from './tree-layout'
 export { SaveBarSlot, SAVE_BAR_SLOT_ID } from './save-bar-slot'

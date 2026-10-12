@@ -77,7 +77,7 @@ chosen, nothing changes it back.
 The search box searches the whole document library, notes included, so a
 note and the manufacturer's PDF it came from turn up together. Tag a note and
 it filters by tag like anything else in the library, and Unfiled notes shows
-everything captured but not yet put anywhere. With Mate switched on, search
+everything captured but not yet put anywhere, from its entry in the folder pane. With Mate switched on, search
 also matches on meaning rather than
 only on words, so a note about "the head won't flush" is found by a search
 for the toilet. Without Mate, word search still works exactly as it always
@@ -96,7 +96,7 @@ fit.
 
 ## Filing, and where notes go next
 
-A captured note starts unfiled. **Unfiled notes** in Documents' toolbar
+A captured note starts unfiled. **Unfiled notes** in Documents' folder pane
 shows how many, and switches the listing to just those - the pile you are
 working through, not a place notes live permanently. Filing one into a
 folder, the same **Move…** you would use on any document, takes it out of
@@ -118,14 +118,14 @@ off.
 
 A manual is a folder, so it appears in Documents wherever that folder does,
 marked with a book icon in place of the ordinary folder icon. Open it the
-same way you would open any folder, and the listing becomes the ordered
+same way you would open any folder, by choosing it in the folder pane, and the listing becomes the ordered
 tree and reading pane instead of the table.
 
 Creating one starts the same way as any other folder: **More actions → New folder**
 offers a **Manual** checkbox when you are at the top level of the library
 (a manual can't sit inside another folder). Check it, name it, and it opens
 empty. An existing top-level folder can be turned into a manual, or back,
-from its row menu: **Treat as a manual** and **Stop treating as manual**.
+from its menu in the folder pane: **Treat as a manual** and **Stop treating as manual**.
 Neither moves or deletes anything underneath.
 
 A brand new manual is empty on purpose: it is meant to be built out of notes

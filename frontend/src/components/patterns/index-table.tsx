@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -174,6 +174,12 @@ export interface IndexTableProps<T> {
   /** Make the header toggle strictly ascending/descending: no third click
    * that clears the sort, and no shift-click multi-sort. */
   twoStateSort?: boolean
+  /** Makes table rows draggable (a wide screen only; a phone moves things
+   * through a menu). Called on dragstart with the row and the event, so the
+   * caller fills in `dataTransfer`. Rows for which `isRowDraggable` returns
+   * false stay put. */
+  onRowDragStart?: (row: T, e: DragEvent<HTMLElement>) => void
+  isRowDraggable?: (row: T) => boolean
 }
 
 export function IndexTable<T>({
@@ -200,6 +206,8 @@ export function IndexTable<T>({
   initialSorting,
   onSortingChange,
   twoStateSort = false,
+  onRowDragStart,
+  isRowDraggable,
 }: IndexTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting ?? [])
   const onSortingChangeRef = useRef(onSortingChange)
@@ -423,6 +431,10 @@ export function IndexTable<T>({
   }
 
   function renderRow(row: TanstackRow<T>) {
+    const dragStart =
+      !isMobile && onRowDragStart && (isRowDraggable ? isRowDraggable(row.original) : true)
+        ? (e: DragEvent<HTMLElement>) => onRowDragStart(row.original, e)
+        : undefined
     return (
       <TableRow
         key={row.id}
@@ -438,6 +450,8 @@ export function IndexTable<T>({
           if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(row.original)
         } : undefined}
         className={cn(onOpen && 'cursor-pointer')}
+        draggable={dragStart ? true : undefined}
+        onDragStart={dragStart}
       >
         {selectable && <TableCell className="w-10 pr-0">{rowCheckbox(row)}</TableCell>}
         {row.getVisibleCells().map((cell) => (

@@ -2,9 +2,11 @@ import {
   Download,
   File,
   FileText,
+  Files,
   Folder,
   FolderPlus,
   Image as ImageIcon,
+  Inbox,
   Info,
   Library,
   Loader2,
@@ -30,14 +32,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -56,14 +50,17 @@ import { Switch } from '@/components/ui/switch'
 import {
   ConfirmDelete,
   EmptyState,
+  FolderTree,
   IndexFilters,
   IndexTable,
   Page,
   ResourceItem,
   ResourceList,
+  TreeLayout,
   type IndexFilter,
   type PageAction,
   type RowAction,
+  type TreeNode,
 } from '@/components/patterns'
 import { apiBaseUrl } from '@/config/api'
 import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
@@ -74,6 +71,7 @@ import {
   type DocumentRecord,
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
+import { useDocumentFolderTree, type DocumentFolderTreeNode } from '@/hooks/use-document-folder-tree'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
@@ -245,7 +243,7 @@ interface RenameTarget {
 }
 
 type DeleteTarget =
-  | { kind: 'folder'; id: string; name: string }
+  | { kind: 'folder'; id: string; name: string; parentId: string | null }
   | { kind: 'document'; id: string; name: string }
   | { kind: 'bulk'; ids: string[] }
 
@@ -259,15 +257,20 @@ type ReindexTarget =
 interface MoveTarget {
   ids: string[]
   label: string
+  /** The ids are a folder (moved with the folder API), not documents. */
+  isFolder?: boolean
 }
 
-/** One line of the listing: a folder or a document, in one IndexTable. */
-type ListRow =
-  | { kind: 'folder'; folder: DocumentFolder }
-  | { kind: 'document'; doc: DocumentRecord }
+// ADR 0170: the folder pane's own pseudo-nodes, and the drag payload a
+// document row carries to a folder node.
+const ALL_DOCUMENTS_NODE = '__all-documents__'
+const UNFILED_NOTES_NODE = '__unfiled-notes__'
+const DOCUMENT_DRAG_TYPE = 'application/x-helmcentral-documents'
+const TREE_EXPANDED_KEY = 'helmcentral.documents.treeExpanded'
+const TREE_COLLAPSED_KEY = 'helmcentral.documents.treeHidden'
 
-const rowName = (row: ListRow) => (row.kind === 'folder' ? row.folder.name : documentDisplayName(row.doc))
-const rowKey = (row: ListRow) => (row.kind === 'folder' ? row.folder.id : row.doc.id)
+const rowName = (doc: DocumentRecord) => documentDisplayName(doc)
+const rowKey = (doc: DocumentRecord) => doc.id
 
 export interface DocumentsPanelProps {
   /** Seeds the panel's current folder on mount - App.tsx passes whatever
@@ -358,8 +361,15 @@ export function DocumentsPanel({
   // always a no-op (manualId: null), so this costs one GET /api/manuals,
   // not a wasted tree fetch on every folder browsed.
   const manualsList = useManuals(null)
-  const isCurrentFolderManual = folderId !== null && manualsList.manuals.some((m) => m.id === folderId)
-  const manualFolderIds = useMemo(() => new Set(manualsList.manuals.map((m) => m.id)), [manualsList.manuals])
+
+  // ADR 0170: the whole folder hierarchy for the pane beside the listing.
+  // Refreshed after anything that changes a folder or a per-folder count.
+  const folderTree = useDocumentFolderTree()
+  const { refresh: refreshFolderTree } = folderTree
+  const treeChanged = useCallback(() => { void refreshFolderTree() }, [refreshFolderTree])
+  // The tree is the one source of truth for which folders are manuals;
+  // useManuals above is kept only for flag/clear.
+  const isCurrentFolderManual = folderId !== null && folderTree.folders.some((f) => f.id === folderId && f.is_manual)
 
   // ── Unfiled notes saved view + the viewer's note editing (revision) ────
   // One useNotes() instance serves three things: the "Unfiled notes" view
@@ -631,6 +641,7 @@ export function DocumentsPanel({
       setNewFolderOpen(false)
       setNewFolderName('')
       setNewFolderIsManual(false)
+      treeChanged()
     })
   }
 
@@ -644,6 +655,7 @@ export function DocumentsPanel({
     await runAction(async () => {
       if (renameTarget.kind === 'folder') {
         await documents.renameFolder(renameTarget.id, value)
+        treeChanged()
       } else {
         await documents.patchDocument(renameTarget.id, { title: value })
       }
@@ -656,13 +668,14 @@ export function DocumentsPanel({
   const submitMove = async (destination: string | null) => {
     if (!moveTarget) return
     await runAction(async () => {
-      if (moveTarget.ids.length === 1 && documents.folders.some((f) => f.id === moveTarget.ids[0])) {
+      if (moveTarget.isFolder) {
         await documents.moveFolder(moveTarget.ids[0], destination)
       } else {
         await documents.moveDocuments(moveTarget.ids, destination)
       }
       setMoveTarget(null)
       setSelectedIds(new Set())
+      treeChanged()
       // A moved id may have been an unfiled note draining out of the inbox
       // (File… on an Unfiled notes row, revision "one panel, not three") -
       // always refreshed rather than tracked per-id, the same "simpler over
@@ -679,10 +692,10 @@ export function DocumentsPanel({
   const [deleteTarget, setDeleteTargetState] = useState<DeleteTarget | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const setDeleteTarget = (target: DeleteTarget | null) => {
+  const setDeleteTarget = useCallback((target: DeleteTarget | null) => {
     setDeleteTargetState(target)
     setDeleteError(null)
-  }
+  }, [])
   const submitDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -690,6 +703,9 @@ export function DocumentsPanel({
     try {
       if (deleteTarget.kind === 'folder') {
         await documents.deleteFolder(deleteTarget.id)
+        // Only an empty folder can be deleted, so the one being browsed is the
+        // only one the panel can be standing in: step out to its parent.
+        if (deleteTarget.id === folderId) navigate(deleteTarget.parentId ?? null)
       } else if (deleteTarget.kind === 'document') {
         await documents.deleteDocument(deleteTarget.id)
         setSelectedIds((prev) => {
@@ -712,6 +728,7 @@ export function DocumentsPanel({
         }
       }
       setDeleteTarget(null)
+      treeChanged()
       void unfiled.refresh() // a deleted document may have been an unfiled note
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : String(err))
@@ -775,9 +792,10 @@ export function DocumentsPanel({
       if (handledUploadKeysRef.current.has(item.key)) continue
       handledUploadKeysRef.current.add(item.key)
       void documents.refresh()
+      treeChanged()
       uploads.remove(item.key)
     }
-  }, [uploads.items, uploads, documents])
+  }, [uploads.items, uploads, documents, treeChanged])
 
   // No note-type facet here. One was built and removed: a library folder
   // holds mostly kind='file' rows (PDFs, photos, the builder's handbook),
@@ -792,45 +810,18 @@ export function DocumentsPanel({
   // acts on documents that are on screen right now.
   const visibleSelectedIds = () => documentRows.filter((d) => selectedIds.has(d.id)).map((d) => d.id)
 
-  // ── the listing: folders and documents in one IndexTable ───────────────
-  const listRows = useMemo<ListRow[]>(
-    () => [
-      ...documents.folders.map((folder): ListRow => ({ kind: 'folder', folder })),
-      ...documents.documents.map((doc): ListRow => ({ kind: 'document', doc })),
-    ],
-    [documents.folders, documents.documents],
-  )
+  // ── the listing: documents only; folders live in the pane ──────────────
+  const listRows = documents.documents
   const { patchNote: patchUnfiledNote } = unfiled
   const [initialSorting] = useState<SortingState>(loadSort)
-  const columns = useMemo<ColumnDef<ListRow, unknown>[]>(() => [
+  const columns = useMemo<ColumnDef<DocumentRecord, unknown>[]>(() => [
     {
       id: 'name',
       header: 'Name',
       sortingFn: 'alphanumeric',
       accessorFn: rowName,
       cell: ({ row }) => {
-        const item = row.original
-        if (item.kind === 'folder') {
-          return (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); navigate(item.folder.id) }}
-              className="flex items-center gap-2 text-left font-medium hover:underline"
-            >
-              {/* Library, not Folder, for a Manual-kind folder - the only way
-                  to see that from the OUTSIDE (browsing its parent) at all,
-                  since GET /api/document-folders never serialises
-                  document_folders.role. */}
-              {manualFolderIds.has(item.folder.id) ? (
-                <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              )}
-              {item.folder.name}
-            </button>
-          )
-        }
-        const doc = item.doc
+        const doc = row.original
         const MimeIcon = rowIcon(doc.mime)
         const state = docStateIcon(doc)
         return (
@@ -877,75 +868,49 @@ export function DocumentsPanel({
       id: 'added',
       header: 'Added',
       sortDescFirst: true,
-      accessorFn: (item) => (item.kind === 'document' ? Date.parse(item.doc.created_at) || undefined : undefined),
-      cell: ({ row }) =>
-        row.original.kind === 'document' ? (
-          <span className="text-xs tabular-nums text-muted-foreground" title={formatDocumentTime(row.original.doc.created_at) ?? undefined}>
-            {formatAdded(row.original.doc.created_at) ?? '--'}
-          </span>
-        ) : null,
+      accessorFn: (doc) => Date.parse(doc.created_at) || undefined,
+      cell: ({ row }) => (
+        <span className="text-xs tabular-nums text-muted-foreground" title={formatDocumentTime(row.original.created_at) ?? undefined}>
+          {formatAdded(row.original.created_at) ?? '--'}
+        </span>
+      ),
     },
     {
       id: 'tags',
       header: 'Tags',
       enableSorting: false,
-      accessorFn: (item) => (item.kind === 'document' ? item.doc.tags.map((t) => t.tag).join(', ') : ''),
-      cell: ({ row }) =>
-        row.original.kind === 'document' ? (
-          <div
-            className="flex min-w-0 flex-nowrap gap-1"
-            title={row.original.doc.tags.map((t) => t.tag).join(', ')}
-          >
-            <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
-              {row.original.doc.tags.slice(0, MAX_LISTED_TAGS).map((t) => (
-                <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'} className="min-w-0 max-w-32 shrink">
-                  <span className="truncate">{t.tag}</span>
-                </Badge>
-              ))}
-            </div>
-            {row.original.doc.tags.length > MAX_LISTED_TAGS && (
-              <Badge variant="outline" className="shrink-0">+{row.original.doc.tags.length - MAX_LISTED_TAGS}</Badge>
-            )}
+      accessorFn: (doc) => doc.tags.map((t) => t.tag).join(', '),
+      cell: ({ row }) => (
+        <div className="flex min-w-0 flex-nowrap gap-1" title={row.original.tags.map((t) => t.tag).join(', ')}>
+          <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
+            {row.original.tags.slice(0, MAX_LISTED_TAGS).map((t) => (
+              <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'} className="min-w-0 max-w-32 shrink">
+                <span className="truncate">{t.tag}</span>
+              </Badge>
+            ))}
           </div>
-        ) : null,
+          {row.original.tags.length > MAX_LISTED_TAGS && (
+            <Badge variant="outline" className="shrink-0">+{row.original.tags.length - MAX_LISTED_TAGS}</Badge>
+          )}
+        </div>
+      ),
     },
     {
       id: 'size',
       header: 'Size',
       sortDescFirst: false,
-      accessorFn: (item) => (item.kind === 'document' ? item.doc.size_bytes : undefined),
+      accessorFn: (doc) => doc.size_bytes,
       cell: ({ getValue }) => {
         const bytes = getValue<number | undefined>()
         return bytes === undefined ? null : formatBytes(bytes)
       },
     },
-  ], [manualFolderIds, navigate, runAction, patchUnfiledNote])
+  ], [runAction, patchUnfiledNote])
 
-  // The current row menus, unchanged in what they offer (the old
-  // DocumentRowMenu / FolderRowMenu): a document can be opened, downloaded,
-  // renamed, detailed, moved, reindexed or deleted; a folder renamed, moved,
-  // promoted to / demoted from a manual, or deleted.
-  const rowActions = (item: ListRow): RowAction<ListRow>[] => {
-    if (item.kind === 'folder') {
-      const folder = item.folder
-      const isManual = manualFolderIds.has(folder.id)
-      return [
-        { label: 'Rename', icon: <Pencil className="h-4 w-4" aria-hidden="true" />, onSelect: () => { setRenameTarget({ kind: 'folder', id: folder.id, name: folder.name }); setRenameValue(folder.name) } },
-        { label: 'Move…', onSelect: () => setMoveTarget({ ids: [folder.id], label: folder.name }) },
-        // Promote/demote: a folder's kind, not a destructive act either way -
-        // "moves and deletes nothing" (POST/DELETE /api/manuals), so this is a
-        // direct toggle like Rename/Move, not a confirmation like Delete.
-        // Only a top-level folder can ever become a manual (backend's own
-        // errManualNotTopLevel) - true exactly when browsing the root.
-        ...(isManual
-          ? [{ label: 'Stop treating as manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(() => manualsList.clearManual(folder.id)) } }]
-          : folderId === null
-            ? [{ label: 'Treat as a manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(() => manualsList.flagManual(folder.id)) } }]
-            : []),
-        { label: 'Delete', icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: () => setDeleteTarget({ kind: 'folder', id: folder.id, name: folder.name }) },
-      ]
-    }
-    const doc = item.doc
+  // A document can be opened, downloaded, renamed, detailed, moved,
+  // reindexed or deleted. The folder actions (rename, move, manual, delete)
+  // live on the folder pane's per-node menu (ADR 0170).
+  const rowActions = (doc: DocumentRecord): RowAction<DocumentRecord>[] => {
     const name = documentDisplayName(doc)
     return [
       { label: 'Open', onSelect: () => setViewerId(doc.id) },
@@ -1011,37 +976,87 @@ export function DocumentsPanel({
       }]
     : []
 
+  // ── folder pane (ADR 0170) ─────────────────────────────────────────────
+  const { flagManual, clearManual } = manualsList
+  const unfiledCount = unfiled.notes.length
+  const treeNodes = useMemo<TreeNode[]>(() => {
+  const folderMenu = (f: DocumentFolderTreeNode): RowAction<TreeNode>[] => [
+    { label: 'Rename', icon: <Pencil className="h-4 w-4" aria-hidden="true" />, onSelect: () => { setRenameTarget({ kind: 'folder', id: f.id, name: f.name }); setRenameValue(f.name) } },
+    { label: 'Move…', onSelect: () => setMoveTarget({ ids: [f.id], label: f.name, isFolder: true }) },
+    // Promote/demote is a folder's kind, not a destructive act, so it is a
+    // direct toggle like Rename. Only a top-level folder can become a manual.
+    ...(f.is_manual
+      ? [{ label: 'Stop treating as manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await clearManual(f.id); treeChanged() }) } }]
+      : f.parent_id === null
+        ? [{ label: 'Treat as a manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await flagManual(f.id); treeChanged() }) } }]
+        : []),
+    { label: 'Delete', icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: () => setDeleteTarget({ kind: 'folder', id: f.id, name: f.name, parentId: f.parent_id }) },
+  ]
+  const treeByParent = new Map<string | null, DocumentFolderTreeNode[]>()
+  for (const f of folderTree.folders) {
+    const siblings = treeByParent.get(f.parent_id)
+    if (siblings) siblings.push(f)
+    else treeByParent.set(f.parent_id, [f])
+  }
+  // A manual is read as one thing in its own view, so its sections are not
+  // listed as folders here.
+  const buildTreeNodes = (parentId: string | null): TreeNode[] =>
+    (treeByParent.get(parentId) ?? []).map((f) => ({
+      id: f.id,
+      label: f.name,
+      icon: f.is_manual
+        ? <Library className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+      count: f.is_manual ? f.subtree_document_count : f.document_count,
+      droppable: true,
+      actions: folderMenu(f),
+      children: f.is_manual ? undefined : buildTreeNodes(f.id),
+    }))
+  return [
+    { id: ALL_DOCUMENTS_NODE, label: 'Documents', icon: <Files className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />, droppable: true },
+    ...buildTreeNodes(null),
+    { id: UNFILED_NOTES_NODE, label: 'Unfiled notes', icon: <Inbox className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />, count: unfiledCount, separatorBefore: true },
+  ]
+  }, [folderTree.folders, unfiledCount, runAction, flagManual, clearManual, treeChanged, setDeleteTarget])
+  // A folder inside a manual is not a node: the manual itself stays lit.
+  const selectedNodeId = useMemo(() => {
+    if (view === 'unfiled') return UNFILED_NOTES_NODE
+    if (folderId === null) return ALL_DOCUMENTS_NODE
+    let id = folderId
+    const byId = new Map(folderTree.folders.map((f) => [f.id, f]))
+    for (let f = byId.get(folderId); f; f = f.parent_id ? byId.get(f.parent_id) : undefined) {
+      if (f.is_manual) id = f.id
+    }
+    return id
+  }, [view, folderId, folderTree.folders])
+  const selectTreeNode = (id: string) => {
+    if (id === ALL_DOCUMENTS_NODE) navigate(null)
+    else if (id === UNFILED_NOTES_NODE) setView('unfiled')
+    else navigate(id)
+  }
+  const startDocumentDrag = (doc: DocumentRecord, e: DragEvent<HTMLElement>) => {
+    // Dragging a selected row carries the whole selection.
+    const ids = selectedIds.has(doc.id) ? visibleSelectedIds() : [doc.id]
+    e.dataTransfer.setData(DOCUMENT_DRAG_TYPE, JSON.stringify(ids))
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const dropOnTreeNode = (nodeId: string, data: string) => {
+    void runAction(async () => {
+      const ids: unknown = JSON.parse(data)
+      if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string')) return
+      await documents.moveDocuments(ids, nodeId === ALL_DOCUMENTS_NODE ? null : nodeId)
+      setSelectedIds(new Set())
+      treeChanged()
+      void unfiled.refresh()
+    })
+  }
+
   const bordered = 'min-h-0 flex-1 overflow-auto rounded-md border border-border bg-card'
 
   return (
     <Page
       className="h-full min-h-0 p-4"
-      title={currentFolder ? currentFolder.name : 'Documents'}
-      breadcrumb={documents.path.length > 0 ? (
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); navigate(null) }}>
-                Documents
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            {documents.path.map((folder, index) => (
-              <span key={folder.id} className="contents">
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  {index === documents.path.length - 1 ? (
-                    <BreadcrumbPage>{folder.name}</BreadcrumbPage>
-                  ) : (
-                    <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); navigate(folder.id) }}>
-                      {folder.name}
-                    </BreadcrumbLink>
-                  )}
-                </BreadcrumbItem>
-              </span>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-      ) : undefined}
+      title={view === 'unfiled' ? 'Unfiled notes' : currentFolder ? currentFolder.name : 'Documents'}
       primaryAction={{
         label: 'Upload',
         icon: <UploadIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />,
@@ -1058,6 +1073,25 @@ export function DocumentsPanel({
         data-testid="documents-file-input"
       />
 
+      <TreeLayout
+        paneLabel="Folders"
+        collapsedStorageKey={TREE_COLLAPSED_KEY}
+        pane={({ dismiss }) => (
+          <>
+            {folderTree.error && <p role="alert" className="p-2 text-xs text-destructive">{folderTree.error}</p>}
+            <FolderTree
+              label="Folders"
+              nodes={treeNodes}
+              selectedId={selectedNodeId}
+              onSelect={selectTreeNode}
+              storageKey={TREE_EXPANDED_KEY}
+              dropType={DOCUMENT_DRAG_TYPE}
+              onDropOnNode={dropOnTreeNode}
+              onDismiss={dismiss}
+            />
+          </>
+        )}
+      >
       <div className="flex flex-wrap items-end gap-3">
         {/* The search field is the trigger for the ⌘K overlay below, not a
             second search: see IndexFilters' onSearchActivate. */}
@@ -1071,19 +1105,6 @@ export function DocumentsPanel({
           filters={tagFilters}
           onClearAll={() => documents.setSelectedTag(null)}
         />
-        {/* "Unfiled notes" as a saved view, not a place (revision) -
-            kind='note' AND folder_id IS NULL, preserving the deleted
-            notes-panel.tsx's drain-the-inbox loop and its visible count
-            without owning a sidebar row. */}
-        <Button
-          type="button"
-          variant="outline"
-          className={cn('h-9', view === 'unfiled' && 'border-primary/40 bg-primary/10 text-primary')}
-          aria-pressed={view === 'unfiled'}
-          onClick={() => setView((prev) => (prev === 'unfiled' ? 'browse' : 'unfiled'))}
-        >
-          Unfiled notes ({unfiled.notes.length})
-        </Button>
         <MateFailureRow status={documents.embeddingsStatus} onOpenAssistantSettings={onOpenAssistantSettings} />
       </div>
 
@@ -1121,7 +1142,13 @@ export function DocumentsPanel({
       <div
         className={cn('flex min-h-0 flex-1 flex-col rounded-md', dragOver && 'ring-2 ring-primary')}
         data-testid="documents-dropzone"
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragOver={(e) => {
+          // Only a file from outside is an upload; a document row dragged to
+          // the folder pane passes over this area without lighting it up.
+          if (!Array.from(e.dataTransfer.types).includes('Files')) return
+          e.preventDefault()
+          setDragOver(true)
+        }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
@@ -1141,7 +1168,7 @@ export function DocumentsPanel({
               folderId={folderId}
               sectionId={sectionId}
               onSectionChange={setSectionId}
-              onDemoted={() => { void manualsList.refreshManuals() }}
+              onDemoted={() => { void manualsList.refreshManuals(); treeChanged() }}
               onNavigateDocument={setViewerId}
               mateAvailable={mateAvailable}
               onAskMate={onAskMate}
@@ -1152,17 +1179,14 @@ export function DocumentsPanel({
             columns={columns}
             rows={listRows}
             getRowId={rowKey}
-            onOpen={(item) => { if (item.kind === 'folder') navigate(item.folder.id); else setViewerId(item.doc.id) }}
+            onOpen={(doc) => setViewerId(doc.id)}
             rowActions={rowActions}
             rowActionsLabel={(item) => `Actions for ${rowName(item)}`}
             initialSorting={initialSorting}
             twoStateSort
             onSortingChange={saveSort}
-            groupBy={(item) => (item.kind === 'folder' ? 'folders' : 'documents')}
-            groupOrder={['folders', 'documents']}
-            groupLabel={(key) => (key === 'folders' ? 'Folders' : 'Documents')}
             selectable
-            isRowSelectable={(item) => item.kind === 'document'}
+            onRowDragStart={startDocumentDrag}
             selectedIds={selectedIds}
             onSelectionChange={setSelectedIds}
             rowSelectLabel={(item) => `Select ${rowName(item)}`}
@@ -1203,6 +1227,7 @@ export function DocumentsPanel({
           />
         )}
       </div>
+      </TreeLayout>
 
       {/* ── Search overlay (shadcn.io "navbar-search-overlay") ────────
           Reuses the query/allFolders state and debounce effect above -
@@ -1399,7 +1424,7 @@ export function DocumentsPanel({
         onOpenChange={(open) => { if (!open) setMoveTarget(null) }}
         label={moveTarget?.label ?? ''}
         onPick={(destination) => { void submitMove(destination) }}
-        onFolderCreated={() => { void documents.refresh() }}
+        onFolderCreated={() => { void documents.refresh(); treeChanged() }}
       />
 
       {/* ── Delete confirmation ────────────────────────────────────── */}
@@ -1479,7 +1504,7 @@ export function DocumentsPanel({
             open={captureOpen}
             onOpenChange={setCaptureOpen}
             initialType={captureType}
-            onCaptured={(id) => { setViewerId(id); void unfiled.refresh() }}
+            onCaptured={(id) => { setViewerId(id); void unfiled.refresh(); treeChanged() }}
           />
         </Suspense>
       )}

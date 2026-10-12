@@ -1189,6 +1189,15 @@ func listDocumentFoldersHandler(c echo.Context) error {
 	})
 }
 
+// GET /api/document-folders/tree
+func documentFolderTreeHandler(c echo.Context) error {
+	folders, err := globalDocumentStore.FolderTree()
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"folders": folders})
+}
+
 // POST /api/document-folders
 func createDocumentFolderHandler(c echo.Context) error {
 	var body struct {
