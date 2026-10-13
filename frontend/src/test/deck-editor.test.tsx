@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createRef } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { DeckEditor, type DeckEditorHandle } from '@/components/inventory/deck-editor'
+import { DeckEditor } from '@/components/inventory/deck-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import type { LayoutDraft } from '@/lib/deck-layout'
 import { stubImageSize } from './stub-image'
@@ -178,14 +177,6 @@ describe('DeckEditor', () => {
     await act(async () => { await router.saveAndContinue() })
     expect(calls('PUT', '/api/inventory/decks/d1/layout')).toHaveLength(1)
     expect(router.getSnapshot().location).toEqual({ panel: 'radar' })
-  })
-
-  it('exposes save() for the unsaved-changes guard', async () => {
-    const ref = createRef<DeckEditorHandle>()
-    render(<DeckEditor ref={ref} id="d1" onOpenLocations={vi.fn()} onOpenDecks={vi.fn()} onDeleted={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Stub: outline Lazarette' }))
-    await ref.current!.save()
-    expect(calls('PUT', '/api/inventory/decks/d1/layout')).toHaveLength(1)
   })
 
   it('shows the plain viewer, not the drawing surface, when read-only', async () => {

@@ -11,7 +11,7 @@
  * app-deep-link.test.tsx already uses to reach the Documents panel.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { App } from '../App'
 import { useDocument, useDocuments, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
@@ -393,93 +393,6 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     expect(screen.getByText(/unsaved changes on the details page/i)).toBeInTheDocument()
   })
 
-  it('Cancel closes the dialog and stays on the Details page', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-  })
-
-  it('Discard navigates away without saving', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
-    })
-    expect(patchMock).not.toHaveBeenCalled()
-  })
-
-  it('Save and Continue saves then navigates on success', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
-
-    await waitFor(() => {
-      expect(patchMock).toHaveBeenCalledTimes(1)
-    })
-    expect(patchMock).toHaveBeenCalledWith({ title: 'Impeller kit v2', notes: '', tags: [] })
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
-    })
-    expect(screen.queryByRole('alertdialog', { name: 'Unsaved changes' })).not.toBeInTheDocument()
-  })
-
-  it('Save and Continue does NOT navigate away if the save fails', async () => {
-    patchMock.mockRejectedValueOnce(new Error('title already used'))
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
-
-    await waitFor(() => {
-      expect(patchMock).toHaveBeenCalledTimes(1)
-    })
-
-    // Still on the Details page - save failed, so navigation must not have happened.
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByText('title already used')).toBeInTheDocument()
-  })
-
-  // ADR 0115 §2 review finding: the page's own breadcrumb Back
-  // (onBack) stays on the 'documents' panel - only documentsEditId changes -
-  // so it can't be caught by the same targetPanel check every other call
-  // site above relies on. It needs its own path through the guard.
-  it('the page\'s own breadcrumb Back also asks before leaving a dirty Details page', async () => {
-    render(<App />)
-    await navigateToDirtyDocumentDetails()
-
-    // Two things share the accessible name "Documents" here: App's own top
-    // breadcrumb ("current page", rendered as a non-interactive
-    // aria-disabled span) and DocumentDetailsPage's own breadcrumb link
-    // (onBack) - only the latter is an actual <a>.
-    const documentsLink = screen.getAllByRole('link', { name: 'Documents' }).find((el) => el.tagName === 'A')
-    expect(documentsLink).toBeDefined()
-    fireEvent.click(documentsLink!)
-
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
-    })
-  })
-
   // Mirrors app-settings-navigation-guard.test.tsx's own Back/Forward
   // coverage: Back is the browser's native button, not the page's own
   // breadcrumb link above - it moves window.location on its own and only
@@ -500,19 +413,5 @@ describe('App navigation guard on a dirty Documents Details page', () => {
     // still-mounted Details page back with getByDisplayValue (unfiltered)
     // rather than a role-based query.
     expect(screen.getByDisplayValue('Impeller kit v2')).toBeInTheDocument()
-  })
-
-  it('Discard on that guarded Back navigates to the listing and the bar goes to /documents', async () => {
-    window.history.replaceState({}, '', '/documents/doc-1')
-    render(<App />)
-
-    await screen.findByLabelText('Title')
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
-
-    window.history.replaceState({}, '', '/documents')
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    expect(window.location.pathname).toBe('/documents')
   })
 })

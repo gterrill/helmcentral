@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
+import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
 import { scanTags } from '@/lib/nfc'
 import { testRouter } from './helpers/router'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
@@ -406,6 +407,27 @@ describe('StocktakeSection', () => {
     await scan('https://boat.example/inventory/equipment/eq-1')
     await screen.findByText('Confirmed')
     expect(harness.router.hasGuards()).toBe(true)
+  })
+
+  it('holds a move that takes the pass off screen, with the stocktake wording, but not one that stays on it', async () => {
+    const item = makeItem({ id: 'eq-1', bin_id: 'b1', verified_aboard: true })
+    equipmentById['eq-1'] = item
+    const harness = testRouter('/inventory/stocktake')
+    render(<><StocktakeSection /><NavigationGuardDialog /></>, { wrapper: harness.wrapper as never })
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+    await scan('https://boat.example/inventory/bins/LAZ-02')
+    await scan('https://boat.example/inventory/equipment/eq-1')
+    await screen.findByText('Confirmed')
+
+    expect(harness.router.navigate({ panel: 'inventory', route: { view: 'index', section: 'stocktake' } })).toBe(true)
+    expect(harness.router.navigate({ panel: 'inventory', route: { view: 'equipment', id: 'eq-1' } })).toBe(false)
+    expect(harness.router.getSnapshot().pending).toMatchObject({ kind: 'stocktake-work' })
+    expect(await screen.findByRole('alertdialog', { name: 'Leave stocktake?' })).toBeInTheDocument()
+    expect(screen.getByText('The scans from this pass will be cleared.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save and Continue' })).not.toBeInTheDocument()
+    act(() => { harness.router.cancelPending() })
+    expect(harness.router.navigate({ panel: 'radar' })).toBe(false)
+    expect(harness.router.getSnapshot().pending).toMatchObject({ kind: 'stocktake-work' })
   })
 
   it('wires the bin photo grid\'s Open button to onOpenEquipment', async () => {

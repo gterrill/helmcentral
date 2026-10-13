@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LocationEditor } from '@/components/inventory/location-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import { stubImageSize } from './stub-image'
@@ -116,6 +116,19 @@ describe('LocationEditor', () => {
     expect(JSON.parse(String((putCalls('/api/inventory/zones/z1')[0][1] as RequestInit).body))).toEqual({ name: 'Engine room' })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument())
     expect(router.hasGuards()).toBe(false)
+  })
+
+  it('registers its own guard, held only for a move that leaves the location, and saves through it', async () => {
+    const { router } = renderEditor()
+    fireEvent.change(await screen.findByLabelText('Location name'), { target: { value: 'Engine room' } })
+    await waitFor(() => expect(router.hasGuards()).toBe(true))
+    expect(router.navigate({ panel: 'inventory', route: { view: 'location', id: 'z1' } })).toBe(true)
+    expect(router.navigate({ panel: 'radar' })).toBe(false)
+    expect(router.getSnapshot().pending).toMatchObject({ kind: 'dirty' })
+    await act(async () => { await router.saveAndContinue() })
+    expect(putCalls('/api/inventory/zones/z1')).toHaveLength(1)
+    expect(JSON.parse(String((putCalls('/api/inventory/zones/z1')[0][1] as RequestInit).body))).toEqual({ name: 'Engine room' })
+    expect(router.getSnapshot().location).toEqual({ panel: 'radar' })
   })
 
   it('discards an unsaved rename', async () => {

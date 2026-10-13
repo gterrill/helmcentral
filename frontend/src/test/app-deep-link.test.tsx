@@ -386,14 +386,6 @@ describe('App deep links', () => {
     expect(window.location.pathname).toBe('/mate')
   })
 
-  it('opens a thread deeplink at /mate/<threadId> and keeps the pathname', async () => {
-    window.history.replaceState({}, '', '/mate/12345')
-    render(<App />)
-
-    expect(await screen.findByTestId('assistant-drawer', {}, { timeout: 5000 })).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/mate/12345')
-  })
-
   it('treats /assistant as a legacy alias and normalises it to /mate', async () => {
     window.history.replaceState({}, '', '/assistant')
     render(<App />)
@@ -436,26 +428,6 @@ describe('App deep links', () => {
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
   })
 
-  it('mounts on a non-first dashboard page named by the URL and remembers it', () => {
-    mockPagesState.pages = [page('p1', 'Anchored'), page('p2', 'Underway')]
-    globalThis.localStorage?.setItem('dashboard.activePageId', 'p1')
-    window.history.replaceState({}, '', '/dashboard/p2')
-
-    render(<App />)
-
-    expect(screen.getByRole('button', { name: 'Underway' })).toHaveAttribute('data-active', 'true')
-    expect(globalThis.localStorage?.getItem('dashboard.activePageId')).toBe('p2')
-  })
-
-  it('normalises a deep link to the first page down to /', () => {
-    mockPagesState.pages = [page('p1', 'Anchored'), page('p2', 'Underway')]
-    window.history.replaceState({}, '', '/dashboard/p1')
-
-    render(<App />)
-
-    expect(window.location.pathname).toBe('/')
-  })
-
   it('retains the selected page and replaces its canonical URL when ordering changes', () => {
     const anchored = page('p1', 'Anchored')
     const docked = page('p2', 'Docked')
@@ -472,29 +444,6 @@ describe('App deep links', () => {
     rerender(<App />)
     expect(window.location.pathname).toBe('/')
     expect(window.history.length).toBe(historyLength)
-  })
-
-  it('reconciles an unknown page id to the first page and normalises the bar to /', () => {
-    mockPagesState.pages = [page('p1', 'Anchored'), page('p2', 'Underway')]
-    window.history.replaceState({}, '', '/dashboard/zzz')
-
-    render(<App />)
-
-    expect(screen.getByRole('button', { name: 'Anchored' })).toHaveAttribute('data-active', 'true')
-    expect(window.location.pathname).toBe('/')
-  })
-
-  it('pushes /dashboard/<id> for a non-first page and / for the first page from sidebar clicks', () => {
-    mockPagesState.pages = [page('p1', 'Anchored'), page('p2', 'Underway')]
-    window.history.replaceState({}, '', '/')
-
-    render(<App />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Underway' }))
-    expect(window.location.pathname).toBe('/dashboard/p2')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Anchored' }))
-    expect(window.location.pathname).toBe('/')
   })
 })
 

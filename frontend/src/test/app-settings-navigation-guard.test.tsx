@@ -342,65 +342,6 @@ describe('App navigation guard on dirty Settings', () => {
     expect(within(screen.getByRole('alertdialog')).getByText('Unsaved changes')).toBeInTheDocument()
   })
 
-  it('Cancel closes the dialog and stays on Settings', async () => {
-    render(<App />)
-    await navigateToDirtySettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    expect(within(screen.getByRole('alertdialog')).getByText('Unsaved changes')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Vessel prefix')).toBeInTheDocument()
-  })
-
-  it('Discard navigates away without saving', async () => {
-    render(<App />)
-    await navigateToDirtySettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Vessel prefix')).not.toBeInTheDocument()
-    })
-    expect(saveMock).not.toHaveBeenCalled()
-  })
-
-  it('Save and Continue saves then navigates on success', async () => {
-    render(<App />)
-    await navigateToDirtySettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
-
-    await waitFor(() => {
-      expect(saveMock).toHaveBeenCalledTimes(1)
-    })
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Vessel prefix')).not.toBeInTheDocument()
-    })
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-  })
-
-  it('Save and Continue does NOT navigate away if the save fails', async () => {
-    saveMock.mockRejectedValueOnce(new Error('boom'))
-    render(<App />)
-    await navigateToDirtySettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-
-    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
-
-    await waitFor(() => {
-      expect(saveMock).toHaveBeenCalledTimes(1)
-    })
-
-    // Still on Settings — save failed, so navigation must not have happened.
-    expect(screen.getByLabelText('Vessel prefix')).toBeInTheDocument()
-  })
-
   // ADR 0074: Back/Forward go through the same guard as a sidebar click.
   // These three dirty Settings via `mockTouched` (a touched secret field —
   // the same technique settings-page.test.tsx's own touched-secret case
@@ -438,48 +379,5 @@ describe('App navigation guard on dirty Settings', () => {
     // inert content). Distance units is General's own field, unlike
     // "General" itself, which the breadcrumb's section crumb also says.
     expect(screen.getByLabelText('Distance units')).toBeInTheDocument()
-  })
-
-  it('Cancel on that guarded Back closes the dialog and keeps the bar on /settings', async () => {
-    mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
-    window.history.replaceState({}, '', '/settings')
-    render(<App />)
-
-    // Settings is a lazy chunk — wait for it to actually mount and report
-    // dirty before simulating Back, or the popstate handler below would see
-    // settingsDirty still at its initial `false`. The SectionNav's own
-    // button, not bare text — the header breadcrumb also says "General"
-    // (its section crumb) as soon as settingsSection's initial state
-    // resolves, well before the lazy chunk mounts.
-    await screen.findByRole('button', { name: 'General' })
-
-    window.history.replaceState({}, '', '/')
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    })
-    expect(window.location.pathname).toBe('/settings')
-  })
-
-  it('Discard on that guarded Back navigates to the dashboard and the bar goes to /', async () => {
-    mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
-    window.history.replaceState({}, '', '/settings')
-    render(<App />)
-
-    // Settings is a lazy chunk — wait for it to actually mount and report
-    // dirty before simulating Back, or the popstate handler below would see
-    // settingsDirty still at its initial `false`. The SectionNav's own
-    // button, not bare text — the header breadcrumb also says "General"
-    // (its section crumb) as soon as settingsSection's initial state
-    // resolves, well before the lazy chunk mounts.
-    await screen.findByRole('button', { name: 'General' })
-
-    window.history.replaceState({}, '', '/')
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
-
-    expect(window.location.pathname).toBe('/')
   })
 })

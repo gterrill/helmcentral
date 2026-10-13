@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
@@ -17,14 +17,10 @@ import { loadImageSize, useImageSize } from '@/lib/use-image-size'
 
 // ADR 0156: one deck's page - its name, its plan image and the drawing
 // surface. The name and the whole layout (outlines and pins) are one draft
-// saved through the Save bar and reported up through onDirtyChange so the
-// app's unsaved-changes guard covers it; a half-drawn outline never reaches
+// saved through the Save bar, and the editor registers its own navigation
+// guard for that draft, with performSave as its Save and Continue; a half-drawn outline never reaches
 // the server. The plan image is different, like a photo: it uploads the moment
 // it is chosen.
-
-export interface DeckEditorHandle {
-  save: () => Promise<void>
-}
 
 interface DeckEditorProps {
   id: string
@@ -42,9 +38,8 @@ const ASPECT_TOLERANCE = 0.02
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function DeckEditor(
-  { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true },
-  ref,
+export function DeckEditor(
+  { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true }: DeckEditorProps,
 ) {
   const { decks, loading, error, refresh, renameDeck, deleteDeck, uploadPlan, saveLayout } = useInventoryDecks()
   const { zones, loading: zonesLoading, error: zonesError, refresh: refreshZones } = useInventoryZones()
@@ -107,9 +102,6 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
       setSaving(false)
     }
   }, [deck, name, layout, layoutChanged, zones, renameDeck, saveLayout, refreshZones])
-
-  // Same contract as LocationEditorHandle: App.tsx's "Save and Continue".
-  useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
   // ADR 0171: this page owns the guard for its name and layout draft.
   useNavigationGuard(dirty
@@ -339,4 +331,4 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
       )}
     </Page>
   )
-})
+}

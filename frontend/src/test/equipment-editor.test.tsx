@@ -1,7 +1,7 @@
-import { createRef, useState } from 'react'
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
+import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/use-inventory'
 import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
@@ -657,17 +657,18 @@ describe('EquipmentEditor', () => {
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
 
-    it('gates the ref save ("Save and Continue") behind the same confirmation', async () => {
+    it('gates the Save and Continue behind the same confirmation', async () => {
       currentItem = makeItem({ profile_id: 'old-profile' })
       profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
-      const ref = createRef<EquipmentEditorHandle>()
-      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      const harness = testRouter('/inventory/equipment/eq-1')
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
       await waitForLoaded()
       await pickProfile('Onan 13.5kW')
       await screen.findByText('Drive belt')
 
+      act(() => { harness.router.navigate({ panel: 'radar' }) })
       let result: Promise<void> | undefined
-      act(() => { result = ref.current!.save() })
+      act(() => { result = harness.router.saveAndContinue() })
       const dialog = await screen.findByRole('alertdialog')
       expect(putCalls()).toHaveLength(0)
       fireEvent.click(within(dialog).getByRole('button', { name: 'Change profile' }))
@@ -675,17 +676,18 @@ describe('EquipmentEditor', () => {
       expect(putCalls()).toHaveLength(1)
     })
 
-    it('rejects the ref save when the operator declines', async () => {
+    it('rejects the Save and Continue when the operator declines', async () => {
       currentItem = makeItem({ profile_id: 'old-profile' })
       profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
-      const ref = createRef<EquipmentEditorHandle>()
-      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      const harness = testRouter('/inventory/equipment/eq-1')
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
       await waitForLoaded()
       await pickProfile('Onan 13.5kW')
       await screen.findByText('Drive belt')
 
+      act(() => { harness.router.navigate({ panel: 'radar' }) })
       let result: Promise<void> | undefined
-      act(() => { result = ref.current!.save() })
+      act(() => { result = harness.router.saveAndContinue() })
       const dialog = await screen.findByRole('alertdialog')
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
       await expect(result).rejects.toThrow(/not confirmed/i)
@@ -717,17 +719,18 @@ describe('EquipmentEditor', () => {
       await waitFor(() => expect(putCalls()).toHaveLength(1))
     })
 
-    it('clears the profile change summary once a ref save ("Save and Continue") succeeds', async () => {
+    it('clears the profile change summary once the Save and Continue succeeds', async () => {
       currentItem = makeItem({ profile_id: 'old-profile' })
       profilePreviewBody = { kept: [], leaving: [{ service_id: 'belt', description: 'Drive belt' }], new: [] }
-      const ref = createRef<EquipmentEditorHandle>()
-      render(<EquipmentEditor ref={ref} id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      const harness = testRouter('/inventory/equipment/eq-1')
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
       await waitForLoaded()
       await pickProfile('Onan 13.5kW')
       await screen.findByText('Drive belt')
 
+      act(() => { harness.router.navigate({ panel: 'radar' }) })
       let result: Promise<void> | undefined
-      act(() => { result = ref.current!.save() })
+      act(() => { result = harness.router.saveAndContinue() })
       const dialog = await screen.findByRole('alertdialog')
       fireEvent.click(within(dialog).getByRole('button', { name: 'Change profile' }))
       await act(async () => { await result })

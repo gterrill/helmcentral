@@ -83,7 +83,11 @@ function DetailsView({ documentId, onOpenFolder, onBack, onFolderContextChange, 
         blocks: (_from, to) => (
           to.panel === 'documents' && to.route.view === 'details' && to.route.id === documentId ? null : { kind: 'dirty' }
         ),
-        save: async () => { await pageRef.current?.save() },
+        save: async () => {
+          const page = pageRef.current
+          if (!page) throw new Error('The Details page is not available to save.')
+          await page.save()
+        },
       }
     : null)
 
