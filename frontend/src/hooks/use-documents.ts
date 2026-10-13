@@ -498,9 +498,15 @@ export function useDocument(id: string | null): {
   /** Files the document into a folder (null for the top level) and reloads it. */
   move: (folderId: string | null) => Promise<void>
 } {
-  const [document, setDocument] = useState<DocumentRecord | null>(null)
-  const [loading, setLoading] = useState(id !== null)
-  const [error, setError] = useState<string | null>(null)
+  const [fetched, setDocument] = useState<DocumentRecord | null>(null)
+  const [loadingState, setLoading] = useState(id !== null)
+  const [errorState, setError] = useState<{ id: string; message: string } | null>(null)
+
+  // Data for a different id is never reported: while a new id loads, the
+  // previous document (and its error) must not describe it.
+  const document = fetched !== null && fetched.id === id ? fetched : null
+  const error = errorState !== null && errorState.id === id ? errorState.message : null
+  const loading = id !== null && document === null && error === null ? true : loadingState
 
   // Same ordering guard as useDocuments' own refresh() above, and for the
   // same reason: a GET for an id the operator has since navigated away from
@@ -534,7 +540,7 @@ export function useDocument(id: string | null): {
     } catch (err) {
       if (seq !== seqRef.current) return
       setDocument(null)
-      setError(err instanceof Error ? err.message : String(err))
+      setError({ id, message: err instanceof Error ? err.message : String(err) })
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }

@@ -32,6 +32,9 @@ export function DocumentsRoutePanel({
   if (route.view === 'details') {
     return (
       <DetailsView
+        // A new document is a new page: never show the previous one's
+        // fields or dirty flag while the next loads.
+        key={route.id}
         documentId={route.id}
         onOpenFolder={(folderId) => { openFolder(folderId) }}
         onBack={() => { close() }}

@@ -11,6 +11,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-12
+
+### Added
+
+- A document's Details page now shows where it is filed as a trail of
+  clickable folders (**Documents** > folder > document), so there is an obvious
+  way back to the list. It also has a **Move** button that files the document
+  in another folder, and the **About the file** column shows its current
+  folder.
+- Mate knows which document you are looking at. Open Mate from a document's
+  Details page and "what period does this cover?" is taken to mean that
+  document; Mate reads it instead of asking which source you mean.
+- The screen stays awake while the dashboard is full screen, so a tablet at
+  the helm no longer dims and locks mid-watch. This works only when you open
+  Helmcentral by an `https://` address such as the Tailscale name; over plain
+  `http://` the screen sleeps as before. On an iPad or iPhone, where
+  Helmcentral opened from a Home Screen icon has no full screen, the screen
+  stays awake while that copy shows the dashboard.
+
 ### Changed
 
 - In Inventory, clicking **Equipment** while an item is open now takes you
@@ -55,20 +74,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
-- A document's Details page now shows where it is filed as a trail of
-  clickable folders (**Documents** > folder > document), so there is an obvious
-  way back to the list. It also has a **Move** button that files the document
-  in another folder, and the **About the file** column shows its current
-  folder.
-- Mate knows which document you are looking at. Open Mate from a document's
-  Details page and "what period does this cover?" is taken to mean that
-  document; Mate reads it instead of asking which source you mean.
-- The screen stays awake while the dashboard is full screen, so a tablet at
-  the helm no longer dims and locks mid-watch. This works only when you open
-  Helmcentral by an `https://` address such as the Tailscale name; over plain
-  `http://` the screen sleeps as before. On an iPad or iPhone, where
-  Helmcentral opened from a Home Screen icon has no full screen, the screen
-  stays awake while that copy shows the dashboard.
 - The indicator ribbon now shows labelled cells instead of small dots. Each
   cell has an icon, the full name and a reading (On, Off, or `--` with no
   data), and fills green when on. A cell turns amber or red while an active
@@ -1050,7 +1055,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/gterrill/helmcentral/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/gterrill/helmcentral/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/gterrill/helmcentral/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/gterrill/helmcentral/compare/v0.40.0...v0.41.0

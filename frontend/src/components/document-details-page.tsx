@@ -16,6 +16,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 import { useDocument, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
 
@@ -190,6 +191,22 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
 
   const { path: folderPath, error: folderPathError } = useFolderPath(document?.folder_id ?? null)
 
+  // A crumb inside a manual opens the manual itself: a manual's chapters are
+  // not listings of their own (the manual view is the only way to read
+  // them), so opening one as a plain folder would show the wrong thing. The
+  // tree says which top-level folders are manuals; until it has loaded (or
+  // if it failed) the folder crumbs are not links, rather than guessing.
+  const folderTree = useDocumentFolderTree()
+  const crumbTarget = (folderId: string): string => {
+    const byId = new Map(folderTree.folders.map((f) => [f.id, f]))
+    let target = folderId
+    for (let node = byId.get(folderId); node; node = node.parent_id ? byId.get(node.parent_id) : undefined) {
+      if (node.is_manual) target = node.id
+    }
+    return target
+  }
+  const treeReady = !folderTree.loading && folderTree.error === null
+
   const displayName = document ? documentDisplayName(document) : null
   useEffect(() => {
     onTitleChange?.(displayName)
@@ -224,9 +241,13 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
           <span key={folder.id} className="contents">
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(folder.id) }}>
-                {folder.name}
-              </BreadcrumbLink>
+              {treeReady ? (
+                <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(crumbTarget(folder.id)) }}>
+                  {folder.name}
+                </BreadcrumbLink>
+              ) : (
+                <span className="text-muted-foreground">{folder.name}</span>
+              )}
             </BreadcrumbItem>
           </span>
         ))}
@@ -399,6 +420,11 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
       className={pageClassName}
       primaryAction={{ label: 'Move', icon: <FolderInput className="h-4 w-4" aria-hidden="true" />, onClick: () => setMoveOpen(true) }}
     >
+      {folderTree.error && (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Folder links unavailable ({folderTree.error})
+        </p>
+      )}
       {moveError && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {moveError}
