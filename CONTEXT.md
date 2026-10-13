@@ -21,3 +21,12 @@ so "Save and Continue" needs nothing from App.
 **Panel route**: one panel's slice of the app location, a single union of that
 panel's views. Going to a view replaces the whole slice, so sibling views
 never need clearing.
+
+## Mate
+
+**Mate tool**: one thing the model can call during a run, defined by a single
+record in `mateTools` (`backend/assistant_tools.go`): its name, its definition,
+its handler, its status line, and optionally how its result becomes a card on
+the reply and whether it is on offer for this run. Calls in a round run
+concurrently, so a tool that writes is safe under that on its own.
+_Avoid_: function, plugin, skill.
