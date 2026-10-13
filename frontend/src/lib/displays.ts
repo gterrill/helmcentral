@@ -162,6 +162,9 @@ export interface DisplayOptions {
   preview: boolean
 }
 
+/** What the wall options are everywhere except the wall display route itself. */
+export const NO_DISPLAY_OPTIONS: DisplayOptions = { pageId: null, preview: false }
+
 /** Parses the wall display route's own query string. Never throws on a malformed value. */
 export function parseDisplayOptions(search: string): DisplayOptions {
   const params = new URLSearchParams(search)

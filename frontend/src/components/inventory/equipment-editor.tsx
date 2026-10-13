@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +11,8 @@ import { DocumentViewerSheet } from '@/components/documents/document-viewer-shee
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
 import { EquipmentSparesFields } from '@/components/inventory/equipment-spares-fields'
 import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
@@ -160,12 +162,6 @@ interface EquipmentEditorProps {
    * editor is still reporting dirty at this moment, and the operator has just
    * declined to keep the changes). */
   onDiscarded: () => void
-  onDirtyChange?: (dirty: boolean) => void
-  /** 2026-09-25 amendment (finding 8): photos still waiting for Retry on
-   * the open item are unsaved work for the SAME leave guard bin-quick-add's
-   * identical prop drives - Leave/Stay wording with a detail, not the
-   * Save-and-Continue wording onDirtyChange's own dirty-draft case gets. */
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   canWrite?: boolean
   /** ADR 0127: the bin page's "Full item" action pre-sets a brand new
    * draft's location - read only once, when a NEW draft (id === null)
@@ -188,7 +184,7 @@ export interface EquipmentEditorHandle {
 }
 
 export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditorProps>(function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDiscarded, onDirtyChange, onHasWorkChange, canWrite = true, initialZoneId = null, initialBinId = null },
+  { id, onBack, onCreated, onDeleted, onDiscarded, canWrite = true, initialZoneId = null, initialBinId = null },
   ref,
 ) {
   const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
@@ -385,8 +381,6 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   const linksDirty = effectiveAdds.length > 0 || effectiveRemoves.length > 0
   const dirty = draftDirty || linksDirty
 
-  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
-
   // finding 8 (pre-release review): photos still waiting for Retry on the
   // OPEN item are unsaved work for the leave guard, the same way
   // bin-quick-add's own pendingRetries drive its onHasWorkChange - a
@@ -402,14 +396,6 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
     return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
   }, [failedPhotoUploads.length, item?.name, draft.name])
   const hasPhotoWork = photoWorkDetail !== undefined
-  // useLayoutEffect - see bin-quick-add.tsx's own onHasWorkChange effect for
-  // why: App.tsx's guard can read inventoryHasWork right after a state
-  // update this same effect is meant to report, with no render in between
-  // for an ordinary passive effect to be guaranteed to have caught up.
-  useLayoutEffect(() => {
-    if (photoWorkDetail !== undefined) onHasWorkChange?.(hasPhotoWork, photoWorkDetail)
-    else onHasWorkChange?.(hasPhotoWork)
-  }, [hasPhotoWork, photoWorkDetail, onHasWorkChange])
 
   // Trap: the bin select is constrained to the CHOSEN zone's bins - with no
   // zone chosen yet, every bin across every zone is offered instead (so a
@@ -812,6 +798,22 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
   }, [id, draft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
+
+  // ADR 0171: this editor owns the guard for its draft. An unsaved draft has a
+  // Save behind Save and Continue; photos still waiting for Retry have nothing
+  // to save and get Leave/Stay with their own wording. The draft wins when
+  // both are present. A New item draft has no address, so any move closes it.
+  useNavigationGuard(dirty || hasPhotoWork
+    ? {
+        owner: 'inventory',
+        label: 'Inventory',
+        blocks: (_from, to) => {
+          if (!inventoryEditorClosedBy(id === null ? { view: 'equipment-new', preset: null } : { view: 'equipment', id }, to)) return null
+          return dirty ? { kind: 'dirty' } : { kind: 'quick-add-work', detail: photoWorkDetail }
+        },
+        save: performSave,
+      }
+    : null)
 
   const decideProfileChange = (confirmed: boolean) => {
     const pending = profileDecision.current

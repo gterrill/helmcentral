@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LocationEditor } from '@/components/inventory/location-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import { stubImageSize } from './stub-image'
+import { testRouter } from './helpers/router'
 
 let zones: InventoryZone[]
 const fetchMock = vi.fn()
@@ -71,7 +72,9 @@ beforeEach(() => {
 afterEach(() => { headerHost.remove() })
 
 function renderEditor(props: Partial<React.ComponentProps<typeof LocationEditor>> = {}) {
-  return render(<LocationEditor id="z1" onBack={vi.fn()} onDeleted={vi.fn()} {...props} />)
+  const harness = testRouter('/inventory/locations/z1')
+  render(<LocationEditor id="z1" onBack={vi.fn()} onDeleted={vi.fn()} {...props} />, { wrapper: harness.wrapper as never })
+  return harness
 }
 
 describe('LocationEditor', () => {
@@ -95,26 +98,24 @@ describe('LocationEditor', () => {
   })
 
   it('never reports unsaved changes just from loading', async () => {
-    const onDirtyChange = vi.fn()
-    renderEditor({ onDirtyChange })
+    const { router } = renderEditor()
     await screen.findByDisplayValue('Engine room (stbd)')
-    expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+    expect(router.hasGuards()).toBe(false)
   })
 
   it('renames through the save bar, and only once it is dirty', async () => {
-    const onDirtyChange = vi.fn()
-    renderEditor({ onDirtyChange })
+    const { router } = renderEditor()
     const input = await screen.findByLabelText('Location name')
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
 
     fireEvent.change(input, { target: { value: 'Engine room' } })
-    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    expect(router.hasGuards()).toBe(true)
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(putCalls('/api/inventory/zones/z1')).toHaveLength(1))
     expect(JSON.parse(String((putCalls('/api/inventory/zones/z1')[0][1] as RequestInit).body))).toEqual({ name: 'Engine room' })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument())
-    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    expect(router.hasGuards()).toBe(false)
   })
 
   it('discards an unsaved rename', async () => {

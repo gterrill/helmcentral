@@ -3,7 +3,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BinPhotoGrid } from '@/components/inventory/bin-page'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { resolveScannedText } from '@/lib/app-location'
+import { inventoryWorkClosedBy } from '@/lib/inventory-navigation-guard'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
   EquipmentNotFoundError,
@@ -54,27 +56,9 @@ interface StocktakeSectionProps {
    * reports what it found - but nothing is written, and Move (the one press
    * that writes) is hidden rather than shown and then rejected. */
   canWrite?: boolean
-  /** Release-fixes code-review finding: reports whether this pass holds
-   * anything a navigation away would silently clear, the way the equipment
-   * editor reports dirty (onDirtyChange) - App.tsx routes Open/Full item
-   * through the same unsaved-work guard when this is true. A confirmed or
-   * elsewhere-scanned item is "work" (it took an actual scan against a real
-   * bin to produce); a bare bin scan is not - it's the normal first step of
-   * scanning INTO a bin, trivially repeated by rescanning the same tag, and
-   * gating it too would put a dialog in front of "scan bin, tap a photo's
-   * Open" for no data actually at risk. Live NFC scanning is also "work":
-   * navigating away silently stops the reader without the operator having
-   * pressed Stop. */
-  // Release-fixes code-review finding: widened to match BinQuickAdd's own
-  // onHasWorkChange (bin-quick-add.tsx) - InventoryPanel forwards the exact
-  // same function to both, so the two props have to agree on a signature.
-  // Stocktake itself never has a `detail` to report; a scans-cleared warning
-  // is specific enough on its own (App.tsx's dialog copy for
-  // 'stocktake-work').
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
 }
 
-export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, onHasWorkChange }: StocktakeSectionProps) {
+export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }: StocktakeSectionProps) {
   // Review finding: only `zones` used to be read here - a genuine fetch
   // failure left it at its initial `[]` with no way to tell that apart from
   // "the tree loaded fine and this code just doesn't exist", so
@@ -122,20 +106,29 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
     [events],
   )
 
-  // See onHasWorkChange's own doc comment on StocktakeSectionProps for why
-  // a bare 'bin'/'unrecognised' event doesn't count.
+  // What counts as work: a confirmed or elsewhere-scanned item (it took an
+  // actual scan against a real bin to produce), and live NFC scanning, which
+  // navigating away silently stops without the operator pressing Stop. A bare
+  // bin scan is not - it's the normal first step of scanning INTO a bin,
+  // trivially repeated by rescanning the same tag, and gating it too would put
+  // a dialog in front of "scan bin, tap a photo's Open" for no data at risk.
   const hasReviewWork = useMemo(
     () => events.some((e) => e.kind === 'confirmed' || e.kind === 'elsewhere') || scanning,
     [events, scanning],
   )
-  // useLayoutEffect, not useEffect - App.tsx's own guard (requestWithinInventory)
-  // reads inventoryHasWork the instant Open/Full item is pressed, which can
-  // follow a confirmed scan within the same handleScan call chain with no
-  // render in between for a passive effect to have caught up on. A layout
-  // effect commits synchronously with the render that added the event,
-  // closing the same class of gap currentBinRef/handleScanRef's own
-  // comments (above) already describe for the scan decision itself.
-  useLayoutEffect(() => { onHasWorkChange?.(hasReviewWork) }, [hasReviewWork, onHasWorkChange])
+  // ADR 0171: Stocktake owns the guard for its pass. Leaving the section (or
+  // the panel) clears the scans and stops the reader, so that move is held.
+  // Registered in a layout effect, so it is live the instant Open is pressed
+  // after a scan, with no render in between for a passive effect to catch up.
+  useNavigationGuard(hasReviewWork
+    ? {
+        owner: 'inventory',
+        label: 'Inventory',
+        blocks: (_from, to) => (
+          inventoryWorkClosedBy({ view: 'index', section: 'stocktake' }, to) ? { kind: 'stocktake-work' } : null
+        ),
+      }
+    : null)
 
   // Takes a fully-formed ScanEvent (id included) rather than an Omit<...,
   // 'id'> - Omit collapses a discriminated union to the INTERSECTION of its
@@ -161,7 +154,8 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
       return
     }
 
-    if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
+    if (parsed.panel === 'inventory' && parsed.route.view === 'bin') {
+      const binCode = parsed.route.code
       // Review finding: neither of these is "this code doesn't exist" - a
       // bin scan taken while the zone tree hasn't loaded yet (or failed to)
       // can't be resolved either way, so it is reported for what it
@@ -173,7 +167,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
         return
       }
       if (zonesError) return
-      const match = findBinByCode(zones, parsed.binCode)
+      const match = findBinByCode(zones, binCode)
       if (!match) {
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
         return
@@ -188,10 +182,11 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true, 
       return
     }
 
-    if (parsed.panel === 'inventory' && parsed.inventorySection === 'equipment' && parsed.equipmentEditId) {
+    if (parsed.panel === 'inventory' && parsed.route.view === 'equipment') {
+      const equipmentId = parsed.route.id
       let item: EquipmentItem
       try {
-        item = await fetchEquipment(parsed.equipmentEditId)
+        item = await fetchEquipment(equipmentId)
       } catch (err) {
         // Review finding: every fetchEquipment failure used to be logged as
         // an unrecognised scan - a genuine server error (a 500, a dropped

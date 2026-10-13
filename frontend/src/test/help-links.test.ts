@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path'
 
 import { describe, it, expect } from 'vitest'
 
-import { PANEL_IDS } from '@/lib/app-location'
+import { PANEL_IDS, type AppLocation, type PanelId } from '@/lib/app-location'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
 import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 import {
@@ -22,23 +22,35 @@ import {
 
 describe('helpTargetFor', () => {
   it('sends the dashboard (panel null) to the dashboard help page', () => {
-    expect(helpTargetFor({ panel: null })).toEqual(DASHBOARD_HELP_TARGET)
+    expect(helpTargetFor({ panel: null, pageId: null })).toEqual(DASHBOARD_HELP_TARGET)
   })
 
-  it('sends every non-settings panel to its own table entry', () => {
-    for (const id of PANEL_IDS) {
-      if (id === 'settings') continue
-      expect(helpTargetFor({ panel: id })).toEqual(PANEL_HELP_TARGETS[id])
+  it('sends every panel without sections to its own table entry', () => {
+    const plain: AppLocation[] = [
+      { panel: 'forecast' },
+      { panel: 'routes' },
+      { panel: 'radar' },
+      { panel: 'anchor-watch' },
+      { panel: 'alarms' },
+      { panel: 'assistant', conversationId: null },
+      { panel: 'display', slug: null, options: { pageId: null, preview: false } },
+      { panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: null } },
+      { panel: 'wall-displays', route: { view: 'index' } },
+    ]
+    for (const location of plain) {
+      expect(helpTargetFor(location)).toEqual(PANEL_HELP_TARGETS[location.panel as PanelId])
     }
   })
 
-  it('sends settings to the section table, defaulting to general when no section is set', () => {
-    expect(helpTargetFor({ panel: 'settings' })).toEqual(SETTINGS_HELP_TARGETS.general)
+  it('sends settings to the section table, and the Import wizard to the Import section', () => {
     for (const section of SETTINGS_SECTIONS) {
-      expect(helpTargetFor({ panel: 'settings', section: section.id })).toEqual(
+      expect(helpTargetFor({ panel: 'settings', route: { view: 'section', section: section.id } })).toEqual(
         SETTINGS_HELP_TARGETS[section.id],
       )
     }
+    expect(helpTargetFor({ panel: 'settings', route: { view: 'import-run', runId: 'new' } })).toEqual(
+      SETTINGS_HELP_TARGETS.import,
+    )
   })
 
   it('gives the settings panel-table entry the same target as the general section, for totality', () => {
@@ -50,13 +62,15 @@ describe('helpTargetFor', () => {
   })
 
   // ADR 0123: the Inventory panel, same section-table branching as settings.
-  it('sends inventory to the section table, defaulting to Equipment when no section is set', () => {
-    expect(helpTargetFor({ panel: 'inventory' })).toEqual(INVENTORY_HELP_TARGETS.equipment)
+  it('sends inventory to the section table, and a page under a section to that section', () => {
     for (const section of INVENTORY_SECTIONS) {
-      expect(helpTargetFor({ panel: 'inventory', inventorySection: section.id })).toEqual(
+      expect(helpTargetFor({ panel: 'inventory', route: { view: 'index', section: section.id } })).toEqual(
         INVENTORY_HELP_TARGETS[section.id],
       )
     }
+    expect(helpTargetFor({ panel: 'inventory', route: { view: 'equipment', id: 'eq-1' } })).toEqual(INVENTORY_HELP_TARGETS.equipment)
+    expect(helpTargetFor({ panel: 'inventory', route: { view: 'bin', code: 'LAZ-02' } })).toEqual(INVENTORY_HELP_TARGETS.locations)
+    expect(helpTargetFor({ panel: 'inventory', route: { view: 'deck', id: 'd1' } })).toEqual(INVENTORY_HELP_TARGETS.locations)
   })
 
   it('gives the inventory panel-table entry the same target as the Equipment section, for totality', () => {

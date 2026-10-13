@@ -1,125 +1,102 @@
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import type { InventorySectionId } from '@/components/inventory/inventory-nav'
+import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
 
 // ADR 0074: path URLs, hand-rolled (no router library). This module is the
-// only place that knows how a URL string maps to app state — App.tsx's sync
-// effect and popstate handler both go through parseAppLocation and
-// formatAppLocation rather than building or reading path strings themselves.
+// only place that knows how a URL string maps to an app location. The
+// router (app-router.ts) goes through parseAppLocation and formatAppLocation
+// rather than building or reading path strings itself.
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
+//
+// ADR 0171: an AppLocation is a discriminated union. Each panel with views of
+// its own carries a `route`, a single union of that panel's views, so going
+// to a view replaces the whole slice and no sibling field is ever left
+// behind to clear.
 export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
-export interface AppLocation {
-  panel: PanelId | null
-  pageId?: string | null
-  section?: SettingsSectionId
-  /** The Import section's wizard: `/settings/import/<runId>`, where "new" is the
-   * upload page. null on the bare `/settings/import` list; absent elsewhere. */
-  importRunId?: string | null
-  conversationId?: string | null
-  /** ADR 0106 F1: the Documents panel's current folder, null for the root.
-   * Absent (undefined) on every other panel/location. */
-  documentFolderId?: string | null
-  /** ADR 0106 F1: a document to open in the viewer on mount - how a Mate
-   * attachment chip's link opens straight to that document. formatAppLocation
-   * serializes it like any other field (round-tripping a deep link exactly);
-   * App.tsx's own sync effect is what chooses to read it only once, from
-   * initialLocation, rather than feeding it back in on every render the way
-   * it does documentFolderId - see that effect's own comment. */
-  documentId?: string | null
-  /** ADR 0115 §2: the Details page's `/documents/<documentId>`
-   * segment - a full-panel page for one document's metadata (title, notes,
-   * tags, the read-only indexing facts), reached from the listing rather
-   * than the viewer's ?document= dialog above. Absent on the ordinary browse
-   * shape (that shape's own three keys - panel/documentFolderId/documentId -
-   * are unchanged so existing `toEqual` tests keep passing), present and the
-   * others null'd out whenever the Details page is what the route names.
-   * documentFolderId still carries the current folder on this shape too
-   * (see formatAppLocation's own comment) - without it, Back out of the
-   * Details page would land the listing at the root rather than the folder
-   * it was opened from. */
-  documentEditId?: string | null
-  /** ADR 0110: the wall display route's `/display/<slug>` segment. null on
-   * a bare `/display` (and absent everywhere else). Never validated against
-   * the configured displays here — an unknown or absent slug is a distinct,
-   * explicit shape the wall shell renders a diagnostic for; this module has
-   * no fallback to "the first display", which would silently put one
-   * display's geometry on another screen. */
-  displaySlug?: string | null
-  /** Revision "one panel, not three" (2026-09-20): which section (a document
-   * node in documentFolderId's manual tree, when that folder carries
-   * document_folders.role='manual') is open in the reading pane rendered by
-   * documents-panel.tsx's ManualFolderView, `/documents?folder=<id>&section=<id>`.
-   * Meaningless without documentFolderId also set - formatAppLocation only
-   * ever emits it alongside `folder=`, the same "meaningless on its own"
-   * rule the deleted /manuals route's own manualSectionId used to follow.
-   * A note (unfiled or filed) opens through the existing documentId above
-   * instead of a field of its own - it is a document with kind='note', and
-   * `/documents?document=<id>` already addresses any document by id. */
-  documentSectionId?: string | null
-  /** ADR 0112: the wall-displays management editor's `/wall-displays/<slug>`
-   * segment (the "editor" name, not "displaySlug", keeps it from being
-   * confused with the wall route's field above). null on a bare
-   * `/wall-displays`, absent everywhere else.
-   *
-   * `/display/<slug>` (above) and `/wall-displays/<slug>` are deliberately
-   * NOT one character apart from each other. `/display/<slug>` is the wall
-   * itself - what gets typed into a kiosk browser and rendered at kiosk
-   * scale on a screen as narrow as 1920x360. `/wall-displays/<slug>` is the
-   * admin editor for that display's configuration, meant for a normal
-   * browser. Resist the urge to "tidy" these into `/displays/<slug>` next to
-   * `/display/<slug>` - a one-character typo (or a stale bookmark from
-   * before a rename) would then silently swap one for the other, and the
-   * failure mode is a 1920x360 strip showing the management UI, or the
-   * editor rendering nothing because it hit the wall shell instead. */
-  displayEditSlug?: string | null
-  /** ADR 0123: the Inventory panel's internal section (the InventoryNav
-   * shape, same contract as `section` above) - `/inventory`, `/inventory/profiles`,
-   * `/inventory/locations`. Defaults to 'equipment' the same way `section`
-   * defaults to 'general'. */
-  inventorySection?: InventorySectionId
-  /** ADR 0123: the Equipment editor's `/inventory/equipment/<id>` segment -
-   * only meaningful alongside inventorySection 'equipment' (or its default),
-   * same "meaningless on its own" rule documentSectionId already follows.
-   * null on the bare `/inventory` index; absent everywhere else. A brand
-   * new, not-yet-saved draft (the "New item" button) has no id and so no
-   * URL of its own - see App.tsx's inventoryCreatingEquipment, which is
-   * local UI state, never serialized here. */
-  equipmentEditId?: string | null
-  /** ADR 0127: the Locations section's `/inventory/bins/<code>` segment -
-   * the bin page a tag tap or a Locations-section click opens. Only
-   * meaningful alongside inventorySection 'locations', the same
-   * "meaningless on its own" rule documentSectionId already follows, and
-   * present only when it names a real, non-empty code (decoded with
-   * decodeSegment). Absent everywhere else, INCLUDING a bare
-   * `/inventory/bins` with no third segment - that collapses to the
-   * ordinary Locations shape rather than carrying an explicit null, since
-   * nothing in this app ever deliberately links to a codeless bin route
-   * and a plain `/inventory/locations` is the correct place to land on one
-   * anyway (isCanonicalAppPath then just replaceState's it there). */
-  binCode?: string
-  /** The Locations section's `/inventory/locations/<id>` segment - one
-   * location's own page, where it is renamed and its bins added or removed.
-   * Same rules as `binCode`: only meaningful alongside inventorySection
-   * 'locations', absent everywhere else, and a bare `/inventory/locations`
-   * carries no value rather than an explicit null. A brand new location has
-   * no id until the server assigns one, so there is no draft state to
-   * serialise: creating one navigates here once it exists. */
-  locationEditId?: string
-  /** ADR 0156: the Locations index shows its Plan view - `?view=plan` on
-   * `/inventory/locations`. Absent for the ordinary Table view. */
-  locationsView?: 'plan'
-  /** The deck tab open in the Plan view (`&deck=<id>`). Only meaningful
-   * alongside locationsView 'plan'. */
-  planDeckId?: string
-  /** ADR 0156: the Decks list - `/inventory/decks` - which sits under the
-   * Locations section. true only there; absent everywhere else. */
-  decksOpen?: boolean
-  /** The deck page, `/inventory/decks/<id>`. Only meaningful alongside
-   * decksOpen. */
-  deckEditId?: string
+/** The panels with a single view and nothing to remember beyond being open. */
+export type PlainPanelId = 'forecast' | 'routes' | 'radar' | 'anchor-watch' | 'alarms'
+
+/** `/settings/<section>`, or the Import wizard at `/settings/import/<runId>`
+ * ("new" is the upload page). The bare `/settings/import` list is the
+ * `section` view. */
+export type SettingsRoute =
+  | { view: 'section'; section: SettingsSectionId }
+  | { view: 'import-run'; runId: string }
+
+/**
+ * The Documents panel. `browse` is the listing: a folder (null for the root),
+ * the section open in a Manual folder's reading pane (`?section=`, only
+ * meaningful alongside a folder) and, on a deep link from a Mate attachment
+ * chip, a document to open in the viewer (`?document=`). The router drops
+ * `documentId` once the location is adopted: the viewer is opened once, from
+ * the location the app was loaded with, and is not part of where the app is.
+ *
+ * `details` is the full-panel metadata page at `/documents/<id>`. It carries
+ * the folder it was opened from so Back lands the listing there. `sectionId`
+ * rides along for the same reason but has no URL of its own, so a reload of
+ * the details page loses it.
+ */
+export type DocumentsRoute =
+  | { view: 'browse'; folderId: string | null; sectionId: string | null; documentId: string | null }
+  | { view: 'details'; id: string; folderId: string | null; sectionId: string | null }
+
+/**
+ * `/wall-displays` is the management index, `/wall-displays/<slug>` the
+ * editor for one display. `/display/<slug>` (the wall itself) is a different
+ * panel on a deliberately dissimilar path: a one-character typo between the
+ * two would put a 1920x360 strip on the management UI.
+ */
+export type WallDisplaysRoute = { view: 'index' } | { view: 'editor'; slug: string }
+
+/**
+ * The Inventory panel. `index` is a section's own page (`/inventory`,
+ * `/inventory/profiles`, ...), Locations' table included. The rest are pages
+ * under a section: `equipment` and `equipment-new` under Equipment (a New
+ * item draft has no URL of its own and formats to the Equipment index), and
+ * `plan`, `bin`, `location`, `decks` and `deck` under Locations.
+ */
+export type InventoryRoute =
+  | { view: 'index'; section: InventorySectionId }
+  | { view: 'equipment'; id: string }
+  | { view: 'equipment-new'; preset: { zoneId?: string; binId?: string } | null }
+  | { view: 'plan'; deckId: string | null }
+  | { view: 'bin'; code: string }
+  | { view: 'location'; id: string }
+  | { view: 'decks' }
+  | { view: 'deck'; id: string }
+
+export type AppLocation =
+  | { panel: null; pageId: string | null }
+  | { panel: PlainPanelId }
+  | { panel: 'assistant'; conversationId: string | null }
+  | { panel: 'settings'; route: SettingsRoute }
+  | { panel: 'documents'; route: DocumentsRoute }
+  | { panel: 'inventory'; route: InventoryRoute }
+  | { panel: 'wall-displays'; route: WallDisplaysRoute }
+  /** ADR 0110: the wall display at `/display/<slug>`. `slug` is null on a bare
+   * `/display`. Never validated against the configured displays here: an
+   * unknown or absent slug is a distinct, explicit shape the wall shell
+   * renders a diagnostic for, with no fallback to "the first display" (which
+   * would put one display's geometry on another screen). Its query string
+   * (`options`) is parsed once and the location is never written to history. */
+  | { panel: 'display'; slug: string | null; options: DisplayOptions }
+
+/** The Inventory section a route sits under, for the nav and the breadcrumb. */
+export function inventorySectionOf(route: InventoryRoute): InventorySectionId {
+  switch (route.view) {
+    case 'index': return route.section
+    case 'equipment':
+    case 'equipment-new': return 'equipment'
+    default: return 'locations'
+  }
+}
+
+export function settingsSectionOf(route: SettingsRoute): SettingsSectionId {
+  return route.view === 'import-run' ? 'import' : route.section
 }
 
 export interface LocationContext {
@@ -154,9 +131,9 @@ function decodeSegment(segment: string): string | null {
 // ancestor (the dashboard, first page) rather than surfacing a parse error —
 // a mistyped or stale link should degrade gracefully, not break the app.
 export function parseAppLocation(pathname: string): AppLocation {
-  // Split off the query string before segmenting on '/' - only the
-  // Documents panel (below) has one; every other branch never looks at
-  // `search` at all, same as before this existed.
+  // Split off the query string before segmenting on '/'. Documents, the
+  // Locations plan view and the wall display read it; every other branch
+  // never looks at `search` at all.
   const [path, search = ''] = pathname.split('?', 2)
   const segments = path.split('/').filter(Boolean)
   const [first, second] = segments
@@ -174,10 +151,10 @@ export function parseAppLocation(pathname: string): AppLocation {
     }
     if (section === 'import') {
       const runSegment = segments[2]
-      const importRunId = runSegment !== undefined ? decodeSegment(runSegment) : null
-      return { panel: 'settings', section, importRunId: importRunId || null }
+      const runId = runSegment !== undefined ? decodeSegment(runSegment) : null
+      if (runId) return { panel: 'settings', route: { view: 'import-run', runId } }
     }
-    return { panel: 'settings', section }
+    return { panel: 'settings', route: { view: 'section', section } }
   }
 
   // ADR 0094 named the assistant "Mate" in the UI. Keep /assistant as a
@@ -190,111 +167,93 @@ export function parseAppLocation(pathname: string): AppLocation {
   // attachment chip, a document to open in the viewer - both optional and
   // independent of each other, so query params rather than a path segment.
   //
-  // ADR 0115 §2: a second path segment names the Details page
-  // instead - `/documents/<documentId>` - since that page has its own URL
-  // (unlike the viewer, which is a dialog over the listing, not a
-  // navigation). A segment present but unusable (fails to decode, or decodes
-  // to '') falls back to the ordinary browse shape below rather than a
-  // half-parsed Details route, the same tolerance decodeSegment's other
-  // callers already have for a mistyped or stale link.
+  // ADR 0115 §2: a second path segment names the Details page instead -
+  // `/documents/<documentId>` - since that page has its own URL (unlike the
+  // viewer, which is a dialog over the listing, not a navigation). A segment
+  // present but unusable (fails to decode, or decodes to '') falls back to
+  // the ordinary browse shape below rather than a half-parsed Details route,
+  // the same tolerance decodeSegment's other callers already have for a
+  // mistyped or stale link.
   if (first === 'documents') {
     const params = new URLSearchParams(search)
-    const documentFolderId = params.get('folder')
+    const folderId = params.get('folder')
     if (second !== undefined) {
-      const documentEditId = decodeSegment(second)
-      if (documentEditId !== null && documentEditId !== '') {
-        return { panel: 'documents', documentEditId, documentFolderId, documentId: null }
+      const id = decodeSegment(second)
+      if (id !== null && id !== '') {
+        return { panel: 'documents', route: { view: 'details', id, folderId, sectionId: null } }
       }
     }
-    // `section` (revision "one panel, not three", 2026-09-20) is only ever
-    // meaningful alongside a folder - a manual IS a folder, so its reading
-    // pane's open section has nowhere to attach without one. Omitted
-    // entirely (not even a null key) when absent, so every existing
-    // toEqual fixture for this branch that predates `section` keeps
-    // matching unchanged.
-    const documentSectionId = params.get('section')
     return {
       panel: 'documents',
-      documentFolderId,
-      documentId: params.get('document'),
-      ...(documentSectionId !== null ? { documentSectionId } : {}),
+      route: { view: 'browse', folderId, sectionId: params.get('section'), documentId: params.get('document') },
     }
   }
 
   // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
   // branch because it carries an extra segment none of those panels do.
   if (first === 'display') {
-    return { panel: 'display', displaySlug: second !== undefined ? decodeSegment(second) : null }
+    return {
+      panel: 'display',
+      slug: second !== undefined ? decodeSegment(second) : null,
+      options: parseDisplayOptions(search),
+    }
   }
 
   // ADR 0112: the wall-displays management editor. Same shape as /display
   // above (an optional slug segment), kept as its own branch for the same
-  // reason: it carries an extra segment the generic PANEL_ID_SET branch
-  // below doesn't know how to read. See the displayEditSlug doc comment on
-  // AppLocation for why this path is spelled so differently from /display.
+  // reason. See WallDisplaysRoute for why this path is spelled so
+  // differently from /display.
   if (first === 'wall-displays') {
-    return { panel: 'wall-displays', displayEditSlug: second !== undefined ? decodeSegment(second) : null }
+    const slug = second !== undefined ? decodeSegment(second) : null
+    return { panel: 'wall-displays', route: slug ? { view: 'editor', slug } : { view: 'index' } }
   }
 
   // ADR 0123: the Inventory panel. `/inventory` (bare) is the canonical
-  // Equipment index - the same collapse-to-default `section` gives
-  // `/settings`. `/inventory/equipment/<id>` carries a third segment none of
-  // the other two sub-routes do, so (like /documents/<id> above) it's read
-  // explicitly here rather than falling through to the generic
-  // PANEL_ID_SET branch below.
+  // Equipment index - the same collapse-to-default `/settings` gives
+  // General.
   if (first === 'inventory') {
-    // ADR 0127: the bin page. Kept ahead of the plain 'locations' branch
-    // below because it carries an extra segment that one doesn't - same
-    // reasoning as /documents/<id> and /display/<slug> elsewhere in this
-    // function. A missing or empty/undecodable code collapses to the
-    // ordinary Locations shape (binCode's own doc comment on AppLocation).
+    // ADR 0127: the bin page. A missing or empty/undecodable code collapses
+    // to the ordinary Locations index: nothing in this app deliberately links
+    // to a codeless bin route, and a plain `/inventory/locations` is the
+    // correct place to land on one anyway (the router then replaces the bar
+    // with it).
     if (second === 'bins') {
       const codeSegment = segments[2]
-      const binCode = codeSegment !== undefined ? decodeSegment(codeSegment) : null
-      if (binCode) {
-        return { panel: 'inventory', inventorySection: 'locations', binCode }
-      }
-      return { panel: 'inventory', inventorySection: 'locations' }
+      const code = codeSegment !== undefined ? decodeSegment(codeSegment) : null
+      if (code) return { panel: 'inventory', route: { view: 'bin', code } }
+      return { panel: 'inventory', route: { view: 'index', section: 'locations' } }
     }
     // ADR 0156: decks sit under Locations in the nav but have a URL of
     // their own, like the bin page.
     if (second === 'decks') {
       const idSegment = segments[2]
-      const deckEditId = idSegment !== undefined ? decodeSegment(idSegment) : null
-      if (deckEditId) {
-        return { panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId }
-      }
-      return { panel: 'inventory', inventorySection: 'locations', decksOpen: true }
+      const id = idSegment !== undefined ? decodeSegment(idSegment) : null
+      if (id) return { panel: 'inventory', route: { view: 'deck', id } }
+      return { panel: 'inventory', route: { view: 'decks' } }
     }
     if (second === 'locations') {
       const idSegment = segments[2]
-      const locationEditId = idSegment !== undefined ? decodeSegment(idSegment) : null
-      if (locationEditId) {
-        return { panel: 'inventory', inventorySection: 'locations', locationEditId }
-      }
+      const id = idSegment !== undefined ? decodeSegment(idSegment) : null
+      if (id) return { panel: 'inventory', route: { view: 'location', id } }
       const params = new URLSearchParams(search)
       if (params.get('view') === 'plan') {
-        const planDeckId = params.get('deck')
-        return {
-          panel: 'inventory', inventorySection: 'locations', locationsView: 'plan',
-          ...(planDeckId ? { planDeckId } : {}),
-        }
+        return { panel: 'inventory', route: { view: 'plan', deckId: params.get('deck') || null } }
       }
-      return { panel: 'inventory', inventorySection: 'locations' }
+      return { panel: 'inventory', route: { view: 'index', section: 'locations' } }
     }
     if (second === 'maintenance' || second === 'profiles' || second === 'stocktake') {
-      return { panel: 'inventory', inventorySection: second }
+      return { panel: 'inventory', route: { view: 'index', section: second } }
     }
     if (second === 'equipment') {
-      const segments2 = segments[2]
-      const equipmentEditId = segments2 !== undefined ? decodeSegment(segments2) : null
-      return { panel: 'inventory', inventorySection: 'equipment', equipmentEditId: equipmentEditId || null }
+      const idSegment = segments[2]
+      const id = idSegment !== undefined ? decodeSegment(idSegment) : null
+      if (id) return { panel: 'inventory', route: { view: 'equipment', id } }
     }
-    return { panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null }
+    return { panel: 'inventory', route: { view: 'index', section: 'equipment' } }
   }
 
   if (PANEL_ID_SET.has(first)) {
-    return { panel: first as PanelId }
+    return { panel: first as PlainPanelId }
   }
 
   return { panel: null, pageId: null }
@@ -303,10 +262,9 @@ export function parseAppLocation(pathname: string): AppLocation {
 // ADR 0127: turns scanned text (a keyboard-wedge or pasted URL, or a bare
 // bin code) into an AppLocation naming the bin or item it scanned, or null
 // when nothing recognisable comes out of it. Stocktake's own scan handler
-// (stocktake-section.tsx's handleScan) is the only caller; moved here,
-// next to parseAppLocation, so the string-matching stays in the one module
-// that already owns "how a path string maps to app state" rather than
-// living inline in a component.
+// (stocktake-section.tsx's handleScan) is the only caller; kept here, next
+// to parseAppLocation, so the string-matching stays in the one module that
+// already owns "how a path string maps to an app location".
 //
 // `new URL(text)` only succeeds for an ABSOLUTE url (a scheme included),
 // which a scan typed into a boat's own tailnet address bar without
@@ -359,10 +317,7 @@ export function resolveScannedText(text: string): AppLocation | null {
   }
 
   const parsed = parseAppLocation(pathname)
-  if (parsed.panel === 'inventory' && parsed.inventorySection === 'locations' && parsed.binCode) {
-    return parsed
-  }
-  if (parsed.panel === 'inventory' && parsed.inventorySection === 'equipment' && parsed.equipmentEditId) {
+  if (parsed.panel === 'inventory' && (parsed.route.view === 'bin' || parsed.route.view === 'equipment')) {
     return parsed
   }
   return null
@@ -370,86 +325,82 @@ export function resolveScannedText(text: string): AppLocation | null {
 
 // The inverse of parseAppLocation, and the only place that builds a path
 // string. Every AppLocation has exactly one canonical string here (the
-// one-to-one mapping isCanonicalAppPath and the URL sync effect both rely
-// on) — the first page collapses to `/`, General collapses to `/settings`.
+// one-to-one mapping isCanonicalAppPath and the router's URL writes both
+// rely on) — the first page collapses to `/`, General collapses to
+// `/settings`.
 export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, 'firstPageId'>): string {
-  if (loc.panel === null) {
-    if (!loc.pageId || loc.pageId === ctx.firstPageId) return '/'
-    return `/dashboard/${encodeURIComponent(loc.pageId)}`
-  }
+  switch (loc.panel) {
+    case null: {
+      if (!loc.pageId || loc.pageId === ctx.firstPageId) return '/'
+      return `/dashboard/${encodeURIComponent(loc.pageId)}`
+    }
 
-  if (loc.panel === 'settings') {
-    const section = loc.section ?? 'general'
-    if (section === 'assistant') return '/settings/mate'
-    if (section === 'import' && loc.importRunId) return `/settings/import/${encodeURIComponent(loc.importRunId)}`
-    return section === 'general' ? '/settings' : `/settings/${section}`
-  }
+    case 'settings': {
+      const { route } = loc
+      if (route.view === 'import-run') return `/settings/import/${encodeURIComponent(route.runId)}`
+      if (route.section === 'assistant') return '/settings/mate'
+      return route.section === 'general' ? '/settings' : `/settings/${route.section}`
+    }
 
-  if (loc.panel === 'assistant') {
-    if (!loc.conversationId) return '/mate'
-    return `/mate/${encodeURIComponent(loc.conversationId)}`
-  }
+    case 'assistant': {
+      if (!loc.conversationId) return '/mate'
+      return `/mate/${encodeURIComponent(loc.conversationId)}`
+    }
 
-  if (loc.panel === 'documents') {
-    // The Details page's folder is carried as a query param on the SAME
-    // /documents/<id> path segment shape the ordinary browse form uses -
-    // deliberately, so Back out of the page (which restores documentFolderId
-    // but clears documentEditId - see App.tsx's applyAppLocation) lands on
-    // the folder the operator actually came from rather than the root.
-    // documentId (the viewer deep link) is never serialized alongside a
-    // Details page: the two are mutually exclusive destinations, and
-    // App.tsx's own URL sync effect only ever sets one or the other.
-    if (loc.documentEditId) {
+    case 'documents': {
+      const { route } = loc
       const params = new URLSearchParams()
-      if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
+      if (route.view === 'details') {
+        // The Details page's folder is carried as a query param on the SAME
+        // /documents/<id> path segment shape the ordinary browse form uses -
+        // deliberately, so Back out of the page lands the listing on the
+        // folder the operator actually came from rather than the root. The
+        // viewer deep link is never serialized alongside a Details page:
+        // the two are mutually exclusive destinations.
+        if (route.folderId) params.set('folder', route.folderId)
+        const qs = params.toString()
+        const base = `/documents/${encodeURIComponent(route.id)}`
+        return qs ? `${base}?${qs}` : base
+      }
+      if (route.folderId) params.set('folder', route.folderId)
+      if (route.documentId) params.set('document', route.documentId)
+      // A section is meaningless without its folder (a manual IS a folder),
+      // so it is never emitted on its own.
+      if (route.folderId && route.sectionId) params.set('section', route.sectionId)
       const qs = params.toString()
-      return qs ? `/documents/${encodeURIComponent(loc.documentEditId)}?${qs}` : `/documents/${encodeURIComponent(loc.documentEditId)}`
+      return qs ? `/documents?${qs}` : '/documents'
     }
-    const params = new URLSearchParams()
-    if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
-    if (loc.documentId) params.set('document', loc.documentId)
-    // section is meaningless without folder - see the doc comment on
-    // documentSectionId above - so it is never emitted on its own.
-    if (loc.documentFolderId && loc.documentSectionId) params.set('section', loc.documentSectionId)
-    const qs = params.toString()
-    return qs ? `/documents?${qs}` : '/documents'
-  }
 
-  if (loc.panel === 'inventory') {
-    const section = loc.inventorySection ?? 'equipment'
-    if (section === 'equipment') {
-      if (loc.equipmentEditId) return `/inventory/equipment/${encodeURIComponent(loc.equipmentEditId)}`
-      return '/inventory'
+    case 'inventory': {
+      const { route } = loc
+      switch (route.view) {
+        case 'index': return route.section === 'equipment' ? '/inventory' : `/inventory/${route.section}`
+        case 'equipment': return `/inventory/equipment/${encodeURIComponent(route.id)}`
+        // A New item draft has no id and so no URL of its own.
+        case 'equipment-new': return '/inventory'
+        case 'plan': {
+          const params = new URLSearchParams({ view: 'plan' })
+          if (route.deckId) params.set('deck', route.deckId)
+          return `/inventory/locations?${params.toString()}`
+        }
+        case 'bin': return `/inventory/bins/${encodeURIComponent(route.code)}`
+        case 'location': return `/inventory/locations/${encodeURIComponent(route.id)}`
+        case 'decks': return '/inventory/decks'
+        case 'deck': return `/inventory/decks/${encodeURIComponent(route.id)}`
+      }
+      break
     }
-    // ADR 0127: binCode is only ever set alongside 'locations' - see its
-    // own doc comment on AppLocation for why a falsy (absent) value here
-    // collapses to the ordinary Locations path rather than a bare
-    // /inventory/bins.
-    if (section === 'locations' && loc.binCode) {
-      return `/inventory/bins/${encodeURIComponent(loc.binCode)}`
-    }
-    if (section === 'locations' && loc.locationEditId) {
-      return `/inventory/locations/${encodeURIComponent(loc.locationEditId)}`
-    }
-    if (section === 'locations' && loc.decksOpen) {
-      return loc.deckEditId ? `/inventory/decks/${encodeURIComponent(loc.deckEditId)}` : '/inventory/decks'
-    }
-    if (section === 'locations' && loc.locationsView === 'plan') {
-      const params = new URLSearchParams({ view: 'plan' })
-      if (loc.planDeckId) params.set('deck', loc.planDeckId)
-      return `/inventory/locations?${params.toString()}`
-    }
-    return `/inventory/${section}`
-  }
 
-  if (loc.panel === 'display') {
-    if (!loc.displaySlug) return '/display'
-    return `/display/${encodeURIComponent(loc.displaySlug)}`
-  }
+    case 'display': {
+      // The wall's query string is its own and is never written back.
+      if (!loc.slug) return '/display'
+      return `/display/${encodeURIComponent(loc.slug)}`
+    }
 
-  if (loc.panel === 'wall-displays') {
-    if (!loc.displayEditSlug) return '/wall-displays'
-    return `/wall-displays/${encodeURIComponent(loc.displayEditSlug)}`
+    case 'wall-displays': {
+      if (loc.route.view === 'index') return '/wall-displays'
+      return `/wall-displays/${encodeURIComponent(loc.route.slug)}`
+    }
   }
 
   return `/${loc.panel}`
@@ -459,8 +410,8 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
 // exactly, AND the state it names is actually reachable right now (a settings
 // path when signed in without admin, or a page id that's since been deleted,
 // parse fine but aren't states this app will land on). Both checks matter:
-// the sync effect uses this to decide replaceState vs. pushState, and the
-// popstate handler uses it to decide whether to normalise before navigating.
+// the router uses this to decide replace vs. push when it writes the bar, and
+// to decide whether a popstate needs normalising before it is applied.
 export function isCanonicalAppPath(path: string, ctx: LocationContext): boolean {
   const loc = parseAppLocation(path)
   if (formatAppLocation(loc, ctx) !== path) return false
@@ -469,98 +420,4 @@ export function isCanonicalAppPath(path: string, ctx: LocationContext): boolean 
     return false
   }
   return true
-}
-
-/**
- * What the Equipment editor is showing right now, as App.tsx holds it.
- * `creating` is the "New item" draft, which deliberately has no URL of its
- * own (see InventoryPanelProps' own note), so it cannot be read back out of
- * an AppLocation - which is exactly why this comparison needs it passed in.
- */
-export interface InventoryEditorState {
-  section: InventorySectionId
-  equipmentEditId: string | null
-  creating: boolean
-  /** The location page (`/inventory/locations/<id>`), which holds its own
-   * rename draft. Absent or null when no location page is open. */
-  locationEditId?: string | null
-  /** The deck page (`/inventory/decks/<id>`), which holds its own name and
-   * layout draft. Absent or null when no deck page is open. */
-  deckEditId?: string | null
-}
-
-/**
- * Would navigating to `target` take the Equipment editor off screen?
- *
- * The popstate handler asks this to decide whether a Back press needs the
- * unsaved-changes guard. Comparing `equipmentEditId` alone is not enough, and
- * got this wrong twice over: a "New item" draft has a null id, so Back out of
- * one to another inventory section compared null to null, saw no change, and
- * discarded the draft with no prompt at all. A saved record open in the
- * editor had the same hole whenever the section changed without the id doing
- * so.
- *
- * So the question is asked the other way round - is the editor showing, and
- * does `target` still show that same editor? - which needs no special case
- * for the draft and none for a section switch.
- */
-export function inventoryEditorClosedBy(current: InventoryEditorState, target: AppLocation): boolean {
-  // The deck page holds a layout draft and has a URL, so like a location page
-  // it survives only a target naming the same deck.
-  if (current.section === 'locations' && (current.deckEditId ?? null) !== null) {
-    return target.panel !== 'inventory'
-      || (target.inventorySection ?? 'equipment') !== 'locations'
-      || (target.deckEditId ?? null) !== current.deckEditId
-  }
-  // A location page is the other editor that holds a draft. It has a URL, so
-  // it survives only a target naming the same location.
-  if (current.section === 'locations' && (current.locationEditId ?? null) !== null) {
-    return target.panel !== 'inventory'
-      || (target.inventorySection ?? 'equipment') !== 'locations'
-      || (target.locationEditId ?? null) !== current.locationEditId
-  }
-  const showing = current.section === 'equipment'
-    && (current.equipmentEditId !== null || current.creating)
-  if (!showing) return false
-  if (target.panel !== 'inventory') return true
-  if ((target.inventorySection ?? 'equipment') !== 'equipment') return true
-  // A draft has no URL that can represent it, so any inventory location at
-  // all closes it. A saved record survives only a target naming that same id.
-  if (current.creating) return true
-  return (target.equipmentEditId ?? null) !== current.equipmentEditId
-}
-
-/**
- * What Stocktake or the bin page's quick-add draft is showing right now, as
- * App.tsx holds it - inventoryEditorClosedBy's own state shape, for
- * inventoryHasWork rather than inventoryDirty.
- */
-export interface InventoryWorkState {
-  section: InventorySectionId
-  binCode: string | null
-}
-
-/**
- * Would navigating to `target` take Stocktake or the bin page (whichever is
- * reporting inventoryHasWork) off screen?
- *
- * Release-fixes code-review finding: the popstate handler only ever asked
- * inventoryEditorClosedBy this question, so a Back press that left Stocktake
- * or a bin page's quick-add draft behind - the other two things
- * inventoryHasWork guards - went straight through with no prompt. Same
- * "is it showing, and does target still show it" shape as
- * inventoryEditorClosedBy, generalized to the two ways inventoryHasWork's own
- * clearing effect (App.tsx) treats as "no longer showing": leaving the
- * 'inventory' panel, leaving Stocktake, or the bin page's own binCode going
- * back to null.
- */
-export function inventoryWorkClosedBy(current: InventoryWorkState, target: AppLocation): boolean {
-  const showing = current.section === 'stocktake' || (current.section === 'locations' && current.binCode !== null)
-  if (!showing) return false
-  if (target.panel !== 'inventory') return true
-  const targetSection = target.inventorySection ?? 'equipment'
-  if (current.section === 'stocktake') return targetSection !== 'stocktake'
-  // current.section === 'locations' with a bin open.
-  if (targetSection !== 'locations') return true
-  return (target.binCode ?? null) !== current.binCode
 }

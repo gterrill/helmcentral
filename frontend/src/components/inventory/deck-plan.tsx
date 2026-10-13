@@ -137,7 +137,7 @@ export function DeckPlan({
         return onOpenZone ? (
           <g key={zone.id}>
             {link(
-              formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationEditId: zone.id }, NO_CTX),
+              formatAppLocation({ panel: 'inventory', route: { view: 'location', id: zone.id } }, NO_CTX),
               label,
               () => onOpenZone(zone.id),
               drawing,
@@ -192,7 +192,7 @@ export function DeckPlan({
         return onOpenBin ? (
           <g key={bin.id}>
             {link(
-              formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: bin.code }, NO_CTX),
+              formatAppLocation({ panel: 'inventory', route: { view: 'bin', code: bin.code } }, NO_CTX),
               `Bin ${bin.code}`,
               () => onOpenBin(bin.code),
               drawing,

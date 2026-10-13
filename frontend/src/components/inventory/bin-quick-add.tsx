@@ -1,10 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/photo-strip-editor'
 import { BLANK_DRAFT, createEquipment, type EquipmentInput } from '@/hooks/use-inventory'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { inventoryWorkClosedBy } from '@/lib/inventory-navigation-guard'
 import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-staging'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
@@ -22,14 +24,8 @@ interface BinQuickAddProps {
    * the bin page's own contents list refresh. */
   onCreated: () => void
   canWrite?: boolean
-  /** Release-fixes code-review finding: reports whether this form holds a
-   * staged name or photos a navigation away would silently clear -
-   * App.tsx routes the bin page's "Full item" button through the same
-   * unsaved-work guard equipment-editor.tsx's onDirtyChange already gets
-   * when this is true. `detail`, when given, is wording for what is
-   * actually staged (see the second review finding on `hasWork` below) -
-   * App.tsx's dialog uses it in place of its own generic copy when present. */
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
+  /** The bin's code, to tell a move that stays on this bin from one that leaves it. */
+  binCode: string
 }
 
 /** One saved item's photos still waiting for Retry. */
@@ -40,7 +36,7 @@ interface PendingRetry {
   notice: string
 }
 
-export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWorkChange }: BinQuickAddProps) {
+export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, binCode }: BinQuickAddProps) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [saving, setSaving] = useState(false)
@@ -91,14 +87,19 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, onHasWo
     const who = pendingRetries.length === 1 ? pendingRetries[0].name : `${pendingRetries.length} items`
     return `${n} photo${n === 1 ? '' : 's'} for ${who} ${n === 1 ? "hasn't" : "haven't"} uploaded yet.`
   }, [pendingRetries])
-  // useLayoutEffect - see stocktake-section.tsx's own onHasWorkChange effect
-  // for why: App.tsx's guard can read inventoryHasWork right after a state
-  // update this same effect is meant to report, with no render in between
-  // for an ordinary passive effect to be guaranteed to have caught up.
-  useLayoutEffect(() => {
-    if (detail !== undefined) onHasWorkChange?.(hasWork, detail)
-    else onHasWorkChange?.(hasWork)
-  }, [hasWork, detail, onHasWorkChange])
+  // ADR 0171: the form owns the guard for what it holds. Only a move off this
+  // bin is held; `detail` replaces the dialog's generic copy when photos are
+  // still queued for Retry. Registered in a layout effect, so it is live the
+  // instant Full item is pressed after a staged change.
+  useNavigationGuard(hasWork
+    ? {
+        owner: 'inventory',
+        label: 'Inventory',
+        blocks: (_from, to) => (
+          inventoryWorkClosedBy({ view: 'bin', code: binCode }, to) ? { kind: 'quick-add-work', detail: detail ?? null } : null
+        ),
+      }
+    : null)
 
   const handleSave = async () => {
     const trimmedName = name.trim()

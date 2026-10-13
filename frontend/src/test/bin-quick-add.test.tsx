@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BinQuickAdd } from '@/components/inventory/bin-quick-add'
+import type { AppRouter } from '@/lib/app-router'
+import { testRouter } from './helpers/router'
+
+// The wording the guard gives a move away from the bin, as the dialog would see it.
+function heldDetail(router: AppRouter): string | null | undefined {
+  act(() => { router.navigate({ panel: 'radar' }) })
+  const detail = router.getSnapshot().pending?.detail
+  act(() => { router.cancelPending() })
+  return detail
+}
 
 // ADR 0127 (the plan's A5b): mirrors equipment-editor.test.tsx's own
 // downscale-and-fetch mocking approach exactly (that file's own comment
@@ -58,7 +68,7 @@ beforeEach(() => {
 describe('BinQuickAdd', () => {
   it('creates the item, then uploads the picked photo', async () => {
     const onCreated = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={onCreated} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={onCreated} />)
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
@@ -84,7 +94,7 @@ describe('BinQuickAdd', () => {
 
   it('leaves the item saved and offers Retry when a photo upload fails', async () => {
     failingPhotoUploadNames.add('a.jpg')
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />)
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
@@ -106,28 +116,36 @@ describe('BinQuickAdd', () => {
   // Release-fixes code-review finding: reports whether the form holds
   // anything a navigation away would clear - App.tsx routes the bin page's
   // "Full item" through the same unsaved-work guard when this is true.
+  it('holds a move off the bin, but not one that stays on it', () => {
+    const harness = testRouter('/inventory/bins/LAZ-02')
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />, { wrapper: harness.wrapper as never })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
+    expect(harness.router.navigate({ panel: 'inventory', route: { view: 'bin', code: 'LAZ-02' } })).toBe(true)
+    expect(harness.router.navigate({ panel: 'inventory', route: { view: 'bin', code: 'LAZ-03' } })).toBe(false)
+    expect(harness.router.getSnapshot().pending).toMatchObject({ kind: 'quick-add-work' })
+  })
+
   it('reports hasWork as a name or photos are staged, and clears it after Save', async () => {
-    const onHasWorkChange = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    const harness = testRouter('/inventory/bins/LAZ-02')
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />, { wrapper: harness.wrapper as never })
+    expect(harness.router.hasGuards()).toBe(false)
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   it('reports hasWork from a staged photo alone, with no name typed', async () => {
-    const onHasWorkChange = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
-    onHasWorkChange.mockClear()
+    const harness = testRouter('/inventory/bins/LAZ-02')
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />, { wrapper: harness.wrapper as never })
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
 
-    await waitFor(() => expect(onHasWorkChange).toHaveBeenLastCalledWith(true))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(true))
   })
 
   // Release-fixes code-review finding: the form clears name/photos on a
@@ -139,8 +157,8 @@ describe('BinQuickAdd', () => {
   // to describe).
   it('counts photos still queued for Retry as work, until Retry clears them', async () => {
     failingPhotoUploadNames.add('a.jpg')
-    const onHasWorkChange = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    const harness = testRouter('/inventory/bins/LAZ-02')
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />, { wrapper: harness.wrapper as never })
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [file] } })
@@ -153,20 +171,20 @@ describe('BinQuickAdd', () => {
     // The form itself is cleared and ready for the next item...
     expect(screen.getByLabelText('Name')).toHaveValue('')
     // ...but the guard still has something real to warn about.
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "1 photo for Gaffer tape hasn't uploaded yet.")
+    expect(heldDetail(harness.router)).toBe("1 photo for Gaffer tape hasn't uploaded yet.")
 
     failingPhotoUploadNames.clear()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
     await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   it('pluralizes the queued-photo wording for more than one failed upload', async () => {
     failingPhotoUploadNames.add('a.jpg')
     failingPhotoUploadNames.add('b.jpg')
-    const onHasWorkChange = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    const harness = testRouter('/inventory/bins/LAZ-02')
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />, { wrapper: harness.wrapper as never })
 
     const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     const fileB = new File(['b'], 'b.jpg', { type: 'image/jpeg' })
@@ -177,7 +195,7 @@ describe('BinQuickAdd', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(uploadedPhotoOrder).toEqual(['a.jpg', 'b.jpg']))
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "2 photos for Gaffer tape haven't uploaded yet.")
+    expect(heldDetail(harness.router)).toBe("2 photos for Gaffer tape haven't uploaded yet.")
   })
 
   // Final pre-release review finding: the Retry list held one item's failed
@@ -187,7 +205,7 @@ describe('BinQuickAdd', () => {
   it('keeps each saved item\'s failed photos for Retry when the next item is saved', async () => {
     createdIdQueue = ['eq-a', 'eq-b']
     failingPhotoUploadNames.add('a.jpg')
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Take photo'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } })
     await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
@@ -211,7 +229,7 @@ describe('BinQuickAdd', () => {
   })
 
   it('blocks Save when the name is blank', async () => {
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={vi.fn()} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -226,7 +244,7 @@ describe('BinQuickAdd', () => {
   // the button had disabled itself.
   it('Enter pressed twice in quick succession creates exactly one item', async () => {
     const onCreated = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={onCreated} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={onCreated} />)
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
     const nameField = screen.getByLabelText('Name')
@@ -267,7 +285,7 @@ describe('BinQuickAdd', () => {
     })
 
     const onCreated = vi.fn()
-    render(<BinQuickAdd zoneId="z1" binId="b1" onCreated={onCreated} />)
+    render(<BinQuickAdd zoneId="z1" binId="b1" binCode="LAZ-02" onCreated={onCreated} />)
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gaffer tape' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))

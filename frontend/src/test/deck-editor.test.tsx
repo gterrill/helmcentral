@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRef } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DeckEditor, type DeckEditorHandle } from '@/components/inventory/deck-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import type { LayoutDraft } from '@/lib/deck-layout'
 import { stubImageSize } from './stub-image'
+import { testRouter } from './helpers/router'
 
 // The drawing surface has its own tests (deck-plan-editor.test.tsx); here a
 // stand-in lets these tests change the draft without driving pointer events.
@@ -37,7 +38,9 @@ const calls = (method: string, suffix: string) =>
   fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && ((init as RequestInit | undefined)?.method ?? 'GET') === method)
 
 function renderEditor(props: Partial<React.ComponentProps<typeof DeckEditor>> = {}) {
-  return render(<DeckEditor id="d1" onOpenLocations={vi.fn()} onOpenDecks={vi.fn()} onDeleted={vi.fn()} {...props} />)
+  const harness = testRouter('/inventory/decks/d1')
+  render(<DeckEditor id="d1" onOpenLocations={vi.fn()} onOpenDecks={vi.fn()} onDeleted={vi.fn()} {...props} />, { wrapper: harness.wrapper as never })
+  return harness
 }
 
 beforeEach(() => {
@@ -119,10 +122,9 @@ describe('DeckEditor', () => {
   })
 
   it('renames through the Save bar', async () => {
-    const onDirtyChange = vi.fn()
-    renderEditor({ onDirtyChange })
+    const { router } = renderEditor()
     fireEvent.change(await screen.findByLabelText('Deck name'), { target: { value: 'Upper deck' } })
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+    await waitFor(() => expect(router.hasGuards()).toBe(true))
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls('PUT', '/api/inventory/decks/d1')).toHaveLength(1))
     expect(JSON.parse(String(calls('PUT', '/api/inventory/decks/d1')[0][1].body))).toEqual({ name: 'Upper deck' })
@@ -130,17 +132,16 @@ describe('DeckEditor', () => {
   })
 
   it('saves a layout change as one request, then is clean again', async () => {
-    const onDirtyChange = vi.fn()
-    renderEditor({ onDirtyChange })
+    const { router } = renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'Stub: outline Lazarette' }))
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+    await waitFor(() => expect(router.hasGuards()).toBe(true))
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls('PUT', '/api/inventory/decks/d1/layout')).toHaveLength(1))
     const body = JSON.parse(String(calls('PUT', '/api/inventory/decks/d1/layout')[0][1].body))
     expect(body.zones.map((z: { id: string }) => z.id).sort()).toEqual(['z1', 'z2', 'z3'])
     expect(body.zones.find((z: { id: string }) => z.id === 'z3').polygon).toEqual(tri)
     expect(body.bins).toEqual([])
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(router.hasGuards()).toBe(false))
     expect(calls('PUT', '/api/inventory/decks/d1')).toHaveLength(0)
   })
 
@@ -153,8 +154,7 @@ describe('DeckEditor', () => {
   })
 
   it('shows the server message when a layout save is refused and stays dirty', async () => {
-    const onDirtyChange = vi.fn()
-    renderEditor({ onDirtyChange })
+    const { router } = renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'Stub: outline Lazarette' }))
     const previous = fetchMock.getMockImplementation()!
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -165,7 +165,19 @@ describe('DeckEditor', () => {
     })
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await screen.findByText('a zone outline needs 3 to 64 points, each between 0 and 1')
-    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    expect(router.hasGuards()).toBe(true)
+  })
+
+  it('registers its own guard, held only for a move that leaves the deck, and saves through it', async () => {
+    const { router } = renderEditor()
+    fireEvent.click(await screen.findByRole('button', { name: 'Stub: outline Lazarette' }))
+    await waitFor(() => expect(router.hasGuards()).toBe(true))
+    expect(router.navigate({ panel: 'inventory', route: { view: 'deck', id: 'd1' } })).toBe(true)
+    expect(router.navigate({ panel: 'radar' })).toBe(false)
+    expect(router.getSnapshot().pending).toMatchObject({ kind: 'dirty' })
+    await act(async () => { await router.saveAndContinue() })
+    expect(calls('PUT', '/api/inventory/decks/d1/layout')).toHaveLength(1)
+    expect(router.getSnapshot().location).toEqual({ panel: 'radar' })
   })
 
   it('exposes save() for the unsaved-changes guard', async () => {

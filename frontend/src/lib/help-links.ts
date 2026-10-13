@@ -1,4 +1,4 @@
-import type { AppLocation, PanelId } from '@/lib/app-location'
+import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId } from '@/lib/app-location'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
 import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 import { normalizePath, slugifyHeading } from '@/lib/markdown-links'
@@ -110,8 +110,8 @@ export const CREATE_PAGE_HELP_TARGET: HelpTarget = { page: 'how-to/create-a-dash
 /** The contextual `?`'s target for the screen `location` currently shows. */
 export function helpTargetFor(location: AppLocation): HelpTarget {
   if (location.panel === null) return DASHBOARD_HELP_TARGET
-  if (location.panel === 'settings') return SETTINGS_HELP_TARGETS[location.section ?? 'general']
-  if (location.panel === 'inventory') return INVENTORY_HELP_TARGETS[location.inventorySection ?? 'equipment']
+  if (location.panel === 'settings') return SETTINGS_HELP_TARGETS[settingsSectionOf(location.route)]
+  if (location.panel === 'inventory') return INVENTORY_HELP_TARGETS[inventorySectionOf(location.route)]
   return PANEL_HELP_TARGETS[location.panel]
 }
 

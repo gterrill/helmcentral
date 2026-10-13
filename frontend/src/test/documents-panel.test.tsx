@@ -705,6 +705,19 @@ describe('DocumentsPanel', () => {
     expect(screen.getByRole('treeitem', { name: /Manuals/ })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('a Back/Forward re-sync of folder and section does not report a section change', () => {
+    // Returning to {folder A, section S} hands the panel both props at once.
+    // Reporting the folder-driven section clear back to the router would push
+    // a new entry and cut the forward history.
+    setFolderTree([treeFolder({ id: 'f1', name: 'Manuals' })])
+    const onSectionChange = vi.fn()
+    const { rerender } = render(
+      <DocumentsPanel initialFolderId={null} initialSectionId={null} onSectionChange={onSectionChange} />,
+    )
+    rerender(<DocumentsPanel initialFolderId="f1" initialSectionId="s1" onSectionChange={onSectionChange} />)
+    expect(onSectionChange).not.toHaveBeenCalled()
+  })
+
   it('titles the page with the current folder and has no breadcrumb', () => {
     mockedUseDocuments.mockImplementation((folderId) =>
       makeDocumentsMock(

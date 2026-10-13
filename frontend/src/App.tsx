@@ -40,22 +40,18 @@ import { RadarTargetsTile } from '@/components/radar-targets-tile'
 // the editor-vendor chunk through a dynamic import() of its own (see that
 // file's doc comment) — importing the function itself here costs nothing.
 import { prefetchNoteEditor } from '@/components/note-editor'
-import type { SettingsPageHandle } from '@/components/settings/settings-page'
-import type { DocumentDetailsPageHandle } from '@/components/document-details-page'
-import type { InventoryPanelHandle } from '@/components/inventory/inventory-panel'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
-import { INVENTORY_SECTIONS, type InventorySectionId } from '@/components/inventory/inventory-nav'
+import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 
 const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
 const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
-const DocumentsPanel = lazy(() => import('@/components/documents-panel').then((mod) => ({ default: mod.DocumentsPanel })))
-const DocumentDetailsPage = lazy(() => import('@/components/document-details-page').then((mod) => ({ default: mod.DocumentDetailsPage })))
-const InventoryPanel = lazy(() => import('@/components/inventory/inventory-panel').then((mod) => ({ default: mod.InventoryPanel })))
+const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
+const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
-const SettingsPage = lazy(() => import('@/components/settings/settings-page').then((mod) => ({ default: mod.SettingsPage })))
+const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
 // MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
 // no effects until they've actually been opened - see the `hasOpened`
 // latches below, next to where each is rendered, for why that makes them
@@ -72,16 +68,7 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 // entry chunk, and additionally never even requested in a production build
 // since the render path that names it is dead code once DEV is false.
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
 import { AutopilotTile } from '@/components/autopilot-tile'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
@@ -102,7 +89,7 @@ import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-display-rotation'
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
-import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
+import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
 import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
@@ -221,15 +208,10 @@ import {
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
 import { UpdatedToast } from '@/components/updated-toast'
-import {
-  parseAppLocation,
-  formatAppLocation,
-  isCanonicalAppPath,
-  inventoryEditorClosedBy,
-  inventoryWorkClosedBy,
-  type AppLocation,
-  type PanelId,
-} from '@/lib/app-location'
+import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId } from '@/lib/app-location'
+import { browserHistory, createAppRouter } from '@/lib/app-router'
+import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
+import { useHasNavigationGuard } from '@/hooks/use-navigation-guard'
 import { screenContextFor } from '@/lib/mate-screen'
 import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Its own module, not the patterns barrel: the barrel would drag TanStack
@@ -258,7 +240,7 @@ import { cn } from '@/lib/utils'
  * this sidebar, reachable from every screen rather than only this one -
  * see ADR 0119.
  */
-const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
+const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; icon: typeof CloudSun }> = [
   { id: 'alarms', label: 'Alarms', icon: BellRing },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
@@ -276,13 +258,15 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 // single crumb (see the breadcrumb JSX below). Panels are not children of
 // Dashboard, so the root crumb is always the panel's own name, never
 // "Dashboard"; this only ever supplies the section beneath it.
-function activePanelSectionLabel(
-  panel: PanelId,
-  settingsSection: SettingsSectionId,
-  inventorySection: InventorySectionId,
-): string | null {
-  if (panel === 'settings') return SETTINGS_SECTIONS.find((section) => section.id === settingsSection)?.label ?? null
-  if (panel === 'inventory') return INVENTORY_SECTIONS.find((section) => section.id === inventorySection)?.label ?? null
+function activePanelSectionLabel(location: AppLocation): string | null {
+  if (location.panel === 'settings') {
+    const section = settingsSectionOf(location.route)
+    return SETTINGS_SECTIONS.find((item) => item.id === section)?.label ?? null
+  }
+  if (location.panel === 'inventory') {
+    const section = inventorySectionOf(location.route)
+    return INVENTORY_SECTIONS.find((item) => item.id === section)?.label ?? null
+  }
   return null
 }
 
@@ -355,7 +339,20 @@ function DisplayRemoteController({ rotation, onAction }: DisplayRemoteController
   return null
 }
 
+// ADR 0171: one router per mounted App, reading the address the app was
+// loaded with. It is created here, not at module scope, so each mount (and
+// each test) starts from the address it finds.
 export function App() {
+  const [router] = useState(() => createAppRouter(browserHistory()))
+  useEffect(() => router.start(), [router])
+  return (
+    <AppRouterContext.Provider value={router}>
+      <AppShell />
+    </AppRouterContext.Provider>
+  )
+}
+
+function AppShell() {
   // Called before every other hook, and unconditionally on every render
   // (rules of hooks) even while the login screen is what actually renders
   // below — the conditional return happens only at the very end of this
@@ -373,32 +370,24 @@ export function App() {
   // keeps them passing without every one of them growing an unrelated
   // voice-config fixture.
   const { ui: uiConfig, anchor: anchorConfig, assistant: assistantVoiceConfig = fallbackAssistantVoiceConfig } = useAppConfig()
-  // ADR 0074: seeds the shell's initial panel/section/page from the URL the
-  // app was loaded with. Computed once via a lazy initializer — this only
-  // matters for the very first render, and re-parsing it on every render
-  // would be wasted work (and wrong besides, once the URL sync effect below
-  // starts rewriting the bar to match in-app navigation).
-  const [initialLocation] = useState<AppLocation>(() =>
-    parseAppLocation((globalThis.location?.pathname ?? '/') + (globalThis.location?.search ?? '')))
+  // ADR 0171: the router owns what the app is showing. `appLocation` is the one
+  // value for it (panel, and that panel's view), `navigate` the one way to
+  // change it. `initialLocation` is what the app was loaded with, which
+  // still carries a `?document=` deep link the live location does not.
+  const router = useAppRouter()
+  const appLocation = useAppLocation()
+  const navigate = useNavigate()
+  const initialLocation = router.initialLocation
+  const activePanel: PanelId | null = appLocation.panel
   // ADR 0142: /patterns is deliberately NOT a PanelId - it never needs
-  // parseAppLocation/formatAppLocation's own canonical-path or dirty-
-  // navigation-guard machinery, so it reads the raw pathname directly
-  // rather than growing AppLocation a shape none of that machinery would
-  // ever act on. import.meta.env.DEV is statically replaced at build time,
-  // so this is `false` (and the PatternsGallery branch below dead code) in
+  // the router's canonical-path or navigation-guard machinery, so it reads
+  // the raw pathname directly rather than growing AppLocation a shape none
+  // of that machinery would ever act on. import.meta.env.DEV is statically
+  // replaced at build time, so this is `false` (and the PatternsGallery branch below dead code) in
   // a production build - see that branch's own comment for what this
   // guards, beyond the lazy-loading gallery.tsx already gets on its own.
   const [patternsGalleryRequested] = useState(() =>
     import.meta.env.DEV && (globalThis.location?.pathname ?? '').replace(/\/+$/, '') === '/patterns')
-  const [activePanel, setActivePanel] = useState<PanelId | null>(initialLocation.panel)
-  // Lives in App, not in SettingsPage/SettingsNav, because App is the one
-  // place that also writes it to the URL (`/settings/<id>`) — and it is
-  // deliberately NOT reset when leaving Settings, so returning to Settings
-  // later (without a section-specific deep link) lands back where it was.
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(initialLocation.section ?? 'general')
-  // The Import section's wizard run, `/settings/import/<runId>` ("new" is the
-  // upload page); null on the list. Cleared whenever the section changes.
-  const [settingsImportRunId, setSettingsImportRunId] = useState<string | null>(initialLocation.importRunId ?? null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
@@ -446,35 +435,8 @@ export function App() {
   const gaugeAges = useGaugeAges()
   // Which engines read as switched off, so a cluster says OFF, not stale.
   const engineStates = useEngineStates()
-  const [settingsDirty, setSettingsDirty] = useState(false)
-  const settingsPageRef = useRef<SettingsPageHandle>(null)
-  // ADR 0115 §2 review finding: the Details page holds its own explicit
-  // Save/Discard draft (document-details-page.tsx), and used to let any
-  // navigation throw it away unasked. This is that page's half of exactly
-  // the same guard settingsDirty/settingsPageRef already give Settings,
-  // generalized below rather than reinvented.
-  const [documentDetailsDirty, setDocumentDetailsDirty] = useState(false)
   // The Details page's document name, for the Mate sheet's screen context.
   const [documentDetailsTitle, setDocumentDetailsTitle] = useState<string | null>(null)
-  const documentDetailsPageRef = useRef<DocumentDetailsPageHandle>(null)
-  // ADR 0123: the Equipment editor's own half of the same guard, wired
-  // through InventoryPanel the same way documentDetailsDirty/
-  // documentDetailsPageRef wire through DocumentDetailsPage directly -
-  // InventoryPanel forwards whichever child (EquipmentEditor) is actually
-  // mounted, see its own imperative handle.
-  const [inventoryDirty, setInventoryDirty] = useState(false)
-  // Release-fixes code-review finding: Stocktake's scan events/live NFC
-  // session and the bin page's quick-add draft, reported the same way
-  // inventoryDirty is (onDirtyChange) - see requestWithinInventory's own
-  // comment for why this shares that guard rather than getting a second one.
-  const [inventoryHasWork, setInventoryHasWork] = useState(false)
-  // Wording for what inventoryHasWork actually holds (BinQuickAdd's own
-  // onHasWorkChange doc comment) - only meaningful alongside inventoryHasWork
-  // true, cleared by the same effect that clears inventoryHasWork itself
-  // below. Read at the moment a navigation is stashed (stashPendingNavigation
-  // below), not live by the dialog - see pendingNavigationDetail's own
-  // comment for why.
-  const [inventoryWorkDetail, setInventoryWorkDetail] = useState<string | null>(null)
   // Unsent Mate composer text or staged attachments, one flag per mounted
   // composer (the /mate panel and the sheet over any page).
   const [matePanelHasDraft, setMatePanelHasDraft] = useState(false)
@@ -484,56 +446,15 @@ export function App() {
   // a Settings, document or inventory edit, a stocktake scan or bin quick-add
   // draft, or an unsent Mate message. The reload waits until the operator
   // has saved, sent or left. Mounted at the App root, so the wall display
-  // and kiosk routes get it too.
-  const unsavedWorkRef = useRef(false)
-  unsavedWorkRef.current =
-    settingsDirty ||
-    documentDetailsDirty ||
-    inventoryDirty ||
-    inventoryHasWork ||
-    matePanelHasDraft ||
-    mateSheetHasDraft
-  useVersionReload({ hasUnsavedWork: () => unsavedWorkRef.current })
-  const inventoryPanelRef = useRef<InventoryPanelHandle>(null)
-  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
-  // Release-fixes code-review finding: which dialog form (pendingNavigationKind)
-  // and, for a quick-add-work reason, what to say (pendingNavigationDetail) -
-  // captured by stashPendingNavigation at the moment a navigation is stashed,
-  // not recomputed from live state while the dialog is open. Recomputing
-  // it live used to work only because nothing was ever assumed to change
-  // inventoryDirty/inventoryHasWork/inventorySection while the underlying
-  // page sits inert behind the modal - true for a page the operator can no
-  // longer click into, false for an async save already in flight when the
-  // dialog opened (BinQuickAdd's own Save, kicked off just before Back was
-  // pressed): its success still lands and clears inventoryHasWork, which
-  // used to flip the dialog from Leave/Stay to the "Unsaved changes"/Save and
-  // Continue form for a page that was never dirty in that sense - and whose
-  // ref (inventoryPanelRef) has no editor mounted to save with Save and
-  // Continue's own onClick.
-  const [pendingNavigationKind, setPendingNavigationKind] = useState<'dirty' | 'stocktake-work' | 'quick-add-work'>('dirty')
-  const [pendingNavigationDetail, setPendingNavigationDetail] = useState<string | null>(null)
-  const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
-  const [saveAndContinueError, setSaveAndContinueError] = useState<string | null>(null)
-
-  // requestNavigate/requestBackFromDocumentDetails/requestWithinInventory and
-  // their shared stashPendingNavigation/inventoryPendingReason/
-  // dirtyPageLabel/handleSaveAndContinue live further down (after
-  // inventoryNewEquipmentPreset) - inventoryPendingReason needs
-  // inventorySection, declared there, and `const` bindings can't be read
-  // before that declaration runs.
-
-  // settingsDirty is only meaningful while the Settings page is actually
-  // mounted and reporting it via onDirtyChange. Once the user has left
-  // (Discard, a successful Save and Continue, or any other route away from
-  // 'settings'), clear it explicitly rather than leaving the sidebar dot lit
-  // on stale state — SettingsPageContent stops calling onDirtyChange the
-  // moment it unmounts, so nothing else would ever reset this otherwise.
-  useEffect(() => {
-    if (activePanel !== 'settings') {
-      setSettingsDirty(false)
-    }
-  }, [activePanel])
-
+  // and kiosk routes get it too. Settings, Document Details and the
+  // Inventory panel register a navigation guard while they hold unsaved
+  // work, so "any guard" is "unsaved work"; Mate drafts are deliberately
+  // unguarded (leaving a half-typed message is fine) and only count here.
+  // The sidebar's unsaved dot: Settings holds a guard exactly while it is dirty.
+  const settingsDirty = useHasNavigationGuard('settings')
+  const mateDraftRef = useRef(false)
+  mateDraftRef.current = matePanelHasDraft || mateSheetHasDraft
+  useVersionReload({ hasUnsavedWork: () => router.hasGuards() || mateDraftRef.current })
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
@@ -635,7 +556,7 @@ export function App() {
   // and duplicate-to-display popover, and the displays-management dialog all
   // render regardless of which route is active.
   const { displays, loading: displaysLoading, error: displaysError, refetch: refetchDisplays, createDisplay, updateDisplay, deleteDisplay } = useDisplays()
-  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId, !isDisplay)
+  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, !isDisplay)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
   // ADR 0110: a page assigned to a display leaves the Dashboard sub-list
   // (and the header's DashboardPageSwitcher, and full screen swipe paging
@@ -715,20 +636,17 @@ export function App() {
   }, [layoutEditing])
   // ADR 0110 (superseding ADR 0089): the wall display at /display/<slug>.
   // Its query string is its own (just `?page=`, for authoring/screenshots)
-  // rather than app state, so it's parsed once here the same way
-  // initialLocation is, and never written back to the URL — see the early
-  // returns in the sync effect and the popstate handler below. isDisplay
-  // itself is declared earlier, beside useDarkMode, so the wall dark-theme
-  // override there can read it.
-  const [displayOptions] = useState(() => parseDisplayOptions(globalThis.location?.search ?? ''))
-  // Read off initialLocation, not activePanel/the live location bar, for the
-  // same reason displayOptions is parsed once: the wall never navigates, so
-  // its slug can only ever be the one it was loaded with. Deliberately no
-  // fallback to "the first display" when the slug is missing or unknown —
-  // that would silently put one display's geometry on another screen, the
-  // masking fallback AGENTS.md forbids. The wall branch below renders an
-  // explicit diagnostic instead.
-  const wallDisplay = isDisplay ? displays.find((d) => d.slug === initialLocation.displaySlug) ?? null : null
+  // rather than app state, so the location carries it parsed and the router
+  // never writes it back. isDisplay itself is declared earlier, beside
+  // useDarkMode, so the wall dark-theme override there can read it.
+  const displayOptions = appLocation.panel === 'display' ? appLocation.options : NO_DISPLAY_OPTIONS
+  // Read off the location, which for the wall is the one it was loaded with:
+  // the wall never navigates. Deliberately no fallback to "the first display"
+  // when the slug is missing or unknown - that would silently put one
+  // display's geometry on another screen, the masking fallback AGENTS.md
+  // forbids. The wall branch below renders an explicit diagnostic instead.
+  const wallDisplaySlug = appLocation.panel === 'display' ? appLocation.slug : null
+  const wallDisplay = isDisplay ? displays.find((d) => d.slug === wallDisplaySlug) ?? null : null
   // The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip, not
   // tied to any page, so it lives beside the page hooks rather than inside
   // effectiveWidgets below.
@@ -768,305 +686,20 @@ export function App() {
   // fresh empty chat (Mate UI cycle: "Mate opens on an empty chat") - the
   // panel's own hook no longer falls back to the newest existing thread when
   // this is null.
-  const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
-  // ADR 0106 F1: the Documents panel's current folder, mirrored into the URL
-  // (?folder=) the same way matePanelConversationId mirrors Mate's active
-  // thread - see applyAppLocation and the URL sync effect below. Unlike
-  // conversationId, initialLocation.documentId (which document to open in
+  const matePanelConversationId = appLocation.panel === 'assistant' ? appLocation.conversationId : null
+  const openMatePanel = useCallback((conversationId: string | null) => {
+    return navigate({ panel: 'assistant', conversationId })
+  }, [navigate])
+  // The panel reports its own active thread. That only means something while
+  // the panel is the thing on screen: a report that lands as it unmounts must
+  // not pull the operator back to Mate.
+  const reportMatePanelConversation = useCallback((conversationId: string | null) => {
+    if (router.getSnapshot().location.panel === 'assistant') navigate({ panel: 'assistant', conversationId })
+  }, [router, navigate])
+  // The Documents panel's `?document=` deep link (which document to open in
   // the viewer, e.g. from a Mate attachment chip's link) is handed to the
-  // panel once as an initial prop rather than tracked in App state at all:
-  // nothing here needs to know which document is open, only which folder.
-  const [documentsFolderId, setDocumentsFolderId] = useState<string | null>(initialLocation.documentFolderId ?? null)
-  // ADR 0115 §2: which document's Details page is open (the
-  // `/documents/<id>` route, app-location.ts's documentEditId), or null for
-  // the ordinary listing. Same precedent as ADR 0112's wallDisplaysSlug just
-  // below - one panel owning an index/editor split, seeded from the deep
-  // link the same way.
-  const [documentsEditId, setDocumentsEditId] = useState<string | null>(initialLocation.documentEditId ?? null)
-
-  // documentDetailsDirty (declared up with settingsDirty) is only meaningful
-  // while the Details page is actually mounted and reporting it via
-  // onDirtyChange - mirrors settingsDirty's own clearing effect above, kept
-  // as a separate effect down here (rather than folded into that one)
-  // because it needs documentsEditId, which isn't declared until this point
-  // in the component. "No longer rendered" is leaving the 'documents' panel
-  // entirely OR documentsEditId going back to null - both unmount
-  // DocumentDetailsPage (see documentsLeftOnceRef's own comment below on
-  // why documentsEditId, not just activePanel, decides what's on screen
-  // here), and DocumentDetailsPage stops calling onDirtyChange the moment it
-  // unmounts, so nothing else would ever reset this otherwise.
-  useEffect(() => {
-    if (activePanel !== 'documents' || documentsEditId === null) {
-      setDocumentDetailsDirty(false)
-    }
-  }, [activePanel, documentsEditId])
-
-  // Revision "one panel, not three" (2026-09-20): which section (a document
-  // node in a Manual-kind folder's tree) Documents has open in its reading
-  // pane, mirrored into `?section=` the same way documentsFolderId mirrors
-  // into `?folder=` - continuously, since picking a section is exactly as
-  // bookmarkable/shareable as opening one used to be on the deleted
-  // /manuals route. A note itself (unfiled or filed) opens through the
-  // existing `?document=` deep link below instead of a field of its own -
-  // it's a document with kind='note', addressed the same way any other one
-  // is.
-  const [documentsSectionId, setDocumentsSectionId] = useState<string | null>(initialLocation.documentSectionId ?? null)
-  // A section belongs to its manual's folder, so the Details page's folder
-  // crumbs and Move drop it when they land the listing somewhere else.
-  const changeDocumentsFolder = (folderId: string | null) => {
-    if (folderId !== documentsFolderId) setDocumentsSectionId(null)
-    setDocumentsFolderId(folderId)
-  }
-  // ADR 0112: which display the management panel is editing, or null for its
-  // index. Seeded from the deep link the same way documentsFolderId is.
-  const [wallDisplaysSlug, setWallDisplaysSlug] = useState<string | null>(initialLocation.displayEditSlug ?? null)
-  // ADR 0123: the Inventory panel's own section (the InventoryNav shape,
-  // same contract as settingsSection) and, within the Equipment section, its
-  // index/editor split - same precedent as documentsEditId/wallDisplaysSlug
-  // just above. inventoryCreatingEquipment is the "New item" draft
-  // (app-location.ts's own doc comment on equipmentEditId): it never has a
-  // URL of its own, so it's local App state rather than something
-  // applyAppLocation/the sync effect below ever reads from or writes to a
-  // parsed location - a page reload always resolves to a real id or the
-  // index, never mid-draft.
-  const [inventorySection, setInventorySection] = useState<InventorySectionId>(initialLocation.inventorySection ?? 'equipment')
-  const [inventoryEquipmentEditId, setInventoryEquipmentEditId] = useState<string | null>(initialLocation.equipmentEditId ?? null)
-  const [inventoryCreatingEquipment, setInventoryCreatingEquipment] = useState(false)
-  // ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`,
-  // what a tag tap or a Locations-section click opens. null is "not on a
-  // bin page" (the ordinary Locations index), the same convention
-  // wallDisplaysSlug/documentsEditId use for their own "nothing open" state.
-  const [inventoryBinCode, setInventoryBinCode] = useState<string | null>(initialLocation.binCode ?? null)
-  // The Locations section's own page - `/inventory/locations/<id>`. Same
-  // "null is the index" convention as inventoryBinCode.
-  const [inventoryLocationEditId, setInventoryLocationEditId] = useState<string | null>(initialLocation.locationEditId ?? null)
-  // ADR 0156: the Locations index's Plan view (`?view=plan`) and the deck tab
-  // open in it (`&deck=<id>`). Kept here, not in the index, so the choice is
-  // in the URL and survives opening a location and coming back.
-  const [inventoryPlanView, setInventoryPlanView] = useState(initialLocation.locationsView === 'plan')
-  const [inventoryPlanDeckId, setInventoryPlanDeckId] = useState<string | null>(initialLocation.planDeckId ?? null)
-  // ADR 0156: the Decks list (`/inventory/decks`) and one deck's page
-  // (`/inventory/decks/<id>`), both under the Locations section. The deck id
-  // is only meaningful while the list is open.
-  const [inventoryDecksOpen, setInventoryDecksOpen] = useState(initialLocation.decksOpen === true)
-  const [inventoryDeckEditId, setInventoryDeckEditId] = useState<string | null>(initialLocation.deckEditId ?? null)
-  // ADR 0127: the bin/zone the bin page's "Full item" button last asked
-  // for - local UI state, like inventoryCreatingEquipment above, never
-  // serialised to the URL (a "New item" draft has none of its own either
-  // way). Read once by EquipmentEditor when a brand new draft mounts
-  // (InventoryPanel's own newEquipmentPreset prop).
-  const [inventoryNewEquipmentPreset, setInventoryNewEquipmentPreset] = useState<{ zoneId?: string; binId?: string } | null>(null)
-
-  // Stashes a navigation the same way every guard below does, capturing which
-  // dialog form to show (and, for quick-add-work, what to say) at THIS
-  // moment - see pendingNavigationKind/pendingNavigationDetail's own comment
-  // on why that has to happen here rather than being read live off
-  // inventoryDirty/inventoryHasWork by the dialog itself.
-  const stashPendingNavigation = useCallback((
-    navigate: () => void,
-    kind: 'dirty' | 'stocktake-work' | 'quick-add-work',
-    detail: string | null = null,
-  ) => {
-    setPendingNavigationKind(kind)
-    setPendingNavigationDetail(detail)
-    setPendingNavigation(() => navigate)
-  }, [])
-
-  // Which of inventoryDirty's dirty-editor reason or inventoryHasWork's two
-  // has-work reasons is actually true right now, for whichever guard below
-  // is about to stash a navigation while activePanel === 'inventory'. Pulled
-  // out into its own function (rather than inlined at each of the three call
-  // sites that need it) purely so it can be called at each of them without
-  // repeating the same three-way branch.
-  const inventoryPendingReason = useCallback((): { kind: 'dirty' | 'stocktake-work' | 'quick-add-work'; detail: string | null } => {
-    if (!inventoryDirty && inventoryHasWork) {
-      return inventorySection === 'stocktake'
-        ? { kind: 'stocktake-work', detail: null }
-        : { kind: 'quick-add-work', detail: inventoryWorkDetail }
-    }
-    return { kind: 'dirty', detail: null }
-  }, [inventoryDirty, inventoryHasWork, inventorySection, inventoryWorkDetail])
-
-  // Intercepts sidebar/breadcrumb navigation away from a dirty Settings
-  // page: instead of navigating immediately, stashes the navigation as a
-  // pending callback and lets the confirmation dialog decide (Cancel stays
-  // put, Discard runs it as-is, Save and Continue runs it only after a
-  // successful save). Navigating while NOT on a dirty Settings page (the
-  // overwhelmingly common case) is unaffected — `navigate()` runs immediately.
-  // Returns whether it ran `navigate()` (false when it stashed it instead) —
-  // existing call sites ignore this; the popstate handler (ADR 0074) uses it
-  // to know whether it needs to re-push the URL Back just moved away from.
-  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void): boolean => {
-    if (activePanel === 'settings' && targetPanel !== 'settings' && settingsDirty) {
-      stashPendingNavigation(navigate, 'dirty')
-      return false
-    }
-    // ADR 0115 §2's Details-page guard, generalized from the Settings guard
-    // above: any navigation to a DIFFERENT panel while a dirty Details page
-    // is open stashes it the same way. Navigating to 'documents' itself is
-    // deliberately not caught here - the one call site that actually leaves
-    // Details while staying on the 'documents' panel (the page's own
-    // breadcrumb Back, and a Back/Forward landing on a different Details id
-    // or the bare listing) has no "leaving documents" signal for this check
-    // to key off, so it goes through its own small guard instead
-    // (requestBackFromDocumentDetails, right below).
-    if (activePanel === 'documents' && targetPanel !== 'documents' && documentDetailsDirty) {
-      stashPendingNavigation(navigate, 'dirty')
-      return false
-    }
-    // ADR 0123: same generalization a third time, for a dirty Equipment
-    // editor. Navigating to 'inventory' itself is deliberately not caught
-    // here for the same reason documents' own check above isn't - switching
-    // sections or going back to the index while staying on the 'inventory'
-    // panel has no "leaving inventory" signal for this check to key off, so
-    // it goes through requestWithinInventory instead.
-    // Release-fixes code-review finding: this used to check inventoryDirty
-    // alone - leaving Inventory from the sidebar (or any other panel) while
-    // Stocktake or the bin page's quick-add held real work went straight
-    // through with no prompt, the same gap onSectionChange/onOpenBin had
-    // before requestWithinInventory picked up inventoryHasWork below.
-    if (activePanel === 'inventory' && targetPanel !== 'inventory' && (inventoryDirty || inventoryHasWork)) {
-      const reason = inventoryPendingReason()
-      stashPendingNavigation(navigate, reason.kind, reason.detail)
-      return false
-    }
-    navigate()
-    return true
-  }, [activePanel, settingsDirty, documentDetailsDirty, inventoryDirty, inventoryHasWork, inventoryPendingReason, stashPendingNavigation])
-
-  // Jumps to a specific Settings section through requestNavigate, so a
-  // dirty Settings/Documents/Inventory page still gets to veto it exactly
-  // as any other navigation would. One helper for every "take me to my
-  // settings" link: AssistantDrawer's own settings button, DocumentsPanel's
-  // Mate-failure line, and the header's per-panel settings gear below all
-  // used to repeat this same three-line requestNavigate call.
-  const openSettingsSection = useCallback((section: SettingsSectionId) => {
-    requestNavigate('settings', () => {
-      setSettingsSection(section)
-      setActivePanel('settings')
-    })
-  }, [requestNavigate])
-
-  // The page's own breadcrumb Back (document-details-page.tsx's onBack) and
-  // a Back/Forward that changes which Details page - or none - is open both
-  // stay on the 'documents' panel, so requestNavigate's targetPanel check
-  // above can never see a difference to catch for either of them. Same
-  // stash-and-return-false shape as requestNavigate, just without the panel
-  // comparison it can't use here.
-  const requestBackFromDocumentDetails = useCallback((navigate: () => void): boolean => {
-    if (documentDetailsDirty) {
-      stashPendingNavigation(navigate, 'dirty')
-      return false
-    }
-    navigate()
-    return true
-  }, [documentDetailsDirty, stashPendingNavigation])
-
-  // ADR 0123's equivalent of requestBackFromDocumentDetails above - covers
-  // both ways an Equipment editor can close without changing `activePanel`:
-  // InventoryNav switching to a different section, and the editor's own
-  // Back/onCreated/onDeleted (all routed through InventoryPanel's
-  // onEquipmentEditIdChange/onCreatingEquipmentChange props, wired at the
-  // 'inventory' case below).
-  // Release-fixes code-review finding: this used to guard only inventoryDirty
-  // (the Equipment editor) - Stocktake's own scan events/live NFC session and
-  // the bin page's quick-add draft can hold just as much work an operator
-  // would not want silently cleared, and nothing routed Open/Full item
-  // through this at all. inventoryHasWork is their shared "has work" flag
-  // (StocktakeSection/BinQuickAdd's own onHasWorkChange, wired below), and
-  // guarding it here - the same stash-and-let-the-dialog-decide shape
-  // inventoryDirty already used - covers both without a second guard
-  // function. The dialog itself shows whichever form stashPendingNavigation
-  // captured (pendingNavigationKind, by the dialog below).
-  const requestWithinInventory = useCallback((navigate: () => void): boolean => {
-    if (inventoryDirty || inventoryHasWork) {
-      const reason = inventoryPendingReason()
-      stashPendingNavigation(navigate, reason.kind, reason.detail)
-      return false
-    }
-    navigate()
-    return true
-  }, [inventoryDirty, inventoryHasWork, inventoryPendingReason, stashPendingNavigation])
-
-  // Which dirty page pendingNavigation (if any) is guarding, for the
-  // dialog's copy and for handleSaveAndContinue below - derived from
-  // activePanel rather than stored alongside the stashed navigate() itself.
-  // The three dirty pages are mutually exclusive (activePanel is exactly one
-  // panel at a time), and activePanel stays exactly where it was when
-  // requestNavigate/requestBackFromDocumentDetails/requestWithinInventory
-  // stashed the navigation, right up until the dialog resolves one way or
-  // the other. Unlike pendingNavigationKind/pendingNavigationDetail, this one
-  // is safe to read live: activePanel cannot change while the underlying
-  // page is still on screen (behind the modal), only inventoryDirty/
-  // inventoryHasWork/inventorySection can, from an async completion - which
-  // is exactly the race those two are captured against instead.
-  const dirtyPageLabel = activePanel === 'settings' ? 'Settings' : activePanel === 'inventory' ? 'Inventory' : 'Details'
-
-  const handleSaveAndContinue = useCallback(async () => {
-    setIsSavingBeforeNavigate(true)
-    setSaveAndContinueError(null)
-    try {
-      if (activePanel === 'settings') {
-        await settingsPageRef.current?.save()
-      } else if (activePanel === 'inventory') {
-        await inventoryPanelRef.current?.save()
-      } else {
-        await documentDetailsPageRef.current?.save()
-      }
-      pendingNavigation?.()
-      setPendingNavigation(null)
-    } catch (err) {
-      // Stay on the page so the user can fix it and retry. Every page
-      // renders its own error banner too, but this dialog is modal and
-      // covers it - without repeating the reason here, a rejected save
-      // (e.g. POST /api/settings refusing an unreachable SignalK address, a
-      // document PATCH rejecting a duplicate title, or an equipment PUT
-      // rejecting a zone/bin that disagree) looks like the button simply
-      // did nothing.
-      setSaveAndContinueError(err instanceof Error ? err.message : `Unable to save the ${dirtyPageLabel} page`)
-    } finally {
-      setIsSavingBeforeNavigate(false)
-    }
-  }, [pendingNavigation, activePanel, dirtyPageLabel])
-
-  // inventoryDirty (declared up with settingsDirty) is only meaningful while
-  // the Equipment editor is actually mounted and reporting it via
-  // onDirtyChange - same reasoning and shape as documentDetailsDirty's own
-  // clearing effect just above, kept separate for the same reason: it needs
-  // state that isn't declared until this point. "No longer rendered" is
-  // leaving the 'inventory' panel entirely, leaving the Equipment section,
-  // OR both equipmentEditId and creatingEquipment going back to their
-  // nothing-open state - any of those unmounts EquipmentEditor, which stops
-  // calling onDirtyChange the moment it does.
-  useEffect(() => {
-    if (
-      activePanel !== 'inventory'
-      || inventorySection !== 'equipment'
-      || (inventoryEquipmentEditId === null && !inventoryCreatingEquipment)
-    ) {
-      // The location page reports its rename draft through the same flag.
-      if (activePanel === 'inventory' && inventorySection === 'locations' && inventoryLocationEditId !== null) return
-      // So does the deck page (ADR 0156).
-      if (activePanel === 'inventory' && inventorySection === 'locations' && inventoryDeckEditId !== null) return
-      setInventoryDirty(false)
-    }
-  }, [activePanel, inventorySection, inventoryEquipmentEditId, inventoryCreatingEquipment, inventoryLocationEditId, inventoryDeckEditId])
-  // inventoryHasWork/inventoryWorkDetail (declared up with inventoryDirty)
-  // are only meaningful while Stocktake or the bin page's quick-add are
-  // actually mounted and reporting them - same reasoning as inventoryDirty's
-  // own clearing effect just above. Leaving the 'inventory' panel, leaving
-  // Stocktake, or leaving the bin page (inventoryBinCode back to null)
-  // unmounts whichever of the two was reporting, which stops calling
-  // onHasWorkChange the moment it does.
-  useEffect(() => {
-    if (
-      activePanel !== 'inventory'
-      || !(inventorySection === 'stocktake' || (inventorySection === 'locations' && inventoryBinCode !== null))
-    ) {
-      setInventoryHasWork(false)
-      setInventoryWorkDetail(null)
-    }
-  }, [activePanel, inventorySection, inventoryBinCode])
+  // panel once as an initial prop rather than tracked in the location at
+  // all: nothing here needs to know which document is open.
   // Ditto latch pattern (mateSheetHasOpenedRef/helpSheetHasOpenedRef
   // above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
@@ -1094,7 +727,7 @@ export function App() {
   // Also trips while the Details page is open (ADR 0115 §2):
   // activePanel stays 'documents' the whole time an operator goes from the
   // listing to a document's Details page and back, so without this
-  // documentsEditId check, DocumentsPanel unmounting for the Details page
+  // Details-view check, DocumentsPanel unmounting for the Details page
   // and remounting on the way back (activePanelContent switches between two
   // different component types under the one Suspense boundary - see the
   // comment on that Suspense below) would still see the latch un-tripped
@@ -1102,7 +735,7 @@ export function App() {
   // Mate attachment chip's ?document= viewer the operator had already seen
   // and dismissed before ever visiting Details.
   const documentsLeftOnceRef = useRef(false)
-  if (activePanel !== 'documents' || documentsEditId !== null) documentsLeftOnceRef.current = true
+  if (appLocation.panel !== 'documents' || appLocation.route.view === 'details') documentsLeftOnceRef.current = true
   // The sheet's own active conversation (mate-answer-toast plan): mirrors
   // matePanelConversationId above, but for the sheet rather than the panel -
   // MateSheet reports it the same way AssistantDrawer already reports
@@ -1116,12 +749,8 @@ export function App() {
     setMateSheetOpen(true)
   }, [])
   const mateScreen = useMemo(
-    () => screenContextFor(
-      { panel: activePanel, section: settingsSection, documentEditId: activePanel === 'documents' ? documentsEditId : null },
-      activePage?.name ?? null,
-      documentDetailsTitle,
-    ),
-    [activePanel, settingsSection, activePage, documentsEditId, documentDetailsTitle],
+    () => screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle),
+    [appLocation, activePage, documentDetailsTitle],
   )
 
   // mate-answer-toast plan: which conversation(s), if any, are actually on
@@ -1140,12 +769,20 @@ export function App() {
   // The "Open" action on a Mate-answer toast (mate-answer-toast plan): the
   // same navigation the sheet's own "Open the Mate page" button already
   // does (onOpenPanel below) - hand the panel this conversation and
-  // navigate to it, through requestNavigate so a dirty Settings page still
-  // gets to veto it exactly as any other navigation would.
+  // navigate to it, through the router so a dirty Settings page still gets to
+  // veto it exactly as any other navigation would.
   const openMateConversationFromToast = useCallback((conversationId: string) => {
-    setMatePanelConversationId(conversationId)
-    requestNavigate('assistant', () => setActivePanel('assistant'))
-  }, [requestNavigate])
+    openMatePanel(conversationId)
+  }, [openMatePanel])
+
+  // Jumps to a specific Settings section through the router, so a dirty
+  // Details/Inventory page still gets to veto it exactly as any other
+  // navigation would. One helper for every "take me to my settings" link:
+  // AssistantDrawer's own settings button, DocumentsPanel's Mate-failure
+  // line, and the header's per-panel settings gear below.
+  const openSettingsSection = useCallback((section: SettingsSectionId) => {
+    navigate({ panel: 'settings', route: { view: 'section', section } })
+  }, [navigate])
 
   // Mounted unconditionally (rules of hooks) but a no-op on the wall route
   // (`enabled: !isDisplay`) - see the hook's own doc comment. Never on the
@@ -1228,257 +865,32 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [assistantVoiceConfig.voiceInput, isDisplay, mateVoicePushToTalk, mateVoiceCancel, mateVoiceListening])
 
-  // Gates the two URL-writing effects below on the shell actually being
-  // shown (mirrors the render gate further down): while auth is still
-  // resolving, or a signalk install is waiting on sign-in, `canAdmin` reads
-  // permissive-false rather than a real answer, and without this gate the
-  // sync effect would rewrite an admin's `/settings` deep link to `/`
-  // before they ever get to the login form.
+  // Gates the router's address writes on the shell actually being shown
+  // (mirrors the render gate further down): while auth is still resolving, or
+  // a signalk install is waiting on sign-in, `canAdmin` reads permissive-false
+  // rather than a real answer, and without this gate the router would rewrite
+  // an admin's `/settings` deep link to `/` before they ever get to the login
+  // form.
   const shellVisible = !auth.loading && auth.mode !== null && !(auth.mode === 'signalk' && auth.user === null)
 
-  // Flips to true the first time the URL sync effect below runs (whether or
-  // not it actually writes) — see that effect's own comment for why the
-  // write path needs to know this.
-  const locationInitialisedRef = useRef(false)
-  // Set by a change that corrects the current location rather than going
-  // somewhere new (a Move refiling the open document), so the sync effect
-  // below rewrites this history entry instead of pushing one Back would
-  // land on with the document's old folder still in it.
-  const replaceNextLocationRef = useRef(false)
-  const previousFirstPageIdRef = useRef<string | null>(null)
-
-  // Applies a parsed location to the shell's own state. Separate from
-  // requestNavigate's plain `() => setActivePanel(...)` callbacks (every
-  // existing sidebar/tile/breadcrumb call site) because a location can also
-  // carry a page id or a settings section, and the dashboard branch has to
-  // reconcile an unknown/absent page id to the first page rather than just
-  // setting it blind.
-  const applyAppLocation = useCallback((loc: AppLocation) => {
-    setActivePanel(loc.panel)
-    if (loc.panel === null && !pagesLoading) {
-      const knownPageId = loc.pageId != null && pages.some((p) => p.id === loc.pageId) ? loc.pageId : null
-      setActivePageId(knownPageId ?? firstDashboardPageId(pages))
-    }
-    if (loc.panel === 'settings') {
-      setSettingsSection(loc.section ?? 'general')
-      setSettingsImportRunId(loc.importRunId ?? null)
-    }
-    if (loc.panel === 'assistant') {
-      setMatePanelConversationId(loc.conversationId ?? null)
-    }
-    if (loc.panel === 'wall-displays') {
-      setWallDisplaysSlug(loc.displayEditSlug ?? null)
-    }
-    if (loc.panel === 'documents') {
-      setDocumentsFolderId(loc.documentFolderId ?? null)
-      setDocumentsEditId(loc.documentEditId ?? null)
-      setDocumentsSectionId(loc.documentSectionId ?? null)
-    }
-    if (loc.panel === 'inventory') {
-      setInventorySection(loc.inventorySection ?? 'equipment')
-      setInventoryEquipmentEditId(loc.equipmentEditId ?? null)
-      // A location-driven change always resolves to a real id or the index,
-      // never a mid-draft "New item" - see inventoryCreatingEquipment's own
-      // doc comment above.
-      setInventoryCreatingEquipment(false)
-      setInventoryBinCode(loc.binCode ?? null)
-      setInventoryLocationEditId(loc.locationEditId ?? null)
-      setInventoryPlanView(loc.locationsView === 'plan')
-      setInventoryPlanDeckId(loc.planDeckId ?? null)
-      setInventoryDecksOpen(loc.decksOpen === true)
-      setInventoryDeckEditId(loc.deckEditId ?? null)
-    }
-  }, [pages, pagesLoading, setActivePageId])
-
-  // The single writer of window.location (ADR 0074). Chosen over pushing at
-  // each of the ~10 existing setActivePanel call sites (sidebar, page
-  // sub-items, breadcrumb, tile onOpen, alarm banner, anchor-watch
-  // auto-close) because it needs no call-site churn and covers programmatic
-  // changes too (e.g. the active page disappearing out from under a user).
+  // Tells the router what it needs to write the address: which page is first,
+  // which pages exist, and whether Settings is reachable. The router does the
+  // rest (ADR 0171); App no longer mirrors the location into the bar itself.
+  const firstPageId = firstDashboardPageId(pages)
+  const knownPageIds = useMemo(() => (pagesLoading ? null : pages.map((p) => p.id)), [pages, pagesLoading])
   useEffect(() => {
-    if (!shellVisible) return
-    // /display/<slug> owns its own query string (just `?page=`) rather than
-    // app state, and never navigates anywhere else - writing to history here
-    // would fight the device's fixed URL for no benefit to anyone looking at
-    // a screen with no back button.
-    if (isDisplay) return
-    // Page structure not yet known: leave whatever deep link brought us
-    // here alone rather than guessing at a page id that might still turn
-    // out valid once the list loads.
-    if (activePanel === null && pagesLoading) return
-
-    // Set BEFORE the equality check below, or the first user click right
-    // after a clean deep link (where the write below is skipped because
-    // next === path already) would still see `first` as true and wrongly
-    // replace that click's own entry instead of pushing it.
-    const first = !locationInitialisedRef.current
-    locationInitialisedRef.current = true
-
-    const ctx = { firstPageId: firstDashboardPageId(pages), knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
-    const firstPageChanged = previousFirstPageIdRef.current !== ctx.firstPageId
-    previousFirstPageIdRef.current = ctx.firstPageId
-    const next = formatAppLocation({
-      panel: activePanel,
-      pageId: activePageId,
-      section: settingsSection,
-      importRunId: activePanel === 'settings' ? settingsImportRunId : null,
-      conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
-      displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
-      documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
-      documentEditId: activePanel === 'documents' ? documentsEditId : null,
-      documentSectionId: activePanel === 'documents' ? documentsSectionId : null,
-      // inventoryCreatingEquipment never reaches here - a "New item" draft
-      // has no URL of its own (its own doc comment above), so the bar shows
-      // the Equipment index until the operator actually saves.
-      inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
-      equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
-      binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
-      locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
-      locationsView: activePanel === 'inventory' && inventoryPlanView ? 'plan' : undefined,
-      planDeckId: activePanel === 'inventory' ? (inventoryPlanDeckId ?? undefined) : undefined,
-      decksOpen: activePanel === 'inventory' && inventoryDecksOpen ? true : undefined,
-      deckEditId: activePanel === 'inventory' ? (inventoryDeckEditId ?? undefined) : undefined,
-    }, ctx)
-    // documents is the one panel whose canonical URL can carry a query
-    // string (?folder=/?document=/?section=) - pathname alone is never
-    // enough to tell it apart from its own bare path, so this compares
-    // against pathname+search (harmless everywhere else: no other
-    // panel/location ever has one).
-    const path = window.location.pathname + window.location.search
-    if (next === path) return // popstate, or a clean deep link, already put us here
-
-    // Normalise (replace) rather than add a history entry for a path this
-    // effect didn't itself write — that only ever happens on first load, or
-    // when the page list/admin role resolve to something that makes the
-    // current bar non-canonical.
-    const replace = replaceNextLocationRef.current || first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
-    replaceNextLocationRef.current = false
-    window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [
-    shellVisible, isDisplay, activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId,
-    documentsFolderId, documentsEditId, documentsSectionId, wallDisplaysSlug,
-    inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId, inventoryPlanView, inventoryPlanDeckId,
-    inventoryDecksOpen, inventoryDeckEditId, pages, pagesLoading, canAdmin,
-  ])
-
-  // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
-  // (or, ADR 0115 §2, a dirty Documents Details) page still gets to veto the
-  // navigation exactly as a sidebar click would - window.location has
-  // already moved to the previous entry by the time this fires, so without
-  // the re-push below, a guarded Back would leave the bar on the
-  // destination while the guard dialog (and the dirty page itself) stay on
-  // screen.
-  useEffect(() => {
-    const handlePopState = () => {
-      if (!shellVisible) return
-      // /display/<slug> never pushes or replaces history (see the sync
-      // effect above), so there is nothing here for it to react to; a bare
-      // `return` also means the device's own back/forward gestures, if it
-      // has any, don't fight the fixed URL it was launched with.
-      if (isDisplay) return
-      // Documents (?folder=) is the one location whose canonical form needs
-      // the query string too - see the sync effect above's own comment.
-      const path = window.location.pathname + window.location.search
-      const ctx = { firstPageId: firstDashboardPageId(pages), knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
-      const parsed = parseAppLocation(path)
-      if (!isCanonicalAppPath(path, ctx)) {
-        // So the sync effect's own equality check holds once it runs off
-        // the state change requestNavigate is about to (maybe) apply.
-        window.history.replaceState(null, '', formatAppLocation(parsed, ctx))
-      }
-      // ADR 0115 §2 review finding: a Back/Forward that stays on the
-      // 'documents' panel but changes (or clears) which Details page is
-      // open never differs in `targetPanel` the way every other navigation
-      // this guard covers does - requestNavigate's panel-level check can't
-      // see it, for exactly the same reason the page's own breadcrumb Back
-      // can't (see requestBackFromDocumentDetails's own comment). This is
-      // the single most common way Back actually leaves a dirty Details
-      // page (opening it always pushes a new entry over the listing, so one
-      // Back press lands here, not on some other panel), so it's routed
-      // through that same small guard instead of requestNavigate.
-      const leavingDetailsWithinDocuments = activePanel === 'documents' && parsed.panel === 'documents'
-        && (parsed.documentEditId ?? null) !== documentsEditId
-      // ADR 0123: the same "stays on the panel, so requestNavigate's own
-      // targetPanel check can't see it" case a third time - a Back/Forward
-      // that takes the Equipment editor off screen. The comparison itself
-      // lives in app-location.ts (inventoryEditorClosedBy) because getting it
-      // right needs the "New item" draft, which has no URL, and a section
-      // switch, which leaves the record id untouched on both sides; see that
-      // function's own note on the two holes an id-only check left.
-      const leavingInventoryEditorWithinInventory = activePanel === 'inventory'
-        && inventoryEditorClosedBy(
-          {
-            section: inventorySection,
-            equipmentEditId: inventoryEquipmentEditId,
-            creating: inventoryCreatingEquipment,
-            locationEditId: inventoryLocationEditId,
-            deckEditId: inventoryDeckEditId,
-          },
-          parsed,
-        )
-      // Release-fixes code-review finding: this popstate handler only ever
-      // asked inventoryEditorClosedBy (the Equipment editor's own case) -
-      // Back off Stocktake or a bin page's quick-add draft never asked
-      // inventoryWorkClosedBy anything at all, so it fell all the way through
-      // to requestNavigate, whose own targetPanel check can't see a same-
-      // panel move either. inventoryWorkClosedBy is that function's exact
-      // counterpart for inventoryHasWork - see its own doc comment
-      // (app-location.ts).
-      const leavingInventoryWorkWithinInventory = activePanel === 'inventory'
-        && inventoryWorkClosedBy(
-          { section: inventorySection, binCode: inventoryBinCode },
-          parsed,
-        )
-      const navigated = leavingDetailsWithinDocuments
-        ? requestBackFromDocumentDetails(() => applyAppLocation(parsed))
-        : (leavingInventoryEditorWithinInventory || leavingInventoryWorkWithinInventory)
-          ? requestWithinInventory(() => applyAppLocation(parsed))
-          : requestNavigate(parsed.panel, () => applyAppLocation(parsed))
-      if (!navigated) {
-        // Guarded: the browser already moved off whichever page is actually
-        // still on screen (Settings, a dirty Documents Details page, or a
-        // dirty Equipment editor), so push its own URL back - the bar has to
-        // agree with what's still rendered while the confirmation dialog is
-        // up. Built the same way the sync effect above builds `next`, rather
-        // than hardcoded to Settings, now that this guard also covers the
-        // other two.
-        window.history.pushState(null, '', formatAppLocation({
-          panel: activePanel,
-          pageId: activePageId,
-          section: settingsSection,
-          importRunId: activePanel === 'settings' ? settingsImportRunId : null,
-          conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
-          displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
-          documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
-          documentEditId: activePanel === 'documents' ? documentsEditId : null,
-          inventorySection: activePanel === 'inventory' ? inventorySection : undefined,
-          equipmentEditId: activePanel === 'inventory' ? inventoryEquipmentEditId : null,
-          binCode: activePanel === 'inventory' ? (inventoryBinCode ?? undefined) : undefined,
-          locationEditId: activePanel === 'inventory' ? (inventoryLocationEditId ?? undefined) : undefined,
-          locationsView: activePanel === 'inventory' && inventoryPlanView ? 'plan' : undefined,
-          planDeckId: activePanel === 'inventory' ? (inventoryPlanDeckId ?? undefined) : undefined,
-          decksOpen: activePanel === 'inventory' && inventoryDecksOpen ? true : undefined,
-          deckEditId: activePanel === 'inventory' ? (inventoryDeckEditId ?? undefined) : undefined,
-        }, ctx))
-      }
-    }
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [
-    shellVisible, isDisplay, requestNavigate, requestBackFromDocumentDetails, requestWithinInventory, applyAppLocation,
-    activePanel, activePageId, settingsSection, settingsImportRunId, matePanelConversationId, wallDisplaysSlug,
-    documentsFolderId, documentsEditId, inventorySection, inventoryEquipmentEditId, inventoryBinCode, inventoryLocationEditId,
-    inventoryPlanView, inventoryPlanDeckId, inventoryDeckEditId, inventoryDecksOpen, pages, pagesLoading, canAdmin,
-  ])
+    router.setContext({ firstPageId, knownPageIds, canAdmin, shellVisible })
+  }, [router, firstPageId, knownPageIds, canAdmin, shellVisible])
 
   // If admin access ends (or was never established) while Settings happens
-  // to be open, drop back to the dashboard. The sync effect above then sees
-  // `/settings` as non-canonical (canAdmin false) and replaces it with `/`.
+  // to be open, drop back to the dashboard. The router then sees `/settings`
+  // as non-canonical (canAdmin false) and replaces it with `/`. Not a move
+  // the operator asked for, so the guards do not get a say.
   useEffect(() => {
     if (shellVisible && !canAdmin && activePanel === 'settings') {
-      setActivePanel(null)
+      navigate({ panel: null, pageId: null }, { force: true })
     }
-  }, [shellVisible, canAdmin, activePanel])
+  }, [shellVisible, canAdmin, activePanel, navigate])
 
   useEffect(() => {
     const label = activePanel ? PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label : null
@@ -2103,10 +1515,10 @@ export function App() {
   // Same reasoning as configureHandlerFor above, for the tiles/banner whose
   // onOpen just navigates — these take no widget-specific argument, so a
   // single stable callback per destination covers every call site.
-  const openForecastPanel = useCallback(() => setActivePanel('forecast'), [])
-  const openRoutesPanel = useCallback(() => setActivePanel('routes'), [])
-  const openAlarmsPanel = useCallback(() => requestNavigate('alarms', () => setActivePanel('alarms')), [requestNavigate])
-  const openAnchorWatchPanel = useCallback(() => setActivePanel('anchor-watch'), [])
+  const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
+  const openRoutesPanel = useCallback(() => navigate.toPanel('routes'), [navigate])
+  const openAlarmsPanel = useCallback(() => navigate.toPanel('alarms'), [navigate])
+  const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
@@ -2521,7 +1933,10 @@ export function App() {
     let name = 'New display'
     for (let n = 2; taken.has(name); n += 1) name = `New display ${n}`
     const created = await createDisplay({ name, width: 1920, height: 1080, scale: 1, rotate: 0 })
-    if (created) setWallDisplaysSlug(created.slug)
+    // Only while the index is still on screen: the create is async.
+    if (created && router.getSnapshot().location.panel === 'wall-displays') {
+      navigate({ panel: 'wall-displays', route: { view: 'editor', slug: created.slug } })
+    }
   }
 
   // Both duplicate paths build the same copy; they differ only in what
@@ -2593,7 +2008,7 @@ export function App() {
           onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
           displays={displays}
           onDisplayPatch={handleDisplayPatch}
-          onManageDisplays={() => requestNavigate('wall-displays', () => setActivePanel('wall-displays'))}
+          onManageDisplays={() => navigate.toPanel('wall-displays')}
           onDuplicateToDisplay={handleDuplicateToDisplay}
           onDeletePage={(id) => {
             void deletePage(id).then((ok) => {
@@ -2850,7 +2265,7 @@ export function App() {
             canWrite={canWrite}
             onOpenSettings={() => openSettingsSection('assistant')}
             initialConversationId={matePanelConversationId}
-            onActiveConversationChange={setMatePanelConversationId}
+            onActiveConversationChange={reportMatePanelConversation}
             onHasDraftChange={setMatePanelHasDraft}
           />
         )
@@ -2859,23 +2274,28 @@ export function App() {
         // same way DocumentsPanel owns its own folder drill-down. Which one
         // renders is the presence of a slug, and the editor resolves it
         // itself rather than App keeping a second piece of state in step.
-        const editing = wallDisplaysSlug !== null
-          ? displays.find((d) => d.slug === wallDisplaysSlug) ?? null
+        const wallDisplaysRoute = appLocation.panel === 'wall-displays' ? appLocation.route : { view: 'index' as const }
+        const editing = wallDisplaysRoute.view === 'editor'
+          ? displays.find((d) => d.slug === wallDisplaysRoute.slug) ?? null
           : null
-        if (wallDisplaysSlug !== null) {
+        if (wallDisplaysRoute.view === 'editor') {
           return (
             <DisplayEditorPanel
               display={editing}
               pages={pages}
               displays={displays}
-              onBack={() => setWallDisplaysSlug(null)}
+              onBack={() => navigate({ panel: 'wall-displays', route: { view: 'index' } })}
               onUpdate={async (id, patch) => {
                 const updated = await updateDisplay(id, patch)
                 // The route names the display by slug, and the slug is one
                 // of the fields this panel edits: without following it, a
                 // rename resolves to nothing and the editor flips to "could
                 // not be found" on a display that is fine.
-                if (updated && updated.id === editing?.id) setWallDisplaysSlug(updated.slug)
+                // Only while the editor is still what is on screen: the save
+                // is async, and the operator may have moved on meanwhile.
+                if (updated && updated.id === editing?.id && router.getSnapshot().location.panel === 'wall-displays') {
+                  navigate({ panel: 'wall-displays', route: { view: 'editor', slug: updated.slug } })
+                }
                 return updated
               }}
               onDelete={async (id) => {
@@ -2902,11 +2322,9 @@ export function App() {
                 display_id: displayId,
                 dwell_seconds: DEFAULT_DWELL_SECONDS,
               })}
-              onOpenPage={(id) => requestNavigate(null, () => {
-                setActivePanel(null)
-                setActivePageId(id)
-                setLayoutEditing(true)
-              })}
+              onOpenPage={(id) => {
+                if (navigate({ panel: null, pageId: id })) setLayoutEditing(true)
+              }}
               onReorder={reorderPages}
               reordering={reordering}
               canWrite={canWrite}
@@ -2922,7 +2340,7 @@ export function App() {
             onRetry={() => { void refetchDisplays() }}
             onOpenDisplay={(id) => {
               const target = displays.find((d) => d.id === id)
-              if (target) setWallDisplaysSlug(target.slug)
+              if (target) navigate({ panel: 'wall-displays', route: { view: 'editor', slug: target.slug } })
             }}
             onCreateDisplay={() => { void handleCreateDisplay() }}
             onOpenHelp={openHelp}
@@ -2931,52 +2349,19 @@ export function App() {
         )
       }
       case 'documents': {
-        // ADR 0115 §2: the listing and the Details page are one
-        // panel, the same index/editor split ADR 0112's wall-displays branch
-        // above already uses - which one renders is just the presence of
-        // documentsEditId, resolved by the Details page itself rather than
-        // App keeping a second piece of resolved-document state in step.
-        if (documentsEditId !== null) {
-          return (
-            <DocumentDetailsPage
-              key={documentsEditId}
-              ref={documentDetailsPageRef}
-              documentId={documentsEditId}
-              onDirtyChange={setDocumentDetailsDirty}
-              // Routed through requestBackFromDocumentDetails rather than a
-              // bare setDocumentsEditId(null) - review finding: this call
-              // site stays on the 'documents' panel, so requestNavigate's
-              // own targetPanel check (used everywhere else) would never
-              // catch a dirty Details page being left this way.
-              onOpenFolder={(folderId) => {
-                requestBackFromDocumentDetails(() => {
-                  changeDocumentsFolder(folderId)
-                  setDocumentsEditId(null)
-                })
-              }}
-              onBack={() => {
-                requestBackFromDocumentDetails(() => setDocumentsEditId(null))
-              }}
-              onFolderContextChange={(folderId) => {
-                // Only a change of folder makes the sync effect write a new
-                // location; if it stays the same nothing would clear the
-                // flag and it would leak onto the next unrelated navigation.
-                if (folderId !== documentsFolderId) replaceNextLocationRef.current = true
-                changeDocumentsFolder(folderId)
-              }}
-              onTitleChange={setDocumentDetailsTitle}
-            />
-          )
-        }
-        const documentDeepLinkId = documentsLeftOnceRef.current ? null : (initialLocation.documentId ?? null)
+        // ADR 0115 §2: the listing and the Details page are one panel, the
+        // same index/editor split ADR 0112's wall-displays branch above
+        // already uses - which one renders is the route's view, resolved
+        // by DocumentsRoutePanel, which also owns the Details page's
+        // unsaved-changes guard (ADR 0171).
+        const documentDeepLinkId = documentsLeftOnceRef.current
+          ? null
+          : (initialLocation.panel === 'documents' && initialLocation.route.view === 'browse'
+            ? initialLocation.route.documentId
+            : null)
         return (
-          <DocumentsPanel
-            initialFolderId={documentsFolderId}
-            onFolderChange={setDocumentsFolderId}
+          <DocumentsRoutePanel
             initialDocumentId={documentDeepLinkId}
-            onEditDocument={setDocumentsEditId}
-            initialSectionId={documentsSectionId}
-            onSectionChange={setDocumentsSectionId}
             onOpenHelp={openHelp}
             // ADR 0120: the toolbar's Mate failure line links straight to
             // Settings → Assistant, the same openSettingsSection helper
@@ -2986,226 +2371,14 @@ export function App() {
             // openMate the header's Sparkles button and SettingsPage's own
             // onAskMate already call, always starting a fresh conversation.
             onAskMate={openMate}
+            onDetailsTitleChange={setDocumentDetailsTitle}
           />
         )
       }
       case 'inventory':
-        return (
-          <InventoryPanel
-            ref={inventoryPanelRef}
-            activeSectionId={inventorySection}
-            onSectionChange={(id) => {
-              requestWithinInventory(() => {
-                setInventorySection(id)
-                // Picking Locations in the nav from a location page returns
-                // to the index, not to the page already open.
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-              })
-            }}
-            equipmentEditId={inventoryEquipmentEditId}
-            creatingEquipment={inventoryCreatingEquipment}
-            // Opening an item or starting a new one enters the editor, so
-            // there is no draft to discard yet and nothing to guard. Both
-            // callbacks are reachable from OUTSIDE the Equipment section too
-            // - the bin page's own item rows/"Full item" button and
-            // Stocktake's photo grid (ADR 0127) - so both have to switch
-            // inventorySection to 'equipment' and clear inventoryBinCode
-            // themselves, not just set the id/creating flag. Review finding:
-            // InventoryPanel only ever renders the editor when
-            // activeSectionId === 'equipment' (its own showEquipmentEditor
-            // check), so pressing Open from a bin page used to set
-            // inventoryEquipmentEditId while activeSectionId stayed
-            // 'locations' - nothing appeared, and the bin's own binCode
-            // stayed set underneath a URL that had already moved to
-            // /inventory/equipment/<id>. Clearing binCode here is what makes
-            // the sync effect below produce that URL as a NEW history entry
-            // rather than leaving the bar disagreeing with what's on screen,
-            // so the browser's own Back returns to the bin.
-            // Release-fixes code-review finding: these used to set section/
-            // id state directly, with no guard at all - reachable not just
-            // from the Equipment index (nothing to lose there) but from the
-            // bin page's own item rows/"Full item" and Stocktake's photo
-            // grid, where switching straight to 'equipment' silently threw
-            // away a stocktake pass's scans or a staged quick-add.
-            // requestWithinInventory now also checks inventoryHasWork (its
-            // own comment above), so this is a no-op everywhere neither
-            // reason applies - which is everywhere except those two cases.
-            onOpenEquipment={(id) => {
-              requestWithinInventory(() => {
-                setInventorySection('equipment')
-                setInventoryBinCode(null)
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-                setInventoryEquipmentEditId(id)
-              })
-            }}
-            onNewEquipment={(preset) => {
-              requestWithinInventory(() => {
-                setInventorySection('equipment')
-                setInventoryBinCode(null)
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-                setInventoryNewEquipmentPreset(preset ?? null)
-                setInventoryCreatingEquipment(true)
-              })
-            }}
-            // Back is the only exit that can throw away typed work, so it is
-            // the only one guarded - and it is ONE guarded call that clears
-            // both pieces of state together. Two calls would not work:
-            // requestWithinInventory stashes a single pending navigation, so
-            // the second would overwrite the first and Discard would run a
-            // no-op with the dirty editor still open.
-            onCloseEditor={() => {
-              requestWithinInventory(() => {
-                setInventoryEquipmentEditId(null)
-                setInventoryCreatingEquipment(false)
-              })
-            }}
-            // A create or delete that already succeeded has nothing left to
-            // discard, and the editor is still reporting dirty at the moment
-            // it calls these (its draft is never re-baselined - it unmounts
-            // or reloads instead). Routing them through the guard therefore
-            // popped "unsaved changes" straight after a successful save, and
-            // on a delete offered a Save that would PUT to a record the
-            // server had just dropped.
-            onEquipmentCreated={(id) => {
-              setInventoryDirty(false)
-              setInventoryCreatingEquipment(false)
-              setInventoryEquipmentEditId(id)
-            }}
-            onEquipmentDeleted={(message) => {
-              setInventoryDirty(false)
-              setInventoryEquipmentEditId(null)
-              setInventoryCreatingEquipment(false)
-              // 2026-09-25 amendment: the item is gone either way - message
-              // is only ever the server's own "the item was deleted, but a
-              // photo file/document could not be removed" warning, shown on
-              // the destination (the Equipment index) rather than keeping
-              // the editor open on a record that no longer exists.
-              if (message) toast.error(message)
-            }}
-            // Discard on a new item: nothing left to protect, and the editor
-            // is still reporting dirty when it fires, so the guard would ask
-            // about the changes the operator just threw away.
-            onEquipmentDiscarded={() => {
-              setInventoryDirty(false)
-              setInventoryEquipmentEditId(null)
-              setInventoryCreatingEquipment(false)
-            }}
-            onDirtyChange={setInventoryDirty}
-            onHasWorkChange={(work, detail) => {
-              setInventoryHasWork(work)
-              setInventoryWorkDetail(detail ?? null)
-            }}
-            canWrite={canWrite}
-            binCode={inventoryBinCode}
-            // Opening a bin, like opening an equipment item, never discards
-            // anything by itself - but it CAN leave a dirty Equipment
-            // editor on screen if the operator navigates to a bin from
-            // there (a Locations-section click, or a deep link), so it
-            // still goes through the same guard onSectionChange uses.
-            onOpenBin={(code) => {
-              requestWithinInventory(() => {
-                setInventorySection('locations')
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-                setInventoryBinCode(code)
-              })
-            }}
-            // Release-fixes code-review finding: this used to be a plain
-            // setter on the theory that the bin page holds no draft to
-            // discard - true of the Equipment editor, but not of the
-            // quick-add form living on this same page (ADR 0127), which can
-            // hold a staged name/photos or a photo still queued for Retry.
-            // Routed through the same guard onOpenBin/onSectionChange use.
-            onCloseBin={(zoneId) => {
-              // Back is "up": a resolved bin returns to its own location's
-              // page, whether the operator came from there or from a tag
-              // scan. No zone (unknown bin, failed load) is the index.
-              requestWithinInventory(() => {
-                setInventoryBinCode(null)
-                setInventoryLocationEditId(zoneId ?? null)
-              })
-            }}
-            locationEditId={inventoryLocationEditId}
-            // Opening a location discards nothing; Back is the one exit that
-            // can throw away an unsaved rename, so it goes through the guard.
-            onOpenLocation={(id) => {
-              requestWithinInventory(() => {
-                setInventorySection('locations')
-                setInventoryBinCode(null)
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-                setInventoryLocationEditId(id)
-              })
-            }}
-            onCloseLocation={() => { requestWithinInventory(() => { setInventoryLocationEditId(null) }) }}
-            locationsView={inventoryPlanView ? 'plan' : 'table'}
-            onLocationsViewChange={(view) => { setInventoryPlanView(view === 'plan') }}
-            planDeckId={inventoryPlanDeckId}
-            onPlanDeckChange={setInventoryPlanDeckId}
-            // ADR 0156: the Decks list and a deck's page. Opening one is a
-            // move within the Locations section, so it goes through the same
-            // guard as every other move that can leave a draft behind; the
-            // deck page's own Back is the one exit that can discard its
-            // layout draft.
-            decksOpen={inventoryDecksOpen}
-            deckEditId={inventoryDeckEditId}
-            onOpenDecks={() => {
-              requestWithinInventory(() => {
-                setInventorySection('locations')
-                setInventoryBinCode(null)
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(true)
-                setInventoryDeckEditId(null)
-              })
-            }}
-            onOpenDeck={(deckId) => {
-              requestWithinInventory(() => {
-                setInventorySection('locations')
-                setInventoryBinCode(null)
-                setInventoryLocationEditId(null)
-                setInventoryDecksOpen(true)
-                setInventoryDeckEditId(deckId)
-              })
-            }}
-            onCloseDecks={() => {
-              requestWithinInventory(() => {
-                setInventoryDecksOpen(false)
-                setInventoryDeckEditId(null)
-              })
-            }}
-            onCloseDeck={() => { requestWithinInventory(() => { setInventoryDeckEditId(null) }) }}
-            onDeckDeleted={() => {
-              setInventoryDirty(false)
-              setInventoryDeckEditId(null)
-            }}
-            // A delete that already succeeded: the page is still reporting
-            // dirty if a rename was pending, and has nothing left to save.
-            onLocationDeleted={() => {
-              setInventoryDirty(false)
-              setInventoryLocationEditId(null)
-            }}
-            newEquipmentPreset={inventoryNewEquipmentPreset}
-          />
-        )
+        return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
-        return (
-          <SettingsPage
-            ref={settingsPageRef}
-            onDirtyChange={setSettingsDirty}
-            activeSectionId={settingsSection}
-            onSectionChange={(id) => { setSettingsSection(id); setSettingsImportRunId(null) }}
-            importRunId={settingsImportRunId}
-            onImportRunChange={setSettingsImportRunId}
-            onAskMate={openMate}
-          />
-        )
+        return <SettingsRoutePanel onAskMate={openMate} />
       case 'anchor-watch':
         return (
           <>
@@ -3389,8 +2562,8 @@ export function App() {
       return (
         <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
           <p className="text-sm font-semibold text-foreground">
-            {initialLocation.displaySlug
-              ? `No display is configured at "${initialLocation.displaySlug}".`
+            {wallDisplaySlug
+              ? `No display is configured at "${wallDisplaySlug}".`
               : 'This address needs a display slug: /display/<slug>.'}
           </p>
           {displays.length > 0 ? (
@@ -3460,7 +2633,7 @@ export function App() {
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton isActive={activePanel === null} onClick={() => requestNavigate(null, () => setActivePanel(null))} tooltip="Dashboard">
+              <SidebarMenuButton isActive={activePanel === null} onClick={() => navigate.toPanel(null)} tooltip="Dashboard">
                 <LayoutDashboard />
                 <span>Dashboard</span>
               </SidebarMenuButton>
@@ -3475,10 +2648,11 @@ export function App() {
                     <SidebarMenuSubButton
                       render={<button type="button" />}
                       isActive={activePanel === null && page.id === activePageId}
-                      onClick={() => requestNavigate(null, () => {
-                        setActivePanel(null)
-                        setActivePageId(page.id)
-                      })}
+                      onClick={() => {
+                        // The router moves to the page; the hook also
+                        // remembers it for next time straight away.
+                        if (navigate({ panel: null, pageId: page.id })) setActivePageId(page.id)
+                      }}
                     >
                       <span className="min-w-0 flex-1 truncate">{page.name}</span>
                     </SidebarMenuSubButton>
@@ -3490,18 +2664,10 @@ export function App() {
               <SidebarMenuItem key={id}>
                 <SidebarMenuButton
                   isActive={activePanel === id}
-                  onClick={() => requestNavigate(id, () => {
-                    setActivePanel(id)
-                    // Code-review finding ("clicking Mate ALWAYS shows a
-                    // fresh empty chat"): without this, matePanelConversationId
-                    // keeps whatever the operator last picked forever, and
-                    // AssistantDrawer/useAssistantConversations' own re-select
-                    // effect (Mate UI cycle) reopens it on this exact prop
-                    // change - clearing it here is what actually makes the
-                    // sidebar's Mate entry always land on a blank chat,
-                    // whether the panel is remounting or already showing.
-                    if (id === 'assistant') setMatePanelConversationId(null)
-                  })}
+                  // Mate always opens on a fresh empty chat (code-review
+                  // finding): the router's resume(assistant) is exactly that,
+                  // where every other panel returns to where it was left.
+                  onClick={() => navigate.toPanel(id)}
                   tooltip={label}
                 >
                   <Icon />
@@ -3570,7 +2736,7 @@ export function App() {
                   // section as a second crumb, mirroring the SectionNav each
                   // of them hosts; every other panel is a single crumb.
                   const panelLabel = PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label
-                  const sectionLabel = activePanelSectionLabel(activePanel, settingsSection, inventorySection)
+                  const sectionLabel = activePanelSectionLabel(appLocation)
                   if (sectionLabel === null) {
                     return (
                       <BreadcrumbItem className="min-w-0">
@@ -3691,7 +2857,7 @@ export function App() {
               size="icon"
               aria-label="Open help"
               title="Help for this screen"
-              onClick={() => openHelp(helpTargetFor({ panel: activePanel, section: settingsSection, inventorySection }))}
+              onClick={() => openHelp(helpTargetFor(appLocation))}
             >
               <CircleHelp className="h-4 w-4" />
             </Button>
@@ -3881,94 +3047,7 @@ export function App() {
       )}
 
 
-      <AlertDialog
-        open={pendingNavigation !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingNavigation(null)
-            setSaveAndContinueError(null)
-          }
-        }}
-      >
-        <AlertDialogContent>
-          {pendingNavigationKind === 'dirty' ? (
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {/* dirtyPageLabel: 'Settings', 'Details' (ADR 0115 §2) or
-                      'Inventory' (ADR 0123) - whichever page's guard actually
-                      stashed this navigation. */}
-                  You have unsaved changes on the {dirtyPageLabel} page. Save them before leaving, or discard them?
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              {saveAndContinueError && (
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-                  {saveAndContinueError}
-                </div>
-              )}
-              <AlertDialogFooter>
-                <AlertDialogCancel
-                  onClick={() => {
-                    setPendingNavigation(null)
-                    setSaveAndContinueError(null)
-                  }}
-                >
-                  Cancel
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    pendingNavigation?.()
-                    setPendingNavigation(null)
-                    setSaveAndContinueError(null)
-                  }}
-                >
-                  Discard
-                </AlertDialogAction>
-                <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
-                  {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
-                </Button>
-              </AlertDialogFooter>
-            </>
-          ) : (
-            // Release-fixes code-review finding: Stocktake's scans and a
-            // staged quick-add have nothing to Save - offering that button
-            // anyway (or the "Unsaved changes" copy, which implies one) would
-            // be offering an action that does not exist. Leave/Stay instead,
-            // worded for what is actually about to be cleared.
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {pendingNavigationKind === 'stocktake-work' ? 'Leave stocktake?' : 'Leave this bin?'}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {pendingNavigationKind === 'stocktake-work'
-                    ? 'The scans from this pass will be cleared.'
-                    // Release-fixes code-review finding: falls back to the
-                    // generic copy only when BinQuickAdd didn't give a more
-                    // specific one (pendingNavigationDetail, captured by
-                    // stashPendingNavigation) - a photo still queued for
-                    // Retry after a partial-failure save leaves the form's
-                    // own name/photo fields empty, so "the name and photos
-                    // you have added" would be describing nothing.
-                    : (pendingNavigationDetail ?? 'The name and photos you have added will be cleared.')}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Stay</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    pendingNavigation?.()
-                    setPendingNavigation(null)
-                  }}
-                >
-                  Leave
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </>
-          )}
-        </AlertDialogContent>
-      </AlertDialog>
+      <NavigationGuardDialog />
 
       {/* Lazy-loaded, and not mounted at all until first opened - see
           mateSheetHasOpenedRef above. `fallback={null}` is fine here: the
@@ -3992,9 +3071,8 @@ export function App() {
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}
             onOpenPanel={(id) => {
-              setMatePanelConversationId(id)
               setMateSheetOpen(false)
-              requestNavigate('assistant', () => setActivePanel('assistant'))
+              openMatePanel(id)
             }}
             onActiveConversationChange={setMateSheetConversationId}
             onHasDraftChange={setMateSheetHasDraft}

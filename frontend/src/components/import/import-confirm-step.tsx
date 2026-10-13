@@ -131,16 +131,16 @@ function recordHref(record: ImportSummaryRecord): string {
   const ctx = { firstPageId: null }
   switch (record.kind) {
     case 'equipment':
-      return formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: record.id }, ctx)
+      return formatAppLocation({ panel: 'inventory', route: { view: 'equipment', id: record.id } }, ctx)
     case 'bin':
-      return formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: record.label }, ctx)
+      return formatAppLocation({ panel: 'inventory', route: { view: 'bin', code: record.label } }, ctx)
     case 'zone':
-      return formatAppLocation({ panel: 'inventory', inventorySection: 'locations' }, ctx)
+      return formatAppLocation({ panel: 'inventory', route: { view: 'index', section: 'locations' } }, ctx)
     case 'log_entry':
-      return formatAppLocation({ panel: 'inventory', inventorySection: 'maintenance' }, ctx)
+      return formatAppLocation({ panel: 'inventory', route: { view: 'index', section: 'maintenance' } }, ctx)
     case 'note':
     case 'document':
-      return formatAppLocation({ panel: 'documents', documentId: record.id }, ctx)
+      return formatAppLocation({ panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: record.id } }, ctx)
   }
 }
 

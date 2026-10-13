@@ -30,16 +30,11 @@ interface BinPageProps {
   /** Full item (below) - pre-sets a brand new draft's location. */
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite?: boolean
-  /** Release-fixes code-review finding: forwarded to the quick-add form's
-   * own onHasWorkChange (its doc comment, bin-quick-add.tsx) - App.tsx
-   * routes Open/Full item through the same unsaved-work guard when this is
-   * true. */
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   /** ADR 0156: opens a deck's page, from the missing-plan-image notice. */
   onOpenDeck?: (deckId: string) => void
 }
 
-export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onHasWorkChange, onOpenDeck = () => {} }: BinPageProps) {
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onOpenDeck = () => {} }: BinPageProps) {
   // ONE useInventoryZones() instance for the whole page (there is no shared
   // store between separate calls - the hook's own header comment), so that
   // when BinNotFound's Create bin below calls createBin/createZone, THIS
@@ -61,7 +56,6 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
         onOpenEquipment={onOpenEquipment}
         onNewEquipment={onNewEquipment}
         canWrite={canWrite}
-        onHasWorkChange={onHasWorkChange}
         onOpenDeck={onOpenDeck}
       />
     )
@@ -340,7 +334,7 @@ function BinOnPlan({
 }
 
 function BinContents({
-  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onHasWorkChange, onOpenDeck,
+  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onOpenDeck,
 }: {
   zone: InventoryZone
   zones: InventoryZone[]
@@ -349,7 +343,6 @@ function BinContents({
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   onOpenDeck: (deckId: string) => void
 }) {
   const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
@@ -393,7 +386,7 @@ function BinContents({
           binId={bin.id}
           onCreated={() => { void refresh() }}
           canWrite={canWrite}
-          onHasWorkChange={onHasWorkChange}
+          binCode={bin.code}
         />
       )}
 
