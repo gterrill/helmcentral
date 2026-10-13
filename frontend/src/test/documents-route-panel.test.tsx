@@ -9,6 +9,7 @@ import { DocumentsRoutePanel } from '@/components/documents-route-panel'
 import { testRouter } from './helpers/router'
 
 const save = vi.fn().mockResolvedValue(undefined)
+const detailsRef = vi.hoisted(() => ({ detach: false }))
 
 vi.mock('@/components/documents-panel', () => ({
   DocumentsPanel: (props: {
@@ -40,7 +41,7 @@ vi.mock('@/components/document-details-page', () => ({
     },
     ref,
   ) {
-    useImperativeHandle(ref, () => ({ save }))
+    useImperativeHandle(ref, () => (detailsRef.detach ? (null as never) : { save }))
     return (
       <div>
         <p data-testid="details">{props.documentId}</p>
@@ -130,6 +131,29 @@ describe('DocumentsRoutePanel Details page guard', () => {
     await act(async () => { await router.saveAndContinue() })
     expect(save).toHaveBeenCalledTimes(1)
     expect(router.getSnapshot().location.panel).toBe('forecast')
+  })
+
+  it('Save and Continue stays put and keeps the move held when the page\'s save fails', async () => {
+    save.mockRejectedValueOnce(new Error('title already used'))
+    const { router } = mount('/documents/doc-1')
+    fireEvent.click(screen.getByText('make-dirty'))
+    act(() => { router.navigate({ panel: 'forecast' }) })
+    await act(async () => { await expect(router.saveAndContinue()).rejects.toThrow('title already used') })
+    expect(router.getSnapshot().pending).toMatchObject({ kind: 'dirty' })
+    expect(router.getSnapshot().location.panel).toBe('documents')
+  })
+
+  it('Save and Continue fails rather than moving on when the page is not mounted to save', async () => {
+    detailsRef.detach = true
+    try {
+      const { router } = mount('/documents/doc-1')
+      fireEvent.click(screen.getByText('make-dirty'))
+      act(() => { router.navigate({ panel: 'forecast' }) })
+      await act(async () => { await expect(router.saveAndContinue()).rejects.toThrow(/not available/i) })
+      expect(router.getSnapshot().location.panel).toBe('documents')
+    } finally {
+      detailsRef.detach = false
+    }
   })
 
   it('goes straight back when clean, to the listing the page was opened from', () => {

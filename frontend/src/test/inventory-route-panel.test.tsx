@@ -176,6 +176,17 @@ describe('InventoryRoutePanel: a move that already settled', () => {
     expect(shape()).toBe('equipment - - - - - - table -')
   })
 
+  it('Discard on a New item draft, whose guard holds every inventory move, leaves without holding anything', () => {
+    const { router, history } = mount('/inventory')
+    fireEvent.click(screen.getByText('new-item'))
+    fireEvent.click(screen.getByText('dirty'))
+    expect(router.getSnapshot().guardOwners).toEqual(['inventory'])
+    fireEvent.click(screen.getByText('discarded'))
+    expect(router.getSnapshot().pending).toBeNull()
+    expect(history.path()).toBe('/inventory')
+    expect(shape()).toBe('equipment - - - - - - table -')
+  })
+
   it('lets a location page or deck page that settled go without asking', () => {
     const { router } = mount('/inventory/locations/z1')
     fireEvent.click(screen.getByText('dirty'))

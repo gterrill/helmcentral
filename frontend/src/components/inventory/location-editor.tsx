@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -15,8 +15,8 @@ import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 // delete it. Built from the pattern library the way EquipmentEditor is.
 // Zones are "locations" to the operator; the code keeps the zone name.
 //
-// The name is a draft saved through the SaveBar (dirty tracking, reported up
-// through onDirtyChange so App.tsx's unsaved-changes guard covers it). Bins
+// The name is a draft saved through the SaveBar; the editor registers its own
+// navigation guard for the draft, with performSave as its Save and Continue. Bins
 // are different: each is its own record, added, renamed and removed on the
 // spot, exactly as the old inline list did, so they never make the page dirty.
 //
@@ -25,10 +25,6 @@ import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 // itself refuses and explains, surfaced verbatim in the banner rather than
 // pre-empted by a generic "are you sure?". Deleting a location gets the
 // standard ConfirmDelete, and the same 409 message lands inside it.
-
-export interface LocationEditorHandle {
-  save: () => Promise<void>
-}
 
 interface LocationEditorProps {
   id: string
@@ -96,9 +92,8 @@ function OnThePlan({
   )
 }
 
-export const LocationEditor = forwardRef<LocationEditorHandle, LocationEditorProps>(function LocationEditor(
-  { id, onBack, onDeleted, onOpenBin = () => {}, onOpenDeck = () => {}, onOpenDecks = () => {}, canWrite = true },
-  ref,
+export function LocationEditor(
+  { id, onBack, onDeleted, onOpenBin = () => {}, onOpenDeck = () => {}, onOpenDecks = () => {}, canWrite = true }: LocationEditorProps,
 ) {
   const { zones, loading, error, refresh, renameZone, deleteZone, createBin, renameBin, deleteBin } = useInventoryZones()
   const zone = zones.find((z) => z.id === id) ?? null
@@ -145,9 +140,6 @@ export const LocationEditor = forwardRef<LocationEditorHandle, LocationEditorPro
       setSaving(false)
     }
   }, [zone, name, renameZone])
-
-  // Same contract as EquipmentEditorHandle: App.tsx's "Save and Continue".
-  useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
   // ADR 0171: this page owns the guard for its rename draft. Only a move that
   // takes the page off screen is held; it unregisters when the page unmounts.
@@ -361,4 +353,4 @@ export const LocationEditor = forwardRef<LocationEditorHandle, LocationEditorPro
       )}
     </Page>
   )
-})
+}

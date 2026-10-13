@@ -23,7 +23,11 @@ export function SettingsRoutePanel({ onAskMate }: SettingsRoutePanelProps) {
         owner: 'settings',
         label: 'Settings',
         blocks: (_from, to) => (to.panel === 'settings' ? null : { kind: 'dirty' }),
-        save: async () => { await pageRef.current?.save() },
+        save: async () => {
+          const page = pageRef.current
+          if (!page) throw new Error('The Settings page is not available to save.')
+          await page.save()
+        },
       }
     : null)
 

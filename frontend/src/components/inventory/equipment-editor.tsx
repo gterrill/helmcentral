@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -57,13 +57,12 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { fetchNote, saveNote } from '@/lib/note-api'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
-// equipment record - `id === null` is the "New item" draft (App.tsx's
-// inventoryCreatingEquipment), everything else is an existing record bound
-// to useEquipmentItem(id). Mirrors document-details-page.tsx's own shape
-// throughout: an explicit local draft, an imperative `save()` handle for
-// App.tsx's navigation guard (the same Settings/Details dirty-save contract,
-// generalized a third time), and the aliases chips are the same
-// add/remove/Enter-to-add interaction as that page's own tags editor.
+// equipment record - `id === null` is the "New item" draft, everything else is
+// an existing record bound to useEquipmentItem(id). Mirrors
+// document-details-page.tsx's own shape throughout: an explicit local draft,
+// a navigation guard it registers itself through useNavigationGuard (its
+// performSave is the guard's "Save and Continue"), and the aliases chips are
+// the same add/remove/Enter-to-add interaction as that page's own tags editor.
 //
 // ADR 0142: the chrome around all of that - the outer shell, each section's
 // card, the delete confirmation - is now Page/DetailsLayout/FormSection/
@@ -179,13 +178,8 @@ class ProfileChangeDeclined extends Error {
   }
 }
 
-export interface EquipmentEditorHandle {
-  save: () => Promise<void>
-}
-
-export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditorProps>(function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDiscarded, canWrite = true, initialZoneId = null, initialBinId = null },
-  ref,
+export function EquipmentEditor(
+  { id, onBack, onCreated, onDeleted, onDiscarded, canWrite = true, initialZoneId = null, initialBinId = null }: EquipmentEditorProps,
 ) {
   const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
@@ -686,10 +680,8 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
         isCover: i === 0,
       }))
 
-  // Exposed via useImperativeHandle so App.tsx's "Save and Continue" (the
-  // dirty-navigation guard, wired through InventoryPanel the same way
-  // ADR 0115 §2 wires DocumentDetailsPageHandle) can save this draft without
-  // knowing anything about create vs. update. Throws rather than swallowing
+  // The guard below carries this as its own "Save and Continue", so it has to
+  // work without knowing anything about create vs. update. Throws rather than swallowing
   // (AGENTS.md fallback policy) so the guard dialog can show the server's
   // own message instead of navigating past a save that didn't happen.
   const performSave = useCallback(async () => {
@@ -796,8 +788,6 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       throw err
     }
   }, [id, draft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
-
-  useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
   // ADR 0171: this editor owns the guard for its draft. An unsaved draft has a
   // Save behind Save and Continue; photos still waiting for Retry have nothing
@@ -1383,4 +1373,4 @@ export const EquipmentEditor = forwardRef<EquipmentEditorHandle, EquipmentEditor
       )}
     </Page>
   )
-})
+}

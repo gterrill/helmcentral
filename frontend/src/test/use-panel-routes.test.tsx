@@ -56,6 +56,51 @@ describe('useDocumentsRoute', () => {
     expect(history.path()).toBe('/documents?folder=f2')
   })
 
+  it('picking a folder from a manual section is one entry: one Back returns to that section, and Forward goes on', () => {
+    const { wrapper, history } = testRouter('/documents?folder=f1&section=s1')
+    const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
+
+    act(() => { result.current.openFolder('f2') })
+    expect(history.entries).toEqual(['/documents?folder=f1&section=s1', '/documents?folder=f2'])
+
+    act(() => { history.back() })
+    expect(result.current.route).toEqual({ view: 'browse', folderId: 'f1', sectionId: 's1', documentId: null })
+    act(() => { history.forward() })
+    expect(result.current.route).toEqual({ view: 'browse', folderId: 'f2', sectionId: null, documentId: null })
+  })
+
+  it('a Move on Details drops the old folder\'s section, and Back from the moved document lists the folder it was opened from', () => {
+    const { wrapper, history } = testRouter('/documents?folder=f1&section=s1')
+    const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
+    act(() => { result.current.openDetails('doc-1') })
+    act(() => { result.current.followFolder('f2') })
+    expect(history.entries).toEqual(['/documents?folder=f1&section=s1', '/documents/doc-1?folder=f2'])
+    expect(result.current.route).toEqual({ view: 'details', id: 'doc-1', folderId: 'f2', sectionId: null })
+    act(() => { history.back() })
+    expect(result.current.route).toEqual({ view: 'browse', folderId: 'f1', sectionId: 's1', documentId: null })
+  })
+
+  it('a folder crumb on a Details page opened from a manual section drops that section', () => {
+    const { wrapper, history } = testRouter('/documents?folder=f1&section=s1')
+    const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
+    act(() => { result.current.openDetails('doc-1') })
+    expect(result.current.route).toMatchObject({ view: 'details', folderId: 'f1', sectionId: 's1' })
+    act(() => { result.current.openFolder('f2') })
+    expect(result.current.route).toEqual({ view: 'browse', folderId: 'f2', sectionId: null, documentId: null })
+    expect(history.path()).toBe('/documents?folder=f2')
+  })
+
+  it('a Move into the folder already browsed leaves the next move a push, not a replace', () => {
+    const { wrapper, history } = testRouter('/documents?folder=f2')
+    const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
+    act(() => { result.current.openDetails('doc-1') })
+    expect(history.entries).toEqual(['/documents?folder=f2', '/documents/doc-1?folder=f2'])
+    act(() => { result.current.followFolder('f2') })
+    expect(history.entries).toEqual(['/documents?folder=f2', '/documents/doc-1?folder=f2'])
+    act(() => { result.current.close() })
+    expect(history.entries).toEqual(['/documents?folder=f2', '/documents/doc-1?folder=f2', '/documents?folder=f2'])
+  })
+
   it('keeps the section when the folder has not changed', () => {
     const { wrapper } = testRouter('/documents?folder=f1&section=s1')
     const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
@@ -83,17 +128,6 @@ describe('useDocumentsRoute', () => {
     act(() => { result.current.close() })
     expect(result.current.route).toEqual({ view: 'browse', folderId: 'f1', sectionId: 's1', documentId: null })
     expect(history.path()).toBe('/documents?folder=f1&section=s1')
-  })
-
-  it('follows a Move on the Details page by replacing the entry', () => {
-    const { wrapper, history } = testRouter('/documents')
-    const { result } = renderHook(() => useDocumentsRoute(), { wrapper })
-    act(() => { result.current.openDetails('doc-1') })
-    expect(history.entries).toEqual(['/documents', '/documents/doc-1'])
-
-    act(() => { result.current.followFolder('f9') })
-    expect(history.entries).toEqual(['/documents', '/documents/doc-1?folder=f9'])
-    expect(result.current.route).toMatchObject({ view: 'details', id: 'doc-1', folderId: 'f9' })
   })
 
   it('hands out callbacks that keep one identity across moves', () => {
