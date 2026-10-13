@@ -187,7 +187,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
           <p className="mt-1 text-xs">
             Fix or restore it on the{' '}
             <a
-              href={formatAppLocation({ panel: 'inventory', inventorySection: 'profiles' }, { firstPageId: null })}
+              href={formatAppLocation({ panel: 'inventory', route: { view: 'index', section: 'profiles' } }, { firstPageId: null })}
               className="underline"
             >
               Profiles

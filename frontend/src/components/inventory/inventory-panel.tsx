@@ -1,22 +1,22 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react'
 
 import { BinPage } from '@/components/inventory/bin-page'
-import { DeckEditor, type DeckEditorHandle } from '@/components/inventory/deck-editor'
+import { DeckEditor } from '@/components/inventory/deck-editor'
 import { DecksIndex } from '@/components/inventory/decks-index'
-import { EquipmentEditor, type EquipmentEditorHandle } from '@/components/inventory/equipment-editor'
+import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
-import { LocationEditor, type LocationEditorHandle } from '@/components/inventory/location-editor'
+import { LocationEditor } from '@/components/inventory/location-editor'
 import { LocationsIndex, type LocationsView } from '@/components/inventory/locations-index'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
 
 // ADR 0123: InventoryNav plus whichever section is active - the Settings
-// page shape (settings-page.tsx) exactly: App owns the active section (and,
-// here, the Equipment index/editor split) and mirrors it to the URL (ADR
-// 0074); this component is a thin composition shell with no fetches or
-// navigation state of its own.
+// page shape (settings-page.tsx) exactly: the app location (ADR 0171) owns
+// the active view, including the Equipment index/editor split, and mirrors it
+// to the URL (ADR 0074); InventoryRoutePanel wires this component to it. This
+// component is a thin composition shell with no fetches or navigation state
+// of its own.
 //
 // No Help button of its own (removed - it used to duplicate the header's `?`,
 // and worse, App.tsx's own `?` handler didn't pass inventorySection at all,
@@ -30,10 +30,9 @@ import { StocktakeSection } from '@/components/inventory/stocktake-section'
 // entries - which one shows is `equipmentEditId`/`creatingEquipment`, the
 // same "one panel, index or editor" shape ADR 0112's wall-displays and ADR
 // 0115's Documents Details page already use elsewhere in this app. Both
-// pieces of state are owned by App.tsx (not local to this component) so its
-// dirty-navigation guard can clear inventoryDirty the moment either one
-// changes the editor is no longer showing - see App.tsx's own clearing
-// effect, mirroring documentDetailsDirty's.
+// pieces of state live in the app location (not local to this component) so
+// the navigation guard in InventoryRoutePanel can clear its dirty flag the
+// moment the editor is no longer showing.
 
 // Each way into and out of the Equipment editor is its own callback, named
 // for what the operator did rather than for the state it happens to change.
@@ -72,15 +71,6 @@ interface InventoryPanelProps {
   /** Discard on a new item: leave the editor with no guard, like a create or
    * delete that already succeeded. */
   onEquipmentDiscarded: () => void
-  onDirtyChange?: (dirty: boolean) => void
-  /** Release-fixes code-review finding: forwarded to Stocktake's own
-   * onHasWorkChange and the bin page's quick-add onHasWorkChange - never
-   * both mounted at once, so one prop covers either. App.tsx routes Open/
-   * Full item through the same unsaved-work guard when this is true.
-   * `detail`, when given, is wording for what would actually be lost -
-   * BinQuickAdd's own doc comment on its identical prop explains when it
-   * passes one. */
-  onHasWorkChange?: (hasWork: boolean, detail?: string) => void
   canWrite?: boolean
   /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
    * null is the ordinary Locations index; a non-null code shows that bin's
@@ -94,8 +84,8 @@ interface InventoryPanelProps {
    * to be a plain setter on the theory that the bin page holds no draft to
    * discard - true of the equipment editor, but the quick-add form living on
    * this same page (ADR 0127) can hold a staged name/photos or a photo still
-   * queued for Retry, so App.tsx routes this through the same
-   * requestWithinInventory guard onOpenBin/onSectionChange already use. */
+   * queued for Retry, so it goes through the same navigation guard
+   * onOpenBin/onSectionChange do. */
   onCloseBin: (zoneId?: string) => void
   /** `/inventory/locations/<id>` - one location's own page. null is the
    * Locations index. Same index/page split as binCode and equipmentEditId. */
@@ -131,12 +121,7 @@ interface InventoryPanelProps {
   newEquipmentPreset: { zoneId?: string; binId?: string } | null
 }
 
-export interface InventoryPanelHandle {
-  save: () => Promise<void>
-}
-
-export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelProps>(function InventoryPanel(
-  {
+export function InventoryPanel({
     activeSectionId,
     onSectionChange,
     equipmentEditId,
@@ -147,8 +132,6 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onEquipmentCreated,
     onEquipmentDeleted,
     onEquipmentDiscarded,
-    onDirtyChange,
-    onHasWorkChange,
     canWrite = true,
     binCode,
     onOpenBin,
@@ -169,28 +152,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
     onCloseDeck,
     onDeckDeleted,
     newEquipmentPreset,
-  },
-  ref,
-) {
-  // Only ever mounted while the Equipment editor itself is - save() is a
-  // no-op (App.tsx's guard only ever calls it while inventoryDirty is true,
-  // which itself can only be true while the editor is mounted and reporting
-  // it) when nothing is bound, same contract as SettingsPageHandle/
-  // DocumentDetailsPageHandle's own imperative save.
-  const editorRef = useRef<EquipmentEditorHandle>(null)
-  // The Locations page's rename draft is the only other thing that can be
-  // dirty, and never at the same time as the Equipment editor.
-  const locationEditorRef = useRef<LocationEditorHandle>(null)
-  // So can the deck page's name and layout draft (ADR 0156).
-  const deckEditorRef = useRef<DeckEditorHandle>(null)
-  useImperativeHandle(ref, () => ({
-    save: async () => {
-      await editorRef.current?.save()
-      await locationEditorRef.current?.save()
-      await deckEditorRef.current?.save()
-    },
-  }), [])
-
+}: InventoryPanelProps) {
   const showEquipmentEditor = activeSectionId === 'equipment' && (equipmentEditId !== null || creatingEquipment)
 
   const activeSection = (() => {
@@ -198,14 +160,11 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       if (showEquipmentEditor) {
         return (
           <EquipmentEditor
-            ref={editorRef}
             id={equipmentEditId}
             onBack={onCloseEditor}
             onCreated={onEquipmentCreated}
             onDeleted={onEquipmentDeleted}
             onDiscarded={onEquipmentDiscarded}
-            onDirtyChange={onDirtyChange}
-            onHasWorkChange={onHasWorkChange}
             canWrite={canWrite}
             initialZoneId={equipmentEditId === null ? (newEquipmentPreset?.zoneId ?? null) : null}
             initialBinId={equipmentEditId === null ? (newEquipmentPreset?.binId ?? null) : null}
@@ -236,7 +195,6 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
             onOpenEquipment={onOpenEquipment}
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
-            onHasWorkChange={onHasWorkChange}
             onOpenDeck={onOpenDeck}
           />
         )
@@ -244,14 +202,12 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       if (locationEditId !== null) {
         return (
           <LocationEditor
-            ref={locationEditorRef}
             id={locationEditId}
             onBack={onCloseLocation}
             onDeleted={onLocationDeleted}
             onOpenBin={onOpenBin}
             onOpenDeck={onOpenDeck}
             onOpenDecks={onOpenDecks}
-            onDirtyChange={onDirtyChange}
             canWrite={canWrite}
           />
         )
@@ -260,13 +216,11 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
         if (deckEditId !== null) {
           return (
             <DeckEditor
-              ref={deckEditorRef}
               id={deckEditId}
               onOpenLocations={onCloseDecks}
               onOpenDecks={onCloseDeck}
               onDeleted={onDeckDeleted}
-              onDirtyChange={onDirtyChange}
-              canWrite={canWrite}
+                canWrite={canWrite}
             />
           )
         }
@@ -287,7 +241,7 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       )
     }
     if (activeSectionId === 'stocktake') {
-      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} onHasWorkChange={onHasWorkChange} />
+      return <StocktakeSection onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
     }
     return null
   })()
@@ -301,4 +255,4 @@ export const InventoryPanel = forwardRef<InventoryPanelHandle, InventoryPanelPro
       </div>
     </div>
   )
-})
+}

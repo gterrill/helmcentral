@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
@@ -9,6 +9,8 @@ import { ConfirmDelete, DetailsLayout, FormSection, Page, SaveBar } from '@/comp
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { DeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { deckPlanUrl, useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 import { layoutFromZones, layoutToPayload, sameLayout } from '@/lib/deck-layout'
 import { downscaleImage, PLAN_MAX_DIMENSION, photoFilename } from '@/lib/image-downscale'
 import { loadImageSize, useImageSize } from '@/lib/use-image-size'
@@ -32,7 +34,6 @@ interface DeckEditorProps {
   onOpenDecks: () => void
   /** A delete that already succeeded - the page no longer has a record. */
   onDeleted: () => void
-  onDirtyChange?: (dirty: boolean) => void
   canWrite?: boolean
 }
 
@@ -42,7 +43,7 @@ const ASPECT_TOLERANCE = 0.02
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function DeckEditor(
-  { id, onOpenLocations, onOpenDecks, onDeleted, onDirtyChange, canWrite = true },
+  { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true },
   ref,
 ) {
   const { decks, loading, error, refresh, renameDeck, deleteDeck, uploadPlan, saveLayout } = useInventoryDecks()
@@ -82,7 +83,6 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
   const nameChanged = deck !== null && name.trim() !== deck.name
   const layoutChanged = !sameLayout(layout, baseline)
   const dirty = canWrite && deck !== null && (nameChanged || layoutChanged)
-  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
   const performSave = useCallback(async () => {
     if (!deck) return
@@ -110,6 +110,16 @@ export const DeckEditor = forwardRef<DeckEditorHandle, DeckEditorProps>(function
 
   // Same contract as LocationEditorHandle: App.tsx's "Save and Continue".
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
+
+  // ADR 0171: this page owns the guard for its name and layout draft.
+  useNavigationGuard(dirty
+    ? {
+        owner: 'inventory',
+        label: 'Inventory',
+        blocks: (_from, to) => (inventoryEditorClosedBy({ view: 'deck', id }, to) ? { kind: 'dirty' } : null),
+        save: performSave,
+      }
+    : null)
 
   const handleDiscard = () => {
     setName(deck?.name ?? '')

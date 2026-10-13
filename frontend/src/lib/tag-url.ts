@@ -7,12 +7,12 @@ import { formatAppLocation } from '@/lib/app-location'
 /** The app-relative path a bin's tag opens. formatAppLocation percent-encodes
  * the code the same way the app parses `/inventory/bins/<code>` back. */
 export function binTagPath(code: string): string {
-  return formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: code }, { firstPageId: null })
+  return formatAppLocation({ panel: 'inventory', route: { view: 'bin', code } }, { firstPageId: null })
 }
 
 /** The app-relative path an equipment item's tag opens. */
 export function equipmentTagPath(id: string): string {
-  return formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: id }, { firstPageId: null })
+  return formatAppLocation({ panel: 'inventory', route: { view: 'equipment', id } }, { firstPageId: null })
 }
 
 /** The full address written to a tag or encoded in a QR code: the page's own

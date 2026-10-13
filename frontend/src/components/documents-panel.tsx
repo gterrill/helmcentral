@@ -307,7 +307,7 @@ export interface DocumentsPanelProps {
   /** ADR 0120: opens Settings → Assistant - the toolbar's failure line (the
    * one surfaced state left once the backlog banners were removed) links
    * here the same way AssistantDrawer's own "Open Mate settings" button
-   * does (App.tsx wires both through requestNavigate('settings', ...)).
+   * does (App.tsx wires both through its openSettingsSection).
    * Optional, same reasoning as onOpenHelp above: a test that never
    * triggers a failure doesn't need it. */
   onOpenAssistantSettings?: () => void
@@ -396,18 +396,13 @@ export function DocumentsPanel({
     setCaptureOpen(true)
   }, [])
 
-  const navigate = useCallback((id: string | null) => {
-    setFolderId(id)
-    setView('browse') // browsing a folder always leaves the Unfiled notes view
-    onFolderChange?.(id)
-  }, [onFolderChange])
 
   // Re-syncs when `initialFolderId` changes after mount. App.tsx keeps the
   // Suspense key on 'documents' while browsing (only a panel switch
   // remounts it - see App.tsx's activePanelContent comment), so browser
   // Back/Forward can only reach this already-mounted panel by handing it a
-  // new `initialFolderId` prop through its popstate handler and
-  // applyAppLocation, not by remounting it - the `useState` above only
+  // new `initialFolderId` prop from the app location, not by remounting
+  // it - the `useState` above only
   // reads that prop once. Mirrors use-assistant-conversations.ts's own
   // re-select effect for `initialConversationId`, but without that one's
   // "only when non-null" guard: unlike a conversation id, where null means
@@ -437,18 +432,18 @@ export function DocumentsPanel({
     previousInitialSectionIdRef.current = initialSectionId
     if (initialSectionId !== previous) setSectionIdState(initialSectionId)
   }, [initialSectionId])
-  // A section id is only meaningful against the tree it was picked from -
-  // leaving it set while navigating to a DIFFERENT folder would point a
-  // freshly opened manual's reading pane at a section that (probably)
-  // isn't even in its tree. Skips the very first run (the ref already holds
-  // the just-mounted folderId), or this would immediately clear a section
-  // id this panel was seeded with, on mount, before it's ever rendered.
-  const previousFolderIdForSectionRef = useRef(folderId)
-  useEffect(() => {
-    const previous = previousFolderIdForSectionRef.current
-    previousFolderIdForSectionRef.current = folderId
-    if (folderId !== previous) setSectionId(null)
-  }, [folderId, setSectionId])
+
+  const navigate = useCallback((id: string | null) => {
+    setFolderId(id)
+    setView('browse') // browsing a folder always leaves the Unfiled notes view
+    onFolderChange?.(id)
+    // A section belongs to its manual's folder: picking a different folder
+    // drops it (the section state above). Done here, on the operator's
+    // pick, and not in an effect on folderId: a Back/Forward re-sync changes
+    // folderId too, and reporting a clear back to the router would push a new
+    // entry over the {folder, section} it was just handed.
+    if (id !== folderId) setSectionId(null)
+  }, [onFolderChange, folderId, setSectionId])
 
   // ── search ────────────────────────────────────────────────────────────
   // Modelled on shadcn.io's "navbar-search-overlay" block: a small trigger

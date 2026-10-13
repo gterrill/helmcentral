@@ -1,19 +1,38 @@
 /**
  * Pure parse/format tests for the deep-link URL scheme (ADR 0074). No React
  * — app-location.ts has none, so these run directly against the module.
+ *
+ * ADR 0171 changed the shape of an AppLocation (a union per panel, each with
+ * a `route`), not a single URL: every path asserted here is the one it was
+ * before the change.
  */
 import { describe, it, expect } from 'vitest'
 import {
   parseAppLocation,
   formatAppLocation,
   isCanonicalAppPath,
-  inventoryEditorClosedBy,
-  inventoryWorkClosedBy,
   resolveScannedText,
+  type AppLocation,
+  type InventoryRoute,
   type LocationContext,
 } from '@/lib/app-location'
+import type { SettingsSectionId } from '@/components/settings/settings-nav'
+import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 
 const ctx: Pick<LocationContext, 'firstPageId'> = { firstPageId: 'p1' }
+
+// Short names for the shapes the assertions below keep repeating.
+const NO_OPTIONS = { pageId: null, preview: false }
+const settings = (section: SettingsSectionId): AppLocation => ({ panel: 'settings', route: { view: 'section', section } })
+const importRun = (runId: string): AppLocation => ({ panel: 'settings', route: { view: 'import-run', runId } })
+const browse = (folderId: string | null = null, documentId: string | null = null, sectionId: string | null = null): AppLocation => ({
+  panel: 'documents', route: { view: 'browse', folderId, sectionId, documentId },
+})
+const details = (id: string, folderId: string | null = null): AppLocation => ({
+  panel: 'documents', route: { view: 'details', id, folderId, sectionId: null },
+})
+const inventory = (route: InventoryRoute): AppLocation => ({ panel: 'inventory', route })
+const indexOf = (section: InventorySectionId): AppLocation => inventory({ view: 'index', section })
 
 describe('parseAppLocation', () => {
   it('parses the root path as the dashboard, first page', () => {
@@ -46,19 +65,19 @@ describe('parseAppLocation', () => {
   // (displaySlug: null) that the caller renders a diagnostic for, never a
   // silently-chosen display.
   it('parses /display with no slug', () => {
-    expect(parseAppLocation('/display')).toEqual({ panel: 'display', displaySlug: null })
+    expect(parseAppLocation('/display')).toEqual({ panel: 'display', slug: null, options: NO_OPTIONS })
   })
 
   it('parses /display/<slug> as that display', () => {
-    expect(parseAppLocation('/display/flybridge')).toEqual({ panel: 'display', displaySlug: 'flybridge' })
+    expect(parseAppLocation('/display/flybridge')).toEqual({ panel: 'display', slug: 'flybridge', options: NO_OPTIONS })
   })
 
   it('decodes a percent-encoded display slug', () => {
-    expect(parseAppLocation('/display/saloon%20tv')).toEqual({ panel: 'display', displaySlug: 'saloon tv' })
+    expect(parseAppLocation('/display/saloon%20tv')).toEqual({ panel: 'display', slug: 'saloon tv', options: NO_OPTIONS })
   })
 
   it('treats a malformed percent-escape in the display slug as no slug rather than throwing', () => {
-    expect(parseAppLocation('/display/%E0%A4%A')).toEqual({ panel: 'display', displaySlug: null })
+    expect(parseAppLocation('/display/%E0%A4%A')).toEqual({ panel: 'display', slug: null, options: NO_OPTIONS })
   })
 
   // The wall-displays management editor: /display/<slug> is the wall itself
@@ -67,19 +86,32 @@ describe('parseAppLocation', () => {
   // deliberately dissimilar path so a typo in either can never land on the
   // other's route.
   it('parses /wall-displays with no slug as the index', () => {
-    expect(parseAppLocation('/wall-displays')).toEqual({ panel: 'wall-displays', displayEditSlug: null })
+    expect(parseAppLocation('/wall-displays')).toEqual({ panel: 'wall-displays', route: { view: 'index' } })
   })
 
   it('parses /wall-displays/<slug> as that display\'s editor', () => {
-    expect(parseAppLocation('/wall-displays/flybridge')).toEqual({ panel: 'wall-displays', displayEditSlug: 'flybridge' })
+    expect(parseAppLocation('/wall-displays/flybridge')).toEqual({ panel: 'wall-displays', route: { view: 'editor', slug: 'flybridge' } })
   })
 
   it('decodes a percent-encoded wall-displays edit slug', () => {
-    expect(parseAppLocation('/wall-displays/saloon%20tv')).toEqual({ panel: 'wall-displays', displayEditSlug: 'saloon tv' })
+    expect(parseAppLocation('/wall-displays/saloon%20tv')).toEqual({ panel: 'wall-displays', route: { view: 'editor', slug: 'saloon tv' } })
   })
 
   it('treats a malformed percent-escape in the wall-displays edit slug as no slug rather than throwing', () => {
-    expect(parseAppLocation('/wall-displays/%E0%A4%A')).toEqual({ panel: 'wall-displays', displayEditSlug: null })
+    expect(parseAppLocation('/wall-displays/%E0%A4%A')).toEqual({ panel: 'wall-displays', route: { view: 'index' } })
+  })
+
+  // ADR 0171: the wall's own query string rides on the location, parsed
+  // once, and is never part of what formatAppLocation writes.
+  it('parses the wall display\'s query string into its options', () => {
+    expect(parseAppLocation('/display/flybridge?page=p2&preview=1')).toEqual({
+      panel: 'display', slug: 'flybridge', options: { pageId: 'p2', preview: true },
+    })
+  })
+
+  it('does not write the wall display\'s options back into its path', () => {
+    const loc = parseAppLocation('/display/flybridge?page=p2&preview=1')
+    expect(formatAppLocation(loc, ctx)).toBe('/display/flybridge')
   })
 
   // Regression guard: /display and /wall-displays are one word apart, not
@@ -92,8 +124,8 @@ describe('parseAppLocation', () => {
     const editor = parseAppLocation('/wall-displays/x')
     expect(wall.panel).toBe('display')
     expect(editor.panel).toBe('wall-displays')
-    expect(wall).toEqual({ panel: 'display', displaySlug: 'x' })
-    expect(editor).toEqual({ panel: 'wall-displays', displayEditSlug: 'x' })
+    expect(wall).toEqual({ panel: 'display', slug: 'x', options: NO_OPTIONS })
+    expect(editor).toEqual({ panel: 'wall-displays', route: { view: 'editor', slug: 'x' } })
   })
 
   // ADR 0106 F1: the Documents panel carries its current folder (and, on a
@@ -102,25 +134,19 @@ describe('parseAppLocation', () => {
   // absent independently and neither has a natural path position the way
   // /mate/<conversationId> does.
   it('parses /documents with no query as the Documents panel at the root', () => {
-    expect(parseAppLocation('/documents')).toEqual({ panel: 'documents', documentFolderId: null, documentId: null })
+    expect(parseAppLocation('/documents')).toEqual(browse())
   })
 
   it('parses /documents?folder=<id> as that folder', () => {
-    expect(parseAppLocation('/documents?folder=f1')).toEqual({
-      panel: 'documents', documentFolderId: 'f1', documentId: null,
-    })
+    expect(parseAppLocation('/documents?folder=f1')).toEqual(browse('f1'))
   })
 
   it('parses /documents?document=<id> as a viewer deep link, root folder', () => {
-    expect(parseAppLocation('/documents?document=d1')).toEqual({
-      panel: 'documents', documentFolderId: null, documentId: 'd1',
-    })
+    expect(parseAppLocation('/documents?document=d1')).toEqual(browse(null, 'd1'))
   })
 
   it('parses /documents?folder=<id>&document=<id> as both together', () => {
-    expect(parseAppLocation('/documents?folder=f1&document=d1')).toEqual({
-      panel: 'documents', documentFolderId: 'f1', documentId: 'd1',
-    })
+    expect(parseAppLocation('/documents?folder=f1&document=d1')).toEqual(browse('f1', 'd1'))
   })
 
   // ADR 0115 §2: the Details page's own route. Carries the folder
@@ -129,21 +155,15 @@ describe('parseAppLocation', () => {
   // Back out of the Details page would land the listing at the root instead
   // of the folder it was opened from.
   it('parses /documents/<documentId> as the Details page, root folder', () => {
-    expect(parseAppLocation('/documents/doc-1')).toEqual({
-      panel: 'documents', documentEditId: 'doc-1', documentFolderId: null, documentId: null,
-    })
+    expect(parseAppLocation('/documents/doc-1')).toEqual(details('doc-1'))
   })
 
   it('parses /documents/<documentId>?folder=<id> as the Details page, that folder', () => {
-    expect(parseAppLocation('/documents/doc-1?folder=f1')).toEqual({
-      panel: 'documents', documentEditId: 'doc-1', documentFolderId: 'f1', documentId: null,
-    })
+    expect(parseAppLocation('/documents/doc-1?folder=f1')).toEqual(details('doc-1', 'f1'))
   })
 
   it('decodes a percent-encoded Details page document id', () => {
-    expect(parseAppLocation('/documents/a%20b')).toEqual({
-      panel: 'documents', documentEditId: 'a b', documentFolderId: null, documentId: null,
-    })
+    expect(parseAppLocation('/documents/a%20b')).toEqual(details('a b'))
   })
 
   // decodeSegment's own tolerance (see its doc comment): a malformed escape
@@ -151,9 +171,7 @@ describe('parseAppLocation', () => {
   // route, the same way every other caller of decodeSegment falls back to
   // its own "nothing named" state instead of surfacing a parse error.
   it('treats a malformed percent-escape in the Details page id as the ordinary browse shape', () => {
-    expect(parseAppLocation('/documents/%E0%A4%A')).toEqual({
-      panel: 'documents', documentFolderId: null, documentId: null,
-    })
+    expect(parseAppLocation('/documents/%E0%A4%A')).toEqual(browse())
   })
 
   // Revision "one panel, not three" (2026-09-20): /notes and /manuals are
@@ -164,9 +182,7 @@ describe('parseAppLocation', () => {
   // pane, meaningless without a folder the same way manualSectionId used to
   // be meaningless without a manual.
   it('parses /documents?folder=<id>&section=<id> as that folder with a section open', () => {
-    expect(parseAppLocation('/documents?folder=f1&section=s1')).toEqual({
-      panel: 'documents', documentFolderId: 'f1', documentId: null, documentSectionId: 's1',
-    })
+    expect(parseAppLocation('/documents?folder=f1&section=s1')).toEqual(browse('f1', null, 's1'))
   })
 
   it('parses /mate as the Mate panel', () => {
@@ -186,12 +202,12 @@ describe('parseAppLocation', () => {
   })
 
   it('parses /settings as settings, General section', () => {
-    expect(parseAppLocation('/settings')).toEqual({ panel: 'settings', section: 'general' })
+    expect(parseAppLocation('/settings')).toEqual(settings('general'))
   })
 
   it('parses /settings/<sectionId> as that section', () => {
-    expect(parseAppLocation('/settings/signalk')).toEqual({ panel: 'settings', section: 'signalk' })
-    expect(parseAppLocation('/settings/security')).toEqual({ panel: 'settings', section: 'security' })
+    expect(parseAppLocation('/settings/signalk')).toEqual(settings('signalk'))
+    expect(parseAppLocation('/settings/security')).toEqual(settings('security'))
   })
 
   // ADR 0123: Equipment profiles moved out of Settings into Inventory -
@@ -199,36 +215,36 @@ describe('parseAppLocation', () => {
   // /settings/equipment bookmark degrades the same way any other unknown
   // section id does (falls back to General), rather than resolving.
   it('parses the Import wizard route with its run id, and the list without one', () => {
-    expect(parseAppLocation('/settings/import')).toEqual({ panel: 'settings', section: 'import', importRunId: null })
-    expect(parseAppLocation('/settings/import/new')).toEqual({ panel: 'settings', section: 'import', importRunId: 'new' })
-    expect(parseAppLocation('/settings/import/9d3e-uuid')).toEqual({ panel: 'settings', section: 'import', importRunId: '9d3e-uuid' })
+    expect(parseAppLocation('/settings/import')).toEqual(settings('import'))
+    expect(parseAppLocation('/settings/import/new')).toEqual(importRun('new'))
+    expect(parseAppLocation('/settings/import/9d3e-uuid')).toEqual(importRun('9d3e-uuid'))
   })
 
   it('formats the Import wizard route back to the same path', () => {
     const ctx = { firstPageId: null }
-    expect(formatAppLocation({ panel: 'settings', section: 'import' }, ctx)).toBe('/settings/import')
-    expect(formatAppLocation({ panel: 'settings', section: 'import', importRunId: 'run 1' }, ctx)).toBe('/settings/import/run%201')
+    expect(formatAppLocation(settings('import'), ctx)).toBe('/settings/import')
+    expect(formatAppLocation(importRun('run 1'), ctx)).toBe('/settings/import/run%201')
   })
 
   it('falls back to General for the retired /settings/equipment section id', () => {
-    expect(parseAppLocation('/settings/equipment')).toEqual({ panel: 'settings', section: 'general' })
+    expect(parseAppLocation('/settings/equipment')).toEqual(settings('general'))
   })
 
   // ADR 0093: the onboard assistant's settings section.
   it('parses /settings/mate as the Assistant section', () => {
-    expect(parseAppLocation('/settings/mate')).toEqual({ panel: 'settings', section: 'assistant' })
+    expect(parseAppLocation('/settings/mate')).toEqual(settings('assistant'))
   })
 
   it('treats /settings/assistant as a legacy alias of /settings/mate', () => {
-    expect(parseAppLocation('/settings/assistant')).toEqual({ panel: 'settings', section: 'assistant' })
+    expect(parseAppLocation('/settings/assistant')).toEqual(settings('assistant'))
   })
 
   it('falls back to General for an unknown settings section id', () => {
-    expect(parseAppLocation('/settings/bogus')).toEqual({ panel: 'settings', section: 'general' })
+    expect(parseAppLocation('/settings/bogus')).toEqual(settings('general'))
   })
 
   it('drops a trailing slash', () => {
-    expect(parseAppLocation('/settings/')).toEqual({ panel: 'settings', section: 'general' })
+    expect(parseAppLocation('/settings/')).toEqual(settings('general'))
   })
 
   it('treats an unknown top-level path as the dashboard', () => {
@@ -239,68 +255,52 @@ describe('parseAppLocation', () => {
   // /settings - the bare path is the Equipment section (the canonical
   // index), rather than needing its own /inventory/equipment.
   it('parses /inventory as the Equipment index', () => {
-    expect(parseAppLocation('/inventory')).toEqual({
-      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null,
-    })
+    expect(parseAppLocation('/inventory')).toEqual(indexOf('equipment'))
   })
 
   it('parses /inventory/equipment/<id> as the Equipment editor', () => {
-    expect(parseAppLocation('/inventory/equipment/eq-1')).toEqual({
-      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'eq-1',
-    })
+    expect(parseAppLocation('/inventory/equipment/eq-1')).toEqual(inventory({ view: 'equipment', id: 'eq-1' }))
   })
 
   it('decodes a percent-encoded equipment edit id', () => {
-    expect(parseAppLocation('/inventory/equipment/a%20b')).toEqual({
-      panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'a b',
-    })
+    expect(parseAppLocation('/inventory/equipment/a%20b')).toEqual(inventory({ view: 'equipment', id: 'a b' }))
   })
 
   it('parses /inventory/profiles as the Profiles section', () => {
-    expect(parseAppLocation('/inventory/profiles')).toEqual({ panel: 'inventory', inventorySection: 'profiles' })
+    expect(parseAppLocation('/inventory/profiles')).toEqual(indexOf('profiles'))
   })
 
   it('parses /inventory/locations as the Locations section', () => {
-    expect(parseAppLocation('/inventory/locations')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
+    expect(parseAppLocation('/inventory/locations')).toEqual(indexOf('locations'))
   })
 
   // ADR 0127: the bin page.
-  it('parses /inventory/bins/<code> as the Locations section with a binCode', () => {
-    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02',
-    })
+  it('parses /inventory/bins/<code> as the bin page', () => {
+    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('decodes a percent-encoded bin code', () => {
-    expect(parseAppLocation('/inventory/bins/LAZ%2002')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ 02',
-    })
+    expect(parseAppLocation('/inventory/bins/LAZ%2002')).toEqual(inventory({ view: 'bin', code: 'LAZ 02' }))
   })
 
   it('collapses a bare /inventory/bins (no code) to the ordinary Locations shape', () => {
-    expect(parseAppLocation('/inventory/bins')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
+    expect(parseAppLocation('/inventory/bins')).toEqual(indexOf('locations'))
   })
 
-  it('parses /inventory/locations/<id> as the Locations section with a locationEditId', () => {
-    expect(parseAppLocation('/inventory/locations/z1')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', locationEditId: 'z1',
-    })
+  it('parses /inventory/locations/<id> as that location\'s page', () => {
+    expect(parseAppLocation('/inventory/locations/z1')).toEqual(inventory({ view: 'location', id: 'z1' }))
   })
 
   it('decodes a percent-encoded location id', () => {
-    expect(parseAppLocation('/inventory/locations/a%20b')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', locationEditId: 'a b',
-    })
+    expect(parseAppLocation('/inventory/locations/a%20b')).toEqual(inventory({ view: 'location', id: 'a b' }))
   })
 
   it('keeps /inventory/bins/<code> a bin page, not a location page', () => {
-    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02',
-    })
+    expect(parseAppLocation('/inventory/bins/LAZ-02')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('parses /inventory/stocktake as the Stocktake section', () => {
-    expect(parseAppLocation('/inventory/stocktake')).toEqual({ panel: 'inventory', inventorySection: 'stocktake' })
+    expect(parseAppLocation('/inventory/stocktake')).toEqual(indexOf('stocktake'))
   })
 })
 
@@ -326,33 +326,31 @@ describe('formatAppLocation', () => {
   )
 
   it('formats the display panel with no slug as /display', () => {
-    expect(formatAppLocation({ panel: 'display' }, ctx)).toBe('/display')
-    expect(formatAppLocation({ panel: 'display', displaySlug: null }, ctx)).toBe('/display')
+    expect(formatAppLocation({ panel: 'display', slug: null, options: NO_OPTIONS }, ctx)).toBe('/display')
   })
 
   it('formats a display slug as /display/<slug>', () => {
-    expect(formatAppLocation({ panel: 'display', displaySlug: 'flybridge' }, ctx)).toBe('/display/flybridge')
+    expect(formatAppLocation({ panel: 'display', slug: 'flybridge', options: NO_OPTIONS }, ctx)).toBe('/display/flybridge')
   })
 
   it('encodes the display slug', () => {
-    expect(formatAppLocation({ panel: 'display', displaySlug: 'saloon tv' }, ctx)).toBe('/display/saloon%20tv')
+    expect(formatAppLocation({ panel: 'display', slug: 'saloon tv', options: NO_OPTIONS }, ctx)).toBe('/display/saloon%20tv')
   })
 
   it('formats the wall-displays panel with no slug as /wall-displays', () => {
-    expect(formatAppLocation({ panel: 'wall-displays' }, ctx)).toBe('/wall-displays')
-    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: null }, ctx)).toBe('/wall-displays')
+    expect(formatAppLocation({ panel: 'wall-displays', route: { view: 'index' } }, ctx)).toBe('/wall-displays')
   })
 
   it('formats a wall-displays edit slug as /wall-displays/<slug>', () => {
-    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: 'flybridge' }, ctx)).toBe('/wall-displays/flybridge')
+    expect(formatAppLocation({ panel: 'wall-displays', route: { view: 'editor', slug: 'flybridge' } }, ctx)).toBe('/wall-displays/flybridge')
   })
 
   it('encodes the wall-displays edit slug', () => {
-    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: 'saloon tv' }, ctx)).toBe('/wall-displays/saloon%20tv')
+    expect(formatAppLocation({ panel: 'wall-displays', route: { view: 'editor', slug: 'saloon tv' } }, ctx)).toBe('/wall-displays/saloon%20tv')
   })
 
   it('formats the Mate panel as /mate', () => {
-    expect(formatAppLocation({ panel: 'assistant' }, ctx)).toBe('/mate')
+    expect(formatAppLocation({ panel: 'assistant', conversationId: null }, ctx)).toBe('/mate')
   })
 
   it('formats a Mate thread deeplink as /mate/<conversationId>', () => {
@@ -360,54 +358,48 @@ describe('formatAppLocation', () => {
   })
 
   it('formats settings, General section as /settings', () => {
-    expect(formatAppLocation({ panel: 'settings', section: 'general' }, ctx)).toBe('/settings')
-    expect(formatAppLocation({ panel: 'settings' }, ctx)).toBe('/settings')
+    expect(formatAppLocation(settings('general'), ctx)).toBe('/settings')
   })
 
   it('formats settings, another section as /settings/<sectionId>', () => {
-    expect(formatAppLocation({ panel: 'settings', section: 'signalk' }, ctx)).toBe('/settings/signalk')
-    expect(formatAppLocation({ panel: 'settings', section: 'security' }, ctx)).toBe('/settings/security')
+    expect(formatAppLocation(settings('signalk'), ctx)).toBe('/settings/signalk')
+    expect(formatAppLocation(settings('security'), ctx)).toBe('/settings/security')
   })
 
   it('formats settings, Assistant section as /settings/mate', () => {
-    expect(formatAppLocation({ panel: 'settings', section: 'assistant' }, ctx)).toBe('/settings/mate')
+    expect(formatAppLocation(settings('assistant'), ctx)).toBe('/settings/mate')
   })
 
   it('formats the Documents panel with no folder/document as /documents', () => {
-    expect(formatAppLocation({ panel: 'documents' }, ctx)).toBe('/documents')
-    expect(formatAppLocation({ panel: 'documents', documentFolderId: null, documentId: null }, ctx)).toBe('/documents')
+    expect(formatAppLocation(browse(), ctx)).toBe('/documents')
   })
 
   it('formats a Documents folder as /documents?folder=<id>', () => {
-    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1' }, ctx)).toBe('/documents?folder=f1')
+    expect(formatAppLocation(browse('f1'), ctx)).toBe('/documents?folder=f1')
   })
 
   it('formats a Documents viewer deep link as /documents?document=<id>', () => {
-    expect(formatAppLocation({ panel: 'documents', documentId: 'd1' }, ctx)).toBe('/documents?document=d1')
+    expect(formatAppLocation(browse(null, 'd1'), ctx)).toBe('/documents?document=d1')
   })
 
   it('formats a Documents folder plus viewer deep link together', () => {
-    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1', documentId: 'd1' }, ctx)).toBe(
+    expect(formatAppLocation(browse('f1', 'd1'), ctx)).toBe(
       '/documents?folder=f1&document=d1',
     )
   })
 
   it('formats the Details page as /documents/<documentId>', () => {
-    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1' }, ctx)).toBe('/documents/doc-1')
+    expect(formatAppLocation(details('doc-1'), ctx)).toBe('/documents/doc-1')
   })
 
   it('formats the Details page with a folder as /documents/<documentId>?folder=<id>', () => {
-    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1', documentFolderId: 'f1' }, ctx)).toBe(
+    expect(formatAppLocation(details('doc-1', 'f1'), ctx)).toBe(
       '/documents/doc-1?folder=f1',
     )
   })
 
-  it('never serializes documentId alongside a Details page documentEditId', () => {
-    expect(formatAppLocation({ panel: 'documents', documentEditId: 'doc-1', documentId: 'd2' }, ctx)).toBe('/documents/doc-1')
-  })
-
   it('encodes the Details page document id', () => {
-    expect(formatAppLocation({ panel: 'documents', documentEditId: 'a b' }, ctx)).toBe('/documents/a%20b')
+    expect(formatAppLocation(details('a b'), ctx)).toBe('/documents/a%20b')
   })
 
   // Revision "one panel, not three" (2026-09-20): a section within a
@@ -416,69 +408,67 @@ describe('formatAppLocation', () => {
   // existing /documents route, since a manual IS a folder rather than a
   // panel of its own.
   it('formats a folder with a section open as /documents?folder=<id>&section=<id>', () => {
-    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1', documentSectionId: 's1' }, ctx)).toBe(
+    expect(formatAppLocation(browse('f1', null, 's1'), ctx)).toBe(
       '/documents?folder=f1&section=s1',
     )
   })
 
   it('drops a section with no folder open - it is meaningless on its own', () => {
-    expect(formatAppLocation({ panel: 'documents', documentFolderId: null, documentSectionId: 's1' }, ctx)).toBe('/documents')
+    expect(formatAppLocation(browse(null, null, 's1'), ctx)).toBe('/documents')
   })
 
   it('formats the Inventory panel, Equipment section with no id, as /inventory', () => {
-    expect(formatAppLocation({ panel: 'inventory' }, ctx)).toBe('/inventory')
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: null }, ctx)).toBe('/inventory')
+    expect(formatAppLocation(indexOf('equipment'), ctx)).toBe('/inventory')
   })
 
   it('formats an equipment edit id as /inventory/equipment/<id>', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'eq-1' }, ctx)).toBe(
+    expect(formatAppLocation(inventory({ view: 'equipment', id: 'eq-1' }), ctx)).toBe(
       '/inventory/equipment/eq-1',
     )
   })
 
   it('encodes the equipment edit id', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', equipmentEditId: 'a b' }, ctx)).toBe(
+    expect(formatAppLocation(inventory({ view: 'equipment', id: 'a b' }), ctx)).toBe(
       '/inventory/equipment/a%20b',
     )
   })
 
   it('formats the Profiles and Locations sections as /inventory/<section>', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'profiles' }, ctx)).toBe('/inventory/profiles')
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations' }, ctx)).toBe('/inventory/locations')
+    expect(formatAppLocation(indexOf('profiles'), ctx)).toBe('/inventory/profiles')
+    expect(formatAppLocation(indexOf('locations'), ctx)).toBe('/inventory/locations')
   })
 
   // ADR 0127: the bin page.
-  it('formats a binCode as /inventory/bins/<code>', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ-02' }, ctx)).toBe(
+  it('formats a bin page as /inventory/bins/<code>', () => {
+    expect(formatAppLocation(inventory({ view: 'bin', code: 'LAZ-02' }), ctx)).toBe(
       '/inventory/bins/LAZ-02',
     )
   })
 
   it('encodes the bin code', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', binCode: 'LAZ 02' }, ctx)).toBe(
+    expect(formatAppLocation(inventory({ view: 'bin', code: 'LAZ 02' }), ctx)).toBe(
       '/inventory/bins/LAZ%2002',
     )
   })
 
-  it('drops a binCode on the Equipment section - it is meaningless on its own', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', binCode: 'LAZ-02' }, ctx)).toBe('/inventory')
+  // A New item draft has no id and so no URL of its own: the bar shows the
+  // Equipment index until the operator actually saves.
+  it('formats a New item draft as the Equipment index', () => {
+    expect(formatAppLocation(inventory({ view: 'equipment-new', preset: null }), ctx)).toBe('/inventory')
+    expect(formatAppLocation(inventory({ view: 'equipment-new', preset: { zoneId: 'z1', binId: 'b1' } }), ctx)).toBe('/inventory')
   })
 
-  it('formats a locationEditId as /inventory/locations/<id>', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationEditId: 'z1' }, ctx)).toBe(
+  it('formats a location page as /inventory/locations/<id>', () => {
+    expect(formatAppLocation(inventory({ view: 'location', id: 'z1' }), ctx)).toBe(
       '/inventory/locations/z1',
     )
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationEditId: 'a b' }, ctx)).toBe(
+    expect(formatAppLocation(inventory({ view: 'location', id: 'a b' }), ctx)).toBe(
       '/inventory/locations/a%20b',
     )
   })
 
-  it('drops a locationEditId outside the Locations section', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'equipment', locationEditId: 'z1' }, ctx)).toBe('/inventory')
-  })
-
   it('formats the Stocktake section as /inventory/stocktake', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'stocktake' }, ctx)).toBe('/inventory/stocktake')
+    expect(formatAppLocation(indexOf('stocktake'), ctx)).toBe('/inventory/stocktake')
   })
 })
 
@@ -556,186 +546,21 @@ describe('isCanonicalAppPath', () => {
   })
 })
 
-describe('inventoryEditorClosedBy', () => {
-  const at = (path: string) => parseAppLocation(path)
-
-  it('says no when the editor is not showing at all', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: null, creating: false },
-      at('/inventory/locations'),
-    )).toBe(false)
-  })
-
-  it('says no when the target is the same record', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/inventory/equipment/eq-1'),
-    )).toBe(false)
-  })
-
-  it('says yes when the target is a different record', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/inventory/equipment/eq-2'),
-    )).toBe(true)
-  })
-
-  it('says yes when the target is the index', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/inventory'),
-    )).toBe(true)
-  })
-
-  // The hole this function was extracted to close: a section switch leaves the
-  // equipment id null on both sides, so comparing ids alone saw no change and
-  // let a dirty editor close unguarded.
-  it('says yes when only the section changed', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/inventory/profiles'),
-    )).toBe(true)
-  })
-
-  // And the same hole for a New item draft, which has no id to compare with.
-  it('says yes for an unsaved New item draft, whatever the inventory target', () => {
-    const draft = { section: 'equipment' as const, equipmentEditId: null, creating: true }
-    expect(inventoryEditorClosedBy(draft, at('/inventory'))).toBe(true)
-    expect(inventoryEditorClosedBy(draft, at('/inventory/profiles'))).toBe(true)
-    expect(inventoryEditorClosedBy(draft, at('/inventory/locations'))).toBe(true)
-  })
-
-  it('says yes when leaving the panel entirely', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/documents'),
-    )).toBe(true)
-  })
-
-  // ADR 0127: a bin page target is inventorySection 'locations', so it is
-  // already covered by the same "any non-equipment section closes it" check
-  // as a plain /inventory/locations - no special case needed, and this
-  // pins that a target carrying a binCode doesn't slip through.
-  it('says yes when the target is a bin page', () => {
-    expect(inventoryEditorClosedBy(
-      { section: 'equipment', equipmentEditId: 'eq-1', creating: false },
-      at('/inventory/bins/LAZ-02'),
-    )).toBe(true)
-  })
-})
-
-describe('inventoryEditorClosedBy for a location page', () => {
-  const at = (path: string) => parseAppLocation(path)
-  const open = { section: 'locations' as const, equipmentEditId: null, creating: false, locationEditId: 'z1' }
-
-  it('says no when the target is the same location', () => {
-    expect(inventoryEditorClosedBy(open, at('/inventory/locations/z1'))).toBe(false)
-  })
-
-  it('says yes for the index, another location, a bin page or another section', () => {
-    expect(inventoryEditorClosedBy(open, at('/inventory/locations'))).toBe(true)
-    expect(inventoryEditorClosedBy(open, at('/inventory/locations/z2'))).toBe(true)
-    expect(inventoryEditorClosedBy(open, at('/inventory/bins/LAZ-02'))).toBe(true)
-    expect(inventoryEditorClosedBy(open, at('/inventory'))).toBe(true)
-    expect(inventoryEditorClosedBy(open, at('/documents'))).toBe(true)
-  })
-})
-
-// Release-fixes code-review finding: a Back/Forward that leaves Stocktake or
-// a bin page's quick-add draft behind - popstate's own equivalent of
-// inventoryEditorClosedBy above, for inventoryHasWork rather than
-// inventoryDirty.
-describe('inventoryWorkClosedBy', () => {
-  const at = (path: string) => parseAppLocation(path)
-
-  it('says no when neither Stocktake nor a bin page is showing', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'equipment', binCode: null },
-      at('/inventory/locations'),
-    )).toBe(false)
-  })
-
-  it('says no when a bin page is showing but the target is the same bin', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'locations', binCode: 'LAZ-02' },
-      at('/inventory/bins/LAZ-02'),
-    )).toBe(false)
-  })
-
-  it('says yes when the target is a different bin', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'locations', binCode: 'LAZ-02' },
-      at('/inventory/bins/LAZ-03'),
-    )).toBe(true)
-  })
-
-  it('says yes when the target is the Locations index (no bin)', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'locations', binCode: 'LAZ-02' },
-      at('/inventory/locations'),
-    )).toBe(true)
-  })
-
-  it('says yes when only the section changed', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'locations', binCode: 'LAZ-02' },
-      at('/inventory/equipment'),
-    )).toBe(true)
-  })
-
-  it('says no when Stocktake is showing and the target is still Stocktake', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'stocktake', binCode: null },
-      at('/inventory/stocktake'),
-    )).toBe(false)
-  })
-
-  it('says yes when Stocktake is showing and the target is a different section', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'stocktake', binCode: null },
-      at('/inventory/locations'),
-    )).toBe(true)
-  })
-
-  it('says yes when leaving the panel entirely', () => {
-    expect(inventoryWorkClosedBy(
-      { section: 'stocktake', binCode: null },
-      at('/documents'),
-    )).toBe(true)
-  })
-})
-
 describe('resolveScannedText', () => {
   it('resolves a full https URL to a bin', () => {
-    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('resolves a full https URL to an item', () => {
-    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/equipment/eq-1')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'equipment',
-      equipmentEditId: 'eq-1',
-    })
+    expect(resolveScannedText('https://boat.tailnet.ts.net/inventory/equipment/eq-1')).toEqual(inventory({ view: 'equipment', id: 'eq-1' }))
   })
 
   it('resolves a scheme-less host + path the same way', () => {
-    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('resolves a bare bin code with no slash', () => {
-    expect(resolveScannedText('LAZ-02')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
+    expect(resolveScannedText('LAZ-02')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('rejects a bare code that contains a slash', () => {
@@ -743,11 +568,7 @@ describe('resolveScannedText', () => {
   })
 
   it('trims surrounding whitespace before resolving', () => {
-    expect(resolveScannedText('  LAZ-02  ')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
+    expect(resolveScannedText('  LAZ-02  ')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('returns null for a URL that parses but names no bin or item', () => {
@@ -756,37 +577,17 @@ describe('resolveScannedText', () => {
   })
 
   it('strips a ?query and #hash from a scheme-less scan before resolving', () => {
-    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02?foo=bar')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
-    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02#section')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
-    expect(resolveScannedText('LAZ-02?foo=bar')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ-02',
-    })
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02?foo=bar')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
+    expect(resolveScannedText('boat.tailnet.ts.net/inventory/bins/LAZ-02#section')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
+    expect(resolveScannedText('LAZ-02?foo=bar')).toEqual(inventory({ view: 'bin', code: 'LAZ-02' }))
   })
 
   it('percent-encodes a bare bin code before building the path', () => {
-    expect(resolveScannedText('LAZ 02')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ 02',
-    })
+    expect(resolveScannedText('LAZ 02')).toEqual(inventory({ view: 'bin', code: 'LAZ 02' }))
   })
 
   it('does not treat a bare code containing a colon as an absolute URL', () => {
-    expect(resolveScannedText('LAZ:02')).toEqual({
-      panel: 'inventory',
-      inventorySection: 'locations',
-      binCode: 'LAZ:02',
-    })
+    expect(resolveScannedText('LAZ:02')).toEqual(inventory({ view: 'bin', code: 'LAZ:02' }))
   })
 })
 
@@ -794,30 +595,24 @@ describe('deck plans in the Locations section (ADR 0156)', () => {
   const ctx = { firstPageId: null }
 
   it('parses the Plan view with and without a deck', () => {
-    expect(parseAppLocation('/inventory/locations?view=plan')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', locationsView: 'plan',
-    })
-    expect(parseAppLocation('/inventory/locations?view=plan&deck=d1')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', locationsView: 'plan', planDeckId: 'd1',
-    })
+    expect(parseAppLocation('/inventory/locations?view=plan')).toEqual(inventory({ view: 'plan', deckId: null }))
+    expect(parseAppLocation('/inventory/locations?view=plan&deck=d1')).toEqual(inventory({ view: 'plan', deckId: 'd1' }))
   })
 
   it('ignores an unknown view', () => {
-    expect(parseAppLocation('/inventory/locations?view=grid')).toEqual({ panel: 'inventory', inventorySection: 'locations' })
+    expect(parseAppLocation('/inventory/locations?view=grid')).toEqual(indexOf('locations'))
   })
 
   it('parses the Decks list and a deck page', () => {
-    expect(parseAppLocation('/inventory/decks')).toEqual({ panel: 'inventory', inventorySection: 'locations', decksOpen: true })
-    expect(parseAppLocation('/inventory/decks/d%201')).toEqual({
-      panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId: 'd 1',
-    })
+    expect(parseAppLocation('/inventory/decks')).toEqual(inventory({ view: 'decks' }))
+    expect(parseAppLocation('/inventory/decks/d%201')).toEqual(inventory({ view: 'deck', id: 'd 1' }))
   })
 
   it('formats them back to the same paths', () => {
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationsView: 'plan' }, ctx)).toBe('/inventory/locations?view=plan')
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', locationsView: 'plan', planDeckId: 'd1' }, ctx)).toBe('/inventory/locations?view=plan&deck=d1')
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', decksOpen: true }, ctx)).toBe('/inventory/decks')
-    expect(formatAppLocation({ panel: 'inventory', inventorySection: 'locations', decksOpen: true, deckEditId: 'd 1' }, ctx)).toBe('/inventory/decks/d%201')
+    expect(formatAppLocation(inventory({ view: 'plan', deckId: null }), ctx)).toBe('/inventory/locations?view=plan')
+    expect(formatAppLocation(inventory({ view: 'plan', deckId: 'd1' }), ctx)).toBe('/inventory/locations?view=plan&deck=d1')
+    expect(formatAppLocation(inventory({ view: 'decks' }), ctx)).toBe('/inventory/decks')
+    expect(formatAppLocation(inventory({ view: 'deck', id: 'd 1' }), ctx)).toBe('/inventory/decks/d%201')
   })
 
   it('treats the new paths as canonical', () => {
@@ -825,13 +620,5 @@ describe('deck plans in the Locations section (ADR 0156)', () => {
     for (const path of ['/inventory/locations?view=plan', '/inventory/locations?view=plan&deck=d1', '/inventory/decks', '/inventory/decks/d1']) {
       expect(isCanonicalAppPath(path, c)).toBe(true)
     }
-  })
-
-  it('a deck page is an editor that a Back to anywhere else closes', () => {
-    const current = { section: 'locations' as const, equipmentEditId: null, creating: false, deckEditId: 'd1' }
-    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks'))).toBe(true)
-    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/locations'))).toBe(true)
-    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks/d2'))).toBe(true)
-    expect(inventoryEditorClosedBy(current, parseAppLocation('/inventory/decks/d1'))).toBe(false)
   })
 })

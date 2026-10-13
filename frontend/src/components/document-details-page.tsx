@@ -26,9 +26,9 @@ import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumen
 // the same way it resolves a wall display by slug.
 //
 // Review finding (ADR 0115 §2/§3): the page holds an explicit Save/Discard
-// draft, and used to let any navigation throw it away unasked. App.tsx
-// already has exactly this "Unsaved changes" guard for Settings
-// (settingsDirty/SettingsPageHandle) - onDirtyChange and the imperative
+// draft, and used to let any navigation throw it away unasked. Settings
+// already had exactly this "Unsaved changes" guard (a navigation guard fed by
+// SettingsPageHandle) - onDirtyChange and the imperative
 // `save()` handle below are this page's half of that same machinery,
 // generalized rather than reinvented, mirroring SettingsPageHandle's own
 // shape and naming.
@@ -47,9 +47,9 @@ export interface DocumentDetailsPageProps {
   /** Told the document's display name once loaded (null on leaving), so the
    * Mate sheet can say which document is on screen. */
   onTitleChange?: (title: string | null) => void
-  /** Reported the same way SettingsPage reports settingsDirty - App.tsx
-   * tracks it as documentDetailsDirty and clears it once this page is no
-   * longer what's rendered. */
+  /** Reported the same way SettingsPage reports its dirty flag -
+   * DocumentsRoutePanel registers the navigation guard from it, and the
+   * guard goes with the page when it is no longer what's rendered. */
   onDirtyChange?: (dirty: boolean) => void
 }
 

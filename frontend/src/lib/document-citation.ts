@@ -19,7 +19,7 @@ import { formatAppLocation } from '@/lib/app-location'
  * only reads it for the dashboard panel===null case).
  */
 export function documentViewerHref(id: string): string {
-  return formatAppLocation({ panel: 'documents', documentId: id }, { firstPageId: null })
+  return formatAppLocation({ panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: id } }, { firstPageId: null })
 }
 
 /**

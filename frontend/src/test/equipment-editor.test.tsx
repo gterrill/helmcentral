@@ -6,6 +6,7 @@ import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/us
 import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { downloadDocument } from '@/lib/document-download'
+import { testRouter } from './helpers/router'
 
 // ADR 0127: the photo row runs every picked file through downscaleImage
 // before it ever reaches the network (canvas/createImageBitmap aren't
@@ -819,29 +820,27 @@ describe('EquipmentEditor', () => {
   })
 
   it('re-seeds the draft from the saved item after a successful save, so server-side trimming does not leave it dirty forever', async () => {
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
-    onDirtyChange.mockClear()
 
     // The server trims this to "Onan" and echoes that back - the draft has
     // to pick up the trimmed value, not keep comparing against what was typed.
     fireEvent.change(screen.getByLabelText('Manufacturer'), { target: { value: '  Onan  ' } })
-    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('Onan')
   })
 
   it('keeps a newer edit typed while a save is in flight instead of the server echo overwriting it, and dirty stays true', async () => {
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Onan Generator' } })
-    onDirtyChange.mockClear()
 
     // The PUT this Save sends is held open, so the operator's next edit
     // lands while it's still in flight - the same race as a slow network.
@@ -869,7 +868,7 @@ describe('EquipmentEditor', () => {
     // the OLDER draft must not stomp it - and the editor keeps reporting it
     // dirty rather than silently losing the warning along with the edit.
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Onan Generator 2'))
-    expect(onDirtyChange).not.toHaveBeenCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(true)
   })
 
   it('addAlias dedupes case-insensitively, matching the server\'s normalizeAliases', async () => {
@@ -887,16 +886,15 @@ describe('EquipmentEditor', () => {
   })
 
   it('reports dirty as soon as a field changes and clears it after a successful save', async () => {
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
-    onDirtyChange.mockClear()
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed' } })
-    expect(onDirtyChange).toHaveBeenCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   it('does not PATCH the documents link set when it was not touched', async () => {
@@ -1024,8 +1022,8 @@ describe('EquipmentEditor', () => {
     currentDocuments = [
       { document_id: 'photo-1', title: '', filename: 'a.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' },
     ]
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
     await screen.findByText('Remove')
 
@@ -1034,7 +1032,7 @@ describe('EquipmentEditor', () => {
     // test in this file settles past that same moment) is not what this
     // pins; a permanently mismatched baseline never settles back to false
     // at all.
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   // 2026-09-25 amendment: the Documents tab now lists ALL of an item's
@@ -1394,46 +1392,50 @@ describe('EquipmentEditor', () => {
   // this draft compares against must ALSO carry them, or draftDirty reads
   // true the instant the form opens, with nothing yet typed.
   it('is not dirty when a "Full item" draft opens with a pre-set zone and bin', async () => {
-    const onDirtyChange = vi.fn()
+    const harness = testRouter()
     render(
       <EquipmentEditor
         id={null}
         onBack={vi.fn()}
         onCreated={vi.fn()}
         onDeleted={vi.fn()} onDiscarded={vi.fn()}
-        onDirtyChange={onDirtyChange}
         initialZoneId="z1"
         initialBinId="b1"
       />,
+      { wrapper: harness.wrapper as never },
     )
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zone' })).toHaveTextContent('Engine room (stbd)'))
 
-    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   // finding 8 (pre-release review): photos still waiting for Retry on the
   // OPEN item are unsaved work for the leave guard - routed through
-  // onHasWorkChange (Leave/Stay wording, with a detail), not onDirtyChange
+  // the work kind (Leave/Stay wording, with a detail), not the dirty kind
   // (which would give the Save-and-Continue wording bin-quick-add's own
   // identical case deliberately avoids for this failure).
-  it('reports a failed photo upload on the open item as hasWork, with Leave/Stay wording', async () => {
+  it('holds a move away over a failed photo upload on the open item, with Leave/Stay wording', async () => {
     failingPhotoUploadNames.add('a.jpg')
-    const onHasWorkChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onHasWorkChange={onHasWorkChange} />)
+    const harness = testRouter('/inventory/equipment/eq-1')
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
-    onHasWorkChange.mockClear()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
     await screen.findByText(/didn't upload/)
 
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true, "1 photo for Generator hasn't uploaded yet.")
+    act(() => { harness.router.navigate({ panel: 'radar' }) })
+    expect(harness.router.getSnapshot().pending).toMatchObject({
+      kind: 'quick-add-work',
+      detail: "1 photo for Generator hasn't uploaded yet.",
+    })
+    act(() => { harness.router.cancelPending() })
 
     failingPhotoUploadNames.clear()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(screen.queryByText(/didn't upload/)).not.toBeInTheDocument())
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   // finding 10 (pre-release review): a photo that fails to DOWNSCALE used to
@@ -1584,14 +1586,14 @@ describe('EquipmentEditor', () => {
   it('is not left unsaved when a photo staged for removal is then removed from the strip', async () => {
     currentItem = makeItem({ photo_ids: ['p1'], exclusive_photo_ids: [] })
     currentDocuments = [{ document_id: 'p1', title: 'Pump label', filename: 'pump.jpg', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'image/jpeg', created_at: '2026-01-12T09:30:00Z' }]
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
     await removeFromItem('Pump label')
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(true))
 
     fireEvent.click(screen.getByText('Remove'))
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   // Documents-save review: the documents reload after a photo write
@@ -1629,8 +1631,8 @@ describe('EquipmentEditor', () => {
   // picked document is.
   it('keeps an earlier-uploaded photo linked when the Documents tab is saved afterward', async () => {
     currentItem = makeItem({ photo_ids: [] })
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1654,7 +1656,7 @@ describe('EquipmentEditor', () => {
     })
     // Still on the strip after the save.
     await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   // Mirrors the test above, but through the create (id === null -> created)
@@ -1696,8 +1698,8 @@ describe('EquipmentEditor', () => {
   // removing a still-pending add, this genuinely has to go in `remove`.
   it('PATCHes remove when an uploaded photo is removed from the Documents tab (not the photo strip), and clears dirty', async () => {
     currentItem = makeItem({ photo_ids: [] })
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -1708,9 +1710,8 @@ describe('EquipmentEditor', () => {
     // own title line and the filename line beneath it).
     await waitFor(() => expect(screen.getAllByText('a.jpg')).toHaveLength(1))
 
-    onDirtyChange.mockClear()
     await removeFromItem('a.jpg')
-    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -1722,14 +1723,14 @@ describe('EquipmentEditor', () => {
       expect(body.add).toEqual([])
       expect(body.remove).toEqual(['photo-1'])
     })
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   it('is not dirty when the editor mounts fresh on a saved item', async () => {
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    await waitFor(() => expect(harness.router.hasGuards()).toBe(false))
   })
 
   // Bug #3 in the workaround this pending-diff model replaces: an effect
@@ -1851,16 +1852,15 @@ describe('EquipmentEditor', () => {
 
   it('uploading a photo alone does not make the editor dirty', async () => {
     currentItem = makeItem({ photo_ids: [] })
-    const onDirtyChange = vi.fn()
-    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} onDirtyChange={onDirtyChange} />)
+    const harness = testRouter()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />, { wrapper: harness.wrapper as never })
     await waitForLoaded()
-    onDirtyChange.mockClear()
 
     const file = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
     fireEvent.change(screen.getByLabelText('Add from library'), { target: { files: [file] } })
     await waitFor(() => expect(screen.getByText('Remove')).toBeInTheDocument())
 
-    expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   it('offers "Remove and delete" alongside Remove for an exclusive photo, and it sends ?delete=true', async () => {

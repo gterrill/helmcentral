@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { InventoryPanel, type InventoryPanelHandle } from '@/components/inventory/inventory-panel'
+import { InventoryPanel } from '@/components/inventory/inventory-panel'
 
 // InventoryPanel is a thin composition shell over four already-tested
 // children (equipment-index.test.tsx, equipment-editor.test.tsx,
@@ -268,13 +268,6 @@ describe('InventoryPanel', () => {
     expect(props.onDeckDeleted).toHaveBeenCalled()
   })
 
-  it('saves the deck page through the panel handle', async () => {
-    const ref = { current: null as InventoryPanelHandle | null }
-    render(<InventoryPanel {...baseProps()} ref={ref} activeSectionId="locations" decksOpen deckEditId="d1" />)
-    await ref.current!.save()
-    expect(deckSaveMock).toHaveBeenCalled()
-  })
-
   // ADR 0127: the bin page is the SAME section as Locations, split by
   // binCode the same way Equipment is split by equipmentEditId.
   it('renders BinPage instead of the Locations index when binCode is set', () => {
@@ -318,19 +311,5 @@ describe('InventoryPanel', () => {
     render(<InventoryPanel {...props} />)
     fireEvent.click(screen.getByRole('button', { name: 'Locations' }))
     expect(props.onSectionChange).toHaveBeenCalledWith('locations')
-  })
-
-  it('forwards the dirty flag from the mounted editor', () => {
-    const onDirtyChange = vi.fn()
-    render(<InventoryPanel {...baseProps()} equipmentEditId="eq-1" onDirtyChange={onDirtyChange} />)
-    fireEvent.click(screen.getByText('make-dirty'))
-    expect(onDirtyChange).toHaveBeenCalledWith(true)
-  })
-
-  it('exposes save() through the imperative handle, delegating to the mounted editor', async () => {
-    const ref = { current: null as InventoryPanelHandle | null }
-    render(<InventoryPanel {...baseProps()} equipmentEditId="eq-1" ref={ref} />)
-    await ref.current?.save()
-    expect(saveMock).toHaveBeenCalled()
   })
 })

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import { scanTags } from '@/lib/nfc'
+import { testRouter } from './helpers/router'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 
 // ADR 0127 (the plan's Phase B): the manual scan field is what drives every
@@ -393,18 +394,18 @@ describe('StocktakeSection', () => {
   it('reports hasWork once an item is confirmed, but not from a bare bin scan', async () => {
     const item = makeItem({ id: 'eq-1', bin_id: 'b1', verified_aboard: true })
     equipmentById['eq-1'] = item
-    const onHasWorkChange = vi.fn()
-    render(<StocktakeSection onHasWorkChange={onHasWorkChange} />)
+    const harness = testRouter('/inventory/stocktake')
+    render(<StocktakeSection />, { wrapper: harness.wrapper as never })
     await waitFor(() => expect(zones.length).toBeGreaterThan(0))
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
 
     await scan('https://boat.example/inventory/bins/LAZ-02')
     await screen.findByRole('heading', { name: 'LAZ-02' })
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
 
     await scan('https://boat.example/inventory/equipment/eq-1')
     await screen.findByText('Confirmed')
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
   })
 
   it('wires the bin photo grid\'s Open button to onOpenEquipment', async () => {
@@ -555,17 +556,16 @@ describe('StocktakeSection: NFC scanning', () => {
   it('reports hasWork while NFC scanning is live, and clears it on Stop scanning', async () => {
     let onUrl: ((url: string) => void) | null = null
     mockedScanTags.mockImplementation(async (cb) => { onUrl = cb })
-    const onHasWorkChange = vi.fn()
-    render(<StocktakeSection onHasWorkChange={onHasWorkChange} />)
+    const harness = testRouter('/inventory/stocktake')
+    render(<StocktakeSection />, { wrapper: harness.wrapper as never })
     await waitFor(() => expect(zones.length).toBeGreaterThan(0))
-    onHasWorkChange.mockClear()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start scanning' }))
     await waitFor(() => expect(onUrl).not.toBeNull())
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(true)
+    expect(harness.router.hasGuards()).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop scanning' }))
-    expect(onHasWorkChange).toHaveBeenLastCalledWith(false)
+    expect(harness.router.hasGuards()).toBe(false)
   })
 
   it('aborts the scan\'s AbortController on unmount', async () => {

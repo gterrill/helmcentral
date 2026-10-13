@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- In Inventory, clicking **Equipment** while an item is open now takes you
+  back to the equipment list. It used to do nothing.
+- In Inventory, the unsaved-changes prompt now appears only when a click would
+  close the item you are editing or the bin or stocktake you are working in.
+  Moving around Inventory while that stays on screen no longer asks.
+- In Documents, choosing a folder while reading a manual section now takes one
+  press of Back to undo, not two.
+- **New item** in Inventory now always shows the equipment list address, rather
+  than the address of the item you had open before.
 - The Documents page now has a folder pane on the left. It shows every folder
   as a tree with the number of documents in each, so you can jump to any folder
   in one click instead of stepping through the levels. The breadcrumb and the
@@ -36,6 +45,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   to get a bay or island name.
 - The Anchor Watch map no longer shows a Scope row in its readout panel. The
   rode planner still gives the recommended rode.
+
+### Fixed
+
+- In Documents, going Back to a manual section you were reading in another
+  folder now reopens that section, and Forward still works afterwards.
 
 ## [0.43.0] - 2026-10-08
 

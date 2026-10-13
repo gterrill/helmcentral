@@ -1,4 +1,4 @@
-import type { AppLocation } from '@/lib/app-location'
+import { settingsSectionOf, type AppLocation } from '@/lib/app-location'
 import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
 
 // ADR 0093 voice phase: turns the shell's current location into the
@@ -14,15 +14,15 @@ export function screenContextFor(location: AppLocation, pageName: string | null,
   }
 
   if (location.panel === 'settings') {
-    return { panel: 'settings', section: location.section ?? 'general' }
+    return { panel: 'settings', section: settingsSectionOf(location.route) }
   }
 
   // ADR 0167: a document open on its Details page is what a question asked
   // from the Mate sheet most likely means by "this".
-  if (location.panel === 'documents' && location.documentEditId) {
+  if (location.panel === 'documents' && location.route.view === 'details') {
     return {
       panel: 'documents',
-      document_id: location.documentEditId,
+      document_id: location.route.id,
       ...(documentTitle ? { document_title: documentTitle } : {}),
     }
   }
