@@ -198,3 +198,25 @@ func (d assistantToolDeps) executeListPassages(ctx context.Context, raw json.Raw
 	}
 	return string(b), nil
 }
+
+var mateToolListPassages = mateTool{
+	name: "list_passages",
+	function: openRouterFunctionDef{
+		Description: "From InfluxDB's logged speed over ground, list the recent periods the vessel was " +
+			"underway (start, end, duration, approximate distance, mean and max speed), most recent first. " +
+			"Use it to turn \"the last passage\", \"the last few passages\" or \"when we were last underway\" " +
+			"into time windows, then call get_path_history for each window: a short window gives finer " +
+			"buckets. If no speed was logged in the range it says so explicitly.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"days_back": {"type": "integer", "description": "How many days back to look. Default 14, at most 60."},
+						"limit": {"type": "integer", "description": "How many passages to return, most recent first. Default 5, at most 20."}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeListPassages,
+	describe: func(args json.RawMessage) string {
+		return "Finding recent passages in the log…"
+	},
+}

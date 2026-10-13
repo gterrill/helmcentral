@@ -187,3 +187,64 @@ func (d assistantToolDeps) executeDescribeRecordType(ctx context.Context, raw js
 		"note": "Give fields by name in an operation's fields object; null clears a nullable field. A later operation can refer to a record an earlier create makes as $1, $2 (the operation's position).",
 	}, nil)
 }
+
+var mateToolDescribeRecordType = mateTool{
+	name: "describe_record_type",
+	function: openRouterFunctionDef{
+		Description: "Describe a kind of Helmcentral record Mate can read or propose changes to: its fields (which " +
+			"are writable, which can be cleared, which refer to other records), the actions a proposal may " +
+			"take on it, and the filters list_records accepts. Call it with no type to list the types. Use it " +
+			"before you read or propose changes to a type you have not used in this conversation.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type; leave out to list the types."}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeDescribeRecordType,
+	describe: func(args json.RawMessage) string {
+		return "Checking what can be recorded…"
+	},
+}
+
+var mateToolListRecords = mateTool{
+	name: "list_records",
+	function: openRouterFunctionDef{
+		Description: "List records of one type with their registered fields and each one's version. Use it for " +
+			"records no other tool reads (locations, bins, decks, and the rest of describe_record_type's list); " +
+			"find_equipment and list_maintenance remain better for equipment and the maintenance schedule.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type."},
+						"filter": {"type": "object", "description": "Filters by name, as describe_record_type lists them."},
+						"limit": {"type": "integer", "description": "Maximum records (default 25, maximum 100)."}
+					},
+					"required": ["type"]
+				}`),
+	},
+	execute: assistantToolDeps.executeListRecords,
+	describe: func(args json.RawMessage) string {
+		return "Reading the records…"
+	},
+}
+
+var mateToolGetRecord = mateTool{
+	name: "get_record",
+	function: openRouterFunctionDef{
+		Description: "Read one record by id: its registered fields and its version (the base_version for a proposal that changes or deletes it).",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {"type": "string", "description": "The record type."},
+						"id": {"type": "string", "description": "The record's id."}
+					},
+					"required": ["type", "id"]
+				}`),
+	},
+	execute: assistantToolDeps.executeGetRecord,
+	describe: func(args json.RawMessage) string {
+		return "Reading a record…"
+	},
+}

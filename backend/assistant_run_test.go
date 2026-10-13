@@ -261,6 +261,10 @@ type fakeToolExecutor struct {
 	calls []fakeToolCall
 }
 
+func (f *fakeToolExecutor) definitions() []openRouterTool {
+	return assistantToolDefinitions(assistantToolDeps{})
+}
+
 func (f *fakeToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, fakeToolCall{name: name, args: string(args)})
@@ -288,6 +292,10 @@ type slowToolExecutor struct {
 	calls int
 }
 
+func (s *slowToolExecutor) definitions() []openRouterTool {
+	return assistantToolDefinitions(assistantToolDeps{})
+}
+
 func (s *slowToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	select {
 	case <-time.After(s.delay):
@@ -307,6 +315,10 @@ func (s *slowToolExecutor) execute(ctx context.Context, name string, args json.R
 type orderedDelayToolExecutor struct {
 	delays  map[string]time.Duration
 	results map[string]string
+}
+
+func (o *orderedDelayToolExecutor) definitions() []openRouterTool {
+	return assistantToolDefinitions(assistantToolDeps{})
 }
 
 func (o *orderedDelayToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {

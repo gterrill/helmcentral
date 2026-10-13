@@ -652,3 +652,43 @@ func assistantSearchNotInRange(d assistantToolDeps, nameQuery string, limit int)
 	}
 	return out, nil
 }
+
+var mateToolGetNearbyVessels = mateTool{
+	name: "get_nearby_vessels",
+	function: openRouterFunctionDef{
+		Description: "List the other vessels (AIS targets) currently around this one, or look up when " +
+			"one was last seen. Use this for any question about other boats: who is nearby, how close, " +
+			"neighbours at anchor or in a marina, collision risk, or how long a boat has been sitting on " +
+			"a mooring. Filter by name (or MMSI) to answer about one vessel specifically, including a " +
+			"boat that is no longer in range.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string",
+							"description": "Filter to a vessel whose name contains this text (case-insensitive), or an exact MMSI. Omit to list every vessel currently in range."
+						},
+						"max_results": {
+							"type": "integer",
+							"description": "Maximum number of vessels to return (default 10, maximum 25)."
+						},
+						"include_history": {
+							"type": "boolean",
+							"description": "Include each matched vessel's past sightings. Defaults to true when name is given, false otherwise. Logged position history (stationary_since) only ever runs when name is also given, regardless of this flag - it is a lookup per specific vessel, not something a bare listing can do."
+						}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeGetNearbyVessels,
+	describe: func(args json.RawMessage) string {
+		var a assistantGetNearbyVesselsArgs
+		vesselName := ""
+		if json.Unmarshal(args, &a) == nil {
+			vesselName = strings.TrimSpace(a.Name)
+		}
+		if vesselName == "" {
+			return "Checking nearby vessels…"
+		}
+		return fmt.Sprintf("Looking up %s…", vesselName)
+	},
+}

@@ -855,6 +855,21 @@ func assistantDocumentLookup(id string) (document, error) {
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
 var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	return &assistantRunner{
+		doer:       openRouterHTTPClient,
+		apiKey:     apiKey,
+		model:      model,
+		autoRouter: autoRouter,
+		tools:      assistantTurnToolDeps(apiKey, settingsPath, webSearch, today),
+		emit:       emit,
+	}
+}
+
+// assistantTurnToolDeps is the tool dependencies for one turn. webSearch (the
+// operator's setting) wires search_web's function, which is what makes the
+// tool available: the offered tool list, the prompt and dispatch all read that
+// one fact from these deps (ADR 0172).
+func assistantTurnToolDeps(apiKey, settingsPath string, webSearch bool, today time.Time) assistantToolDeps {
 	tools := assistantProductionToolDeps(settingsPath)
 	tools.today = today
 	if webSearch {
@@ -869,15 +884,7 @@ var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter ass
 			return buildSettingsPayload(settings).Assistant.WebSearchModel, nil
 		})
 	}
-	return &assistantRunner{
-		doer:       openRouterHTTPClient,
-		apiKey:     apiKey,
-		model:      model,
-		autoRouter: autoRouter,
-		webSearch:  webSearch,
-		tools:      tools,
-		emit:       emit,
-	}
+	return tools
 }
 
 // parseAssistantToday validates the message body's today field, the same
@@ -1092,7 +1099,7 @@ func assistantTurnParamsFromSettings(settingsPath string, readiness assistantRea
 func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, messages []assistantMessage, p assistantTurnParams) error {
 	pc := collectAssistantPromptContext(p.settingsPath, time.Now())
 	pc.Spoken = p.spoken
-	pc.WebSearch = p.webSearch
+	pc.WebSearch = mateToolAvailable(assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today), "search_web")
 	if p.screen != nil {
 		pc.Screen = *p.screen
 	}

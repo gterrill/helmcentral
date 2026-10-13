@@ -1094,45 +1094,6 @@ func acquireAssistantRunForWatch(id string, deadline time.Duration) (context.Con
 
 // ── the tool ────────────────────────────────────────────────────────────
 
-func assistantStartWatchToolDefinition() openRouterTool {
-	return openRouterTool{
-		Type: "function",
-		Function: openRouterFunctionDef{
-			Name: "start_watch",
-			Description: "Start a background watch on 1 to 6 live SignalK paths for 1 to 30 minutes, sampled once a " +
-				"second from the live feed. Use it when the skipper asks you to watch or monitor something over " +
-				"time, such as intermittent spikes, dropouts or one engine against the other. It returns at once " +
-				"with the end time; tell the skipper when you will report back. When the watch ends, its report " +
-				"arrives in this conversation by itself and you will be asked to explain it: per path count, " +
-				"min/mean/max, stdev, first/last, gaps, excursions from a rolling median and the sources seen, and " +
-				"for exactly two paths in the same units the same for their difference. Every path must be live now or the call fails naming it; " +
-				"find exact paths with check_signalk_paths first. One watch per conversation. A Helmcentral " +
-				"restart cancels it, and the skipper can stop it from the chat.",
-			Parameters: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"paths": {
-						"type": "array",
-						"minItems": 1,
-						"maxItems": 6,
-						"items": {
-							"type": "object",
-							"properties": {
-								"path": {"type": "string", "description": "The exact SignalK path, e.g. \"propulsion.port.engineLoad\"."},
-								"label": {"type": "string", "description": "Short name the skipper would use, at most 40 characters, e.g. \"Port engine load\". Shown in the chat while the watch runs."}
-							},
-							"required": ["path"]
-						}
-					},
-					"minutes": {"type": "integer", "minimum": 1, "maximum": 30, "description": "How long to watch, whole minutes from 1 to 30."},
-					"reason": {"type": "string", "description": "In a few words, what you are looking for, e.g. \"port load spikes vs starboard at matched rpm\". Carried into the report so you can read it against this."}
-				},
-				"required": ["paths", "minutes", "reason"]
-			}`),
-		},
-	}
-}
-
 type assistantStartWatchResultPath struct {
 	Path     string  `json:"path"`
 	Label    string  `json:"label"`
@@ -1245,4 +1206,44 @@ func deleteAssistantWatchHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "no watch is running in this conversation"})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+var mateToolStartWatch = mateTool{
+	name: "start_watch",
+	function: openRouterFunctionDef{
+		Description: "Start a background watch on 1 to 6 live SignalK paths for 1 to 30 minutes, sampled once a " +
+			"second from the live feed. Use it when the skipper asks you to watch or monitor something over " +
+			"time, such as intermittent spikes, dropouts or one engine against the other. It returns at once " +
+			"with the end time; tell the skipper when you will report back. When the watch ends, its report " +
+			"arrives in this conversation by itself and you will be asked to explain it: per path count, " +
+			"min/mean/max, stdev, first/last, gaps, excursions from a rolling median and the sources seen, and " +
+			"for exactly two paths in the same units the same for their difference. Every path must be live now or the call fails naming it; " +
+			"find exact paths with check_signalk_paths first. One watch per conversation. A Helmcentral " +
+			"restart cancels it, and the skipper can stop it from the chat.",
+		Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"paths": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 6,
+						"items": {
+							"type": "object",
+							"properties": {
+								"path": {"type": "string", "description": "The exact SignalK path, e.g. \"propulsion.port.engineLoad\"."},
+								"label": {"type": "string", "description": "Short name the skipper would use, at most 40 characters, e.g. \"Port engine load\". Shown in the chat while the watch runs."}
+							},
+							"required": ["path"]
+						}
+					},
+					"minutes": {"type": "integer", "minimum": 1, "maximum": 30, "description": "How long to watch, whole minutes from 1 to 30."},
+					"reason": {"type": "string", "description": "In a few words, what you are looking for, e.g. \"port load spikes vs starboard at matched rpm\". Carried into the report so you can read it against this."}
+				},
+				"required": ["paths", "minutes", "reason"]
+			}`),
+	},
+	execute: assistantToolDeps.executeStartWatch,
+	describe: func(args json.RawMessage) string {
+		return "Starting a watch…"
+	},
 }

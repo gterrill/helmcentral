@@ -336,7 +336,7 @@ func TestDescribeAssistantToolCall_PlanTidalDeparture(t *testing.T) {
 }
 
 func TestAssistantToolDefinitions_PlanTidalDepartureRequiresSetAndSource(t *testing.T) {
-	for _, tool := range assistantToolDefinitions() {
+	for _, tool := range assistantToolDefinitions(assistantToolDeps{}) {
 		if tool.Function.Name != "plan_tidal_departure" {
 			continue
 		}
