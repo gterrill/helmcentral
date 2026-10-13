@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // webSearchFixture is the shape OpenRouter's web plugin documents for a
@@ -32,6 +33,10 @@ const webSearchFixture = `{
   "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.007}
 }`
 
+func webSearchStubDeps() assistantToolDeps {
+	return assistantToolDeps{webSearch: func(context.Context, string) ([]assistantWebResult, error) { return nil, nil }}
+}
+
 func toolNames(tools []openRouterTool) []string {
 	var names []string
 	for _, tool := range tools {
@@ -41,7 +46,7 @@ func toolNames(tools []openRouterTool) []string {
 }
 
 func TestAssistantToolDefinitionsFor_WebSearchOffOmitsTool(t *testing.T) {
-	for _, name := range toolNames(assistantToolDefinitionsFor(false)) {
+	for _, name := range toolNames(assistantToolDefinitions(assistantToolDeps{})) {
 		if name == "search_web" {
 			t.Fatal("search_web must not be offered when web search is off")
 		}
@@ -49,8 +54,8 @@ func TestAssistantToolDefinitionsFor_WebSearchOffOmitsTool(t *testing.T) {
 }
 
 func TestAssistantToolDefinitionsFor_WebSearchOnAddsTool(t *testing.T) {
-	off := assistantToolDefinitionsFor(false)
-	on := assistantToolDefinitionsFor(true)
+	off := assistantToolDefinitions(assistantToolDeps{})
+	on := assistantToolDefinitions(webSearchStubDeps())
 	if len(on) != len(off)+1 {
 		t.Fatalf("expected exactly one extra tool, got %d vs %d", len(on), len(off))
 	}
@@ -202,7 +207,11 @@ func TestAssistantRunner_OffersSearchWebOnlyWhenEnabled(t *testing.T) {
 			errs:      []error{nil},
 		}
 		emit, _ := recordingEmitter()
-		runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", webSearch: enabled, tools: &fakeToolExecutor{results: map[string]string{}}, emit: emit}
+		deps := assistantToolDeps{}
+		if enabled {
+			deps = webSearchStubDeps()
+		}
+		runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: deps, emit: emit}
 		if _, err := runner.run(context.Background(), "sys", "", nil); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -353,7 +362,7 @@ func TestAssistantRunner_ReplyCostIncludesWebSearchCharges(t *testing.T) {
 	searchDoer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, searchResponseWithUsage(searchCost, 30, 5))}}
 	tools := assistantToolDeps{}.withWebSearch(searchDoer, "k", func() (string, error) { return "m", nil })
 	emit, _ := recordingEmitter()
-	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", webSearch: true, tools: tools, emit: emit}
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
 
 	reply, err := runner.run(context.Background(), "sys", "", nil)
 	if err != nil {
@@ -380,12 +389,44 @@ func TestAssistantRunner_SearchWithNoUsageAddsNothing(t *testing.T) {
 	searchDoer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 	tools := assistantToolDeps{}.withWebSearch(searchDoer, "k", func() (string, error) { return "m", nil })
 	emit, _ := recordingEmitter()
-	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", webSearch: true, tools: tools, emit: emit}
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
 	reply, err := runner.run(context.Background(), "sys", "", nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if math.Abs(reply.CostUSD-0.03) > 1e-9 {
 		t.Fatalf("a search with no usage must add nothing, got %v", reply.CostUSD)
+	}
+}
+
+// The setting is the only switch: deps with no search function neither offer
+// search_web nor let the prompt mention it, and the turn's deps and the
+// prompt flag agree.
+func TestAssistantTurn_WebSearchOffOfferPromptAndDispatchTogether(t *testing.T) {
+	today := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	off := assistantTurnToolDeps("k", "", false, today)
+	if mateToolAvailable(off, "search_web") {
+		t.Fatal("search_web must be unavailable with web search off")
+	}
+	for _, tool := range off.definitions() {
+		if tool.Function.Name == "search_web" {
+			t.Fatal("search_web offered with web search off")
+		}
+	}
+	if _, err := off.execute(context.Background(), "search_web", json.RawMessage(`{"query":"x"}`)); err == nil {
+		t.Fatal("dispatch must refuse search_web with web search off")
+	}
+	pc := assistantPromptContext{WebSearch: mateToolAvailable(off, "search_web")}
+	if stable, live := assistantSystemPromptParts(pc); strings.Contains(stable+live, "search_web") {
+		t.Fatal("prompt mentions search_web with web search off")
+	}
+	if !mateToolAvailable(assistantTurnToolDeps("k", "", true, today), "search_web") {
+		t.Fatal("search_web must be available with web search on")
+	}
+}
+
+func TestSearchWeb_NilFunctionFailsFast(t *testing.T) {
+	if _, err := (assistantToolDeps{}).executeSearchWeb(context.Background(), json.RawMessage(`{"query":"x"}`)); err == nil {
+		t.Fatal("expected an error, not a nil-func panic")
 	}
 }

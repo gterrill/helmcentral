@@ -172,3 +172,63 @@ func (d assistantToolDeps) executeReadConversation(ctx context.Context, raw json
 	}
 	return capToolResultJSON(&result, shrink)
 }
+
+var mateToolSearchConversations = mateTool{
+	name: "search_conversations",
+	function: openRouterFunctionDef{
+		Description: "Search the operator's earlier conversations with you - what they asked, what you " +
+			"answered, and what was established - by keyword. Returns each matching conversation's id, " +
+			"title and date with excerpts of the matching messages, most recent first. The current " +
+			"conversation is left out. Use it before advising on a specific piece of the boat's " +
+			"equipment, and whenever the operator refers to earlier work.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Keywords to search for, e.g. \"fuel polisher\" or \"Racor\"."
+						},
+						"limit": {
+							"type": "integer",
+							"description": "Maximum number of conversations to return (default 5, maximum 10)."
+						}
+					},
+					"required": ["query"]
+				}`),
+	},
+	execute: assistantToolDeps.executeSearchConversations,
+	describe: func(args json.RawMessage) string {
+		var a assistantSearchConversationsArgs
+		query := ""
+		if json.Unmarshal(args, &a) == nil {
+			query = strings.TrimSpace(a.Query)
+		}
+		if query == "" {
+			return "Searching earlier conversations…"
+		}
+		return fmt.Sprintf("Searching earlier conversations for %q…", query)
+	},
+}
+
+var mateToolReadConversation = mateTool{
+	name: "read_conversation",
+	function: openRouterFunctionDef{
+		Description: "Read an earlier conversation's operator and assistant messages in order, with the " +
+			"names of any documents attached. Use it on a search_conversations result when its excerpts " +
+			"are not enough to tell what was established.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "A conversation id from a search_conversations result."
+						}
+					},
+					"required": ["id"]
+				}`),
+	},
+	execute: assistantToolDeps.executeReadConversation,
+	describe: func(args json.RawMessage) string {
+		return "Reading an earlier conversation…"
+	},
+}

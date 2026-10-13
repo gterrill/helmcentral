@@ -571,3 +571,97 @@ func (d assistantToolDeps) executeGetMaintenanceLog(ctx context.Context, raw jso
 	}
 	return capToolResultJSON(&result, shrink)
 }
+
+var mateToolFindEquipment = mateTool{
+	name: "find_equipment",
+	function: openRouterFunctionDef{
+		Description: "Find items in the boat's equipment registry by name, manufacturer, model or " +
+			"alias, optionally within one system. Returns each item's id, system, whether its hour " +
+			"meter is bound and reading right now (current_meter_reading is what the meter shows and " +
+			"is absent when the reading is unknown - never assume 0), and its effective maintenance rules " +
+			"(rules: id, description, intervals, source, overridden_fields, not_applicable) as the " +
+			"schedule resolves them - the linked profile's jobs are live, with this item's overrides " +
+			"applied - plus schedule_errors when its profile could not supply its jobs. Use it to get an equipment id for list_maintenance or " +
+			"get_maintenance_log.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Text to match against name, manufacturer, model and aliases, e.g. \"genset\" or \"yanmar\"."
+						},
+						"system": {
+							"type": "string",
+							"description": "Optional system: propulsion, electrical, water, fuel, bilge, anchoring, safety, hvac, navigation, appliances, structure or other."
+						},
+						"limit": {"type": "integer", "description": "Maximum items to return (default 10, maximum 20)."}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeFindEquipment,
+	describe: func(args json.RawMessage) string {
+		var a assistantFindEquipmentArgs
+		query := ""
+		if json.Unmarshal(args, &a) == nil {
+			query = strings.TrimSpace(a.Query)
+		}
+		if query == "" {
+			return "Looking up equipment…"
+		}
+		return fmt.Sprintf("Looking up equipment %q…", query)
+	},
+}
+
+var mateToolListMaintenance = mateTool{
+	name: "list_maintenance",
+	function: openRouterFunctionDef{
+		Description: "List the boat's maintenance rules with each one's status (overdue, due_soon, ok, " +
+			"never_recorded, interval_not_set or hours_unknown) worked out right now against the " +
+			"operator's own date, plus intervals, last-done baseline, what is remaining, " +
+			"acknowledgement and any procedure note. Most urgent first. Use it for every due, overdue " +
+			"or schedule question; never work a status out yourself. A rule marked hours_unknown has an " +
+			"hours interval but its meter is not reading: say so, do not guess hours. When you tell the " +
+			"operator when a job falls due, quote next_due_meter_reading (what their meter will read) " +
+			"with remaining_hours; last_done_engine_hours is cumulative engine hours, which equals the " +
+			"meter only if no meter replacement is recorded. Stored items are left out unless " +
+			"include_stored is true.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"equipment_id": {"type": "string", "description": "Only this item's rules (an id from find_equipment)."},
+						"status": {"type": "string", "description": "Only rules with this status: overdue, due_soon, ok, never_recorded, interval_not_set or hours_unknown."},
+						"system": {"type": "string", "description": "Only rules for gear in this system, e.g. \"propulsion\"."},
+						"calendar_only": {"type": "boolean", "description": "Only rules with no equipment (certificates, renewals)."},
+						"include_stored": {"type": "boolean", "description": "Also include rules for items in storage (default false)."}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeListMaintenance,
+	describe: func(args json.RawMessage) string {
+		return "Checking the maintenance list…"
+	},
+}
+
+var mateToolGetMaintenanceLog = mateTool{
+	name: "get_maintenance_log",
+	function: openRouterFunctionDef{
+		Description: "Read the maintenance log, newest first: what was done, when, at what cumulative " +
+			"engine hours (engine_hours, which equals the meter only if no meter replacement is " +
+			"recorded), by whom, what it cost and which parts were used. Filter by equipment (an id from " +
+			"find_equipment), by rule (an id from list_maintenance) or by a since date. Use it to see " +
+			"when something was last serviced and how the actual history compares with the rule.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"equipment_id": {"type": "string", "description": "Only this item's entries."},
+						"rule_id": {"type": "string", "description": "Only entries written by completing this rule."},
+						"since": {"type": "string", "description": "Only entries performed on or after this date, YYYY-MM-DD."},
+						"limit": {"type": "integer", "description": "Maximum entries (default 20, maximum 50)."}
+					}
+				}`),
+	},
+	execute: assistantToolDeps.executeGetMaintenanceLog,
+	describe: func(args json.RawMessage) string {
+		return "Reading the maintenance log…"
+	},
+}

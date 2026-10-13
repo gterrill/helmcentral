@@ -35,21 +35,6 @@ type assistantVesselParticularsResult struct {
 	Notes   []string                `json:"notes,omitempty"`
 }
 
-func assistantVesselParticularsToolDefinition() openRouterTool {
-	return openRouterTool{
-		Type: "function",
-		Function: openRouterFunctionDef{
-			Name: "get_vessel_particulars",
-			Description: "Read what Helmcentral has on record about the boat and its owner: owner name, phone and email, insurer " +
-				"and policy number, home marina and berth, the storm delegate, length overall and beam, builder, model, year, hull " +
-				"details, registration; plus the boat's name and length overall and draft from live instruments when they are " +
-				"connected. Each value says where it came from. Anything not on record is listed as absent: never fill it from " +
-				"memory or guess it, ask the operator. Use it before filling in any form.",
-			Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
-		},
-	}
-}
-
 type vesselParticularsLabel struct{ field, label string }
 
 // The order is the order Mate sees them in: owner and insurance first, since
@@ -129,4 +114,20 @@ func (d assistantToolDeps) executeGetVesselParticulars(ctx context.Context, _ js
 		}
 	}
 	return capToolResultJSON(&res, nil)
+}
+
+var mateToolGetVesselParticulars = mateTool{
+	name: "get_vessel_particulars",
+	function: openRouterFunctionDef{
+		Description: "Read what Helmcentral has on record about the boat and its owner: owner name, phone and email, insurer " +
+			"and policy number, home marina and berth, the storm delegate, length overall and beam, builder, model, year, hull " +
+			"details, registration; plus the boat's name and length overall and draft from live instruments when they are " +
+			"connected. Each value says where it came from. Anything not on record is listed as absent: never fill it from " +
+			"memory or guess it, ask the operator. Use it before filling in any form.",
+		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
+	},
+	execute: assistantToolDeps.executeGetVesselParticulars,
+	describe: func(args json.RawMessage) string {
+		return "Reading the vessel details…"
+	},
 }

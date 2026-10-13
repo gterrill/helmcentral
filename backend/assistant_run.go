@@ -323,6 +323,9 @@ func assistantRetractPayload() any {
 // production; tests substitute a map-backed fake so the loop can be
 // exercised with no live SignalK, Overpass, or weather/tide provider.
 type assistantToolExecutor interface {
+	// definitions is the tool list offered to the model, computed from the
+	// same dependencies that execute the calls.
+	definitions() []openRouterTool
 	execute(ctx context.Context, name string, args json.RawMessage) (string, error)
 }
 
@@ -339,11 +342,8 @@ type assistantRunner struct {
 	apiKey     string
 	model      string
 	autoRouter assistantAutoRouterOptions
-	// webSearch offers search_web to the model (assistant.web_search). Off,
-	// the tool is absent from the request entirely.
-	webSearch bool
-	tools     assistantToolExecutor
-	emit      assistantEmitter
+	tools      assistantToolExecutor
+	emit       assistantEmitter
 }
 
 // assistantTextToolCallMarkers lists the substrings that mark a message's
@@ -667,7 +667,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		req := openRouterChatRequest{
 			Model:     r.model,
 			Messages:  messages,
-			Tools:     assistantToolDefinitionsFor(r.webSearch),
+			Tools:     r.tools.definitions(),
 			Usage:     &openRouterUsageOption{Include: true},
 			SessionID: assistantConversationIDFrom(ctx),
 		}
@@ -828,22 +828,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if i < len(toolMessages) {
 				result = string(toolMessages[i].Content)
 			}
-			if call.Function.Name == assistantProposalToolTag {
-				proposal, perr := assistantProposalFromToolResult(result)
-				if perr != nil {
-					return assistantReply{}, perr
-				}
-				if proposal != nil {
-					reply.Proposals = append(reply.Proposals, *proposal)
-				}
-			}
-			if call.Function.Name == assistantFillFormToolName {
-				draft, derr := assistantFormDraftFromToolResult(result)
-				if derr != nil {
-					return assistantReply{}, derr
-				}
-				if draft != nil {
-					reply.FormDrafts = append(reply.FormDrafts, *draft)
+			if tool := lookupMateTool(call.Function.Name); tool != nil && tool.collect != nil {
+				if cerr := tool.collect(result, &reply); cerr != nil {
+					return assistantReply{}, cerr
 				}
 			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
@@ -880,44 +867,30 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // (it writes SSE frames straight to the HTTP response), so every call to it
 // from inside a goroutine below is serialised through mu.
 //
-// Every tool assistant_tools.go defines (find_places, get_wind_forecast,
-// get_tides, estimate_passage, plan_tidal_departure, read_help, search_documents, read_document,
-// search_conversations, read_conversation, get_nearby_vessels, check_signalk_paths, get_last_recorded,
-// get_path_history, list_passages, find_equipment, list_maintenance, get_maintenance_log,
-// propose_changes) only reads: none of them writes to the
-// conversation store, settings, the document store, or any other shared
-// state, so running a round's calls in parallel needs no locking beyond
-// r.emit's own and failures' own (see assistantToolFailures's doc comment for
-// why that one is not just guarded by this round's local mu).
+// All of a round's calls run concurrently (semaphore of 4, at most 20 calls
+// per round), so a tool that writes must be safe under concurrency by
+// itself. Most tools only read. The two that touch state do it safely:
 //
-// propose_changes is the one that looks like an exception and is
-// not (ADR 0146, ADR 0158). It validates operations against the registered
-// record types and returns them as data: a proposal. To do that faithfully it dry-runs every
-// operation, in order, through the same commands Apply uses, inside a
-// transaction that is ALWAYS rolled back (recordRegistry.prepare), so nothing is ever
-// committed. The transaction holds the document store's mutex, so a round's
-// concurrent calls queue behind it instead of deadlocking. The run collects the
-// proposal from the tool result after the round (see run), the handler saves
-// it with the assistant message in that message's own transaction, and the
-// operator's Apply tap on the card is what writes the records. A
-// retried, duplicated or cancelled tool call therefore produces at worst an
-// extra card, never an extra record, and a run that fails or is cancelled saves
-// no proposal because it saves no message.
+//   - start_watch starts a watch. It relies on the one-watch-per-conversation
+//     rule, so two concurrent calls cannot start two.
+//   - fill_form writes a draft row, only its own. Nothing is added to the
+//     document library until the operator taps Save on the card.
 //
-// This is a RULE, not an observation about the tools that happen to exist
-// today. A write-capable tool was designed and deliberately not built: the
-// notes feature wanted a `draft_note`, and the affordance shipped as a
-// "Save as note" button on an assistant message instead (ADR 0116/0119),
-// precisely so this contract holds. Mate drafts nothing and writes
-// nothing; the operator's tap creates the note. A retried or cancelled
-// tool call would also have produced duplicate notes with no idempotency
-// key - something sha256 UNIQUE cannot catch, since two drafts of the same
-// text carry different UUIDs and so hash differently. Maintenance follows
-// the same shape: propose, then the operator applies.
+// propose_changes writes nothing (ADR 0146, ADR 0158). It validates
+// operations against the registered record types and returns them as data: a
+// proposal. To do that faithfully it dry-runs every operation, in order,
+// through the same commands Apply uses, inside a transaction that is ALWAYS
+// rolled back (recordRegistry.prepare). The transaction holds the document
+// store's mutex, so a round's concurrent calls queue behind it instead of
+// deadlocking. The run collects the proposal from the tool result after the
+// round (the tool's collect, see run), the handler saves it with the
+// assistant message in that message's own transaction, and the operator's
+// Apply tap on the card is what writes the records. A retried, duplicated or
+// cancelled call therefore produces at worst an extra card, never an extra
+// record.
 //
-// If a future tool ever does need to mutate shared state, it must either
-// take its own lock or be called out here as one that has to run
-// serially - and whoever adds it should read the paragraph above first.
+// Whoever adds a tool that mutates shared state must make it safe on its own
+// (its own lock or an idempotency rule) and name it here.
 func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, error) {
 	for _, call := range calls {
 		if call.ID == "" {

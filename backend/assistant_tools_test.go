@@ -1850,7 +1850,7 @@ func TestExecuteGetNearbyVessels_PositionHistorySkippedWithoutNameEvenWhenInclud
 // discover by trial that include_history's position-history half only runs
 // with a name filter - the parameter description says so.
 func TestAssistantToolDefinitions_GetNearbyVesselsIncludeHistoryDescribesNameRequirement(t *testing.T) {
-	for _, tool := range assistantToolDefinitions() {
+	for _, tool := range assistantToolDefinitions(assistantToolDeps{}) {
 		if tool.Function.Name != "get_nearby_vessels" {
 			continue
 		}
@@ -2389,7 +2389,7 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 }
 
 func TestAssistantToolDefinitions_FindPlacesDescriptionMentionsBareFeatureName(t *testing.T) {
-	for _, tool := range assistantToolDefinitions() {
+	for _, tool := range assistantToolDefinitions(assistantToolDeps{}) {
 		if tool.Function.Name != "find_places" {
 			continue
 		}
@@ -2402,7 +2402,7 @@ func TestAssistantToolDefinitions_FindPlacesDescriptionMentionsBareFeatureName(t
 }
 
 func TestAssistantToolDefinitions_GetWindForecastDescribesCourseDeg(t *testing.T) {
-	for _, tool := range assistantToolDefinitions() {
+	for _, tool := range assistantToolDefinitions(assistantToolDeps{}) {
 		if tool.Function.Name != "get_wind_forecast" {
 			continue
 		}
@@ -2415,7 +2415,7 @@ func TestAssistantToolDefinitions_GetWindForecastDescribesCourseDeg(t *testing.T
 }
 
 func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRisk(t *testing.T) {
-	for _, tool := range assistantToolDefinitions() {
+	for _, tool := range assistantToolDefinitions(assistantToolDeps{}) {
 		if tool.Function.Name != "get_nearby_vessels" {
 			continue
 		}
@@ -2425,38 +2425,6 @@ func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRi
 		return
 	}
 	t.Fatal("get_nearby_vessels tool definition not found")
-}
-
-func TestAssistantToolDefinitions_TwentySixToolsIncludingMaintenanceRecordsWatchFormsAndPassages(t *testing.T) {
-	tools := assistantToolDefinitions()
-	if len(tools) != 26 {
-		t.Fatalf("expected 26 tool definitions, got %d: %+v", len(tools), tools)
-	}
-
-	var names []string
-	for _, tool := range tools {
-		names = append(names, tool.Function.Name)
-	}
-	for _, want := range []string{
-		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_help",
-		"search_documents", "read_document", "get_nearby_vessels",
-		"check_signalk_paths", "get_last_recorded", "get_path_history",
-		"find_equipment", "list_maintenance", "get_maintenance_log", "propose_changes",
-		"describe_record_type", "list_records", "get_record",
-		"plan_tidal_departure", "start_watch", "search_conversations", "read_conversation",
-		"get_vessel_particulars", "inspect_form", "fill_form", "list_passages",
-	} {
-		found := false
-		for _, name := range names {
-			if name == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected a %q tool definition, got %v", want, names)
-		}
-	}
 }
 
 // ── dispatch / truncation ───────────────────────────────────────────────

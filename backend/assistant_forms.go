@@ -24,71 +24,6 @@ const (
 	assistantFillFormToolName    = "fill_form"
 )
 
-func assistantInspectFormToolDefinition() openRouterTool {
-	return openRouterTool{
-		Type: "function",
-		Function: openRouterFunctionDef{
-			Name: assistantInspectFormToolName,
-			Description: "Read the layout of a PDF form the operator attached or stored as a document, so you can fill it in. " +
-				"A form with fillable fields returns each field's name, kind (text, date, checkbox, radio, combobox, listbox), " +
-				"options and current value. A flat form, one with no fields, returns for each page its lines of text with their " +
-				"position and the tick boxes with the text beside each. Positions are PDF points from the lower left of the page; " +
-				"y is the text baseline. For a flat form, the text of a line is the anchor you give to fill_form, so copy it exactly. " +
-				"Read the lines in order to see which blank belongs to which question. Call it before fill_form. A big form comes " +
-				"back a page at a time: pass page to read the next, and offset (with page) to read on in a page that was cut.",
-			Parameters: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"document_id": {"type": "string", "description": "The id of the PDF document."},
-					"page": {"type": "integer", "minimum": 1, "description": "Optional: read only this page of a flat form."},
-					"offset": {"type": "integer", "minimum": 0, "description": "Optional: skip this many fields (fillable form) or lines of the page (flat form, with page). Use the next_offset a cut result gave."}
-				},
-				"required": ["document_id"]
-			}`),
-		},
-	}
-}
-
-func assistantFillFormToolDefinition() openRouterTool {
-	return openRouterTool{
-		Type: "function",
-		Function: openRouterFunctionDef{
-			Name: assistantFillFormToolName,
-			Description: "Fill in a PDF form and hand the result to the operator as a card under your reply, where they can open it, " +
-				"download it, save it to Documents or dismiss it. Nothing is saved to Documents until they do. Give inspect_form's " +
-				"names exactly: an entry is either {field, value} for a fillable field, {page, anchor, value} to write text after a " +
-				"label on a flat form, or {page, box} to tick the box with that label (value no leaves it empty; a tick is the default). A check box field takes yes or no, a radio or " +
-				"combo box one of its options. One bad entry fails the call and names it, and nothing is made. Never fill a " +
-				"signature: leave it for the operator. Use only values you have from the operator or from get_vessel_particulars, " +
-				"never guesses. After it succeeds, tell the operator to check the form and use the card to save it.",
-			Parameters: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"document_id": {"type": "string", "description": "The id of the blank PDF form."},
-					"entries": {
-						"type": "array",
-						"minItems": 1,
-						"items": {
-							"type": "object",
-							"properties": {
-								"field": {"type": "string", "description": "A fillable field's name."},
-								"page": {"type": "integer", "minimum": 1, "description": "The page, for an anchor or a box."},
-								"anchor": {"type": "string", "description": "The exact text of a line from inspect_form; the value is written after it."},
-								"box": {"type": "string", "description": "The exact label of a tick box from inspect_form. It is ticked unless value is no."},
-								"occurrence": {"type": "integer", "minimum": 1, "description": "Which one, counting from the top of the page, when the same anchor or box label appears more than once."},
-								"value": {"type": "string", "description": "What to write. For a check box field or a tick box, yes or no (a tick box with no value is ticked)."}
-							}
-						}
-					},
-					"title": {"type": "string", "description": "A name for the filled-in document, such as \"Storm declaration 2026\"."},
-					"folder": {"type": "string", "description": "Where to suggest saving it, a folder path such as \"Insurance/2026\"."}
-				},
-				"required": ["document_id", "entries"]
-			}`),
-		},
-	}
-}
-
 // formSourcePath finds a stored PDF document and its file.
 func (d assistantToolDeps) formSourcePath(tool, documentID string) (document, string, error) {
 	store, err := d.documentStore(tool)
@@ -342,4 +277,85 @@ func assistantFormDraftFromToolResult(result string) (*assistantFormDraft, error
 		return nil, fmt.Errorf("read %s result: the draft has no id", assistantFillFormToolName)
 	}
 	return decoded.FormDraft, nil
+}
+
+var mateToolInspectForm = mateTool{
+	name: assistantInspectFormToolName,
+	function: openRouterFunctionDef{
+		Description: "Read the layout of a PDF form the operator attached or stored as a document, so you can fill it in. " +
+			"A form with fillable fields returns each field's name, kind (text, date, checkbox, radio, combobox, listbox), " +
+			"options and current value. A flat form, one with no fields, returns for each page its lines of text with their " +
+			"position and the tick boxes with the text beside each. Positions are PDF points from the lower left of the page; " +
+			"y is the text baseline. For a flat form, the text of a line is the anchor you give to fill_form, so copy it exactly. " +
+			"Read the lines in order to see which blank belongs to which question. Call it before fill_form. A big form comes " +
+			"back a page at a time: pass page to read the next, and offset (with page) to read on in a page that was cut.",
+		Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"document_id": {"type": "string", "description": "The id of the PDF document."},
+					"page": {"type": "integer", "minimum": 1, "description": "Optional: read only this page of a flat form."},
+					"offset": {"type": "integer", "minimum": 0, "description": "Optional: skip this many fields (fillable form) or lines of the page (flat form, with page). Use the next_offset a cut result gave."}
+				},
+				"required": ["document_id"]
+			}`),
+	},
+	execute: assistantToolDeps.executeInspectForm,
+	describe: func(args json.RawMessage) string {
+		return "Reading the form…"
+	},
+}
+
+var mateToolFillForm = mateTool{
+	name: assistantFillFormToolName,
+	function: openRouterFunctionDef{
+		Description: "Fill in a PDF form and hand the result to the operator as a card under your reply, where they can open it, " +
+			"download it, save it to Documents or dismiss it. Nothing is saved to Documents until they do. Give inspect_form's " +
+			"names exactly: an entry is either {field, value} for a fillable field, {page, anchor, value} to write text after a " +
+			"label on a flat form, or {page, box} to tick the box with that label (value no leaves it empty; a tick is the default). A check box field takes yes or no, a radio or " +
+			"combo box one of its options. One bad entry fails the call and names it, and nothing is made. Never fill a " +
+			"signature: leave it for the operator. Use only values you have from the operator or from get_vessel_particulars, " +
+			"never guesses. After it succeeds, tell the operator to check the form and use the card to save it.",
+		Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"document_id": {"type": "string", "description": "The id of the blank PDF form."},
+					"entries": {
+						"type": "array",
+						"minItems": 1,
+						"items": {
+							"type": "object",
+							"properties": {
+								"field": {"type": "string", "description": "A fillable field's name."},
+								"page": {"type": "integer", "minimum": 1, "description": "The page, for an anchor or a box."},
+								"anchor": {"type": "string", "description": "The exact text of a line from inspect_form; the value is written after it."},
+								"box": {"type": "string", "description": "The exact label of a tick box from inspect_form. It is ticked unless value is no."},
+								"occurrence": {"type": "integer", "minimum": 1, "description": "Which one, counting from the top of the page, when the same anchor or box label appears more than once."},
+								"value": {"type": "string", "description": "What to write. For a check box field or a tick box, yes or no (a tick box with no value is ticked)."}
+							}
+						}
+					},
+					"title": {"type": "string", "description": "A name for the filled-in document, such as \"Storm declaration 2026\"."},
+					"folder": {"type": "string", "description": "Where to suggest saving it, a folder path such as \"Insurance/2026\"."}
+				},
+				"required": ["document_id", "entries"]
+			}`),
+	},
+	execute: assistantToolDeps.executeFillForm,
+	describe: func(args json.RawMessage) string {
+		return "Filling in the form…"
+	},
+	collect: collectFormDraftFromToolResult,
+}
+
+// collectFormDraftFromToolResult is fill_form's collect: the draft it made
+// becomes a card under the reply.
+func collectFormDraftFromToolResult(result string, reply *assistantReply) error {
+	draft, err := assistantFormDraftFromToolResult(result)
+	if err != nil {
+		return err
+	}
+	if draft != nil {
+		reply.FormDrafts = append(reply.FormDrafts, *draft)
+	}
+	return nil
 }
