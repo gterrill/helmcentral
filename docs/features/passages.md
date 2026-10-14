@@ -105,6 +105,13 @@ stays a suggestion until you press a button to confirm it.
 Deleting a cruise deletes only the grouping. Its passages stay and become
 unfiled.
 
+## Sharing
+
+A passage, a cruise or a selection of passages can go on your blog as an
+animated map your readers replay, or out as a still picture for a post's
+header. The **Export** button on each page makes both. See
+[Share a passage on your blog](../how-to/share-a-passage-on-your-blog.md).
+
 ## Limits
 
 - Tracks imported from GPX files carry no readings, so their battery, wind,

@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Passages, cruises and selected passages can be shared from the new **Export**
+  button. **Copy blog embed** puts an animated map on the clipboard to paste
+  into a Ghost HTML card: readers tap play, the map drops from a view of the
+  globe onto the track, and the boat follows it with the local time, each night
+  at anchor shown as a short pause, and the distance, time underway, nights,
+  fuel and highest gust underneath. Choose a 15, 30 or 60 second replay and
+  whether the small overview map shows. The embed loads public map tiles and
+  never connects to the boat. **Download embed as HTML** gives a page for
+  previewing it, and two image downloads (1200 × 630 and 2:1) make a still
+  picture of the track with its title and figures.
 - Helmcentral now keeps its own log of where the boat has been, with speed,
   wind, house battery, fuel rate, generator and fresh water recorded alongside
   each position. It starts on its own after the upgrade and needs no setting;
