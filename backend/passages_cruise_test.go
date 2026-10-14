@@ -132,13 +132,53 @@ func TestCruiseWaterUsedAndTakenOnWithDeadband(t *testing.T) {
 	}
 }
 
+func TestCruiseWindUnderwayAndAtAnchorAreSeparate(t *testing.T) {
+	ps, per, span := cruiseFixture()
+	for i := range span {
+		in := !span[i].At.After(ps[0].End) || !span[i].At.Before(ps[1].Start)
+		w, g := 5.0, 8.0 // at anchor
+		if in {
+			w, g = 15, 25
+		}
+		span[i].TWSKts, span[i].GustKts = pfloat(w), pfloat(g)
+	}
+	for k := range per {
+		for i := range per[k] {
+			per[k][i].TWSKts, per[k][i].GustKts = pfloat(15), pfloat(25)
+		}
+	}
+	st := computeCruiseStats(ps, per, span)
+	if st.UnderwayTWSMeanKts == nil || *st.UnderwayTWSMeanKts != 15 || st.UnderwayMaxGustKts == nil || *st.UnderwayMaxGustKts != 25 {
+		t.Errorf("underway %v %v", st.UnderwayTWSMeanKts, st.UnderwayMaxGustKts)
+	}
+	if st.AnchorTWSMeanKts == nil || *st.AnchorTWSMeanKts != 5 || st.AnchorMaxGustKts == nil || *st.AnchorMaxGustKts != 8 {
+		t.Errorf("anchor %v %v", st.AnchorTWSMeanKts, st.AnchorMaxGustKts)
+	}
+}
+
+func TestCruiseWindAbsentWhereNoReadings(t *testing.T) {
+	ps, per, span := cruiseFixture()
+	for k := range per {
+		for i := range per[k] {
+			per[k][i].TWSKts, per[k][i].GustKts = pfloat(12), pfloat(20)
+		}
+	}
+	for i := range span {
+		span[i].TWSKts, span[i].GustKts = nil, nil
+	}
+	st := computeCruiseStats(ps, per, span)
+	if st.UnderwayTWSMeanKts == nil || st.AnchorTWSMeanKts != nil || st.AnchorMaxGustKts != nil {
+		t.Errorf("%+v", st)
+	}
+}
+
 func TestCruiseNoWaterOrGeneratorReadingsMeansAbsent(t *testing.T) {
 	ps, per, span := cruiseFixture()
 	for i := range span {
 		span[i].WaterL, span[i].GenState, span[i].SoCPct, span[i].TWSKts = nil, nil, nil, nil
 	}
 	st := computeCruiseStats(ps, per, span)
-	if st.GeneratorHours != nil || st.WaterUsedL != nil || st.WaterTakenOnL != nil || st.LowestSoCPct != nil || st.TWSMeanKts != nil || st.FuelBurnedL != nil {
+	if st.GeneratorHours != nil || st.WaterUsedL != nil || st.WaterTakenOnL != nil || st.LowestSoCPct != nil || st.UnderwayTWSMeanKts != nil || st.AnchorTWSMeanKts != nil || st.FuelBurnedL != nil {
 		t.Errorf("%+v", st)
 	}
 	if len(st.WaterRises) != 0 {

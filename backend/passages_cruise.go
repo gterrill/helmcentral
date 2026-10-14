@@ -47,22 +47,26 @@ type waterRise struct {
 }
 
 type cruiseStats struct {
-	PassageCount    int         `json:"passage_count"`
-	Departure       *time.Time  `json:"departure"`
-	Arrival         *time.Time  `json:"arrival"`
-	SpanSeconds     float64     `json:"span_seconds"`
-	UnderwaySeconds float64     `json:"underway_seconds"`
-	Nights          int         `json:"nights"`
-	DistanceNM      float64     `json:"distance_nm"`
-	FuelBurnedL     *float64    `json:"fuel_burned_l"`
-	TWSMeanKts      *float64    `json:"tws_mean_kts"`
-	MaxGustKts      *float64    `json:"max_gust_kts"`
-	GeneratorHours  *float64    `json:"generator_hours"`
-	LowestSoCPct    *float64    `json:"lowest_soc_pct"`
-	NightSoC        []nightSoC  `json:"night_soc"`
-	WaterUsedL      *float64    `json:"water_used_l"`
-	WaterTakenOnL   *float64    `json:"water_taken_on_l"`
-	WaterRises      []waterRise `json:"water_rises"`
+	PassageCount    int        `json:"passage_count"`
+	Departure       *time.Time `json:"departure"`
+	Arrival         *time.Time `json:"arrival"`
+	SpanSeconds     float64    `json:"span_seconds"`
+	UnderwaySeconds float64    `json:"underway_seconds"`
+	Nights          int        `json:"nights"`
+	DistanceNM      float64    `json:"distance_nm"`
+	FuelBurnedL     *float64   `json:"fuel_burned_l"`
+	// Wind is reported twice: points inside the passages, and points in the
+	// span outside them (the nights and days at anchor).
+	UnderwayTWSMeanKts *float64    `json:"underway_tws_mean_kts"`
+	UnderwayMaxGustKts *float64    `json:"underway_max_gust_kts"`
+	AnchorTWSMeanKts   *float64    `json:"anchor_tws_mean_kts"`
+	AnchorMaxGustKts   *float64    `json:"anchor_max_gust_kts"`
+	GeneratorHours     *float64    `json:"generator_hours"`
+	LowestSoCPct       *float64    `json:"lowest_soc_pct"`
+	NightSoC           []nightSoC  `json:"night_soc"`
+	WaterUsedL         *float64    `json:"water_used_l"`
+	WaterTakenOnL      *float64    `json:"water_taken_on_l"`
+	WaterRises         []waterRise `json:"water_rises"`
 }
 
 // computeCruiseStats takes the cruise's passages with each passage's points,
@@ -87,8 +91,6 @@ func computeCruiseStats(passages []passageRecord, perPassage [][]recordedTrackPo
 	var (
 		fuel         float64
 		fuelComplete = true
-		twsSum       float64
-		twsN         int
 	)
 	for _, pts := range perPassage {
 		ps := computePassageStats(pts)
@@ -99,24 +101,28 @@ func computeCruiseStats(passages []passageRecord, perPassage [][]recordedTrackPo
 		} else {
 			fuel += *ps.FuelBurnedL
 		}
-		if ps.MaxGustKts != nil && (st.MaxGustKts == nil || *ps.MaxGustKts > *st.MaxGustKts) {
-			v := *ps.MaxGustKts
-			st.MaxGustKts = &v
-		}
-		for _, p := range pts {
-			if p.TWSKts != nil {
-				twsSum += *p.TWSKts
-				twsN++
-			}
-		}
 	}
 	if fuelComplete {
 		st.FuelBurnedL = &fuel
 	}
-	if twsN > 0 {
-		v := twsSum / float64(twsN)
-		st.TWSMeanKts = &v
+	var underway, anchored []recordedTrackPoint
+	for _, pts := range perPassage {
+		underway = append(underway, pts...)
 	}
+	for _, p := range span {
+		inside := false
+		for _, ps := range passages {
+			if !p.At.Before(ps.Start) && !p.At.After(ps.End) {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			anchored = append(anchored, p)
+		}
+	}
+	st.UnderwayTWSMeanKts, st.UnderwayMaxGustKts = windFigures(underway)
+	st.AnchorTWSMeanKts, st.AnchorMaxGustKts = windFigures(anchored)
 
 	if len(span) == 0 {
 		return st
@@ -133,6 +139,28 @@ func computeCruiseStats(passages []passageRecord, perPassage [][]recordedTrackPo
 	st.NightSoC = nightSoCFigures(span, start, end, loc)
 	st.WaterRises, st.WaterUsedL, st.WaterTakenOnL = waterFigures(span)
 	return st
+}
+
+// windFigures is the mean true wind speed over every sample and the highest
+// gust, each nil when no point carries the reading.
+func windFigures(pts []recordedTrackPoint) (mean, maxGust *float64) {
+	var sum float64
+	n := 0
+	for _, p := range pts {
+		if p.TWSKts != nil {
+			sum += *p.TWSKts
+			n++
+		}
+		if p.GustKts != nil && (maxGust == nil || *p.GustKts > *maxGust) {
+			v := *p.GustKts
+			maxGust = &v
+		}
+	}
+	if n > 0 {
+		v := sum / float64(n)
+		mean = &v
+	}
+	return
 }
 
 func localMidnightsBetween(start, end time.Time, loc *time.Location) int {
