@@ -51,16 +51,18 @@ func (s *passageStore) PassagesNeedingNames(now time.Time, retryAfter time.Durat
 	return ids, rows.Err()
 }
 
-func (s *passageStore) firstPointFrom(t time.Time) (*recordedTrackPoint, error) {
-	return s.onePoint(`WHERE t_ms >= ? ORDER BY t_ms, id LIMIT 1`, t)
+// firstPointIn and lastPointIn return the first and last track point inside
+// [start, end], or nil when the span holds none.
+func (s *passageStore) firstPointIn(start, end time.Time) (*recordedTrackPoint, error) {
+	return s.onePoint(`WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms, id LIMIT 1`, start, end)
 }
 
-func (s *passageStore) lastPointUntil(t time.Time) (*recordedTrackPoint, error) {
-	return s.onePoint(`WHERE t_ms <= ? ORDER BY t_ms DESC, id DESC LIMIT 1`, t)
+func (s *passageStore) lastPointIn(start, end time.Time) (*recordedTrackPoint, error) {
+	return s.onePoint(`WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms DESC, id DESC LIMIT 1`, start, end)
 }
 
-func (s *passageStore) onePoint(tail string, t time.Time) (*recordedTrackPoint, error) {
-	p, err := scanTrackPoint(s.db.QueryRow(`SELECT `+trackPointColumns+` FROM track_points `+tail, t.UnixMilli()))
+func (s *passageStore) onePoint(tail string, start, end time.Time) (*recordedTrackPoint, error) {
+	p, err := scanTrackPoint(s.db.QueryRow(`SELECT `+trackPointColumns+` FROM track_points `+tail, start.UnixMilli(), end.UnixMilli()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -84,7 +86,7 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 		return err
 	}
 	if rec.FromName == "" && !rec.FromNameEdited {
-		if p, err := s.firstPointFrom(rec.Start); err != nil {
+		if p, err := s.firstPointIn(rec.Start, rec.End); err != nil {
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {
@@ -95,7 +97,7 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 		}
 	}
 	if rec.ToName == "" && !rec.ToNameEdited {
-		if p, err := s.lastPointUntil(rec.End); err != nil {
+		if p, err := s.lastPointIn(rec.Start, rec.End); err != nil {
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {

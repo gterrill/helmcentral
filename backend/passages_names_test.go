@@ -236,3 +236,22 @@ func TestSplitAndMergeCarryNameProtection(t *testing.T) {
 		t.Errorf("stored: %+v", stored)
 	}
 }
+
+// Review finding 7: the name lookups must stay inside the passage's span.
+func TestFillPassageNamesStaysInsideTheSpan(t *testing.T) {
+	s := newTestPassageStore(t)
+	// points exist only well before and well after the passage
+	appendAll(t, s, []recordedTrackPoint{
+		{At: passageEpoch, Lat: -20, Lon: 149, Segment: 1},
+		{At: passageEpoch.Add(10 * time.Hour), Lat: -21, Lon: 149, Segment: 2},
+	})
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(3 * time.Hour), End: passageEpoch.Add(4 * time.Hour)})
+	calls := 0
+	if err := s.FillPassageNames(p.ID, func(float64, float64) string { calls++; return "Wrong Place" }); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetPassage(p.ID)
+	if calls != 0 || got.FromName != "" || got.ToName != "" {
+		t.Errorf("no points in the span must leave names empty without asking: %+v (%d lookups)", got, calls)
+	}
+}
