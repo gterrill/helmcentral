@@ -41,7 +41,7 @@ func TestGetActiveAlarms_ReturnsSensorIdentifiers(t *testing.T) {
 	}
 	for _, want := range []string{
 		"electrical.batteries.1.voltage", "PortALT", "anomaly-out-of-range",
-		"Impossible sensor reading: PortALT voltage 72.3 V", "raised_at", "live_sensors", "sensors",
+		"Impossible sensor reading: PortALT voltage 72.3 V", "raised_at", "live_same_as_raised", "sensors",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -80,6 +80,13 @@ func TestBuildAssistantSystemPrompt_AlarmRule(t *testing.T) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
+}
+
+func truncateForLog(s string) string {
+	if len(s) > 200 {
+		return s[:200]
+	}
+	return s
 }
 
 func runActiveAlarms(t *testing.T, deps assistantToolDeps) string {
@@ -122,8 +129,8 @@ func TestGetActiveAlarms_ShrinksSensorsBeforeAlarms(t *testing.T) {
 	if len(got.Alarms[0].Sensors) == 0 || got.Alarms[0].Sensors[0].Identifier == "" {
 		t.Fatalf("want at least one identifier kept, got %s", out)
 	}
-	if !got.Truncated || got.Count != 1 || got.Shown != 1 {
-		t.Fatalf("want truncated, count 1, shown 1; got %s", out[:200])
+	if got.Truncated || got.Count != 1 || !strings.Contains(out, "sensor_count") {
+		t.Fatalf("want a counted list cut and no truncated flag; got %s", truncateForLog(out))
 	}
 }
 
@@ -240,5 +247,227 @@ func TestBuildAssistantSystemPrompt_AlarmRuleIdentifiers(t *testing.T) {
 	}
 	if strings.Contains(prompt, "2c1b") {
 		t.Error("prompt should not carry the out-of-order label")
+	}
+}
+
+func manySensors(n int, textRepeat int) []sensorHealthEntry {
+	var out []sensorHealthEntry
+	for i := 0; i < n; i++ {
+		out = append(out, sensorHealthEntry{
+			Identifier: fmt.Sprintf("electrical.batteries.%d.voltage", i+1),
+			Name:       fmt.Sprintf("Sensor %d", i+1), Quantity: "voltage",
+			Text: strings.Repeat("reading text ", textRepeat),
+		})
+	}
+	return out
+}
+
+func TestGetActiveAlarms_TrimmedResultStaysUnderCap(t *testing.T) {
+	var list []alarmStatus
+	for i := 0; i < 40; i++ {
+		a := sensorHealthAlarmForTest()
+		a.RuleID = fmt.Sprintf("rule-%d", i)
+		a.Sensors = manySensors(60, 4)
+		a.LiveSensors = manySensors(60, 4)
+		list = append(list, a)
+	}
+	start := time.Now()
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return list }})
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("shrinking took %v", time.Since(start))
+	}
+	if len(out) > assistantMaxToolResultChars {
+		t.Fatalf("trimmed result is %d chars, cap %d", len(out), assistantMaxToolResultChars)
+	}
+	if !strings.Contains(out, `"count":40`) {
+		t.Errorf("want count 40: %s", truncateForLog(out))
+	}
+}
+
+func TestGetActiveAlarms_UnshrinkableReturnsFallback(t *testing.T) {
+	a := sensorHealthAlarmForTest()
+	a.Message = strings.Repeat("x", assistantMaxToolResultChars*2)
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{a} }})
+	if len(out) > assistantMaxToolResultChars {
+		t.Fatalf("want the capped fallback, got %d chars", len(out))
+	}
+	if !strings.Contains(out, "too large") {
+		t.Errorf("want the fallback note: %s", truncateForLog(out))
+	}
+}
+
+func decodeAlarms(t *testing.T, out string) []map[string]any {
+	t.Helper()
+	var got struct {
+		Alarms []map[string]any `json:"alarms"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return got.Alarms
+}
+
+func TestGetActiveAlarms_SameLiveSensorsAreMarkedNotDropped(t *testing.T) {
+	var list []alarmStatus
+	for i := 0; i < 6; i++ {
+		a := sensorHealthAlarmForTest()
+		a.RuleID = fmt.Sprintf("rule-%d", i)
+		a.Sensors = manySensors(20, 12)
+		a.LiveSensors = manySensors(20, 12)
+		list = append(list, a)
+	}
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return list }})
+	alarms := decodeAlarms(t, out)
+	if len(alarms) == 0 {
+		t.Fatal("no alarms")
+	}
+	for _, a := range alarms {
+		_, hasLive := a["live_sensors"]
+		same, _ := a["live_same_as_raised"].(bool)
+		if hasLive == same {
+			t.Errorf("live state must be either listed or marked same, got %v", a)
+		}
+	}
+}
+
+func TestGetActiveAlarms_CutSensorListsAreCounted(t *testing.T) {
+	var list []alarmStatus
+	for i := 0; i < 6; i++ {
+		a := sensorHealthAlarmForTest()
+		a.RuleID = fmt.Sprintf("rule-%d", i)
+		a.Sensors = manySensors(40, 12)
+		a.LiveSensors = manySensors(35, 12)
+		list = append(list, a)
+	}
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return list }})
+	for _, a := range decodeAlarms(t, out) {
+		sensors, _ := a["sensors"].([]any)
+		if len(sensors) < 40 {
+			if a["sensor_count"] != float64(40) {
+				t.Errorf("a cut sensors list must carry sensor_count 40: %v", truncateForLog(out))
+			}
+		}
+		if live, ok := a["live_sensors"].([]any); ok && len(live) < 35 {
+			if a["live_sensor_count"] != float64(35) {
+				t.Errorf("a cut live_sensors list must carry live_sensor_count 35: %v", truncateForLog(out))
+			}
+		}
+	}
+}
+
+func TestGetActiveAlarms_InvestigatePathsPerKind(t *testing.T) {
+	thr := 12.0
+	rule := alarmStatus{RuleID: "r1", Label: "House Bank Low", Path: "electrical.batteries.1.voltage",
+		Phase: alarmPhaseActive, State: alarmStateAlert, Op: "below", Threshold: &thr}
+	bus := alarmStatus{RuleID: "notifications:propulsion.port.oilPressure", Label: "Oil", Path: "notifications.propulsion.port.oilPressure",
+		Phase: alarmPhaseActive, State: alarmStateAlert}
+	nodata := alarmStatus{RuleID: "notifications:vebus.lowBattery", Label: "Low", Path: "notifications.vebus.lowBattery",
+		Phase: alarmPhaseActive, State: alarmStateAlert}
+	health := sensorHealthAlarmForTest()
+	health.LiveSensors = []sensorHealthEntry{
+		{Identifier: "electrical.batteries.1.voltage"},
+		{Identifier: "YachtDevices.47"},
+	}
+	deps := assistantToolDeps{
+		activeAlarms: func() []alarmStatus { return []alarmStatus{rule, bus, nodata, health} },
+		pathHasData:  func(p string) bool { return p == "propulsion.port.oilPressure" },
+	}
+	alarms := decodeAlarms(t, runActiveAlarms(t, deps))
+	want := [][]any{
+		{"electrical.batteries.1.voltage"},
+		{"propulsion.port.oilPressure"},
+		nil,
+		{"electrical.batteries.1.voltage", "YachtDevices.47"},
+	}
+	for i, w := range want {
+		got, _ := alarms[i]["investigate"].([]any)
+		if fmt.Sprint(got) != fmt.Sprint(w) {
+			t.Errorf("alarm %d investigate = %v, want %v", i, got, w)
+		}
+	}
+}
+
+func TestGetActiveAlarms_SensorHealthCountIsNeverAReading(t *testing.T) {
+	thr := 0.0
+	a := sensorHealthAlarmForTest()
+	a.Sensors, a.LiveSensors = nil, nil
+	a.Op, a.Threshold, a.Value = "above", &thr, 3
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{a} }})
+	if _, ok := decodeAlarms(t, out)[0]["value"]; ok {
+		t.Errorf("a sensor-health count must not be quoted as a reading: %s", out)
+	}
+}
+
+func TestGetActiveAlarms_NoVesselFetchWithoutTimes(t *testing.T) {
+	calls := 0
+	a := sensorHealthAlarmForTest()
+	a.RaisedAt = time.Time{}
+	deps := assistantToolDeps{
+		activeAlarms: func() []alarmStatus { return []alarmStatus{a} },
+		vesselState:  func() (vesselStateData, error) { calls++; return vesselStateData{}, nil },
+	}
+	runActiveAlarms(t, deps)
+	if calls != 0 {
+		t.Errorf("vesselState called %d times with no timestamps to format", calls)
+	}
+}
+
+func TestGetActiveAlarms_TimezoneErrorIsSurfaced(t *testing.T) {
+	deps := assistantToolDeps{
+		activeAlarms: func() []alarmStatus { return []alarmStatus{sensorHealthAlarmForTest()} },
+		vesselState:  func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("signalk down") },
+	}
+	out := runActiveAlarms(t, deps)
+	if !strings.Contains(out, `"timezone":"UTC"`) || !strings.Contains(out, "timezone_note") || !strings.Contains(out, "signalk down") {
+		t.Errorf("want UTC with a note naming the error: %s", out)
+	}
+}
+
+func TestGetActiveAlarms_LiveSameMarkerIndependentOfSize(t *testing.T) {
+	a := sensorHealthAlarmForTest()
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{a} }})
+	al := decodeAlarms(t, out)[0]
+	if _, has := al["live_sensors"]; has || al["live_same_as_raised"] != true {
+		t.Errorf("small result must use the marker too: %v", al)
+	}
+}
+
+func TestGetActiveAlarms_TruncatedMeansAlarmsLeftOut(t *testing.T) {
+	var list []alarmStatus
+	for i := 0; i < 6; i++ {
+		a := sensorHealthAlarmForTest()
+		a.RuleID = fmt.Sprintf("rule-%d", i)
+		a.Sensors = manySensors(40, 12)
+		list = append(list, a)
+	}
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return list }})
+	if strings.Contains(out, "truncated") || strings.Contains(out, `"shown"`) {
+		t.Errorf("list cuts alone must not set truncated: %s", truncateForLog(out))
+	}
+	if !strings.Contains(out, "sensor_count") {
+		t.Errorf("the cut must be signalled by sensor_count: %s", truncateForLog(out))
+	}
+}
+
+func TestGetActiveAlarms_BigListDoesNotStripSmallOne(t *testing.T) {
+	big := sensorHealthAlarmForTest()
+	big.RuleID = "big"
+	big.Sensors = manySensors(200, 40)
+	small := sensorHealthAlarmForTest()
+	small.RuleID = "small"
+	small.Sensors = manySensors(5, 1)
+	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{big, small} }})
+	if len(out) > assistantMaxToolResultChars {
+		t.Fatalf("over cap: %d", len(out))
+	}
+	alarms := decodeAlarms(t, out)
+	if len(alarms) != 2 {
+		t.Fatalf("both alarms must stay: %s", truncateForLog(out))
+	}
+	if got := len(alarms[1]["sensors"].([]any)); got != 5 {
+		t.Errorf("small alarm lost sensors: %d", got)
+	}
+	if alarms[1]["sensor_count"] != nil {
+		t.Errorf("small alarm must not be marked cut: %v", alarms[1]["sensor_count"])
 	}
 }

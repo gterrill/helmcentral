@@ -1898,3 +1898,16 @@ func TestApplyDeltaDropsALeafSentenceWhenALaterUpdateHasNone(t *testing.T) {
 		t.Fatalf("leaf kept a sentence from an earlier update: %+v", leaf)
 	}
 }
+
+func TestBatteryPublisherIgnoresNonNumericValues(t *testing.T) {
+	s := newSignalKSnapshot()
+	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	for _, v := range []any{"", map[string]any{}, true} {
+		s.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+			SourceRef: "Stray.1", Values: []signalKValue{{Path: "electrical.batteries.1.voltage", Value: v}},
+		}}}, at)
+	}
+	if got := s.batteryPublishersFor("vessels.self", "1"); len(got) != 0 {
+		t.Fatalf("non-numeric values must not register a publisher, got %v", got)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"maps"
@@ -483,7 +484,7 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 
 			s.pathSeen[d.Context+"|"+val.Path] = now
-			if update.SourceRef != "" && val.Value != nil {
+			if update.SourceRef != "" && isNumericSignalKValue(val.Value) {
 				s.noteBatteryPublisherLocked(d.Context, val.Path, update.SourceRef)
 			}
 			if radarControlPath(val.Path) {
@@ -828,10 +829,28 @@ const (
 	signalKBatteryMaxPublishers = 16
 )
 
+// isNumericSignalKValue reports whether a delta value is a number. Booleans,
+// strings and objects on a battery path are not readings.
+func isNumericSignalKValue(v any) bool {
+	switch v.(type) {
+	case float64, float32, int, int64, json.Number:
+		return true
+	}
+	return false
+}
+
 // noteBatteryPublisherLocked records source as a publisher of the
 // electrical.batteries.<id> instance path names, if it names one. Must be
 // called with s.mu held for writing. Past a cap a new entry is dropped, not
 // an old one evicted.
+//
+// Publishers are deliberately never aged out. A solar charger that stops
+// publishing at dusk leaves its last panel voltage (76 V) in the tree, and if
+// the charger stopped counting as a publisher that stale leaf would be
+// checked as a battery and raise a false impossible-reading alarm. Naming
+// has the same need: a silent shunt must keep the name it had when its
+// silent-source alarm was raised. Only numeric values register (the caller
+// checks), so one stray empty value cannot make a source a publisher.
 func (s *signalKSnapshot) noteBatteryPublisherLocked(context, path, source string) {
 	rest, ok := strings.CutPrefix(path, "electrical.batteries.")
 	if !ok {
@@ -856,8 +875,9 @@ func (s *signalKSnapshot) noteBatteryPublisherLocked(context, path, source strin
 	set[source] = struct{}{}
 }
 
-// batteryPublishersFor lists, sorted, every $source that has published any
-// path of electrical.batteries.<id> under context since this process started.
+// batteryPublishersFor lists, sorted, every $source that has published a
+// number on any path of electrical.batteries.<id> under context since this
+// process started.
 func (s *signalKSnapshot) batteryPublishersFor(context, id string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
