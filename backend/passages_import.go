@@ -264,9 +264,11 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 			sum.PassagesSkipped++
 			continue
 		}
-		if _, err := s.InsertPassage(passageRecord{Start: lp.Start, End: lp.End}); err != nil {
+		rec, err := s.InsertPassage(passageRecord{Start: lp.Start, End: lp.End})
+		if err != nil {
 			return sum, err
 		}
+		announcePassage(rec.ID)
 		sum.PassagesCreated++
 	}
 	return sum, nil

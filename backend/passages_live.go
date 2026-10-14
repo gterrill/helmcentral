@@ -185,6 +185,7 @@ func startPassageRecording(store *passageStore) error {
 		return err
 	}
 	globalPassageStore = store
+	startPassageNaming(store)
 	globalTrackRecord = rec
 	return nil
 }

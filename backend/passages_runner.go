@@ -36,9 +36,11 @@ func runPassageDetection(store *passageStore) error {
 		if overlaps {
 			continue
 		}
-		if _, err := store.InsertPassage(passageRecord{Start: lp.Start, End: lp.End}); err != nil {
+		rec, err := store.InsertPassage(passageRecord{Start: lp.Start, End: lp.End})
+		if err != nil {
 			return fmt.Errorf("store detected passage: %w", err)
 		}
+		announcePassage(rec.ID)
 	}
 	return store.SetDetectorResume(det.Resume)
 }
