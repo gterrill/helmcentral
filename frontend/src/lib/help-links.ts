@@ -57,6 +57,7 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   // Reachable, unlike the others: the management surface (ADR 0112)
   // mounts the ordinary header, so its Help affordance resolves here.
   'wall-displays': { page: 'features/dashboard', heading: 'Wall displays' },
+  passages: { page: 'features/passages' },
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the help index, for totality.

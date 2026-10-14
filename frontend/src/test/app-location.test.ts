@@ -622,3 +622,62 @@ describe('deck plans in the Locations section (ADR 0156)', () => {
     }
   })
 })
+
+describe('Passages panel (ADR 0171 panel route)', () => {
+  const index = (filter: import('@/lib/app-location').PassagesFilter = { kind: 'all' }): AppLocation => ({
+    panel: 'passages', route: { view: 'index', filter },
+  })
+
+  it('parses bare /passages as the index showing every passage', () => {
+    expect(parseAppLocation('/passages')).toEqual(index())
+  })
+
+  it('parses the unfiled and cruise filters', () => {
+    expect(parseAppLocation('/passages?filter=unfiled')).toEqual(index({ kind: 'unfiled' }))
+    expect(parseAppLocation('/passages?cruise=c1')).toEqual(index({ kind: 'cruise', id: 'c1' }))
+  })
+
+  it('parses a passage, a cruise and a combined selection', () => {
+    expect(parseAppLocation('/passages/p1')).toEqual({
+      panel: 'passages', route: { view: 'passage', id: 'p1', filter: { kind: 'all' } },
+    })
+    expect(parseAppLocation('/passages/p1?cruise=c1')).toEqual({
+      panel: 'passages', route: { view: 'passage', id: 'p1', filter: { kind: 'cruise', id: 'c1' } },
+    })
+    expect(parseAppLocation('/passages/cruises/c1')).toEqual({ panel: 'passages', route: { view: 'cruise', id: 'c1' } })
+    expect(parseAppLocation('/passages/combined?ids=a,b,c')).toEqual({
+      panel: 'passages', route: { view: 'combined', ids: ['a', 'b', 'c'], filter: { kind: 'all' } },
+    })
+  })
+
+  it('falls back to the index for a combined link with no ids or a cruise link with no id', () => {
+    expect(parseAppLocation('/passages/combined')).toEqual(index())
+    expect(parseAppLocation('/passages/cruises')).toEqual(index())
+  })
+
+  it('treats a malformed escape as no id', () => {
+    expect(parseAppLocation('/passages/%E0%A4%A')).toEqual(index())
+  })
+
+  it('formats every shape and round-trips it', () => {
+    const shapes: AppLocation[] = [
+      index(),
+      index({ kind: 'unfiled' }),
+      index({ kind: 'cruise', id: 'c 1' }),
+      { panel: 'passages', route: { view: 'passage', id: 'p1', filter: { kind: 'unfiled' } } },
+      { panel: 'passages', route: { view: 'cruise', id: 'c1' } },
+      { panel: 'passages', route: { view: 'combined', ids: ['a', 'b'], filter: { kind: 'cruise', id: 'c1' } } },
+    ]
+    for (const loc of shapes) {
+      expect(parseAppLocation(formatAppLocation(loc, ctx))).toEqual(loc)
+    }
+    expect(formatAppLocation(index(), ctx)).toBe('/passages')
+    expect(formatAppLocation(shapes[3], ctx)).toBe('/passages/p1?filter=unfiled')
+  })
+
+  it('is a canonical path once formatted', () => {
+    const c = { firstPageId: 'p1', knownPageIds: null, canAdmin: true }
+    expect(isCanonicalAppPath('/passages', c)).toBe(true)
+    expect(isCanonicalAppPath('/passages/cruises/c1', c)).toBe(true)
+  })
+})

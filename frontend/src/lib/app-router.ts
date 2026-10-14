@@ -202,6 +202,7 @@ function startLocation(panel: ResumablePanel): AppLocation {
     case 'documents': return { panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: null } }
     case 'inventory': return { panel: 'inventory', route: { view: 'index', section: 'equipment' } }
     case 'wall-displays': return { panel: 'wall-displays', route: { view: 'index' } }
+    case 'passages': return { panel: 'passages', route: { view: 'index', filter: { kind: 'all' } } }
     default: return { panel }
   }
 }
