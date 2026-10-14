@@ -82,6 +82,11 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 		}
 		prev := pts[i-1]
 		if !legBetween(prev, p) {
+			// A hole in the record. Fuel is only known across it if the
+			// engines were measured off on both sides.
+			if prev.FuelLph == nil || p.FuelLph == nil || *prev.FuelLph != 0 || *p.FuelLph != 0 {
+				fuelComplete = false
+			}
 			continue
 		}
 		dt := p.At.Sub(prev.At).Seconds()

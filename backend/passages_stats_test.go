@@ -214,3 +214,30 @@ func TestGetPassageCarriesReplayTrackBesideDisplayTrack(t *testing.T) {
 		t.Errorf("a 1 h run at 30 s should keep about 120 points, got %d", n)
 	}
 }
+
+// Review finding 3: a hole in the record while the engine was burning is fuel
+// nobody measured; a partial figure must not pass as the total.
+func TestStatsFuelAbsentWhenAGapHidesABurn(t *testing.T) {
+	pts := instrumentedRun()
+	for i := 30; i < len(pts); i++ {
+		pts[i].Segment = 1
+		pts[i].At = pts[i].At.Add(3 * time.Hour)
+	}
+	if s := computePassageStats(pts); s.FuelBurnedL != nil {
+		t.Errorf("fuel %v reported across a gap with the engines running", *s.FuelBurnedL)
+	}
+}
+
+func TestStatsFuelKnownWhenGapIsWithEnginesOff(t *testing.T) {
+	pts := instrumentedRun()
+	for i := range pts {
+		pts[i].FuelLph = pfloat(0)
+	}
+	for i := 30; i < len(pts); i++ {
+		pts[i].Segment = 1
+		pts[i].At = pts[i].At.Add(3 * time.Hour)
+	}
+	if s := computePassageStats(pts); s.FuelBurnedL == nil || *s.FuelBurnedL != 0 {
+		t.Errorf("a gap with both sides at zero burn is zero: %v", s.FuelBurnedL)
+	}
+}
