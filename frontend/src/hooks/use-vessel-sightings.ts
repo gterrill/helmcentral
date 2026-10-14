@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+
+import { useApiQuery } from '@/lib/api-query'
 
 export type VesselSighting = {
   seen_at: string
@@ -18,48 +20,17 @@ type VesselSightingsResponse = {
 // in nearby-vessels-tile.tsx can pass null while closed and the actual key
 // only once opened, instead of fetching on every poll tick.
 export function useVesselSightings(key: string | null) {
-  const [sightings, setSightings] = useState<VesselSighting[]>([])
-  const [loading, setLoading] = useState(false)
+  const path = `/api/nearby-vessels/${encodeURIComponent(key ?? '')}/sightings`
+  const { data, error, isLoading } = useApiQuery<VesselSighting[]>({
+    queryKey: [path],
+    path,
+    enabled: !!key,
+    select: (body: VesselSightingsResponse) => (Array.isArray(body.sightings) ? body.sightings : []),
+  })
 
   useEffect(() => {
-    if (!key) {
-      setSightings([])
-      setLoading(false)
-      return
-    }
+    if (error) console.error('Failed to fetch vessel sightings:', error)
+  }, [error])
 
-    let cancelled = false
-    setLoading(true)
-
-    const fetchSightings = async () => {
-      try {
-        const response = await fetch(`/api/nearby-vessels/${encodeURIComponent(key)}/sightings`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch vessel sightings')
-        }
-
-        const data = (await response.json()) as VesselSightingsResponse
-        if (!cancelled) {
-          setSightings(Array.isArray(data.sightings) ? data.sightings : [])
-        }
-      } catch (err) {
-        console.error('Failed to fetch vessel sightings:', err)
-        if (!cancelled) {
-          setSightings([])
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void fetchSightings()
-
-    return () => {
-      cancelled = true
-    }
-  }, [key])
-
-  return { sightings, loading }
+  return { sightings: error ? [] : (data ?? []), loading: isLoading }
 }

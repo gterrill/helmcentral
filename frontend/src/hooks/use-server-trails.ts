@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 
+import { apiRequest } from '@/lib/api-query'
+
 export interface TrailPoint {
   lat: number
   lon: number
@@ -58,9 +60,7 @@ export function useServerTrails(pollIntervalMs = 5000, enabled = true): ServerTr
       const url = sinceRef.current
         ? `/api/tracks?since=${encodeURIComponent(sinceRef.current)}`
         : '/api/tracks'
-      const res = await fetch(url, { signal })
-      if (!res.ok) return
-      const data = (await res.json()) as ServerTracksResponse
+      const data = await apiRequest<ServerTracksResponse>(url, { signal })
       // The effect cleanup aborts the controller on unmount/StrictMode
       // remount; a response that lands after that point belongs to a poll
       // this hook instance no longer owns, so it must not touch the refs.

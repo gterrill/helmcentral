@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export type SecretKey =
   | 'SIGNALK_USERNAME'
@@ -23,6 +23,9 @@ export const SECRET_KEYS: SecretKey[] = [
   'GOOGLE_PLACES_API_KEY',
   'OPENROUTER_API_KEY',
 ]
+
+const SECRETS_PATH = '/api/settings/secrets'
+const NO_STATUS = Object.fromEntries(SECRET_KEYS.map((key) => [key, false])) as Record<SecretKey, boolean>
 
 const emptyValues = (): Record<SecretKey, string> =>
   Object.fromEntries(SECRET_KEYS.map((key) => [key, ''])) as Record<SecretKey, string>
@@ -56,13 +59,14 @@ export interface UseSecretsStatusResult {
  * via `saveTouchedKeys`.
  */
 export function useSecretsStatus(): UseSecretsStatusResult {
-  const [status, setStatus] = useState<Record<SecretKey, boolean>>(
-    Object.fromEntries(SECRET_KEYS.map((key) => [key, false])) as Record<SecretKey, boolean>,
-  )
+  const { data, isLoading: loading, error: queryError } = useApiQuery<Record<SecretKey, boolean>>({
+    queryKey: [SECRETS_PATH],
+    path: SECRETS_PATH,
+  })
+  const status = data ?? NO_STATUS
   const [values, setValues] = useState<Record<SecretKey, string>>(emptyValues)
   const [touched, setTouched] = useState<Record<SecretKey, boolean>>(emptyTouched)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const error = queryError?.message ?? null
 
   // Ref-mirrored so saveTouchedKeys (a useCallback with empty deps, per the
   // same stale-closure-avoidance pattern as use-settings-form.ts's save())
@@ -87,43 +91,11 @@ export function useSecretsStatus(): UseSecretsStatusResult {
     statusRef.current = status
   }, [status])
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/settings/secrets`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch secrets')
-        }
-        const data = (await response.json()) as Record<SecretKey, boolean>
-        setStatus(data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to load secrets')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    void fetchStatus()
-  }, [])
-
   // Shared POST logic used by both saveTouchedKeys and clearKey.
   const postSecretsPatch = useCallback(async (patch: Partial<Record<SecretKey, string>>) => {
-    const response = await fetch(`${apiBaseUrl}/api/settings/secrets`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(patch),
-    })
-
-    if (!response.ok) {
-      const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-      throw new Error(errorPayload?.error ?? 'Unable to save secrets')
-    }
-
-    const data = (await response.json()) as Record<SecretKey, boolean>
-    setStatus(data)
-    return data
+    const next = await apiRequest<Record<SecretKey, boolean>>(SECRETS_PATH, { method: 'POST', json: patch })
+    setQueryData<Record<SecretKey, boolean>>([SECRETS_PATH], next)
+    return next
   }, [])
 
   const setFieldValue = useCallback((key: SecretKey, value: string) => {

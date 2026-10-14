@@ -21,13 +21,13 @@ describe('useRoutes', () => {
     const { result } = renderHook(() => useRoutes())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/routes')
+    expect(fetchMock).toHaveBeenCalledWith('/api/routes', expect.anything())
     expect(result.current.routes).toHaveLength(1)
     expect(result.current.routes[0].name).toBe('Route A')
   })
 
   it('sets an error message when the fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useRoutes())
@@ -83,7 +83,7 @@ describe('useRoutes', () => {
   it('deleteRoute issues a DELETE request and refetches', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [{ id: '1', name: 'Route A', waypoints: [], created_at: '', updated_at: '' }] }) })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, status: 204 })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [] }) })
     vi.stubGlobal('fetch', fetchMock)
 

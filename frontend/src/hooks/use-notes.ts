@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { useCallback } from 'react'
+import { apiRequest, useApiQuery } from '@/lib/api-query'
 import type { ChecklistItem, ChecklistRun } from './use-checklist-run'
-import type { DocumentTag } from './use-documents'
+import { invalidateDocumentLists, type DocumentTag } from './use-documents'
 
 // Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Notes inbox's data
 // layer. Deliberately small next to use-documents.ts - Phase 2 needs list,
 // get-one, create and patch, nothing else (no folder browsing, no search,
 // no tag/embeddings plumbing; those either don't apply to the inbox view or
 // are already served by the Documents panel's own search reaching kind='note'
-// rows for free). Same idiom as use-documents.ts throughout: no react-query,
-// no shared store, one instance per caller, a plain fetch-and-throw-the-
-// server's-own-message write helper (AGENTS.md fallback policy).
+// rows for free). Reads go through useApiQuery and writes through apiRequest
+// (ADR 0173), which throws the server's own message (AGENTS.md fallback
+// policy).
 
 export type NoteType = 'contact' | 'quirk' | 'spec' | 'procedure' | 'recipe' | 'note'
 
@@ -102,93 +102,61 @@ export interface UseNotesOptions {
   tag?: string | null
 }
 
-// Every write goes through this: a non-2xx response throws with the
-// server's own message (AGENTS.md fallback policy - no invented "something
-// went wrong" standing in for a 400 empty-body, a 413 oversize body, or a
-// 409 sha collision's actual "note collides with existing document <id>").
-// Copied from use-documents.ts's own submitJSON rather than imported: it's
-// not exported there (kept private to that hook), and a two-line helper is
-// cheaper to duplicate than to thread a shared-module dependency between
-// two features that otherwise don't know about each other.
-async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
-  return (await response.json()) as T
-}
+const NOTES = '/api/notes'
+const NO_NOTES: NoteRecord[] = []
 
 export function useNotes(options: UseNotesOptions = {}) {
   const { unfiledOnly = false, type = null, tag = null } = options
 
-  const [notes, setNotes] = useState<NoteRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const params = new URLSearchParams()
+  if (unfiledOnly) params.set('filed', '0')
+  if (type) params.set('type', type)
+  if (tag) params.set('tag', tag)
+  const qs = params.toString()
 
-  // Same ordering guard as use-documents.ts's refresh()/search(): a
-  // caller-triggered refresh() (after a create/patch) can overlap an
-  // earlier refresh() still in flight (e.g. the mount fetch, or a filter
-  // prop changing mid-request). Without it, whichever fetch happens to
-  // resolve LAST wins even if it was the OLDER call, silently overwriting
-  // newer, more-correct state.
-  const refreshSeqRef = useRef(0)
+  const { data, error, isLoading, refetch } = useApiQuery<NoteRecord[]>({
+    queryKey: [NOTES, { unfiledOnly, type, tag }],
+    path: `${NOTES}${qs ? `?${qs}` : ''}`,
+    select: (raw: { notes?: NoteRecord[] }) => raw.notes ?? [],
+  })
 
-  const refresh = useCallback(async () => {
-    const seq = (refreshSeqRef.current += 1)
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (unfiledOnly) params.set('filed', '0')
-      if (type) params.set('type', type)
-      if (tag) params.set('tag', tag)
-      const qs = params.toString()
-      const res = await fetch(`${apiBaseUrl}/api/notes${qs ? `?${qs}` : ''}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { notes?: NoteRecord[] }
-
-      if (seq !== refreshSeqRef.current) return // superseded by a newer call - see comment above
-      setNotes(data.notes ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== refreshSeqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === refreshSeqRef.current) setLoading(false)
-    }
-  }, [unfiledOnly, type, tag])
-
-  useEffect(() => { void refresh() }, [refresh])
+  // Resolves once the fresh list has landed. refetch starts a new read, so one
+  // already in flight from before the write is superseded, not awaited.
+  const reload = useCallback(async () => {
+    await refetch()
+  }, [refetch])
 
   // Fetches one note directly by id, bypassing whatever the list currently
   // holds - the reader (notes-panel.tsx) needs this for a note reached via
   // a hc-note: link or a `/notes?note=` deep link, neither of which is
   // guaranteed to be in the current (possibly filtered) list at all.
   const getNote = useCallback(async (id: string) => {
-    return submitJSON<NoteDetail>(`${apiBaseUrl}/api/notes/${encodeURIComponent(id)}`, 'GET')
+    return apiRequest<NoteDetail>(`${NOTES}/${encodeURIComponent(id)}`)
   }, [])
 
   const createNote = useCallback(async (input: CreateNoteInput) => {
-    const created = await submitJSON<NoteDetail>(`${apiBaseUrl}/api/notes`, 'POST', input)
-    await refresh() // a fresh, unfiled note belongs at the top of the inbox immediately
+    const created = await apiRequest<NoteDetail>(NOTES, { method: 'POST', json: input })
+    // A note is a document: a fresh, unfiled note belongs at the top of the
+    // inbox immediately, and a filed one shows in its folder's listing.
+    invalidateDocumentLists({ counts: true })
+    await reload()
     return created
-  }, [refresh])
+  }, [reload])
 
   const patchNote = useCallback(async (id: string, patch: NotePatch) => {
-    const updated = await submitJSON<NoteDetail>(`${apiBaseUrl}/api/notes/${encodeURIComponent(id)}`, 'PATCH', patch)
-    await refresh() // a type override or a file-out both change what the inbox shows
+    const updated = await apiRequest<NoteDetail>(`${NOTES}/${encodeURIComponent(id)}`, { method: 'PATCH', json: patch })
+    // A type override or a file-out both change what the inbox shows, and a
+    // file-out moves the note between folders.
+    invalidateDocumentLists({ counts: true })
+    await reload()
     return updated
-  }, [refresh])
+  }, [reload])
 
   return {
-    notes,
-    loading,
-    error,
-    refresh,
+    notes: data ?? NO_NOTES,
+    loading: isLoading,
+    error: error?.message ?? null,
+    refresh: refetch,
 
     getNote,
     createNote,

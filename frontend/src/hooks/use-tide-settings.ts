@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export interface TideSettings {
   tideProvider: string
@@ -21,86 +22,71 @@ const defaultTideSettings: TideSettings = {
   tideAutoStation: false,
 }
 
+// The full settings document, of which tide settings are a slice under `ui`.
+interface SettingsDocument {
+  ui?: {
+    tide_provider?: unknown
+    tide_station_id?: unknown
+    tide_station_name?: unknown
+    tide_auto_station?: unknown
+  } & Record<string, unknown>
+}
+
+const SETTINGS_KEY = ['/api/settings'] as const
+const AUTO_STATION_REFRESH_MS = 30 * 60 * 1000
+
 export function useTideSettings() {
-  const [settings, setSettings] = useState<TideSettings>(defaultTideSettings)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
-  const fetchSettings = useCallback(async () => {
-    try {
-      setLoading(true)
-      const response = await fetch('/api/settings')
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
-      setSettings({
-        tideProvider: typeof data.ui?.tide_provider === 'string' ? data.ui.tide_provider : defaultTideSettings.tideProvider,
-        tideStationId: typeof data.ui?.tide_station_id === 'string' ? data.ui.tide_station_id : '',
-        tideStationName: typeof data.ui?.tide_station_name === 'string' ? data.ui.tide_station_name : '',
-        tideAutoStation: typeof data.ui?.tide_auto_station === 'boolean' ? data.ui.tide_auto_station : false,
-      })
-      setError(null)
-    } catch (err) {
-      console.error('Error fetching tide settings:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load tide settings')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void fetchSettings()
-  }, [fetchSettings])
+  const { data, isLoading, error: loadError, refetch } = useApiQuery<SettingsDocument>({
+    queryKey: SETTINGS_KEY,
+    path: '/api/settings',
+  })
+  const settings = useMemo<TideSettings>(
+    () => ({
+      tideProvider: typeof data?.ui?.tide_provider === 'string' ? data.ui.tide_provider : defaultTideSettings.tideProvider,
+      tideStationId: typeof data?.ui?.tide_station_id === 'string' ? data.ui.tide_station_id : '',
+      tideStationName: typeof data?.ui?.tide_station_name === 'string' ? data.ui.tide_station_name : '',
+      tideAutoStation: typeof data?.ui?.tide_auto_station === 'boolean' ? data.ui.tide_auto_station : false,
+    }),
+    [data],
+  )
 
   // When auto-update is on, re-fetch settings every 30 min so the UI picks up
-  // any station changes written by the backend's background auto-updater.
-  useEffect(() => {
-    if (!settings.tideAutoStation) return
-    const id = setInterval(() => void fetchSettings(), 30 * 60 * 1000)
-    return () => clearInterval(id)
-  }, [settings.tideAutoStation, fetchSettings])
+  // any station changes written by the backend's background auto-updater. The
+  // interval is a second reader of the same entry, since whether auto-update
+  // is on only shows once the first has loaded.
+  useApiQuery<SettingsDocument>({
+    queryKey: SETTINGS_KEY,
+    path: '/api/settings',
+    refetchInterval: settings.tideAutoStation ? AUTO_STATION_REFRESH_MS : undefined,
+  })
 
   const saveStation = useCallback(async (stationId: string, stationName: string) => {
     setSaving(true)
-    setError(null)
+    setSaveError(null)
     try {
-      const current = await fetch('/api/settings')
-      if (!current.ok) {
-        throw new Error(`HTTP error! status: ${current.status}`)
-      }
-      const data = await current.json()
-
-      const payload = {
-        ...data,
-        ui: {
-          ...data.ui,
-          tide_station_id: stationId,
-          tide_station_name: stationName,
-        },
-      }
-
-      const response = await fetch('/api/settings', {
+      const current = await apiRequest<SettingsDocument>('/api/settings')
+      await apiRequest<unknown>('/api/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        json: { ...current, ui: { ...current.ui, tide_station_id: stationId, tide_station_name: stationName } },
       })
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(errorPayload?.error ?? 'Unable to save tide station')
-      }
-
-      setSettings((previous) => ({ ...previous, tideStationId: stationId, tideStationName: stationName }))
+      // The saved document is the one just read plus the two fields, so the
+      // shared settings entry takes the same patch without a re-read.
+      setQueryData<SettingsDocument>(SETTINGS_KEY, (prev) => ({
+        ...prev,
+        ui: { ...prev?.ui, tide_station_id: stationId, tide_station_name: stationName },
+      }))
     } catch (err) {
       console.error('Error saving tide station:', err)
-      setError(err instanceof Error ? err.message : 'Failed to save tide station')
+      setSaveError(err instanceof Error ? err.message : 'Failed to save tide station')
       throw err
     } finally {
       setSaving(false)
     }
   }, [])
 
-  return { ...settings, loading, saving, error, refetch: fetchSettings, saveStation }
+  const error = saveError ?? loadError?.message ?? null
+  return { ...settings, loading: isLoading, saving, error, refetch, saveStation }
 }

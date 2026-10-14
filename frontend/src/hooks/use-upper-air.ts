@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import { useApiQuery } from '@/lib/api-query';
 
 /**
  * The 500mb outlook for one forecast day.
@@ -181,6 +182,41 @@ function mapOutlook(api: UpperAirOutlookApi | undefined): UpperAirOutlook {
   };
 }
 
+interface MappedUpperAir {
+  days: UpperAirDay[];
+  series: UpperAirSample[];
+  windowBand: UpperAirWindow;
+  provider: string | null;
+  updatedAt: string | null;
+  ttlSeconds: number | null;
+}
+
+function mapUpperAir(payload: UpperAirEnvelopeApi): MappedUpperAir {
+  const rawDays = Array.isArray(payload.days) ? payload.days : [];
+  return {
+    days: rawDays.map((day) => ({
+      dayKey: typeof day.day_key === 'string' ? day.day_key : '',
+      date: typeof day.date === 'string' ? day.date : '',
+      dayName: typeof day.day_name === 'string' ? day.day_name : '',
+      outlook: mapOutlook(day.outlook),
+    })),
+    series: mapSeries(payload.series),
+    windowBand: mapWindow(payload.window),
+    provider: typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null,
+    updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
+    ttlSeconds: typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null,
+  };
+}
+
+const EMPTY_UPPER_AIR: MappedUpperAir = {
+  days: [],
+  series: [],
+  windowBand: ABSENT_WINDOW,
+  provider: null,
+  updatedAt: null,
+  ttlSeconds: null,
+};
+
 /**
  * Upper air is optional: a boat with no upper-air plugin installed gets an
  * empty day list and a 200, not an error, because that is a normal
@@ -188,60 +224,27 @@ function mapOutlook(api: UpperAirOutlookApi | undefined): UpperAirOutlook {
  * sets `error`.
  */
 export function useUpperAir(refreshIntervalSeconds = 21600) {
-  const [days, setDays] = useState<UpperAirDay[]>([]);
-  const [series, setSeries] = useState<UpperAirSample[]>([]);
-  const [windowBand, setWindowBand] = useState<UpperAirWindow>(ABSENT_WINDOW);
-  const [provider, setProvider] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
-  const hasLoadedDataRef = useRef(false);
-
-  const fetchUpperAir = useCallback(async () => {
-    try {
-      if (!hasLoadedDataRef.current) {
-        setLoading(true);
-      }
-
-      const response = await fetch('/api/upper-air');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const payload = (await response.json()) as UpperAirEnvelopeApi;
-      const rawDays = Array.isArray(payload.days) ? payload.days : [];
-
-      setDays(
-        rawDays.map((day) => ({
-          dayKey: typeof day.day_key === 'string' ? day.day_key : '',
-          date: typeof day.date === 'string' ? day.date : '',
-          dayName: typeof day.day_name === 'string' ? day.day_name : '',
-          outlook: mapOutlook(day.outlook),
-        })),
-      );
-      setSeries(mapSeries(payload.series));
-      setWindowBand(mapWindow(payload.window));
-      setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
-      setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
-      setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
-      if (rawDays.length > 0) {
-        hasLoadedDataRef.current = true;
-      }
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching upper-air forecast:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load upper-air forecast');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data, error, isLoading, refetch } = useApiQuery<MappedUpperAir>({
+    queryKey: ['/api/upper-air'],
+    path: '/api/upper-air',
+    refetchInterval: refreshIntervalSeconds * 1000,
+    select: mapUpperAir,
+  });
 
   useEffect(() => {
-    fetchUpperAir();
-    const interval = setInterval(fetchUpperAir, refreshIntervalSeconds * 1000);
-    return () => clearInterval(interval);
-  }, [fetchUpperAir, refreshIntervalSeconds]);
+    if (error) console.error('Error fetching upper-air forecast:', error);
+  }, [error]);
 
-  return { days, series, windowBand, provider, loading, error, updatedAt, ttlSeconds, refetch: fetchUpperAir };
+  const { days, series, windowBand, provider, updatedAt, ttlSeconds } = data ?? EMPTY_UPPER_AIR;
+  return {
+    days,
+    series,
+    windowBand,
+    provider,
+    loading: isLoading,
+    error: error ? error.message || 'Failed to load upper-air forecast' : null,
+    updatedAt,
+    ttlSeconds,
+    refetch,
+  };
 }

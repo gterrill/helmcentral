@@ -435,7 +435,6 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
         onOpenChange={setMoveOpen}
         label={documentDisplayName(document)}
         onPick={(destination) => { void submitMove(destination) }}
-        onFolderCreated={() => {}}
       />
       <DetailsLayout aside={aside}>
         <FormSection title="Details">

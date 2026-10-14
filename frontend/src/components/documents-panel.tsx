@@ -62,7 +62,6 @@ import {
   type RowAction,
   type TreeNode,
 } from '@/components/patterns'
-import { apiBaseUrl } from '@/config/api'
 import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import {
   useDocuments,
@@ -75,6 +74,7 @@ import { useDocumentFolderTree, type DocumentFolderTreeNode } from '@/hooks/use-
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
+import { apiRequest } from '@/lib/api-query'
 import { downloadDocument } from '@/lib/document-download'
 import { documentDisplayName, documentFailureMessage, formatAdded, formatBytes, formatDocumentTime } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
@@ -363,10 +363,9 @@ export function DocumentsPanel({
   const manualsList = useManuals(null)
 
   // ADR 0170: the whole folder hierarchy for the pane beside the listing.
-  // Refreshed after anything that changes a folder or a per-folder count.
+  // Every write that changes it, in any hook, invalidates it through the
+  // shared store, so nothing here refreshes it by hand.
   const folderTree = useDocumentFolderTree()
-  const { refresh: refreshFolderTree } = folderTree
-  const treeChanged = useCallback(() => { void refreshFolderTree() }, [refreshFolderTree])
   // The tree is the one source of truth for which folders are manuals;
   // useManuals above is kept only for flag/clear.
   const isCurrentFolderManual = folderId !== null && folderTree.folders.some((f) => f.id === folderId && f.is_manual)
@@ -595,9 +594,9 @@ export function DocumentsPanel({
     ))
     if (missing.length === 0) return
     for (const id of missing) {
-      void fetch(`${apiBaseUrl}/api/document-folders?parent=${encodeURIComponent(id)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { path?: DocumentFolder[] } | null) => {
+      void apiRequest<{ path?: DocumentFolder[] }>(`/api/document-folders?parent=${encodeURIComponent(id)}`)
+        .catch(() => null)
+        .then((data) => {
           const label = data?.path && data.path.length > 0 ? data.path.map((f) => f.name).join(' / ') : id
           setFolderLabels((prev) => ({ ...prev, [id]: label }))
         })
@@ -641,7 +640,6 @@ export function DocumentsPanel({
       setNewFolderOpen(false)
       setNewFolderName('')
       setNewFolderIsManual(false)
-      treeChanged()
     })
   }
 
@@ -655,7 +653,6 @@ export function DocumentsPanel({
     await runAction(async () => {
       if (renameTarget.kind === 'folder') {
         await documents.renameFolder(renameTarget.id, value)
-        treeChanged()
       } else {
         await documents.patchDocument(renameTarget.id, { title: value })
       }
@@ -675,7 +672,6 @@ export function DocumentsPanel({
       }
       setMoveTarget(null)
       setSelectedIds(new Set())
-      treeChanged()
       // A moved id may have been an unfiled note draining out of the inbox
       // (File… on an Unfiled notes row, revision "one panel, not three") -
       // always refreshed rather than tracked per-id, the same "simpler over
@@ -728,7 +724,6 @@ export function DocumentsPanel({
         }
       }
       setDeleteTarget(null)
-      treeChanged()
       void unfiled.refresh() // a deleted document may have been an unfiled note
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : String(err))
@@ -778,12 +773,12 @@ export function DocumentsPanel({
   }
 
   // Once a staged upload reaches a terminal, document-backed state, its row
-  // exists in whatever folder it was uploaded into - refreshing here is
-  // what makes that row actually appear (nothing else is watching
-  // uploads.items), and the chip is then redundant with the table row it
-  // just produced, so it's dismissed rather than left duplicated beside it.
-  // handledUploadKeysRef dedupes so this doesn't refresh/remove repeatedly
-  // for the same item across re-renders before its chip is actually gone.
+  // exists in whatever folder it was uploaded into (useDocumentUploads
+  // refreshed the listing and the folder counts when the upload landed), so
+  // the chip is redundant with the table row it produced and is dismissed
+  // rather than left duplicated beside it. handledUploadKeysRef dedupes so
+  // this doesn't remove repeatedly for the same item across re-renders
+  // before its chip is actually gone.
   const handledUploadKeysRef = useRef(new Set<string>())
   useEffect(() => {
     for (const item of uploads.items) {
@@ -791,11 +786,9 @@ export function DocumentsPanel({
       if (item.status !== 'indexed' && item.status !== 'failed') continue
       if (handledUploadKeysRef.current.has(item.key)) continue
       handledUploadKeysRef.current.add(item.key)
-      void documents.refresh()
-      treeChanged()
       uploads.remove(item.key)
     }
-  }, [uploads.items, uploads, documents, treeChanged])
+  }, [uploads.items, uploads])
 
   // No note-type facet here. One was built and removed: a library folder
   // holds mostly kind='file' rows (PDFs, photos, the builder's handbook),
@@ -993,9 +986,9 @@ export function DocumentsPanel({
     // Promote/demote is a folder's kind, not a destructive act, so it is a
     // direct toggle like Rename. Only a top-level folder can become a manual.
     ...(f.is_manual
-      ? [{ label: 'Stop treating as manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await clearManual(f.id); treeChanged() }) } }]
+      ? [{ label: 'Stop treating as manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await clearManual(f.id) }) } }]
       : f.parent_id === null
-        ? [{ label: 'Treat as a manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await flagManual(f.id); treeChanged() }) } }]
+        ? [{ label: 'Treat as a manual', icon: <Library className="h-4 w-4" aria-hidden="true" />, onSelect: () => { void runAction(async () => { await flagManual(f.id) }) } }]
         : []),
     { label: 'Delete', icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, onSelect: () => setDeleteTarget({ kind: 'folder', id: f.id, name: f.name, parentId: f.parent_id }) },
   ]
@@ -1024,7 +1017,7 @@ export function DocumentsPanel({
     ...buildTreeNodes(null),
     { id: UNFILED_NOTES_NODE, label: 'Unfiled notes', icon: <Inbox className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />, count: unfiledCount, separatorBefore: true },
   ]
-  }, [folderTree.folders, unfiledCount, runAction, flagManual, clearManual, treeChanged, setDeleteTarget])
+  }, [folderTree.folders, unfiledCount, runAction, flagManual, clearManual, setDeleteTarget])
   // A folder inside a manual is not a node: the manual itself stays lit.
   const selectedNodeId = useMemo(() => {
     if (view === 'unfiled') return UNFILED_NOTES_NODE
@@ -1053,7 +1046,6 @@ export function DocumentsPanel({
       if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string')) return
       await documents.moveDocuments(ids, nodeId === ALL_DOCUMENTS_NODE ? null : nodeId)
       setSelectedIds(new Set())
-      treeChanged()
       void unfiled.refresh()
     })
   }
@@ -1183,7 +1175,6 @@ export function DocumentsPanel({
               folderId={folderId}
               sectionId={sectionId}
               onSectionChange={setSectionId}
-              onDemoted={() => { void manualsList.refreshManuals(); treeChanged() }}
               onNavigateDocument={setViewerId}
               mateAvailable={mateAvailable}
               onAskMate={onAskMate}
@@ -1439,7 +1430,6 @@ export function DocumentsPanel({
         onOpenChange={(open) => { if (!open) setMoveTarget(null) }}
         label={moveTarget?.label ?? ''}
         onPick={(destination) => { void submitMove(destination) }}
-        onFolderCreated={() => { void documents.refresh(); treeChanged() }}
       />
 
       {/* ── Delete confirmation ────────────────────────────────────── */}
@@ -1507,19 +1497,15 @@ export function DocumentsPanel({
           viewer - setViewerId already fetches a document that isn't in
           whatever's currently loaded (see its own effect's comment), which
           covers a brand new unfiled note without this panel needing a
-          second lookup path. The sheet's own useNotes() instance is
-          separate from `unfiled` above (no shared cache between hook
-          instances - use-notes.ts's own doc comment), so a plain
-          setViewerId here would open the note without the Unfiled notes
-          count or list ever learning it exists; unfiled.refresh() closes
-          that gap now that both live in the same component. */}
+          second lookup path. The sheet's createNote invalidates the shared
+          notes list, so the Unfiled notes count and list pick it up. */}
       {captureHasOpenedRef.current && (
         <Suspense fallback={null}>
           <NoteCaptureSheet
             open={captureOpen}
             onOpenChange={setCaptureOpen}
             initialType={captureType}
-            onCaptured={(id) => { setViewerId(id); void unfiled.refresh(); treeChanged() }}
+            onCaptured={(id) => { setViewerId(id) }}
           />
         </Suspense>
       )}

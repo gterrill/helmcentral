@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 
+import { apiRequest, useApiQuery } from '@/lib/api-query'
 import type { AlarmState } from '@/hooks/use-alarms'
 
 export const ALARM_OPERATORS = ['above', 'below', 'equal', 'notEqual', 'stale'] as const
@@ -53,49 +54,38 @@ export function newAlarmRuleDraft(): AlarmRuleDraft {
   }
 }
 
+const RULES_PATH = '/api/alarm-rules'
+const NO_RULES: AlarmRule[] = []
+
 export function useAlarmRules() {
-  const [rules, setRules] = useState<AlarmRule[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, error, refetch } = useApiQuery<AlarmRule[]>({
+    queryKey: [RULES_PATH],
+    path: RULES_PATH,
+    select: (payload: { rules?: AlarmRule[] }) => (Array.isArray(payload.rules) ? payload.rules : NO_RULES),
+  })
 
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch('/api/alarm-rules')
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const payload = (await response.json()) as { rules?: AlarmRule[] }
-      setRules(Array.isArray(payload.rules) ? payload.rules : [])
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // The backend validates and is the authority; its message surfaces verbatim
+  // rather than a friendlier guess that might not be true.
+  const submit = useCallback(async (method: string, url: string, json?: unknown) => {
+    await apiRequest(url, { method, json })
+    await refetch()
+  }, [refetch])
 
-  useEffect(() => { void refresh() }, [refresh])
-
-  // The backend validates and is the authority; surface its message verbatim
-  // rather than guessing at a friendlier one that might not be true.
-  const submit = useCallback(async (method: string, url: string, body?: unknown) => {
-    const response = await fetch(url, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      throw new Error(payload.error ?? `HTTP ${response.status}`)
-    }
-    await refresh()
-  }, [refresh])
-
-  const createRule = useCallback((draft: AlarmRuleDraft) => submit('POST', '/api/alarm-rules', draft), [submit])
+  const createRule = useCallback((draft: AlarmRuleDraft) => submit('POST', RULES_PATH, draft), [submit])
   const updateRule = useCallback((id: string, draft: AlarmRuleDraft) =>
-    submit('PUT', `/api/alarm-rules/${encodeURIComponent(id)}`, draft), [submit])
+    submit('PUT', `${RULES_PATH}/${encodeURIComponent(id)}`, draft), [submit])
   const deleteRule = useCallback((id: string) =>
-    submit('DELETE', `/api/alarm-rules/${encodeURIComponent(id)}`), [submit])
+    submit('DELETE', `${RULES_PATH}/${encodeURIComponent(id)}`), [submit])
 
-  return { rules, loading, error, refresh, createRule, updateRule, deleteRule }
+  return {
+    rules: data ?? NO_RULES,
+    loading: isLoading,
+    error: error?.message ?? null,
+    refresh: refetch,
+    createRule,
+    updateRule,
+    deleteRule,
+  }
 }
 
 export interface AlarmLogEntry {
@@ -112,24 +102,17 @@ export interface AlarmLogEntry {
   cleared_at?: string
 }
 
+const NO_ENTRIES: AlarmLogEntry[] = []
+
 export function useAlarmLog(enabled: boolean) {
-  const [entries, setEntries] = useState<AlarmLogEntry[]>([])
+  // History is a nice-to-have; a failure here must not blank the page, so the
+  // error is not surfaced.
+  const { data, refetch } = useApiQuery<AlarmLogEntry[]>({
+    queryKey: ['/api/alarms/log'],
+    path: '/api/alarms/log',
+    enabled,
+    select: (payload: { entries?: AlarmLogEntry[] }) => (Array.isArray(payload.entries) ? payload.entries : NO_ENTRIES),
+  })
 
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch('/api/alarms/log')
-      if (!response.ok) return
-      const payload = (await response.json()) as { entries?: AlarmLogEntry[] }
-      setEntries(Array.isArray(payload.entries) ? payload.entries : [])
-    } catch {
-      // History is a nice-to-have; a failure here must not blank the page.
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!enabled) return
-    void refresh()
-  }, [enabled, refresh])
-
-  return { entries, refresh }
+  return { entries: data ?? NO_ENTRIES, refresh: refetch }
 }

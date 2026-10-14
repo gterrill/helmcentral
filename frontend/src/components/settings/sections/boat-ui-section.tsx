@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { useSettingsFormContext } from '@/components/settings/settings-form-context'
 import type { RegularSettingsDraft, VesselDraft, VesselEngineRowDraft } from '@/components/settings/settings-draft'
-import { readErrorMessage } from '@/lib/api-error'
+import { apiRequest } from '@/lib/api-query'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
 import { useVesselCandidates } from '@/hooks/use-vessel-candidates'
 import { newGaugeGroupWidgetId, type GaugeWidgetConfig } from '@/lib/dashboard-widgets'
@@ -167,12 +167,7 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     // both tiles, rather than the second overwrite the first's.
     let current: DashboardPage
     try {
-      const res = await fetch(`/api/dashboard-pages/${targetId}`)
-      if (!res.ok) {
-        toast.error('Could not apply gauge zones', { description: await readErrorMessage(res) })
-        return
-      }
-      current = (await res.json()) as DashboardPage
+      current = await apiRequest<DashboardPage>(`/api/dashboard-pages/${targetId}`)
     } catch (err) {
       toast.error('Could not apply gauge zones', { description: err instanceof Error ? err.message : 'Request failed' })
       return

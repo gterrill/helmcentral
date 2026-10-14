@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo } from 'react';
+import { useApiQuery } from '@/lib/api-query';
 
 import type { NowcastPoint } from '@/lib/nowcast';
 
@@ -261,149 +262,170 @@ function mapNextHour(raw: WeatherNextHourApi | undefined): WeatherNextHour | nul
   };
 }
 
+interface MappedForecast {
+  forecast: WeatherForecastDay[];
+  hourlyToday: WeatherHourlyEntry[];
+  nextHour: WeatherNextHour | null;
+  summary: string | null;
+  provider: string | null;
+  isCached: boolean;
+  updatedAt: string | null;
+  ttlSeconds: number | null;
+}
+
+function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi): MappedForecast {
+  const rawDays = Array.isArray(payload) ? payload : payload.days;
+  if (!Array.isArray(rawDays)) {
+    throw new Error('Unexpected weather forecast payload format');
+  }
+
+  const mappedForecast = rawDays
+    .slice(0, 10)
+    .map((day, idx): WeatherForecastDay => {
+      const fallbackDate = new Date();
+      fallbackDate.setDate(fallbackDate.getDate() + idx);
+
+      const windSpeed = typeof day.wind_speed_kts === 'number' ? day.wind_speed_kts : -1;
+      const windGust = typeof day.wind_gust_kts === 'number' ? day.wind_gust_kts : windSpeed;
+
+      return {
+        dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
+        date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
+        condition: day.condition || 'Unknown',
+        high: typeof day.high_temp_f === 'number' ? day.high_temp_f : -1,
+        low: typeof day.low_temp_f === 'number' ? day.low_temp_f : -1,
+        windSpeed,
+        windGust,
+        windDirection: day.wind_direction || '—',
+        windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
+        precipitationSummary: typeof day.precipitation_summary === 'string' && day.precipitation_summary !== '' ? day.precipitation_summary : null,
+        precipitation: sentinelValueOrNull(day.precipitation_pct),
+        humidityPct: sentinelValueOrNull(day.humidity_pct),
+        visibilityNm: sentinelValueOrNull(day.visibility_nm),
+        sunriseTime: typeof day.sunrise_time === 'string' && day.sunrise_time !== '' ? day.sunrise_time : null,
+        sunsetTime: typeof day.sunset_time === 'string' && day.sunset_time !== '' ? day.sunset_time : null,
+        moonPhase: typeof day.moon_phase === 'string' && day.moon_phase !== '' ? day.moon_phase : null,
+        hourlyWind: Array.isArray(day.hourly_wind)
+          ? day.hourly_wind.map((entry) => ({
+              label: entry.label || '—',
+              hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
+              windSpeed: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
+              windGust: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
+              windDirection: entry.wind_direction || '—',
+              windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
+            }))
+          : [],
+        hourlyPrecip: Array.isArray(day.hourly_precip)
+          ? day.hourly_precip.map((entry) => ({
+              label: entry.label || '—',
+              hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
+              precipChancePct: sentinelValueOrNull(entry.precipitation_chance_pct),
+              precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
+            }))
+          : [],
+        hourlyUV: Array.isArray(day.hourly_uv)
+          ? day.hourly_uv.map((entry) => ({
+              label: entry.label || '—',
+              uvIndex: typeof entry.uv_index === 'number' ? entry.uv_index : 0,
+            }))
+          : [],
+        hourlyCloud: Array.isArray(day.hourly_cloud)
+          ? day.hourly_cloud.map((entry) => ({
+              label: entry.label || '—',
+              hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
+              condition: entry.condition || 'Unknown',
+              temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
+              isDaylight: Boolean(entry.is_daylight),
+              humidityPct: sentinelValueOrNull(entry.humidity_pct),
+              visibilityNm: sentinelValueOrNull(entry.visibility_nm),
+            }))
+          : [],
+      };
+    });
+
+  if (Array.isArray(payload)) {
+    return {
+      forecast: mappedForecast,
+      hourlyToday: [],
+      nextHour: null,
+      summary: null,
+      provider: null,
+      isCached: false,
+      updatedAt: null,
+      ttlSeconds: null,
+    };
+  }
+  return {
+    forecast: mappedForecast,
+    hourlyToday: Array.isArray(payload.hourly_today)
+      ? payload.hourly_today.map((entry) => ({
+          label: entry.label || '—',
+          condition: entry.condition || 'Unknown',
+          temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
+          windSpeedKts: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
+          windGustKts: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
+          windDirection: entry.wind_direction || '—',
+          windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
+          kind: entry.kind || 'forecast',
+          isDaylight: Boolean(entry.is_daylight),
+        }))
+      : [],
+    nextHour: mapNextHour(payload.next_hour),
+    summary: typeof payload.summary === 'string' ? payload.summary : null,
+    provider: typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null,
+    isCached: Boolean(payload.cached),
+    updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
+    ttlSeconds: typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null,
+  };
+}
+
+const EMPTY_FORECAST: MappedForecast = {
+  forecast: [],
+  hourlyToday: [],
+  nextHour: null,
+  summary: null,
+  provider: null,
+  isCached: false,
+  updatedAt: null,
+  ttlSeconds: null,
+};
+
 export function useWeatherForecast(refreshIntervalSeconds = 3600) {
-  const [forecast, setForecast] = useState<WeatherForecastDay[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [hourlyToday, setHourlyToday] = useState<WeatherHourlyEntry[]>([]);
-  const [nextHour, setNextHour] = useState<WeatherNextHour | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [provider, setProvider] = useState<string | null>(null);
-  const [isCached, setIsCached] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
-  const hasLoadedDataRef = useRef(false);
+  const query = useApiQuery<WeatherForecastDayApi[] | WeatherForecastEnvelopeApi>({
+    queryKey: ['/api/weather-forecast'],
+    path: '/api/weather-forecast',
+    refetchInterval: refreshIntervalSeconds * 1000,
+  });
 
-  const fetchForecast = useCallback(async () => {
-      try {
-        if (!hasLoadedDataRef.current) {
-          setLoading(true);
-        }
+  // A payload of the wrong shape is reported like a failed request, so the
+  // mapping runs here where it can be caught rather than inside select.
+  const mapped = useMemo(() => {
+    if (query.data === undefined) return { value: EMPTY_FORECAST, error: null as Error | null };
+    try {
+      return { value: mapForecastPayload(query.data), error: null as Error | null };
+    } catch (err) {
+      return { value: EMPTY_FORECAST, error: err instanceof Error ? err : new Error(String(err)) };
+    }
+  }, [query.data]);
 
-        const response = await fetch('/api/weather-forecast');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const payload = (await response.json()) as WeatherForecastDayApi[] | WeatherForecastEnvelopeApi;
-        const rawDays = Array.isArray(payload) ? payload : payload.days;
-        if (!Array.isArray(rawDays)) {
-          throw new Error('Unexpected weather forecast payload format');
-        }
-
-        const mappedForecast = rawDays
-          .slice(0, 10)
-          .map((day, idx): WeatherForecastDay => {
-            const fallbackDate = new Date();
-            fallbackDate.setDate(fallbackDate.getDate() + idx);
-
-            const windSpeed = typeof day.wind_speed_kts === 'number' ? day.wind_speed_kts : -1;
-            const windGust = typeof day.wind_gust_kts === 'number' ? day.wind_gust_kts : windSpeed;
-
-            return {
-              dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
-              date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-              dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
-              condition: day.condition || 'Unknown',
-              high: typeof day.high_temp_f === 'number' ? day.high_temp_f : -1,
-              low: typeof day.low_temp_f === 'number' ? day.low_temp_f : -1,
-              windSpeed,
-              windGust,
-              windDirection: day.wind_direction || '—',
-              windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
-              precipitationSummary: typeof day.precipitation_summary === 'string' && day.precipitation_summary !== '' ? day.precipitation_summary : null,
-              precipitation: sentinelValueOrNull(day.precipitation_pct),
-              humidityPct: sentinelValueOrNull(day.humidity_pct),
-              visibilityNm: sentinelValueOrNull(day.visibility_nm),
-              sunriseTime: typeof day.sunrise_time === 'string' && day.sunrise_time !== '' ? day.sunrise_time : null,
-              sunsetTime: typeof day.sunset_time === 'string' && day.sunset_time !== '' ? day.sunset_time : null,
-              moonPhase: typeof day.moon_phase === 'string' && day.moon_phase !== '' ? day.moon_phase : null,
-              hourlyWind: Array.isArray(day.hourly_wind)
-                ? day.hourly_wind.map((entry) => ({
-                    label: entry.label || '—',
-                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                    windSpeed: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
-                    windGust: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
-                    windDirection: entry.wind_direction || '—',
-                    windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
-                  }))
-                : [],
-              hourlyPrecip: Array.isArray(day.hourly_precip)
-                ? day.hourly_precip.map((entry) => ({
-                    label: entry.label || '—',
-                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                    precipChancePct: sentinelValueOrNull(entry.precipitation_chance_pct),
-                    precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
-                  }))
-                : [],
-              hourlyUV: Array.isArray(day.hourly_uv)
-                ? day.hourly_uv.map((entry) => ({
-                    label: entry.label || '—',
-                    uvIndex: typeof entry.uv_index === 'number' ? entry.uv_index : 0,
-                  }))
-                : [],
-              hourlyCloud: Array.isArray(day.hourly_cloud)
-                ? day.hourly_cloud.map((entry) => ({
-                    label: entry.label || '—',
-                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                    condition: entry.condition || 'Unknown',
-                    temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
-                    isDaylight: Boolean(entry.is_daylight),
-                    humidityPct: sentinelValueOrNull(entry.humidity_pct),
-                    visibilityNm: sentinelValueOrNull(entry.visibility_nm),
-                  }))
-                : [],
-            };
-          });
-
-        if (mappedForecast.length > 0) {
-          hasLoadedDataRef.current = true;
-        }
-
-        setForecast(mappedForecast);
-        if (!Array.isArray(payload)) {
-          setHourlyToday(Array.isArray(payload.hourly_today)
-            ? payload.hourly_today.map((entry) => ({
-                label: entry.label || '—',
-                condition: entry.condition || 'Unknown',
-                temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
-                windSpeedKts: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
-                windGustKts: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
-                windDirection: entry.wind_direction || '—',
-                windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
-                kind: entry.kind || 'forecast',
-                isDaylight: Boolean(entry.is_daylight),
-              }))
-            : []);
-          setNextHour(mapNextHour(payload.next_hour));
-          setSummary(typeof payload.summary === 'string' ? payload.summary : null);
-          setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
-          setIsCached(Boolean(payload.cached));
-          setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
-          setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
-        } else {
-          setHourlyToday([]);
-          setNextHour(null);
-          setSummary(null);
-          setProvider(null);
-          setIsCached(false);
-          setUpdatedAt(null);
-          setTtlSeconds(null);
-        }
-        setError(null);
-      } catch (error) {
-        console.error('Error fetching weather forecast:', error);
-        setError(error instanceof Error ? error.message : 'Failed to load forecast data');
-      } finally {
-        setLoading(false);
-      }
-    }, []);
-
+  const failure = query.error ?? mapped.error;
   useEffect(() => {
-    fetchForecast();
-    const interval = setInterval(fetchForecast, refreshIntervalSeconds * 1000);
-    return () => clearInterval(interval);
-  }, [fetchForecast, refreshIntervalSeconds]);
+    if (failure) console.error('Error fetching weather forecast:', failure);
+  }, [failure]);
 
-  return { forecast, hourlyToday, nextHour, summary, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
+  const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
+  return {
+    forecast,
+    hourlyToday,
+    nextHour,
+    summary,
+    provider,
+    loading: query.isLoading,
+    error: failure ? failure.message || 'Failed to load forecast data' : null,
+    isCached,
+    updatedAt,
+    ttlSeconds,
+    refetch: query.refetch,
+  };
 }

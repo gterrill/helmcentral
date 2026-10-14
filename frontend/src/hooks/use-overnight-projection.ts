@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-
+import { useApiQuery } from '@/lib/api-query'
 import { parseOvernightProjection, type OvernightProjection } from '@/lib/soc-projection'
 
 /**
@@ -13,61 +12,16 @@ export function useOvernightProjection(refreshIntervalSeconds = 900): {
   projection: OvernightProjection | null
   error: string | null
 } {
-  const [projection, setProjection] = useState<OvernightProjection | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { data, error } = useApiQuery<OvernightProjection | null>({
+    queryKey: ['/api/electrical/overnight'],
+    path: '/api/electrical/overnight',
+    refetchInterval: refreshIntervalSeconds * 1000,
+    select: parseOvernightProjection,
+  })
 
-  useEffect(() => {
-    let cancelled = false
-
-    const fetchOvernight = async () => {
-      try {
-        const response = await fetch('/api/electrical/overnight')
-
-        if (!response.ok) {
-          let message = `HTTP ${response.status}`
-          try {
-            const body = await response.json()
-            if (body && typeof body.error === 'string') {
-              message = body.error
-            }
-          } catch {
-            // Body wasn't JSON (or had no error field); the HTTP status
-            // message above already says something true.
-          }
-          if (!cancelled) {
-            setProjection(null)
-            setError(message)
-          }
-          return
-        }
-
-        const body = await response.json()
-        const parsed = parseOvernightProjection(body)
-        if (cancelled) return
-
-        if (parsed === null) {
-          setProjection(null)
-          setError('unexpected overnight payload')
-          return
-        }
-
-        setProjection(parsed)
-        setError(null)
-      } catch (err) {
-        if (!cancelled) {
-          setProjection(null)
-          setError(err instanceof Error ? err.message : 'unexpected overnight payload')
-        }
-      }
-    }
-
-    fetchOvernight()
-    const interval = setInterval(fetchOvernight, refreshIntervalSeconds * 1000)
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [refreshIntervalSeconds])
-
-  return { projection, error }
+  // A failed refresh drops the projection instead of showing the last one,
+  // so the footer never carries a dawn figure the server just refused.
+  if (error) return { projection: null, error: error.message }
+  if (data === null) return { projection: null, error: 'unexpected overnight payload' }
+  return { projection: data ?? null, error: null }
 }

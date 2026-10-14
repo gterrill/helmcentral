@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
-import { applyAssistantProposal, dismissAssistantProposal, ProposalActionError } from '@/lib/assistant-proposal-actions'
+import { applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
 
 interface AssistantProposalCardProps {
@@ -49,7 +49,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         // carries its reason; a dismissed proposal (dismissed in another tab)
         // shows as dismissed. The thread holds the same, so a reload agrees.
         if (kind === 'apply' && err instanceof ProposalActionError && err.status === 409) {
-          if (err.proposalStatus === 'dismissed') {
+          if (refusedProposalStatus(err) === 'dismissed') {
             onChange({ ...proposal, status: 'dismissed' })
           } else {
             onChange({ ...proposal, status: 'stale', staleReason: message })

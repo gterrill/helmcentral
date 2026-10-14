@@ -39,7 +39,6 @@ import {
   BLANK_DRAFT,
   EQUIPMENT_SYSTEMS,
   EQUIPMENT_SYSTEM_LABELS,
-  InventoryValidationError,
   createEquipment,
   deleteEquipmentPhoto,
   setEquipmentPhotoOrder,
@@ -51,6 +50,7 @@ import {
   type EquipmentSystem,
   type InventoryFieldError,
 } from '@/hooks/use-inventory'
+import { ApiError } from '@/lib/api-query'
 import { documentIsImage, documentTypeBadge, formatDocumentTime } from '@/lib/document-display'
 import { documentContentUrl, downloadDocument } from '@/lib/document-download'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
@@ -784,7 +784,9 @@ export function EquipmentEditor(
         setPendingRemoves([])
       }
     } catch (err) {
-      if (err instanceof InventoryValidationError) setFieldErrors(err.fields)
+      if (err instanceof ApiError && err.fieldErrors) {
+        setFieldErrors(Object.entries(err.fieldErrors).map(([field, message]) => ({ field, message })))
+      }
       throw err
     }
   }, [id, draft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])

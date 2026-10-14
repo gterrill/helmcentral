@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest } from '@/lib/api-query'
 
 // Plan "Notes and the Boat's Manual" §3/§4, ADR 0118: the checklist
 // runner's data layer, the same small "no react-query, one instance per
@@ -50,28 +50,6 @@ export interface ChecklistRun {
   checked_count: number
 }
 
-// Copied from use-notes.ts's own submitJSON rather than imported/shared,
-// for the same reason that file gives for not importing use-documents.ts's
-// copy: it isn't exported there, and a small helper is cheaper to
-// duplicate than to introduce a shared module between features that
-// otherwise don't know about each other. The one difference from both:
-// DELETE .../checklist-runs/:runId answers 204 with no body
-// (abandonChecklistRunHandler, checklist_runs_handlers.go), which a bare
-// `response.json()` would throw on.
-async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
-}
-
 /**
  * Starts (or resumes - plan §3's "POST on a note that already has an
  * active run returns 200 {run, resumed:true}") a checklist run for noteId
@@ -95,9 +73,11 @@ export function useChecklistRun(noteId: string) {
   useEffect(() => {
     const seq = (seqRef.current += 1)
     setLoading(true)
-    submitJSON<{ run: ChecklistRun; resumed: boolean }>(
-      `${apiBaseUrl}/api/notes/${encodeURIComponent(noteId)}/checklist-runs`,
-      'POST',
+    // A POST that starts or resumes a run, not a read, so it stays out of
+    // useApiQuery and keeps its own ordering guard.
+    apiRequest<{ run: ChecklistRun; resumed: boolean }>(
+      `/api/notes/${encodeURIComponent(noteId)}/checklist-runs`,
+      { method: 'POST' },
     )
       .then((res) => {
         if (seq !== seqRef.current) return
@@ -116,26 +96,25 @@ export function useChecklistRun(noteId: string) {
 
   const tick = useCallback(async (itemKey: string, occurrence: number, checked: boolean) => {
     if (!run) return
-    const res = await submitJSON<{ run: ChecklistRun }>(
-      `${apiBaseUrl}/api/checklist-runs/${encodeURIComponent(run.id)}/items`,
-      'PATCH',
-      { item_key: itemKey, occurrence, checked },
+    const res = await apiRequest<{ run: ChecklistRun }>(
+      `/api/checklist-runs/${encodeURIComponent(run.id)}/items`,
+      { method: 'PATCH', json: { item_key: itemKey, occurrence, checked } },
     )
     setRun(res.run)
   }, [run])
 
   const complete = useCallback(async () => {
     if (!run) return
-    const res = await submitJSON<{ run: ChecklistRun }>(
-      `${apiBaseUrl}/api/checklist-runs/${encodeURIComponent(run.id)}/complete`,
-      'POST',
+    const res = await apiRequest<{ run: ChecklistRun }>(
+      `/api/checklist-runs/${encodeURIComponent(run.id)}/complete`,
+      { method: 'POST' },
     )
     setRun(res.run)
   }, [run])
 
   const abandon = useCallback(async () => {
     if (!run) return
-    await submitJSON<void>(`${apiBaseUrl}/api/checklist-runs/${encodeURIComponent(run.id)}`, 'DELETE')
+    await apiRequest<void>(`/api/checklist-runs/${encodeURIComponent(run.id)}`, { method: 'DELETE' })
   }, [run])
 
   return { run, resumed, loading, error, tick, complete, abandon }

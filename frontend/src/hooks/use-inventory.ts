@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { readErrorMessage } from '@/lib/api-error'
+import { ApiError, apiRequest, fetchQuery, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
-// its zones/bins. Same idiom as use-documents.ts/use-manuals.ts throughout:
-// no react-query, no shared store, one instance per caller, a plain
-// fetch-and-throw-the-server's-own-message write helper (AGENTS.md fallback
+// its zones/bins. Reads go through useApiQuery and writes through apiRequest
+// (ADR 0173), which throws the server's own message (AGENTS.md fallback
 // policy). Split into three hooks rather than one, mirroring how
 // use-documents.ts splits useDocuments(folderId) (a listing, parametrised by
 // the caller-owned filter) from useDocument(id) (one record, parametrised by
@@ -234,368 +233,169 @@ export interface EquipmentFilter {
 }
 
 /** One `{field, message}` entry from a 4xx validation failure
- * (backend/inventory_handlers.go's validateEquipmentInput). */
+ * (backend/inventory_handlers.go's validateEquipmentInput). A write that the
+ * server rejects per field throws ApiError with these in `fieldErrors`. */
 export interface InventoryFieldError {
   field: string
   message: string
 }
 
-// Thrown by submitJSON below when the server responded with a structured
-// `{errors: [...]}` validation body rather than a single `{error}` string -
-// distinct from a plain Error so a caller that wants to place each message
-// next to its own field (EquipmentEditor) can, while a caller that just
-// wants one string to show (LocationsSection, a 409) can treat it as an
-// ordinary Error and read `.message`. AGENTS.md fallback policy: `.message`
-// is built ONLY from the server's own per-field messages, joined, never a
-// generic "check the form" standing in for them.
-export class InventoryValidationError extends Error {
-  fields: InventoryFieldError[]
-  constructor(fields: InventoryFieldError[]) {
-    super(fields.map((f) => f.message).join('; '))
-    this.name = 'InventoryValidationError'
-    this.fields = fields
-  }
+// Cache keys follow lib/api-query.ts: the URL path, then the filter. A list
+// key is [EQUIPMENT, filter] and an item key is [EQUIPMENT/<id>], so
+// invalidating [EQUIPMENT] reaches every list and no single item.
+const EQUIPMENT = '/api/inventory/equipment'
+const ZONES = '/api/inventory/zones'
+const DECKS = '/api/inventory/decks'
+// Owned by use-maintenance.ts. An equipment write can change its schedule
+// (profile, stored/deployed), so it invalidates the same prefix.
+const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
+
+const NO_ITEMS: EquipmentItem[] = []
+const NO_DOCUMENTS: EquipmentDocument[] = []
+const NO_ZONES: InventoryZone[] = []
+const NO_DECKS: InventoryDeck[] = []
+
+function itemPath(id: string): string {
+  return `${EQUIPMENT}/${encodeURIComponent(id)}`
 }
 
-// Every write below goes through this: a non-2xx response throws with the
-// server's own message (AGENTS.md fallback policy - no invented "something
-// went wrong" standing in for a 409's actual "zone is in use by 3 items" or
-// a validation failure's actual per-field reasons). 204 (every DELETE) has
-// no body to parse. Copied from use-documents.ts's own submitJSON rather
-// than imported - see that file's own comment on why a two-line helper is
-// cheaper to duplicate a third time than to thread a shared-module
-// dependency between features that otherwise don't know about each other -
-// with one addition: a field validation failure throws the richer
-// InventoryValidationError so the editor can mark the offending input.
-//
-// Three body shapes reach here, and all three are the server's own words:
-//
-//   {"field":"install_date","message":"..."}  one rejected field
-//       (writeInventoryValidationError, inventory_handlers.go) - the common
-//       case, and the one an earlier cut of this function missed entirely by
-//       looking only for the array below, turning every validation failure
-//       into a bare "HTTP 400" and leaving the per-field error block dead.
-//   {"errors":[{field,message}, ...]}         several at once, if this API
-//       ever grows a bulk write; cheap to keep recognised.
-//   {"error":"zone is in use: ..."}           conflicts and not-founds,
-//       which belong to the record as a whole rather than to one input.
-//
-// A status code is the last resort, only for a body that parses as none of
-// them (AGENTS.md fallback policy: never a generic message standing in for
-// one the server actually sent).
-async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as {
-      error?: string
-      errors?: InventoryFieldError[]
-      field?: string
-      message?: string
-    }
-    if (Array.isArray(payload.errors) && payload.errors.length > 0) {
-      throw new InventoryValidationError(payload.errors)
-    }
-    if (typeof payload.field === 'string' && typeof payload.message === 'string') {
-      throw new InventoryValidationError([{ field: payload.field, message: payload.message }])
-    }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
+interface EquipmentItemResponse {
+  item: EquipmentItem
+  documents?: EquipmentDocument[]
+}
+
+// A write that changes a record every list shows. The lists refetch in the
+// background; an item that is not mounted is not touched.
+function equipmentListsChanged() {
+  invalidateQueries([EQUIPMENT])
+}
+
+// An item's own fields (profile, status) decide which maintenance jobs it has.
+function equipmentChanged() {
+  invalidateQueries([EQUIPMENT])
+  invalidateQueries([MAINTENANCE_RULES])
 }
 
 /**
- * The Equipment index's filtered listing - `?category=&system=&status=&zone=&q=`.
- * `filter` is caller-owned (EquipmentIndex's own toolbar state), the same
- * contract useDocuments(folderId) gives folderId. `null` fetches nothing at
- * all (items stay `[]`, loading false) - the same "meaningless without a
- * scope" shape useEquipmentItem(null) gives a brand new draft - for a
- * caller like StocktakeSection that only has something to filter BY once
- * the operator has scanned a bin, rather than that caller having to invent
- * a filter value that can never match a real record.
+ * The Equipment index's filtered listing - `?system=&status=&zone=&bin=&q=`.
+ * `filter` is caller-owned (EquipmentIndex's own toolbar state). `null`
+ * fetches nothing at all (items stay `[]`, loading false) for a caller like
+ * StocktakeSection that only has something to filter BY once the operator
+ * has scanned a bin.
  */
 export function useEquipment(filter: EquipmentFilter | null) {
-  const [items, setItems] = useState<EquipmentItem[]>([])
-  const [loading, setLoading] = useState(filter !== null)
-  const [error, setError] = useState<string | null>(null)
+  const params = new URLSearchParams()
+  if (filter?.system) params.set('system', filter.system)
+  if (filter?.status) params.set('status', filter.status)
+  if (filter?.zone) params.set('zone', filter.zone)
+  if (filter?.bin) params.set('bin', filter.bin)
+  if (filter?.q) params.set('q', filter.q)
+  const qs = params.toString()
 
-  // Ordering guard (same idiom as use-documents.ts's refreshSeqRef): a
-  // filter change fires a new request before the previous one lands, and
-  // without this the OLDER, now-stale response could still win and show
-  // results for a filter the operator has already changed away from.
-  const seqRef = useRef(0)
+  // The filter is a fresh object on most renders; the store keys on its
+  // contents, so an unchanged filter does not refetch.
+  const { data, error, isLoading, refetch } = useApiQuery<EquipmentItem[]>({
+    queryKey: [EQUIPMENT, { system: filter?.system ?? '', status: filter?.status ?? '', zone: filter?.zone ?? '', bin: filter?.bin ?? '', q: filter?.q ?? '' }],
+    path: `${EQUIPMENT}${qs ? `?${qs}` : ''}`,
+    enabled: filter !== null,
+    select: (raw: { items?: EquipmentItem[] }) => raw.items ?? [],
+  })
 
-  // filter is a fresh object literal on every render from most callers
-  // (EquipmentIndex builds it inline from several useState values) - keying
-  // the effect on its serialized contents, not its identity, is what keeps
-  // the request from refiring every render for no filter change at all.
-  const filterKey = filter === null
-    ? null
-    : JSON.stringify([filter.system ?? '', filter.status ?? '', filter.zone ?? '', filter.bin ?? '', filter.q ?? ''])
-
-  const refresh = useCallback(async () => {
-    if (filter === null) {
-      seqRef.current += 1
-      setItems([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (filter.system) params.set('system', filter.system)
-      if (filter.status) params.set('status', filter.status)
-      if (filter.zone) params.set('zone', filter.zone)
-      if (filter.bin) params.set('bin', filter.bin)
-      if (filter.q) params.set('q', filter.q)
-      const qs = params.toString()
-      const res = await fetch(`${apiBaseUrl}/api/inventory/equipment${qs ? `?${qs}` : ''}`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as { items?: EquipmentItem[] }
-      if (seq !== seqRef.current) return
-      setItems(data.items ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-    // filterKey stands in for filter's actual fields - see the comment above it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { items, loading, error, refresh }
+  return { items: data ?? NO_ITEMS, loading: isLoading, error: error?.message ?? null, refresh: refetch }
 }
 
 /**
  * One equipment record plus its linked documents - `id === null` (a brand
- * new, not-yet-saved draft; App.tsx's inventoryCreatingEquipment) clears
- * state and fetches nothing, the same shape useDocument(null) gives an
- * unresolved Details route.
+ * new, not-yet-saved draft) fetches nothing, the same shape useDocument(null)
+ * gives an unresolved Details route.
  */
 export function useEquipmentItem(id: string | null) {
-  const [item, setItemState] = useState<EquipmentItem | null>(null)
-  const [documents, setDocuments] = useState<EquipmentDocument[]>([])
-  const [loading, setLoading] = useState(id !== null)
-  const [error, setError] = useState<string | null>(null)
+  const path = itemPath(id ?? '')
+  const { data, error, isLoading, isFetching, refetch } = useApiQuery<EquipmentItemResponse>({
+    queryKey: [path],
+    path,
+    enabled: id !== null,
+  })
 
-  // Same ordering guard as useEquipment's own refresh() above, and for the
-  // same reason: a GET for an id the operator has since navigated away from
-  // must not have its late reply overwrite whatever a newer call already set.
-  const seqRef = useRef(0)
+  // A write that lands while a read of the same record is in flight would be
+  // overwritten by that read's older answer. setQueryData now drops that read,
+  // but the read was also the only carrier of the linked documents (a write
+  // response has the item alone), so they would never arrive. Invalidating
+  // refetches, and only when there is a read to replace.
+  const fetchingRef = useRef(isFetching)
+  fetchingRef.current = isFetching
 
-  // Review finding: seqRef alone conflated two different races. setItem
-  // bumping it (below) correctly stops a stale GET's `item` from winning
-  // against a newer write (the create-then-upload race this hook's own
-  // history comment describes) - but a GET in flight checks the SAME
-  // seqRef for its documents/error/loading too, so that write collaterally
-  // discarded them as well, and left `loading` stuck true forever once
-  // nothing else was left to flip it back off (the `finally` block's own
-  // `seq === seqRef.current` check fails right along with everything else).
-  // update() had the opposite gap: it never touched seqRef at all, so a
-  // slower GET for the same id already in flight could still resolve AFTER
-  // it and clobber the just-written item with stale data.
-  //
-  // itemSeqRef is a SEPARATE counter, bumped only by a write applying an
-  // item directly (setItem, update()) - a GET captures it when it starts,
-  // and only skips re-applying `item` from its own response if a write has
-  // landed since; documents/error/loading are never gated by it, so a GET's
-  // own results outside the item race still land normally.
-  const itemSeqRef = useRef(0)
-  // Orders `documents` updates: refreshDocuments' own background reloads
-  // bump it, and so does refresh() below, so a slow background reload
-  // started by a photo write can't land after a later full reload (the
-  // one after a Save) and put an older list back (Documents-save review).
-  const documentsSeqRef = useRef(0)
-
-  const refresh = useCallback(async () => {
-    if (id === null) {
-      seqRef.current += 1
-      setItemState(null)
-      setDocuments([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    documentsSeqRef.current += 1
-    const itemSeqAtStart = itemSeqRef.current
-    setLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
-      if (!res.ok) {
-        // AGENTS.md fallback policy: the server's own message (e.g. "item
-        // not found"), never an invented "something went wrong".
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
-      const data = (await res.json()) as { item: EquipmentItem; documents?: EquipmentDocument[] }
-      if (seq !== seqRef.current) return
-      if (itemSeqRef.current === itemSeqAtStart) setItemState(data.item)
-      setDocuments(data.documents ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      if (itemSeqRef.current === itemSeqAtStart) setItemState(null)
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
+  // The record the server just handed back from a write. The cache is keyed
+  // by id, so a response for a record that is no longer open lands under its
+  // own key and cannot show A's fields under B.
+  const setItem = useCallback((next: EquipmentItem) => {
+    setQueryData<EquipmentItemResponse>([itemPath(next.id)], (prev) => ({ documents: prev?.documents, item: next }))
+    if (next.id === id && fetchingRef.current) invalidateQueries([itemPath(next.id)])
   }, [id])
-
-  useEffect(() => { void refresh() }, [refresh])
 
   // Throws on a rejected PUT (a validation failure, a bin/zone that
-  // disagree) rather than swallowing it - the caller (EquipmentEditor's
-  // Save) is the one that has to show the failure and keep the draft
-  // intact, mirroring useDocument(id)'s own patch().
+  // disagree): the caller (EquipmentEditor's Save) shows it and keeps the
+  // draft intact.
   const update = useCallback(async (input: EquipmentInput) => {
     if (id === null) throw new Error('useEquipmentItem: no id to update')
-    const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
-    // Review finding: this never used to bump itemSeqRef, so a slower GET
-    // for the same id already in flight when this PUT lands could still
-    // resolve afterward and win, overwriting the just-saved item with
-    // whatever stale copy it fetched before the PUT ever happened.
-    itemSeqRef.current += 1
-    setItemState(data.item)
+    const data = await apiRequest<{ item: EquipmentItem }>(itemPath(id), { method: 'PUT', json: input })
+    setItem(data.item)
+    equipmentChanged()
     return data.item
-  }, [id])
+  }, [id, setItem])
 
-  // deletePhotos (2026-09-25 amendment) is the operator's own explicit
-  // choice, surfaced by the delete confirm dialog's "Also delete N
-  // photo(s) only this item uses" checkbox (off by default) - an ordinary
-  // delete only ever unlinks, never destroys a document, see equipmentItem's
-  // own exclusive_photo_ids doc comment.
+  // deletePhotos is the operator's own explicit choice, from the delete
+  // confirm's "Also delete N photo(s) only this item uses" checkbox. An
+  // ordinary delete only unlinks, see equipmentItem's exclusive_photo_ids.
   const remove = useCallback(async (deletePhotos = false) => {
     if (id === null) throw new Error('useEquipmentItem: no id to delete')
     const qs = deletePhotos ? '?delete_photos=true' : ''
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
+    await apiRequest<void>(`${itemPath(id)}${qs}`, { method: 'DELETE' })
+    equipmentChanged()
   }, [id])
 
-  // Applies a DIFF to the link set (backend PATCH /documents: {add, remove}
-  // - replaces the old whole-set PUT, ADR 0123's "Links edited from the
-  // equipment side this cycle" is still true, only the wire shape changed).
-  // The caller only ever has to say what changed, not restate the ids it
-  // isn't touching - a link this call doesn't name (a just-uploaded photo,
-  // say) is never at risk of being silently unlinked. Re-fetches afterward
-  // rather than trusting a locally-merged guess at the response shape - the
-  // join back to each document's title/filename/kind/note_type only the
-  // server can do, and this is the one place that already knows how to ask
-  // for it.
+  // Applies a DIFF to the link set (PATCH /documents: {add, remove}), so a
+  // link this call does not name (a just-uploaded photo) is never unlinked.
+  // Re-reads afterward because the join back to each document's title and
+  // kind is only the server's to make.
   const patchLinkedDocuments = useCallback(async (add: string[], remove: string[]) => {
     if (id === null) throw new Error('useEquipmentItem: no id to patch documents on')
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}/documents`, 'PATCH', { add, remove })
-    await refresh()
-  }, [id, refresh])
+    await apiRequest<void>(`${itemPath(id)}/documents`, { method: 'PATCH', json: { add, remove } })
+    await refetch()
+    equipmentListsChanged()
+  }, [id, refetch])
 
-  // Exposed (rather than making every photo write below call refresh()) so
-  // a caller holding an EquipmentItem the server just handed back directly
-  // - uploadEquipmentPhoto/setEquipmentPhotoOrder/deleteEquipmentPhoto below
-  // all return the updated item the same way update() does - can apply it
-  // straight to this hook's own state instead of firing a second, redundant
-  // GET. ADR 0127 review: equipment-editor.tsx's create-with-photos flow
-  // used to do neither (no refresh, no setItem) after each upload, so the
-  // photo strip stayed empty until something else happened to re-fetch -
-  // which for a brand new draft was only the ONE GET useEquipmentItem's own
-  // effect fires the instant `id` turns from null into the created id, a
-  // request that typically lands before the photo uploads that follow it
-  // even start.
-  //
-  // Review finding: that GET is not guaranteed to land first, only to fire
-  // first. A caller's own setItem, applied while it's still in flight, used
-  // to leave seqRef untouched, so the GET's own ordering guard (seq !==
-  // seqRef.current, above) never saw anything to disagree with and its
-  // late, stale reply was free to overwrite a newer write - the create-
-  // then-upload race this hook's id-change GET can lose against
-  // equipment-editor.tsx's own per-upload setItem(updated) calls, silently
-  // dropping photos back off the strip once that GET finally landed.
-  // Bumping itemSeqRef here invalidates any GET already in flight's own
-  // `item` the moment a caller hands this a fresher one - see itemSeqRef's
-  // own doc comment (above, by seqRef) for why this is a separate counter
-  // from seqRef rather than reusing it: reusing it also discarded that
-  // GET's documents/error and left loading stuck true.
-  // The editor is not remounted between records, so a write's response can
-  // arrive after Back/Forward has already moved this hook to another id - a
-  // photo upload for item A landing while item B is open. Applying it would
-  // show A's fields under B's id (and a Save would then write them onto B),
-  // and bumping itemSeqRef would discard B's own GET. A record that isn't
-  // the one open is therefore dropped (final pre-release review finding).
-  //
-  // `adopt` is the create-then-upload case: Save's create hands the new id
-  // to App.tsx, but the first photo upload can resolve before the re-render
-  // that brings that id back in as this hook's `id`. An adopting write may
-  // claim the id only while no record is open yet (still the draft's null).
-  const idRef = useRef(id)
-  idRef.current = id
-
-  const setItem = useCallback((next: EquipmentItem, options?: { adopt?: boolean }) => {
-    if (options?.adopt && idRef.current === null) idRef.current = next.id
-    if (next.id !== idRef.current) return
-    itemSeqRef.current += 1
-    setItemState(next)
-  }, [])
-
-  // Same ordering guard as documents/error/loading above, but its OWN
-  // counter - a documents-only refetch (below) is fired off the back of a
-  // photo write and never touches itemSeqRef/seqRef, so it needs a race
-  // guard that doesn't accidentally interact with either of those.
-
-  // 2026-09-25 refactor: replaces pruneDocument. A photo write (upload,
-  // retry, remove) already updates `item` directly via the response's own
-  // returned record (setItem, above) - but `documents` (fetched once, at
-  // mount/refresh) is a SEPARATE field that write's response never carries,
-  // and the Documents tab reads `documents`, not item.photo_ids, for what
-  // it shows. This re-fetches the same GET useEquipmentItem's own refresh()
-  // uses, but applies ONLY the `documents` field from it - NEVER
-  // setItemState, which would risk re-opening the exact create-then-upload
-  // race itemSeqRef exists to close (a slow GET landing after a newer write
-  // and overwriting it).
-  //
-  // Two races guarded against, both mirroring idioms already in this file:
-  // (a) the operator has since navigated to a different item entirely (the
-  // editor stays mounted across Back/Forward, the same reasoning setItem's
-  // own doc comment gives) - idRef.current is the hook's LIVE id, checked
-  // against `targetId`, the id this fetch was actually FOR (an explicit
-  // parameter, not read off the hook's own `id` closed over at call time,
-  // because the caller - equipment-editor.tsx - already knows exactly which
-  // item a given photo write belonged to, independent of whatever record is
-  // open by the time this resolves); (b) a slower, OLDER refreshDocuments
-  // call for the SAME id landing after a newer one already has - guarded by
-  // documentsSeqRef, the same idiom seqRef/itemSeqRef use above.
-  //
-  // Throws the server's own message on failure (AGENTS.md fallback policy):
-  // the photo write already succeeded, but a list that silently stays stale
-  // shows a removed photo as still linked, so the caller reports it.
+  // Re-reads one record after a photo write, whose response carries the item
+  // but not the documents the Documents tab shows. Throws the server's own
+  // message on failure: the photo write already succeeded, but a list that
+  // silently stays stale shows a removed photo as still linked, so the
+  // caller reports it.
   const refreshDocuments = useCallback(async (targetId: string) => {
-    const seq = (documentsSeqRef.current += 1)
-    const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(targetId)}`)
-    if (!res.ok) throw new Error(await readErrorMessage(res))
-    const data = (await res.json()) as { documents?: EquipmentDocument[] }
-    if (idRef.current !== targetId) return
-    if (seq !== documentsSeqRef.current) return
-    setDocuments(data.documents ?? [])
+    const fresh = await apiRequest<EquipmentItemResponse>(itemPath(targetId))
+    setQueryData<EquipmentItemResponse>([itemPath(targetId)], fresh)
   }, [])
 
-  return { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments }
+  return {
+    item: data?.item ?? null,
+    documents: data?.documents ?? NO_DOCUMENTS,
+    loading: isLoading,
+    error: error?.message ?? null,
+    refresh: refetch,
+    update,
+    remove,
+    patchLinkedDocuments,
+    setItem,
+    refreshDocuments,
+  }
 }
 
-/** Creates a brand new equipment record - standalone (not tied to any
- * useEquipmentItem instance) because the "New item" draft has no id yet to
- * parametrise a hook with. EquipmentEditor calls this directly, then hands
- * the returned item's id to App.tsx so the URL becomes
- * `/inventory/equipment/<id>` and a fresh useEquipmentItem(id) takes over -
- * "Create flow: POST, then navigate to the new id" (the plan). */
+/** Creates a brand new equipment record - standalone because the "New item"
+ * draft has no id yet to parametrise a hook with. EquipmentEditor calls this
+ * directly, then hands the returned item's id to App.tsx so the URL becomes
+ * `/inventory/equipment/<id>` and a fresh useEquipmentItem(id) takes over. */
 export async function createEquipment(input: EquipmentInput): Promise<EquipmentItem> {
-  const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment`, 'POST', input)
+  const data = await apiRequest<{ item: EquipmentItem }>(EQUIPMENT, { method: 'POST', json: input })
+  equipmentChanged()
   return data.item
 }
 
@@ -608,19 +408,17 @@ export async function createEquipment(input: EquipmentInput): Promise<EquipmentI
  * fallback policy). */
 export class EquipmentNotFoundError extends Error {}
 
-/** GET /api/inventory/equipment/:id - a standalone, one-off fetch (not
- * useEquipmentItem's own persistent hook instance) for a caller that reads
- * an ARBITRARY id it doesn't already hold state for - stocktake-section.tsx
- * scanning a different item's tag on every pass, one after another. */
+/** GET /api/inventory/equipment/:id - a one-off read (not useEquipmentItem's
+ * cached hook) for a caller that reads an ARBITRARY id it holds no state
+ * for - stocktake-section.tsx scanning a different item's tag on every pass. */
 export async function fetchEquipment(id: string): Promise<EquipmentItem> {
-  const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`)
-  if (!res.ok) {
-    const message = await readErrorMessage(res)
-    if (res.status === 404) throw new EquipmentNotFoundError(message)
-    throw new Error(message)
+  try {
+    const data = await apiRequest<{ item: EquipmentItem }>(itemPath(id))
+    return data.item
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) throw new EquipmentNotFoundError(err.message)
+    throw err
   }
-  const data = (await res.json()) as { item: EquipmentItem }
-  return data.item
 }
 
 /** Strips an equipmentItem down to its own editable EquipmentInput shape -
@@ -654,44 +452,40 @@ export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
 /** PUT /api/inventory/equipment/:id - standalone, for the same "no
  * persistent hook instance" reason fetchEquipment exists. */
 export async function updateEquipment(id: string, input: EquipmentInput): Promise<EquipmentItem> {
-  const data = await submitJSON<{ item: EquipmentItem }>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}`, 'PUT', input)
+  const data = await apiRequest<{ item: EquipmentItem }>(itemPath(id), { method: 'PUT', json: input })
+  invalidateQueries([itemPath(id)])
+  equipmentChanged()
   return data.item
 }
 
 /** DELETE /api/inventory/equipment/:id - standalone, for a caller with no
  * useEquipmentItem instance open on this id, e.g. the Equipment index's own
- * row action menu (ADR 0142). Same route and deletePhotos semantics as
- * useEquipmentItem's own `remove` (equipment-editor.tsx's delete confirm),
- * just without requiring the record to already be loaded into that hook. */
+ * row action menu. Same route and deletePhotos semantics as
+ * useEquipmentItem's own `remove`. */
 export async function deleteEquipment(id: string, deletePhotos = false): Promise<void> {
   const qs = deletePhotos ? '?delete_photos=true' : ''
-  await submitJSON<void>(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(id)}${qs}`, 'DELETE')
+  await apiRequest<void>(`${itemPath(id)}${qs}`, { method: 'DELETE' })
+  equipmentChanged()
 }
 
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────
-// Three plain functions, not a hook - the same "standalone, not tied to a
-// useEquipmentItem instance" reasoning createEquipment's own doc comment
-// gives: the photo row works identically for a saved item (each action
-// calls its route immediately) and, before Save, for a brand new draft
-// held only as local Blobs (photo-strip-editor.tsx/bin-quick-add.tsx),
-// neither of which has a persistent hook instance to hang these off.
+// Three plain functions, not a hook: the photo row works identically for a
+// saved item (each action calls its route immediately) and, before Save, for
+// a brand new draft held only as local Blobs, neither of which has a hook
+// instance to hang these off. A photo changes the item's photo_ids, which the
+// lists show; the open item takes the returned record through setItem.
 
 /** POST /api/inventory/equipment/:id/photos - one multipart upload, linked
- * at the end of the item's photo order server-side. No tag is written
- * (2026-09-25 amendment) - the item's photo_ids view is MIME-based. Throws
- * the server's own message on a rejected upload (AGENTS.md fallback
- * policy: HEIC/non-image get a specific reason, never a generic one). A
- * byte-identical upload is no longer refused with a 409 - it links the
- * existing document and returns 200, same as any other success here. */
+ * at the end of the item's photo order server-side. No tag is written - the
+ * item's photo_ids view is MIME-based. Throws the server's own message on a
+ * rejected upload (AGENTS.md fallback policy: HEIC/non-image get a specific
+ * reason, never a generic one). A byte-identical upload is not refused with
+ * a 409 - it links the existing document and returns 200. */
 export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, filename: string): Promise<EquipmentItem> {
   const form = new FormData()
   form.append('file', file, filename)
-  const response = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`, {
-    method: 'POST',
-    body: form,
-  })
-  if (!response.ok) throw new Error(await readErrorMessage(response))
-  const data = (await response.json()) as { item: EquipmentItem }
+  const data = await apiRequest<{ item: EquipmentItem }>(`${itemPath(equipmentId)}/photos`, { method: 'POST', body: form })
+  equipmentListsChanged()
   return data.item
 }
 
@@ -699,28 +493,28 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
  * EXACTLY the item's current photo set; "Make cover" is this same call
  * with the chosen id moved to the front. */
 export async function setEquipmentPhotoOrder(equipmentId: string, documentIds: string[]): Promise<EquipmentItem> {
-  const data = await submitJSON<{ item: EquipmentItem }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos`,
-    'PUT',
-    { document_ids: documentIds },
-  )
+  const data = await apiRequest<{ item: EquipmentItem }>(`${itemPath(equipmentId)}/photos`, {
+    method: 'PUT',
+    json: { document_ids: documentIds },
+  })
+  equipmentListsChanged()
   return data.item
 }
 
 /** DELETE /api/inventory/equipment/:id/photos/:documentId - removes the
- * photo from the item. UNLINK ONLY by default (2026-09-25 amendment,
- * superseding "a photo has no life outside its item") - deletePhotos is
- * the operator's own explicit choice, from the strip's "Remove and delete"
+ * photo from the item. UNLINK ONLY by default - deletePhotos is the
+ * operator's own explicit choice, from the strip's "Remove and delete"
  * option (offered only when the photo is exclusive to this item - see
  * EquipmentItem's own exclusive_photo_ids doc comment), and additionally
  * deletes the document (and, server-side, its file) once nothing else
  * links it. */
 export async function deleteEquipmentPhoto(equipmentId: string, documentId: string, deletePhotos = false): Promise<EquipmentItem> {
   const qs = deletePhotos ? '?delete=true' : ''
-  const data = await submitJSON<{ item: EquipmentItem }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/photos/${encodeURIComponent(documentId)}${qs}`,
-    'DELETE',
+  const data = await apiRequest<{ item: EquipmentItem }>(
+    `${itemPath(equipmentId)}/photos/${encodeURIComponent(documentId)}${qs}`,
+    { method: 'DELETE' },
   )
+  equipmentListsChanged()
   return data.item
 }
 
@@ -739,160 +533,118 @@ export function findBinByCode(zones: InventoryZone[], code: string): { zone: Inv
   return null
 }
 
-/** Zones (with their nested bins) plus every zone/bin write - shared by
- * EquipmentEditor's zone/bin selects and LocationsSection's own CRUD, so it
- * is its own hook rather than folded into either useEquipment or
- * useEquipmentItem above (see this file's header comment). */
-export function useInventoryZones() {
-  const [zones, setZones] = useState<InventoryZone[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const seqRef = useRef(0)
+// Marks the zone list stale and resolves once the fresh one has landed, so a
+// caller that reads `zones` right after a write sees it. The invalidate comes
+// first: it supersedes a read already in flight, which would otherwise be the
+// one fetchQuery hands back.
+async function reloadZones() {
+  invalidateQueries([ZONES])
+  await fetchQuery([ZONES], ZONES)
+}
 
-  const refresh = useCallback(async () => {
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/inventory/zones`)
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
-      const data = (await res.json()) as { zones?: InventoryZone[] }
-      if (seq !== seqRef.current) return
-      setZones(data.zones ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
+async function reloadDecks() {
+  invalidateQueries([DECKS])
+  await fetchQuery([DECKS], DECKS)
+}
+
+/** Zones (with their nested bins) plus every zone/bin write - shared by
+ * EquipmentEditor's zone/bin selects and LocationsSection's own CRUD. */
+export function useInventoryZones() {
+  const { data, error, isLoading, refetch } = useApiQuery<InventoryZone[]>({
+    queryKey: [ZONES],
+    path: ZONES,
+    select: (raw: { zones?: InventoryZone[] }) => raw.zones ?? [],
+  })
+
+  // Every write re-reads the whole zone list rather than merging its own
+  // response: sort_index and a bin's zone membership are server-decided. The
+  // 409 "in use" body (deleteZone/deleteBin) names what is still filed in it,
+  // and ApiError carries that message verbatim. Create returns the record
+  // because the bin page's "Create bin" flow needs the new zone's id.
+  const createZone = useCallback(async (name: string) => {
+    const data = await apiRequest<{ zone: InventoryZone }>(ZONES, { method: 'POST', json: { name } })
+    await reloadZones()
+    return data.zone
   }, [])
 
-  useEffect(() => { void refresh() }, [refresh])
-
-  // Every write below re-fetches the whole zone list afterward rather than
-  // merging its own response locally - sort_index and a bin's zone
-  // membership are server-decided, and re-fetching the canonical shape costs
-  // one small GET against getting either wrong. The 409 "in use" body
-  // (deleteZone/deleteBin) is a plain `{error}` naming what's still filed in
-  // it (ADR 0123 decisions) - submitJSON's ordinary Error path already
-  // surfaces that message verbatim, so no special handling is needed here.
-  // Returns the created record (ADR 0127: the bin page's own "Create bin"
-  // flow needs the new zone's id to then create a bin under it, and the
-  // caller-side `zones` state isn't updated synchronously by refresh()'s own
-  // setZones - a caller reading it right after this resolves would see
-  // whatever this render still holds, not the new zone). Every existing
-  // caller (locations-section.tsx) already discards the return value, so
-  // this is additive.
-  const createZone = useCallback(async (name: string) => {
-    const data = await submitJSON<{ zone: InventoryZone }>(`${apiBaseUrl}/api/inventory/zones`, 'POST', { name })
-    await refresh()
-    return data.zone
-  }, [refresh])
-
+  // A zone's or bin's name is joined into every equipment row (zone_name,
+  // bin_code), so a rename also refreshes the lists.
   const renameZone = useCallback(async (id: string, name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/zones/${encodeURIComponent(id)}`, 'PUT', { name })
-    await refresh()
-  }, [refresh])
+    await apiRequest<unknown>(`${ZONES}/${encodeURIComponent(id)}`, { method: 'PUT', json: { name } })
+    await reloadZones()
+    equipmentListsChanged()
+  }, [])
 
   const deleteZone = useCallback(async (id: string) => {
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/zones/${encodeURIComponent(id)}`, 'DELETE')
-    await refresh()
-  }, [refresh])
+    await apiRequest<void>(`${ZONES}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await reloadZones()
+  }, [])
 
-  // Returns the created record - same reasoning as createZone's own comment
-  // just above.
   const createBin = useCallback(async (zoneId: string, code: string, name: string) => {
-    const data = await submitJSON<{ bin: InventoryBin }>(`${apiBaseUrl}/api/inventory/bins`, 'POST', { zone_id: zoneId, code, name })
-    await refresh()
+    const data = await apiRequest<{ bin: InventoryBin }>('/api/inventory/bins', { method: 'POST', json: { zone_id: zoneId, code, name } })
+    await reloadZones()
     return data.bin
-  }, [refresh])
+  }, [])
 
   const renameBin = useCallback(async (id: string, patch: { code?: string; name?: string }) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/bins/${encodeURIComponent(id)}`, 'PUT', patch)
-    await refresh()
-  }, [refresh])
+    await apiRequest<unknown>(`/api/inventory/bins/${encodeURIComponent(id)}`, { method: 'PUT', json: patch })
+    await reloadZones()
+    equipmentListsChanged()
+  }, [])
 
   const deleteBin = useCallback(async (id: string) => {
-    await submitJSON<void>(`${apiBaseUrl}/api/inventory/bins/${encodeURIComponent(id)}`, 'DELETE')
-    await refresh()
-  }, [refresh])
+    await apiRequest<void>(`/api/inventory/bins/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await reloadZones()
+  }, [])
 
-  return { zones, loading, error, refresh, createZone, renameZone, deleteZone, createBin, renameBin, deleteBin }
+  return { zones: data ?? NO_ZONES, loading: isLoading, error: error?.message ?? null, refresh: refetch, createZone, renameZone, deleteZone, createBin, renameBin, deleteBin }
 }
 
 /**
- * Decks and their plan images (ADR 0156). Same shape as useInventoryZones:
- * one instance per caller, every write re-fetches the list. saveLayout
- * returns the refreshed zone list the server answers with, so a caller that
- * also holds zones can adopt it without a second request.
+ * Decks and their plan images (ADR 0156). Same shape as useInventoryZones.
+ * saveLayout answers with the refreshed zone list, which it puts straight
+ * into the zones cache, and deleteDeck clears outlines, so both keep every
+ * zones reader current without a call from the component.
  */
 export function useInventoryDecks() {
-  const [decks, setDecks] = useState<InventoryDeck[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const seqRef = useRef(0)
-
-  const refresh = useCallback(async () => {
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/inventory/decks`)
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
-      const data = (await res.json()) as { decks?: InventoryDeck[] }
-      if (seq !== seqRef.current) return
-      setDecks(data.decks ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
+  const { data, error, isLoading, refetch } = useApiQuery<InventoryDeck[]>({
+    queryKey: [DECKS],
+    path: DECKS,
+    select: (raw: { decks?: InventoryDeck[] }) => raw.decks ?? [],
+  })
 
   const createDeck = useCallback(async (name: string) => {
-    const data = await submitJSON<{ deck: InventoryDeck }>(`${apiBaseUrl}/api/inventory/decks`, 'POST', { name })
-    await refresh()
+    const data = await apiRequest<{ deck: InventoryDeck }>(DECKS, { method: 'POST', json: { name } })
+    await reloadDecks()
     return data.deck
-  }, [refresh])
+  }, [])
 
   const renameDeck = useCallback(async (id: string, name: string) => {
-    await submitJSON<unknown>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}`, 'PUT', { name })
-    await refresh()
-  }, [refresh])
+    await apiRequest<unknown>(`${DECKS}/${encodeURIComponent(id)}`, { method: 'PUT', json: { name } })
+    await reloadDecks()
+  }, [])
 
   /** Resolves with how many locations lost their outline. */
   const deleteDeck = useCallback(async (id: string) => {
-    const data = await submitJSON<{ zones_cleared: number }>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}`, 'DELETE')
-    await refresh()
+    const data = await apiRequest<{ zones_cleared: number }>(`${DECKS}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await reloadDecks()
+    invalidateQueries([ZONES])
     return data.zones_cleared
-  }, [refresh])
+  }, [])
 
   const uploadPlan = useCallback(async (id: string, file: Blob, filename: string) => {
     const form = new FormData()
     form.append('file', file, filename)
-    const response = await fetch(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}/plan`, { method: 'POST', body: form })
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      throw new Error(payload.error ?? `HTTP ${response.status}`)
-    }
-    const data = (await response.json()) as { deck: InventoryDeck }
-    await refresh()
+    const data = await apiRequest<{ deck: InventoryDeck }>(`${DECKS}/${encodeURIComponent(id)}/plan`, { method: 'POST', body: form })
+    await reloadDecks()
     return data.deck
-  }, [refresh])
+  }, [])
 
   const saveLayout = useCallback(async (id: string, layout: DeckLayout) => {
-    const data = await submitJSON<{ zones: InventoryZone[] }>(`${apiBaseUrl}/api/inventory/decks/${encodeURIComponent(id)}/layout`, 'PUT', layout)
+    const data = await apiRequest<{ zones: InventoryZone[] }>(`${DECKS}/${encodeURIComponent(id)}/layout`, { method: 'PUT', json: layout })
+    setQueryData<{ zones: InventoryZone[] }>([ZONES], { zones: data.zones })
     return data.zones
   }, [])
 
-  return { decks, loading, error, refresh, createDeck, renameDeck, deleteDeck, uploadPlan, saveLayout }
+  return { decks: data ?? NO_DECKS, loading: isLoading, error: error?.message ?? null, refresh: refetch, createDeck, renameDeck, deleteDeck, uploadPlan, saveLayout }
 }

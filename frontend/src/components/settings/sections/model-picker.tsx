@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useApiQuery } from '@/lib/api-query'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 // Which models the catalog lists: Mate answers through tool calls, document
@@ -21,6 +22,15 @@ const modelSearchDebounceMs = 300
 export const customModelIDPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i
 
 type ModelsSortKey = 'popular' | 'newest' | 'throughput' | 'latency' | 'price'
+
+type ModelsPayload = {
+  models?: ModelOption[]
+  page?: { total_pages?: number }
+}
+
+type ModelsPage = { models: ModelOption[]; totalPages: number }
+
+const NO_MODELS: ModelOption[] = []
 
 type ModelOption = {
   id: string
@@ -104,11 +114,7 @@ export function ModelCatalogDialog({
   renderActions,
   renderBadges,
 }: ModelCatalogDialogProps) {
-  const [tableModels, setTableModels] = useState<ModelOption[]>([])
-  const [tableLoading, setTableLoading] = useState(false)
-  const [tableError, setTableError] = useState<string | null>(null)
   const [tablePage, setTablePage] = useState(1)
-  const [tableTotalPages, setTableTotalPages] = useState(1)
   const [tableSort, setTableSort] = useState<ModelsSortKey>('popular')
   const [tableOrder, setTableOrder] = useState<'asc' | 'desc'>('desc')
   const [tableQueryInput, setTableQueryInput] = useState('')
@@ -135,67 +141,52 @@ export function ModelCatalogDialog({
   // Reset the page while rendering the open transition, so the first fetch
   // after reopening asks for page 1 rather than the page left behind.
   const [wasOpen, setWasOpen] = useState(open)
+  // The page kept from the last answer. It belongs to one open dialog and one
+  // capability, so closing drops it, and a capability change is checked below.
+  const [lastCatalog, setLastCatalog] = useState<{ capability: ModelCapability; page: ModelsPage } | null>(null)
   if (open !== wasOpen) {
     setWasOpen(open)
     if (open) setTablePage(1)
+    setLastCatalog(null)
   }
+
+  const catalogParams = new URLSearchParams({
+    capability,
+    sort: tableSort,
+    order: tableOrder,
+    page: String(tablePage),
+    page_size: '10',
+  })
+  const trimmedQuery = tableQuery.trim()
+  if (trimmedQuery !== '') {
+    catalogParams.set('q', trimmedQuery)
+  }
+  const { data: catalog, isLoading: tableLoading, error: catalogError } = useApiQuery<ModelsPage>({
+    queryKey: ['/api/assistant/models', Object.fromEntries(catalogParams)],
+    path: `/api/assistant/models?${catalogParams.toString()}`,
+    enabled: open,
+    select: (payload: ModelsPayload) => ({
+      models: Array.isArray(payload.models) ? payload.models : NO_MODELS,
+      totalPages: Math.max(1, payload.page?.total_pages ?? 1),
+    }),
+  })
+  // The catalog's own error text is not what the operator can act on.
+  const tableError = catalogError ? 'Unable to load model catalog.' : null
+  // Each page is its own key, so the page being left is kept until the next
+  // one lands rather than the count blanking per click. Never beside an error,
+  // and never from another capability.
+  useEffect(() => {
+    if (catalog) setLastCatalog({ capability, page: catalog })
+  }, [catalog, capability])
+  const keptCatalog = lastCatalog?.capability === capability ? lastCatalog.page : null
+  const shownCatalog = catalog ?? (tableError ? null : keptCatalog)
+  const tableModels = shownCatalog?.models ?? NO_MODELS
+  const tableTotalPages = shownCatalog?.totalPages ?? Math.max(1, tablePage)
 
   const visibleTableModels = useMemo(
     () => tableModels.filter((model) => modelMatchesSearch(model, tableQuery)),
     [tableModels, tableQuery],
   )
-
-  useEffect(() => {
-    if (!open) return
-
-    let cancelled = false
-    const params = new URLSearchParams({
-      capability,
-      sort: tableSort,
-      order: tableOrder,
-      page: String(tablePage),
-      page_size: '10',
-    })
-    const trimmedQuery = tableQuery.trim()
-    if (trimmedQuery !== '') {
-      params.set('q', trimmedQuery)
-    }
-
-    async function loadModelsPage() {
-      setTableLoading(true)
-      setTableError(null)
-      try {
-        const response = await fetch(`/api/assistant/models?${params.toString()}`)
-        if (!response.ok) {
-          if (cancelled) return
-          setTableError('Unable to load model catalog.')
-          return
-        }
-        const payload = (await response.json()) as {
-          models?: ModelOption[]
-          page?: { total_pages?: number }
-        }
-        if (cancelled) return
-        setTableError(null)
-        setTableModels(Array.isArray(payload.models) ? payload.models : [])
-        setTableTotalPages(Math.max(1, payload.page?.total_pages ?? 1))
-      } catch {
-        if (!cancelled) {
-          setTableError('Unable to load model catalog.')
-        }
-      } finally {
-        if (!cancelled) {
-          setTableLoading(false)
-        }
-      }
-    }
-
-    void loadModelsPage()
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, capability, tableSort, tableOrder, tablePage, tableQuery])
 
   const close = () => onOpenChange(false)
 

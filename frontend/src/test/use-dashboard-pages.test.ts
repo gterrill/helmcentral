@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
+import { stubApi, jsonResponse } from '@/test/helpers/stub-api'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
@@ -9,6 +10,27 @@ describe('useDashboardPages', () => {
   const orderedPages = ['Anchored', 'Underway', 'Docked'].map((name, index) => ({
     id: String(index), name, widgets: [], created_at: '', updated_at: '',
   }))
+
+  it('keeps cached pages visible when a later revalidation fails', async () => {
+    let calls = 0
+    stubApi({
+      'GET /api/dashboard-pages': () => (++calls === 1 ? { pages: orderedPages } : jsonResponse({ error: 'blip' }, 502)),
+    })
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.pages).toEqual(orderedPages)
+    await act(async () => { await result.current.refetch() })
+    expect(calls).toBe(2)
+    expect(result.current.pages).toEqual(orderedPages)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('reports the load error when there are no pages to show', async () => {
+    stubApi({ 'GET /api/dashboard-pages': () => jsonResponse({ error: 'down' }, 502) })
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.error).toBe('down'))
+    expect(result.current.pages).toEqual([])
+  })
 
   it('saves the complete order and uses the server response without refetching', async () => {
     const reordered = [orderedPages[0], orderedPages[2], orderedPages[1]]
@@ -21,10 +43,7 @@ describe('useDashboardPages', () => {
     await act(async () => {
       expect(await result.current.reorderPages(['0', '2', '1'])).toBe(true)
     })
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/order', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page_ids: ['0', '2', '1'] }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/order', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ page_ids: ['0', '2', '1'] }) }))
     expect(result.current.pages).toEqual(reordered)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.current.reordering).toBe(false)
@@ -107,13 +126,13 @@ describe('useDashboardPages', () => {
     const { result } = renderHook(() => useDashboardPages())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-pages')
+    expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-pages', expect.anything())
     expect(result.current.pages).toHaveLength(1)
     expect(result.current.pages[0].name).toBe('Page A')
   })
 
   it('sets an error message when the fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())
@@ -218,11 +237,7 @@ describe('useDashboardPages', () => {
       await result.current.createPage('New Page', { display_id: 'd1', dwell_seconds: 45, show_when: 'always' })
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Page', display_id: 'd1', dwell_seconds: 45, show_when: 'always' }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'New Page', display_id: 'd1', dwell_seconds: 45, show_when: 'always' }) }))
     expect(result.current.pages).toEqual([created])
   })
 
@@ -241,11 +256,7 @@ describe('useDashboardPages', () => {
       await result.current.createPage('New Page', { widgets })
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Page', widgets }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'New Page', widgets }) }))
     expect(result.current.pages).toEqual([created])
   })
 
@@ -263,17 +274,13 @@ describe('useDashboardPages', () => {
       await result.current.createPage('New Page')
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Page', widgets: [] }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'New Page', widgets: [] }) }))
   })
 
   it('deletePage issues a DELETE request and removes the page locally', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, status: 204 })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())

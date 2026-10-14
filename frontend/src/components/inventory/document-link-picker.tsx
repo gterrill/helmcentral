@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { apiBaseUrl } from '@/config/api'
 import type { DocumentSearchResult } from '@/hooks/use-documents'
+import { apiRequest, useApiQuery } from '@/lib/api-query'
 
 // ADR 0123: "Add document" on the Equipment editor. Deliberately its own
-// small fetch, not a second consumer of use-documents.ts's useDocuments
+// small read, not a second consumer of use-documents.ts's useDocuments
 // hook - that hook is folder-scoped (path/folders/tags/embeddings status,
 // none of which this needs) and parametrised by a currently-browsed folder
 // this picker has no notion of. Search runs over the WHOLE library
@@ -36,57 +36,32 @@ interface DocumentLinkPickerProps {
   excludeIds?: string[]
 }
 
+const NO_RESULTS: DocumentSearchResult[] = []
+
 export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = [] }: DocumentLinkPickerProps) {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<DocumentSearchResult[]>([])
-  const [searching, setSearching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // A failed pick (the record could not be read), shown beside a search error.
+  const [pickError, setPickError] = useState<string | null>(null)
+  const trimmed = query.trim()
 
-  // Ordering guard, same idiom as use-documents.ts's own search(): a fresh
-  // keystroke's request can land before an older one still in flight, and
-  // without this the OLDER result could overwrite the newer query's own.
-  const seqRef = useRef(0)
+  const search = useApiQuery({
+    queryKey: ['/api/documents', { q: trimmed }],
+    path: `/api/documents?${new URLSearchParams({ q: trimmed }).toString()}`,
+    enabled: open && trimmed !== '',
+    select: (raw: { results?: DocumentSearchResult[] }) => raw.results ?? NO_RESULTS,
+  })
+  const results = trimmed === '' ? NO_RESULTS : (search.data ?? NO_RESULTS)
+  const searching = search.isLoading
+  const error = pickError ?? search.error?.message ?? null
 
-  useEffect(() => {
-    if (!open) return
-    const trimmed = query.trim()
-    if (trimmed === '') {
-      seqRef.current += 1
-      setResults([])
-      setError(null)
-      setSearching(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    setSearching(true)
-    let cancelled = false
-    void (async () => {
-      try {
-        const params = new URLSearchParams({ q: trimmed })
-        const res = await fetch(`${apiBaseUrl}/api/documents?${params.toString()}`)
-        if (!res.ok) {
-          const payload = (await res.json().catch(() => ({}))) as { error?: string }
-          throw new Error(payload.error ?? `HTTP ${res.status}`)
-        }
-        const data = (await res.json()) as { results?: DocumentSearchResult[] }
-        if (cancelled || seq !== seqRef.current) return
-        setResults(data.results ?? [])
-        setError(null)
-      } catch (err) {
-        if (cancelled || seq !== seqRef.current) return
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled && seq === seqRef.current) setSearching(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [open, query])
+  // A new search starts clean.
+  useEffect(() => { setPickError(null) }, [trimmed])
 
   // Resets the search box on every close (whether from a pick or Cancel) so
   // reopening the picker for a different item never shows a stale query and
   // its now-irrelevant results.
   useEffect(() => {
-    if (!open) { setQuery(''); setResults([]); setError(null) }
+    if (!open) { setQuery(''); setPickError(null) }
   }, [open])
 
   const visibleResults = results.filter((r) => !excludeIds.includes(r.document_id))
@@ -105,12 +80,9 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
     const seq = (pickSeq.current += 1)
     setPickingId(result.document_id)
     try {
-      const res = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(result.document_id)}`)
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? `HTTP ${res.status}`)
-      }
-      const record = (await res.json()) as { kind: string; mime: string; created_at: string }
+      const record = await apiRequest<{ kind: string; mime: string; created_at: string }>(
+        `/api/documents/${encodeURIComponent(result.document_id)}`,
+      )
       if (seq !== pickSeq.current) return
       onPick({
         document_id: result.document_id,
@@ -125,7 +97,7 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
       if (seq !== pickSeq.current) return
       // Fail loud: linking a document whose record cannot be read would put
       // a row with a guessed type in the list.
-      setError(err instanceof Error ? err.message : String(err))
+      setPickError(err instanceof Error ? err.message : String(err))
     } finally {
       if (seq === pickSeq.current) setPickingId(null)
     }

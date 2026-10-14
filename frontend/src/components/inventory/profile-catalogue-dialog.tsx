@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export interface CatalogueEntry {
   source: string
@@ -28,61 +28,49 @@ interface ProfileCatalogueDialogProps {
   onAdded: (id: string) => void
 }
 
+const CATALOGUE_PATH = '/api/equipment-profiles/catalogue'
+interface CatalogueBody {
+  entries?: CatalogueEntry[]
+}
+
+const NONE: CatalogueEntry[] = []
+
 /**
  * Lists the profiles that ship with Helmcentral and copies the chosen one into
  * the operator's own list. A profile already in the list stays visible but
  * cannot be added a second time.
  */
 export function ProfileCatalogueDialog({ open, onOpenChange, onAdded }: ProfileCatalogueDialogProps) {
-  const [entries, setEntries] = useState<CatalogueEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [addError, setAddError] = useState<string | null>(null)
   const [addingID, setAddingID] = useState<string | null>(null)
+  const { data, isLoading: loading, error: loadError } = useApiQuery<CatalogueEntry[]>({
+    queryKey: [CATALOGUE_PATH],
+    path: CATALOGUE_PATH,
+    enabled: open,
+    select: (body: CatalogueBody | null) => (Array.isArray(body?.entries) ? body.entries : NONE),
+  })
+  const entries = loadError ? NONE : (data ?? NONE)
+  const error = addError ?? loadError?.message ?? null
 
   useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/equipment-profiles/catalogue`)
-        const body = (await response.json().catch(() => null)) as { entries?: CatalogueEntry[]; error?: string } | null
-        if (cancelled) return
-        if (!response.ok) {
-          setError(body?.error ?? `HTTP ${response.status}`)
-          setEntries([])
-          return
-        }
-        setEntries(Array.isArray(body?.entries) ? body.entries : [])
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err))
-          setEntries([])
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
+    if (open) setAddError(null)
   }, [open])
 
   const handleAdd = async (entry: CatalogueEntry) => {
     setAddingID(entry.id)
-    setError(null)
+    setAddError(null)
     try {
-      const response = await fetch(`${apiBaseUrl}/api/equipment-profiles/catalogue/${encodeURIComponent(entry.id)}`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `HTTP ${response.status}`)
-      }
-      setEntries((current) => current.map((item) => (item.id === entry.id ? { ...item, added: true } : item)))
+      await apiRequest(`${CATALOGUE_PATH}/${encodeURIComponent(entry.id)}`, { method: 'POST' })
+      // The cache holds the response body as sent, before select reads it.
+      setQueryData<CatalogueBody>([CATALOGUE_PATH], (current) => ({
+        entries: (current?.entries ?? NONE).map((item) => (item.id === entry.id ? { ...item, added: true } : item)),
+      }))
+      // The copy is now one of the operator's own profiles, so every list of
+      // them is out of date.
+      invalidateQueries(['/api/equipment-profiles'])
       onAdded(entry.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to add profile.')
+      setAddError(err instanceof Error ? err.message : 'Unable to add profile.')
     } finally {
       setAddingID(null)
     }

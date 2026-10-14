@@ -1,10 +1,27 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { deepMergeSettings, useSettingsForm } from '@/hooks/use-settings-form'
+import { useTideSettings } from '@/hooks/use-tide-settings'
+import { stubApi, type StubRequest } from '@/test/helpers/stub-api'
 
 describe('useSettingsForm', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('a save reaches a mounted tide settings reader without a reload', async () => {
+    stubApi({
+      'GET /api/settings': { ui: { tide_provider: 'noaa', tide_station_id: 'A', tide_station_name: 'Alpha' } },
+      'POST /api/settings': (req: StubRequest) => req.body,
+    })
+    const tide = renderHook(() => useTideSettings())
+    const form = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(tide.result.current.tideProvider).toBe('noaa'))
+    await waitFor(() => expect(form.result.current.loading).toBe(false))
+
+    await act(async () => { await form.result.current.save({ ui: { tide_provider: 'bom', tide_station_id: 'B' } }) })
+    expect(tide.result.current.tideProvider).toBe('bom')
+    expect(tide.result.current.tideStationId).toBe('B')
   })
 
   it('fetches settings on mount and populates state', async () => {
@@ -22,7 +39,7 @@ describe('useSettingsForm', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.settings.signalk?.address).toBe('localhost')
     expect(result.current.settings.ui?.tank_labels).toEqual({ 'fuel.2': 'Port Fuel' })
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings'))
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings'), expect.anything())
   })
 
   it('falls back to GET /api/settings/signalk when GET /api/settings fails', async () => {
@@ -41,7 +58,7 @@ describe('useSettingsForm', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.settings.signalk).toEqual({ address: 'boat.local', port: 3001 })
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings/signalk'))
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings/signalk'), expect.anything())
   })
 
   it('save(patch) deep-merges into current state and POSTs the FULL merged object', async () => {

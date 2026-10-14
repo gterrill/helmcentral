@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- Going back to a page you opened in the last few minutes shows what it had at
+  once and brings it up to date behind the scenes, instead of a spinner each
+  time. Lists also stay in step with each other: adding an item from a bin, or
+  moving a document, updates every other list showing it without a reload.
+- When the server refuses a change, the message you see is now the server's own
+  reason wherever it gives one, rather than a generic "could not save".
+
 ## [0.44.0] - 2026-10-12
 
 ### Added

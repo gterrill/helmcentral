@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest } from '@/lib/api-query'
 import type { AppVersion } from '@/hooks/use-app-version'
 
 /** sessionStorage key carrying `{ from, to }` across the reload, read once by useUpdatedToast. */
@@ -20,9 +20,7 @@ export interface VersionReloadOptions {
 }
 
 async function readBuild(): Promise<AppVersion> {
-  const response = await fetch(`${apiBaseUrl}/api/health`)
-  if (!response.ok) throw new Error(`Health check failed: ${response.status}`)
-  const data = (await response.json()) as Partial<AppVersion>
+  const data = await apiRequest<Partial<AppVersion>>('/api/health')
   if (!data.version) throw new Error('Health check returned no version')
   return { version: data.version, revision: data.revision ?? 'unknown' }
 }

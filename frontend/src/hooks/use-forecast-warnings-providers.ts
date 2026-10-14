@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { useApiQuery } from '@/lib/api-query'
 
 export interface ForecastWarningsProviderInfo {
   id: string
@@ -6,31 +7,19 @@ export interface ForecastWarningsProviderInfo {
   description: string
 }
 
+const NONE: ForecastWarningsProviderInfo[] = []
+
 export function useForecastWarningsProviders() {
-  const [providers, setProviders] = useState<ForecastWarningsProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const path = '/api/forecast-warnings-providers'
+  const { data, isLoading, error } = useApiQuery<ForecastWarningsProviderInfo[]>({
+    queryKey: [path],
+    path,
+    select: (raw: unknown) => (Array.isArray(raw) ? raw : NONE),
+  })
 
   useEffect(() => {
-    const fetchProviders = async () => {
-      try {
-        const response = await fetch('/api/forecast-warnings-providers')
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
+    if (error) console.error('Error fetching forecast warnings providers:', error)
+  }, [error])
 
-        const data = await response.json()
-        setProviders(Array.isArray(data) ? data : [])
-      } catch (error) {
-        console.error('Error fetching forecast warnings providers:', error)
-        setError(error instanceof Error ? error.message : String(error))
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    void fetchProviders()
-  }, [])
-
-  return { providers, loading, error }
+  return { providers: data ?? NONE, loading: isLoading, error: error?.message ?? null }
 }

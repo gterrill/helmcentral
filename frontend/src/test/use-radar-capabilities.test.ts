@@ -103,7 +103,7 @@ describe('useRadarCapabilities', () => {
     expect(result.current.error).not.toBeNull()
   })
 
-  it('does not refetch on a second mount for the same radar id', async () => {
+  it('shows the cached capabilities at once on a second mount for the same radar id', async () => {
     const fixture = loadCapabilitiesFixture()
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => fixture }))
     vi.stubGlobal('fetch', fetchMock)
@@ -114,10 +114,12 @@ describe('useRadarCapabilities', () => {
     await waitFor(() => expect(first.result.current.loading).toBe(false))
 
     const second = renderHook(() => useRadarCapabilities('fur6424A'))
-    await waitFor(() => expect(second.result.current.loading).toBe(false))
 
+    // No loading state: the shared store hands over the first mount's answer
+    // while it revalidates in the background (one more GET, not one per tile).
+    expect(second.result.current.loading).toBe(false)
     expect(second.result.current.capabilities?.spokesPerRevolution).toBe(8192)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
   })
 
   it('does not fetch when radarId is null', async () => {

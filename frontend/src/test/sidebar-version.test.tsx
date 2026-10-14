@@ -8,9 +8,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { resetQueryStore } from '@/lib/api-query'
+import { jsonResponse } from '@/test/helpers/stub-api'
 
 const stubHealth = (payload: unknown, ok = true) => {
-  const fetchMock = vi.fn(async () => ({ ok, json: async () => payload }))
+  const fetchMock = vi.fn(async () => jsonResponse(payload, ok ? 200 : 500))
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -28,13 +30,13 @@ describe('SidebarVersion', () => {
     expect(await screen.findByText('v0.17.0')).toBeInTheDocument()
   })
 
-  it('reads it from the relative /api/health endpoint', async () => {
+  it('reads it from the /api/health endpoint', async () => {
     const fetchMock = stubHealth({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' })
 
     render(<SidebarVersion />)
     await screen.findByText('v0.17.0')
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/health')
+    expect(fetchMock).toHaveBeenCalledWith('/api/health', expect.anything())
   })
 
   it('carries the build revision for support, without spending sidebar width on it', async () => {
@@ -96,6 +98,8 @@ describe('SidebarVersion', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     unmount()
 
+    // The first probe's answer is cached; a second mount must ask afresh.
+    resetQueryStore()
     stubHealth({}, false)
     render(<SidebarVersion />)
     await screen.findByText('version unavailable')

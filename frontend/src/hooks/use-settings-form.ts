@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
 import type { VesselSettings } from '@/lib/vessel-settings'
 
@@ -150,22 +150,15 @@ export function useSettingsForm(): UseSettingsFormResult {
     settingsRef.current = settings
   }, [settings])
 
+  // The form edits a local draft seeded from the server, so this read stays
+  // out of the shared cache.
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/api/settings`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch settings')
-        }
-        const data = (await response.json()) as SettingsPayload
-        setSettings(data)
+        setSettings(await apiRequest<SettingsPayload>('/api/settings'))
       } catch {
         try {
-          const response = await fetch(`${apiBaseUrl}/api/settings/signalk`)
-          if (!response.ok) {
-            throw new Error('Failed to fetch SignalK settings')
-          }
-          const data = (await response.json()) as { address?: string; port?: number }
+          const data = await apiRequest<{ address?: string; port?: number }>('/api/settings/signalk')
           setSettings((previous) => ({ ...previous, signalk: data }))
         } catch {
           // Keep defaults if settings endpoint is unavailable.
@@ -185,21 +178,11 @@ export function useSettingsForm(): UseSettingsFormResult {
     const merged = deepMergeSettings(settingsRef.current, patch)
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/settings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(merged),
-      })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(errorPayload?.error ?? 'Unable to save settings')
-      }
-
-      const data = (await response.json()) as SettingsPayload
+      const data = await apiRequest<SettingsPayload>('/api/settings', { method: 'POST', json: merged })
       setSettings(data)
+      // The response is the whole document, the shape other readers of the
+      // shared entry (the tide settings) take, so they follow the save.
+      setQueryData(['/api/settings'], data)
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

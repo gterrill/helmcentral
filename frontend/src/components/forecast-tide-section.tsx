@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { formatRefreshAge } from '@/components/forecast-drawer'
 import { TideChart, TidePhaseBadge } from '@/components/tide-chart'
 import { TideStationPicker } from '@/components/tide-station-picker'
+import { apiRequest } from '@/lib/api-query'
 import { useTideChart } from '@/hooks/use-tide-chart'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useTideSettings } from '@/hooks/use-tide-settings'
@@ -36,9 +37,8 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
       setAutoDetecting(false)
       return
     }
-    fetch(`/api/tide-nearest?provider=${tideProvider}`)
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error('unavailable')))
-      .then((s: { station_id: string; name: string }) => saveStation(s.station_id, s.name))
+    apiRequest<{ station_id: string; name: string }>(`/api/tide-nearest?provider=${tideProvider}`)
+      .then((s) => saveStation(s.station_id, s.name))
       .catch(() => setAutoDetectFailed(true))
       .finally(() => setAutoDetecting(false))
   }, [settingsLoading, tideProvider, tideStationId, saveStation])

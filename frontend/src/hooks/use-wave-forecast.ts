@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import { useApiQuery } from '@/lib/api-query';
 
 export type WaveSteepnessBand = 'rolling' | 'building' | 'steep' | 'breaking';
 
@@ -93,90 +94,94 @@ interface WaveForecastEnvelopeApi {
   ttl_seconds?: number;
 }
 
+interface MappedWaveForecast {
+  days: WaveForecastDay[];
+  seaTemperatureF: number | null;
+  provider: string | null;
+  isCached: boolean;
+  updatedAt: string | null;
+  ttlSeconds: number | null;
+}
+
+function mapWavePayload(payload: WaveForecastEnvelopeApi): MappedWaveForecast {
+  const rawDays = Array.isArray(payload.days) ? payload.days : [];
+
+  const mappedDays = rawDays.slice(0, 10).map((day, idx): WaveForecastDay => {
+    const fallbackDate = new Date();
+    fallbackDate.setDate(fallbackDate.getDate() + idx);
+
+    return {
+      dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
+      date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
+      waveSummary: typeof day.wave_summary === 'string' && day.wave_summary !== '' ? day.wave_summary : null,
+      hourlyWave: Array.isArray(day.hourly_wave)
+        ? day.hourly_wave.map((entry) => ({
+            label: entry.label || '—',
+            hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
+            waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
+            wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
+            waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
+            windWaveHeightM: typeof entry.wind_wave_height_m === 'number' ? entry.wind_wave_height_m : -1,
+            swellWaveHeightM: typeof entry.swell_wave_height_m === 'number' ? entry.swell_wave_height_m : -1,
+            windWaveDirectionDeg: typeof entry.wind_wave_direction_deg === 'number' ? entry.wind_wave_direction_deg : -1,
+            windWavePeriodS: typeof entry.wind_wave_period_s === 'number' ? entry.wind_wave_period_s : -1,
+            swellWaveDirectionDeg: typeof entry.swell_wave_direction_deg === 'number' ? entry.swell_wave_direction_deg : -1,
+            swellWavePeriodS: typeof entry.swell_wave_period_s === 'number' ? entry.swell_wave_period_s : -1,
+            steepnessRatio: typeof entry.steepness_ratio === 'number' ? entry.steepness_ratio : null,
+            steepnessBand: steepnessBandOrNull(entry.steepness_band),
+          }))
+        : [],
+      indicators: {
+        waveFront: Boolean(day.indicators?.wave_front),
+        rapidBuild: Boolean(day.indicators?.rapid_build),
+        periodStep: Boolean(day.indicators?.period_step),
+        crossSea: Boolean(day.indicators?.cross_sea),
+      },
+    };
+  });
+
+  return {
+    days: mappedDays,
+    seaTemperatureF: typeof payload.sea_temperature_f === 'number' ? payload.sea_temperature_f : null,
+    provider: typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null,
+    isCached: Boolean(payload.cached),
+    updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
+    ttlSeconds: typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null,
+  };
+}
+
+const EMPTY_WAVES: MappedWaveForecast = {
+  days: [],
+  seaTemperatureF: null,
+  provider: null,
+  isCached: false,
+  updatedAt: null,
+  ttlSeconds: null,
+};
+
 export function useWaveForecast(refreshIntervalSeconds = 3600) {
-  const [days, setDays] = useState<WaveForecastDay[]>([]);
-  const [seaTemperatureF, setSeaTemperatureF] = useState<number | null>(null);
-  const [provider, setProvider] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isCached, setIsCached] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
-  const hasLoadedDataRef = useRef(false);
-
-  const fetchWaveForecast = useCallback(async () => {
-    try {
-      if (!hasLoadedDataRef.current) {
-        setLoading(true);
-      }
-
-      const response = await fetch('/api/wave-forecast');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const payload = (await response.json()) as WaveForecastEnvelopeApi;
-      const rawDays = Array.isArray(payload.days) ? payload.days : [];
-
-      const mappedDays = rawDays.slice(0, 10).map((day, idx): WaveForecastDay => {
-        const fallbackDate = new Date();
-        fallbackDate.setDate(fallbackDate.getDate() + idx);
-
-        return {
-          dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
-          date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
-          waveSummary: typeof day.wave_summary === 'string' && day.wave_summary !== '' ? day.wave_summary : null,
-          hourlyWave: Array.isArray(day.hourly_wave)
-            ? day.hourly_wave.map((entry) => ({
-                label: entry.label || '—',
-                hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
-                wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
-                waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
-                windWaveHeightM: typeof entry.wind_wave_height_m === 'number' ? entry.wind_wave_height_m : -1,
-                swellWaveHeightM: typeof entry.swell_wave_height_m === 'number' ? entry.swell_wave_height_m : -1,
-                windWaveDirectionDeg: typeof entry.wind_wave_direction_deg === 'number' ? entry.wind_wave_direction_deg : -1,
-                windWavePeriodS: typeof entry.wind_wave_period_s === 'number' ? entry.wind_wave_period_s : -1,
-                swellWaveDirectionDeg: typeof entry.swell_wave_direction_deg === 'number' ? entry.swell_wave_direction_deg : -1,
-                swellWavePeriodS: typeof entry.swell_wave_period_s === 'number' ? entry.swell_wave_period_s : -1,
-                steepnessRatio: typeof entry.steepness_ratio === 'number' ? entry.steepness_ratio : null,
-                steepnessBand: steepnessBandOrNull(entry.steepness_band),
-              }))
-            : [],
-          indicators: {
-            waveFront: Boolean(day.indicators?.wave_front),
-            rapidBuild: Boolean(day.indicators?.rapid_build),
-            periodStep: Boolean(day.indicators?.period_step),
-            crossSea: Boolean(day.indicators?.cross_sea),
-          },
-        };
-      });
-
-      if (mappedDays.length > 0) {
-        hasLoadedDataRef.current = true;
-      }
-
-      setDays(mappedDays);
-      setSeaTemperatureF(typeof payload.sea_temperature_f === 'number' ? payload.sea_temperature_f : null);
-      setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
-      setIsCached(Boolean(payload.cached));
-      setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
-      setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
-      setError(null);
-    } catch (error) {
-      console.error('Error fetching wave forecast:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load wave forecast data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data, error, isLoading, refetch } = useApiQuery<MappedWaveForecast>({
+    queryKey: ['/api/wave-forecast'],
+    path: '/api/wave-forecast',
+    refetchInterval: refreshIntervalSeconds * 1000,
+    select: mapWavePayload,
+  });
 
   useEffect(() => {
-    fetchWaveForecast();
-    const interval = setInterval(fetchWaveForecast, refreshIntervalSeconds * 1000);
-    return () => clearInterval(interval);
-  }, [fetchWaveForecast, refreshIntervalSeconds]);
+    if (error) console.error('Error fetching wave forecast:', error);
+  }, [error]);
 
-  return { days, seaTemperatureF, provider, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchWaveForecast };
+  const { days, seaTemperatureF, provider, isCached, updatedAt, ttlSeconds } = data ?? EMPTY_WAVES;
+  return {
+    days,
+    seaTemperatureF,
+    provider,
+    loading: isLoading,
+    error: error ? error.message || 'Failed to load wave forecast data' : null,
+    isCached,
+    updatedAt,
+    ttlSeconds,
+    refetch,
+  };
 }

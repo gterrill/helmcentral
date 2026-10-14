@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { apiRequest } from '@/lib/api-query'
+
 /** Resizes settle (a TV changing UI scale, a window drag) before one report. */
 export const VIEWPORT_REPORT_DEBOUNCE_MS = 1000
 
@@ -32,14 +34,10 @@ export function useDisplayViewport(displayId: string, reporting = true): Viewpor
       const key = `${displayId}:${next.w}x${next.h}`
       if (lastSent.current === key) return
       lastSent.current = key
-      fetch(`/api/displays/${encodeURIComponent(displayId)}/viewport`, {
+      apiRequest(`/api/displays/${encodeURIComponent(displayId)}/viewport`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ w: next.w, h: next.h, user_agent: navigator.userAgent }),
+        json: { w: next.w, h: next.h, user_agent: navigator.userAgent },
       })
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        })
         .catch((err: unknown) => {
           lastSent.current = null
           console.error('display viewport report failed', err)

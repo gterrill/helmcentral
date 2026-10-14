@@ -38,7 +38,7 @@ describe('useOvernightProjection', () => {
       await Promise.resolve()
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/electrical/overnight')
+    expect(fetchMock).toHaveBeenCalledWith('/api/electrical/overnight', expect.anything())
     expect(result.current.error).toBeNull()
     expect(result.current.projection).not.toBeNull()
     expect(result.current.projection?.basis).toBe('history')
