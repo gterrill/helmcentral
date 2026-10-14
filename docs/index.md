@@ -22,6 +22,9 @@ meets your needs.
   heavy-weather warning signs the wave graph watches for.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
 - [Alarms](features/alarms.md), rules, transports and the decisions behind them.
+- [Passages](features/passages.md), the logbook: every leg the boat has run,
+  replayed on the chart, with cruise totals for nights, fuel, wind, generator,
+  battery and water.
 - [Anomaly detection](features/anomaly-detection.md), frozen and impossible
   sensor readings, charging into a full house bank, and engines pulling
   apart from each other.
@@ -81,6 +84,10 @@ Steps for specific tasks.
   asking Mate for a schedule and applying what it proposes.
 - [Log a service](how-to/log-a-service.md), completing a scheduled job or
   recording a repair or improvement.
+- [Import GPX tracks](how-to/import-gpx-tracks.md), adding trips Helmcentral did
+  not record itself.
+- [Edit a passage](how-to/edit-passages.md), splitting, trimming, merging,
+  hiding and filing passages in cruises.
 - [Import from YachtWave](how-to/import-from-yachtwave.md), page by page
   through the import wizard.
 - [Development](how-to/development.md), running the stack, tests and release builds.
