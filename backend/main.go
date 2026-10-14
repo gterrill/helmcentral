@@ -382,6 +382,17 @@ func main() {
 	}
 	globalNearbyContactStore = ncs
 
+	// Track point log and passages (ADR 0176), in the same file. The recorder
+	// is always on; a log that cannot be opened is a startup failure, not a
+	// feature quietly turned off.
+	pas, err := newPassageStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open passage store: %v", err)
+	}
+	if err := startPassageRecording(pas); err != nil {
+		log.Fatalf("failed to start track point recording: %v", err)
+	}
+
 	// Alarm log (occurrence history and notification queue behind the alarm
 	// centre), another of the six stores sharing helmcentral.sqlite (ADR
 	// 0141). Fail fast on open error, same reasoning as the stores above.
@@ -784,6 +795,10 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
 		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
+		{http.MethodGet, "/api/passages", tierRead, listPassagesHandler},
+		{http.MethodGet, "/api/passages/:id", tierRead, getPassageHandler},
+		{http.MethodGet, "/api/cruises", tierRead, listCruisesHandler},
+		{http.MethodGet, "/api/cruises/:id", tierRead, getCruiseHandler},
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
 		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
 		{http.MethodGet, "/api/equipment-profiles", tierRead, equipmentProfilesHandler},
@@ -909,6 +924,15 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
+		{http.MethodPost, "/api/passages/import", tierWrite, importPassagesHandler},
+		{http.MethodPost, "/api/passages/merge", tierWrite, mergePassagesHandler},
+		{http.MethodPatch, "/api/passages/:id", tierWrite, patchPassageHandler},
+		{http.MethodPost, "/api/passages/:id/split", tierWrite, splitPassageHandler},
+		{http.MethodPost, "/api/passages/:id/trim", tierWrite, trimPassageHandler},
+		{http.MethodPost, "/api/cruises", tierWrite, createCruiseHandler},
+		{http.MethodPatch, "/api/cruises/:id", tierWrite, patchCruiseHandler},
+		{http.MethodDelete, "/api/cruises/:id", tierWrite, deleteCruiseHandler},
+		{http.MethodPut, "/api/cruises/:id/water-rises", tierWrite, putWaterRiseLabelHandler},
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
 		{http.MethodPost, "/api/alarms/:id/silence", tierWrite, silenceAlarmHandler},
 		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},

@@ -24,6 +24,17 @@ beforeEach(() => {
   try { localStorage.clear() } catch { /* not available */ }
 })
 
+describe('FolderTree long names', () => {
+  it('wraps a name to two lines and keeps the full name in a title', () => {
+    renderTree({ nodes: [{ id: 'long', label: 'Dunk to Townsville', count: 4 }], selectedId: 'long' })
+    const name = screen.getByText('Dunk to Townsville')
+    expect(name).toHaveClass('line-clamp-2')
+    expect(name).not.toHaveClass('truncate')
+    expect(name).toHaveAttribute('title', 'Dunk to Townsville')
+    expect(screen.getByText('4')).toHaveClass('self-start')
+  })
+})
+
 describe('FolderTree', () => {
   it('marks the selected node, and only a parent carries aria-expanded', () => {
     renderTree({ selectedId: 'b' })
@@ -119,9 +130,9 @@ describe('FolderTree', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
-  it('truncates long names and right-aligns the count', () => {
+  it('clamps long names to two lines and keeps the count', () => {
     renderTree({ nodes: [{ id: 'x', label: 'A very long folder name', count: 12 }], selectedId: 'x' })
-    expect(screen.getByText('A very long folder name').className).toContain('truncate')
+    expect(screen.getByText('A very long folder name').className).toContain('line-clamp-2')
     expect(screen.getByText('12').className).toContain('tabular-nums')
   })
 })

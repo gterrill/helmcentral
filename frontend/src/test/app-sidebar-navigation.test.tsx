@@ -432,6 +432,7 @@ describe('App sidebar navigation', () => {
       'Forecast',
       'Radar',
       'Routes',
+      'Passages',
       'Documents',
       'Inventory',
       'Mate',

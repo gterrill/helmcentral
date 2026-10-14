@@ -14,7 +14,7 @@ import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
 // its own carries a `route`, a single union of that panel's views, so going
 // to a view replaces the whole slice and no sibling field is ever left
 // behind to clear.
-export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** The panels with a single view and nothing to remember beyond being open. */
@@ -69,6 +69,23 @@ export type InventoryRoute =
   | { view: 'decks' }
   | { view: 'deck'; id: string }
 
+/**
+ * Which passages the Passages index lists: all, those in no Cruise, or one
+ * Cruise's. Passage and combined views carry the filter they were opened from
+ * so Back lands the index there.
+ */
+export type PassagesFilter = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'cruise'; id: string }
+
+/**
+ * `/passages` is the index. `/passages/<id>` is one passage, `/passages/cruises/<id>`
+ * one Cruise, and `/passages/combined?ids=a,b` an ad-hoc selection viewed together.
+ */
+export type PassagesRoute =
+  | { view: 'index'; filter: PassagesFilter }
+  | { view: 'passage'; id: string; filter: PassagesFilter }
+  | { view: 'cruise'; id: string }
+  | { view: 'combined'; ids: string[]; filter: PassagesFilter }
+
 export type AppLocation =
   | { panel: null; pageId: string | null }
   | { panel: PlainPanelId }
@@ -77,6 +94,7 @@ export type AppLocation =
   | { panel: 'documents'; route: DocumentsRoute }
   | { panel: 'inventory'; route: InventoryRoute }
   | { panel: 'wall-displays'; route: WallDisplaysRoute }
+  | { panel: 'passages'; route: PassagesRoute }
   /** ADR 0110: the wall display at `/display/<slug>`. `slug` is null on a bare
    * `/display`. Never validated against the configured displays here: an
    * unknown or absent slug is a distinct, explicit shape the wall shell
@@ -187,6 +205,27 @@ export function parseAppLocation(pathname: string): AppLocation {
       panel: 'documents',
       route: { view: 'browse', folderId, sectionId: params.get('section'), documentId: params.get('document') },
     }
+  }
+
+  if (first === 'passages') {
+    const params = new URLSearchParams(search)
+    const cruiseParam = params.get('cruise')
+    const filter: PassagesFilter = cruiseParam
+      ? { kind: 'cruise', id: cruiseParam }
+      : params.get('filter') === 'unfiled' ? { kind: 'unfiled' } : { kind: 'all' }
+    const indexRoute: AppLocation = { panel: 'passages', route: { view: 'index', filter } }
+    if (second === undefined) return indexRoute
+    if (second === 'cruises') {
+      const idSegment = segments[2]
+      const id = idSegment !== undefined ? decodeSegment(idSegment) : null
+      return id ? { panel: 'passages', route: { view: 'cruise', id } } : indexRoute
+    }
+    if (second === 'combined') {
+      const ids = (params.get('ids') ?? '').split(',').filter(Boolean)
+      return ids.length > 0 ? { panel: 'passages', route: { view: 'combined', ids, filter } } : indexRoute
+    }
+    const id = decodeSegment(second)
+    return id ? { panel: 'passages', route: { view: 'passage', id, filter } } : indexRoute
   }
 
   // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
@@ -395,6 +434,22 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
       // The wall's query string is its own and is never written back.
       if (!loc.slug) return '/display'
       return `/display/${encodeURIComponent(loc.slug)}`
+    }
+
+    case 'passages': {
+      const { route } = loc
+      const params = new URLSearchParams()
+      if (route.view !== 'cruise') {
+        if (route.filter.kind === 'unfiled') params.set('filter', 'unfiled')
+        if (route.filter.kind === 'cruise') params.set('cruise', route.filter.id)
+      }
+      if (route.view === 'combined') params.set('ids', route.ids.join(','))
+      const qs = params.toString()
+      let base = '/passages'
+      if (route.view === 'passage') base = `/passages/${encodeURIComponent(route.id)}`
+      if (route.view === 'cruise') base = `/passages/cruises/${encodeURIComponent(route.id)}`
+      if (route.view === 'combined') base = '/passages/combined'
+      return qs ? `${base}?${qs}` : base
     }
 
     case 'wall-displays': {

@@ -1,0 +1,121 @@
+{
+ "navigation": {
+  "position": {
+   "value": {
+    "latitude": -19.25215335783864,
+    "longitude": 146.82380063270864
+   },
+   "$source": "WLN10.GP",
+   "timestamp": "2026-10-14T01:01:27.000Z",
+   "sentence": "GGA"
+  },
+  "speedOverGround": {
+   "value": 0.0149188926683417,
+   "$source": "WLN10.GP",
+   "timestamp": "2026-10-14T01:01:27.000Z",
+   "sentence": "RMC"
+  },
+  "courseOverGroundTrue": {
+   "value": 3.1743,
+   "$source": "YachtDevices.22",
+   "timestamp": "2026-10-14T01:01:27.995Z",
+   "pgn": 129026
+  }
+ },
+ "environment": {
+  "wind": {
+   "speedTrue": {
+    "value": 2.41,
+    "$source": "derived-data",
+    "timestamp": "2026-10-14T01:01:28.074Z"
+   }
+  }
+ },
+ "electrical": {
+  "batteries": {
+   "0": {
+    "capacity": {
+     "stateOfCharge": {
+      "value": 1,
+      "$source": "YachtDevices.224",
+      "timestamp": "2026-10-14T01:01:28.102Z",
+      "pgn": 127506
+     }
+    }
+   }
+  },
+  "generator": {
+   "0": {
+    "state": {
+     "value": "stopped",
+     "$source": "venus.com.victronenergy.generator.0",
+     "timestamp": "2026-10-14T01:01:14.856Z"
+    }
+   }
+  }
+ },
+ "tanks": {
+  "freshWater": {
+   "0": {
+    "currentLevel": {
+     "value": 1,
+     "$source": "YachtDevices.6",
+     "timestamp": "2026-10-14T01:01:27.664Z",
+     "pgn": 127505
+    },
+    "capacity": {
+     "value": 0.34,
+     "$source": "YachtDevices.6",
+     "timestamp": "2026-10-14T01:01:27.664Z",
+     "pgn": 127505
+    }
+   },
+   "3": {
+    "currentLevel": {
+     "value": 0.79752,
+     "$source": "YachtDevices.7",
+     "timestamp": "2026-10-14T01:01:26.200Z",
+     "pgn": 127505
+    },
+    "capacity": {
+     "value": 0.66,
+     "$source": "YachtDevices.7",
+     "timestamp": "2026-10-14T01:01:26.200Z",
+     "pgn": 127505
+    }
+   }
+  }
+ },
+ "propulsion": {
+  "port": {
+   "fuel": {
+    "rate": {
+     "value": 0,
+     "$source": "YachtDevices.128",
+     "timestamp": "2026-10-12T05:32:25.756Z",
+     "pgn": 127489
+    }
+   },
+   "state": {
+    "value": "stopped",
+    "$source": "derived-data",
+    "timestamp": "2026-10-12T05:20:30.951Z"
+   }
+  },
+  "starboard": {
+   "fuel": {
+    "rate": {
+     "value": 4.1666666666666667e-07,
+     "$source": "YachtDevices.128",
+     "timestamp": "2026-10-13T05:08:20.804Z",
+     "pgn": 127489
+    }
+   },
+   "state": {
+    "value": "started",
+    "$source": "derived-data",
+    "timestamp": "2026-10-13T05:06:02.915Z"
+   }
+  }
+ }
+}

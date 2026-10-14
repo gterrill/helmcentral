@@ -30,3 +30,26 @@ its handler, its status line, and optionally how its result becomes a card on
 the reply and whether it is on offer for this run. Calls in a round run
 concurrently, so a tool that writes is safe under that on its own.
 _Avoid_: function, plugin, skill.
+
+## Passages
+
+**Track point**: one recorded position with the readings taken at that moment
+(speed, course, wind, gust, house state of charge, fuel rate, generator state,
+fresh water). Kept by Helmcentral itself, whether or not the boat is moving. A
+reading that was too old when the point was taken is absent, not copied from
+an earlier point.
+_Avoid_: trail point, sample, fix.
+
+**Passage**: one leg the boat actually ran, from departing a place to coming
+to rest at the next, found in the track points and then kept as a record the
+operator can rename, split, merge, trim or hide. A stop of up to an hour stays
+inside one passage. A leg that is only being planned is a **planned passage**,
+never a Passage.
+_Avoid_: trip (the trip ETA is TimeZero's next waypoint), voyage, leg, track.
+
+**Cruise**: a named group of Passages, such as "Whitsundays with Steve and
+Kim". A Passage belongs to at most one Cruise. Its span runs from the first
+departure to the last arrival, and it owns the nights at anchor in between,
+which is where generator hours, water made and battery figures come from.
+Cruises do not nest.
+_Avoid_: trip, voyage, season.

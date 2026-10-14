@@ -15,6 +15,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- Helmcentral now keeps its own log of where the boat has been, with speed,
+  wind, house battery, fuel rate, generator and fresh water recorded alongside
+  each position. It starts on its own after the upgrade and needs no setting;
+  to include the house battery, choose the house bank under Vessel settings.
+- A new **Passages** page in the sidebar lists every leg the boat has run,
+  newest first, with the distance, time underway and the places it went from
+  and to. Open one to see its track on the chart, replay it with a moving boat
+  and the local time, and read its speed, fuel, wind and battery figures.
+  Figures the boat did not record show `--`.
+- Passages can be grouped into a **cruise**. A cruise page replays its passages
+  one after another and adds nights, fuel, wind underway and at anchor,
+  generator hours, the lowest house battery and its charge at dawn each night,
+  and the fresh water used and taken on, with each fill marked as Watermaker or
+  Dock fill.
+- Passages can be edited: rename them, change the two ends, add notes, split
+  one in two, trim its start or end, merge neighbours, hide one, or move it to
+  another cruise.
+- Trips Helmcentral did not record can be added with **Import GPX** on the
+  Passages page. See the new pages on importing GPX tracks and editing
+  passages in the help.
 - Mate can see the active alarms, so asking it about an alarm investigates the
   sensor that raised it, not a guess from the device name on the card.
 

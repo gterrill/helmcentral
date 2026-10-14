@@ -13,6 +13,7 @@ import {
   Radar as RadarIcon,
   Route,
   Settings,
+  Ship,
   Sparkles,
   MonitorPlay,
   Wrench,
@@ -47,6 +48,7 @@ const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) 
 const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
+const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
@@ -247,6 +249,7 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'routes', label: 'Routes', icon: Route },
+  { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'inventory', label: 'Inventory', icon: Wrench },
   { id: 'assistant', label: 'Mate', icon: Sparkles },
@@ -2373,6 +2376,8 @@ function AppShell() {
           />
         )
       }
+      case 'passages':
+        return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
