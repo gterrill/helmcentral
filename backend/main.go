@@ -382,6 +382,17 @@ func main() {
 	}
 	globalNearbyContactStore = ncs
 
+	// Track point log and passages (ADR 0173), in the same file. The recorder
+	// is always on; a log that cannot be opened is a startup failure, not a
+	// feature quietly turned off.
+	pas, err := newPassageStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open passage store: %v", err)
+	}
+	if err := startPassageRecording(pas); err != nil {
+		log.Fatalf("failed to start track point recording: %v", err)
+	}
+
 	// Alarm log (occurrence history and notification queue behind the alarm
 	// centre), another of the six stores sharing helmcentral.sqlite (ADR
 	// 0141). Fail fast on open error, same reasoning as the stores above.
@@ -784,6 +795,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
 		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
+		{http.MethodGet, "/api/passages", tierRead, listPassagesHandler},
+		{http.MethodGet, "/api/passages/:id", tierRead, getPassageHandler},
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
 		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
 		{http.MethodGet, "/api/equipment-profiles", tierRead, equipmentProfilesHandler},

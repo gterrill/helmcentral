@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Helmcentral now keeps its own log of where the boat has been, with speed,
+  wind, house battery, fuel rate, generator and fresh water recorded alongside
+  each position. It starts on its own after the upgrade and needs no setting;
+  to include the house battery, choose the house bank under Vessel settings.
+  Runs of travel are saved as passages, which the Passages page will show.
+
 ## [0.44.0] - 2026-10-12
 
 ### Added
