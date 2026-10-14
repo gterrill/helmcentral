@@ -150,6 +150,8 @@ func createPassageSchema(db *sql.DB) error {
 			at_ms INTEGER NOT NULL,
 			suggested TEXT,
 			looked_up_ms INTEGER NOT NULL,
+			status TEXT NOT NULL DEFAULT '',
+			error_class TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (cruise_id, at_ms)
 		)`,
 		`CREATE TABLE IF NOT EXISTS passage_detector_state (
@@ -483,6 +485,12 @@ func ensureColumn(db *sql.DB, table, column, ddl string) error {
 }
 
 func addPassageNameAttemptColumn(db *sql.DB) error {
+	if err := ensureColumn(db, "water_rise_suggestions", "status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "water_rise_suggestions", "error_class", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	for _, c := range [][2]string{
 		{"name_attempted_ms", "INTEGER"},
 		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},

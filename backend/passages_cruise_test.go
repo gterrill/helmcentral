@@ -228,7 +228,7 @@ func TestCruiseStatsReadsStoredValuesAndNeverLooksUp(t *testing.T) {
 	if *calls != 0 {
 		t.Errorf("GET looked up a marina %d times", *calls)
 	}
-	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt != nil {
+	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt != nil || r.SuggestionStatus != "pending" {
 		t.Errorf("nothing stored yet: %+v", r)
 	}
 }
@@ -247,7 +247,7 @@ func TestMarinaWorkerStoresSuggestionOnceAndOperatorLabelsSeparately(t *testing.
 	}
 	_, _, st, _ := s.CruiseStats(c.ID)
 	r := st.WaterRises[0]
-	if r.SuggestedLabel == nil || *r.SuggestedLabel != "Dock fill" || r.LookedUpAt == nil || r.Label != nil {
+	if r.SuggestedLabel == nil || *r.SuggestedLabel != "Dock fill" || r.LookedUpAt == nil || r.Label != nil || r.SuggestionStatus != "found" {
 		t.Fatalf("%+v", r)
 	}
 
@@ -268,17 +268,31 @@ func TestMarinaWorkerStoresSuggestionOnceAndOperatorLabelsSeparately(t *testing.
 	}
 }
 
-func TestMarinaWorkerFailureStoredAsNoSuggestionAndNotRetried(t *testing.T) {
+func TestMarinaWorkerFailureIsStoredAsFailedAndRetriedAfterSixHours(t *testing.T) {
 	s, c := cruiseWithRise(t)
+	now := time.Now()
 	calls := stubMarina(t, func(float64, float64) (bool, error) { return false, errors.New("overpass unreachable") })
-	s.LookUpNewWaterRises()
-	s.LookUpNewWaterRises()
+	s.LookUpNewWaterRisesAt(now)
+	s.LookUpNewWaterRisesAt(now.Add(5 * time.Hour))
 	if *calls != 1 {
-		t.Errorf("a failed lookup was retried: %d calls", *calls)
+		t.Errorf("a failed lookup was retried inside six hours: %d calls", *calls)
 	}
 	_, _, st, _ := s.CruiseStats(c.ID)
-	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt == nil {
-		t.Errorf("want no suggestion with looked_up_at set: %+v", r)
+	r := st.WaterRises[0]
+	if r.SuggestionStatus != "failed" || r.SuggestedLabel != nil || r.LookedUpAt == nil || r.SuggestionError == "" {
+		t.Fatalf("a failure must read as failed, not as none: %+v", r)
+	}
+
+	// six hours on the job tries again, and a good answer replaces the failure
+	*calls = 0
+	marinaNear = func(float64, float64) (bool, error) { *calls++; return true, nil }
+	s.LookUpNewWaterRisesAt(now.Add(7 * time.Hour))
+	if *calls != 1 {
+		t.Errorf("retry calls %d", *calls)
+	}
+	_, _, st, _ = s.CruiseStats(c.ID)
+	if r := st.WaterRises[0]; r.SuggestionStatus != "found" || r.SuggestedLabel == nil || r.SuggestionError != "" {
+		t.Errorf("%+v", r)
 	}
 }
 
@@ -287,8 +301,14 @@ func TestMarinaWorkerNoMarinaMeansNoSuggestion(t *testing.T) {
 	stubMarina(t, func(float64, float64) (bool, error) { return false, nil })
 	s.LookUpNewWaterRises()
 	_, _, st, _ := s.CruiseStats(c.ID)
-	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt == nil {
-		t.Errorf("no marina nearby is no suggestion, not a Watermaker guess: %+v", r)
+	r := st.WaterRises[0]
+	if r.SuggestedLabel != nil || r.LookedUpAt == nil || r.SuggestionStatus != "none" {
+		t.Errorf("no marina nearby is a final none, not a Watermaker guess: %+v", r)
+	}
+	calls := stubMarina(t, func(float64, float64) (bool, error) { return true, nil })
+	s.LookUpNewWaterRisesAt(time.Now().Add(48 * time.Hour))
+	if *calls != 0 {
+		t.Error("none is final and is not looked up again")
 	}
 }
 

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
+	"net"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -45,7 +48,12 @@ type waterRise struct {
 	SuggestedLabel *string `json:"suggested_label"`
 	// LookedUpAt is when the marina check ran; nil means it has not yet.
 	LookedUpAt *time.Time `json:"looked_up_at"`
-	Label      *string    `json:"label"`
+	// SuggestionStatus is pending (not checked yet), found, none (checked, no
+	// marina there: final) or failed (the check itself failed; it is retried).
+	// SuggestionError names the class of failure when it failed.
+	SuggestionStatus string  `json:"suggestion_status"`
+	SuggestionError  string  `json:"suggestion_error,omitempty"`
+	Label            *string `json:"label"`
 }
 
 type cruiseStats struct {
@@ -419,13 +427,41 @@ func (s *passageStore) cruiseCore(cruiseID string) (cruiseRecord, []passageRecor
 	return cr, passages, computeCruiseStats(passages, per, span), nil
 }
 
+const (
+	suggestionPending = "pending"
+	suggestionFound   = "found"
+	suggestionNone    = "none"
+	suggestionFailed  = "failed"
+
+	// marinaRetryAfter is how long a failed lookup waits before the job
+	// tries it again.
+	marinaRetryAfter = 6 * time.Hour
+)
+
 type storedRiseInfo struct {
 	suggested *string
 	lookedUp  time.Time
+	status    string
+	errClass  string
+}
+
+// classifyLookupError names the kind of failure without carrying its text into
+// the API.
+func classifyLookupError(err error) string {
+	var ne net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
+		return "timeout"
+	case errors.As(err, &ne):
+		return "network"
+	case strings.Contains(err.Error(), "provider"):
+		return "provider"
+	}
+	return "error"
 }
 
 func (s *passageStore) storedRiseInfo(cruiseID string) (map[int64]storedRiseInfo, error) {
-	rows, err := s.db.Query(`SELECT at_ms, suggested, looked_up_ms FROM water_rise_suggestions WHERE cruise_id = ?`, cruiseID)
+	rows, err := s.db.Query(`SELECT at_ms, suggested, looked_up_ms, status, error_class FROM water_rise_suggestions WHERE cruise_id = ?`, cruiseID)
 	if err != nil {
 		return nil, err
 	}
@@ -434,13 +470,20 @@ func (s *passageStore) storedRiseInfo(cruiseID string) (map[int64]storedRiseInfo
 	for rows.Next() {
 		var ms, looked int64
 		var sug sql.NullString
-		if err := rows.Scan(&ms, &sug, &looked); err != nil {
+		var status, class string
+		if err := rows.Scan(&ms, &sug, &looked, &status, &class); err != nil {
 			return nil, err
 		}
-		info := storedRiseInfo{lookedUp: time.UnixMilli(looked).UTC()}
+		info := storedRiseInfo{lookedUp: time.UnixMilli(looked).UTC(), status: status, errClass: class}
 		if sug.Valid {
 			v := sug.String
 			info.suggested = &v
+		}
+		if info.status == "" { // a row from before statuses existed
+			info.status = suggestionNone
+			if info.suggested != nil {
+				info.status = suggestionFound
+			}
 		}
 		out[ms] = info
 	}
@@ -472,6 +515,9 @@ func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageReco
 		if in, ok := info[r.Start.UnixMilli()]; ok {
 			t := in.lookedUp
 			r.LookedUpAt, r.SuggestedLabel = &t, in.suggested
+			r.SuggestionStatus, r.SuggestionError = in.status, in.errClass
+		} else {
+			r.SuggestionStatus = suggestionPending
 		}
 	}
 	sort.Slice(st.WaterRises, func(i, j int) bool { return st.WaterRises[i].Start.Before(st.WaterRises[j].Start) })
@@ -479,10 +525,12 @@ func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageReco
 }
 
 // LookUpNewWaterRises checks, once per rise, whether the rise happened beside a
-// marina and stores the answer with the time of the check. A rise already
-// checked is skipped. A failed check is logged and stored as no suggestion, so
-// it is not repeated on every pass.
-func (s *passageStore) LookUpNewWaterRises() error {
+// marina and stores the answer with the time of the check. No marina is a final
+// answer. A failed check is stored as failed, with the class of failure, and is
+// retried once marinaRetryAfter has passed.
+func (s *passageStore) LookUpNewWaterRises() error { return s.LookUpNewWaterRisesAt(time.Now()) }
+
+func (s *passageStore) LookUpNewWaterRisesAt(now time.Time) error {
 	cruises, err := s.ListCruises()
 	if err != nil {
 		return err
@@ -497,19 +545,21 @@ func (s *passageStore) LookUpNewWaterRises() error {
 			return err
 		}
 		for _, r := range st.WaterRises {
-			if _, ok := done[r.Start.UnixMilli()]; ok {
+			if in, ok := done[r.Start.UnixMilli()]; ok && !(in.status == suggestionFailed && now.Sub(in.lookedUp) >= marinaRetryAfter) {
 				continue
 			}
 			var suggested any
+			status, class := suggestionNone, ""
 			near, lerr := marinaNear(r.Lat, r.Lon)
 			switch {
 			case lerr != nil:
-				log.Printf("passages: marina lookup for water rise at %s failed, stored as no suggestion: %v", r.Start.Format(time.RFC3339), lerr)
+				status, class = suggestionFailed, classifyLookupError(lerr)
+				log.Printf("passages: marina lookup for water rise at %s failed (%s), will retry: %v", r.Start.Format(time.RFC3339), class, lerr)
 			case near:
-				suggested = waterLabelDockFill
+				status, suggested = suggestionFound, waterLabelDockFill
 			}
-			if _, err := s.db.Exec(`INSERT OR REPLACE INTO water_rise_suggestions (cruise_id, at_ms, suggested, looked_up_ms) VALUES (?,?,?,?)`,
-				cr.ID, r.Start.UnixMilli(), suggested, time.Now().UnixMilli()); err != nil {
+			if _, err := s.db.Exec(`INSERT OR REPLACE INTO water_rise_suggestions (cruise_id, at_ms, suggested, looked_up_ms, status, error_class) VALUES (?,?,?,?,?,?)`,
+				cr.ID, r.Start.UnixMilli(), suggested, now.UnixMilli(), status, class); err != nil {
 				return err
 			}
 		}
