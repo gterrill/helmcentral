@@ -209,10 +209,13 @@ export function dateRangeLabel(startUnix: number, endUnix: number, offsetHours: 
   return `${a.day} to ${full(b)}`
 }
 
-/** Whole boat-local midnights between two instants: the nights at anchor. */
-export function nightsBetween(endUnix: number, nextStartUnix: number, offsetHours: number): number {
-  const day = (t: number) => Math.floor((t + offsetHours * 3600) / 86400)
-  return Math.max(0, day(nextStartUnix) - day(endUnix))
+const localDay = (unix: number, offsetHours: number) => Math.floor((unix + offsetHours * 3600) / 86400)
+
+/** Boat-local midnights from the first departure up to an instant: the rule
+ * the cruise page uses for its nights. An instant exactly on midnight does not
+ * count its own midnight. */
+export function midnightsSince(firstStartUnix: number, unix: number, offsetHours: number): number {
+  return Math.max(0, localDay(unix - 0.001, offsetHours) - localDay(firstStartUnix, offsetHours))
 }
 
 /** A heading for a hand-picked set of passages. */
@@ -309,13 +312,18 @@ function buildExport(input: ExportInput): ExportData {
   const bounds = segmentBounds(thinned.flat())
   if (!bounds) throw new Error('Nothing to export: no track was recorded for these passages')
 
-  let nightNo = 1
-  let totalNights = 0
+  const firstStart = Date.parse(withTracks[0].p.start) / 1000
+  const lastEnd = Date.parse(withTracks[withTracks.length - 1].p.end) / 1000
+  const totalNights = midnightsSince(firstStart, lastEnd, input.zone.offsetHours)
   const passages: ExportPassage[] = withTracks.map(({ p }, i) => {
     const a = Date.parse(p.start) / 1000
     const b = Date.parse(p.end) / 1000
     const prev = i > 0 ? withTracks[i - 1].p : null
-    const nb = prev ? nightsBetween(Date.parse(prev.end) / 1000, a, input.zone.offsetHours) : 0
+    const prevEnd = prev ? Date.parse(prev.end) / 1000 : 0
+    const nb = prev ? midnightsSince(prevEnd, a, input.zone.offsetHours) : 0
+    // Numbered from the first departure, so a night spent at sea on an
+    // overnight passage counts and the next night at anchor follows it.
+    const n0 = prev ? midnightsSince(firstStart, prevEnd, input.zone.offsetHours) + 1 : 1
     const entry: ExportPassage = {
       n: passageHeading(p),
       c: exportColour(i),
@@ -323,11 +331,9 @@ function buildExport(input: ExportInput): ExportData {
       b,
       s: thinned[i].map((seg) => seg.map((pt) => [Math.round(pt.t), round(pt.lon, 5), round(pt.lat, 5)] as [number, number, number])),
       nb,
-      n0: nightNo,
+      n0,
       pl: prev?.to_name ?? '',
     }
-    nightNo += nb
-    totalNights += nb
     return entry
   })
 

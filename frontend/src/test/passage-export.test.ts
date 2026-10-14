@@ -13,7 +13,7 @@ import {
   exportFileName,
   generateEmbed,
   generateStandalonePage,
-  nightsBetween,
+  midnightsSince,
   playerScript,
   POINT_BUDGET,
   prepareExport,
@@ -136,11 +136,11 @@ describe('simplifyTracks', () => {
 describe('nights and dates', () => {
   it('counts boat-local midnights between passages', () => {
     // Arrive 15 Sep 16:00 UTC+10 (06:00Z), leave 16 Sep 07:00 UTC+10 (21:00Z on 15th)
-    expect(nightsBetween(Date.UTC(2026, 8, 15, 6) / 1000, Date.UTC(2026, 8, 15, 21) / 1000, 10)).toBe(1)
+    expect(midnightsSince(Date.UTC(2026, 8, 15, 6) / 1000, Date.UTC(2026, 8, 15, 21) / 1000, 10)).toBe(1)
     // Same local day: no night.
-    expect(nightsBetween(Date.UTC(2026, 8, 15, 0) / 1000, Date.UTC(2026, 8, 15, 5) / 1000, 10)).toBe(0)
+    expect(midnightsSince(Date.UTC(2026, 8, 15, 0) / 1000, Date.UTC(2026, 8, 15, 5) / 1000, 10)).toBe(0)
     // Three local midnights.
-    expect(nightsBetween(Date.UTC(2026, 8, 14, 6) / 1000, Date.UTC(2026, 8, 17, 21) / 1000, 10)).toBe(4)
+    expect(midnightsSince(Date.UTC(2026, 8, 14, 6) / 1000, Date.UTC(2026, 8, 17, 21) / 1000, 10)).toBe(4)
   })
 
   it('writes a date range in the boat zone', () => {
@@ -221,14 +221,14 @@ describe('stats strip', () => {
 
   it('uses the cruise figures, with nights counted the way the captions count them', () => {
     const cruiseStats = {
-      passage_count: 2, distance_nm: 100, underway_seconds: 36000, nights: 9, fuel_burned_l: 300,
+      passage_count: 2, distance_nm: 100, underway_seconds: 36000, nights: 5, fuel_burned_l: 300,
       underway_max_gust_kts: 20, anchor_max_gust_kts: 33,
     } as CruiseStats
     const two = [passage({ id: 'a', t0: T0 }), passage({ id: 'b', t0: T0 + 5 * 86400 })]
     const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: two }))
     const captioned = data.passages.reduce((n, p) => n + p.nb, 0)
     expect(captioned).toBe(5)
-    // The server's own count (9 here) is not shown: strip and captions agree.
+    expect(cruiseStats.nights).toBe(5)
     expect(data.stats.map((s) => [s.l, s.v])).toEqual([
       ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Nights', String(captioned)], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
@@ -247,6 +247,28 @@ describe('overview inset framing', () => {
     expect(insetNeedsDot([148, -20.4, 149, -19.9], 3.8)).toBe(false)
     // The fixture track is about 0.05 degrees across: a dot.
     expect(data.insetDot).toBe(true)
+  })
+})
+
+describe('nights agree with the cruise page', () => {
+  // Server rule: boat-local midnights from the first departure to the last arrival.
+  it('counts a night at sea, numbers the anchor nights after it, and matches the cruise figure', () => {
+    // Leg one leaves 14 Sep 20:00 UTC+10 and arrives 15 Sep 06:00 after ten hours: one midnight at sea.
+    const leg1Start = Date.UTC(2026, 8, 14, 10) / 1000
+    const leg1 = passage({ id: 'a', t0: leg1Start, points: 601 })
+    // Two nights at anchor (the 16 Sep and 17 Sep midnights); leg two leaves 17 Sep 07:00.
+    const leg2 = passage({ id: 'b', t0: Date.UTC(2026, 8, 16, 21) / 1000, points: 50 })
+    const cruiseStats = {
+      passage_count: 2, distance_nm: 50, underway_seconds: 40000, fuel_burned_l: null,
+      underway_max_gust_kts: null, anchor_max_gust_kts: null,
+      // 15, 16 and 17 Sep midnights between first departure and last arrival.
+      nights: 3,
+    } as CruiseStats
+    const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: [leg1, leg2] }))
+    expect(data.stats.find((s) => s.l === 'Nights')?.v).toBe(String(cruiseStats.nights))
+    // The sea night is night 1, so the first night at anchor is night 2.
+    expect(data.passages[1].nb).toBe(2)
+    expect(data.passages[1].n0).toBe(2)
   })
 })
 
