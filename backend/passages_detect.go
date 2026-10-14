@@ -108,6 +108,18 @@ func detectLoggedPassages(pts []recordedTrackPoint) passageDetection {
 		return pts[lastMoving].At
 	}
 
+	// movedUntil is when the boat last moved, given the moving point idx. A
+	// point's speed is the leg to the next fix, so a moving point means the boat
+	// was moving up to that next fix, however far off it is (a thinned GPX leg).
+	// Nothing says what happened across a segment break, so there it is the
+	// point itself.
+	movedUntil := func(idx int) time.Time {
+		if j := idx + 1; j < len(pts) && pts[j].Segment == pts[idx].Segment {
+			return pts[j].At
+		}
+		return pts[idx].At
+	}
+
 	finish := func(end time.Time) {
 		lp := loggedPassage{Start: pts[startIdx].At, Departed: pts[departIdx].At, End: end}
 		if end.Before(lp.Start) {
@@ -128,7 +140,7 @@ func detectLoggedPassages(pts []recordedTrackPoint) passageDetection {
 			var end time.Time
 			ended := false
 
-			if quiet := p.At.Sub(pts[lastMoving].At); quiet >= passageEndQuiet {
+			if quiet := p.At.Sub(movedUntil(lastMoving)); quiet >= passageEndQuiet {
 				end, ended = restStart(i), true
 			}
 			if p.AnchorSetAt != nil && p.AnchorSetAt.After(pts[startIdx].At) && !p.AnchorSetAt.After(p.At) {

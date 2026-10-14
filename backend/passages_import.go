@@ -149,9 +149,24 @@ func importedTrackPoints(fixes []gpxFix) (pts []recordedTrackPoint, rejected int
 	// sailed in a straight line, never missing data. Which of the two is
 	// decided by the speed the gap implies, below; the 10 minute segment gap
 	// belongs to the dense recorded log only.
+	//
+	// The one exception: a gap longer than the stop rule whose implied speed is
+	// between one and three knots. That is too fast to be sitting still and too
+	// slow to be a boat under way for that long, so it is lost data or a stop
+	// with a drift, and the track is cut there instead of joining the two sides
+	// with a leg nobody sailed.
 	pts = make([]recordedTrackPoint, 0, len(kept))
-	for _, f := range kept {
-		pts = append(pts, recordedTrackPoint{At: f.At, Segment: importedSegment, Lat: f.Lat, Lon: f.Lon, Source: trackSourceImported})
+	segment := importedSegment
+	for i, f := range kept {
+		if i > 0 {
+			prev := kept[i-1]
+			dt := f.At.Sub(prev.At)
+			kts := haversineMeters(prev.Lat, prev.Lon, f.Lat, f.Lon) / dt.Seconds() / trackMetersPerKnot
+			if dt > passageEndQuiet && kts >= passageRestSOGKts && kts < passageStartSOGKts {
+				segment = int(f.At.Unix())
+			}
+		}
+		pts = append(pts, recordedTrackPoint{At: f.At, Segment: segment, Lat: f.Lat, Lon: f.Lon, Source: trackSourceImported})
 	}
 	for i := range pts {
 		var a, b int

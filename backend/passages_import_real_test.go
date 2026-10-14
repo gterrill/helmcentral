@@ -136,3 +136,66 @@ func TestRealImportKeepsFortyKnotJumpRejection(t *testing.T) {
 		t.Error("a 120 NM jump must be rejected")
 	}
 }
+
+// Review finding 1: a thinned leg with fixes more than an hour apart, sailed at
+// speed, is movement the whole way and must not end the passage mid-leg.
+func TestDetectorThinnedLegLongerThanStopRuleStaysOnePassage(t *testing.T) {
+	b := newTrackBuilder()
+	b.run(30*mn, 10*mn, 0)
+	b.run(10*mn, 20*sc, 6)
+	// one fix 90 minutes and 9 NM later: 6 kn through the gap
+	b.t = b.t.Add(90 * mn)
+	b.lat += 9.0 / 60
+	b.pts = append(b.pts, recordedTrackPoint{At: b.t, Segment: b.seg, Lat: b.lat, Lon: 149, SOGKts: pfloat(6), Source: trackSourceImported})
+	b.run(10*mn, 20*sc, 6)
+	b.run(2*time.Hour, 10*mn, 0)
+	for i := range b.pts {
+		b.pts[i].Source = trackSourceImported
+	}
+	got := detectLoggedPassages(b.pts)
+	if len(got.Closed) != 1 {
+		t.Fatalf("passages %d, want 1: %+v", len(got.Closed), got.Closed)
+	}
+	if got.Closed[0].DistanceNM < 10 {
+		t.Errorf("distance %.1f NM: the leg was cut", got.Closed[0].DistanceNM)
+	}
+	if !got.Closed[0].Departed.Equal(b.pts[3].At) {
+		t.Errorf("departed %v, want the first fast fix %v: the passage was split mid-leg", got.Closed[0].Departed, b.pts[3].At)
+	}
+}
+
+// Review finding 2: two files with days and 100 NM between them imply 1.4 kn.
+// That is not continuous motion; the first passage ends at its last fix and the
+// 100 NM is nobody's distance.
+func TestImportLongSlowGapBetweenFilesSplitsAndIsNotCounted(t *testing.T) {
+	mk := func(startLat float64, at time.Time) []gpxFix {
+		var fx []gpxFix
+		lat := startLat
+		for i := 0; i <= 360; i++ { // 2 h at 6 kn, a fix every 20 s
+			fx = append(fx, gpxFix{At: at.Add(time.Duration(i) * 20 * time.Second), Lat: lat, Lon: 149})
+			lat += 6.0 * (20.0 / 3600) / 60
+		}
+		return fx
+	}
+	f1 := mk(-20, passageEpoch)
+	lastLat := f1[len(f1)-1].Lat
+	f2 := mk(lastLat+100.0/60, passageEpoch.Add(2*time.Hour+72*time.Hour))
+	s := newTestPassageStore(t)
+	if _, err := s.ImportGPX([]gpxFile{{Name: "a", Fixes: f1}, {Name: "b", Fixes: f2}}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.ListPassages()
+	if len(list) != 2 {
+		t.Fatalf("passages %d, want 2", len(list))
+	}
+	first := list[1] // newest first
+	if !first.End.Equal(f1[len(f1)-1].At) {
+		t.Errorf("arrival %v, want the last fix of file one %v", first.End, f1[len(f1)-1].At)
+	}
+	for _, p := range list {
+		pts, _ := s.TrackPointsBetween(p.Start, p.End)
+		if st := computePassageStats(pts); st.DistanceNM > 14 {
+			t.Errorf("passage %v counts %.1f NM", p.Start, st.DistanceNM)
+		}
+	}
+}
