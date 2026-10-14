@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate can see the active alarms, so asking it about an alarm investigates the
+  sensor that raised it, not a guess from the device name on the card.
+
+### Fixed
+
+- The solar chargers' panel voltage (for example 72 V) no longer raises an
+  "Impossible sensor reading" alarm named after an alternator regulator. A
+  device that only reported an empty value for a battery no longer counts as
+  sharing that battery.
+
 ### Changed
 
 - Going back to a page you opened in the last few minutes shows what it had at
