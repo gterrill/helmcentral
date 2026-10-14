@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import type { ReplayCursor } from '@/components/passages/replay-panel'
 import { ConfirmDelete, FormSection } from '@/components/patterns'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -61,11 +62,28 @@ export function PassageEditPanel({
     }
   }
 
+  const persist = async () => {
+    await passagesApi.patch(passage.id, { title, from_name: fromName, to_name: toName, notes })
+    onChanged()
+  }
+
+  // Unsaved edits hold any move off this passage. Staying on it (a Split
+  // or Trim re-lands here) is not a move away.
+  useNavigationGuard(dirty
+    ? {
+        owner: 'passage-details',
+        label: 'Details',
+        blocks: (_from, to) => (
+          to.panel === 'passages' && to.route.view === 'passage' && to.route.id === passage.id ? null : { kind: 'dirty' }
+        ),
+        save: persist,
+      }
+    : null)
+
   const save = async () => {
     setSaving(true)
     try {
-      await passagesApi.patch(passage.id, { title, from_name: fromName, to_name: toName, notes })
-      onChanged()
+      await persist()
     } catch (err) {
       failure('save passage', err)
     } finally {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { ConfirmDelete, FormSection } from '@/components/patterns'
+import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,6 +24,22 @@ export function CruiseEditPanel({ cruise, canWrite, onChanged, onDeleted }: Crui
   const [deleteOpen, setDeleteOpen] = useState(false)
   const dirty = name !== cruise.name || notes !== cruise.notes
 
+  const persist = async () => {
+    await passagesApi.patchCruise(cruise.id, { name: name.trim(), notes })
+    onChanged()
+  }
+
+  useNavigationGuard(dirty && name.trim() !== ''
+    ? {
+        owner: 'cruise-details',
+        label: 'Cruise',
+        blocks: (_from, to) => (
+          to.panel === 'passages' && to.route.view === 'cruise' && to.route.id === cruise.id ? null : { kind: 'dirty' }
+        ),
+        save: persist,
+      }
+    : null)
+
   const fail = (action: string, err: unknown) =>
     toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
 
@@ -38,8 +55,7 @@ export function CruiseEditPanel({ cruise, canWrite, onChanged, onDeleted }: Crui
             onClick={async () => {
               setSaving(true)
               try {
-                await passagesApi.patchCruise(cruise.id, { name: name.trim(), notes })
-                onChanged()
+                await persist()
               } catch (err) {
                 fail('save cruise', err)
               } finally {
