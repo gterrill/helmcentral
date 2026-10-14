@@ -48,8 +48,8 @@ func buildTransparentPNG1x1() []byte {
 // proxyWorldImageryTileHandler is a handler factory (rather than a plain
 // echo.HandlerFunc) so tests can inject a *tileCache pointed at a temp-dir
 // sqlite file and a fake tileFetcher instead of a real cache/Esri network
-// call. main.go registers it as
-// proxyWorldImageryTileHandler(globalTileCache, http.DefaultClient).
+// call. mapRoutes registers it as
+// proxyWorldImageryTileHandler(globalTileCache, tileFetchClient).
 func proxyWorldImageryTileHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		z := strings.TrimSpace(c.Param("z"))
@@ -94,4 +94,25 @@ func clampTileCoords(z, x, y, maxZoom int) (int, int, int) {
 
 	shift := z - maxZoom
 	return maxZoom, x >> shift, y >> shift
+}
+
+// mapRoutes returns the /api routes for map imagery, the Carto basemap proxy and the coastline layer.
+// Each row carries its own auth tier (docs/adr/0177).
+func mapRoutes(tileFetchClient *http.Client) []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/world-imagery/prefetch/:jobId", tierRead, prefetchStatusHandler()},
+		{http.MethodGet, "/api/gshhg-coastline", tierRead, gshhgCoastlineHandler},
+
+		// Carto vector basemap proxy + offline cache (ADR 0067) - same
+		// tierRead as world-imagery above: read-only, no session write
+		// implied by fetching a map tile/style/font/sprite.
+		{http.MethodGet, "/api/basemap/style/:name", tierRead, basemapStyleHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/tilejson", tierRead, basemapTileJSONHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
+		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, tileFetchClient)},
+		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
+	}
 }

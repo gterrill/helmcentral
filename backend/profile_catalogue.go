@@ -192,3 +192,20 @@ func copyCatalogueProfileHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"profile": profile})
 }
+
+// profileRoutes returns the /api routes for equipment and engine profiles.
+// Each row carries its own auth tier (docs/adr/0177).
+func profileRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/equipment-profiles", tierRead, equipmentProfilesHandler},
+		{http.MethodGet, "/api/equipment-profiles/catalogue", tierRead, profileCatalogueHandler},
+		{http.MethodGet, "/api/equipment-profiles/:id", tierRead, getEquipmentProfileHandler},
+		{http.MethodGet, "/api/equipment-profiles/:id/download", tierRead, downloadEquipmentProfileHandler},
+		{http.MethodGet, "/api/engine-profiles", tierRead, engineProfilesHandler},
+		{http.MethodPost, "/api/equipment-profiles", tierWrite, createEquipmentProfileHandler},
+		{http.MethodPost, "/api/equipment-profiles/catalogue/:id", tierWrite, copyCatalogueProfileHandler},
+		{http.MethodDelete, "/api/equipment-profiles/:id", tierWrite, deleteEquipmentProfileHandler},
+		{http.MethodPut, "/api/equipment-profiles/:id", tierWrite, updateEquipmentProfileHandler},
+		{http.MethodPut, "/api/engine-profiles/:id", tierWrite, updateEngineProfileHandler},
+	}
+}

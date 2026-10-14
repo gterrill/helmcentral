@@ -244,3 +244,21 @@ func deleteImportRunHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, run)
 }
+
+// importRoutes returns the /api routes for staged imports from other platforms.
+// Each row carries its own auth tier (docs/adr/0177).
+func importRoutes() []apiRoute {
+	return []apiRoute{
+		// Imports: a staged, reviewed import of another
+		// platform's export. Every route is write-tier, reads included: a run
+		// carries a whole export's worth of the boat's records and is only
+		// ever used by the operator working through the wizard. "/files/:key"
+		// and "/commit" are sub-resources of a run.
+		{http.MethodPost, "/api/import/runs", tierWrite, createImportRunHandler},
+		{http.MethodGet, "/api/import/runs/:id", tierWrite, getImportRunHandler},
+		{http.MethodPatch, "/api/import/runs/:id", tierWrite, patchImportRunHandler},
+		{http.MethodPost, "/api/import/runs/:id/files/:key", tierWrite, uploadImportFileHandler},
+		{http.MethodPost, "/api/import/runs/:id/commit", tierWrite, commitImportRunHandler},
+		{http.MethodDelete, "/api/import/runs/:id", tierWrite, deleteImportRunHandler},
+	}
+}

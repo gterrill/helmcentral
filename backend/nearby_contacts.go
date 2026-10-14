@@ -630,7 +630,7 @@ var missingMMSILoggedForContactHistory sync.Map // key: vessel id (string)
 // enrichNearbyVesselsWithContactHistory fills in each vessel's SeenCount and
 // LastSeenAt by reading sighting history for every reported vessel in one
 // batched summaries() call, rather than one call per vessel
-// (buildNearbyVesselsPayload, main.go - backend perf audit Tier 3). Split
+// (buildNearbyVesselsPayload, nearby_vessels.go - backend perf audit Tier 3). Split
 // out of that function so this exact query-count contract can be tested
 // directly against a fake summarizer without needing a live SignalK fetch.
 func enrichNearbyVesselsWithContactHistory(store nearbyContactSummarizer, nearby []nearbyVessel) {

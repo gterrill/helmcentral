@@ -185,7 +185,7 @@ func bandAgeMap(ages map[string]any) map[string]any {
 // shape needs; see backend-perf-audit.md Tier 1 #4 for which fields on which
 // events were measured changing every frame.
 
-// vesselStateGateKey covers main.go's buildVesselStatePayload: datetime, plus
+// vesselStateGateKey covers vessel_state.go's buildVesselStatePayload: datetime, plus
 // depth/position/wind's own last_update_age_s fields.
 func vesselStateGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, false)
@@ -199,13 +199,13 @@ func gaugeValuesGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, false)
 }
 
-// electricalStateGateKey covers main.go's buildElectricalStatePayload:
+// electricalStateGateKey covers electrical_state.go's buildElectricalStatePayload:
 // datetime and the feed-level last_update_age_s.
 func electricalStateGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, false)
 }
 
-// tanksStateGateKey covers main.go's buildTanksStatePayload: datetime, the
+// tanksStateGateKey covers tanks_state.go's buildTanksStatePayload: datetime, the
 // feed-level last_update_age_s, fuel_volume_age_s and fuel_derived_age_s, and
 // — via the generic "_age_s" suffix rule, not a special case here — each
 // tank's own last_update_age_s nested inside the "tanks" array.
@@ -213,7 +213,7 @@ func tanksStateGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, false)
 }
 
-// nearbyVesselsGateKey covers main.go's buildNearbyVesselsPayload: datetime
+// nearbyVesselsGateKey covers nearby_vessels.go's buildNearbyVesselsPayload: datetime
 // and the feed-level last_update_age_s. bandAgeSeconds is false because each
 // vessel's own age_seconds is displayed on every row ("12s ago",
 // nearby-vessels-tile.tsx) and must stay exact so a row that actually ticks
@@ -231,7 +231,7 @@ func radarTargetsGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, true)
 }
 
-// solarStateGateKey covers main.go's buildSolarStatePayload: datetime, the
+// solarStateGateKey covers solar_state.go's buildSolarStatePayload: datetime, the
 // feed-level and per-controller last_update_age_s, and trend_24h_total as a
 // whole.
 //

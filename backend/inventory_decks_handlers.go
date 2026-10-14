@@ -133,3 +133,16 @@ func uploadDeckPlanHandler(c echo.Context) error {
 		},
 	)
 }
+
+// deckRoutes returns the /api routes for deck plans and their layouts.
+// Each row carries its own auth tier (docs/adr/0177).
+func deckRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/inventory/decks", tierRead, listDecksHandler},
+		{http.MethodPost, "/api/inventory/decks", tierWrite, createDeckHandler},
+		{http.MethodPut, "/api/inventory/decks/:id", tierWrite, updateDeckHandler},
+		{http.MethodDelete, "/api/inventory/decks/:id", tierWrite, deleteDeckHandler},
+		{http.MethodPost, "/api/inventory/decks/:id/plan", tierWrite, uploadDeckPlanHandler},
+		{http.MethodPut, "/api/inventory/decks/:id/layout", tierWrite, saveDeckLayoutHandler},
+	}
+}

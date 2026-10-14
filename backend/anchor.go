@@ -961,3 +961,20 @@ func getAllAISTrailsHandler(c echo.Context) error {
 		"trails": trails,
 	})
 }
+
+// anchorRoutes returns the /api routes for the anchor watch, its placemarks and trails.
+// Each row carries its own auth tier (docs/adr/0177).
+func anchorRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
+		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/ais/:id", tierRead, getAISTrailHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAllAISTrailsHandler},
+		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
+		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
+		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},
+		{http.MethodPost, "/api/anchor-watch/placemarks", tierWrite, createPlacemarkHandler},
+		{http.MethodDelete, "/api/anchor-watch/placemarks/:id", tierWrite, deletePlacemarkHandler},
+	}
+}

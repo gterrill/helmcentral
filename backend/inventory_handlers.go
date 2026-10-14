@@ -819,3 +819,45 @@ func deleteEquipmentPhotoHandler(c echo.Context) error {
 	}
 	return respondWithUpdatedEquipment(c, id, http.StatusOK)
 }
+
+// inventoryRoutes returns the /api routes for the equipment registry, zones, bins and photos.
+// Each row carries its own auth tier (docs/adr/0177).
+func inventoryRoutes() []apiRoute {
+	return []apiRoute{
+		// Inventory (plan "Inventory: the equipment registry and locations"):
+		// the equipment registry's own API family, under /api/inventory/ -
+		// deliberately separate from /api/equipment-profiles (profileRoutes),
+		// which stays exactly where it is (plan's own decision: profiles
+		// move in the UI only, in a later phase; the backend route never
+		// changes). "/api/inventory/equipment/:id" registered after the bare
+		// "/api/inventory/equipment" for readability only - Echo's router
+		// prioritises static segments over param ones regardless of order (see
+		// documentRoutes).
+		{http.MethodGet, "/api/inventory/zones", tierRead, listZonesHandler},
+		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
+
+		// Inventory writes (plan "Inventory: the equipment registry and
+		// locations"). DELETE on a zone/bin still in use answers 409 with
+		// {error, in_use} rather than the ordinary writeDocumentError
+		// mapping - see deleteZoneHandler/deleteBinHandler's own doc
+		// comments.
+		{http.MethodPost, "/api/inventory/zones", tierWrite, createZoneHandler},
+		{http.MethodPut, "/api/inventory/zones/:id", tierWrite, updateZoneHandler},
+		{http.MethodDelete, "/api/inventory/zones/:id", tierWrite, deleteZoneHandler},
+		{http.MethodPost, "/api/inventory/bins", tierWrite, createBinHandler},
+		{http.MethodPut, "/api/inventory/bins/:id", tierWrite, updateBinHandler},
+		{http.MethodDelete, "/api/inventory/bins/:id", tierWrite, deleteBinHandler},
+		{http.MethodPost, "/api/inventory/equipment", tierWrite, createEquipmentHandler},
+		{http.MethodPut, "/api/inventory/equipment/:id", tierWrite, updateEquipmentHandler},
+		{http.MethodDelete, "/api/inventory/equipment/:id", tierWrite, deleteEquipmentHandler},
+		{http.MethodPatch, "/api/inventory/equipment/:id/documents", tierWrite, patchEquipmentDocumentsHandler},
+
+		// Photo routes (ADR 0127): a write-tier file intake, same size limit
+		// and MIME sniffing as POST /api/documents (documentRoutes) - see
+		// uploadEquipmentPhotoHandler's own doc comment.
+		{http.MethodPost, "/api/inventory/equipment/:id/photos", tierWrite, uploadEquipmentPhotoHandler},
+		{http.MethodPut, "/api/inventory/equipment/:id/photos", tierWrite, setEquipmentPhotoOrderHandler},
+		{http.MethodDelete, "/api/inventory/equipment/:id/photos/:documentId", tierWrite, deleteEquipmentPhotoHandler},
+	}
+}

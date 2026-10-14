@@ -260,6 +260,8 @@ join `documentErrorStatus`: `errChecklistRunNotFound` and
 `errChecklistItemNotFound` at 404, `errNoteHasNoChecklist` and
 `errChecklistRunClosed` at 409.
 
+> Amended by [ADR 0177](0177-features-own-their-routes.md): the rows now sit in `checklistRunRoutes`, composed by `buildAPIRoutes`; `registerAPIRoutes` is still the only place a route reaches Echo.
+
 `GET /api/notes/:id` grows two fields — `checklist` (the current body's
 template items, present even with no run, so a reader can decide whether
 "Start checklist" belongs on screen at all) and `active_run` (that note's

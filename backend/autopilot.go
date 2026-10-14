@@ -372,3 +372,21 @@ func buildAutopilotPayload() map[string]any {
 		"stale":             stale,
 	}
 }
+
+// autopilotRoutes returns the /api routes for the autopilot controls.
+// Each row carries its own auth tier (docs/adr/0177).
+func autopilotRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/autopilot", tierRead, getAutopilotHandler},
+		{http.MethodPost, "/api/autopilot/engage", tierWrite, postAutopilotEngageHandler},
+		{http.MethodPost, "/api/autopilot/disengage", tierWrite, postAutopilotDisengageHandler},
+		{http.MethodPut, "/api/autopilot/state", tierWrite, putAutopilotStateHandler},
+		{http.MethodPut, "/api/autopilot/mode", tierWrite, putAutopilotModeHandler},
+		{http.MethodPut, "/api/autopilot/target", tierWrite, putAutopilotTargetHandler},
+		{http.MethodPut, "/api/autopilot/target/adjust", tierWrite, putAutopilotTargetAdjustHandler},
+		{http.MethodPost, "/api/autopilot/tack/:side", tierWrite, postAutopilotTackHandler},
+		{http.MethodPost, "/api/autopilot/gybe/:side", tierWrite, postAutopilotGybeHandler},
+		{http.MethodPut, "/api/autopilot/dodge", tierWrite, putAutopilotDodgeHandler},
+		{http.MethodDelete, "/api/autopilot/dodge", tierWrite, deleteAutopilotDodgeHandler},
+	}
+}

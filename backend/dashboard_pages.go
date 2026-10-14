@@ -1665,3 +1665,21 @@ func gaugeBoundPaths() []string {
 	sort.Strings(paths)
 	return paths
 }
+
+// dashboardRoutes returns the /api routes for dashboard pages and the pinned ribbon.
+// Each row carries its own auth tier (docs/adr/0177).
+func dashboardRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/dashboard-pages", tierRead, listDashboardPagesHandler},
+		{http.MethodGet, "/api/dashboard-pages/:id", tierRead, getDashboardPageHandler},
+
+		// The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip,
+		// promoted out of the per-page widget above.
+		{http.MethodGet, "/api/dashboard-ribbon", tierRead, getDashboardRibbonHandler},
+		{http.MethodPost, "/api/dashboard-pages", tierWrite, createDashboardPageHandler},
+		{http.MethodPut, "/api/dashboard-pages/order", tierWrite, reorderDashboardPagesHandler},
+		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
+		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},
+		{http.MethodPut, "/api/dashboard-ribbon", tierWrite, putDashboardRibbonHandler},
+	}
+}

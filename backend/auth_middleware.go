@@ -102,10 +102,11 @@ func requireRole(sessions *sessionStore, minRole string) echo.MiddlewareFunc {
 
 // ── route table ───────────────────────────────────────────────────────────────
 
-// apiRoute is one entry in the production route table (built by
-// buildAPIRoutes in main.go). Routes are data, not scattered e.GET/e.POST
-// calls, specifically so a new endpoint's tier is visible in one table
-// instead of being a per-call detail someone can forget (plan §3).
+// apiRoute is one entry in the production route table (composed by
+// buildAPIRoutes in main.go from per-feature xxxRoutes functions that sit
+// beside their handlers, docs/adr/0177). Routes are data, not scattered
+// e.GET/e.POST calls, with the tier written on every row so it cannot be a
+// per-call detail someone forgets (plan §3).
 type apiRoute struct {
 	Method  string
 	Path    string

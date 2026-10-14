@@ -1525,3 +1525,41 @@ func decodeRuleIDParam(c echo.Context) error {
 	c.SetParamValues(values...)
 	return nil
 }
+
+// maintenanceRoutes returns the /api routes for maintenance rules, the service log and hour meters.
+// Each row carries its own auth tier (docs/adr/0177).
+func maintenanceRoutes() []apiRoute {
+	return []apiRoute{
+		// Maintenance (ADR 0138): service rules and the log they're
+		// completed into, under /api/inventory/maintenance/ - a sub-family
+		// of Inventory's own routes (inventoryRoutes), not a separate one.
+		// "export.csv" and profile-change-preview/meter-reset/meter-resets
+		// are static path segments ahead of "/:id" purely for readability -
+		// see documentRoutes on why Echo's router never needs that ordering.
+		{http.MethodGet, "/api/inventory/maintenance/rules", tierRead, listMaintenanceRulesHandler},
+		{http.MethodGet, "/api/inventory/maintenance/rules/:id", tierRead, getMaintenanceRuleHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log", tierRead, listMaintenanceLogEntriesHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log/export.csv", tierRead, exportMaintenanceLogCSVHandler},
+		{http.MethodGet, "/api/inventory/maintenance/log/:id", tierRead, getMaintenanceLogEntryHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/meter-resets", tierRead, listHourMeterResetsHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/profile-change-preview", tierRead, maintenanceProfileChangePreviewHandler},
+
+		// Maintenance writes (ADR 0138).
+		{http.MethodPost, "/api/inventory/maintenance/rules", tierWrite, createMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id", tierWrite, updateMaintenanceRuleHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/rules/:id", tierWrite, deleteMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id/overrides", tierWrite, setMaintenanceRuleOverridesHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/rules/:id/overrides/:field", tierWrite, resetMaintenanceRuleOverrideHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/acknowledge", tierWrite, acknowledgeMaintenanceRuleHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/last-done", tierWrite, setMaintenanceRuleLastDoneHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/complete", tierWrite, completeMaintenanceRuleHandler},
+		{http.MethodPut, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, setMaintenanceRuleProcedureNoteHandler},
+		{http.MethodPost, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, createMaintenanceProcedureNoteHandler},
+		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/meter-reset", tierWrite, recordHourMeterResetHandler},
+		{http.MethodPost, "/api/inventory/maintenance/log", tierWrite, createMaintenanceLogEntryHandler},
+		{http.MethodPut, "/api/inventory/maintenance/log/:id", tierWrite, updateMaintenanceLogEntryHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/log/:id", tierWrite, deleteMaintenanceLogEntryHandler},
+		{http.MethodPost, "/api/inventory/maintenance/log/:id/photos", tierWrite, uploadMaintenanceLogPhotoHandler},
+		{http.MethodDelete, "/api/inventory/maintenance/log/:id/photos/:documentId", tierWrite, deleteMaintenanceLogPhotoHandler},
+	}
+}

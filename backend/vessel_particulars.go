@@ -270,3 +270,15 @@ func putVesselParticularsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, saved)
 }
+
+// vesselParticularsRoutes returns the /api routes for vessel particulars.
+// Each row carries its own auth tier (docs/adr/0177).
+func vesselParticularsRoutes() []apiRoute {
+	return []apiRoute{
+		// Vessel particulars: the facts about the boat SignalK does not
+		// publish (the vessel_particulars table). Separate from
+		// the engines and house bank, which are part of /api/settings.
+		{http.MethodGet, "/api/vessel/particulars", tierRead, getVesselParticularsHandler},
+		{http.MethodPut, "/api/vessel/particulars", tierWrite, putVesselParticularsHandler},
+	}
+}

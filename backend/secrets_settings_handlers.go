@@ -75,3 +75,13 @@ func importEnvSecretsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{"imported": imported})
 }
+
+// secretsRoutes returns the /api routes for stored secrets.
+// Each row carries its own auth tier (docs/adr/0177).
+func secretsRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/settings/secrets", tierAdmin, getSecretsSettingsHandler},
+		{http.MethodPost, "/api/settings/secrets", tierAdmin, updateSecretsSettingsHandler},
+		{http.MethodPost, "/api/settings/secrets/import-env", tierAdmin, importEnvSecretsHandler},
+	}
+}

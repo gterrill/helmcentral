@@ -316,3 +316,14 @@ func meHandler(sessions *sessionStore) echo.HandlerFunc {
 		})
 	}
 }
+
+// authRoutes returns the /api routes for login, logout and the session probes.
+// Each row carries its own auth tier (docs/adr/0177).
+func authRoutes(sessions *sessionStore) []apiRoute {
+	return []apiRoute{
+		{http.MethodPost, "/api/auth/login", tierPublic, loginHandler(sessions)},
+		{http.MethodPost, "/api/auth/logout", tierPublic, logoutHandler(sessions)},
+		{http.MethodGet, "/api/auth/me", tierPublic, meHandler(sessions)},
+		{http.MethodGet, "/api/auth/mode", tierPublic, authModeHandler},
+	}
+}

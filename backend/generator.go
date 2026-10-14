@@ -80,3 +80,12 @@ func postGeneratorStopHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{"stopped": true})
 }
+
+// generatorRoutes returns the /api routes for generator start and stop.
+// Each row carries its own auth tier (docs/adr/0177).
+func generatorRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodPost, "/api/generator/start", tierWrite, postGeneratorStartHandler},
+		{http.MethodPost, "/api/generator/stop", tierWrite, postGeneratorStopHandler},
+	}
+}

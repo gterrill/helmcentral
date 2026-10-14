@@ -15,7 +15,7 @@ import (
 
 // getHelpPageHandler builds GET /api/help/*. help is injected the
 // same way assistantToolDeps.help is - production passes
-// func() []helpPage { return globalHelp } (main.go's buildAPIRoutes),
+// func() []helpPage { return globalHelp } (helpRoutes),
 // tests pass a fixture - so this handler never touches the global directly.
 func getHelpPageHandler(help func() []helpPage) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -52,5 +52,17 @@ func getHelpPageHandler(help func() []helpPage) echo.HandlerFunc {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": fmt.Sprintf("unknown help page %q", id),
 		})
+	}
+}
+
+// helpRoutes returns the /api routes for the in-app help pages.
+// Each row carries its own auth tier (docs/adr/0177).
+func helpRoutes() []apiRoute {
+	return []apiRoute{
+		// The in-app Help sheet's page fetch (ADR 0095), same embedded
+		// pages as the read_help tool (assistant_tools_library.go), reached by direct id instead of a tool
+		// call. Wildcard path, not a :id param: page ids contain a slash
+		// ("features/dashboard").
+		{http.MethodGet, "/api/help/*", tierRead, getHelpPageHandler(func() []helpPage { return globalHelp })},
 	}
 }

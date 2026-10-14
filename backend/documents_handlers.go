@@ -1284,3 +1284,43 @@ func deleteDocumentFolderHandler(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusNoContent)
 }
+
+// documentRoutes returns the /api routes for the document library and its folders.
+// Each row carries its own auth tier (docs/adr/0177).
+func documentRoutes() []apiRoute {
+	return []apiRoute{
+		// Document library (ADR 0106): metadata, virtual folders, tags,
+		// content bytes and full text, backed by globalDocumentStore
+		// (documents_store.go) and a flat hash-named folder on disk.
+		// The two static routes ("move", "tags")
+		// are listed ahead of the "/:id" routes below purely for
+		// readability - Echo's router already prioritises a static segment
+		// over a param one regardless of registration order (confirmed
+		// against vendored router.go: "Search order/priority is: static >
+		// param > any"), so "GET /api/documents/tags" can never be captured
+		// by "GET /api/documents/:id" either way.
+		{http.MethodGet, "/api/documents", tierRead, listDocumentsHandler},
+		{http.MethodGet, "/api/documents/tags", tierRead, documentTagsHandler},
+
+		// E1c: semantic-search status. Also a static segment ahead of
+		// "/:id" for the same reason "tags" is - see the comment above.
+		{http.MethodGet, "/api/documents/embeddings", tierRead, documentsEmbeddingsStatusHandler},
+		{http.MethodGet, "/api/documents/:id", tierRead, getDocumentHandler},
+		{http.MethodGet, "/api/documents/:id/content", tierRead, documentContentHandler},
+		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
+		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
+		{http.MethodGet, "/api/document-folders/tree", tierRead, documentFolderTreeHandler},
+
+		// Document library writes (ADR 0106). "move" and "tags" ahead of the
+		// "/:id" routes purely for readability - see the read-tier comment
+		// above on why Echo's router never needs that ordering.
+		{http.MethodPost, "/api/documents", tierWrite, uploadDocumentHandler},
+		{http.MethodPost, "/api/documents/move", tierWrite, moveDocumentsHandler},
+		{http.MethodPatch, "/api/documents/:id", tierWrite, patchDocumentHandler},
+		{http.MethodDelete, "/api/documents/:id", tierWrite, deleteDocumentHandler},
+		{http.MethodPost, "/api/documents/:id/reindex", tierWrite, reindexDocumentHandler},
+		{http.MethodPost, "/api/document-folders", tierWrite, createDocumentFolderHandler},
+		{http.MethodPatch, "/api/document-folders/:id", tierWrite, patchDocumentFolderHandler},
+		{http.MethodDelete, "/api/document-folders/:id", tierWrite, deleteDocumentFolderHandler},
+	}
+}

@@ -190,7 +190,7 @@ type radarPoller struct {
 // newRadarPoller wires real defaults: radarsFromSnapshot against the live
 // SignalK snapshot, fetchTargets through the already-configured SignalK
 // connection (fetchMayaraTargets below), and an own-ship fix read the same
-// way buildNearbyVesselsPayload does (backend/main.go).
+// way buildNearbyVesselsPayload does (nearby_vessels.go).
 func newRadarPoller(store *radarTargetStore, settingsPath string) *radarPoller {
 	return &radarPoller{
 		store:        store,
@@ -559,4 +559,30 @@ func (p *radarPoller) notePollRecovered() {
 		log.Printf("radar poll: recovered")
 	}
 	p.pollFailing = false
+}
+
+// radarRoutes returns the /api routes for mayara radar targets, capabilities and the spoke relay.
+// Each row carries its own auth tier (docs/adr/0177).
+func radarRoutes() []apiRoute {
+	return []apiRoute{
+		// mayara ARPA radar targets, polled through the mayara SignalK plugin
+		// (ADR 0062 amendment). Read-only, same tier as nearby-vessels: this
+		// is the REST equivalent of the "radar-targets" telemetry event,
+		// curl-able before any UI exists.
+		{http.MethodGet, "/api/radar/targets", tierRead, radarTargetsHandler},
+
+		// The radar picture overlay's capabilities proxy (legend, spoke
+		// geometry, range table), same tier and same plugin path shape as
+		// targets above but a distinct endpoint: mayara's REST surface, not
+		// the delta stream (radar_capabilities.go).
+		{http.MethodGet, "/api/radar/capabilities", tierRead, radarCapabilitiesHandler},
+
+		// The radar picture overlay's spoke stream: mayara-server itself, not
+		// the SignalK plugin. SignalK 2.31+ does serve .../spokes, but the
+		// relay keeps dialling mayara directly (ADR 0069). Upgraded to
+		// WebSocket inside the handler rather than declared as one here,
+		// same tier as the REST radar routes above since it is equally
+		// read-only (radar_spoke_relay.go).
+		{http.MethodGet, "/api/radar/spokes", tierRead, radarSpokeRelayHandler},
+	}
 }

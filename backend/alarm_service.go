@@ -498,3 +498,39 @@ func testAlarmTransportsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{"results": results})
 }
+
+// alarmRoutes returns the /api routes for the alarm list, log, rules and ignored sensors.
+// Each row carries its own auth tier (docs/adr/0177).
+func alarmRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/alarms", tierRead, alarmsHandler},
+		{http.MethodGet, "/api/alarms/log", tierRead, alarmLogHandler},
+		{http.MethodGet, "/api/alarm-rules", tierRead, listAlarmRulesHandler},
+
+		// The frozen/impossible/silent-source alarm card's own "Ignore this
+		// sensor" action (alarm_ignored_sensors.go) -- not a settings list.
+		{http.MethodGet, "/api/alarms/ignored-sensors", tierRead, listIgnoredSensorsHandler},
+		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
+		{http.MethodPost, "/api/alarms/:id/silence", tierWrite, silenceAlarmHandler},
+		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},
+		{http.MethodPut, "/api/alarm-rules/:id", tierWrite, updateAlarmRuleHandler},
+		{http.MethodDelete, "/api/alarm-rules/:id", tierWrite, deleteAlarmRuleHandler},
+		{http.MethodPost, "/api/alarms/ignored-sensors", tierWrite, ignoreSensorHandler},
+		{http.MethodDelete, "/api/alarms/ignored-sensors/:identifier", tierWrite, unignoreSensorHandler},
+	}
+}
+
+// alarmTransportRoutes returns the /api routes for alarm notification transports and Web Push subscriptions.
+// Each row carries its own auth tier (docs/adr/0177).
+func alarmTransportRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/alarm-transports", tierAdmin, getAlarmTransportsHandler},
+		{http.MethodPost, "/api/alarm-transports", tierAdmin, setAlarmTransportsHandler},
+		{http.MethodPost, "/api/alarm-transports/test", tierAdmin, testAlarmTransportsHandler},
+		{http.MethodGet, "/api/alarm-transports/webpush/key", tierAdmin, webPushKeyHandler},
+		{http.MethodPost, "/api/alarm-transports/webpush/subscribe", tierAdmin, subscribeWebPushHandler},
+		{http.MethodPost, "/api/alarm-transports/webpush/unsubscribe", tierAdmin, unsubscribeWebPushHandler},
+		{http.MethodGet, "/api/alarm-transports/webpush/subscriptions", tierAdmin, listWebPushSubscriptionsHandler},
+		{http.MethodDelete, "/api/alarm-transports/webpush/subscriptions/:id", tierAdmin, deleteWebPushSubscriptionHandler},
+	}
+}

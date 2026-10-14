@@ -93,3 +93,11 @@ func telemetryHistoryHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{"path": path, "window": window, "points": out, "source": "influx"})
 }
+
+// telemetryHistoryRoutes returns the /api routes for recorded telemetry history.
+// Each row carries its own auth tier (docs/adr/0177).
+func telemetryHistoryRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
+	}
+}

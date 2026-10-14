@@ -12,7 +12,7 @@
 // Condition vocabulary: every provider's `condition` field (on current/,
 // days[]/ and hourly[] alike) must be a WeatherKit-style camelCase or
 // lowercase code that, once lowercased and stripped of "_"/"-", matches one
-// of the keys formatWeatherConditionAt (backend/main.go) recognizes:
+// of the keys formatWeatherConditionAt (this file) recognizes:
 //
 //	clear, cloudy, dusty, foggy, haze, mostlycloudy, partlycloudy,
 //	mostlyclear (day/night special-cased to "Mostly Sunny"/"Mostly Clear"),
@@ -1186,4 +1186,87 @@ func weatherForecast(c echo.Context) error {
 		log.Printf("Failed to build weather forecast ETag: %v", etagErr)
 	}
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
+}
+
+// forecastProviderRoutes returns the /api routes for weather, wave, tide, POI, upper-air and forecast-warning endpoints and their providers.
+// Each row carries its own auth tier (docs/adr/0177).
+func forecastProviderRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/weather-today", tierRead, weatherToday},
+		{http.MethodGet, "/api/weather-forecast", tierRead, weatherForecast},
+		{http.MethodGet, "/api/weather-providers", tierRead, weatherProvidersHandler},
+		{http.MethodGet, "/api/wave-forecast", tierRead, waveForecast},
+		{http.MethodGet, "/api/wave-providers", tierRead, waveProvidersHandler},
+		{http.MethodGet, "/api/poi", tierRead, poiNearby},
+		{http.MethodGet, "/api/poi-providers", tierRead, poiProvidersHandler},
+		{http.MethodGet, "/api/upper-air", tierRead, upperAirForecast},
+		{http.MethodGet, "/api/upper-air-providers", tierRead, upperAirProvidersHandler},
+		{http.MethodGet, "/api/forecast-warnings", tierRead, forecastWarningsHandler},
+		{http.MethodGet, "/api/forecast-warnings-providers", tierRead, forecastWarningsProvidersHandler},
+		{http.MethodGet, "/api/tide-today", tierRead, tideToday},
+		{http.MethodGet, "/api/tide-providers", tierRead, tideProvidersHandler},
+		{http.MethodGet, "/api/tide-stations", tierRead, tideStationsHandler},
+		{http.MethodGet, "/api/tide-chart", tierRead, tideChartHandler},
+		{http.MethodGet, "/api/tide-nearest", tierRead, tideNearestHandler},
+	}
+}
+
+func formatWeatherConditionAt(code string, observedAt time.Time, location *time.Location, preferDaytime bool) string {
+	normalized := strings.ToLower(strings.TrimSpace(code))
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+
+	if normalized == "mostlyclear" {
+		if preferDaytime || isDaytimeWeatherObservation(observedAt, location) {
+			return "Mostly Sunny"
+		}
+		return "Mostly Clear"
+	}
+
+	conditions := map[string]string{
+		"clear":             "Clear",
+		"cloudy":            "Cloudy",
+		"dusty":             "Dusty",
+		"foggy":             "Foggy",
+		"haze":              "Hazy",
+		"mostlycloudy":      "Mostly Cloudy",
+		"partlycloudy":      "Partly Cloudy",
+		"smoky":             "Smoky",
+		"breezy":            "Breezy",
+		"windy":             "Windy",
+		"drizzle":           "Drizzle",
+		"heavyrain":         "Heavy Rain",
+		"rain":              "Rain",
+		"snow":              "Snow",
+		"sleet":             "Sleet",
+		"freezingdrizzle":   "Freezing Drizzle",
+		"freezingrain":      "Freezing Rain",
+		"hail":              "Hail",
+		"mixedrainandsnow":  "Mixed Rain & Snow",
+		"mixedrainandsleet": "Mixed Rain & Sleet",
+		"mixedsnowandsleet": "Mixed Snow & Sleet",
+		"thunderstorms":     "Thunderstorms",
+		"heavysnow":         "Heavy Snow",
+		"blizzard":          "Blizzard",
+	}
+
+	if condition, ok := conditions[normalized]; ok {
+		return condition
+	}
+	if code == "" {
+		return "Unknown"
+	}
+	return code
+}
+
+func isDaytimeWeatherObservation(observedAt time.Time, location *time.Location) bool {
+	if observedAt.IsZero() {
+		return false
+	}
+	if location == nil {
+		location = time.UTC
+	}
+
+	hour := observedAt.In(location).Hour()
+	return hour >= 6 && hour < 18
 }
