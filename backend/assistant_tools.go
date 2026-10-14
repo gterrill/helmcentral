@@ -152,6 +152,10 @@ type assistantToolDeps struct {
 	// signalKDiagnosticsFromGlobalSnapshot (assistant_diagnostics.go); tests
 	// inject a fixed snapshot with no live SignalK connection at all.
 	signalKDiagnostics func(now time.Time) signalKDiagnosticsSnapshot
+	// activeAlarms is get_active_alarms' only dependency: the same list the
+	// alarm card and banner show (ADR 0175). Production wires activeAlarms;
+	// nil is an error, never an empty list.
+	activeAlarms func() []alarmStatus
 	// influxLastRecorded is get_last_recorded's only I/O dependency: the most
 	// recent recorded point for every measurement/source pair matching a
 	// path-prefix and/or source filter, within a lookback window. Production
@@ -230,6 +234,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 			return fetchSignalKPositionHistory(settingsPath, mmsi, from, to, resolutionSeconds)
 		},
 		signalKDiagnostics:         signalKDiagnosticsFromGlobalSnapshot,
+		activeAlarms:               activeAlarms,
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
@@ -330,6 +335,7 @@ var mateTools = []mateTool{
 	mateToolSearchConversations,
 	mateToolReadConversation,
 	mateToolGetNearbyVessels,
+	mateToolGetActiveAlarms,
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,

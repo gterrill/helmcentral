@@ -836,6 +836,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
 		"check both before concluding there is nothing to find).\n\n")
 
+	// 2c1b. Alarms (ADR 0175) - fixed wording, identical for every turn. The
+	// card text names a device ("PortALT"), and investigating that name led
+	// to the wrong sensor. The alarm itself carries the real path.
+	b.WriteString("When the operator asks about an alarm - \"investigate the alarm\", \"why is it alarming\", " +
+		"\"what is that warning\" - call get_active_alarms first. Investigate the sensor identifiers it returns: " +
+		"pass those exact paths to check_signalk_paths, get_last_recorded and get_path_history, never a path guessed " +
+		"from the device name on the card (the name on a card is a label and may belong to a " +
+		"different sensor than the one that tripped). Keep the value at raise (sensors, evidence) apart from the " +
+		"live value now (live_sensors, live_evidence), and say which one you are quoting. An empty list means " +
+		"nothing is alarming now; say so rather than guessing.\n\n")
+
 	// 2c1a. History questions (ADR 0166) - fixed wording, identical for every
 	// turn. Asked when the alternators cut off charging over the last few
 	// passages, Mate searched documents and old chats and never opened the

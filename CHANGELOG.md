@@ -11,6 +11,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- Mate can see the active alarms, so asking it about an alarm investigates the
+  sensor that raised it, not a guess from the device name on the card.
+
 ### Fixed
 
 - The solar chargers' panel voltage (for example 72 V) no longer raises an
