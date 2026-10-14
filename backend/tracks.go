@@ -567,3 +567,10 @@ func getTracksHandler(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, payload)
 }
 
+// trackRoutes returns the /api routes for vessel track history.
+// Each row carries its own auth tier (docs/adr/0177).
+func trackRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
+	}
+}

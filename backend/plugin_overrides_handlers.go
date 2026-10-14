@@ -74,7 +74,7 @@ type pluginConfigFieldResponse struct {
 // validType=true) means the type is valid but no such id is registered
 // under it.
 // The "upper-air" case was missing from this switch until this change even
-// though upper_air_providers.go, main.go's route table and the Settings
+// though upper_air_providers.go, the per-feature route tables and the Settings
 // provider machinery all treat it as a real domain - GET/POST/DELETE
 // /api/plugins/upper-air/:id simply 400'd as an unknown type. Added here
 // alongside "poi" rather than as a separate change since both are the same
@@ -453,4 +453,15 @@ func postPluginConfigHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read plugin allowlist state"})
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// pluginRoutes returns the /api routes for plugin configuration and overrides.
+// Each row carries its own auth tier (docs/adr/0177).
+func pluginRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/plugins/:type/:id", tierAdmin, getPluginInfoHandler},
+		{http.MethodPost, "/api/plugins/:type/:id/overrides", tierAdmin, postPluginOverridesHandler},
+		{http.MethodDelete, "/api/plugins/:type/:id/overrides", tierAdmin, deletePluginOverridesHandler},
+		{http.MethodPost, "/api/plugins/:type/:id/config", tierAdmin, postPluginConfigHandler},
+	}
 }

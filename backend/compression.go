@@ -22,7 +22,7 @@ const compressionMinLength = 1024
 // or accidentally trigger, the skip.
 //
 // TestCompression_SkipListMatchesRegisteredRoutes (compression_test.go)
-// cross-checks every entry here against buildAPIRoutes (main.go), so a
+// cross-checks every entry here against buildAPIRoutes, so a
 // route rename shows up as a test failure instead of a silently stale skip
 // list.
 var noCompressRoutePatterns = map[string]bool{

@@ -114,3 +114,22 @@ func abandonChecklistRunHandler(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusNoContent)
 }
+
+// checklistRunRoutes returns the /api routes for checklist runs.
+// Each row carries its own auth tier (docs/adr/0177).
+func checklistRunRoutes() []apiRoute {
+	return []apiRoute{
+		// Checklist runs (plan "Notes and the Boat's Manual" §3/§4, ADR
+		// 0118): a run stores which of a note's checklist items are
+		// ticked (checklist_runs_store.go), never the item list itself.
+		{http.MethodGet, "/api/notes/:id/checklist-runs/active", tierRead, getActiveChecklistRunHandler},
+
+		// Checklist runs writes (plan "Notes and the Boat's Manual" §3/§4,
+		// ADR 0118). DELETE clears abandoned_at only - see
+		// abandonChecklistRunHandler's own doc comment.
+		{http.MethodPost, "/api/notes/:id/checklist-runs", tierWrite, createChecklistRunHandler},
+		{http.MethodPatch, "/api/checklist-runs/:runId/items", tierWrite, tickChecklistItemHandler},
+		{http.MethodPost, "/api/checklist-runs/:runId/complete", tierWrite, completeChecklistRunHandler},
+		{http.MethodDelete, "/api/checklist-runs/:runId", tierWrite, abandonChecklistRunHandler},
+	}
+}

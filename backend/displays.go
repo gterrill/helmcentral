@@ -498,3 +498,24 @@ func deleteDisplayHandler(c echo.Context) error {
 		"released_page_ids": releasedPageIDs,
 	})
 }
+
+// displayRoutes returns the /api routes for wall displays.
+// Each row carries its own auth tier (docs/adr/0177).
+func displayRoutes() []apiRoute {
+	return []apiRoute{
+		// Wall displays (ADR 0110): the physical screens a page can be
+		// assigned to, a sibling of dashboard pages in the same locked file.
+		// No get-by-id or lookup-by-slug — the list is one
+		// small array the wall fetches on mount and slug resolution is a
+		// client-side find.
+		{http.MethodGet, "/api/displays", tierRead, listDisplaysHandler},
+
+		// The wall browser reports its own window size here (ADR 0153).
+		// Read tier on purpose: the wall holds a read session, and this
+		// route can only write the measurement fields.
+		{http.MethodPut, "/api/displays/:id/viewport", tierRead, putDisplayViewportHandler},
+		{http.MethodPost, "/api/displays", tierWrite, createDisplayHandler},
+		{http.MethodPatch, "/api/displays/:id", tierWrite, patchDisplayHandler},
+		{http.MethodDelete, "/api/displays/:id", tierWrite, deleteDisplayHandler},
+	}
+}

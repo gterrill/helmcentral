@@ -3151,3 +3151,36 @@ func matchesExcludedName(candidate string, excludedNames []string) bool {
 	}
 	return false
 }
+
+// signalkRoutes returns the /api routes for SignalK server settings, discovery and path browsing.
+// Each row carries its own auth tier (docs/adr/0177).
+func signalkRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/signalk/paths", tierRead, signalKPathsHandler},
+		{http.MethodGet, "/api/settings/signalk", tierAdmin, getSignalKSettingsHandler},
+
+		// Probe only — persisting the address is POST /api/settings' job
+		// alone (ADR 0028). There is deliberately no POST /api/settings/signalk.
+		{http.MethodPost, "/api/settings/signalk/test", tierAdmin, testSignalKConnectionHandler},
+
+		// Also a pure read: sweeps the local network and reports what it
+		// found. Accepting a result saves through POST /api/settings like
+		// any other write. Gated admin, alongside the rest of the settings
+		// workflow it belongs to.
+		{http.MethodPost, "/api/signalk/discover", tierAdmin, discoverSignalKHandler},
+	}
+}
+
+// settingsRoutes returns the /api routes for the admin settings document.
+// Each row carries its own auth tier (docs/adr/0177).
+func settingsRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
+		{http.MethodPost, "/api/settings", tierAdmin, updateSettingsHandler},
+
+		// Settings -> Vessel (anomaly detection): candidates is a pure read
+		// of live instances for the picker. The vessel.* block itself
+		// loads and saves through /api/settings.
+		{http.MethodGet, "/api/vessel/candidates", tierAdmin, getVesselCandidatesHandler},
+	}
+}

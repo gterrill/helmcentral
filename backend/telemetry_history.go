@@ -9,7 +9,7 @@ import (
 
 const telemetryHistoryCapacity = 4320 // ~6h at the 5s poll cadence (main.go's startTrackPoller interval); sized for depth-trend's longest window, "3h"
 
-const windGustHistoryCapacity = 17280 // ~24h at the 5s poll cadence — sized for the longest window in the gust ladder (see gustWindowLadder in main.go)
+const windGustHistoryCapacity = 17280 // ~24h at the 5s poll cadence — sized for the longest window in the gust ladder (see gustWindowLadder in vessel_state.go)
 
 type telemetryPoint struct {
 	Value     float64

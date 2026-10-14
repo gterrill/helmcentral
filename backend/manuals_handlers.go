@@ -159,3 +159,24 @@ func reorderManualHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, tree)
 }
+
+// manualRoutes returns the /api routes for manuals.
+// Each row carries its own auth tier (docs/adr/0177).
+func manualRoutes() []apiRoute {
+	return []apiRoute{
+		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116): a
+		// manual is a document_folders row with role='manual'
+		// (manuals_store.go). "/api/manuals/:id/tree" registered after the
+		// bare "/api/manuals" for readability only - see documentRoutes
+		// on why Echo's router never needs that ordering.
+		{http.MethodGet, "/api/manuals", tierRead, listManualsHandler},
+		{http.MethodGet, "/api/manuals/:id/tree", tierRead, manualTreeHandler},
+
+		// Manuals writes (plan "Notes and the Boat's Manual" §4, ADR
+		// 0114/0116). DELETE clears the role flag only - see
+		// clearManualHandler's own doc comment.
+		{http.MethodPost, "/api/manuals", tierWrite, createManualHandler},
+		{http.MethodDelete, "/api/manuals/:id", tierWrite, clearManualHandler},
+		{http.MethodPost, "/api/manuals/:id/reorder", tierWrite, reorderManualHandler},
+	}
+}

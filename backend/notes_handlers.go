@@ -800,3 +800,22 @@ func patchNote(doc document, p notePatch, typeIsSuggestion bool) (document, stri
 	}
 	return updated, body, nil
 }
+
+// noteRoutes returns the /api routes for notes.
+// Each row carries its own auth tier (docs/adr/0177).
+func noteRoutes() []apiRoute {
+	return []apiRoute{
+		// Notes (plan "Notes and the Boat's Manual", ADR 0114): a note is a
+		// documents row with kind='note' (notes_store.go), so it shares the
+		// document library's store, folders, tags, search and this route
+		// table's tiers wholesale. "/api/notes/:id" registered after the
+		// bare "/api/notes" for readability only - see documentRoutes
+		// on why Echo's router never needs that ordering.
+		{http.MethodGet, "/api/notes", tierRead, listNotesHandler},
+		{http.MethodGet, "/api/notes/:id", tierRead, getNoteHandler},
+
+		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
+		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
+		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
+	}
+}

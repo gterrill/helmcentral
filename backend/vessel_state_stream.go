@@ -657,3 +657,11 @@ func telemetryStream(c echo.Context) error {
 		}
 	}
 }
+
+// telemetryStreamRoutes returns the /api routes for the live telemetry SSE stream.
+// Each row carries its own auth tier (docs/adr/0177).
+func telemetryStreamRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/stream", tierRead, telemetryStream},
+	}
+}

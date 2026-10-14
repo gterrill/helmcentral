@@ -93,3 +93,13 @@ func logsStreamHandler(c echo.Context) error {
 		}
 	}
 }
+
+// logRoutes returns the /api routes for the in-memory log buffer.
+// Each row carries its own auth tier (docs/adr/0177).
+func logRoutes() []apiRoute {
+	return []apiRoute{
+		// Settings -> Logs: in-memory log buffer retrieval and live SSE stream
+		{http.MethodGet, "/api/logs", tierRead, getLogsHandler},
+		{http.MethodGet, "/api/logs/stream", tierRead, logsStreamHandler},
+	}
+}

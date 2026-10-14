@@ -166,7 +166,7 @@ func logRadarProjectionMismatch(radarID string, targetID uint64, disagreementM f
 // radarTargetFromArpa converts mayara's wire target into our domain type.
 // radarID identifies which of possibly several radar keys (dual range, ADR
 // 0062) reported it. selfLat/selfLon/selfOK are own ship's current fix, on
-// the same guard buildNearbyVesselsPayload uses (backend/main.go): no fix
+// the same guard buildNearbyVesselsPayload uses (nearby_vessels.go): no fix
 // means no projection, not a fabricated one. now is the local delta receive
 // time, recorded as Seen — never mayara's own firstSeen/lastSeen (ADR 0042).
 func radarTargetFromArpa(radarID string, arpa mayaraArpaTarget, selfLat, selfLon float64, selfOK bool, now time.Time) radarTarget {

@@ -497,3 +497,12 @@ func placeName(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]string{"name": getCurrentPlaceName()})
 }
+
+// placeNameRoutes returns the /api routes for reverse-geocoded place names and their providers.
+// Each row carries its own auth tier (docs/adr/0177).
+func placeNameRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/place-name", tierRead, placeName},
+		{http.MethodGet, "/api/place-name-providers", tierRead, placeNameProvidersHandler},
+	}
+}

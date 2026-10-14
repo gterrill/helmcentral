@@ -304,3 +304,12 @@ func putSignalKValue(signalkURL string, path string, value any, token ...string)
 
 	return nil
 }
+
+// czoneRoutes returns the /api routes for CZone switches.
+// Each row carries its own auth tier (docs/adr/0177).
+func czoneRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/czone/switches", tierRead, getCZoneSwitchesHandler},
+		{http.MethodPut, "/api/czone/switches/:id/state", tierWrite, putCZoneSwitchStateHandler},
+	}
+}

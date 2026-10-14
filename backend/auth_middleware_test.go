@@ -187,7 +187,7 @@ func TestAPIRouteCoverage_EveryRegisteredAPIRouteHasATier(t *testing.T) {
 		}
 	}
 	if uncovered > 0 {
-		t.Fatalf("%d /api route(s) registered without an auth tier — add them to buildAPIRoutes in main.go", uncovered)
+		t.Fatalf("%d /api route(s) registered without an auth tier — add them to a feature route function composed by buildAPIRoutes", uncovered)
 	}
 }
 

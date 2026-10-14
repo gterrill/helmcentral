@@ -1256,3 +1256,62 @@ func postAssistantRunCancelHandler(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusNoContent)
 }
+
+// assistantRoutes returns the /api routes for the Mate assistant: conversations, proposals and form drafts.
+// Each row carries its own auth tier (docs/adr/0177).
+func assistantRoutes() []apiRoute {
+	return []apiRoute{
+		// Onboard OpenRouter-backed assistant (ADR 0093). Status and reading
+		// a conversation's history are read-only, same tier as the other
+		// read routes.
+		{http.MethodGet, "/api/assistant/status", tierRead, assistantStatusHandler},
+		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
+		{http.MethodGet, "/api/assistant/conversations/search", tierRead, searchAssistantConversationsHandler},
+		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
+
+		// Rejoining a reply still being written (ADR 0105): replay-then-live
+		// SSE if a run is in flight, 204 if not - read-only, same tier as
+		// the conversation read above.
+		{http.MethodGet, "/api/assistant/conversations/:id/run", tierRead, getAssistantRunHandler},
+		{http.MethodGet, "/api/assistant/form-drafts/:id/content", tierRead, formDraftContentHandler},
+
+		// The running watch for the chat's chip (ADR 0160), or 204. Read
+		// tier: it only reports what is already running.
+		{http.MethodGet, "/api/assistant/conversations/:id/watch", tierRead, getAssistantWatchHandler},
+		{http.MethodPost, "/api/assistant/conversations", tierWrite, createAssistantConversationHandler},
+		{http.MethodDelete, "/api/assistant/conversations/:id", tierWrite, deleteAssistantConversationHandler},
+
+		// Every tool the assistant can call is read-only (a maintenance
+		// proposal is data until the operator applies it), but this is write
+		// tier anyway: it spends the operator's OpenRouter credit and stores
+		// state (a new message row), which a readonly session must not
+		// trigger (ADR 0093).
+		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
+
+		// Summarise a conversation into a note (ADR 0162). The draft spends
+		// the operator's OpenRouter credit, so it is write tier like sending a
+		// message; the save writes a note and its links.
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-draft", tierWrite, postAssistantSummaryDraftHandler},
+		{http.MethodPost, "/api/assistant/conversations/:id/summary-note", tierWrite, saveAssistantSummaryNoteHandler},
+
+		// Stop, for real (ADR 0105): cancels the in-flight run itself, not
+		// just this tab's local stream. Write tier: it ends a run that
+		// spent the operator's OpenRouter credit, the same reasoning as
+		// sending a message.
+		{http.MethodPost, "/api/assistant/conversations/:id/run/cancel", tierWrite, postAssistantRunCancelHandler},
+
+		// The watch chip's Stop (ADR 0160). Write tier, the same as Stop on a
+		// reply: it ends something a write-tier question started.
+		{http.MethodDelete, "/api/assistant/conversations/:id/watch", tierWrite, deleteAssistantWatchHandler},
+
+		// The operator's Apply and Dismiss on a maintenance proposal card
+		// (ADR 0146). Apply is the one place Mate's maintenance changes are
+		// written, all in one transaction; write tier, since it edits the
+		// schedule exactly as the Maintenance forms do.
+		{http.MethodPost, "/api/assistant/proposals/:id/apply", tierWrite, applyAssistantProposalHandler},
+		{http.MethodPost, "/api/assistant/proposals/:id/dismiss", tierWrite, dismissAssistantProposalHandler},
+		{http.MethodPost, "/api/assistant/form-drafts/:id/save", tierWrite, saveFormDraftHandler},
+		{http.MethodPost, "/api/assistant/form-drafts/:id/dismiss", tierWrite, dismissFormDraftHandler},
+		{http.MethodGet, "/api/assistant/models", tierAdmin, assistantModelsHandler},
+	}
+}

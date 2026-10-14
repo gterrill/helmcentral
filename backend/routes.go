@@ -239,3 +239,18 @@ func deleteRouteHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 }
+
+// plannedRouteRoutes returns the /api routes for planned routes and route activation.
+// Each row carries its own auth tier (docs/adr/0177).
+func plannedRouteRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/routes", tierRead, listRoutesHandler},
+		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
+		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
+		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},
+		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
+		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},
+		{http.MethodPost, "/api/routes/:id/activate", tierWrite, activateRouteHandler},
+		{http.MethodPost, "/api/routes/deactivate", tierWrite, deactivateRouteHandler},
+	}
+}

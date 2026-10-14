@@ -167,3 +167,23 @@ func importPassagesHandler(c echo.Context) error {
 func filepathBase(name string) string {
 	return path.Base(strings.ReplaceAll(name, "\\", "/"))
 }
+
+// passageRoutes returns the /api routes for passages and cruises.
+// Each row carries its own auth tier (docs/adr/0177).
+func passageRoutes() []apiRoute {
+	return []apiRoute{
+		{http.MethodGet, "/api/passages", tierRead, listPassagesHandler},
+		{http.MethodGet, "/api/passages/:id", tierRead, getPassageHandler},
+		{http.MethodGet, "/api/cruises", tierRead, listCruisesHandler},
+		{http.MethodGet, "/api/cruises/:id", tierRead, getCruiseHandler},
+		{http.MethodPost, "/api/passages/import", tierWrite, importPassagesHandler},
+		{http.MethodPost, "/api/passages/merge", tierWrite, mergePassagesHandler},
+		{http.MethodPatch, "/api/passages/:id", tierWrite, patchPassageHandler},
+		{http.MethodPost, "/api/passages/:id/split", tierWrite, splitPassageHandler},
+		{http.MethodPost, "/api/passages/:id/trim", tierWrite, trimPassageHandler},
+		{http.MethodPost, "/api/cruises", tierWrite, createCruiseHandler},
+		{http.MethodPatch, "/api/cruises/:id", tierWrite, patchCruiseHandler},
+		{http.MethodDelete, "/api/cruises/:id", tierWrite, deleteCruiseHandler},
+		{http.MethodPut, "/api/cruises/:id/water-rises", tierWrite, putWaterRiseLabelHandler},
+	}
+}

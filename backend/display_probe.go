@@ -140,3 +140,16 @@ func displayProbeHandler(c echo.Context) error {
 
 	return c.NoContent(http.StatusNoContent)
 }
+
+// displayProbeRoutes returns the /api routes for the wall display capability probe.
+// Each row carries its own auth tier (docs/adr/0177).
+func displayProbeRoutes() []apiRoute {
+	return []apiRoute{
+		// The wall display browser's capability probe
+		// (frontend/public/display-probe.html) reports into the backend log
+		// rather than rendering on a 1920x360 screen with no keyboard or
+		// mouse. Public tier: the screen may never sign in, and the only
+		// effect is a log line.
+		{http.MethodPost, "/api/display-probe", tierPublic, displayProbeHandler},
+	}
+}

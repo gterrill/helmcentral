@@ -38,7 +38,7 @@ func TestBandAge_Boundaries(t *testing.T) {
 }
 
 // vesselStatePayload builds a literal matching buildVesselStatePayload's real
-// field names (main.go), so these tests exercise the same key names
+// field names (vessel_state.go), so these tests exercise the same key names
 // vesselStateGateKey normalises in production rather than a stand-in shape
 // that could quietly drift from it.
 func vesselStatePayload(datetime string, depth, depthAge, positionAge, windAge float64) map[string]any {
@@ -183,7 +183,7 @@ func TestGaugeValuesGateKey_SendsOnRealValueChange(t *testing.T) {
 	}
 }
 
-// nearbyVesselsPayload mirrors buildNearbyVesselsPayload's shape (main.go):
+// nearbyVesselsPayload mirrors buildNearbyVesselsPayload's shape (nearby_vessels.go):
 // a feed-level last_update_age_s alongside a "vessels" array whose entries
 // each carry their own age_seconds.
 func nearbyVesselsPayload(datetime string, feedAge float64, vesselAge int) map[string]any {
@@ -262,7 +262,7 @@ func TestRadarTargetsGateKey_BandsPerTargetAgeSeconds(t *testing.T) {
 	}
 }
 
-// tanksStatePayload mirrors buildTanksStatePayload's shape (main.go): a
+// tanksStatePayload mirrors buildTanksStatePayload's shape (tanks_state.go): a
 // feed-level last_update_age_s, fuel_volume_age_s and fuel_derived_age_s,
 // plus per-tank last_update_age_s nested in the "tanks" array — the nested
 // case the generic "_age_s" suffix rule (not a special case) must catch.
@@ -303,7 +303,7 @@ func TestTanksStateGateKey_BandsNestedPerTankAge(t *testing.T) {
 	}
 }
 
-// solarStatePayload mirrors buildSolarStatePayload's shape (main.go): a
+// solarStatePayload mirrors buildSolarStatePayload's shape (solar_state.go): a
 // feed-level last_update_age_s, a "controllers" array with its own nested
 // last_update_age_s per controller, and trend_24h_total, whose last point's
 // time solarStateGateKey drops entirely (see its doc comment).
@@ -357,7 +357,7 @@ func TestSolarStateGateKey_SendsOnRealPowerChange(t *testing.T) {
 }
 
 // electricalStatePayload mirrors buildElectricalStatePayload's shape
-// (main.go).
+// (electrical_state.go).
 func electricalStatePayload(datetime string, socPercent, feedAge float64) map[string]any {
 	return map[string]any{
 		"datetime":            datetime,
