@@ -24,6 +24,7 @@ import {
   formatLocalDate,
   passageHeading,
   passageRoute,
+  titleRepeatsRoute,
   type CruiseRecord,
   type ImportSummary,
   type PassageSummary,
@@ -118,7 +119,7 @@ export function PassagesPanel({
         return (
           <span className="flex min-w-0 flex-col">
             <span className="truncate font-medium text-foreground">{passageHeading(p)}</span>
-            {p.title.trim() !== '' && (p.from_name || p.to_name) && <span className="truncate text-xs text-muted-foreground">{passageRoute(p)}</span>}
+            {p.title.trim() !== '' && (p.from_name || p.to_name) && !titleRepeatsRoute(p) && <span className="truncate text-xs text-muted-foreground">{passageRoute(p)}</span>}
           </span>
         )
       },

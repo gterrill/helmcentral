@@ -153,6 +153,15 @@ export function passageRoute(p: Pick<PassageRecord, 'from_name' | 'to_name'>): s
   return `${p.from_name || ABSENT} → ${p.to_name || ABSENT}`
 }
 
+function routeKey(text: string): string {
+  return text.toLowerCase().replace(/-+>|→|⟶|➔|➜/g, '>').replace(/\s+/g, '')
+}
+
+/** Whether a title only repeats the route, ignoring arrow style, spacing and case. */
+export function titleRepeatsRoute(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name'>): boolean {
+  return p.title.trim() !== '' && routeKey(p.title) === routeKey(passageRoute(p))
+}
+
 /** The passage's own title; failing that its route; failing that, with no
  * place named at either end, "Passage · <boat-local date>". */
 export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name' | 'start'> & { start_lon?: number | null }): string {

@@ -263,3 +263,16 @@ describe('a passage with no names', () => {
     expect(screen.queryByText('-- → --')).not.toBeInTheDocument()
   })
 })
+
+describe('a titled passage that just repeats its route', () => {
+  it('does not print the route twice, whatever the arrow style', () => {
+    render(<PassagesPanel {...baseProps} passages={[passage('p1', { title: 'airlie  ->  hamilton' })]} />)
+    expect(screen.queryByText('Airlie → Hamilton')).not.toBeInTheDocument()
+    expect(screen.getAllByText('airlie -> hamilton').length).toBeGreaterThan(0)
+  })
+
+  it('keeps the route line under a title that says something else', () => {
+    render(<PassagesPanel {...baseProps} passages={[passage('p1', { title: 'Delivery leg' })]} />)
+    expect(screen.getAllByText('Airlie → Hamilton').length).toBeGreaterThan(0)
+  })
+})
