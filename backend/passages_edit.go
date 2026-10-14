@@ -77,10 +77,10 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 		rec.Notes = *p.Notes
 	}
 	if p.FromName != nil {
-		rec.FromName = *p.FromName
+		rec.FromName, rec.FromNameEdited = *p.FromName, true
 	}
 	if p.ToName != nil {
-		rec.ToName = *p.ToName
+		rec.ToName, rec.ToNameEdited = *p.ToName, true
 	}
 	if p.Hidden != nil {
 		rec.Hidden = *p.Hidden
@@ -101,8 +101,8 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 	if p.CruiseIDSet && marinaLookupWake != nil {
 		defer marinaLookupWake()
 	}
-	if _, err := tx.Exec(`UPDATE passages SET title=?, notes=?, from_name=?, to_name=?, hidden=?, cruise_id=?, edited=1 WHERE id=?`,
-		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, id); err != nil {
+	if _, err := tx.Exec(`UPDATE passages SET title=?, notes=?, from_name=?, to_name=?, hidden=?, cruise_id=?, edited=1, from_name_edited=?, to_name_edited=? WHERE id=?`,
+		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, boolInt(rec.FromNameEdited), boolInt(rec.ToNameEdited), id); err != nil {
 		return rec, fmt.Errorf("update passage: %w", err)
 	}
 	return rec, tx.Commit()
@@ -130,15 +130,15 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 		return
 	}
 	first, second = rec, rec
-	first.End, first.ToName, first.Edited = at, "", true
-	second.ID, second.Start, second.FromName, second.Title, second.Edited = uuid.NewString(), at, "", "", true
+	first.End, first.ToName, first.ToNameEdited, first.Edited = at, "", false, true
+	second.ID, second.Start, second.FromName, second.FromNameEdited, second.Title, second.Edited = uuid.NewString(), at, "", false, "", true
 	second.CreatedAt = time.Now().UTC()
-	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', edited=1 WHERE id=?`, at.UnixMilli(), id); err != nil {
+	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1 WHERE id=?`, at.UnixMilli(), id); err != nil {
 		return
 	}
-	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), "", second.ToName, "", "",
-		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli()); err != nil {
+		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited)); err != nil {
 		return
 	}
 	second.Notes = ""
@@ -191,7 +191,7 @@ func (s *passageStore) MergePassages(idA, idB string) (passageRecord, error) {
 		return a, invalidf("the passages are not next to each other")
 	}
 	m := a
-	m.End, m.ToName, m.Edited = b.End, b.ToName, true
+	m.End, m.ToName, m.ToNameEdited, m.Edited = b.End, b.ToName, b.ToNameEdited, true
 	if m.Title == "" {
 		m.Title = b.Title
 	}
@@ -207,8 +207,8 @@ func (s *passageStore) MergePassages(idA, idB string) (passageRecord, error) {
 	if _, err := tx.Exec(`DELETE FROM passages WHERE id = ?`, b.ID); err != nil {
 		return m, err
 	}
-	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, title=?, notes=?, cruise_id=?, edited=1 WHERE id=?`,
-		m.End.UnixMilli(), m.ToName, m.Title, m.Notes, m.CruiseID, m.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, edited=1 WHERE id=?`,
+		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.ID); err != nil {
 		return m, err
 	}
 	return m, tx.Commit()

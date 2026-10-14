@@ -53,17 +53,22 @@ const (
 )
 
 type passageRecord struct {
-	ID        string    `json:"id"`
-	Start     time.Time `json:"start"`
-	End       time.Time `json:"end"`
-	FromName  string    `json:"from_name"`
-	ToName    string    `json:"to_name"`
-	Title     string    `json:"title"`
-	Notes     string    `json:"notes"`
-	Hidden    bool      `json:"hidden"`
-	Edited    bool      `json:"edited"`
-	CruiseID  *string   `json:"cruise_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID       string    `json:"id"`
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+	FromName string    `json:"from_name"`
+	ToName   string    `json:"to_name"`
+	Title    string    `json:"title"`
+	Notes    string    `json:"notes"`
+	Hidden   bool      `json:"hidden"`
+	Edited   bool      `json:"edited"`
+	// FromNameEdited and ToNameEdited say the operator typed that name, which
+	// is what keeps the place-names plugin from replacing it. Filing, hiding or
+	// moving a passage sets Edited (the detector leaves it alone) but not these.
+	FromNameEdited bool      `json:"from_name_edited"`
+	ToNameEdited   bool      `json:"to_name_edited"`
+	CruiseID       *string   `json:"cruise_id"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type cruiseRecord struct {
@@ -129,7 +134,9 @@ func createPassageSchema(db *sql.DB) error {
 			edited INTEGER NOT NULL DEFAULT 0,
 			cruise_id TEXT REFERENCES cruises(id) ON DELETE SET NULL,
 			created_ms INTEGER NOT NULL,
-			name_attempted_ms INTEGER
+			name_attempted_ms INTEGER,
+			from_name_edited INTEGER NOT NULL DEFAULT 0,
+			to_name_edited INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_passages_start ON passages(start_ms)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
@@ -364,10 +371,10 @@ func (s *passageStore) InsertPassage(r passageRecord) (passageRecord, error) {
 		r.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.Exec(`INSERT INTO passages
-		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
-		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli())
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited))
 	if err != nil {
 		return r, fmt.Errorf("insert passage: %w", err)
 	}
@@ -381,18 +388,19 @@ func boolInt(b bool) int {
 	return 0
 }
 
-const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms`
+const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited`
 
 func scanPassage(r rowScanner) (passageRecord, error) {
 	var p passageRecord
 	var startMs, endMs, createdMs int64
-	var hidden, edited int
+	var hidden, edited, fromEd, toEd int
 	var cruise sql.NullString
-	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs); err != nil {
+	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs, &fromEd, &toEd); err != nil {
 		return p, err
 	}
 	p.Start, p.End = time.UnixMilli(startMs).UTC(), time.UnixMilli(endMs).UTC()
 	p.Hidden, p.Edited = hidden != 0, edited != 0
+	p.FromNameEdited, p.ToNameEdited = fromEd != 0, toEd != 0
 	if cruise.Valid {
 		c := cruise.String
 		p.CruiseID = &c
@@ -445,12 +453,11 @@ func (s *passageStore) InsertCruise(c cruiseRecord) (cruiseRecord, error) {
 	return c, nil
 }
 
-// addPassageNameAttemptColumn upgrades a passages table created before the
-// naming worker kept its own record of attempts.
-func addPassageNameAttemptColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(passages)`)
+// ensureColumn adds a column to a table created before the column existed.
+func ensureColumn(db *sql.DB, table, column, ddl string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
-		return fmt.Errorf("inspect passages: %w", err)
+		return fmt.Errorf("inspect %s: %w", table, err)
 	}
 	has := false
 	for rows.Next() {
@@ -459,9 +466,9 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
 			rows.Close()
-			return fmt.Errorf("inspect passages: %w", err)
+			return fmt.Errorf("inspect %s: %w", table, err)
 		}
-		if name == "name_attempted_ms" {
+		if name == column {
 			has = true
 		}
 	}
@@ -469,8 +476,21 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 	if has {
 		return nil
 	}
-	if _, err := db.Exec(`ALTER TABLE passages ADD COLUMN name_attempted_ms INTEGER`); err != nil {
-		return fmt.Errorf("add passages.name_attempted_ms: %w", err)
+	if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + ddl); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
+func addPassageNameAttemptColumn(db *sql.DB) error {
+	for _, c := range [][2]string{
+		{"name_attempted_ms", "INTEGER"},
+		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},
+		{"to_name_edited", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {
+			return err
+		}
 	}
 	return nil
 }

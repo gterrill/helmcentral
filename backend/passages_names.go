@@ -28,11 +28,12 @@ const (
 	passageNamingScanEvery  = 10 * time.Minute
 )
 
-// PassagesNeedingNames lists unedited passages with an empty origin or
-// destination that have not been tried in the last retryAfter.
+// PassagesNeedingNames lists passages with an empty origin or destination the
+// operator has not named themselves, that have not been tried in the last
+// retryAfter. Filing, hiding or moving a passage does not stop it being named.
 func (s *passageStore) PassagesNeedingNames(now time.Time, retryAfter time.Duration) ([]string, error) {
 	rows, err := s.db.Query(`SELECT id FROM passages
-		WHERE edited = 0 AND (from_name = '' OR to_name = '')
+		WHERE ((from_name = '' AND from_name_edited = 0) OR (to_name = '' AND to_name_edited = 0))
 		AND (name_attempted_ms IS NULL OR name_attempted_ms < ?)
 		ORDER BY start_ms`, now.Add(-retryAfter).UnixMilli())
 	if err != nil {
@@ -70,38 +71,35 @@ func (s *passageStore) onePoint(tail string, t time.Time) (*recordedTrackPoint, 
 }
 
 // FillPassageNames asks lookup for the places at a passage's start and end and
-// stores any answer that is not empty into a name that is still empty, and only
-// while the passage is unedited.
+// stores any answer that is not empty into a name that is still empty and that
+// the operator has not edited.
 func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64) string) error {
 	rec, err := s.GetPassage(id)
 	if err != nil {
 		return err
-	}
-	if rec.Edited {
-		return nil
 	}
 	// Stamped first, so a lookup that fails or hangs is not tried again in a
 	// tight loop; the scan retries it after the retry window.
 	if _, err := s.db.Exec(`UPDATE passages SET name_attempted_ms = ? WHERE id = ?`, time.Now().UnixMilli(), id); err != nil {
 		return err
 	}
-	if rec.FromName == "" {
+	if rec.FromName == "" && !rec.FromNameEdited {
 		if p, err := s.firstPointFrom(rec.Start); err != nil {
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {
-				if _, err := s.db.Exec(`UPDATE passages SET from_name = ? WHERE id = ? AND edited = 0 AND from_name = ''`, name, id); err != nil {
+				if _, err := s.db.Exec(`UPDATE passages SET from_name = ? WHERE id = ? AND from_name_edited = 0 AND from_name = ''`, name, id); err != nil {
 					return err
 				}
 			}
 		}
 	}
-	if rec.ToName == "" {
+	if rec.ToName == "" && !rec.ToNameEdited {
 		if p, err := s.lastPointUntil(rec.End); err != nil {
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {
-				if _, err := s.db.Exec(`UPDATE passages SET to_name = ? WHERE id = ? AND edited = 0 AND to_name = ''`, name, id); err != nil {
+				if _, err := s.db.Exec(`UPDATE passages SET to_name = ? WHERE id = ? AND to_name_edited = 0 AND to_name = ''`, name, id); err != nil {
 					return err
 				}
 			}

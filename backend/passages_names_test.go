@@ -38,12 +38,12 @@ func TestFillPassageNamesNamesBothEnds(t *testing.T) {
 func TestFillPassageNamesLeavesEditedAndUnnamedAlone(t *testing.T) {
 	s := newTestPassageStore(t)
 	appendAll(t, s, simpleTrip(2*time.Hour).pts)
-	edited, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour), Edited: true})
+	edited, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour), Edited: true, FromNameEdited: true, ToNameEdited: true})
 	calls := 0
 	s.FillPassageNames(edited.ID, func(float64, float64) string { calls++; return "X" })
 	got, _ := s.GetPassage(edited.ID)
 	if got.FromName != "" || got.ToName != "" || calls != 0 {
-		t.Errorf("an edited passage must not be touched: %+v (%d lookups)", got, calls)
+		t.Errorf("names the operator edited must not be touched: %+v (%d lookups)", got, calls)
 	}
 
 	plain, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(3 * time.Hour), End: passageEpoch.Add(4 * time.Hour), FromName: "Mine"})
@@ -111,7 +111,7 @@ func TestNamingScanFindsOnlyUnnamedUneditedUnattempted(t *testing.T) {
 	need := mk(passageRecord{})
 	half := mk(passageRecord{FromName: "A"})
 	mk(passageRecord{FromName: "A", ToName: "B"})
-	mk(passageRecord{Edited: true})
+	mk(passageRecord{Edited: true, FromNameEdited: true, ToNameEdited: true})
 
 	now := time.Now()
 	ids, err := s.PassagesNeedingNames(now, 24*time.Hour)
@@ -177,4 +177,62 @@ func waitUntilTrue(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not met")
+}
+
+// Review finding 4: filing or hiding a passage must not stop it being named;
+// only typing a name protects that end.
+func TestFilingAPassageDoesNotStopNaming(t *testing.T) {
+	s := newTestPassageStore(t)
+	appendAll(t, s, simpleTrip(2*time.Hour).pts)
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour)})
+	c, _ := s.InsertCruise(cruiseRecord{Name: "C"})
+	s.PatchPassage(p.ID, passagePatch{CruiseID: &c.ID, CruiseIDSet: true, Hidden: ptr(false)})
+
+	ids, _ := s.PassagesNeedingNames(time.Now(), 24*time.Hour)
+	if !idsContain(ids, p.ID) {
+		t.Fatal("a filed passage still needs names")
+	}
+	s.FillPassageNames(p.ID, func(float64, float64) string { return "Named" })
+	got, _ := s.GetPassage(p.ID)
+	if got.FromName != "Named" || got.ToName != "Named" || !got.Edited {
+		t.Errorf("%+v", got)
+	}
+}
+
+func TestTypingOneNameProtectsOnlyThatEnd(t *testing.T) {
+	s := newTestPassageStore(t)
+	appendAll(t, s, simpleTrip(2*time.Hour).pts)
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour)})
+	s.PatchPassage(p.ID, passagePatch{FromName: pstr("Home")})
+	s.FillPassageNames(p.ID, func(float64, float64) string { return "Plugin" })
+	got, _ := s.GetPassage(p.ID)
+	if got.FromName != "Home" || got.ToName != "Plugin" || !got.FromNameEdited || got.ToNameEdited {
+		t.Errorf("%+v", got)
+	}
+	// clearing a name the operator chose keeps it protected
+	s.PatchPassage(p.ID, passagePatch{FromName: pstr("")})
+	s.FillPassageNames(p.ID, func(float64, float64) string { return "Plugin" })
+	if got, _ := s.GetPassage(p.ID); got.FromName != "" {
+		t.Errorf("an operator-cleared name was refilled: %+v", got)
+	}
+}
+
+func TestSplitAndMergeCarryNameProtection(t *testing.T) {
+	s := newTestPassageStore(t)
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), FromName: "A", ToName: "B", FromNameEdited: true, ToNameEdited: true})
+	a, b, err := s.SplitPassage(p.ID, passageEpoch.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.FromNameEdited || a.ToNameEdited || b.FromNameEdited || !b.ToNameEdited {
+		t.Errorf("split: %+v %+v", a, b)
+	}
+	m, err := s.MergePassages(a.ID, b.ID)
+	if err != nil || !m.FromNameEdited || !m.ToNameEdited {
+		t.Errorf("merge: %+v %v", m, err)
+	}
+	stored, _ := s.GetPassage(m.ID)
+	if !stored.FromNameEdited || !stored.ToNameEdited {
+		t.Errorf("stored: %+v", stored)
+	}
 }
