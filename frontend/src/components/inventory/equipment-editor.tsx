@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFollowingDraft, type FollowingDraftOptions } from '@/hooks/use-following-draft'
 import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, RefreshFailedNote, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
 import { DocumentViewerSheet } from '@/components/documents/document-viewer-sheet'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -109,6 +110,11 @@ function draftFromItem(item: EquipmentItem): EquipmentInput {
   }
 }
 
+// A bin implies its zone (ADR 0123), so an edited zone or bin keeps both: a
+// draft must not pair the operator's zone with the server's bin. Alias order
+// carries no meaning, so a reordered echo is not an edit.
+const FOLLOW_OPTIONS = { groups: [['zone_id', 'bin_id']], unordered: ['aliases'] } as const satisfies FollowingDraftOptions<EquipmentInput>
+
 function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
@@ -199,7 +205,9 @@ export function EquipmentEditor(
   const maintenanceRules = [...scheduleRules.filter((r) => r.created_at !== null), ...removedJobs]
   const { entries: maintenanceLogEntries } = useMaintenanceLogEntries(id !== null ? { equipment: id } : null)
 
-  const [draft, setDraft] = useState<EquipmentInput>(BLANK_DRAFT)
+  // Seeded from the saved record and following it per field (a stale cached
+  // record is followed by a fresh one); a brand new item starts blank.
+  const [draft, setDraft] = useFollowingDraft(id === null ? null : item, draftFromItem, BLANK_DRAFT, FOLLOW_OPTIONS)
   // ADR 0148: what a profile change would do to this item's service
   // schedule, asked for the moment the select changes (saved items only) and
   // confirmed before the save goes through.
@@ -317,27 +325,18 @@ export function EquipmentEditor(
   // baseline (below) is what was actually seeded, not the unseeded default.
   const [newDraftBaseline, setNewDraftBaseline] = useState<EquipmentInput>(BLANK_DRAFT)
 
-  // Re-seeds only when a DIFFERENT record has loaded (id, or - for a brand
-  // new draft - a one-time reset to blank), not on every incidental
-  // re-render of the same one, mirroring document-details-page.tsx's own
-  // draft effect and its reasoning: update()'s echoed-back item would
-  // otherwise re-run this and discard an edit in progress.
+  // A brand new draft is reset to blank once, when the editor opens on it.
+  // ADR 0127: the bin page's "Full item" pre-sets its location - read once,
+  // at the moment this draft is born (EquipmentEditor unmounts and remounts
+  // fresh between one "New item" press and the next, so there is exactly one
+  // render where initialZoneId/initialBinId matter).
   useEffect(() => {
-    if (id === null) {
-      // ADR 0127: the bin page's "Full item" pre-sets a brand new draft's
-      // location - read once, at the moment this draft is born (this
-      // effect's own "only on a different record" reasoning applies
-      // identically to a NEW record: EquipmentEditor unmounts and remounts
-      // fresh between one "New item" press and the next, so there is
-      // exactly one render where initialZoneId/initialBinId matter).
-      const seeded = { ...BLANK_DRAFT, zone_id: initialZoneId, bin_id: initialBinId }
-      setDraft(seeded)
-      setNewDraftBaseline(seeded)
-      return
-    }
-    if (item) setDraft(draftFromItem(item))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id/item id only, see comment above.
-  }, [id, item?.id])
+    if (id !== null) return
+    const seeded = { ...BLANK_DRAFT, zone_id: initialZoneId, bin_id: initialBinId }
+    setDraft(seeded)
+    setNewDraftBaseline(seeded)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id only: seeded once per new draft.
+  }, [id])
 
   // finding 9: id===null's own baseline is the SEEDED draft (newDraftBaseline,
   // set by the effect above the moment this draft was born), not BLANK_DRAFT
@@ -789,7 +788,7 @@ export function EquipmentEditor(
       }
       throw err
     }
-  }, [id, draft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
+  }, [id, draft, setDraft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
 
   // ADR 0171: this editor owns the guard for its draft. An unsaved draft has a
   // Save behind Save and Continue; photos still waiting for Retry have nothing
@@ -888,7 +887,9 @@ export function EquipmentEditor(
       </Page>
     )
   }
-  if (id !== null && error) {
+  // With the item loaded, a failed refresh is a note on the form (below), not
+  // a replacement for it: edits in progress stay on screen.
+  if (id !== null && error && !item) {
     return (
       <Page title="Equipment" onBack={onBack}>
         <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-center">
@@ -1270,6 +1271,7 @@ export function EquipmentEditor(
           `error` slot instead, right beside the button that caused it. A
           failure with nothing dirty (e.g. the documents list not reloading
           after a photo write) has no save bar to show in, so it lands here. */}
+      {id !== null && error && item && <RefreshFailedNote reason={error} onRetry={() => { void refresh() }} />}
       {saveError && !dirty && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {saveError}

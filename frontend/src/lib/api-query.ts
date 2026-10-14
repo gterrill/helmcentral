@@ -296,35 +296,59 @@ export function setQueryData<T>(
   updater: T | ((prev: T | undefined) => T),
 ): void {
   const entry = ensureEntry(key)
+  // A read that left before this write would answer with the state from before
+  // it, so it is dropped when it lands.
+  entry.requestId += 1
+  entry.inflight = undefined
+  // With no data an updater would build its value from `undefined` (nothing
+  // loaded yet, or the load failed), so the result is only a fragment of the
+  // answer: one new row, not the list. It is not stored, because a failed read
+  // after it would leave the fragment standing as the real list. The list comes
+  // only from a read made after the write. A plain value is the caller's whole
+  // answer and stands.
+  if (entry.data === undefined && typeof updater === 'function') {
+    if (entry.subscribers.size > 0 && entry.path !== undefined) {
+      void startFetch(entry, entry.path)
+      return
+    }
+    scheduleGc(entry)
+    commit(entry)
+    return
+  }
   entry.data =
     typeof updater === 'function'
       ? (updater as (prev: T | undefined) => T)(entry.data as T | undefined)
       : updater
   entry.status = 'success'
   entry.error = null
-  // A read that left before this write would answer with the state from before
-  // it, so it is dropped when it lands.
-  entry.requestId += 1
-  entry.inflight = undefined
   if (entry.subscribers.size === 0) scheduleGc(entry)
   commit(entry)
 }
 
 // Every key that starts with `prefix`: one with subscribers refetches now; one
 // without drops any response still in flight and refetches on its next mount.
-export function invalidateQueries(prefix: QueryKey): void {
+// The result settles when the refetches it started have, for a caller that
+// wants fresh data on screen before it goes on and would otherwise have to
+// refetch the same key a second time. It never rejects.
+//
+// `skip` leaves a matching key alone, for a key whose record is gone and would
+// only answer 404.
+export function invalidateQueries(prefix: QueryKey, skip?: (key: QueryKey) => boolean): Promise<void> {
+  const started: Promise<void>[] = []
   const wanted = prefix.map(stableStringify)
   for (const entry of Array.from(entries.values())) {
     if (entry.key.length < wanted.length) continue
     if (!wanted.every((w, i) => stableStringify(entry.key[i]) === w)) continue
+    if (skip?.(entry.key)) continue
     if (entry.subscribers.size > 0 && entry.path !== undefined) {
-      startFetch(entry, entry.path)
+      started.push(startFetch(entry, entry.path))
     } else {
       entry.requestId += 1
       entry.inflight = undefined
       commit(entry)
     }
   }
+  return Promise.all(started).then(() => undefined)
 }
 
 // For tests: forget everything and stop every timer.

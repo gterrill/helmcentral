@@ -176,7 +176,8 @@ describe('useManuals: writes', () => {
     expect(created).toMatchObject({ name: 'Operations Manual' })
     const postCall = calls.find((c) => c.method === 'POST')
     expect(postCall?.body).toEqual({ name: 'Operations Manual' })
-    expect(calls.filter((c) => c.method === 'GET' && c.url === '/api/manuals').length).toBeGreaterThanOrEqual(2)
+    // One read on mount and exactly one after the write, not an invalidate and a refetch.
+    expect(calls.filter((c) => c.method === 'GET' && c.url === '/api/manuals').length).toBe(2)
   })
 
   it('flagManual POSTs {folder_id} rather than {name}', async () => {

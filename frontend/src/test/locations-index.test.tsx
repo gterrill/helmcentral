@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { invalidateQueries } from '@/lib/api-query'
 import { LocationsIndex } from '@/components/inventory/locations-index'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import { stubImageSize } from './stub-image'
@@ -154,14 +155,16 @@ describe('LocationsIndex plan view (ADR 0156)', () => {
     expect(within(screen.getByText('Chain locker').closest('tr')!).getByText('--')).toBeInTheDocument()
   })
 
-  it('shows the decks load error instead of a table with no deck names', async () => {
+  it('keeps the locations, marks the unknown decks and notes the failure when decks cannot load', async () => {
     const base = fetchMock.getMockImplementation()!
     fetchMock.mockImplementation((url: string, init?: RequestInit) =>
       String(url).endsWith('/api/inventory/decks')
         ? Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'decks unavailable' }) })
         : base(url, init))
     render(<LocationsIndex onOpenLocation={vi.fn()} view="table" />)
-    expect(await screen.findByText(/decks unavailable/)).toBeInTheDocument()
+    expect(await screen.findByText(/Couldn't refresh: decks unavailable/)).toBeInTheDocument()
+    const engineRow = screen.getByText('Engine room').closest('tr')!
+    expect(within(engineRow).getByText('?')).toBeInTheDocument()
   })
 
   it('switches between Table and Plan and reports the choice', async () => {
@@ -180,6 +183,23 @@ describe('LocationsIndex plan view (ADR 0156)', () => {
     expect(screen.queryByRole('button', { name: 'Flybridge' })).not.toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'Engine room, 1 bin' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Salon/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the deck plan and notes the failure when a refresh of the decks fails', async () => {
+    const base = fetchMock.getMockImplementation()!
+    let failing = false
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      failing && String(url).endsWith('/api/inventory/decks')
+        ? Promise.resolve({ ok: false, status: 502, json: async () => ({ error: 'HTTP 502' }) })
+        : base(url, init))
+    render(<LocationsIndex onOpenLocation={vi.fn()} view="plan" />)
+    expect(await screen.findByRole('link', { name: 'Engine room, 1 bin' })).toBeInTheDocument()
+
+    failing = true
+    act(() => { invalidateQueries(['/api/inventory/decks']) })
+
+    expect(await screen.findByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Engine room, 1 bin' })).toBeInTheDocument()
   })
 
   it('opens the chosen deck and reports the tab change', async () => {

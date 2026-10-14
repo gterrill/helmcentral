@@ -213,6 +213,34 @@ describe('DocumentDetailsPage', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
   })
 
+  // Enrichment writes a suggested title while the page polls a pending
+  // document. A draft seeded before that must pick it up, or it reads dirty
+  // and Save would PATCH the old blank title over the suggestion.
+  it('takes a title the server wrote meanwhile when the operator has not touched the field', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: '', status: 'pending' }) }))
+    const page = () => <DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />
+    const { rerender } = renderPage(page())
+
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit', status: 'indexed' }) }))
+    rerender(page())
+
+    expect(screen.getByLabelText('Title')).toHaveValue('Impeller kit')
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a field the operator has edited when a fresher record arrives', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: '', notes: '', status: 'pending' }) }))
+    const page = () => <DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />
+    const { rerender } = renderPage(page())
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'spares aboard' } })
+
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit', notes: '', status: 'indexed' }) }))
+    rerender(page())
+
+    expect(screen.getByLabelText('Notes')).toHaveValue('spares aboard')
+    expect(screen.getByLabelText('Title')).toHaveValue('Impeller kit')
+  })
+
   // Main column edits; the aside holds the read-only facts about the file.
   it('puts the editable fields in the main column and the file and indexing facts in the aside', () => {
     mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit', size_bytes: 2048, page_count: 5 }) }))
@@ -361,6 +389,20 @@ describe('DocumentDetailsPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('HTTP 500')
   })
 
+  it('keeps linking the crumbs from a loaded folder tree and notes the failure when a refresh of it fails', () => {
+    const onOpenFolder = vi.fn()
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ folder_id: 'f1' }) }))
+    mockedUseFolderPath.mockReturnValue({ path: [{ id: 'f1', name: 'Boat', parent_id: null }], error: null })
+    mockedUseFolderTree.mockReturnValue({ folders: [treeNode('f1', 'Boat', null)], loading: false, error: 'HTTP 502', refresh: vi.fn() })
+
+    renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={onOpenFolder} onBack={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Boat' }))
+    expect(onOpenFolder).toHaveBeenCalledWith('f1')
+    expect(screen.getByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('the Documents crumb goes back to where the operator came from and a folder crumb opens that folder', () => {
     const onOpenFolder = vi.fn()
     const onBack = vi.fn()
@@ -442,6 +484,20 @@ describe('DocumentDetailsPage', () => {
     renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByRole('alert')).toHaveTextContent('document not found')
+  })
+
+  it('keeps the loaded document, with an edit pending, and notes the failure of a later poll', () => {
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }) }))
+    const page = () => <DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />
+    const { rerender } = renderPage(page())
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'spares aboard' } })
+
+    mockedUseDocument.mockReturnValue(makeDocumentMock({ document: doc({ title: 'Impeller kit' }), error: 'HTTP 502' }))
+    rerender(page())
+
+    expect(screen.getByLabelText('Notes')).toHaveValue('spares aboard')
+    expect(screen.getByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows a not-found message when the fetch resolved to nothing', () => {

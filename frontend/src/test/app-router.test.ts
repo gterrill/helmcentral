@@ -72,6 +72,25 @@ describe('the starting location', () => {
 })
 
 describe('navigate: push or replace', () => {
+  it('replaces, not pushes, when the page list lands empty and rewrites a stale deep link', () => {
+    const { router, history } = setup('/?page=old', { ...READY, firstPageId: null, knownPageIds: null })
+    router.setContext({ ...READY, firstPageId: null, knownPageIds: [] })
+    expect(history.entries).toEqual(['/'])
+    expect(router.getSnapshot().location).toEqual({ panel: null, pageId: null })
+  })
+
+  it('replaces the stale dashboard address when the page list lands without it', () => {
+    const { router, history } = setup('/dashboard/old', { ...READY, firstPageId: null, knownPageIds: null })
+    router.setContext({ ...READY, firstPageId: 'p1', knownPageIds: ['p1'] })
+    expect(history.entries).toHaveLength(1)
+  })
+
+  it('pushes the first move away from a dashboard opened while pages are still loading', () => {
+    const { router, history } = setup('/dashboard/p2', { ...READY, firstPageId: null, knownPageIds: null })
+    router.navigate(forecast)
+    expect(history.entries).toEqual(['/dashboard/p2', '/forecast'])
+  })
+
   it('pushes a new entry for a move to somewhere else', () => {
     const { router, history } = setup('/')
     router.setContext(READY) // the first write is spent on settling the opening entry
@@ -368,6 +387,96 @@ describe('guards', () => {
     finish()
     await saving
     expect(router.getSnapshot().location).toEqual(settings('general'))
+  })
+
+  it('Save and Continue still makes the move when the save itself navigated', async () => {
+    const { router } = setup('/settings')
+    // A New item's save lands on the created record with a forced move, which
+    // clears the held one; the operator still asked to go to Radar.
+    const save = vi.fn(async () => { router.navigate(forecast, { force: true }) })
+    router.registerGuard(() => guard({ save }))
+    router.navigate({ panel: 'radar' })
+    await router.saveAndContinue()
+    expect(router.getSnapshot().location).toEqual({ panel: 'radar' })
+  })
+
+  describe('Save and Continue when the operator moves elsewhere during the save', () => {
+    function holdWithSlowSave(path = '/settings') {
+      const ctx = setup(path)
+      let finish: () => void = () => {}
+      const save = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+      ctx.router.registerGuard(() => guard({ save }))
+      return { ...ctx, save, finish: () => finish() }
+    }
+
+    it('keeps the operator where Back took them', async () => {
+      const { router, history } = setup('/forecast')
+      router.navigate(settings('general'))
+      let finish: () => void = () => {}
+      router.registerGuard(() => guard({ save: () => new Promise<void>((resolve) => { finish = resolve }) }))
+      router.navigate({ panel: 'radar' })
+      const saving = router.saveAndContinue()
+      history.back()
+      finish()
+      await saving
+      expect(router.getSnapshot().location).toEqual(forecast)
+    })
+
+    it('does not count a replace-correction as the operator moving', async () => {
+      const { router } = setup('/settings')
+      let finish: () => void = () => {}
+      router.registerGuard(() => guard({
+        blocks: (_from, to) => (to.panel === 'radar' ? { kind: 'dirty' } : null),
+        save: () => new Promise<void>((resolve) => { finish = resolve }),
+      }))
+      router.navigate({ panel: 'radar' })
+      const saving = router.saveAndContinue()
+      // e.g. a panel rewriting its own address while the save runs
+      router.navigate(settings('signalk'), { replace: true })
+      finish()
+      await saving
+      expect(router.getSnapshot().location).toEqual({ panel: 'radar' })
+    })
+
+    it('runs one save for a double-click, and the move still respects a Back made meanwhile', async () => {
+      const { router, history } = setup('/forecast')
+      router.navigate(settings('general'))
+      let finish: () => void = () => {}
+      const save = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+      router.registerGuard(() => guard({ save }))
+      router.navigate({ panel: 'radar' })
+      const first = router.saveAndContinue()
+      const second = router.saveAndContinue()
+      history.back()
+      finish()
+      await Promise.all([first, second])
+      expect(save).toHaveBeenCalledTimes(1)
+      expect(router.getSnapshot().location).toEqual(forecast)
+    })
+
+    it('keeps a move the guard no longer holds', async () => {
+      const { router, finish } = holdWithSlowSave()
+      router.navigate({ panel: 'radar' })
+      const saving = router.saveAndContinue()
+      router.navigate(forecast)
+      finish()
+      await saving
+      expect(router.getSnapshot().location).toEqual(forecast)
+    })
+  })
+
+  it('Save and Continue drops a move replaced by another held move during the save', async () => {
+    const { router } = setup('/settings')
+    let finish: () => void = () => {}
+    const save = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    router.registerGuard(() => guard({ save }))
+    router.navigate({ panel: 'radar' })
+    const saving = router.saveAndContinue()
+    router.navigate({ panel: 'assistant', conversationId: null })
+    finish()
+    await saving
+    expect(router.getSnapshot().location).toEqual(settings('general'))
+    expect(router.getSnapshot().pending?.target).toEqual({ panel: 'assistant', conversationId: null })
   })
 
   it('Save and Continue stays put, still holding the move, when the save fails', async () => {

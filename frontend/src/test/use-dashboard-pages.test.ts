@@ -11,7 +11,7 @@ describe('useDashboardPages', () => {
     id: String(index), name, widgets: [], created_at: '', updated_at: '',
   }))
 
-  it('keeps cached pages visible when a later revalidation fails', async () => {
+  it('keeps cached pages and reports the error when a later revalidation fails', async () => {
     let calls = 0
     stubApi({
       'GET /api/dashboard-pages': () => (++calls === 1 ? { pages: orderedPages } : jsonResponse({ error: 'blip' }, 502)),
@@ -22,7 +22,41 @@ describe('useDashboardPages', () => {
     await act(async () => { await result.current.refetch() })
     expect(calls).toBe(2)
     expect(result.current.pages).toEqual(orderedPages)
-    expect(result.current.error).toBeNull()
+    expect(result.current.error).toBe('blip')
+  })
+
+  it('a page created during the first load is listed with the rest, read from the server', async () => {
+    let release: (v: unknown) => void = () => {}
+    const firstList = new Promise((resolve) => { release = resolve })
+    let lists = 0
+    const created = { id: 'new', name: 'Fresh', widgets: [], created_at: '', updated_at: '' }
+    stubApi({
+      'GET /api/dashboard-pages': () => (++lists === 1 ? firstList : { pages: [...orderedPages, created] }),
+      'POST /api/dashboard-pages': () => created,
+    })
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(lists).toBe(1))
+    await act(async () => { await result.current.createPage('Fresh') })
+    await waitFor(() => expect(result.current.pages).toHaveLength(4))
+    await act(async () => { release({ pages: orderedPages }) })
+    expect(result.current.pages).toHaveLength(4)
+  })
+
+  it('a page created during the first load does not stand as the whole list when the read fails', async () => {
+    let release: (v: unknown) => void = () => {}
+    const firstList = new Promise((resolve) => { release = resolve })
+    let lists = 0
+    const created = { id: 'new', name: 'Fresh', widgets: [], created_at: '', updated_at: '' }
+    stubApi({
+      'GET /api/dashboard-pages': () => (++lists === 1 ? firstList : jsonResponse({ error: 'down' }, 502)),
+      'POST /api/dashboard-pages': () => created,
+    })
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(lists).toBe(1))
+    await act(async () => { await result.current.createPage('Fresh') })
+    await waitFor(() => expect(result.current.error).toBe('down'))
+    expect(result.current.pages).toEqual([])
+    release({ pages: orderedPages })
   })
 
   it('reports the load error when there are no pages to show', async () => {

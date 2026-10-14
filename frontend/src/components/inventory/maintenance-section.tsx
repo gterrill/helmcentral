@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { RefreshFailedNote } from '@/components/patterns'
 import { BookOpen, CheckCircle2, Download, Plus, Wrench } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -139,8 +140,9 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         </div>
       )}
 
+      {error && rules.length > 0 && <RefreshFailedNote reason={error} onRetry={() => { void refresh() }} />}
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card">
-        {error ? (
+        {error && rules.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
             <p role="alert" className="text-sm text-destructive">{error}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => { void refresh() }}>Retry</Button>

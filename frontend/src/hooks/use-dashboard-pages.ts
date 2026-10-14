@@ -179,10 +179,9 @@ export function useDashboardPages() {
   return {
     pages,
     loading: isLoading,
-    // The error is shared store state, so a failed revalidation started by
-    // another reader would otherwise hide the switcher, or blank a wall, over
-    // pages that are cached and good. It counts only with nothing to show.
-    error: pages.length > 0 ? null : (error?.message ?? null),
+    // Reported alongside the pages: a failed refresh is not hidden, and the
+    // panels that read it keep the cached pages on screen next to the notice.
+    error: error?.message ?? null,
     refetch,
     createPage,
     updatePage,

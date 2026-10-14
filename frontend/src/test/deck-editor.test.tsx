@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DeckEditor } from '@/components/inventory/deck-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import type { LayoutDraft } from '@/lib/deck-layout'
+import { invalidateQueries } from '@/lib/api-query'
 import { stubImageSize } from './stub-image'
 import { testRouter } from './helpers/router'
 
@@ -249,6 +250,27 @@ describe('DeckEditor when locations will not load', () => {
     await screen.findByDisplayValue('Main deck')
     expect(await screen.findByText('zones unavailable')).toBeInTheDocument()
     expect(screen.queryByTestId('plan-editor')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /More|actions/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('DeckEditor when the locations refresh fails over a cached list', () => {
+  it('keeps the drawing surface with a note, but will not offer Delete on a count it cannot vouch for', async () => {
+    const previous = fetchMock.getMockImplementation()!
+    let failing = false
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      failing && String(url).endsWith('/api/inventory/zones')
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'zones unavailable' }) })
+        : previous(url, init))
+    renderEditor()
+    await screen.findByDisplayValue('Main deck')
+    expect(screen.getByRole('button', { name: /More|actions/i })).toBeInTheDocument()
+
+    failing = true
+    act(() => { invalidateQueries(['/api/inventory/zones']) })
+
+    expect(await screen.findByText(/Couldn't refresh: zones unavailable/)).toBeInTheDocument()
+    expect(screen.getByTestId('plan-editor')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /More|actions/i })).not.toBeInTheDocument()
   })
 })

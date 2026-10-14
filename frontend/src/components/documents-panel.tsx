@@ -53,7 +53,9 @@ import {
   FolderTree,
   IndexFilters,
   IndexTable,
+  LoadError,
   Page,
+  RefreshFailedNote,
   ResourceItem,
   ResourceList,
   TreeLayout,
@@ -1077,7 +1079,8 @@ export function DocumentsPanel({
         collapsedStorageKey={TREE_COLLAPSED_KEY}
         pane={({ dismiss }) => (
           <>
-            {folderTree.error && <p role="alert" className="p-2 text-xs text-destructive">{folderTree.error}</p>}
+            {folderTree.error && folderTree.folders.length === 0 && <p role="alert" className="p-2 text-xs text-destructive">{folderTree.error}</p>}
+            {folderTree.error && folderTree.folders.length > 0 && <RefreshFailedNote reason={folderTree.error} className="p-2" />}
             <FolderTree
               label="Folders"
               nodes={treeNodes}
@@ -1136,7 +1139,14 @@ export function DocumentsPanel({
           {uploads.error}
         </p>
       )}
-      {documents.error && <p role="alert" className="text-sm text-destructive">{documents.error}</p>}
+      {/* Rows are what the table draws (documents.documents); the folders sit
+          in the tree pane and have their own error line. */}
+      {view !== 'unfiled' && !isCurrentFolderManual && !folderKindUnknown && documents.error && (
+        <LoadError reason={documents.error} hasRows={listRows.length > 0} onRetry={() => { void documents.refresh() }} />
+      )}
+      {view === 'unfiled' && unfiled.error && (
+        <LoadError reason={unfiled.error} hasRows={unfiled.notes.length > 0} onRetry={() => { void unfiled.refresh() }} />
+      )}
 
       <div
         className={cn('flex min-h-0 flex-1 flex-col rounded-md', dragOver && 'ring-2 ring-primary')}

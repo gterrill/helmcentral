@@ -131,13 +131,19 @@ describe('EquipmentIndex', () => {
   })
 
   it('deletes an item from the row action menu, after confirming', async () => {
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (String(url).includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
-      if (init?.method === 'DELETE') return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
+    // The list read that follows the delete is held, to see what the dialog
+    // does while it is outstanding.
+    let listReadCount = 0
+    let releaseSecondRead: () => void = () => {}
+    const secondRead = new Promise<void>((resolve) => { releaseSecondRead = resolve })
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/inventory/zones')) return { ok: true, json: async () => ({ zones }) }
+      if (init?.method === 'DELETE') return { ok: true, status: 204, json: async () => ({}) }
       if (String(url).includes('/api/inventory/equipment')) {
-        return Promise.resolve({ ok: true, json: async () => ({ items: [makeItem({})] }) })
+        if (++listReadCount === 2) await secondRead
+        return { ok: true, json: async () => ({ items: listReadCount === 1 ? [makeItem({})] : [] }) }
       }
-      return Promise.resolve({ ok: false, json: async () => ({}) })
+      return { ok: false, json: async () => ({}) }
     })
     render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
@@ -155,6 +161,16 @@ describe('EquipmentIndex', () => {
         expect.objectContaining({ method: 'DELETE' }),
       )
     })
+    // The dialog stays up, row still listed, until the fresh list has landed.
+    await waitFor(() => expect(listReadCount).toBe(2))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(screen.getByText('Generator')).toBeInTheDocument()
+    releaseSecondRead()
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.queryByText('Generator')).not.toBeInTheDocument()
+    // One read after the delete, not an invalidate and a refetch.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(listReadCount).toBe(2)
   })
 
   it('calls onNewItem from the toolbar button', async () => {

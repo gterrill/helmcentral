@@ -61,6 +61,17 @@ describe('WallDisplaysPanel', () => {
     })
   })
 
+  describe('refresh error over loaded displays', () => {
+    it('keeps the display rows and notes the failure instead of replacing them', () => {
+      const onRetry = vi.fn()
+      render(<WallDisplaysPanel {...baseProps({ error: 'HTTP 502', onRetry })} />)
+      expect(screen.getByRole('button', { name: 'Flybridge' })).toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent("Couldn't refresh: HTTP 502")
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /New display/i })).toBeInTheDocument()
+    })
+  })
+
   describe('empty state', () => {
     it('teaches what a wall display is and how canvas numbers are measured, and offers New display', () => {
       render(<WallDisplaysPanel {...baseProps({ displays: [] })} />)

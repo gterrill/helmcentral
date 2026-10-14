@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { ApiError, apiRequest, fetchQuery, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
 // its zones/bins. Reads go through useApiQuery and writes through apiRequest
@@ -276,6 +276,18 @@ function equipmentChanged() {
   invalidateQueries([MAINTENANCE_RULES])
 }
 
+// An item is gone. The equipment lists re-read (the promise settles when they
+// have, for a caller that closes a dialog on fresh rows), the other items'
+// maintenance rules re-read in the background, and the deleted item's own
+// rules are left alone: a read of them would only answer 404.
+function equipmentDeleted(id: string): Promise<void> {
+  void invalidateQueries([MAINTENANCE_RULES], (key) => {
+    const filter = key[1] as { equipment?: string } | undefined
+    return filter?.equipment === id
+  })
+  return invalidateQueries([EQUIPMENT])
+}
+
 /**
  * The Equipment index's filtered listing - `?system=&status=&zone=&bin=&q=`.
  * `filter` is caller-owned (EquipmentIndex's own toolbar state). `null`
@@ -329,8 +341,14 @@ export function useEquipmentItem(id: string | null) {
   // by id, so a response for a record that is no longer open lands under its
   // own key and cannot show A's fields under B.
   const setItem = useCallback((next: EquipmentItem) => {
-    setQueryData<EquipmentItemResponse>([itemPath(next.id)], (prev) => ({ documents: prev?.documents, item: next }))
-    if (next.id === id && fetchingRef.current) invalidateQueries([itemPath(next.id)])
+    const prev = getQueryData<EquipmentItemResponse>([itemPath(next.id)])
+    // The item is a whole record, so it is stored as a plain value; only the
+    // linked documents are unknown when nothing was cached (a write response
+    // carries the item alone).
+    setQueryData<EquipmentItemResponse>([itemPath(next.id)], { documents: prev?.documents, item: next })
+    // The documents come from the read: ask again when there is none cached,
+    // or when a read of the same record is in flight that this write passed.
+    if (next.id === id && (prev === undefined || fetchingRef.current)) invalidateQueries([itemPath(next.id)])
   }, [id])
 
   // Throws on a rejected PUT (a validation failure, a bin/zone that
@@ -351,7 +369,7 @@ export function useEquipmentItem(id: string | null) {
     if (id === null) throw new Error('useEquipmentItem: no id to delete')
     const qs = deletePhotos ? '?delete_photos=true' : ''
     await apiRequest<void>(`${itemPath(id)}${qs}`, { method: 'DELETE' })
-    equipmentChanged()
+    void equipmentDeleted(id)
   }, [id])
 
   // Applies a DIFF to the link set (PATCH /documents: {add, remove}), so a
@@ -465,7 +483,9 @@ export async function updateEquipment(id: string, input: EquipmentInput): Promis
 export async function deleteEquipment(id: string, deletePhotos = false): Promise<void> {
   const qs = deletePhotos ? '?delete_photos=true' : ''
   await apiRequest<void>(`${itemPath(id)}${qs}`, { method: 'DELETE' })
-  equipmentChanged()
+  // Settles once the lists have re-read, so a caller can close its dialog on
+  // fresh rows without asking for the list again.
+  await equipmentDeleted(id)
 }
 
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────

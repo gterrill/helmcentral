@@ -8,6 +8,7 @@ import {
   BreadcrumbPage,
 } from '@/components/ui/breadcrumb'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { RefreshFailedNote } from '@/components/patterns'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { displayFit, displayScale, type Display } from '@/lib/displays'
@@ -164,7 +165,7 @@ export function WallDisplaysPanel({
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        {canWrite && !loading && !error && displays.length > 0 && (
+        {canWrite && !loading && displays.length > 0 && (
           <Button type="button" size="sm" onClick={onCreateDisplay}>
             <Plus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             New display
@@ -172,8 +173,9 @@ export function WallDisplaysPanel({
         )}
       </div>
 
+      {error && displays.length > 0 && <RefreshFailedNote reason={error} onRetry={onRetry} />}
       <div className="overflow-x-auto rounded-md border border-border bg-card">
-        {error ? (
+        {error && displays.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
             <p role="alert" className="text-sm text-destructive">{error}</p>
             <Button type="button" variant="outline" size="sm" onClick={onRetry}>Retry</Button>

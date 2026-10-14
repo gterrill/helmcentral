@@ -22,6 +22,7 @@ export {
   type RowActionsProps,
 } from './index-table'
 export { IndexFilters, type IndexFilter, type IndexFilterOption, type IndexFiltersProps } from './index-filters'
+export { LoadError, RefreshFailedNote, type LoadErrorProps, type RefreshFailedNoteProps } from './refresh-failed-note'
 export { ResourceItem, type ResourceItemProps } from './resource-item'
 export { ResourceList, type ResourceListProps } from './resource-list'
 export { Page, type PageAction, type PageProps } from './page'

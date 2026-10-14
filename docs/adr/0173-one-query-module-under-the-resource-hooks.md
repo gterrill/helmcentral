@@ -41,7 +41,23 @@ state in the component and loses it on unmount.
    behind it, so there is no spinner. The first mount for a key shows loading. React
    StrictMode's double mount shares one request. A key change switches entries and does not
    carry the previous data over. After a failed refetch the error is set and the last good
-   data stays beside it until the next success.
+   data stays beside it until the next success. Because any reader's mount revalidates
+   the shared entry, one reader's failed refresh lands in every reader's `error`. The hooks
+   report it as it is, with the cached rows beside it, and never hide it (no masking of an
+   upstream failure). The panels that read them keep the rows on screen and add a small
+   "Couldn't refresh" line; the full error state is for when there are no rows. An explicit
+   `refetch()` always starts a new request. A `setQueryData` updater that lands while
+   the entry has no data (still loading, or the load failed) is not stored, because its
+   result would be a fragment (one new row, not the list) and a failed read after it would
+   leave the fragment standing as the list; it starts a fresh read instead, so the list
+   comes only from the server. A write that has the whole record passes it as a plain
+   value. `invalidateQueries` settles when the refetches it started have, so a caller that
+   wants fresh rows on screen does not refetch the same key a second time, and it can skip
+   keys whose record is gone. A form seeded from a record follows it field by field when a
+   fresher record lands: a field the operator has not edited takes the fresh value, one
+   they have edited keeps their text. Lists that are order-free (tags, aliases) compare as
+   sets, and fields that only make sense together (a zone and its bin) are declared as a
+   group that keeps the draft's values if any one of them was edited.
 5. **The per-resource hooks keep their return shapes.** Components and their `vi.mock`
    calls do not change. Only the body of each hook moves onto `useApiQuery` and
    `apiRequest`.
