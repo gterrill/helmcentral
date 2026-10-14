@@ -128,7 +128,8 @@ func createPassageSchema(db *sql.DB) error {
 			hidden INTEGER NOT NULL DEFAULT 0,
 			edited INTEGER NOT NULL DEFAULT 0,
 			cruise_id TEXT REFERENCES cruises(id) ON DELETE SET NULL,
-			created_ms INTEGER NOT NULL
+			created_ms INTEGER NOT NULL,
+			name_attempted_ms INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_passages_start ON passages(start_ms)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
@@ -147,7 +148,10 @@ func createPassageSchema(db *sql.DB) error {
 			return fmt.Errorf("create passage schema: %w", err)
 		}
 	}
-	return addTrackPointSourceColumn(db)
+	if err := addTrackPointSourceColumn(db); err != nil {
+		return err
+	}
+	return addPassageNameAttemptColumn(db)
 }
 
 // addTrackPointSourceColumn upgrades a track_points table created before GPX
@@ -432,4 +436,34 @@ func (s *passageStore) InsertCruise(c cruiseRecord) (cruiseRecord, error) {
 		return c, fmt.Errorf("insert cruise: %w", err)
 	}
 	return c, nil
+}
+
+// addPassageNameAttemptColumn upgrades a passages table created before the
+// naming worker kept its own record of attempts.
+func addPassageNameAttemptColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(passages)`)
+	if err != nil {
+		return fmt.Errorf("inspect passages: %w", err)
+	}
+	has := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect passages: %w", err)
+		}
+		if name == "name_attempted_ms" {
+			has = true
+		}
+	}
+	rows.Close()
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE passages ADD COLUMN name_attempted_ms INTEGER`); err != nil {
+		return fmt.Errorf("add passages.name_attempted_ms: %w", err)
+	}
+	return nil
 }

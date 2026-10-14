@@ -78,21 +78,103 @@ func TestFillPassageNamesDoesNotClobberOperatorEditMadeDuringLookup(t *testing.T
 	}
 }
 
-func TestRunnerAndImportAnnounceNewPassages(t *testing.T) {
-	var seen []string
-	prev := passageCreated
-	passageCreated = func(id string) { seen = append(seen, id) }
-	defer func() { passageCreated = prev }()
+func TestRunnerAndImportWakeTheNamingWorker(t *testing.T) {
+	wakes := 0
+	prev := passageNamesWake
+	passageNamesWake = func() { wakes++ }
+	defer func() { passageNamesWake = prev }()
 
 	s := newTestPassageStore(t)
 	appendAll(t, s, simpleTrip(2*time.Hour).pts)
 	runPassageDetection(s)
-	if len(seen) != 1 {
-		t.Fatalf("runner announced %d", len(seen))
+	if wakes != 1 {
+		t.Fatalf("runner woke %d", wakes)
 	}
 	s2 := newTestPassageStore(t)
 	s2.ImportGPX(importTrip(simpleTrip(2 * time.Hour).pts))
-	if len(seen) != 2 {
-		t.Errorf("import announced %d total", len(seen))
+	if wakes != 2 {
+		t.Errorf("import woke %d total", wakes)
 	}
+}
+
+func TestNamingScanFindsOnlyUnnamedUneditedUnattempted(t *testing.T) {
+	s := newTestPassageStore(t)
+	appendAll(t, s, simpleTrip(2*time.Hour).pts)
+	mk := func(r passageRecord) string {
+		r.Start, r.End = passageEpoch.Add(20*time.Minute), passageEpoch.Add(2*time.Hour)
+		got, err := s.InsertPassage(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.ID
+	}
+	need := mk(passageRecord{})
+	half := mk(passageRecord{FromName: "A"})
+	mk(passageRecord{FromName: "A", ToName: "B"})
+	mk(passageRecord{Edited: true})
+
+	now := time.Now()
+	ids, err := s.PassagesNeedingNames(now, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || !(idsContain(ids, need) && idsContain(ids, half)) {
+		t.Fatalf("ids %v", ids)
+	}
+
+	// a failed lookup is not retried until the retry window passes
+	s.FillPassageNames(need, func(float64, float64) string { return "" })
+	ids, _ = s.PassagesNeedingNames(now.Add(time.Minute), 24*time.Hour)
+	if idsContain(ids, need) {
+		t.Error("attempted passage came straight back")
+	}
+	ids, _ = s.PassagesNeedingNames(now.Add(25*time.Hour), 24*time.Hour)
+	if !idsContain(ids, need) {
+		t.Error("attempted passage should be retried after 24 h")
+	}
+}
+
+func idsContain(ids []string, id string) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestNamingWorkerNamesBacklogOnStartAndOnWake(t *testing.T) {
+	s := newTestPassageStore(t)
+	appendAll(t, s, simpleTrip(2*time.Hour).pts)
+	// a passage stored before the worker existed, as after a restart
+	old, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour)})
+
+	done := make(chan struct{})
+	w := newNamingWorker(s, func(float64, float64) string { return "Somewhere" }, time.Hour)
+	go func() { w.run(done) }()
+	defer close(done)
+
+	waitUntilTrue(t, func() bool {
+		p, _ := s.GetPassage(old.ID)
+		return p.FromName == "Somewhere" && p.ToName == "Somewhere"
+	})
+
+	later, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(90 * time.Minute)})
+	w.wake()
+	w.wake() // coalesces
+	waitUntilTrue(t, func() bool {
+		p, _ := s.GetPassage(later.ID)
+		return p.FromName == "Somewhere"
+	})
+}
+
+func waitUntilTrue(t *testing.T, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not met")
 }

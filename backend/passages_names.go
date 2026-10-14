@@ -13,14 +13,41 @@ import (
 // fails, leaves the name empty; the operator can type one. A name the operator
 // has edited, or already filled in, is never replaced.
 
-// passageCreated is told the id of every passage the detector or an import
-// stores. Nil in tests unless one is checking it.
-var passageCreated func(id string)
+// passageNamesWake nudges the naming worker after the detector or an import
+// stores passages. Nil until the worker is running.
+var passageNamesWake func()
 
-func announcePassage(id string) {
-	if passageCreated != nil {
-		passageCreated(id)
+func announcePassage(string) {
+	if passageNamesWake != nil {
+		passageNamesWake()
 	}
+}
+
+const (
+	passageNamingRetryAfter = 24 * time.Hour
+	passageNamingScanEvery  = 10 * time.Minute
+)
+
+// PassagesNeedingNames lists unedited passages with an empty origin or
+// destination that have not been tried in the last retryAfter.
+func (s *passageStore) PassagesNeedingNames(now time.Time, retryAfter time.Duration) ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM passages
+		WHERE edited = 0 AND (from_name = '' OR to_name = '')
+		AND (name_attempted_ms IS NULL OR name_attempted_ms < ?)
+		ORDER BY start_ms`, now.Add(-retryAfter).UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *passageStore) firstPointFrom(t time.Time) (*recordedTrackPoint, error) {
@@ -53,6 +80,11 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 	if rec.Edited {
 		return nil
 	}
+	// Stamped first, so a lookup that fails or hangs is not tried again in a
+	// tight loop; the scan retries it after the retry window.
+	if _, err := s.db.Exec(`UPDATE passages SET name_attempted_ms = ? WHERE id = ?`, time.Now().UnixMilli(), id); err != nil {
+		return err
+	}
 	if rec.FromName == "" {
 		if p, err := s.firstPointFrom(rec.Start); err != nil {
 			return err
@@ -78,24 +110,59 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 	return nil
 }
 
-// startPassageNaming runs one worker that names passages as they are announced.
-func startPassageNaming(store *passageStore) {
-	queue := make(chan string, 256)
-	passageCreated = func(id string) {
+type namingWorker struct {
+	store  *passageStore
+	lookup func(lat, lon float64) string
+	every  time.Duration
+	signal chan struct{}
+}
+
+func newNamingWorker(store *passageStore, lookup func(lat, lon float64) string, every time.Duration) *namingWorker {
+	return &namingWorker{store: store, lookup: lookup, every: every, signal: make(chan struct{}, 1)}
+}
+
+// wake asks for a scan; wakes arriving while one is pending coalesce.
+func (w *namingWorker) wake() {
+	select {
+	case w.signal <- struct{}{}:
+	default:
+	}
+}
+
+// run scans at once (this is what resumes the backlog after a restart), then
+// on every wake and every tick, until done closes.
+func (w *namingWorker) run(done <-chan struct{}) {
+	ticker := time.NewTicker(w.every)
+	defer ticker.Stop()
+	for {
+		w.scan()
 		select {
-		case queue <- id:
-		default:
-			log.Printf("passages: naming queue full, passage %s left unnamed", id)
+		case <-done:
+			return
+		case <-w.signal:
+		case <-ticker.C:
 		}
 	}
-	go func() {
-		for id := range queue {
-			err := store.FillPassageNames(id, func(lat, lon float64) string {
-				return resolveAndCachePlaceName(placeNameProviderResolve, lat, lon)
-			})
-			if err != nil {
-				log.Printf("passages: naming %s: %v", id, err)
-			}
+}
+
+func (w *namingWorker) scan() {
+	ids, err := w.store.PassagesNeedingNames(time.Now(), passageNamingRetryAfter)
+	if err != nil {
+		log.Printf("passages: naming scan: %v", err)
+		return
+	}
+	for _, id := range ids {
+		if err := w.store.FillPassageNames(id, w.lookup); err != nil {
+			log.Printf("passages: naming %s: %v", id, err)
 		}
-	}()
+	}
+}
+
+// startPassageNaming runs the naming worker for the life of the process.
+func startPassageNaming(store *passageStore) {
+	w := newNamingWorker(store, func(lat, lon float64) string {
+		return resolveAndCachePlaceName(placeNameProviderResolve, lat, lon)
+	}, passageNamingScanEvery)
+	passageNamesWake = w.wake
+	go w.run(make(chan struct{}))
 }
