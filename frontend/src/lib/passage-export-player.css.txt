@@ -1,0 +1,71 @@
+#HCP_ID {
+  --hcp-ink: #1c1917;
+  --hcp-muted: #57534e;
+  --hcp-line: #e7e5e4;
+  --hcp-accent: #0369a1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 1.5em 0;
+  color: var(--hcp-ink);
+  background: #ffffff;
+  border: 1px solid var(--hcp-line);
+  border-radius: 10px;
+  overflow: hidden;
+  font: 400 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  text-align: left;
+}
+#HCP_ID *, #HCP_ID *::before, #HCP_ID *::after { box-sizing: border-box; }
+#HCP_ID p, #HCP_ID h3 { margin: 0; padding: 0; }
+#HCP_ID .hcp-head { padding: 14px 16px 12px; }
+#HCP_ID .hcp-title { font: 700 20px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: -0.01em; color: var(--hcp-ink); }
+#HCP_ID .hcp-dates { margin-top: 3px; color: var(--hcp-muted); font-size: 14px; }
+#HCP_ID .hcp-stage { position: relative; height: min(480px, 125vw); background: #e8eef2; }
+#HCP_ID .hcp-map { position: absolute; inset: 0; }
+#HCP_ID .hcp-inset {
+  position: absolute; top: 10px; right: 10px; width: 132px; height: 92px;
+  border: 2px solid #ffffff; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35); background: #e8eef2; z-index: 2;
+}
+#HCP_ID .hcp-inset[hidden], #HCP_ID .hcp-readout[hidden], #HCP_ID .hcp-caption[hidden], #HCP_ID .hcp-error[hidden], #HCP_ID .hcp-stats[hidden], #HCP_ID .hcp-btn[hidden] { display: none; }
+#HCP_ID .hcp-readout {
+  position: absolute; left: 10px; bottom: 28px; max-width: calc(100% - 20px); z-index: 2;
+  padding: 8px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25); pointer-events: none;
+}
+#HCP_ID .hcp-caption { font-weight: 700; font-size: 15px; color: var(--hcp-accent); overflow-wrap: anywhere; }
+#HCP_ID .hcp-passage { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+#HCP_ID .hcp-time { font-size: 13px; color: var(--hcp-muted); font-variant-numeric: tabular-nums; }
+#HCP_ID .hcp-btn {
+  position: absolute; z-index: 3; display: inline-flex; align-items: center; gap: 8px;
+  margin: 0; cursor: pointer; border: 0; border-radius: 999px; background: var(--hcp-accent); color: #ffffff;
+  font: 600 16px/1 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); text-transform: none; letter-spacing: 0;
+}
+#HCP_ID .hcp-btn:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; box-shadow: 0 0 0 5px var(--hcp-accent); }
+#HCP_ID .hcp-btn-icon { display: inline-block; width: 0; height: 0; border-style: solid; border-width: 7px 0 7px 12px; border-color: transparent transparent transparent #ffffff; }
+#HCP_ID.hcp-idle .hcp-btn, #HCP_ID.hcp-done .hcp-btn { top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 24px; }
+#HCP_ID.hcp-playing .hcp-btn { top: 10px; left: 48px; padding: 8px 14px; font-size: 14px; background: rgba(3, 105, 161, 0.92); }
+#HCP_ID.hcp-playing .hcp-btn-icon { width: 10px; height: 12px; border-width: 0 3px; border-color: #ffffff; }
+#HCP_ID.hcp-flying .hcp-btn { display: none; }
+#HCP_ID .hcp-error {
+  position: absolute; left: 12px; right: 12px; top: 12px; z-index: 4; padding: 10px 12px; border-radius: 8px;
+  background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; font-size: 14px;
+}
+#HCP_ID .hcp-stats { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 16px 14px; border-top: 1px solid var(--hcp-line); }
+#HCP_ID .hcp-stat { display: flex; flex-direction: column; min-width: 0; }
+#HCP_ID .hcp-k { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--hcp-muted); }
+#HCP_ID .hcp-v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#HCP_ID .hcp-boat {
+  width: 16px; height: 16px; border-radius: 50%; background: #0b5ed7; border: 3px solid #ffffff;
+  box-shadow: 0 0 0 6px rgba(11, 94, 215, 0.25), 0 0 18px 6px rgba(11, 94, 215, 0.45);
+}
+@media (max-width: 520px) {
+  #HCP_ID .hcp-readout { bottom: 58px; }
+  #HCP_ID .hcp-title { font-size: 18px; }
+  #HCP_ID .hcp-inset { width: 104px; height: 74px; }
+  #HCP_ID .hcp-stats { gap: 8px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #HCP_ID .hcp-btn { transition: none; }
+}
