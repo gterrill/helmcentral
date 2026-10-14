@@ -119,7 +119,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
           </Button>
         }
       />
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Play length</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={String(playSeconds)} onValueChange={(v) => setPlaySeconds(Number(v) as PlaySeconds)}>
