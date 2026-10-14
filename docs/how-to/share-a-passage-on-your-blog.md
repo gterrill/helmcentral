@@ -26,6 +26,10 @@ to reach the boat afterwards.
 5. Choose **Copy blog embed**. A message confirms it is on the clipboard.
 6. In your Ghost post, add an **HTML** card and paste.
 
+If you open Helmcentral over a plain `http` address, the browser does not let
+it use the clipboard and **Copy blog embed** says so. Use **Download embed as
+HTML** instead, open the file in a text editor, copy everything and paste that.
+
 To look at it before it goes into a post, choose **Download embed as HTML**
 and open the saved file in a browser.
 
@@ -62,8 +66,8 @@ figure the boat did not record is left out rather than shown as `--`.
   show on the map. The map software is loaded from a public software library.
 - The track and figures are written into the pasted card. Nothing in it points
   at the boat, so readers need no access to your network.
-- The track is thinned to a few hundred points, which is enough to follow the
-  line and keeps the card light.
+- The track is thinned to at most about 1,500 points across all the passages,
+  which is enough to follow the line and keeps the card light.
 - Only the track and the figures above go out. Notes, edits and any other
   boat data stay on the boat.
 
