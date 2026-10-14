@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-14
+
 ### Added
 
 - Mate can see the active alarms, so asking it about an alarm investigates the
@@ -1080,7 +1082,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.44.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/gterrill/helmcentral/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/gterrill/helmcentral/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/gterrill/helmcentral/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/gterrill/helmcentral/compare/v0.41.0...v0.42.0
