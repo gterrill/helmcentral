@@ -49,9 +49,17 @@ describe('figure formatting', () => {
   })
 
   it('shows an unnamed end as -- and falls back to the route for a missing title', () => {
+    const base = { start: '2026-03-13T23:30:00Z', start_lon: 149 }
     expect(passageRoute({ from_name: 'Airlie', to_name: '' })).toBe('Airlie → --')
-    expect(passageHeading({ title: '  ', from_name: 'Airlie', to_name: 'Hamilton' })).toBe('Airlie → Hamilton')
-    expect(passageHeading({ title: 'Delivery leg', from_name: 'A', to_name: 'B' })).toBe('Delivery leg')
+    expect(passageHeading({ ...base, title: '  ', from_name: 'Airlie', to_name: 'Hamilton' })).toBe('Airlie → Hamilton')
+    expect(passageHeading({ ...base, title: 'Delivery leg', from_name: 'A', to_name: 'B' })).toBe('Delivery leg')
+    expect(passageHeading({ ...base, title: '', from_name: 'Airlie', to_name: '' })).toBe('Airlie → --')
+  })
+
+  it('names a passage with no title and no places by its boat-local date', () => {
+    const p = { start: '2026-03-13T23:30:00Z', start_lon: 149, title: '', from_name: '', to_name: '' }
+    expect(passageHeading(p)).toBe('Passage · 14 Mar')
+    expect(passageHeading({ ...p, start_lon: null })).toBe('Passage · 13 Mar')
   })
 })
 

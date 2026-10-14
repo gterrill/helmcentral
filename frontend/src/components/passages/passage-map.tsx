@@ -1,6 +1,6 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
 
@@ -20,6 +20,12 @@ export interface MapPassage {
   segments: TimedSegment[]
 }
 
+export interface PassageMapHandle {
+  /** The opening move: jump high over the track and come down onto it.
+   * Resolves when the camera has settled. */
+  flyIn: () => Promise<void>
+}
+
 export interface PassageMapProps {
   passages: MapPassage[]
   /** Passages already replayed in full are drawn solid; the rest are dimmed. */
@@ -27,60 +33,54 @@ export interface PassageMapProps {
   /** Where the boat marker stands, or null before there is anything to show. */
   boat: { lat: number; lon: number } | null
   isDarkTheme: boolean
-  /** Fires once, when the opening zoom-in has finished. */
-  onIntroDone: () => void
-  /** Pads the track away from an overlaid control strip. */
   className?: string
 }
 
 const INTRO_START_ZOOM = 1.5
 const INTRO_MS = 3200
+const FIT_PADDING = { top: 48, bottom: 80, left: 48, right: 48 }
 
 function centreOf(bounds: [number, number, number, number]) {
   return { longitude: (bounds[0] + bounds[2]) / 2, latitude: (bounds[1] + bounds[3]) / 2 }
 }
 
-export function PassageMap({ passages, playedIds, boat, isDarkTheme, onIntroDone, className }: PassageMapProps) {
+export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
+  { passages, playedIds, boat, isDarkTheme, className },
+  ref,
+) {
   const mapRef = useRef<MapRef>(null)
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const canRender = hasWebGL2()
   const bounds = useMemo(() => segmentBounds(passages.flatMap((p) => p.segments)), [passages])
   const boundsKey = bounds ? bounds.join(',') : ''
-  const introDoneRef = useRef(false)
-  const onIntroDoneRef = useRef(onIntroDone)
-  useEffect(() => { onIntroDoneRef.current = onIntroDone }, [onIntroDone])
+  const loadedRef = useRef(false)
 
-  const finishIntro = useCallback(() => {
-    if (introDoneRef.current) return
-    introDoneRef.current = true
-    onIntroDoneRef.current()
-  }, [])
-
-  // The opening move: start high over the middle of the track and come down
-  // onto its bounds. A different set of passages gets its own opening.
-  const flyIn = useCallback(() => {
+  // On load, and whenever the passages change, the whole track is framed.
+  const frame = useCallback(() => {
     const map = mapRef.current?.getMap?.()
     if (!map || !bounds) return
-    introDoneRef.current = false
-    const centre = centreOf(bounds)
-    map.jumpTo({ center: [centre.longitude, centre.latitude], zoom: INTRO_START_ZOOM })
-    map.once('moveend', finishIntro)
-    map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], {
-      padding: { top: 48, bottom: 80, left: 48, right: 48 },
-      duration: INTRO_MS,
-      maxZoom: 14,
-    })
-  }, [bounds, finishIntro])
+    map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: 0, maxZoom: 14 })
+  }, [bounds])
 
-  const loadedRef = useRef(false)
+  useImperativeHandle(ref, () => ({
+    flyIn: () => new Promise<void>((resolve) => {
+      const map = mapRef.current?.getMap?.()
+      if (!map || !bounds) { resolve(); return }
+      const centre = centreOf(bounds)
+      map.jumpTo({ center: [centre.longitude, centre.latitude], zoom: INTRO_START_ZOOM })
+      map.once('moveend', () => resolve())
+      map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: INTRO_MS, maxZoom: 14 })
+    }),
+  }), [bounds])
+
   const handleLoad = useCallback(() => {
     loadedRef.current = true
-    flyIn()
-  }, [flyIn])
+    frame()
+  }, [frame])
 
   useEffect(() => {
-    if (loadedRef.current) flyIn()
-    // flyIn is keyed on the bounds, so this runs when the track changes.
+    if (loadedRef.current) frame()
+    // frame is keyed on the bounds, so this runs when the track changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundsKey])
 
@@ -138,7 +138,7 @@ export function PassageMap({ passages, playedIds, boat, isDarkTheme, onIntroDone
       </Map>
     </div>
   )
-}
+})
 
 export interface InsetMapProps {
   bounds: [number, number, number, number] | null

@@ -1,18 +1,21 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { REPLAY_SPEEDS } from '@/hooks/use-replay'
 
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import type { PassageDetail } from '@/lib/passages'
 
-let introDone: (() => void) | null = null
+const flyIn = vi.fn(() => Promise.resolve())
 let lastBoat: { lat: number; lon: number } | null = null
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
-  PassageMap: (p: { onIntroDone: () => void; boat: { lat: number; lon: number } | null }) => {
-    introDone = p.onIntroDone
+  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null }, ref) {
+    useImperativeHandle(ref, () => ({ flyIn }))
     lastBoat = p.boat
     return <div data-testid="map" />
-  },
+  }),
   InsetMap: () => <div data-testid="inset" />,
 }))
 
@@ -32,7 +35,7 @@ const passage: PassageDetail = {
   replay_times: [[start, start + 250, start + 750, start + 1000]],
 }
 
-beforeEach(() => { localStorage.clear(); lastBoat = null })
+beforeEach(() => { localStorage.clear(); lastBoat = null; flyIn.mockClear() })
 
 describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
@@ -45,13 +48,31 @@ describe('ReplayPanel', () => {
     expect(cursorRef.current).toEqual({ id: 'p1', at: start + 500 })
   })
 
-  it('shows the overview map only after the zoom-in, when switched on, and remembers the choice', () => {
+  it('frames the track on load without the zoom-in', () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    expect(flyIn).not.toHaveBeenCalled()
+  })
+
+  it('zooms in when Play is pressed at the start, then plays and shows the overview map', async () => {
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     fireEvent.click(screen.getByRole('button', { name: /Overview map/ }))
     expect(localStorage.getItem('passages.insetMap')).toBe('1')
-    expect(screen.queryByTestId('inset')).not.toBeInTheDocument()
-    act(() => introDone?.())
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(flyIn).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
     expect(screen.getByTestId('inset')).toBeInTheDocument()
+  })
+
+  it('does not zoom when resuming after a pause or after scrubbing mid-replay', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
+    expect(flyIn).not.toHaveBeenCalled()
+  })
+
+  it('plays the whole track in 30, 15 or 8 seconds', () => {
+    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['Slow', 30], ['Normal', 15], ['Fast', 8]])
   })
 
   it('says so when no track was kept rather than drawing nothing', () => {

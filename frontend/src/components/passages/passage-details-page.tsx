@@ -68,7 +68,7 @@ function firstLon(passages: PassageDetail[]): number {
 
 function PassageList({
   passages, onOpen, colours = false,
-}: { passages: { id: string; start: string; title: string; from_name: string; to_name: string }[]; onOpen: (id: string) => void; colours?: boolean }) {
+}: { passages: (Parameters<typeof passageHeading>[0] & { id: string })[]; onOpen: (id: string) => void; colours?: boolean }) {
   return (
     <ul className="flex flex-col gap-1">
       {passages.map((p, i) => (
@@ -127,7 +127,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
             />
           }
         >
-          <p className="text-sm text-muted-foreground">{passageRoute(passage)} · {formatLocalDate(passage.start, firstLon([passage]))}</p>
+          <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, firstLon([passage]))}</p>
           <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
           <PassageStatsStrip stats={passage.stats} units={units} />
         </DetailsLayout>

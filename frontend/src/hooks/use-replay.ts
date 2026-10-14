@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 /** Replay speeds: how long the whole timeline takes to play, in seconds. */
 export const REPLAY_SPEEDS = [
-  { id: 'slow', label: 'Slow', seconds: 120 },
-  { id: 'normal', label: 'Normal', seconds: 60 },
-  { id: 'fast', label: 'Fast', seconds: 30 },
+  { id: 'slow', label: 'Slow', seconds: 30 },
+  { id: 'normal', label: 'Normal', seconds: 15 },
+  { id: 'fast', label: 'Fast', seconds: 8 },
 ] as const
 export type ReplaySpeedId = (typeof REPLAY_SPEEDS)[number]['id']
 
@@ -29,7 +29,7 @@ export function useReplay(total: number, speed: ReplaySpeedId) {
 
   useEffect(() => {
     if (!playing || total <= 0) return
-    const seconds = REPLAY_SPEEDS.find((s) => s.id === speed)?.seconds ?? 60
+    const seconds = REPLAY_SPEEDS.find((s) => s.id === speed)?.seconds ?? 15
     let last = performance.now()
     let frame = requestAnimationFrame(function tick(now) {
       const dt = (now - last) / 1000

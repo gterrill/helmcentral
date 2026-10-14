@@ -153,9 +153,12 @@ export function passageRoute(p: Pick<PassageRecord, 'from_name' | 'to_name'>): s
   return `${p.from_name || ABSENT} → ${p.to_name || ABSENT}`
 }
 
-/** The passage's own title, or its route when it has none. */
-export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name'>): string {
-  return p.title.trim() || passageRoute(p)
+/** The passage's own title; failing that its route; failing that, with no
+ * place named at either end, "Passage · <boat-local date>". */
+export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name' | 'start'> & { start_lon?: number | null }): string {
+  if (p.title.trim()) return p.title.trim()
+  if (!p.from_name && !p.to_name) return `Passage · ${formatLocalDate(p.start, p.start_lon ?? 0)}`
+  return passageRoute(p)
 }
 
 // ── boat-local time ──────────────────────────────────────────────────────

@@ -255,3 +255,11 @@ describe('water rise suggestion status', () => {
     }
   })
 })
+
+describe('a passage with no names', () => {
+  it('reads as a dated passage in the list, not as dashes', () => {
+    render(<PassagesPanel {...baseProps} passages={[passage('p1', { from_name: '', to_name: '' })]} />)
+    expect(screen.getAllByText('Passage · 14 Mar').length).toBeGreaterThan(0)
+    expect(screen.queryByText('-- → --')).not.toBeInTheDocument()
+  })
+})

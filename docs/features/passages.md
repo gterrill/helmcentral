@@ -57,12 +57,14 @@ Opening a passage shows its track on the chart, with the same basemap and
 OpenSeaMap marks as Anchor Watch. A gap in the log is never bridged with a
 line: if the log has a hole, the track stops and starts again after it.
 
-The map opens high up and comes down onto the track. Below it, **Play** runs
-the passage as a replay with a boat marker, and the slider scrubs to any
-point. The readout shows the local date and time at that point. Slow, Normal
-and Fast set how long the whole passage takes to play. **Overview map** puts a
-small map of the surrounding coast in the corner, with a box where the track
-is. It stays on or off the next time you open a passage.
+The map opens with the whole track framed. Pressing **Play** from the start
+brings the map down from high above onto the track, then runs the replay with a
+boat marker. The slider scrubs to any point, and Play from the middle just
+carries on with no zoom. The readout shows the local date and time at that
+point. Slow, Normal and Fast set how long the whole replay takes: 30, 15 or 8
+seconds. **Overview map** puts a small map of the surrounding coast in the
+corner, with a box where the track is. It stays on or off the next time you
+open a passage.
 
 Under the map are the passage's figures:
 

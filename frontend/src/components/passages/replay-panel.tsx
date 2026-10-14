@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
-import { InsetMap, PassageMap } from '@/components/passages/passage-map'
+import { InsetMap, PassageMap, type PassageMapHandle } from '@/components/passages/passage-map'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
@@ -48,7 +48,8 @@ export interface ReplayPanelProps {
 export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelProps) {
   const [speed, setSpeed] = useState<ReplaySpeedId>('normal')
   const [insetOn, setInsetOn] = useState(loadInset)
-  const [introDone, setIntroDone] = useState(false)
+  const [flying, setFlying] = useState(false)
+  const mapHandle = useRef<PassageMapHandle>(null)
 
   const built = useMemo(() => {
     try {
@@ -80,15 +81,20 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     if (cursorRef) cursorRef.current = here ? { id: here.entry.id, at: here.at } : null
   })
 
-  // A changed set of passages gets its own opening zoom.
-  const idsKey = passages.map((p) => p.id).join(',')
-  const lastIds = useRef(idsKey)
-  useEffect(() => {
-    if (lastIds.current !== idsKey) {
-      lastIds.current = idsKey
-      setIntroDone(false)
+  // Play from the very start (or from the end, which starts over) opens with
+  // the zoom-in; resuming from a pause or a scrub just plays.
+  const handlePlay = async () => {
+    if (replay.playing) { replay.toggle(); return }
+    if (replay.clock <= 0 || replay.clock >= timeline.total) {
+      setFlying(true)
+      try {
+        await mapHandle.current?.flyIn()
+      } finally {
+        setFlying(false)
+      }
     }
-  }, [idsKey])
+    replay.toggle()
+  }
 
   const playedIds = useMemo(
     () => new Set(timeline.entries.filter((e) => e.offset <= replay.clock).map((e) => e.id)),
@@ -111,13 +117,13 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       <div className="relative h-[26rem] min-h-0">
         <PassageMap
           className="h-full"
+          ref={mapHandle}
           passages={built.items.map((i) => ({ id: i.id, segments: i.line }))}
           playedIds={playedIds}
           boat={boat}
           isDarkTheme={isDarkTheme}
-          onIntroDone={() => setIntroDone(true)}
         />
-        {insetOn && introDone && (
+        {insetOn && !flying && (
           <InsetMap
             className="absolute right-2 top-2 h-32 w-44 overflow-hidden rounded-md border border-border shadow-sm"
             bounds={bounds}
@@ -132,8 +138,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         readout={here ? formatLocalDateTime(here.at, lon) : '--'}
         speed={speed}
         insetOn={insetOn}
-        disabled={timeline.total <= 0}
-        onToggle={replay.toggle}
+        disabled={timeline.total <= 0 || flying}
+        onToggle={() => void handlePlay()}
         onScrub={(c) => { replay.setPlaying(false); replay.setClock(c) }}
         onSpeed={setSpeed}
         onInsetChange={(on) => { setInsetOn(on); saveInset(on) }}
