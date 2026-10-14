@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl'
 
 import type { ExportData } from '@/lib/passage-export'
-import { IMAGE_SIZES, composeImageLayout, isFatalMapError, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
+import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
 
 // Static images of a passage for the blog's feature image or a social card
 // (ADR 0174). The map is drawn offscreen with MapLibre in the same Voyager and
@@ -63,12 +63,11 @@ async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTML
     map = m
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('The map did not finish drawing. Check the internet connection and try again.')), RENDER_TIMEOUT_MS)
+      // Any map error means a tile, source or style did not arrive, and the
+      // picture would be incomplete: fail rather than save it.
       m.on('error', (e) => {
-        const err = e.error as (Error & { status?: number }) | undefined
-        const info = { message: err?.message ?? 'unknown error', status: err?.status, sourceId: (e as { sourceId?: string }).sourceId }
-        if (!isFatalMapError(info, data.map.seamarks.id)) return
         clearTimeout(timer)
-        reject(new Error(`The map could not be drawn completely (${info.message}). Check the internet connection and try again.`))
+        reject(new Error(`The map could not be drawn completely (${e.error?.message ?? 'unknown error'}). Check the internet connection and try again.`))
       })
       m.once('load', () => {
         const seamarks = data.map.seamarks
