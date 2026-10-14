@@ -15,7 +15,7 @@ import (
 
 const (
 	gpxMaxFileBytes    = 50 << 20
-	gpxMaxFiles        = 50
+	gpxMaxFiles        = 500
 	gpxMaxRequestBytes = 200 << 20
 	// A recorded track covers the time between its points while they are no
 	// further apart than this.

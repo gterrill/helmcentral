@@ -234,3 +234,23 @@ func TestStoreUpgradesTrackPointsTableWithoutSource(t *testing.T) {
 		t.Errorf("existing rows must read as recorded: %+v", p)
 	}
 }
+
+func TestImportHandlerTakesAYearOfDailyFilesButNotAThousand(t *testing.T) {
+	withPassageStore(t)
+	mk := func(n int) map[string]string {
+		files := map[string]string{}
+		for i := 0; i < n; i++ {
+			files[fmt.Sprintf("day-%04d.gpx", i)] = `<gpx><trk><trkseg><trkpt lat="-20" lon="149"><time>2026-10-14T00:00:00Z</time></trkpt></trkseg></trk></gpx>`
+		}
+		return files
+	}
+	if code, body := postImport(t, mk(122)); code != 200 {
+		t.Errorf("122 files: %d %s", code, body)
+	}
+	if code, body := postImport(t, mk(500)); code != 200 {
+		t.Errorf("500 files: %d %s", code, body)
+	}
+	if code, body := postImport(t, mk(501)); code != http.StatusBadRequest || !strings.Contains(body, "at most 500") {
+		t.Errorf("501 files: %d %s", code, body)
+	}
+}
