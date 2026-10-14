@@ -42,6 +42,11 @@ type passageDetail struct {
 	Track [][][2]float64 `json:"track"`
 	// TrackTimes is the time of each Track point, Unix seconds, same shape.
 	TrackTimes [][]int64 `json:"track_times"`
+	// ReplayTrack and ReplayTimes are a separate, time-thinned track for the
+	// replay: about one point per 30 s, with every crossing of the at-rest
+	// speed line kept so stops show. The display line above stays distance-simplified.
+	ReplayTrack [][][2]float64 `json:"replay_track"`
+	ReplayTimes [][]int64      `json:"replay_times"`
 }
 
 func passageStoreOrError(c echo.Context) (*passageStore, bool) {
@@ -99,7 +104,12 @@ func getPassageHandler(c echo.Context) error {
 		track = [][][2]float64{}
 		times = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: computePassageStats(pts), StartLon: startLon(pts), Track: track, TrackTimes: times}})
+	replay, replayTimes := replayTrack(pts, passageReplayInterval)
+	if replay == nil {
+		replay = [][][2]float64{}
+		replayTimes = [][]int64{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: computePassageStats(pts), StartLon: startLon(pts), Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

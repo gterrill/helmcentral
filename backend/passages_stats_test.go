@@ -142,3 +142,75 @@ func TestSimplifyToleranceIsMetricAtHighLatitude(t *testing.T) {
 		t.Errorf("a 5.6 m wobble should survive a 3 m tolerance, got %v", out)
 	}
 }
+
+func TestReplayTrackThinsToThirtySecondsAndKeepsEnds(t *testing.T) {
+	b := newTrackBuilder().run(10*time.Minute, 5*time.Second, 6)
+	lines, times := replayTrack(b.pts, passageReplayInterval)
+	if len(lines) != 1 || len(lines[0]) != len(times[0]) {
+		t.Fatalf("shape: %d lines", len(lines))
+	}
+	n := len(lines[0])
+	if n < 19 || n > 22 {
+		t.Errorf("10 min at one point per 30 s should keep about 20 points, got %d", n)
+	}
+	if times[0][0] != b.pts[0].At.Unix() || times[0][n-1] != b.last().At.Unix() {
+		t.Errorf("first and last points must be kept")
+	}
+	for i := 1; i < n; i++ {
+		if times[0][i] <= times[0][i-1] {
+			t.Fatalf("times must increase: %v", times[0])
+		}
+	}
+}
+
+func TestReplayTrackKeepsEveryPointWhereSpeedCrossesTheRestLine(t *testing.T) {
+	// 5 min under way, a 10 min stop, 5 min under way again, a point every 5 s.
+	b := newTrackBuilder().run(5*time.Minute, 5*time.Second, 6).run(10*time.Minute, 5*time.Second, 0).run(5*time.Minute, 5*time.Second, 6)
+	lines, times := replayTrack(b.pts, passageReplayInterval)
+	kept := map[int64]bool{}
+	for _, tt := range times[0] {
+		kept[tt] = true
+	}
+	for i := 1; i < len(b.pts); i++ {
+		prev, cur := *b.pts[i-1].SOGKts < 1, *b.pts[i].SOGKts < 1
+		if prev != cur {
+			if !kept[b.pts[i-1].At.Unix()] || !kept[b.pts[i].At.Unix()] {
+				t.Errorf("crossing at %d must keep both sides", i)
+			}
+		}
+	}
+	if len(lines[0]) > 60 {
+		t.Errorf("thinning did not happen: %d points", len(lines[0]))
+	}
+}
+
+func TestReplayTrackKeepsSegmentsApart(t *testing.T) {
+	b := newTrackBuilder().run(2*time.Minute, 10*time.Second, 6).gap(time.Hour).run(2*time.Minute, 10*time.Second, 6)
+	lines, times := replayTrack(b.pts, passageReplayInterval)
+	if len(lines) != 2 || len(times) != 2 {
+		t.Fatalf("want 2 segments, got %d", len(lines))
+	}
+	if replayTrackNil, tt := replayTrack(nil, passageReplayInterval); replayTrackNil != nil || tt != nil {
+		t.Errorf("no points, no track")
+	}
+}
+
+func TestGetPassageCarriesReplayTrackBesideDisplayTrack(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At})
+	_, body := getJSON(t, getPassageHandler, "/api/passages/x", rec.ID)
+	p := body["passage"].(map[string]any)
+	if n := len(p["track"].([]any)[0].([]any)); n != 2 {
+		t.Errorf("display track must stay distance-simplified, got %d points", n)
+	}
+	rt := p["replay_track"].([]any)
+	rtimes := p["replay_times"].([]any)
+	if len(rt) != 1 || len(rtimes) != 1 {
+		t.Fatalf("replay shape: %v", rt)
+	}
+	if n := len(rt[0].([]any)); n < 100 || n != len(rtimes[0].([]any)) {
+		t.Errorf("a 1 h run at 30 s should keep about 120 points, got %d", n)
+	}
+}

@@ -1,6 +1,9 @@
 package main
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Per-passage figures (plan step 4), computed from the track points. A figure
 // whose readings are missing is nil, never a guess.
@@ -189,4 +192,54 @@ func perpendicularMeters(p, a, b [2]float64) float64 {
 	t := ((p[0]-a[0])*dx + (p[1]-a[1])*dy) / (dx*dx + dy*dy)
 	t = math.Max(0, math.Min(1, t))
 	return math.Hypot(p[0]-(a[0]+t*dx), p[1]-(a[1]+t*dy))
+}
+
+// passageReplayInterval is the spacing of the replay track.
+const passageReplayInterval = 30 * time.Second
+
+// replayTrack thins a track in time rather than in distance, for replay: about
+// one point per interval within each segment, plus the first and last point of
+// the segment and both points either side of every crossing of the at-rest
+// speed line, so a stop shows as a stop. Returns [lat, lon] lines and their
+// Unix-second times, in the shape simplifyTrackTimed uses.
+func replayTrack(pts []recordedTrackPoint, interval time.Duration) ([][][2]float64, [][]int64) {
+	if len(pts) == 0 {
+		return nil, nil
+	}
+	var lines [][][2]float64
+	var times [][]int64
+	for start := 0; start < len(pts); {
+		end := start
+		for end < len(pts) && pts[end].Segment == pts[start].Segment {
+			end++
+		}
+		seg := pts[start:end]
+		keep := make([]bool, len(seg))
+		keep[0], keep[len(seg)-1] = true, true
+		lastKept := seg[0].At
+		for i := 1; i < len(seg); i++ {
+			if seg[i].At.Sub(lastKept) >= interval {
+				keep[i] = true
+			}
+			if keep[i] {
+				lastKept = seg[i].At
+			}
+			if a, b := seg[i-1].SOGKts, seg[i].SOGKts; a != nil && b != nil && (*a < passageRestSOGKts) != (*b < passageRestSOGKts) {
+				keep[i-1], keep[i] = true, true
+				lastKept = seg[i].At
+			}
+		}
+		var line [][2]float64
+		var at []int64
+		for i, k := range keep {
+			if k {
+				line = append(line, [2]float64{seg[i].Lat, seg[i].Lon})
+				at = append(at, seg[i].At.Unix())
+			}
+		}
+		lines = append(lines, line)
+		times = append(times, at)
+		start = end
+	}
+	return lines, times
 }

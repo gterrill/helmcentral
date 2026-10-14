@@ -58,7 +58,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           id: p.id,
           start: Date.parse(p.start) / 1000,
           end: Date.parse(p.end) / 1000,
-          segments: timedSegments(p.track, p.track_times) as TimedSegment[],
+          segments: timedSegments(p.replay_track, p.replay_times) as TimedSegment[],
+          line: timedSegments(p.track, p.track_times) as TimedSegment[],
         })),
       }
     } catch (err) {
@@ -67,7 +68,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   }, [passages])
 
   const timeline = useMemo(() => buildTimeline(built.items), [built.items])
-  const allSegments = useMemo(() => built.items.flatMap((i) => i.segments), [built.items])
+  const allSegments = useMemo(() => built.items.flatMap((i) => i.line), [built.items])
   const bounds = useMemo(() => segmentBounds(allSegments), [allSegments])
   // The server cuts nights by the zone of the first fix; read the clock the same way.
   const lon = passages[0]?.start_lon ?? (bounds ? (bounds[0] + bounds[2]) / 2 : 0)
@@ -110,7 +111,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       <div className="relative h-[26rem] min-h-0">
         <PassageMap
           className="h-full"
-          passages={built.items.map((i) => ({ id: i.id, segments: i.segments }))}
+          passages={built.items.map((i) => ({ id: i.id, segments: i.line }))}
           playedIds={playedIds}
           boat={boat}
           isDarkTheme={isDarkTheme}

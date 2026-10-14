@@ -27,6 +27,9 @@ const passage: PassageDetail = {
   start_lon: 149,
   track: [[[0, 149], [0, 150]]],
   track_times: [[start, start + 1000]],
+  // A stop in the middle: the boat is at 149.2 from a quarter to three quarters of the way.
+  replay_track: [[[0, 149], [0, 149.2], [0, 149.2], [0, 150]]],
+  replay_times: [[start, start + 250, start + 750, start + 1000]],
 }
 
 beforeEach(() => { localStorage.clear(); lastBoat = null })
@@ -37,7 +40,8 @@ describe('ReplayPanel', () => {
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} cursorRef={cursorRef} />)
     expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 09:00 UTC+10')
     fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
-    expect(lastBoat).toEqual({ lat: 0, lon: 149.5 })
+    // The straight display line would put her at 149.5; the replay track shows her stopped.
+    expect(lastBoat).toEqual({ lat: 0, lon: 149.2 })
     expect(cursorRef.current).toEqual({ id: 'p1', at: start + 500 })
   })
 
@@ -51,7 +55,7 @@ describe('ReplayPanel', () => {
   })
 
   it('says so when no track was kept rather than drawing nothing', () => {
-    render(<ReplayPanel passages={[{ ...passage, track: [], track_times: [] }]} isDarkTheme={false} />)
+    render(<ReplayPanel passages={[{ ...passage, track: [], track_times: [], replay_track: [], replay_times: [] }]} isDarkTheme={false} />)
     expect(screen.getByTestId('passage-no-track')).toBeInTheDocument()
   })
 })

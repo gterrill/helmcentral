@@ -43,6 +43,10 @@ export interface PassageDetail extends PassageSummary {
   track: [number, number][][]
   /** Unix seconds of each track point, same shape. */
   track_times: number[][]
+  /** The replay track: thinned in time (about 30 s), with stops kept. The
+   * boat marker follows this; the line on the map is `track`. */
+  replay_track: [number, number][][]
+  replay_times: number[][]
 }
 
 export interface CruiseRecord {

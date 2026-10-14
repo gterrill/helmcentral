@@ -151,7 +151,7 @@ describe('CruiseStatsPanel', () => {
 })
 
 describe('PassageEditPanel', () => {
-  const detail: PassageDetail = { ...passage('p1'), track: [], track_times: [] }
+  const detail: PassageDetail = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [] }
   const make = (cursor: { id: string; at: number } | null) => {
     const props = {
       passage: detail, cruises: [], olderNeighbour: null, newerNeighbour: null,
