@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { InsetMap, PassageMap, type PassageMapHandle } from '@/components/passages/passage-map'
-import { loadInsetPreference as loadInset, saveInsetPreference as saveInset } from '@/lib/passage-inset-preference'
+import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
@@ -30,7 +30,7 @@ export interface ReplayPanelProps {
 
 export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelProps) {
   const [speed, setSpeed] = useState<ReplaySpeedId>('normal')
-  const [insetOn, setInsetOn] = useState(loadInset)
+  const [insetOn, setInsetOn] = useInsetPreference()
   const [flying, setFlying] = useState(false)
   const mapHandle = useRef<PassageMapHandle>(null)
 
@@ -125,7 +125,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         onToggle={() => void handlePlay()}
         onScrub={(c) => { replay.setPlaying(false); replay.setClock(c) }}
         onSpeed={setSpeed}
-        onInsetChange={(on) => { setInsetOn(on); saveInset(on) }}
+        onInsetChange={setInsetOn}
       />
     </div>
   )

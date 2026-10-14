@@ -20,6 +20,8 @@ import {
   DEFAULT_PLAY_SECONDS,
   PLAY_LENGTHS,
   exportFileName,
+  exportablePassages,
+  exportZone,
   generateEmbed,
   generateStandalonePage,
   prepareExport,
@@ -27,8 +29,9 @@ import {
   type PlaySeconds,
 } from '@/lib/passage-export'
 import { IMAGE_SIZES, type ImageKind } from '@/lib/passage-export-layout'
-import { loadInsetPreference, saveInsetPreference } from '@/lib/passage-inset-preference'
-import { vesselZone, type CruiseStats, type PassageDetail } from '@/lib/passages'
+import { useInsetPreference } from '@/lib/passage-inset-preference'
+import type { CruiseStats, PassageDetail } from '@/lib/passages'
+import { saveBlob } from '@/lib/save-blob'
 
 export interface PassageExportMenuProps {
   kind: ExportInput['kind']
@@ -39,18 +42,6 @@ export interface PassageExportMenuProps {
   units: DistanceUnits
 }
 
-function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  try {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    link.click()
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
 function failed(action: string, err: unknown) {
   toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
 }
@@ -58,18 +49,24 @@ function failed(action: string, err: unknown) {
 /** Share a passage, a cruise or a selection: the blog embed and two images. */
 export function PassageExportMenu({ kind, title, passages, cruiseStats, units }: PassageExportMenuProps) {
   const [playSeconds, setPlaySeconds] = useState<PlaySeconds>(DEFAULT_PLAY_SECONDS)
-  const [inset, setInset] = useState(loadInsetPreference)
+  const [inset, setInset] = useInsetPreference()
   const [busy, setBusy] = useState(false)
-  const hasTrack = passages.some((p) => p.track.some((s) => s.length > 0))
+  const hasTrack = exportablePassages(passages).length > 0
 
-  const exportInput = (): ExportInput => {
-    const lon = passages.find((p) => p.start_lon !== null)?.start_lon ?? 0
-    return { kind, title, passages, cruiseStats, units, zone: vesselZone(lon), inset, playSeconds }
+  const exportInput = (): ExportInput => ({ kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds })
+  // The file name follows the same passages, order and zone as the card itself.
+  const fileName = (input: ExportInput, ext: string) => {
+    const data = prepareExport(input)
+    return exportFileName(title, data.start, data.zone.o, ext)
   }
-  const firstStart = () => Math.min(...passages.map((p) => Date.parse(p.start) / 1000))
 
   const copyEmbed = async () => {
     try {
+      // The boat serves Helmcentral over plain http, where browsers withhold
+      // the clipboard. Say so and point at the file route; do not pretend.
+      if (!navigator.clipboard) {
+        throw new Error("This page can't use the clipboard over a plain http address. Choose Download embed as HTML and copy the card from that file.")
+      }
       await navigator.clipboard.writeText(generateEmbed(exportInput()))
       toast.success('Blog embed copied', { description: 'Paste it into a Ghost HTML card.' })
     } catch (err) {
@@ -80,10 +77,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   const downloadPage = () => {
     try {
       const input = exportInput()
-      download(
-        new Blob([generateStandalonePage(input)], { type: 'text/html' }),
-        exportFileName(title, firstStart(), input.zone.offsetHours, 'html'),
-      )
+      saveBlob(new Blob([generateStandalonePage(input)], { type: 'text/html' }), fileName(input, 'html'))
     } catch (err) {
       failed('download the embed', err)
     }
@@ -99,7 +93,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       const data = prepareExport(input)
       const { renderPassageImage } = await import('@/lib/passage-export-image')
       const blob = await renderPassageImage(data, imageKind)
-      download(blob, exportFileName(title, firstStart(), input.zone.offsetHours, 'png'))
+      saveBlob(blob, fileName(input, 'png'))
       toast.success('Image saved', { id: toastId })
     } catch (err) {
       toast.dismiss(toastId)
@@ -131,7 +125,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
         <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem
           checked={inset}
-          onCheckedChange={(on) => { setInset(on); saveInsetPreference(on) }}
+          onCheckedChange={setInset}
         >
           Overview map in the corner
         </DropdownMenuCheckboxItem>

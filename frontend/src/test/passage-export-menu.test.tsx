@@ -46,6 +46,16 @@ describe('PassageExportMenu', () => {
     expect(toast.success).toHaveBeenCalledWith('Blog embed copied', expect.anything())
   })
 
+  it('says what to do instead when the clipboard is withheld, as on plain http', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error.mock.calls[0][1].description).toContain('Download embed as HTML')
+  })
+
   it('offers the play lengths, both images and the HTML download', async () => {
     render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
     openMenu()

@@ -8,6 +8,8 @@ import {
   dateRangeLabel,
   combinedTitle,
   escapeHtml,
+  exportablePassages,
+  exportZone,
   exportFileName,
   generateEmbed,
   generateStandalonePage,
@@ -217,14 +219,18 @@ describe('stats strip', () => {
     expect(strip.find((s) => s.l === 'Distance')?.v).toBe('84.6 NM')
   })
 
-  it('uses the cruise figures, nights included, for a cruise', () => {
+  it('uses the cruise figures, with nights counted the way the captions count them', () => {
     const cruiseStats = {
-      passage_count: 2, distance_nm: 100, underway_seconds: 36000, nights: 5, fuel_burned_l: 300,
+      passage_count: 2, distance_nm: 100, underway_seconds: 36000, nights: 9, fuel_burned_l: 300,
       underway_max_gust_kts: 20, anchor_max_gust_kts: 33,
     } as CruiseStats
-    const strip = prepareExport(input({ kind: 'cruise', cruiseStats })).stats
-    expect(strip.map((s) => [s.l, s.v])).toEqual([
-      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Nights', '5'], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
+    const two = [passage({ id: 'a', t0: T0 }), passage({ id: 'b', t0: T0 + 5 * 86400 })]
+    const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: two }))
+    const captioned = data.passages.reduce((n, p) => n + p.nb, 0)
+    expect(captioned).toBe(5)
+    // The server's own count (9 here) is not shown: strip and captions agree.
+    expect(data.stats.map((s) => [s.l, s.v])).toEqual([
+      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Nights', String(captioned)], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
   })
 })
@@ -241,6 +247,24 @@ describe('overview inset framing', () => {
     expect(insetNeedsDot([148, -20.4, 149, -19.9], 3.8)).toBe(false)
     // The fixture track is about 0.05 degrees across: a dot.
     expect(data.insetDot).toBe(true)
+  })
+})
+
+describe('what an export carries', () => {
+  it('orders passages and drops trackless ones the same way for the zone, file date and card', () => {
+    const empty = passage({ id: 'e', t0: T0 - 86400, track: [], track_times: [], start_lon: -100 })
+    const later = passage({ id: 'l', t0: T0 + 86400, start_lon: 150 })
+    const first = passage({ id: 'f', t0: T0, start_lon: 148 })
+    expect(exportablePassages([later, empty, first]).map((x) => x.p.id)).toEqual(['f', 'l'])
+    expect(exportZone([later, empty, first])).toEqual({ offsetHours: 10, label: 'UTC+10' })
+    const data = prepareExport(input({ kind: 'combined', passages: [later, empty, first] }))
+    expect(data.start).toBe(T0)
+  })
+
+  it('reuses the prepared data for the same input', () => {
+    const i = input()
+    expect(prepareExport(i)).toBe(prepareExport({ ...i }))
+    expect(prepareExport({ ...i, playSeconds: 60 })).not.toBe(prepareExport(i))
   })
 })
 

@@ -26,6 +26,7 @@ import {
   passageHeading,
   segmentBounds,
   timedSegments,
+  vesselZone,
   type CruiseStats,
   type PassageDetail,
   type TimedSegment,
@@ -86,6 +87,8 @@ export interface ExportPassage {
 export interface ExportData {
   title: string
   dates: string
+  /** Unix seconds of the first departure, for the file name. */
+  start: number
   zone: { o: number; l: string }
   /** Show the overview map during the replay. */
   inset: boolean
@@ -175,7 +178,7 @@ export function simplifyTracks(passages: TimedSegment[][], budget: number = POIN
   if (countAt(flat, 0) > budget) {
     let lo = 0
     let hi = 90
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 22; i++) {
       const mid = (lo + hi) / 2
       if (countAt(flat, mid) > budget) lo = mid
       else hi = mid
@@ -243,7 +246,7 @@ function statsStrip(input: ExportInput, nights: number): { l: string; v: string 
     underway = cruiseStats.underway_seconds
     fuel = cruiseStats.fuel_burned_l
     gust = maxOrNull([cruiseStats.underway_max_gust_kts, cruiseStats.anchor_max_gust_kts])
-    nightCount = cruiseStats.nights
+    nightCount = nights
   } else {
     distance = passages.reduce((n, p) => n + p.stats.distance_nm, 0)
     underway = passages.reduce((n, p) => n + p.stats.underway_seconds, 0)
@@ -265,13 +268,41 @@ const round = (v: number, places: number) => Math.round(v * 10 ** places) / 10 *
 
 // ── preparing the data ───────────────────────────────────────────────────
 
-/** Everything the player and the static images draw from. Throws when there
- * is no track to show: an export of nothing is a fault, not an empty card. */
-export function prepareExport(input: ExportInput): ExportData {
-  const sorted = [...input.passages].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
-  const withTracks = sorted
+/** The passages an export carries: oldest first, those with no recorded
+ * position left out. The file name, zone, dates and nights all follow this. */
+export function exportablePassages(passages: PassageDetail[]): { p: PassageDetail; segments: TimedSegment[] }[] {
+  return [...passages]
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     .map((p) => ({ p, segments: timedSegments(p.track, p.track_times).filter((s) => s.length > 0) }))
     .filter((x) => x.segments.length > 0)
+}
+
+/** The boat's zone for an export: from where its first passage began. */
+export function exportZone(passages: PassageDetail[]): { offsetHours: number; label: string } {
+  const first = exportablePassages(passages)[0]
+  const lon = first ? (first.p.start_lon ?? first.segments[0][0].lon) : 0
+  return vesselZone(lon)
+}
+
+let lastPrepared: { key: unknown[]; data: ExportData } | null = null
+
+function sameKey(a: unknown[], b: unknown[]) {
+  return a.length === b.length && a.every((v, i) => v === b[i])
+}
+
+/** Everything the player and the static images draw from. Throws when there
+ * is no track to show: an export of nothing is a fault, not an empty card.
+ * Thinning is the slow part, so the last result is reused for the same input. */
+export function prepareExport(input: ExportInput): ExportData {
+  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds]
+  if (lastPrepared && sameKey(lastPrepared.key, key)) return lastPrepared.data
+  const data = buildExport(input)
+  lastPrepared = { key, data }
+  return data
+}
+
+function buildExport(input: ExportInput): ExportData {
+  const withTracks = exportablePassages(input.passages)
   if (withTracks.length === 0) throw new Error('Nothing to export: no track was recorded for these passages')
 
   const thinned = simplifyTracks(withTracks.map((x) => x.segments))
@@ -305,6 +336,7 @@ export function prepareExport(input: ExportInput): ExportData {
   return {
     title: input.title,
     dates: dateRangeLabel(first.a, last.b, input.zone.offsetHours),
+    start: first.a,
     zone: { o: input.zone.offsetHours, l: input.zone.label },
     inset: input.inset,
     insetZoom: round(insetZoom(bounds), 2),
