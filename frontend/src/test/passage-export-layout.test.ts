@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { IMAGE_SIZES, composeImageLayout, fitText, paintOverlay, type LayoutSpec, type Measure } from '@/lib/passage-export-layout'
+import { IMAGE_SIZES, composeImageLayout, fitText, isFatalMapError, mapCropRect, paintOverlay, type LayoutSpec, type Measure } from '@/lib/passage-export-layout'
 
 // Every glyph is half its font size wide, so widths are exact and the same on
 // every machine.
@@ -130,5 +130,20 @@ describe('paintOverlay', () => {
     expect(texts).toContain('DISTANCE')
     expect(texts).toContain('93.9 NM')
     expect(calls.filter((c) => c.startsWith('fillRect')).length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('trusting the map', () => {
+  it('fails on a missing tile, source or style, but not on an empty seamark tile', () => {
+    expect(isFatalMapError({ message: 'Not Found', status: 404, sourceId: 'hcp-seamarks' }, 'hcp-seamarks')).toBe(false)
+    expect(isFatalMapError({ message: 'Not Found', status: 404, sourceId: 'carto' }, 'hcp-seamarks')).toBe(true)
+    expect(isFatalMapError({ message: 'Failed to fetch', sourceId: 'hcp-seamarks' }, 'hcp-seamarks')).toBe(true)
+    expect(isFatalMapError({ message: 'style failed' }, 'hcp-seamarks')).toBe(true)
+  })
+
+  it('crops by the canvas actual pixel ratio', () => {
+    expect(mapCropRect(1260, 630, 479)).toMatchObject({ ratio: 2, sh: 958 })
+    expect(mapCropRect(1890, 630, 479)).toMatchObject({ ratio: 3, sh: 1437 })
+    expect(mapCropRect(630, 630, 479)).toMatchObject({ ratio: 1, sh: 479 })
   })
 })

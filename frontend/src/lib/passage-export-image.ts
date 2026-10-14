@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl'
 
 import type { ExportData } from '@/lib/passage-export'
-import { IMAGE_SIZES, composeImageLayout, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
+import { IMAGE_SIZES, composeImageLayout, isFatalMapError, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
 
 // Static images of a passage for the blog's feature image or a social card
 // (ADR 0174). The map is drawn offscreen with MapLibre in the same Voyager and
@@ -64,8 +64,11 @@ async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTML
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('The map did not finish drawing. Check the internet connection and try again.')), RENDER_TIMEOUT_MS)
       m.on('error', (e) => {
-        // A missing tile is not fatal; a style that never loads is, and the timeout reports it.
-        console.warn('Passage image map:', e.error?.message ?? e)
+        const err = e.error as (Error & { status?: number }) | undefined
+        const info = { message: err?.message ?? 'unknown error', status: err?.status, sourceId: (e as { sourceId?: string }).sourceId }
+        if (!isFatalMapError(info, data.map.seamarks.id)) return
+        clearTimeout(timer)
+        reject(new Error(`The map could not be drawn completely (${info.message}). Check the internet connection and try again.`))
       })
       m.once('load', () => {
         const seamarks = data.map.seamarks
@@ -135,7 +138,8 @@ export async function renderPassageImage(data: ExportData, kind: ImageKind): Pro
   if (!ctx) throw new Error('This browser cannot draw the image')
   ctx.scale(size.outScale, size.outScale)
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(mapCanvas, 0, 0, mapCanvas.width, mapCanvas.height - layout.band.h * 2, 0, 0, size.width, layout.band.y)
+  const crop = mapCropRect(mapCanvas.height, size.height, layout.band.y)
+  ctx.drawImage(mapCanvas, crop.sx, crop.sy, mapCanvas.width, crop.sh, 0, 0, size.width, layout.band.y)
   if (insetCanvas && layout.inset) {
     const r = layout.inset
     ctx.save()

@@ -153,3 +153,26 @@ export function roundRectPath(ctx: CanvasRenderingContext2D, r: Rect, radius: nu
   ctx.roundRect(r.x, r.y, r.w, r.h, radius)
 }
 
+
+// ── what to trust from the map ───────────────────────────────────────────
+
+/** A source and tile error from MapLibre, reduced to what decides it. */
+export interface MapErrorInfo {
+  message: string
+  status?: number
+  sourceId?: string
+}
+
+/** Whether a map error means the picture would be incomplete. The seamark
+ * server answers 404 for tiles with nothing on them, which is normal; any
+ * other failed tile, source or style is not, and the image is not saved. */
+export function isFatalMapError(e: MapErrorInfo, seamarkSourceId: string): boolean {
+  return !(e.status === 404 && e.sourceId === seamarkSourceId)
+}
+
+/** The part of the rendered map canvas that shows above the band, in canvas
+ * pixels. The ratio comes from the canvas itself, not an assumption. */
+export function mapCropRect(canvasHeight: number, layoutHeight: number, bandTop: number) {
+  const ratio = canvasHeight / layoutHeight
+  return { sx: 0, sy: 0, sh: Math.round(bandTop * ratio), ratio }
+}
