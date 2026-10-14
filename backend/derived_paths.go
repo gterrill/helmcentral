@@ -223,7 +223,7 @@ func unitForAlarmPath(snapshot *signalKSnapshot, path string) string {
 		}
 		return ""
 	}
-	return unitsFor(snapshot.nodeAt(path))
+	return snapshot.liveSelfTelemetry(time.Time{}).unitsAt(path)
 }
 
 /*
@@ -237,7 +237,7 @@ of one, and an infinity would render as a plausible-looking enormous range.
 */
 func vesselFuelEconomy(read alarmReader, ratePaths []string) (float64, bool) {
 	now := time.Now().UTC()
-	value, _, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, memoEngineStates(globalSignalKSnapshot, now), now)
+	value, _, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot.liveSelfTelemetry(now), read, ratePaths, memoEngineStates(globalSignalKSnapshot, now), now)
 	return value, ok
 }
 
@@ -250,26 +250,26 @@ func vesselFuelEconomy(read alarmReader, ratePaths []string) (float64, bool) {
 // current SOG happens to be -- the case a 20-hour-old fuel rate produced a
 // 0.02 nm/L Economy reading exists for.
 //
-// snapshot is taken explicitly, the same snapshot read builds its samples
-// from, rather than assumed to be globalSignalKSnapshot: a test exercising
-// this against a local snapshot must have pathAge resolve node timestamps
-// from that same snapshot.
+// t is taken explicitly, the same view read builds its samples from, rather
+// than assumed to be globalSignalKSnapshot's: a test exercising this against
+// a local snapshot must have pathAge resolve node timestamps from that same
+// snapshot.
 //
 // Only computed alongside a real figure: an age for an undefined economy
 // would say nothing an operator could act on.
-func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (value float64, age float64, ok bool) {
+func vesselFuelEconomyWithAge(t *telemetryView, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (value float64, age float64, ok bool) {
 	const speedOverGroundPath = "navigation.speedOverGround"
 	speed := read(speedOverGroundPath)
 	if !speed.Present || speed.Value <= 0 {
 		return 0, -1, false
 	}
 
-	total, burnAge, burning := totalFuelBurnWithAge(snapshot, read, ratePaths, states, now)
+	total, burnAge, burning := totalFuelBurnWithAge(t, read, ratePaths, states, now)
 	if !burning {
 		return 0, -1, false
 	}
 
-	speedAge := pathAge(snapshot, speed, speedOverGroundPath, now)
+	speedAge := pathAge(t, speed, speedOverGroundPath, now)
 	return speed.Value / total, derivedInputAge(speedAge, burnAge), true
 }
 
@@ -294,7 +294,7 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 // non-engine device on its connection): an engine-only connection failing
 // looks the same as its engines switching off, and with nothing running to
 // show the feed is alive the figures must blank with their age.
-func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (total float64, age float64, ok bool) {
+func totalFuelBurnWithAge(t *telemetryView, read alarmReader, ratePaths []string, states engineStateFunc, now time.Time) (total float64, age float64, ok bool) {
 	type contribution struct {
 		path  string
 		value float64
@@ -307,7 +307,7 @@ func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths
 		if !rate.Present || rate.Value <= 0 {
 			continue
 		}
-		c := contribution{path: path, value: rate.Value, age: pathAge(snapshot, rate, path, now)}
+		c := contribution{path: path, value: rate.Value, age: pathAge(t, rate, path, now)}
 		all = append(all, c)
 		if freshEnoughToPublish(c.age) {
 			anyFresh = true
@@ -368,10 +368,11 @@ type fuelTankVolumePathPair struct {
 // and .1 on the reference vessel report a ratio with no known size) is
 // excluded rather than silently treated as a zero-sized tank.
 //
-// fuelRatePaths and fuelTankVolumePaths used to each call
+// The rate-path and tank-path finders used to each call
 // collectSignalKPaths(tree) themselves, so computeDerivedPaths walked the
 // same already-copied tree twice for the same pass (backend-perf-audit.md
-// Tier 1 #2). Both now delegate here over one collectSignalKPaths call.
+// Tier 1 #2). collectFuelPaths is now the only walk; fuelRatePaths and
+// computeDerivedPaths both call it over one Paths() list.
 func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fuelTankVolumePathPair) {
 	levels := map[string]bool{}
 	capacities := map[string]bool{}
@@ -407,26 +408,11 @@ func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fu
 	return ratePaths, tankPaths
 }
 
-// fuelRatePaths finds every engine's burn path in the snapshot, so a boat with
-// one engine or three needs no configuration here.
-func fuelRatePaths(tree map[string]any) []string {
-	if tree == nil {
-		return nil
-	}
-	rates, _ := collectFuelPaths(collectSignalKPaths(tree))
+// fuelRatePaths finds every engine's burn path in our own boat's telemetry,
+// so a boat with one engine or three needs no configuration here.
+func fuelRatePaths(t telemetryReader) []string {
+	rates, _ := collectFuelPaths(t.Paths())
 	return rates
-}
-
-// fuelTankVolumePaths finds every tanks.fuel.<id> node that publishes both
-// currentLevel and capacity, so a tank carrying only a level -- tanks.fuel.0
-// and .1 on the reference vessel, which report a ratio with no known size --
-// is excluded rather than silently treated as a zero-sized tank.
-func fuelTankVolumePaths(tree map[string]any) []fuelTankVolumePathPair {
-	if tree == nil {
-		return nil
-	}
-	_, tanks := collectFuelPaths(collectSignalKPaths(tree))
-	return tanks
 }
 
 /*
@@ -440,7 +426,7 @@ reports, not an absence.
 Absent, not zero, whenever no tank contributes at all, per the same reasoning
 ADR 0055 already applies to fuel economy.
 */
-func fuelVolumeWithAge(snapshot *signalKSnapshot, read alarmReader, tankPaths []fuelTankVolumePathPair, now time.Time) (volume float64, age float64, ok bool) {
+func fuelVolumeWithAge(t *telemetryView, read alarmReader, tankPaths []fuelTankVolumePathPair, now time.Time) (volume float64, age float64, ok bool) {
 	var ages []float64
 	for _, pair := range tankPaths {
 		level := read(pair.currentLevelPath)
@@ -450,7 +436,7 @@ func fuelVolumeWithAge(snapshot *signalKSnapshot, read alarmReader, tankPaths []
 		}
 		volume += level.Value * capacity.Value
 		ok = true
-		ages = append(ages, pathAge(snapshot, level, pair.currentLevelPath, now), pathAge(snapshot, capacity, pair.capacityPath, now))
+		ages = append(ages, pathAge(t, level, pair.currentLevelPath, now), pathAge(t, capacity, pair.capacityPath, now))
 	}
 	if !ok {
 		return 0, -1, false
@@ -500,16 +486,16 @@ func derivedPathAges(now time.Time) map[string]float64 {
 // computeDerivedPaths is derivedPathValues and derivedPathAges in one pass,
 // so a single build of the gauge-values payload does not walk the ring
 // buffers and the snapshot twice for the same numbers. It always resolves
-// against globalSignalKSnapshot; computeDerivedPathsFromTree is the same
-// pass over an already-fetched tree, for a caller that also needs that tree
-// for something else.
+// against globalSignalKSnapshot; computeDerivedPathsFromView is the same
+// pass over a telemetry view the caller already holds, for a caller that
+// also needs that view for something else.
 func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64) {
-	return computeDerivedPathsFromTree(globalSignalKSnapshot, globalSignalKSnapshot.selfContext(), globalSignalKSnapshot.selfTree(), now)
+	return computeDerivedPathsFromView(globalSignalKSnapshot, globalSignalKSnapshot.selfTelemetryAt(now), now)
 }
 
-// computeDerivedPathsFromTree does computeDerivedPaths' work against a tree
-// and context the caller already has, rather than calling selfTree() a
-// second time.
+// computeDerivedPathsFromView does computeDerivedPaths' work against a
+// telemetry view the caller already has, rather than copying the self tree
+// a second time.
 //
 // Before this, computeDerivedPaths cost two whole-tree copies of its own on
 // every call -- one to fetch tree, a second inside snapshotAlarmReader to
@@ -519,20 +505,19 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 // signalKPathsHandler's per-derived-path loop, that multiplied straight
 // through (backend-perf-audit.md Tier 1 #2). derivedAwareAlarmReader now
 // memoizes one call per reader instance, signalKPathsHandler calls this
-// once per request, and this function itself now takes one tree and builds
-// its reader from that same tree instead of fetching a second copy.
+// once per request, and this function itself takes one view and builds its
+// reader from that same view instead of fetching a second copy.
 //
-// fuelRatePaths and fuelTankVolumePaths also used to each walk the tree via
-// their own collectSignalKPaths call; collectFuelPaths does both in one
-// walk.
-func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree map[string]any, now time.Time) (map[string]*float64, map[string]float64) {
-	return computeDerivedPathsWithStates(snapshot, context, tree, memoEngineStates(snapshot, now), now)
+// The rate-path and tank-path finders also used to each walk the tree via
+// their own collectSignalKPaths call; collectFuelPaths is now the only walk.
+func computeDerivedPathsFromView(snapshot *signalKSnapshot, t *telemetryView, now time.Time) (map[string]*float64, map[string]float64) {
+	return computeDerivedPathsWithStates(t, memoEngineStates(snapshot, now), now)
 }
 
-// computeDerivedPathsWithStates is computeDerivedPathsFromTree with the engine
+// computeDerivedPathsWithStates is computeDerivedPathsFromView with the engine
 // states supplied, so a caller that also publishes them (the gauge-values
 // payload) scans the source history once per build, not once per consumer.
-func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tree map[string]any, states engineStateFunc, now time.Time) (map[string]*float64, map[string]float64) {
+func computeDerivedPathsWithStates(t *telemetryView, states engineStateFunc, now time.Time) (map[string]*float64, map[string]float64) {
 	values := map[string]*float64{
 		vesselFuelEconomyPath:        nil,
 		pressureRatePath:             nil,
@@ -579,12 +564,12 @@ func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tr
 	// (anomaly_detector.go), not the tree -- same reasoning again.
 	addAnomalyValues(values, ages, now)
 
-	if tree == nil {
+	if !t.HasSelf() {
 		return values, ages
 	}
 
-	read := alarmReaderFromTree(snapshot, context, tree)
-	ratePaths, tankPaths := collectFuelPaths(collectSignalKPaths(tree))
+	read := alarmReaderFromView(t)
+	ratePaths, tankPaths := collectFuelPaths(t.Paths())
 
 	// Every fuel figure below reports its true age in ages[] regardless of
 	// freshness -- "the age still reports the oldest input so the reason is
@@ -592,7 +577,7 @@ func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tr
 	// number) when that age clears derivedInputMaxAge. Below the guard the
 	// figure stays absent rather than a rule silently evaluating arithmetic
 	// done against a source that stopped reporting hours or days ago.
-	economy, economyAge, economyOK := vesselFuelEconomyWithAge(snapshot, read, ratePaths, states, now)
+	economy, economyAge, economyOK := vesselFuelEconomyWithAge(t, read, ratePaths, states, now)
 	if economyOK {
 		ages[vesselFuelEconomyPath] = economyAge
 		if freshEnoughToPublish(economyAge) {
@@ -600,7 +585,7 @@ func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tr
 		}
 	}
 
-	volume, volumeAge, volumeOK := fuelVolumeWithAge(snapshot, read, tankPaths, now)
+	volume, volumeAge, volumeOK := fuelVolumeWithAge(t, read, tankPaths, now)
 	if volumeOK {
 		ages[fuelVolumePath] = volumeAge
 		if freshEnoughToPublish(volumeAge) {
@@ -608,7 +593,7 @@ func computeDerivedPathsWithStates(snapshot *signalKSnapshot, context string, tr
 		}
 	}
 
-	burn, burnAge, burnOK := totalFuelBurnWithAge(snapshot, read, ratePaths, states, now)
+	burn, burnAge, burnOK := totalFuelBurnWithAge(t, read, ratePaths, states, now)
 
 	if timeToEmpty, ttAge, ttOK := fuelTimeToEmptyWithAge(volume, volumeAge, volumeOK, burn, burnAge, burnOK); ttOK {
 		ages[fuelTimeToEmptyPath] = ttAge

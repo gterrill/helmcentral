@@ -20,7 +20,7 @@ checks on its own cadence and writes a mutex-guarded slot, which
 derived_paths.go's addAnomalyValues reads on every computeDerivedPaths tick.
 
 This is the file that has to hold state across ticks -- 15-minute frozen
-windows, engine runtime -- because computeDerivedPathsFromTree itself is
+windows, engine runtime -- because computeDerivedPathsFromView itself is
 recomputed concurrently by several readers and cannot (see its own doc
 comment). Running the detectors from exactly one goroutine is what makes
 that state safe to hold at all: nothing else ever touches anomalyTrackers.
@@ -563,12 +563,10 @@ var globalEngineBaselineCache = &engineBaselineCache{}
 
 // --- Helpers shared by the battery and engine wiring below ----------------
 
+// numericFromPath reads the number at one leaf through a live telemetry
+// view: one leaf copied, never the whole tree.
 func numericFromPath(snapshot *signalKSnapshot, path string) (float64, bool) {
-	node := snapshot.nodeAt(path)
-	if node == nil {
-		return 0, false
-	}
-	return numericNodeValue(node)
+	return leafNumber(snapshot.liveSelfTelemetry(time.Now().UTC()), path)
 }
 
 // discoveredEngineBatteryPaths lists every currently-published path whose
@@ -577,12 +575,8 @@ func numericFromPath(snapshot *signalKSnapshot, path string) (float64, bool) {
 // vessel setup: it watches whatever the boat happens to publish, not only
 // configured engines/the configured house bank.
 func discoveredEngineBatteryPaths(snapshot *signalKSnapshot) []string {
-	tree := snapshot.selfTree()
-	if tree == nil {
-		return nil
-	}
 	var out []string
-	for _, p := range collectSignalKPaths(tree) {
+	for _, p := range snapshot.liveSelfTelemetry(time.Now().UTC()).Paths() {
 		if _, ok := engineOrBatterySuffix(p.Path); ok {
 			out = append(out, p.Path)
 		}
@@ -595,12 +589,12 @@ func discoveredEngineBatteryPaths(snapshot *signalKSnapshot) []string {
 // solar current, keyed by a human label -- evidence enrichment only, per
 // the plan's "discovered rather than configured".
 func discoverChargeSources(snapshot *signalKSnapshot) map[string]float64 {
-	tree := snapshot.selfTree()
-	if tree == nil {
+	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
+	if !telemetry.HasSelf() {
 		return nil
 	}
 	sources := map[string]float64{}
-	for _, p := range collectSignalKPaths(tree) {
+	for _, p := range telemetry.Paths() {
 		var label string
 		switch {
 		case strings.HasPrefix(p.Path, "electrical.alternator.") && strings.HasSuffix(p.Path, ".current"):
@@ -1078,10 +1072,8 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 		if frozenNow[path] {
 			return false
 		}
-		if node := snapshot.nodeAt(path); node != nil {
-			if source, ok := node["$source"].(string); ok && silentSourceNow[source] {
-				return false
-			}
+		if source := snapshot.liveSelfTelemetry(now).Sample(path).Source; source != "" && silentSourceNow[source] {
+			return false
 		}
 		return true
 	}

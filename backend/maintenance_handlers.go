@@ -257,8 +257,7 @@ func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReadi
 		return maintenanceHourReading{}, err
 	}
 	offset := offsetInForceAt(resets, now)
-	reader := snapshotAlarmReader(globalSignalKSnapshot)
-	return currentEquipmentHours(reader, globalSignalKSnapshot, eq.HourMeterPath, offset, now), nil
+	return currentEquipmentHours(globalSignalKSnapshot.liveSelfTelemetry(now), eq.HourMeterPath, offset, now), nil
 }
 
 // convertGaugeHoursToTrue looks up equipmentID's own hour-meter reset

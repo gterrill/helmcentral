@@ -62,7 +62,7 @@ func signalKReadClient() *http.Client {
 // alarm don't mistake "can't reach SignalK" for "vessel has moved."
 func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 	validation := criticalGNSSValidation(reason, time.Now().UTC())
-	state.Latitude, state.Longitude = resolveGNSSPosition(-1, -1, validation)
+	state.Latitude, state.Longitude = resolveGNSSPosition(0, 0, false, validation)
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
 	state.GNSSSatellites = validation.Satellites
@@ -83,48 +83,51 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		// reading, in Current Conditions or in the Wind tile's True mode.
 		WindSpeedTrueKts: -1, WindAngleTrueDeg: -1, WindAngleTrueRelativeDeg: -1, WindDirectionTrueDeg: -1,
 		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
-		// return before the payload is even parsed (signalKSelfPayload
-		// failing below) must never read as "just measured".
+		// return before the payload is even parsed (the stream having no
+		// self tree yet) must never read as "just measured".
 		DepthLastUpdateAge: -1, PositionLastUpdateAge: -1, WindLastUpdateAge: -1,
 	}
 
 	// A stream outage lands here the same way an unreachable REST server does,
 	// so the position freezes at the last trusted fix rather than reading as a
 	// jump to null island and tripping the anchor alarm.
-	payload, err := signalKSelfPayload()
-	if err != nil {
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		err := errSignalKNoSelf
 		return criticalVesselState(state, err.Error()), err
 	}
+	return vesselStateFromTelemetry(t, state), nil
+}
 
-	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
+// vesselStateFromTelemetry fills state from our own boat's telemetry. The
+// -1 and "" sentinels vesselStateData still carries to the browser are
+// produced here, at the payload edge, from ok and AgeKnown (ADR 0178).
+func vesselStateFromTelemetry(t telemetryReader, state vesselStateData) vesselStateData {
+	state.Name = strings.TrimSpace(firstString(t, "name", "design.name"))
 
 	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
-	// REST full tree nests it under a "value" wrapper; some sources publish
-	// the bare path instead - same two-step pattern as environment.depth
-	// below.
-	state.LengthOverallM = lookupNumber(payload, "design", "length", "value", "overall")
-	if state.LengthOverallM == -1 {
-		state.LengthOverallM = lookupNumber(payload, "design", "length", "overall")
+	// full tree nests it inside design.length's value; some sources publish
+	// the bare path instead - the reader resolves both.
+	if v, ok := t.Number("design.length.overall"); ok {
+		state.LengthOverallM = v.Value
 	}
 
 	// ADR 0135: the Anchor Watch low-water clearance warning needs the
 	// boat's draft. Only design.draft.maximum is read - the live server
 	// this feature was verified against never publishes
 	// current/minimum/canoe, and maximum is the only figure that is always
-	// the worst case, so there is no fallback to those. Same two-step
-	// value-then-bare lookup as design.length.overall above.
-	state.DraftM = lookupNumber(payload, "design", "draft", "value", "maximum")
-	if state.DraftM == -1 {
-		state.DraftM = lookupNumber(payload, "design", "draft", "maximum")
+	// the worst case, so there is no fallback to those.
+	if v, ok := t.Number("design.draft.maximum"); ok {
+		state.DraftM = v.Value
 	}
 
-	state.Status = firstNonEmptyString(lookupString(payload, "navigation", "state", "value"), lookupString(payload, "navigation", "state"))
+	state.Status = firstString(t, "navigation.state")
 	if state.Status == "" {
 		state.Status = "Unknown"
 	}
 
 	hasGNSSDatetime := false
-	datetimeString := firstNonEmptyString(lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"), lookupString(payload, "timestamp"))
+	datetimeString := firstString(t, "navigation.datetime", "timestamp")
 	if datetimeString != "" {
 		parsed, err := time.Parse(time.RFC3339, datetimeString)
 		if err == nil {
@@ -133,36 +136,28 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		}
 	}
 
-	state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer", "value")
-	if state.Depth == -1 {
-		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
+	if v, ok := t.Number("environment.depth.belowTransducer"); ok {
+		state.Depth = v.Value
 	}
 	// Scoped to belowTransducer alone, not the whole environment.depth
 	// branch: a live belowSurface/belowKeel sensor must never paper over a
 	// dead belowTransducer reading, which is the value actually rendered.
-	state.DepthLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "depth", "belowTransducer"), state.Datetime)
+	state.DepthLastUpdateAge = subtreeAgeSeconds(t, "environment.depth.belowTransducer", state.Datetime)
 
-	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(payload)
+	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(t)
 	state.CurrentDriftKts = currentDriftKts
 	state.CurrentSetDeg = currentSetDeg
 	state.CurrentDriftImpactKts = currentDriftImpactKts
 
-	rawLatitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
-	if rawLatitude == -1 {
-		rawLatitude = lookupNumber(payload, "navigation", "position", "latitude")
-	}
+	position, hasPosition := t.Position()
 
-	rawLongitude := lookupNumber(payload, "navigation", "position", "value", "longitude")
-	if rawLongitude == -1 {
-		rawLongitude = lookupNumber(payload, "navigation", "position", "longitude")
-	}
-
-	state.Engine0RPM = readEngineRPM(payload, []string{"0", "port", "main", "engine0", "engine-0"})
-	state.Engine1RPM = readEngineRPM(payload, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
-	validation := parseGNSSPositionValidation(payload)
+	state.Engine0RPM = readEngineRPM(t, []string{"0", "port", "main", "engine0", "engine-0"})
+	state.Engine1RPM = readEngineRPM(t, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
+	validation := parseGNSSPositionValidation(t)
 	validation = applyGNSSHeuristics(validation, gnssObservedSample{
-		Latitude:       rawLatitude,
-		Longitude:      rawLongitude,
+		HasPosition:    hasPosition,
+		Latitude:       position.Latitude,
+		Longitude:      position.Longitude,
 		DepthMeters:    state.Depth,
 		Navigation:     state.Status,
 		EnginesRunning: (state.Engine0RPM > 0 && !math.IsInf(state.Engine0RPM, 0)) || (state.Engine1RPM > 0 && !math.IsInf(state.Engine1RPM, 0)),
@@ -176,22 +171,22 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	state.GNSSValidationReason = validation.Reason
 	state.GNSSCriticalAlert = validation.Critical
 
-	state.Latitude, state.Longitude = resolveGNSSPosition(rawLatitude, rawLongitude, validation)
+	// -1,-1 reaches the wire only from the gate, when no fix has ever been
+	// trusted.
+	state.Latitude, state.Longitude = resolveGNSSPosition(position.Latitude, position.Longitude, hasPosition, validation)
 
 	// The fix (navigation.position) and its quality figures
 	// (navigation.gnss) are published under two different parents; either
 	// one still ticking means the fix itself is current, so this is the
 	// freshest of the two rather than a single subtree walk.
 	state.PositionLastUpdateAge = freshestAge(
-		freshestTimestampAge(lookupAnyMap(payload, "navigation", "position"), state.Datetime),
-		freshestTimestampAge(lookupAnyMap(payload, "navigation", "gnss"), state.Datetime),
+		subtreeAgeSeconds(t, "navigation.position", state.Datetime),
+		subtreeAgeSeconds(t, "navigation.gnss", state.Datetime),
 	)
 
-	state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue", "value")
-	if state.HeadingTrue == -1 {
-		state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue")
+	if v, ok := t.Number("navigation.headingTrue"); ok {
+		state.HeadingTrue = v.Value
 	}
-
 	if state.HeadingTrue >= 0 {
 		if state.HeadingTrue <= 2*math.Pi {
 			state.HeadingTrue = state.HeadingTrue * 180 / math.Pi
@@ -199,35 +194,33 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.HeadingTrue = normalizeDegrees(state.HeadingTrue)
 	}
 
-	windSpeedApparent := lookupNumber(payload, "environment", "wind", "speedApparent", "value")
-	if windSpeedApparent == -1 {
-		windSpeedApparent = lookupNumber(payload, "environment", "wind", "speedApparent")
-	}
-	windTimestamp := firstNonEmptyString(lookupString(payload, "environment", "wind", "speedApparent", "timestamp"), lookupString(payload, "environment", "wind", "angleApparent", "timestamp"), lookupString(payload, "environment", "wind", "timestamp"))
+	windSpeedApparent, windSpeedApparentOK := t.Number("environment.wind.speedApparent")
+	windTimestamp := firstNonEmptyString(
+		declaredTimestamp(t, "environment.wind.speedApparent"),
+		declaredTimestamp(t, "environment.wind.angleApparent"),
+		declaredTimestamp(t, "environment.wind"),
+	)
 
 	// Scoped to environment.wind only: environment.current is a different
 	// sensor with its own health and must not be folded into wind's own
 	// freshness. Whole-subtree walk (not windTimestamp's first-found
 	// priority list above) so the tile's age tracks whichever of
 	// speedApparent/angleApparent actually updated most recently.
-	state.WindLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "wind"), state.Datetime)
+	state.WindLastUpdateAge = subtreeAgeSeconds(t, "environment.wind", state.Datetime)
 
 	windDataRecent := isRecentTimestamp(windTimestamp, defaultWindMaxAge)
 	if !windDataRecent {
 		windDataRecent = state.Datetime.After(time.Now().UTC().Add(-defaultWindMaxAge))
 	}
 
-	if windSpeedApparent >= 0 && windDataRecent {
-		state.WindSpeedApparentKts = windSpeedApparent * metersPerSecondToKnots
+	if windSpeedApparentOK && windSpeedApparent.Value >= 0 && windDataRecent {
+		state.WindSpeedApparentKts = windSpeedApparent.Value * metersPerSecondToKnots
 	} else {
 		state.WindSpeedApparentKts = 0
 	}
 
-	windAngleApparent := lookupNumber(payload, "environment", "wind", "angleApparent", "value")
-	if windAngleApparent == -1 {
-		windAngleApparent = lookupNumber(payload, "environment", "wind", "angleApparent")
-	}
-	if windAngleApparent != -1 && windDataRecent {
+	if windAngle, ok := t.Number("environment.wind.angleApparent"); ok && windDataRecent {
+		windAngleApparent := windAngle.Value
 		if windAngleApparent >= -2*math.Pi && windAngleApparent <= 2*math.Pi {
 			windAngleApparent = windAngleApparent * 180 / math.Pi
 		}
@@ -247,13 +240,13 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	}
 
 	// True wind: environment.wind.speedTrue/angleTrueWater/directionTrue,
-	// parsed the same way as apparent above (value/bare fallbacks, radian
-	// conversion, side from sign) but kept entirely separate, including its
-	// own recency check per leaf — a stale or absent true-wind source must
-	// read as unknown (-1/"") rather than silently reusing apparent's
-	// numbers, which is a different sensor reading a different quantity.
-	// Feeds the Current Conditions tile (ADR 0129: speedTrue/directionTrue)
-	// and the Wind tile's True mode (ADR 0130: adds angleTrueWater).
+	// parsed the same way as apparent above (radian conversion, side from
+	// sign) but kept entirely separate, including its own recency check per
+	// leaf — a stale or absent true-wind source must read as unknown
+	// (-1/"") rather than silently reusing apparent's numbers, which is a
+	// different sensor reading a different quantity. Feeds the Current
+	// Conditions tile (ADR 0129: speedTrue/directionTrue) and the Wind
+	// tile's True mode (ADR 0130: adds angleTrueWater).
 	//
 	// Each of the three leaves is gated on its OWN timestamp
 	// (speedTrue/angleTrueWater/directionTrue independently), not a
@@ -268,23 +261,16 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// instrument itself is still reporting, so a stale or entirely absent
 	// timestamp on a given leaf leaves only that leaf's own field(s) at
 	// their sentinel.
-	windSpeedTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "speedTrue", "timestamp"), defaultWindMaxAge)
-	windSpeedTrue := lookupNumber(payload, "environment", "wind", "speedTrue", "value")
-	if windSpeedTrue == -1 {
-		windSpeedTrue = lookupNumber(payload, "environment", "wind", "speedTrue")
-	}
-	if windSpeedTrue >= 0 && windSpeedTrueRecent {
-		state.WindSpeedTrueKts = windSpeedTrue * metersPerSecondToKnots
+	windSpeedTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.speedTrue"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.speedTrue"); ok && v.Value >= 0 && windSpeedTrueRecent {
+		state.WindSpeedTrueKts = v.Value * metersPerSecondToKnots
 	} else {
 		state.WindSpeedTrueKts = -1
 	}
 
-	windAngleTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "angleTrueWater", "timestamp"), defaultWindMaxAge)
-	windAngleTrue := lookupNumber(payload, "environment", "wind", "angleTrueWater", "value")
-	if windAngleTrue == -1 {
-		windAngleTrue = lookupNumber(payload, "environment", "wind", "angleTrueWater")
-	}
-	if windAngleTrue != -1 && windAngleTrueRecent {
+	windAngleTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.angleTrueWater"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.angleTrueWater"); ok && windAngleTrueRecent {
+		windAngleTrue := v.Value
 		if windAngleTrue >= -2*math.Pi && windAngleTrue <= 2*math.Pi {
 			windAngleTrue = windAngleTrue * 180 / math.Pi
 		}
@@ -307,12 +293,9 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// environment.wind.directionTrue is the compass bearing the wind comes
 	// FROM (0..2π already relative to true north, not bow-relative), so it
 	// normalizes straight to 0-360 with no signed/side step.
-	windDirectionTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "directionTrue", "timestamp"), defaultWindMaxAge)
-	windDirectionTrue := lookupNumber(payload, "environment", "wind", "directionTrue", "value")
-	if windDirectionTrue == -1 {
-		windDirectionTrue = lookupNumber(payload, "environment", "wind", "directionTrue")
-	}
-	if windDirectionTrue != -1 && windDirectionTrueRecent {
+	windDirectionTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.directionTrue"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.directionTrue"); ok && windDirectionTrueRecent {
+		windDirectionTrue := v.Value
 		if windDirectionTrue >= -2*math.Pi && windDirectionTrue <= 2*math.Pi {
 			windDirectionTrue = windDirectionTrue * 180 / math.Pi
 		}
@@ -321,102 +304,65 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.WindDirectionTrueDeg = -1
 	}
 
-	sog := lookupNumber(payload, "navigation", "speedOverGround", "value")
-	if sog == -1 {
-		sog = lookupNumber(payload, "navigation", "speedOverGround")
-	}
-	if sog >= 0 {
-		state.SpeedOverGroundKts = math.Round(sog*metersPerSecondToKnots*10) / 10
+	if v, ok := t.Number("navigation.speedOverGround"); ok && v.Value >= 0 {
+		state.SpeedOverGroundKts = math.Round(v.Value*metersPerSecondToKnots*10) / 10
 	}
 
 	// Generator state (com.victronenergy.generator.0 via signalk-venus-plugin)
-	state.GeneratorState = firstNonEmptyString(
-		lookupString(payload, "electrical", "generator", "0", "state", "value"),
-		lookupString(payload, "electrical", "generator", "0", "state"),
-	)
+	state.GeneratorState = firstString(t, "electrical.generator.0.state")
 
-	if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart", "value"); ok {
-		state.GeneratorManualStart = v
-	} else if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart"); ok {
+	if v, ok := t.Bool("electrical.generator.0.manualStart"); ok {
 		state.GeneratorManualStart = v
 	}
 
-	genTimer := lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer", "value")
-	if genTimer == -1 {
-		genTimer = lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer")
-	}
-	if genTimer >= 0 {
-		state.GeneratorManualStartTimer = genTimer
+	if v, ok := t.Number("electrical.generator.0.manualStartTimer"); ok && v.Value >= 0 {
+		state.GeneratorManualStartTimer = v.Value
 	}
 
-	state.GeneratorRunningByCondition = firstNonEmptyString(
-		lookupString(payload, "electrical", "generator", "0", "runningByCondition", "value"),
-		lookupString(payload, "electrical", "generator", "0", "runningByCondition"),
-	)
+	state.GeneratorRunningByCondition = firstString(t, "electrical.generator.0.runningByCondition")
 
-	genRuntime := lookupNumber(payload, "electrical", "generator", "0", "runtime", "value")
-	if genRuntime == -1 {
-		genRuntime = lookupNumber(payload, "electrical", "generator", "0", "runtime")
-	}
-	if genRuntime >= 0 {
-		state.GeneratorRuntime = genRuntime
+	if v, ok := t.Number("electrical.generator.0.runtime"); ok && v.Value >= 0 {
+		state.GeneratorRuntime = v.Value
 	}
 
-	return state, nil
+	return state
 }
 
-func readEngineRPM(payload map[string]any, aliases []string) float64 {
+func readEngineRPM(t telemetryReader, aliases []string) float64 {
 	for _, alias := range aliases {
+		prefix := "propulsion." + alias
 		ts := firstNonEmptyString(
-			lookupString(payload, "propulsion", alias, "revolutions", "timestamp"),
-			lookupString(payload, "propulsion", alias, "rpm", "timestamp"),
-			lookupString(payload, "propulsion", alias, "timestamp"),
+			declaredTimestamp(t, prefix+".revolutions"),
+			declaredTimestamp(t, prefix+".rpm"),
+			declaredTimestamp(t, prefix),
 		)
 		if ts != "" && !isRecentTimestamp(ts, defaultRPMMaxAge) {
 			return -1
 		}
 
-		revPerSecond := lookupFirstNumber(payload,
-			[]string{"propulsion", alias, "revolutions", "value"},
-			[]string{"propulsion", alias, "revolutions"},
-		)
-		if revPerSecond >= 0 {
-			return roundTo1(revPerSecond * 60)
+		if v, ok := t.Number(prefix + ".revolutions"); ok && v.Value >= 0 {
+			return roundTo1(v.Value * 60)
 		}
 
-		rpm := lookupFirstNumber(payload,
-			[]string{"propulsion", alias, "rpm", "value"},
-			[]string{"propulsion", alias, "rpm"},
-		)
-		if rpm >= 0 {
-			return roundTo1(rpm)
+		if v, ok := t.Number(prefix + ".rpm"); ok && v.Value >= 0 {
+			return roundTo1(v.Value)
 		}
 	}
 
 	return -1
 }
 
-func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
-	current := lookupAnyMap(payload, "environment", "current")
-	if current == nil {
-		return -1, -1, nil
-	}
+func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
+	const current = "environment.current"
 
-	drift := lookupNumber(current, "drift", "value")
-	if drift == -1 {
-		drift = lookupNumber(current, "drift")
-	}
-	if drift == -1 {
-		drift = lookupFirstNumber(current,
-			[]string{"drift", "speed"},
-			[]string{"drift", "speed", "value"},
-			[]string{"drift", "value", "speed"},
-		)
-	}
-	if drift >= 0 && drift <= 20 {
-		drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
-	} else if drift < 0 {
-		drift = -1
+	drift := -1.0
+	if v, ok := firstNumber(t, current+".drift", current+".drift.speed"); ok {
+		drift = v
+		if drift >= 0 && drift <= 20 {
+			drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
+		} else if drift < 0 {
+			drift = -1
+		}
 	}
 
 	// setTrue is the official SignalK path (environment.current has no plain
@@ -424,33 +370,20 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 	// for setTrue: converting it would need a magnetic variation reading
 	// this codebase doesn't have, and displaying an unconverted magnetic
 	// bearing as true would silently misreport direction.
-	setDeg := lookupNumber(current, "setTrue", "value")
-	if setDeg == -1 {
-		setDeg = lookupNumber(current, "setTrue")
-	}
-	if setDeg == -1 {
-		setDeg = lookupFirstNumber(current,
-			[]string{"drift", "direction"},
-			[]string{"drift", "direction", "value"},
-			[]string{"drift", "angle"},
-			[]string{"drift", "angle", "value"},
-		)
-	}
-	// Check the not-found sentinel before the radian/degree heuristic below:
-	// -1 falls inside a valid radian range ([-2pi, 2pi]), so checking ranges
-	// first would silently reinterpret "no data" as a real angle of -1 rad
-	// (~303 deg once normalized) instead of reporting no data.
-	if setDeg == -1 {
-		// leave as -1 (no data)
-	} else if setDeg >= 0 && setDeg <= 2*math.Pi {
-		setDeg = normalizeDegrees(setDeg * 180 / math.Pi)
-	} else {
-		setDeg = normalizeDegrees(setDeg)
+	// A drift published as an object leaf ({"speed", "direction"}) carries
+	// the set as its direction, read the same way as a separate leaf.
+	setDeg := -1.0
+	if v, ok := firstNumber(t, current+".setTrue", current+".drift.direction", current+".drift.angle"); ok {
+		if v >= -2*math.Pi && v <= 2*math.Pi {
+			setDeg = normalizeDegrees(v * 180 / math.Pi)
+		} else {
+			setDeg = normalizeDegrees(v)
+		}
 	}
 
 	var driftImpactKts *float64
-	if lookupAnyMap(current, "driftImpact") != nil {
-		if value, ok := current["driftImpact"].(map[string]any)["value"].(float64); ok {
+	if sample := t.Sample(current + ".driftImpact"); sample.Present {
+		if value, ok := sample.Value.(float64); ok {
 			knots := roundTo1(value * metersPerSecondToKnots)
 			driftImpactKts = &knots
 		}
@@ -462,12 +395,18 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 func fetchSignalKElectricalState() (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return state, err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return state, errSignalKNoSelf
 	}
+	return electricalStateFromTelemetry(t, state), nil
+}
 
-	datetimeString := firstNonEmptyString(lookupString(payload, "timestamp"), lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"))
+// electricalStateFromTelemetry fills the Battery & Power tile's state. Its
+// unsigned fields keep -1 for unknown on the wire; the signed bank current
+// and power are nil (ADR 0178).
+func electricalStateFromTelemetry(t telemetryReader, state electricalStateData) electricalStateData {
+	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -479,56 +418,47 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	// subtree, so its freshness is that of the most recent of them. A feed that
 	// has stopped freezes every one of these at once, which is what makes a
 	// single subtree-wide age meaningful here.
-	state.LastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "electrical"), state.Datetime)
+	state.LastUpdateAge = subtreeAgeSeconds(t, "electrical", state.Datetime)
 
 	// Identify the main house battery before reading any values from it.
-	mainBattery := lookupMainBattery(payload)
+	mainBattery, haveMain := lookupMainBattery(t)
 
-	soc := -1.0
-	if mainBattery != nil {
-		soc = lookupNumber(mainBattery, "capacity", "stateOfCharge", "value")
+	soc, socOK := 0.0, false
+	if haveMain {
+		soc, socOK = leafNumber(t, mainBattery+".capacity.stateOfCharge")
 	}
-	if soc == -1 {
-		soc = lookupFirstNumber(payload,
-			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge", "value"},
-			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge"},
-			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge", "value"},
-			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge"},
+	if !socOK {
+		soc, socOK = firstNumber(t,
+			"electrical.batteries.house.capacity.stateOfCharge",
+			"electrical.batteries.service.capacity.stateOfCharge",
 		)
 	}
-	if soc == -1 {
-		soc = lookupFirstNumber(payload,
-			[]string{"electrical", "chargers", "276", "capacity", "stateOfCharge", "value"},
-		)
+	if !socOK {
+		soc, socOK = leafNumber(t, "electrical.chargers.276.capacity.stateOfCharge")
 	}
-	if soc == -1 {
-		soc = lookupNumberFromAnyChild(payload, []string{"electrical", "chargers"}, []string{"capacity", "stateOfCharge", "value"})
+	if !socOK {
+		soc, socOK = leafNumberFromAnyChild(t, "electrical.chargers", "capacity.stateOfCharge")
 	}
-	if soc >= 0 {
+	if socOK && soc >= 0 {
 		if soc <= 1 {
 			soc *= 100
 		}
 		state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
 	}
 
-	batteryCapacityAh := lookupFirstNumber(
-		payload,
-		[]string{"electrical", "batteries", "house", "capacity", "nominal", "value"},
-		[]string{"electrical", "batteries", "house", "capacity", "nominal"},
-		[]string{"electrical", "batteries", "service", "capacity", "nominal", "value"},
-		[]string{"electrical", "batteries", "service", "capacity", "nominal"},
-		[]string{"electrical", "batteries", "house", "capacity", "total", "value"},
-		[]string{"electrical", "batteries", "house", "capacity", "total"},
-		[]string{"electrical", "batteries", "service", "capacity", "total", "value"},
-		[]string{"electrical", "batteries", "service", "capacity", "total"},
+	batteryCapacityAh, capacityOK := firstNumber(t,
+		"electrical.batteries.house.capacity.nominal",
+		"electrical.batteries.service.capacity.nominal",
+		"electrical.batteries.house.capacity.total",
+		"electrical.batteries.service.capacity.total",
 	)
-	if batteryCapacityAh == -1 {
-		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "nominal", "value"})
+	if !capacityOK {
+		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.nominal")
 	}
-	if batteryCapacityAh == -1 {
-		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "total", "value"})
+	if !capacityOK {
+		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.total")
 	}
-	if batteryCapacityAh == -1 {
+	if !capacityOK {
 		batteryCapacityAh = loadHouseBatteryCapacityAh(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	}
 	if batteryCapacityAh > 0 {
@@ -536,39 +466,34 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	}
 
 	// Identify the main house battery: the one with valid SOC and highest absolute current.
-	batteryVoltage := -1.0
-	if mainBattery != nil {
-		batteryVoltage = lookupNumber(mainBattery, "voltage", "value")
+	batteryVoltage, voltageOK := 0.0, false
+	if haveMain {
+		batteryVoltage, voltageOK = leafNumber(t, mainBattery+".voltage")
 	}
-	if batteryVoltage == -1 {
-		batteryVoltage = lookupFirstNumber(payload,
-			[]string{"electrical", "venus", "batteryVoltage", "value"},
-			[]string{"electrical", "venus", "batteryVoltage"},
-			[]string{"electrical", "batteries", "house", "voltage", "value"},
-			[]string{"electrical", "batteries", "house", "voltage"},
-			[]string{"electrical", "batteries", "service", "voltage", "value"},
-			[]string{"electrical", "batteries", "service", "voltage"},
+	if !voltageOK {
+		batteryVoltage, voltageOK = firstNumber(t,
+			"electrical.venus.batteryVoltage",
+			"electrical.batteries.house.voltage",
+			"electrical.batteries.service.voltage",
 		)
 	}
-	if batteryVoltage == -1 {
-		batteryVoltage = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"voltage", "value"})
+	if !voltageOK {
+		batteryVoltage, voltageOK = leafNumberFromAnyChild(t, "electrical.batteries", "voltage")
+	}
+	if !voltageOK {
+		batteryVoltage = -1
 	}
 
 	// Bank current and power are signed, so no number can stand for "unknown":
 	// they are left nil until a path actually reports one.
 	var current, power *float64
-	if mainBattery != nil {
-		if v, ok := lookupNumberOK(mainBattery, "current", "value"); ok {
+	if haveMain {
+		if v, ok := leafNumber(t, mainBattery+".current"); ok {
 			current = &v
 		}
 	}
 	if current == nil {
-		if v, ok := lookupFirstNumberOK(payload,
-			[]string{"electrical", "batteries", "house", "current", "value"},
-			[]string{"electrical", "batteries", "house", "current"},
-			[]string{"electrical", "batteries", "service", "current", "value"},
-			[]string{"electrical", "batteries", "service", "current"},
-		); ok {
+		if v, ok := firstNumber(t, "electrical.batteries.house.current", "electrical.batteries.service.current"); ok {
 			current = &v
 		}
 	}
@@ -577,18 +502,13 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 		state.ChargingCurrentA = &v
 	}
 
-	if mainBattery != nil {
-		if v, ok := lookupNumberOK(mainBattery, "power", "value"); ok {
+	if haveMain {
+		if v, ok := leafNumber(t, mainBattery+".power"); ok {
 			power = &v
 		}
 	}
 	if power == nil {
-		if v, ok := lookupFirstNumberOK(payload,
-			[]string{"electrical", "batteries", "house", "power", "value"},
-			[]string{"electrical", "batteries", "house", "power"},
-			[]string{"electrical", "batteries", "service", "power", "value"},
-			[]string{"electrical", "batteries", "service", "power"},
-		); ok {
+		if v, ok := firstNumber(t, "electrical.batteries.house.power", "electrical.batteries.service.power"); ok {
 			power = &v
 		}
 	}
@@ -605,66 +525,64 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	}
 
 	// venus.totalPanelPower is the Victron system aggregate; sum individual chargers as fallback.
-	solar := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "totalPanelPower", "value"},
-		[]string{"electrical", "venus", "totalPanelPower"},
-	)
-	if solar == -1 {
-		solar = sumNumberFromAllChildren(payload, []string{"electrical", "solar"}, []string{"panelPower", "value"})
-	}
-	if solar >= 0 {
-		state.SolarOutputW = roundTo1(solar)
+	solar, solarOK := t.Number("electrical.venus.totalPanelPower")
+	if solarOK && solar.Value >= 0 {
+		state.SolarOutputW = roundTo1(solar.Value)
+	} else if !solarOK {
+		if sum, ok := sumLeafNumberOverChildren(t, "electrical.solar", "panelPower"); ok && sum >= 0 {
+			state.SolarOutputW = roundTo1(sum)
+		}
 	}
 
-	acOutput := lookupFirstNumber(payload, []string{"electrical", "inverters", "0", "ac", "output", "power", "value"}, []string{"electrical", "inverters", "0", "ac", "output", "power"}, []string{"electrical", "inverters", "0", "acout", "power", "value"}, []string{"electrical", "inverters", "0", "acout", "power"}, []string{"electrical", "inverters", "0", "acOutputPower", "value"}, []string{"electrical", "inverters", "0", "acOutputPower"}, []string{"electrical", "alternators", "0", "ac", "output", "power", "value"}, []string{"electrical", "alternators", "0", "ac", "output", "power"})
-	if acOutput == -1 {
-		acOutput = lookupNumberFromAnyChild(payload, []string{"electrical", "inverters"}, []string{"acout", "power", "value"})
+	acOutput, acOutputOK := firstNumber(t,
+		"electrical.inverters.0.ac.output.power",
+		"electrical.inverters.0.acout.power",
+		"electrical.inverters.0.acOutputPower",
+		"electrical.alternators.0.ac.output.power",
+	)
+	if !acOutputOK {
+		acOutput, acOutputOK = leafNumberFromAnyChild(t, "electrical.inverters", "acout.power")
 	}
-	if acOutput >= 0 {
+	if acOutputOK && acOutput >= 0 {
 		state.ACOutputW = roundTo1(acOutput)
 	}
 
-	dc12Power := lookupFirstNumber(payload, []string{"electrical", "venus", "dcPower", "value"}, []string{"electrical", "venus", "dcPower"}, []string{"electrical", "dc", "12v", "power", "value"}, []string{"electrical", "dc", "12v", "power"}, []string{"electrical", "loads", "12v", "power", "value"}, []string{"electrical", "loads", "12v", "power"})
-	if dc12Power >= 0 {
+	if dc12Power, ok := firstNumber(t, "electrical.venus.dcPower", "electrical.dc.12v.power", "electrical.loads.12v.power"); ok && dc12Power >= 0 {
 		state.DC12VPowerW = roundTo1(dc12Power)
 	}
 
-	dc12Current := lookupFirstNumber(payload, []string{"electrical", "venus", "dcCurrent", "value"}, []string{"electrical", "venus", "dcCurrent"}, []string{"electrical", "dc", "12v", "current", "value"}, []string{"electrical", "dc", "12v", "current"}, []string{"electrical", "loads", "12v", "current", "value"}, []string{"electrical", "loads", "12v", "current"})
-	if dc12Current >= 0 {
+	if dc12Current, ok := firstNumber(t, "electrical.venus.dcCurrent", "electrical.dc.12v.current", "electrical.loads.12v.current"); ok && dc12Current >= 0 {
 		state.DC12VCurrentA = roundTo1(dc12Current)
 	} else if state.DC12VPowerW >= 0 && batteryVoltage > 0 {
 		state.DC12VCurrentA = roundTo1(state.DC12VPowerW / batteryVoltage)
 	}
 
-	dc24Voltage := lookupFirstNumber(payload, []string{"electrical", "dc", "24v", "voltage", "value"}, []string{"electrical", "dc", "24v", "voltage"}, []string{"electrical", "batteries", "starter", "voltage", "value"}, []string{"electrical", "batteries", "starter", "voltage"})
-	if dc24Voltage >= 0 {
+	if dc24Voltage, ok := firstNumber(t, "electrical.dc.24v.voltage", "electrical.batteries.starter.voltage"); ok && dc24Voltage >= 0 {
 		state.DC24VVoltageV = roundTo1(dc24Voltage)
 	} else if batteryVoltage >= 0 {
 		state.DC24VVoltageV = roundTo1(batteryVoltage)
 	}
 
-	acLoads := lookupFirstNumber(payload, []string{"electrical", "ac", "loads", "total", "power", "value"}, []string{"electrical", "ac", "loads", "total", "power"}, []string{"electrical", "ac", "loads", "power", "value"}, []string{"electrical", "ac", "loads", "power"})
-	if acLoads >= 0 {
+	if acLoads, ok := firstNumber(t, "electrical.ac.loads.total.power", "electrical.ac.loads.power"); ok && acLoads >= 0 {
 		state.ACLoadsW = roundTo1(acLoads)
 	} else if state.ACOutputW >= 0 {
 		state.ACLoadsW = state.ACOutputW
 	}
 
-	generatorPower := lookupFirstNumber(payload,
-		[]string{"electrical", "ac", "1", "phase", "A", "realPower", "value"},
-		[]string{"electrical", "ac", "1", "phaseA", "realPower", "value"},
-		[]string{"electrical", "ac", "1", "realPower", "value"},
-	)
-	if generatorPower >= 0 {
+	if generatorPower, ok := firstLeafNumber(t,
+		"electrical.ac.1.phase.A.realPower",
+		"electrical.ac.1.phaseA.realPower",
+		"electrical.ac.1.realPower",
+	); ok && generatorPower >= 0 {
 		state.GeneratorRealPowerW = roundTo1(generatorPower)
 	}
 
 	// Alternators — read port (index 0) and starboard (index 1) separately.
-	state.Alternator0 = readAlternatorInstance(payload, "0")
-	state.Alternator1 = readAlternatorInstance(payload, "1")
-	state.Charger0 = readChargerInstance(payload, "0")
+	state.Alternator0 = readAlternatorInstance(t, "0")
+	state.Alternator1 = readAlternatorInstance(t, "1")
+	state.Charger0 = readChargerInstance(t, "0")
 
-	return state, nil
+	return state
 }
 
 func fetchSignalKSolarState() (solarStateData, error) {
@@ -679,12 +597,15 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		Trend24hTotal: []solarTrendPoint{},
 	}
 
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return state, err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return state, errSignalKNoSelf
 	}
+	return solarStateFromTelemetry(t, state), nil
+}
 
-	datetimeString := firstNonEmptyString(lookupString(payload, "timestamp"), lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"))
+func solarStateFromTelemetry(t telemetryReader, state solarStateData) solarStateData {
+	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -692,14 +613,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	solarMap := lookupAnyMap(payload, "electrical", "solar")
-	if solarMap != nil {
-		ids := make([]string, 0, len(solarMap))
-		for id := range solarMap {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-
+	if ids := t.Children("electrical.solar"); len(ids) > 0 {
 		sumCurrentW := 0.0
 		foundCurrent := false
 		sumTodayKWh := 0.0
@@ -708,12 +622,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		foundYesterday := false
 
 		for i, id := range ids {
-			entry, ok := solarMap[id].(map[string]any)
-			if !ok {
-				continue
-			}
-
-			controller := readSolarController(entry, id, i, state.Datetime)
+			controller := readSolarController(t, "electrical.solar."+id, id, i, state.Datetime)
 			state.Controllers = append(state.Controllers, controller)
 
 			if controller.CurrentW >= 0 {
@@ -750,36 +659,24 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	venusCurrent := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "totalPanelPower", "value"},
-		[]string{"electrical", "venus", "totalPanelPower"},
-	)
-	if venusCurrent >= 0 {
-		state.CurrentW = roundTo1(venusCurrent)
+	if v, ok := t.Number("electrical.venus.totalPanelPower"); ok && v.Value >= 0 {
+		state.CurrentW = roundTo1(v.Value)
 	}
 
-	venusTodayKWh := joulesToKWh(lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "yieldToday", "value"},
-		[]string{"electrical", "venus", "yieldToday"},
-	))
-	if venusTodayKWh >= 0 {
-		state.TodayKWh = roundTo3(venusTodayKWh)
+	if v, ok := t.Number("electrical.venus.yieldToday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			state.TodayKWh = roundTo3(kwh)
+		}
 	}
 
-	venusYesterdayKWh := joulesToKWh(lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "yieldYesterday", "value"},
-		[]string{"electrical", "venus", "yieldYesterday"},
-	))
-	if venusYesterdayKWh >= 0 {
-		state.YesterdayKWh = roundTo3(venusYesterdayKWh)
+	if v, ok := t.Number("electrical.venus.yieldYesterday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			state.YesterdayKWh = roundTo3(kwh)
+		}
 	}
 
-	venusPeakW := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "maxPanelPowerToday", "value"},
-		[]string{"electrical", "venus", "maxPanelPowerToday"},
-	)
-	if venusPeakW >= 0 {
-		state.PeakTodayW = roundTo1(venusPeakW)
+	if v, ok := t.Number("electrical.venus.maxPanelPowerToday"); ok && v.Value >= 0 {
+		state.PeakTodayW = roundTo1(v.Value)
 	}
 
 	if state.CurrentW > 0 {
@@ -790,10 +687,10 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	return state, nil
+	return state
 }
 
-func readSolarController(entry map[string]any, id string, index int, sampleTime time.Time) solarControllerData {
+func readSolarController(t telemetryReader, prefix string, id string, index int, sampleTime time.Time) solarControllerData {
 	controller := solarControllerData{
 		ID:            id,
 		Label:         defaultSolarControllerLabel(index, id),
@@ -804,52 +701,30 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 		Contribution:  -1,
 	}
 
-	powerW := lookupFirstNumber(entry,
-		[]string{"panelPower", "value"},
-		[]string{"panelPower"},
-		[]string{"power", "value"},
-		[]string{"power"},
-	)
-	if powerW >= 0 {
+	if powerW, ok := firstNumber(t, prefix+".panelPower", prefix+".power"); ok && powerW >= 0 {
 		controller.CurrentW = roundTo1(powerW)
 	}
 
-	todayKWh := joulesToKWh(lookupFirstNumber(entry,
-		[]string{"yieldToday", "value"},
-		[]string{"yieldToday"},
-	))
-	if todayKWh >= 0 {
-		controller.TodayKWh = roundTo3(todayKWh)
+	if v, ok := t.Number(prefix + ".yieldToday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			controller.TodayKWh = roundTo3(kwh)
+		}
 	}
 
-	yesterdayKWh := joulesToKWh(lookupFirstNumber(entry,
-		[]string{"yieldYesterday", "value"},
-		[]string{"yieldYesterday"},
-	))
-	if yesterdayKWh >= 0 {
-		controller.YesterdayKWh = roundTo3(yesterdayKWh)
+	if v, ok := t.Number(prefix + ".yieldYesterday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			controller.YesterdayKWh = roundTo3(kwh)
+		}
 	}
 
-	controller.Mode = strings.TrimSpace(firstNonEmptyString(
-		lookupString(entry, "chargingMode", "value"),
-		lookupString(entry, "chargingMode"),
-		lookupString(entry, "state", "value"),
-		lookupString(entry, "state"),
-		lookupString(entry, "mode", "value"),
-		lookupString(entry, "mode"),
-	))
+	controller.Mode = strings.TrimSpace(firstString(t, prefix+".chargingMode", prefix+".state", prefix+".mode"))
 
-	controller.Error = strings.TrimSpace(firstNonEmptyString(
-		lookupString(entry, "error", "value"),
-		lookupString(entry, "error"),
-		lookupString(entry, "alarm", "value"),
-		lookupString(entry, "alarm"),
-	))
+	controller.Error = strings.TrimSpace(firstString(t, prefix+".error", prefix+".alarm"))
 
 	timestamp := firstNonEmptyString(
-		lookupString(entry, "panelPower", "timestamp"),
-		lookupString(entry, "yieldToday", "timestamp"),
-		lookupString(entry, "timestamp"),
+		declaredTimestamp(t, prefix+".panelPower"),
+		declaredTimestamp(t, prefix+".yieldToday"),
+		declaredTimestamp(t, prefix),
 	)
 	if timestamp != "" {
 		parsed, err := time.Parse(time.RFC3339, timestamp)
@@ -902,83 +777,168 @@ func roundTo3(value float64) float64 {
 	return math.Round(value*1000) / 1000
 }
 
-func readAlternatorInstance(payload map[string]any, index string) alternatorInstanceData {
+func readAlternatorInstance(t telemetryReader, index string) alternatorInstanceData {
 	inst := alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1}
+	prefix := "electrical.alternator." + index
 
-	current := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "current", "value"},
-		[]string{"electrical", "alternator", index, "current"},
-	)
-	if current >= 0 {
-		inst.CurrentA = roundTo1(current)
+	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {
+		inst.CurrentA = roundTo1(v.Value)
 	}
 
-	voltage := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "voltage", "value"},
-		[]string{"electrical", "alternator", index, "voltage"},
-	)
-	if voltage >= 0 {
-		inst.VoltageV = roundTo1(voltage)
+	if v, ok := t.Number(prefix + ".voltage"); ok && v.Value >= 0 {
+		inst.VoltageV = roundTo1(v.Value)
 	}
 
-	power := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "power", "value"},
-		[]string{"electrical", "alternator", index, "power"},
-	)
-	if power == -1 && inst.CurrentA >= 0 && inst.VoltageV > 0 {
-		power = roundTo1(inst.CurrentA * inst.VoltageV)
+	power, powerOK := 0.0, false
+	if v, ok := t.Number(prefix + ".power"); ok {
+		power, powerOK = v.Value, true
+	} else if inst.CurrentA >= 0 && inst.VoltageV > 0 {
+		power, powerOK = roundTo1(inst.CurrentA*inst.VoltageV), true
 	}
-	if power >= 0 {
+	if powerOK && power >= 0 {
 		inst.PowerW = roundTo1(power)
 	}
 
-	tempK := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "temperature", "value"},
-		[]string{"electrical", "alternator", index, "temperature"},
-	)
-	if tempK >= 0 {
-		inst.TempC = roundTo1(tempK - 273.15)
+	if v, ok := t.Number(prefix + ".temperature"); ok && v.Value >= 0 {
+		inst.TempC = roundTo1(v.Value - 273.15)
 	}
 
 	return inst
 }
 
-func readChargerInstance(payload map[string]any, index string) chargerInstanceData {
+func readChargerInstance(t telemetryReader, index string) chargerInstanceData {
 	inst := chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}
+	prefix := "electrical.chargers." + index
 
-	current := lookupFirstNumber(payload,
-		[]string{"electrical", "chargers", index, "current", "value"},
-		[]string{"electrical", "chargers", index, "current"},
-	)
-	if current >= 0 {
-		inst.CurrentA = roundTo1(current)
+	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {
+		inst.CurrentA = roundTo1(v.Value)
 	}
 
-	acIn1Current := lookupFirstNumber(payload,
-		[]string{"electrical", "chargers", index, "acin", "1", "current", "value"},
-		[]string{"electrical", "chargers", index, "acin", "1", "current"},
-	)
-	if acIn1Current >= 0 {
-		inst.ACIn1CurrentA = roundTo1(acIn1Current)
+	if v, ok := t.Number(prefix + ".acin.1.current"); ok && v.Value >= 0 {
+		inst.ACIn1CurrentA = roundTo1(v.Value)
 	}
 
-	chargingMode := strings.TrimSpace(firstNonEmptyString(
-		lookupString(payload, "electrical", "chargers", index, "chargingMode", "value"),
-		lookupString(payload, "electrical", "chargers", index, "chargingMode"),
-	))
-	if chargingMode != "" {
+	if chargingMode := strings.TrimSpace(firstString(t, prefix+".chargingMode")); chargingMode != "" {
 		inst.ChargingMode = chargingMode
 	}
 
-	errorValue := strings.TrimSpace(firstNonEmptyString(
-		lookupString(payload, "electrical", "chargers", index, "error", "value"),
-		lookupString(payload, "electrical", "chargers", index, "error"),
-	))
-	if errorValue != "" {
+	if errorValue := strings.TrimSpace(firstString(t, prefix+".error")); errorValue != "" {
 		inst.Error = errorValue
 	}
 
 	return inst
+}
+
+// firstNumber reads the first of paths that holds a number.
+func firstNumber(t telemetryReader, paths ...string) (float64, bool) {
+	for _, path := range paths {
+		if v, ok := t.Number(path); ok {
+			return v.Value, true
+		}
+	}
+	return 0, false
+}
+
+// firstString returns the first non-empty string among paths, "" if none.
+func firstString(t telemetryReader, paths ...string) string {
+	for _, path := range paths {
+		if s, ok := t.String(path); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// leafNumber reads the number held by the leaf at exactly path - Sample's
+// form, for the readers that never accepted a bare value there.
+func leafNumber(t telemetryReader, path string) (float64, bool) {
+	sample := t.Sample(path)
+	if !sample.Present {
+		return 0, false
+	}
+	return numericTelemetryValue(sample.Value)
+}
+
+func firstLeafNumber(t telemetryReader, paths ...string) (float64, bool) {
+	for _, path := range paths {
+		if v, ok := leafNumber(t, path); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// leafNumberFromAnyChild reads suffix under the first child of parent, in
+// sorted order, that has it.
+func leafNumberFromAnyChild(t telemetryReader, parent, suffix string) (float64, bool) {
+	for _, child := range t.Children(parent) {
+		if v, ok := leafNumber(t, parent+"."+child+"."+suffix); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// sumLeafNumberOverChildren sums suffix across every child of parent that
+// has it; ok is false when none does.
+func sumLeafNumberOverChildren(t telemetryReader, parent, suffix string) (float64, bool) {
+	sum, found := 0.0, false
+	for _, child := range t.Children(parent) {
+		if v, ok := leafNumber(t, parent+"."+child+"."+suffix); ok {
+			sum += v
+			found = true
+		}
+	}
+	return sum, found
+}
+
+// lookupMainBattery names the battery with valid SOC data and the highest
+// absolute current — i.e. the actively monitored house bank — as its path,
+// "electrical.batteries.<id>".
+func lookupMainBattery(t telemetryReader) (string, bool) {
+	best, found := "", false
+	bestAbsCurrent := -1.0
+
+	for _, id := range t.Children("electrical.batteries") {
+		path := "electrical.batteries." + id
+
+		soc, ok := leafNumber(t, path+".capacity.stateOfCharge")
+		if !ok || soc < 0 || soc > 1.01 {
+			continue
+		}
+
+		current, ok := leafNumber(t, path+".current")
+		if !ok {
+			continue
+		}
+
+		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
+			bestAbsCurrent = absCurrent
+			best, found = path, true
+		}
+	}
+
+	return best, found
+}
+
+// declaredTimestamp is the source timestamp the node at path declares on
+// itself, "" when it declares none. The wind, engine and solar readers judge
+// recency by one named leaf's own clock, in a set order, rather than by the
+// newest anywhere beneath it (Timestamp).
+func declaredTimestamp(t telemetryReader, path string) string {
+	s, _ := t.String(path + ".timestamp")
+	return s
+}
+
+// subtreeAgeSeconds is how long before ref the newest source timestamp at or
+// under path was written, to one decimal, or -1 when there is none - the
+// last_update_age_s the tiles still read.
+func subtreeAgeSeconds(t telemetryReader, path string, ref time.Time) float64 {
+	stamp, ok := t.Timestamp(path)
+	if !ok {
+		return -1
+	}
+	return roundTo1(clampAge(ref.Sub(stamp)).Seconds())
 }
 
 // nearbyVesselMaxAge drops AIS contacts whose position has not been refreshed
@@ -1321,13 +1281,16 @@ func fetchSignalKVesselNameMap() (map[string]string, error) {
 }
 
 func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return nil, time.Now().UTC(), err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return nil, time.Now().UTC(), errSignalKNoSelf
 	}
+	tanks, datetime := tanksFromTelemetry(t, labelOverrides, time.Now().UTC())
+	return tanks, datetime, nil
+}
 
-	datetime := time.Now().UTC()
-	datetimeString := firstNonEmptyString(lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"), lookupString(payload, "timestamp"))
+func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, datetime time.Time) ([]tankLevelData, time.Time) {
+	datetimeString := firstString(t, "navigation.datetime", "timestamp")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -1335,9 +1298,9 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 		}
 	}
 
-	tanksMap := lookupAnyMap(payload, "tanks")
-	if tanksMap == nil {
-		return []tankLevelData{}, datetime, nil
+	present := t.Children("tanks")
+	if len(present) == 0 {
+		return []tankLevelData{}, datetime
 	}
 
 	categoryOrder := []string{"freshWater", "fuel", "blackWater", "greyWater", "liveWell", "lubrication", "water", "wasteWater"}
@@ -1345,14 +1308,18 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 	for _, category := range categoryOrder {
 		knownCategory[category] = struct{}{}
 	}
+	isPresent := map[string]bool{}
+	for _, category := range present {
+		isPresent[category] = true
+	}
 
-	orderedCategories := make([]string, 0, len(tanksMap))
+	orderedCategories := make([]string, 0, len(present))
 	for _, category := range categoryOrder {
-		if _, ok := tanksMap[category]; ok {
+		if isPresent[category] {
 			orderedCategories = append(orderedCategories, category)
 		}
 	}
-	for category := range tanksMap {
+	for _, category := range present {
 		if _, ok := knownCategory[category]; ok {
 			continue
 		}
@@ -1361,34 +1328,15 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 
 	tanks := make([]tankLevelData, 0)
 	for _, category := range orderedCategories {
-		categoryRaw, ok := tanksMap[category]
-		if !ok {
-			continue
-		}
+		for _, entryID := range t.Children("tanks." + category) {
+			entry := "tanks." + category + "." + entryID
 
-		categoryEntries, ok := categoryRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		entryIDs := make([]string, 0, len(categoryEntries))
-		for entryID := range categoryEntries {
-			entryIDs = append(entryIDs, entryID)
-		}
-		sort.Strings(entryIDs)
-
-		for _, entryID := range entryIDs {
-			rawEntry := categoryEntries[entryID]
-			entry, ok := rawEntry.(map[string]any)
-			if !ok {
+			reading, ok := t.Number(entry + ".currentLevel")
+			if !ok || reading.Value < 0 {
 				continue
 			}
 
-			level := lookupFirstNumber(entry, []string{"currentLevel", "value"}, []string{"currentLevel"})
-			if level < 0 {
-				continue
-			}
-
+			level := reading.Value
 			if level <= 1 {
 				level *= 100
 			}
@@ -1402,13 +1350,13 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 			// Mirrors readSolarController (ADR 0068): each tank's age comes
 			// from its own subtree, so one dead sender does not condemn
 			// every tank on the boat.
-			lastUpdateAge := freshestTimestampAge(entry, datetime)
+			lastUpdateAge := subtreeAgeSeconds(t, entry, datetime)
 
 			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level, LastUpdateAge: lastUpdateAge})
 		}
 	}
 
-	return tanks, datetime, nil
+	return tanks, datetime
 }
 
 func loadTankLabelOverrides(settingsPath string) map[string]string {
@@ -1527,38 +1475,6 @@ func lookupNumber(payload map[string]any, keys ...string) float64 {
 	}
 }
 
-// lookupNumberOK is lookupNumber for signed values, where -1 is a real reading.
-func lookupNumberOK(payload map[string]any, keys ...string) (float64, bool) {
-	var current any = payload
-	for _, key := range keys {
-		asMap, ok := current.(map[string]any)
-		if !ok {
-			return 0, false
-		}
-		next, ok := asMap[key]
-		if !ok {
-			return 0, false
-		}
-		current = next
-	}
-	switch v := current.(type) {
-	case float64:
-		return v, true
-	case int:
-		return float64(v), true
-	}
-	return 0, false
-}
-
-func lookupFirstNumberOK(payload map[string]any, paths ...[]string) (float64, bool) {
-	for _, path := range paths {
-		if v, ok := lookupNumberOK(payload, path...); ok {
-			return v, true
-		}
-	}
-	return 0, false
-}
-
 func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
 	var current any = payload
 	for _, key := range keys {
@@ -1581,148 +1497,8 @@ func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
 	return false, false
 }
 
-func lookupFirstNumber(payload map[string]any, paths ...[]string) float64 {
-	for _, path := range paths {
-		value := lookupNumber(payload, path...)
-		if value != -1 {
-			return value
-		}
-	}
-
-	return -1
-}
-
-func lookupNumberFromAnyChild(payload map[string]any, prefix []string, suffix []string) float64 {
-	parent := lookupAnyMap(payload, prefix...)
-	if parent == nil {
-		return -1
-	}
-
-	for _, rawChild := range parent {
-		child, ok := rawChild.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		value := lookupNumber(child, suffix...)
-		if value != -1 {
-			return value
-		}
-	}
-
-	return -1
-}
-
-// sumNumberFromAllChildren sums a numeric field across all children of a map node.
-// Returns -1 if no children have the field.
-func sumNumberFromAllChildren(payload map[string]any, prefix []string, suffix []string) float64 {
-	parent := lookupAnyMap(payload, prefix...)
-	if parent == nil {
-		return -1
-	}
-
-	sum := 0.0
-	found := false
-	for _, rawChild := range parent {
-		child, ok := rawChild.(map[string]any)
-		if !ok {
-			continue
-		}
-		value := lookupNumber(child, suffix...)
-		if value != -1 {
-			sum += value
-			found = true
-		}
-	}
-
-	if !found {
-		return -1
-	}
-	return sum
-}
-
-// lookupMainBattery returns the battery sub-object with valid SOC data and the
-// highest absolute current — i.e. the actively monitored house bank.
-func lookupMainBattery(payload map[string]any) map[string]any {
-	batteries := lookupAnyMap(payload, "electrical", "batteries")
-	if batteries == nil {
-		return nil
-	}
-
-	var best map[string]any
-	bestAbsCurrent := -1.0
-
-	for _, rawBattery := range batteries {
-		battery, ok := rawBattery.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		soc := lookupNumber(battery, "capacity", "stateOfCharge", "value")
-		if soc == -1 || soc < 0 || soc > 1.01 {
-			continue
-		}
-
-		current := lookupNumber(battery, "current", "value")
-		if current == -1 {
-			continue
-		}
-
-		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
-			bestAbsCurrent = absCurrent
-			best = battery
-		}
-	}
-
-	return best
-}
-
-// freshestTimestampAge reports how many seconds before sampleTime the most
-// recent RFC3339 "timestamp" anywhere in the subtree was written.
-//
-// It returns -1 when the subtree carries no usable timestamp at all. That is
-// deliberately distinct from 0: an age we cannot determine must never be
-// presented as freshly measured.
-func freshestTimestampAge(node any, sampleTime time.Time) float64 {
-	newest := time.Time{}
-
-	var walk func(any)
-	walk = func(current any) {
-		entry, ok := current.(map[string]any)
-		if !ok {
-			return
-		}
-		for key, child := range entry {
-			if key == "timestamp" {
-				raw, isString := child.(string)
-				if !isString {
-					continue
-				}
-				parsed, err := time.Parse(time.RFC3339, raw)
-				if err == nil && parsed.After(newest) {
-					newest = parsed.UTC()
-				}
-				continue
-			}
-			walk(child)
-		}
-	}
-	walk(node)
-
-	if newest.IsZero() {
-		return -1
-	}
-
-	age := sampleTime.Sub(newest).Seconds()
-	if age < 0 {
-		// Source clock is marginally ahead of the vessel clock; it is current.
-		return 0
-	}
-	return roundTo1(age)
-}
-
 // freshestAge reduces several last_update_age_s values (each -1 for
-// "unknown", per freshestTimestampAge) down to the one a tile should show:
+// "unknown", per subtreeAgeSeconds) down to the one a tile should show:
 // the freshest (minimum) of whichever inputs are actually known. This is
 // the same "one dead controller among four does not condemn the total"
 // reduction ADR 0068 established for solarStateData.LastUpdateAge across its
@@ -2021,11 +1797,7 @@ func loadBoatVesselPrefix(settingsPath string) string {
 }
 
 func fetchSignalKSelfName() string {
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
+	return strings.TrimSpace(firstString(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()), "name", "design.name"))
 }
 
 func matchesExcludedName(candidate string, excludedNames []string) bool {

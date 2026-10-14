@@ -269,10 +269,9 @@ func (n *sensorNamer) feedsAnotherBank(context, source, skip string) bool {
 // installationDescription1 of its sources, then their product name. Empty
 // when the bus says nothing.
 func (n *sensorNamer) busBatteryName(id string) string {
-	if node := n.snapshot.nodeAt("electrical.batteries." + id + ".name"); node != nil {
-		if name := strings.TrimSpace(asString(node["value"])); name != "" {
-			return name
-		}
+	leaf := n.snapshot.liveSelfTelemetry(time.Now().UTC()).Sample("electrical.batteries." + id + ".name")
+	if name := strings.TrimSpace(asString(leaf.Value)); name != "" {
+		return name
 	}
 	sources := n.publishers(id)
 	for _, source := range sources {

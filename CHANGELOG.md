@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- The tidal current on the Wind tile and in Anchor Watch now shows which way
+  it is setting as well as its rate when the instruments report the two
+  together. Before, it showed only the rate, or nothing at all.
+- A moment with no GPS position, or only half of one, no longer raises a GNSS
+  alarm at anchor when the next fix arrives. The boat's position holds at the
+  last good fix through the gap.
+
 ## [0.45.0] - 2026-10-14
 
 ### Added

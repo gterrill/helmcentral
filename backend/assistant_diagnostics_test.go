@@ -259,15 +259,15 @@ func TestSummarizeSignalKSources_SortsQuietSourcesFirstAndHandlesUnknownAge(t *t
 	}
 }
 
-// ── collectSignalKPathSamples: node timestamp over pathSeen ─────────────
+// ── telemetryView.pathSamples: node timestamp over pathSeen ─────────────
 
-// TestCollectSignalKPathSamples_PrefersNodeTimestampOverPathSeen exercises
+// TestPathSamples_PrefersNodeTimestampOverPathSeen exercises
 // the exact scenario signalk_paths.go's pathAge comment documents: SignalK
 // replays its retained model on reconnect, which resets pathSeen (arrival
 // time) to "now" for a path that has not actually reported since - the
 // node's own declared timestamp must win, or a source dead for days would
 // read as freshly updated on every reconnect.
-func TestCollectSignalKPathSamples_PrefersNodeTimestampOverPathSeen(t *testing.T) {
+func TestPathSamples_PrefersNodeTimestampOverPathSeen(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	oldTimestamp := "2026-09-21T00:30:00.000Z"
 	// The delta's own receive time ("now" at apply time) simulates a replay
@@ -285,7 +285,7 @@ func TestCollectSignalKPathSamples_PrefersNodeTimestampOverPathSeen(t *testing.T
 	snapshot.setSelfContext("vessels.self")
 
 	now := time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)
-	samples := collectSignalKPathSamples(snapshot, "vessels.self", snapshot.selfTree(), now)
+	samples := snapshot.selfTelemetryAt(now).pathSamples()
 	if len(samples) != 1 {
 		t.Fatalf("expected 1 sample, got %d", len(samples))
 	}

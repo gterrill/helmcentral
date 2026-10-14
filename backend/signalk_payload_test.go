@@ -107,24 +107,30 @@ func selfSnapshotWithDepth(depth float64) *signalKSnapshot {
 	return snapshot
 }
 
-func TestSignalKSelfPayloadReadsFromSnapshot(t *testing.T) {
+func TestSelfTelemetryReadsFromSnapshot(t *testing.T) {
 	withGlobalSnapshot(t, selfSnapshotWithDepth(2.5))
 
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		t.Fatalf("signalKSelfPayload: unexpected error %v", err)
+	telemetry := globalSignalKSnapshot.selfTelemetry()
+	if !telemetry.HasSelf() {
+		t.Fatal("expected a self tree")
 	}
-	if got := lookupNumber(payload, "environment", "depth", "belowTransducer", "value"); got != 2.5 {
-		t.Fatalf("depth: got %v, want 2.5", got)
+	if got, ok := telemetry.Number("environment.depth.belowTransducer"); !ok || got.Value != 2.5 {
+		t.Fatalf("depth: got %+v ok=%v, want 2.5", got, ok)
 	}
 }
 
 // The fallback policy is the point: an empty stream is an outage and must be
 // reported as one. There is no REST path left to quietly borrow.
-func TestSignalKSelfPayloadErrorsWhenStreamHasNoData(t *testing.T) {
+func TestOwnBoatReadersErrorWhenStreamHasNoData(t *testing.T) {
 	withGlobalSnapshot(t, newSignalKSnapshot())
 
-	if _, err := signalKSelfPayload(); err == nil {
+	if globalSignalKSnapshot.selfTelemetry().HasSelf() {
+		t.Fatal("no hello frame yet: there is no self tree")
+	}
+	if _, err := fetchSignalKVesselState(); err == nil {
+		t.Fatalf("expected an error when the stream has no data, got nil")
+	}
+	if _, err := fetchSignalKElectricalState(); err == nil {
 		t.Fatalf("expected an error when the stream has no data, got nil")
 	}
 }

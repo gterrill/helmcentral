@@ -1046,7 +1046,7 @@ func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 		},
 	}
 
-	drift, setDeg, _ := parseSignalKCurrent(payload)
+	drift, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
 	if !approxEqual(drift, 1.2, 0.05) {
 		t.Fatalf("expected drift ~1.2 kt, got %v", drift)
 	}
@@ -1065,7 +1065,7 @@ func TestParseSignalKCurrent_DoesNotTreatSetMagneticAsTrue(t *testing.T) {
 		},
 	}
 
-	_, setDeg, _ := parseSignalKCurrent(payload)
+	_, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
 	if setDeg != -1 {
 		t.Fatalf("expected -1 (no reliable true bearing) when only setMagnetic is present, got %v", setDeg)
 	}
@@ -1081,7 +1081,7 @@ func TestParseSignalKCurrent_ReadsDriftImpact(t *testing.T) {
 		},
 	}
 
-	_, _, driftImpactKts := parseSignalKCurrent(payload)
+	_, _, driftImpactKts := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
 	if driftImpactKts == nil {
 		t.Fatalf("expected driftImpactKts to be present")
 	}
@@ -1099,7 +1099,7 @@ func TestParseSignalKCurrent_NilDriftImpactWhenMissing(t *testing.T) {
 		},
 	}
 
-	_, _, driftImpactKts := parseSignalKCurrent(payload)
+	_, _, driftImpactKts := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
 	if driftImpactKts != nil {
 		t.Fatalf("expected nil driftImpactKts when driftImpact is absent, got %v", *driftImpactKts)
 	}
@@ -2823,5 +2823,78 @@ func TestParseSignalKHistoryValues_SkipsMalformedPositionArrays(t *testing.T) {
 func TestParseSignalKHistoryValues_ErrorsOnUndecodableBody(t *testing.T) {
 	if _, err := parseSignalKHistoryValues([]byte("not json")); err == nil {
 		t.Fatalf("expected an error for a body that isn't valid JSON")
+	}
+}
+
+// The SignalK spec publishes environment.current as one object leaf,
+// {drift, setTrue, setMagnetic}. Set must come out of it the same way it
+// does when drift and setTrue are separate leaves.
+func TestParseSignalKCurrent_ReadsSetFromAnObjectCurrentLeaf(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"value": map[string]any{"drift": 0.643, "setTrue": 2.4697, "setMagnetic": 1.0},
+			},
+		},
+	}
+
+	drift, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
+	if !approxEqual(drift, 1.2, 0.05) {
+		t.Fatalf("expected drift ~1.2 kt, got %v", drift)
+	}
+	if !approxEqual(setDeg, 141.5, 0.1) {
+		t.Fatalf("expected set ~141.5 deg from the object's setTrue, got %v", setDeg)
+	}
+}
+
+// Some sources publish drift as an object leaf carrying both its rate and
+// its direction. The direction is the set and must not be dropped.
+func TestParseSignalKCurrent_ReadsSetFromAnObjectDriftLeaf(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift": map[string]any{"value": map[string]any{"speed": 0.643, "direction": 2.4697}},
+			},
+		},
+	}
+
+	drift, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
+	if !approxEqual(drift, 1.2, 0.05) {
+		t.Fatalf("expected drift ~1.2 kt, got %v", drift)
+	}
+	if !approxEqual(setDeg, 141.5, 0.1) {
+		t.Fatalf("expected set ~141.5 deg from the drift object's direction, got %v", setDeg)
+	}
+}
+
+// Only setMagnetic in the object: still no true bearing.
+func TestParseSignalKCurrent_ObjectCurrentLeafDoesNotTreatSetMagneticAsTrue(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"value": map[string]any{"drift": 0.5, "setMagnetic": 1.5707963267948966},
+			},
+		},
+	}
+
+	if _, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{})); setDeg != -1 {
+		t.Fatalf("expected -1 with only setMagnetic, got %v", setDeg)
+	}
+}
+
+// A negative radian set is still radians, the same range the wind angle
+// readers use: -1 rad is ~302.7 deg, not -1 deg wrapped to 359.
+func TestParseSignalKCurrent_NegativeRadianSetIsRadians(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift":   map[string]any{"value": 0.5},
+				"setTrue": map[string]any{"value": -1.0},
+			},
+		},
+	}
+
+	if _, setDeg, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{})); !approxEqual(setDeg, 302.7, 0.1) {
+		t.Fatalf("expected ~302.7 deg, got %v", setDeg)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -77,11 +78,7 @@ var (
 // -- signalk_discovery.go is the unrelated LAN scanner), plus each
 // detector's current setup status against vessel.
 func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCandidatesResponse {
-	tree := snapshot.selfTree()
-	var paths []signalKPath
-	if tree != nil {
-		paths = collectSignalKPaths(tree)
-	}
+	paths := snapshot.liveSelfTelemetry(time.Now().UTC()).Paths()
 
 	engineInstances := map[string]bool{}
 	batteryInstances := map[string]bool{}

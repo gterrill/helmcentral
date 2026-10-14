@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -109,52 +108,39 @@ const radarObservationMaxAge = 60 * time.Second
 const radarPresenceMaxAge = 5 * time.Minute
 
 func radarsFromSnapshot(snapshot *signalKSnapshot, now time.Time) []radarInfo {
-	tree := snapshot.selfTree()
-	if tree == nil {
+	telemetry := snapshot.liveSelfTelemetry(now)
+
+	// Children is sorted: a stable order keeps the payload from reshuffling
+	// between polls for no reason, and makes "poll only the first radar"
+	// (radarPoller.pollOnce) deterministic rather than a coin flip between
+	// fur6424A and fur6424B.
+	ids := telemetry.Children("radars")
+	if len(ids) == 0 {
 		return nil
 	}
-	selfCtx := snapshot.selfContext()
-
-	radarsTree, ok := tree["radars"].(map[string]any)
-	if !ok || len(radarsTree) == 0 {
-		return nil
-	}
-
-	ids := make([]string, 0, len(radarsTree))
-	for id := range radarsTree {
-		ids = append(ids, id)
-	}
-	// Map iteration order is random; a stable order keeps the payload from
-	// reshuffling between polls for no reason, and makes "poll only the
-	// first radar" (radarPoller.pollOnce) deterministic rather than a coin
-	// flip between fur6424A and fur6424B.
-	sort.Strings(ids)
 
 	radars := make([]radarInfo, 0, len(ids))
 	for _, id := range ids {
-		// Two "value" hops, not one. The plugin's delta value for a control is
-		// itself an object, {"value": ..., "timestamp": ...}, and applyDelta
-		// stores that object under its own "value" key. mayara's REST shape is
-		// flat by comparison, so a fixture taken from REST, or hand-built with
-		// a bare scalar, reads one level too shallow and silently yields "".
-		// Pinned by TestRadarsFromSnapshotReadsTheCapturedControlDeltaShape.
+		// Two "value" hops, not one: see mayaraControlValue.
+		prefix := "radars." + id + ".controls"
 		name := firstNonEmptyString(
-			lookupString(radarsTree, id, "controls", "userName", "value", "value"),
-			lookupString(radarsTree, id, "controls", "modelName", "value", "value"),
+			mayaraControlString(telemetry, prefix+".userName"),
+			mayaraControlString(telemetry, prefix+".modelName"),
 		)
-		controls := lookupAnyMap(radarsTree, id, "controls")
+		controls := telemetry.Children(prefix)
 
 		// Presence is a freshness question, not a lookup.
-		seen := newestControlReceipt(snapshot, selfCtx, id, controls)
+		seen := newestControlReceipt(snapshot, telemetry.context, id, controls)
 		if seen.IsZero() || now.Sub(seen) > radarPresenceMaxAge {
 			continue
 		}
 
+		power, powerOK := mayaraControlNumber(telemetry, prefix+".power")
 		radars = append(radars, radarInfo{
 			ID:           id,
 			Name:         name,
-			Transmitting: lookupNumber(radarsTree, id, "controls", "power", "value", "value") == mayaraTransmitPowerValue,
-			clockNow:     freshestControlTimestamp(controls),
+			Transmitting: powerOK && power == mayaraTransmitPowerValue,
+			clockNow:     freshestControlTimestamp(telemetry, prefix, controls),
 		})
 	}
 	return radars
@@ -480,12 +466,20 @@ func observedTargets(targets []mayaraArpaTarget, radar radarInfo) []mayaraArpaTa
 // envelope timestamp (control["timestamp"]) as the fallback. ok is false when
 // neither parses, which callers treat as no information.
 func mayaraControlStamp(control map[string]any) (time.Time, bool) {
+	own, _ := control["timestamp"].(string)
+	return mayaraStamp(control["value"], own)
+}
+
+// mayaraStamp is mayaraControlStamp over a control leaf's value and the
+// timestamp the leaf declares on itself ("" for none): mayara's own inner
+// timestamp wins, the leaf's is the fallback.
+func mayaraStamp(value any, own string) (time.Time, bool) {
 	stamp, ok := "", false
-	if inner, innerOK := control["value"].(map[string]any); innerOK {
+	if inner, innerOK := value.(map[string]any); innerOK {
 		stamp, ok = inner["timestamp"].(string)
 	}
-	if !ok {
-		stamp, ok = control["timestamp"].(string)
+	if !ok && own != "" {
+		stamp, ok = own, true
 	}
 	if !ok {
 		return time.Time{}, false
@@ -497,18 +491,48 @@ func mayaraControlStamp(control map[string]any) (time.Time, bool) {
 	return parsed, true
 }
 
+// mayaraControlValue is the value inside one mayara control leaf. The
+// plugin's delta value for a control is itself an object, {"value": ...,
+// "timestamp": ...}, and applyDelta stores that object under the leaf's own
+// "value" key - two "value" hops, not one. mayara's REST shape is flat by
+// comparison, so a fixture taken from REST, or hand-built with a bare
+// scalar, reads as absent. Pinned by
+// TestRadarsFromSnapshotReadsTheCapturedControlDeltaShape.
+func mayaraControlValue(t telemetryReader, path string) (any, bool) {
+	inner, ok := t.Sample(path).Value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	value, ok := inner["value"]
+	return value, ok
+}
+
+func mayaraControlString(t telemetryReader, path string) string {
+	value, _ := mayaraControlValue(t, path)
+	s, _ := value.(string)
+	return s
+}
+
+func mayaraControlNumber(t telemetryReader, path string) (float64, bool) {
+	value, ok := mayaraControlValue(t, path)
+	if !ok {
+		return 0, false
+	}
+	return numericTelemetryValue(value)
+}
+
 // freshestControlTimestamp reads mayara's current time off the newest control
 // it has published for a radar. Controls stream continuously while mayara is
 // connected to the radar, so this advances even when no target does, which is
 // exactly what makes it a usable reference for target staleness.
-func freshestControlTimestamp(controls map[string]any) time.Time {
+func freshestControlTimestamp(t telemetryReader, prefix string, controls []string) time.Time {
 	var newest time.Time
-	for _, raw := range controls {
-		control, ok := raw.(map[string]any)
-		if !ok {
+	for _, name := range controls {
+		sample := t.Sample(prefix + "." + name)
+		if !sample.Present {
 			continue
 		}
-		parsed, ok := mayaraControlStamp(control)
+		parsed, ok := mayaraStamp(sample.Value, sample.Timestamp)
 		if !ok {
 			continue
 		}
@@ -524,9 +548,9 @@ func freshestControlTimestamp(controls map[string]any) time.Time {
 // held for that control. A bare receipt does not count: SignalK replays the
 // retained tree on every subscribe, so a radar switched off hours ago
 // "arrives" again after each restart (ADR 0062, amendment 2026-10-05).
-func newestControlReceipt(snapshot *signalKSnapshot, selfCtx, radarID string, controls map[string]any) time.Time {
+func newestControlReceipt(snapshot *signalKSnapshot, selfCtx, radarID string, controls []string) time.Time {
 	var newest time.Time
-	for name := range controls {
+	for _, name := range controls {
 		seen := snapshot.controlAdvancedAt(selfCtx, "radars."+radarID+".controls."+name)
 		if seen.After(newest) {
 			newest = seen

@@ -17,7 +17,7 @@ import (
 // This file's three checks are deliberately pure functions taking a
 // precomputed window/summary, not raw time-series accumulators: the caller
 // (the anomaly detector goroutine, anomaly_detector.go) owns the actual
-// 15-minute and 5-minute rolling windows, because computeDerivedPathsFromTree
+// 15-minute and 5-minute rolling windows, because computeDerivedPathsFromView
 // is recomputed concurrently by several readers and cannot itself hold that
 // state (the same reasoning anomaly_battery.go's fullBankChargingLevel
 // already applies to dV/dt).
@@ -428,18 +428,9 @@ const inputValidityMaxAge = 30 * time.Second
 // see anomaly_detector.go. A detector with an invalid input publishes
 // nothing, exactly like fullBankChargingLevel's own valid func.
 func inputValidity(snapshot *signalKSnapshot, path string, now time.Time) bool {
-	self := snapshot.selfContext()
-	if self == "" {
-		return false
-	}
-
-	node := snapshot.nodeAt(path)
-	if node == nil {
-		return false
-	}
-
-	value, ok := numericNodeValue(node)
-	if !ok {
+	sample := snapshot.liveSelfTelemetry(now).Sample(path)
+	value, ok := numericTelemetryValue(sample.Value)
+	if !sample.Present || !ok {
 		return false
 	}
 
@@ -447,21 +438,11 @@ func inputValidity(snapshot *signalKSnapshot, path string, now time.Time) bool {
 		return false
 	}
 
-	seen := snapshot.lastSeen(self, path)
+	// Arrival time, as this check has always timed it.
+	seen := sample.Received
 	if seen.IsZero() || now.Sub(seen) > inputValidityMaxAge {
 		return false
 	}
 
 	return true
-}
-
-// numericNodeValue extracts a float64 from a snapshot node's "value" key,
-// the same shape applyDelta builds every leaf into.
-func numericNodeValue(node map[string]any) (float64, bool) {
-	raw, ok := node["value"]
-	if !ok {
-		return 0, false
-	}
-	v, ok := raw.(float64)
-	return v, ok
 }

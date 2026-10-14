@@ -218,19 +218,7 @@ func collisionProfileEvent(kind, state, message string) alarmEvent {
 // vesselNavigationState reads navigation.state, which signalk-autostate keeps
 // current from anchor position, movement and engine state.
 func vesselNavigationState(snapshot *signalKSnapshot) string {
-	tree := snapshot.selfTree()
-	if tree == nil {
-		return ""
-	}
-	navigation, ok := tree["navigation"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	node, ok := navigation["state"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	state, _ := node["value"].(string)
+	state, _ := snapshot.liveSelfTelemetry(time.Now().UTC()).Sample("navigation.state").Value.(string)
 	return state
 }
 

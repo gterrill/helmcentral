@@ -36,6 +36,10 @@ type gnssPositionValidation struct {
 }
 
 type gnssObservedSample struct {
+	// HasPosition is false when the tick carried no fix (Latitude and
+	// Longitude are then meaningless): such a tick is never compared for a
+	// jump and never becomes the last sample.
+	HasPosition    bool
 	Latitude       float64
 	Longitude      float64
 	DepthMeters    float64
@@ -60,15 +64,15 @@ var lastTrustedGNSSLongitude float64
 var lastTrustedGNSSPositionValid bool
 var gnssHeuristic gnssHeuristicState
 
-func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation {
-	qualityIndicator := parseGNSSQualityIndicator(payload)
-	hdop := parseGNSSHDOP(payload)
-	snrs := parseGNSSSatellitesSNR(payload)
+func parseGNSSPositionValidation(t telemetryReader) gnssPositionValidation {
+	qualityIndicator := parseGNSSQualityIndicator(t)
+	hdop := parseGNSSHDOP(t)
+	snrs := parseGNSSSatellitesSNR(t)
 	status, reason := classifyGNSSPositionValidation(qualityIndicator, hdop, snrs)
 	return gnssPositionValidation{
 		QualityIndicator: qualityIndicator,
 		HDOP:             hdop,
-		Satellites:       gnssSatelliteCount(payload),
+		Satellites:       gnssSatelliteCount(t),
 		Status:           status,
 		Reason:           reason,
 		Trusted:          status == "trusted",
@@ -128,7 +132,7 @@ func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedS
 		}
 	}
 
-	if gnssHeuristic.lastSample != nil && sample.HasObservedAt && gnssHeuristic.lastSample.HasObservedAt {
+	if sample.HasPosition && gnssHeuristic.lastSample != nil && sample.HasObservedAt && gnssHeuristic.lastSample.HasObservedAt {
 		dt := sample.ObservedAt.Sub(gnssHeuristic.lastSample.ObservedAt)
 		if dt > 0 {
 			distance := haversineMeters(
@@ -161,7 +165,7 @@ func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedS
 		}
 	}
 
-	if sample.Latitude >= -90 && sample.Latitude <= 90 && sample.Longitude >= -180 && sample.Longitude <= 180 {
+	if sample.HasPosition && sample.Latitude >= -90 && sample.Latitude <= 90 && sample.Longitude >= -180 && sample.Longitude <= 180 {
 		copySample := sample
 		gnssHeuristic.lastSample = &copySample
 	}
@@ -273,52 +277,57 @@ func classifyGNSSPositionValidation(qualityIndicator int, hdop float64, snrs []f
 	}
 }
 
-func parseGNSSSatellitesSNR(payload map[string]any) []float64 {
-	var current any = payload
-	for _, key := range []string{"navigation", "gnss", "satellites"} {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = m[key]
-		if current == nil {
-			return nil
-		}
-	}
-
-	if m, ok := current.(map[string]any); ok {
-		if val, hasValue := m["value"]; hasValue {
-			current = val
-		}
-	}
+// parseGNSSSatellitesSNR reads the per-satellite SNR figures this boat's
+// server publishes at navigation.gnss.satellites, as an array or a map of
+// satellite objects, either as a leaf's value or bare (a REST-shaped tree).
+// nil when there is none, or the path holds a plain count.
+func parseGNSSSatellitesSNR(t telemetryReader) []float64 {
+	const path = "navigation.gnss.satellites"
 
 	var snrs []float64
-
-	if slice, ok := current.([]any); ok {
-		for _, rawSat := range slice {
-			satMap, ok := rawSat.(map[string]any)
-			if !ok {
-				continue
-			}
-			snr := lookupFirstNumber(satMap, []string{"snr"}, []string{"SNR"})
-			if snr > 0 {
+	raw, ok := t.Value(path)
+	if !ok {
+		// A bare map of satellite objects is a branch, not a value.
+		for _, id := range t.Children(path) {
+			if snr, ok := firstNumber(t, path+"."+id+".snr", path+"."+id+".SNR"); ok && snr > 0 {
 				snrs = append(snrs, snr)
 			}
 		}
-	} else if m, ok := current.(map[string]any); ok {
-		for _, rawSat := range m {
-			satMap, ok := rawSat.(map[string]any)
-			if !ok {
-				continue
-			}
-			snr := lookupFirstNumber(satMap, []string{"snr"}, []string{"SNR"})
-			if snr > 0 {
-				snrs = append(snrs, snr)
-			}
+		return snrs
+	}
+
+	add := func(rawSat any) {
+		satMap, ok := rawSat.(map[string]any)
+		if !ok {
+			return
+		}
+		if snr, ok := satelliteSNR(satMap); ok && snr > 0 {
+			snrs = append(snrs, snr)
+		}
+	}
+
+	switch satellites := raw.(type) {
+	case []any:
+		for _, rawSat := range satellites {
+			add(rawSat)
+		}
+	case map[string]any:
+		for _, rawSat := range satellites {
+			add(rawSat)
 		}
 	}
 
 	return snrs
+}
+
+// satelliteSNR reads one satellite object's SNR, published as "snr" or "SNR".
+func satelliteSNR(sat map[string]any) (float64, bool) {
+	for _, key := range []string{"snr", "SNR"} {
+		if snr, ok := numericTelemetryValue(sat[key]); ok {
+			return snr, true
+		}
+	}
+	return 0, false
 }
 
 // gnssSatelliteCount reports how many satellites are contributing to the
@@ -327,27 +336,22 @@ func parseGNSSSatellitesSNR(payload map[string]any) []float64 {
 // SNR map/array at that path, so fall back to counting those entries when
 // the plain-number form isn't present. Returns -1 when neither form is
 // available, distinguishing "unknown" from a genuine zero.
-func gnssSatelliteCount(payload map[string]any) int {
-	if count := lookupNumber(payload, "navigation", "gnss", "satellites", "value"); count >= 0 {
+func gnssSatelliteCount(t telemetryReader) int {
+	if count, ok := leafNumber(t, "navigation.gnss.satellites"); ok && count >= 0 {
 		return int(count)
 	}
-	if snrs := parseGNSSSatellitesSNR(payload); snrs != nil {
+	if snrs := parseGNSSSatellitesSNR(t); snrs != nil {
 		return len(snrs)
 	}
 	return -1
 }
 
-func parseGNSSQualityIndicator(payload map[string]any) int {
-	numeric := lookupFirstNumber(payload,
-		[]string{"navigation", "gnss", "methodQuality", "value"},
-	)
-	if numeric >= 0 {
+func parseGNSSQualityIndicator(t telemetryReader) int {
+	if numeric, ok := leafNumber(t, "navigation.gnss.methodQuality"); ok && numeric >= 0 {
 		return int(math.Round(numeric))
 	}
 
-	text := firstNonEmptyString(
-		lookupString(payload, "navigation", "gnss", "methodQuality", "value"),
-	)
+	text, _ := t.Sample("navigation.gnss.methodQuality").Value.(string)
 	if text == "" {
 		return -1
 	}
@@ -355,12 +359,11 @@ func parseGNSSQualityIndicator(payload map[string]any) int {
 	return parseGNSSQualityLabel(text)
 }
 
-func parseGNSSHDOP(payload map[string]any) float64 {
-	hdop := lookupFirstNumber(payload,
-		[]string{"navigation", "gnss", "horizontalDilution", "value"},
-		[]string{"navigation", "gnss", "positionDilution", "value"},
-	)
-	if hdop >= 0 {
+func parseGNSSHDOP(t telemetryReader) float64 {
+	if hdop, ok := firstLeafNumber(t,
+		"navigation.gnss.horizontalDilution",
+		"navigation.gnss.positionDilution",
+	); ok && hdop >= 0 {
 		return hdop
 	}
 
@@ -396,7 +399,11 @@ func parseGNSSQualityLabel(value string) int {
 	}
 }
 
-func resolveGNSSPosition(latitude, longitude float64, validation gnssPositionValidation) (float64, float64) {
+// resolveGNSSPosition is the trust gate (ADR 0037): a trusted fix is shown
+// and remembered; anything else, a tick with no fix at all included
+// (hasPosition false), holds the last trusted fix. -1,-1 means no fix has
+// ever been trusted.
+func resolveGNSSPosition(latitude, longitude float64, hasPosition bool, validation gnssPositionValidation) (float64, float64) {
 	gnssValidationMu.Lock()
 	defer gnssValidationMu.Unlock()
 
@@ -415,7 +422,7 @@ func resolveGNSSPosition(latitude, longitude float64, validation gnssPositionVal
 		lastGNSSValidationReason = validation.Reason
 	}
 
-	if validation.Trusted && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180 {
+	if hasPosition && validation.Trusted && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180 {
 		lastTrustedGNSSLatitude = latitude
 		lastTrustedGNSSLongitude = longitude
 		lastTrustedGNSSPositionValid = true

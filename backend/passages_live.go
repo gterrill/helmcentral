@@ -72,9 +72,9 @@ func trackFuelRateLph(read alarmReader, ratePaths []string, now time.Time) *floa
 
 // trackFreshWaterLitres sums level x capacity over every freshWater tank. One
 // tank with an old level leaves the sum absent rather than short.
-func trackFreshWaterLitres(read alarmReader, tree map[string]any, now time.Time) *float64 {
+func trackFreshWaterLitres(read alarmReader, t telemetryReader, now time.Time) *float64 {
 	ids := map[string]bool{}
-	for _, entry := range collectSignalKPaths(tree) {
+	for _, entry := range t.Paths() {
 		if strings.HasPrefix(entry.Path, trackWaterTankPrefix) && strings.HasSuffix(entry.Path, ".currentLevel") {
 			ids[strings.TrimSuffix(strings.TrimPrefix(entry.Path, trackWaterTankPrefix), ".currentLevel")] = true
 		}
@@ -104,7 +104,7 @@ func trackFreshWaterLitres(read alarmReader, tree map[string]any, now time.Time)
 // chosen in Vessel settings; the state of charge is then absent.
 func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBankPath string, anchorSetAt *time.Time, now time.Time) trackSample {
 	read := derivedAwareAlarmReader(snapshot)
-	tree := snapshot.selfTree()
+	telemetry := snapshot.selfTelemetryAt(now)
 
 	s := trackSample{
 		At:  now,
@@ -112,8 +112,8 @@ func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBan
 		FixOK:       !state.GNSSCriticalAlert && state.PositionLastUpdateAge >= 0 && state.PositionLastUpdateAge <= trackReadingMaxAge.Seconds(),
 		SOGKts:      freshPtr(read, trackSOGPath, now, metersPerSecondToKnots),
 		TWSKts:      freshPtr(read, windSpeedTruePath, now, metersPerSecondToKnots),
-		FuelLph:     trackFuelRateLph(read, fuelRatePaths(tree), now),
-		WaterL:      trackFreshWaterLitres(read, tree, now),
+		FuelLph:     trackFuelRateLph(read, fuelRatePaths(telemetry), now),
+		WaterL:      trackFreshWaterLitres(read, telemetry, now),
 		AnchorSetAt: anchorSetAt,
 	}
 	if cog := freshPtr(read, trackCOGPath, now, 180/math.Pi); cog != nil {

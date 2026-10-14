@@ -42,7 +42,7 @@ const (
 // (held within tolerance for twinGateRPMSteadyFor / above threshold for
 // twinGateCoolantSteadyFor) the caller resolves -- the live detector
 // goroutine tracks them the same way anomaly_sensor_health.go's
-// frozenWindow is built up tick by tick, since computeDerivedPathsFromTree
+// frozenWindow is built up tick by tick, since computeDerivedPathsFromView
 // cannot itself hold rolling-window state. twinGateHolds itself judges one
 // instant's already-summarised state, nothing more.
 type engineTwinState struct {

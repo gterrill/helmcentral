@@ -105,7 +105,7 @@ func linearSlopePerSecond(points []telemetryPoint) (float64, bool) {
 	return (n*sumXY - sumX*sumY) / denominator, true
 }
 
-// newestSampleAge is freshestTimestampAge's ring-buffer counterpart: how long
+// newestSampleAge is subtreeAgeSeconds' ring-buffer counterpart: how long
 // before now the most recent point in a window was recorded, rounded to one
 // decimal place, -1 for an empty window.
 //

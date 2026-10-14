@@ -168,22 +168,17 @@ type assistantWatchReading struct {
 
 type assistantWatchReader func(path string, now time.Time) assistantWatchReading
 
-// assistantWatchReadFromGlobalSnapshot is the production reader: one node
-// copy per path per second (nodeAt, not selfTree's whole-tree copy), aged
-// the same way check_signalk_paths ages a leaf.
+// assistantWatchReadFromGlobalSnapshot is the production reader: one leaf
+// read per path per second through a live telemetry view (no whole-tree
+// copy), aged the same way check_signalk_paths ages a leaf.
 func assistantWatchReadFromGlobalSnapshot(path string, now time.Time) assistantWatchReading {
-	node := globalSignalKSnapshot.nodeAt(path)
-	if node == nil {
+	sample := globalSignalKSnapshot.liveSelfTelemetry(now).Sample(path)
+	if !sample.Present {
 		return assistantWatchReading{}
 	}
-	raw, ok := node["value"]
-	if !ok {
-		return assistantWatchReading{}
-	}
-	reading := assistantWatchReading{Present: true, Units: unitsFor(node)}
-	reading.Source, _ = node["$source"].(string)
-	reading.Value, reading.Numeric = raw.(float64)
-	reading.AgeSeconds = signalKPathSampleAge(globalSignalKSnapshot, globalSignalKSnapshot.selfContext(), path, node, now)
+	reading := assistantWatchReading{Present: true, Units: sample.Units, Source: sample.Source}
+	reading.Value, reading.Numeric = sample.Value.(float64)
+	reading.AgeSeconds = telemetryAgeSeconds(sample.Age, sample.AgeKnown)
 	return reading
 }
 
