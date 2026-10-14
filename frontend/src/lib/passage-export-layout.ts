@@ -46,7 +46,7 @@ export interface ImageLayout {
   padding: { top: number; right: number; bottom: number; left: number }
 }
 
-export const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+export const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif'
 const INK = '#1c1917'
 const MUTED = '#57534e'
 
