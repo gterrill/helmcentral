@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -43,7 +44,20 @@ type trackRecorder struct {
 	lastFixAt time.Time           // last accepted fix, kept or not
 	segment   int
 	maxTWS    *float64 // highest true wind speed seen since the last kept point
+
+	// rejected is the run of fixes thrown out as jumps that agree with one
+	// another. If it holds for trackJumpRecovery the kept reference was the
+	// bad one, and the run becomes the new reference.
+	rejected *rejectedRun
 }
+
+type rejectedRun struct {
+	since, lastAt time.Time
+	lastLat       float64
+	lastLon       float64
+}
+
+const trackJumpRecovery = 2 * time.Minute
 
 func newTrackRecorder(store *passageStore) (*trackRecorder, error) {
 	r := &trackRecorder{store: store}
@@ -82,8 +96,19 @@ func (r *trackRecorder) Observe(s trackSample) (bool, error) {
 		}
 		meters = haversineMeters(r.last.Lat, r.last.Lon, s.Lat, s.Lon)
 		if meters/dt > trackMaxJumpKts*trackMetersPerKnot {
-			return false, nil
+			if !r.noteRejectedJump(s) {
+				return false, nil
+			}
+			// The fixes since the last kept point agree with each other and
+			// not with it: the kept point was the bad one.
+			log.Printf("passages: track jump lockout: %v at %.5f,%.5f abandoned for %.5f,%.5f after %v of consistent fixes elsewhere; new segment",
+				r.last.At.Format(time.RFC3339), r.last.Lat, r.last.Lon, s.Lat, s.Lon, trackJumpRecovery)
+			r.rejected = nil
+			r.segment++
+			r.lastFixAt = s.At
+			return r.keep(s)
 		}
+		r.rejected = nil
 	}
 
 	if !r.lastFixAt.IsZero() && s.At.Sub(r.lastFixAt) > trackSegmentGap {
@@ -95,6 +120,24 @@ func (r *trackRecorder) Observe(s trackSample) (bool, error) {
 		return false, nil
 	}
 
+	return r.keep(s)
+}
+
+// noteRejectedJump extends or restarts the run of mutually consistent
+// rejected fixes and reports whether it has lasted long enough to trust.
+func (r *trackRecorder) noteRejectedJump(s trackSample) bool {
+	if r.rejected != nil {
+		dt := s.At.Sub(r.rejected.lastAt).Seconds()
+		if dt > 0 && haversineMeters(r.rejected.lastLat, r.rejected.lastLon, s.Lat, s.Lon)/dt <= trackMaxJumpKts*trackMetersPerKnot {
+			r.rejected.lastAt, r.rejected.lastLat, r.rejected.lastLon = s.At, s.Lat, s.Lon
+			return s.At.Sub(r.rejected.since) >= trackJumpRecovery
+		}
+	}
+	r.rejected = &rejectedRun{since: s.At, lastAt: s.At, lastLat: s.Lat, lastLon: s.Lon}
+	return false
+}
+
+func (r *trackRecorder) keep(s trackSample) (bool, error) {
 	p := recordedTrackPoint{
 		At: s.At, Segment: r.segment, Lat: s.Lat, Lon: s.Lon,
 		SOGKts: s.SOGKts, COGDeg: s.COGDeg, TWSKts: s.TWSKts, GustKts: r.maxTWS,
@@ -122,6 +165,10 @@ func (r *trackRecorder) shouldKeep(s trackSample, meters, dt float64) bool {
 	// A generator start or stop is always a point, so running hours can be
 	// summed from the intervals between them.
 	if s.GenState != nil && (r.last.GenState == nil || *r.last.GenState != *s.GenState) {
+		return true
+	}
+	// Coming to rest is always a point, so arrival is accurate to the tick.
+	if s.SOGKts != nil && *s.SOGKts < passageRestSOGKts && r.last.SOGKts != nil && *r.last.SOGKts >= passageRestSOGKts {
 		return true
 	}
 	return false

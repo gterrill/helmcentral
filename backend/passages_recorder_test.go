@@ -225,3 +225,66 @@ func TestRecorderResumesFromStoredLog(t *testing.T) {
 		t.Errorf("segment after restart %d, want 1", got)
 	}
 }
+
+func TestRecorderForcesPointWhenBoatComesToRest(t *testing.T) {
+	rec, store := newTestRecorder(t)
+	s := fix(passageEpoch, -20, 149)
+	s.SOGKts = pfloat(5)
+	rec.Observe(s)
+	// stopped dead: no 25 m movement, only 5 s later
+	s2 := fix(passageEpoch.Add(5*time.Second), -20, 149)
+	s2.SOGKts = pfloat(0.4)
+	if kept, _ := rec.Observe(s2); !kept {
+		t.Fatal("first sample below 1 kn after moving must be kept")
+	}
+	s3 := fix(passageEpoch.Add(10*time.Second), -20, 149)
+	s3.SOGKts = pfloat(0.3)
+	if kept, _ := rec.Observe(s3); kept {
+		t.Error("only the first rest sample is forced")
+	}
+	if n := count(t, store); n != 2 {
+		t.Errorf("rows %d, want 2", n)
+	}
+}
+
+func TestRecorderRecoversFromBadKeptFixAfterTwoMinutes(t *testing.T) {
+	rec, store := newTestRecorder(t)
+	rec.Observe(fix(passageEpoch, -20, 149))
+	// a bad fix 2 NM away squeaks in over a long enough interval
+	rec.Observe(fix(passageEpoch.Add(10*time.Minute), -20.05, 149))
+	// then the real position returns; each is a >40 kn jump from the bad point
+	var recovered time.Time
+	for s := 5; s <= 200; s += 5 {
+		at := passageEpoch.Add(10*time.Minute + time.Duration(s)*time.Second)
+		if kept, _ := rec.Observe(fix(at, -20, 149)); kept && recovered.IsZero() {
+			recovered = at
+		}
+	}
+	// the bad fix must have been tested: it was at -20.05, so recovery must come
+	if recovered.IsZero() {
+		t.Fatal("recorder never recovered from a bad kept fix")
+	}
+	if d := recovered.Sub(passageEpoch.Add(10 * time.Minute)); d < 2*time.Minute || d > 2*time.Minute+10*time.Second {
+		t.Errorf("recovered after %v, want about 2 minutes", d)
+	}
+	pts, _ := store.TrackPointsSince(passageEpoch)
+	last := pts[len(pts)-1]
+	if last.Lat != -20 || last.Segment != pts[len(pts)-2].Segment+1 {
+		t.Errorf("recovered point must start a new segment: %+v after %+v", last, pts[len(pts)-2])
+	}
+}
+
+func TestRecorderSingleIsolatedJumpStaysRejected(t *testing.T) {
+	rec, store := newTestRecorder(t)
+	rec.Observe(fix(passageEpoch, -20, 149))
+	rec.Observe(fix(passageEpoch.Add(5*time.Second), -20.05, 149)) // glitch
+	for s := 10; s <= 300; s += 5 {
+		rec.Observe(fix(passageEpoch.Add(time.Duration(s)*time.Second), -20, 149))
+	}
+	pts, _ := store.TrackPointsSince(passageEpoch)
+	for _, p := range pts {
+		if p.Lat != -20 || p.Segment != 0 {
+			t.Fatalf("glitch leaked or split the track: %+v", p)
+		}
+	}
+}
