@@ -57,6 +57,9 @@ func TestListPassagesNewestFirstWithStats(t *testing.T) {
 	if first["id"] != newer.ID || list[1].(map[string]any)["id"] != older.ID {
 		t.Errorf("order wrong: %v", list)
 	}
+	if lon, ok := list[1].(map[string]any)["start_lon"].(float64); !ok || lon == 0 {
+		t.Errorf("summary must carry start_lon, got %v", list[1].(map[string]any)["start_lon"])
+	}
 	stats := list[1].(map[string]any)["stats"].(map[string]any)
 	if stats["distance_nm"].(float64) < 11 {
 		t.Errorf("distance %v", stats["distance_nm"])
@@ -86,6 +89,13 @@ func TestGetPassageReturnsRecordStatsAndSimplifiedTrack(t *testing.T) {
 	}
 	if n := len(track[0].([]any)); n != 2 {
 		t.Errorf("a straight run simplifies to its two ends, got %d points", n)
+	}
+	times := p["track_times"].([]any)
+	if len(times) != 1 || len(times[0].([]any)) != 2 {
+		t.Fatalf("track_times must match track: %v", times)
+	}
+	if got := int64(times[0].([]any)[0].(float64)); got != b.pts[2].At.Unix() {
+		t.Errorf("first track time %d, want %d", got, b.pts[2].At.Unix())
 	}
 }
 

@@ -111,8 +111,15 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 // metres east-west as well as north-south. Segments are simplified apart and
 // returned apart, as [lat, lon] pairs. The log itself is never thinned.
 func simplifyTrack(pts []recordedTrackPoint, toleranceMeters float64) [][][2]float64 {
+	lines, _ := simplifyTrackTimed(pts, toleranceMeters)
+	return lines
+}
+
+// simplifyTrackTimed is simplifyTrack plus the time of every kept point, as
+// Unix seconds in the same shape, so a replay can place the boat at a time.
+func simplifyTrackTimed(pts []recordedTrackPoint, toleranceMeters float64) ([][][2]float64, [][]int64) {
 	if len(pts) == 0 {
-		return nil
+		return nil, nil
 	}
 	var latSum float64
 	for _, p := range pts {
@@ -122,6 +129,7 @@ func simplifyTrack(pts []recordedTrackPoint, toleranceMeters float64) [][][2]flo
 	const metersPerDegree = 111195.0
 
 	var out [][][2]float64
+	var times [][]int64
 	for start := 0; start < len(pts); {
 		end := start
 		for end < len(pts) && pts[end].Segment == pts[start].Segment {
@@ -136,15 +144,18 @@ func simplifyTrack(pts []recordedTrackPoint, toleranceMeters float64) [][][2]flo
 		keep[0], keep[len(seg)-1] = true, true
 		douglasPeucker(xy, 0, len(seg)-1, toleranceMeters, keep)
 		var line [][2]float64
+		var at []int64
 		for i, k := range keep {
 			if k {
 				line = append(line, [2]float64{seg[i].Lat, seg[i].Lon})
+				at = append(at, seg[i].At.Unix())
 			}
 		}
 		out = append(out, line)
+		times = append(times, at)
 		start = end
 	}
-	return out
+	return out, times
 }
 
 func douglasPeucker(xy [][2]float64, lo, hi int, tol float64, keep []bool) {
