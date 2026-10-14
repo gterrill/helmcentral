@@ -133,7 +133,7 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	first.End, first.ToName, first.ToNameEdited, first.Edited = at, "", false, true
 	second.ID, second.Start, second.FromName, second.FromNameEdited, second.Title, second.Edited = uuid.NewString(), at, "", false, "", true
 	second.CreatedAt = time.Now().UTC()
-	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1 WHERE id=?`, at.UnixMilli(), id); err != nil {
+	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1, stats_json=NULL WHERE id=?`, at.UnixMilli(), id); err != nil {
 		return
 	}
 	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -207,7 +207,7 @@ func (s *passageStore) MergePassages(idA, idB string) (passageRecord, error) {
 	if _, err := tx.Exec(`DELETE FROM passages WHERE id = ?`, b.ID); err != nil {
 		return m, err
 	}
-	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, edited=1 WHERE id=?`,
+	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, edited=1, stats_json=NULL WHERE id=?`,
 		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.ID); err != nil {
 		return m, err
 	}
@@ -223,7 +223,7 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	if !end.After(start) || start.Before(rec.Start) || end.After(rec.End) {
 		return rec, invalidf("trim must stay inside the passage and leave something")
 	}
-	if _, err := s.db.Exec(`UPDATE passages SET start_ms=?, end_ms=?, edited=1 WHERE id=?`, start.UnixMilli(), end.UnixMilli(), id); err != nil {
+	if _, err := s.db.Exec(`UPDATE passages SET start_ms=?, end_ms=?, edited=1, stats_json=NULL WHERE id=?`, start.UnixMilli(), end.UnixMilli(), id); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)
 	}
 	rec.Start, rec.End, rec.Edited = start, end, true

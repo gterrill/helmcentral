@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +82,13 @@ type cruiseRecord struct {
 
 type passageStore struct {
 	db *sql.DB
+
+	// cruiseCoreCalls counts cruise rebuilds, so the water-rise job's habit
+	// of skipping unchanged cruises can be checked.
+	cruiseCoreCalls atomic.Int64
+
+	marinaMu   sync.Mutex
+	marinaSeen map[string]string // cruise id -> fingerprint last looked at
 }
 
 func newPassageStore(dbPath string) (*passageStore, error) {
@@ -136,7 +145,8 @@ func createPassageSchema(db *sql.DB) error {
 			created_ms INTEGER NOT NULL,
 			name_attempted_ms INTEGER,
 			from_name_edited INTEGER NOT NULL DEFAULT 0,
-			to_name_edited INTEGER NOT NULL DEFAULT 0
+			to_name_edited INTEGER NOT NULL DEFAULT 0,
+			stats_json TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_passages_start ON passages(start_ms)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
@@ -502,6 +512,7 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 		{"name_attempted_ms", "INTEGER"},
 		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"to_name_edited", "INTEGER NOT NULL DEFAULT 0"},
+		{"stats_json", "TEXT"},
 	} {
 		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {
 			return err

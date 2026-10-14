@@ -266,6 +266,13 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 		return sum, fmt.Errorf("commit import: %w", err)
 	}
 
+	if sum.PointsAdded > 0 {
+		// new points inside a stored passage change what its figures are
+		if _, err := s.db.Exec(`UPDATE passages SET stats_json = NULL WHERE start_ms <= ? AND end_ms >= ?`, to.UnixMilli(), from.UnixMilli()); err != nil {
+			return sum, err
+		}
+	}
+
 	imported, err := s.trackPoints(from, to, trackSourceImported)
 	if err != nil {
 		return sum, err
@@ -289,6 +296,7 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 		if err != nil {
 			return sum, err
 		}
+		s.PassageStatsFor(rec) // warm the stored figures
 		announcePassage(rec.ID)
 		sum.PassagesCreated++
 	}

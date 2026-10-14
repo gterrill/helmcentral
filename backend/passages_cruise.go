@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"sort"
@@ -477,6 +478,7 @@ var marinaNear = func(lat, lon float64) (bool, error) {
 // cruiseCore loads a cruise and works out its figures from the track points.
 // Water labels and suggestions are not applied here.
 func (s *passageStore) cruiseCore(cruiseID string) (cruiseRecord, []passageRecord, cruiseStats, error) {
+	s.cruiseCoreCalls.Add(1)
 	cr, err := s.GetCruise(cruiseID)
 	if err != nil {
 		return cr, nil, cruiseStats{}, err
@@ -620,7 +622,21 @@ func (s *passageStore) LookUpNewWaterRisesAt(now time.Time) error {
 	if err != nil {
 		return err
 	}
+	due, err := s.cruisesWithRetryDue(now)
+	if err != nil {
+		return err
+	}
 	for _, cr := range cruises {
+		fp, err := s.cruiseFingerprint(cr.ID)
+		if err != nil {
+			return err
+		}
+		s.marinaMu.Lock()
+		unchanged := s.marinaSeen[cr.ID] == fp
+		s.marinaMu.Unlock()
+		if unchanged && !due[cr.ID] {
+			continue
+		}
 		_, _, st, err := s.cruiseCore(cr.ID)
 		if err != nil {
 			return err
@@ -674,8 +690,46 @@ func (s *passageStore) LookUpNewWaterRisesAt(now time.Time) error {
 				return err
 			}
 		}
+		s.marinaMu.Lock()
+		if s.marinaSeen == nil {
+			s.marinaSeen = map[string]string{}
+		}
+		s.marinaSeen[cr.ID] = fp
+		s.marinaMu.Unlock()
 	}
 	return nil
+}
+
+// cruiseFingerprint is a cheap summary of what decides a cruise's water rises:
+// which visible passages it holds and their ranges. A closed passage's points
+// do not change, so the same fingerprint means the same rises.
+func (s *passageStore) cruiseFingerprint(cruiseID string) (string, error) {
+	var n int
+	var starts, ends int64
+	var ids sql.NullString
+	if err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(start_ms),0), COALESCE(SUM(end_ms),0), group_concat(id) FROM passages WHERE cruise_id = ? AND hidden = 0`, cruiseID).Scan(&n, &starts, &ends, &ids); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d/%d/%d/%s", n, starts, ends, ids.String), nil
+}
+
+// cruisesWithRetryDue are the cruises holding a failed lookup old enough to try again.
+func (s *passageStore) cruisesWithRetryDue(now time.Time) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT cruise_id FROM water_rise_suggestions WHERE status = ? AND looked_up_ms <= ?`,
+		suggestionFailed, now.Add(-marinaRetryAfter).UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 // startMarinaLookups runs the lookups in the background: once at start, then on

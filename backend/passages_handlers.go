@@ -63,19 +63,10 @@ func listPassagesHandler(c echo.Context) error {
 	if !ok {
 		return nil
 	}
-	records, err := store.ListPassages()
+	out, err := store.ListPassageSummaries()
 	if err != nil {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not list passages"})
-	}
-	out := make([]passageSummary, 0, len(records))
-	for _, r := range records {
-		pts, err := store.TrackPointsBetween(r.Start, r.End)
-		if err != nil {
-			log.Printf("passages: %v", err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage track"})
-		}
-		out = append(out, passageSummary{passageRecord: r, Stats: computePassageStats(pts), StartLon: startLon(pts)})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"passages": out})
 }
@@ -99,6 +90,11 @@ func getPassageHandler(c echo.Context) error {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage track"})
 	}
+	figures, err := store.PassageFiguresFor(rec)
+	if err != nil {
+		log.Printf("passages: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage"})
+	}
 	track, times := simplifyTrackTimed(pts, passageDisplayToleranceMeters)
 	if track == nil {
 		track = [][][2]float64{}
@@ -109,7 +105,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: computePassageStats(pts), StartLon: startLon(pts), Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, StartLon: figures.StartLon, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

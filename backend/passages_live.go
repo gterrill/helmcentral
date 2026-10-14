@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -143,14 +144,12 @@ func observeLiveTrack(snapshot *signalKSnapshot, state vesselStateData, settings
 		return
 	}
 
-	houseBank := ""
-	if vessel, err := loadVesselSettings(settingsPath); err != nil {
+	houseBank, err := liveHouseBank.path(settingsPath)
+	if err != nil {
 		if msg := err.Error(); msg != lastVesselLogErr {
 			lastVesselLogErr = msg
 			log.Printf("passages: house bank unavailable, state of charge not recorded: %v", err)
 		}
-	} else if vessel.HouseBank != nil {
-		houseBank = strings.TrimSpace(vessel.HouseBank.Path)
 	}
 
 	var anchorSetAt *time.Time
@@ -190,3 +189,46 @@ func startPassageRecording(store *passageStore) error {
 	globalTrackRecord = rec
 	return nil
 }
+
+// houseBankCache holds the house bank path from Vessel settings and reads the
+// vessel block again only when settings.yaml changes (size or modification
+// time), not on every five-second tick.
+type houseBankCache struct {
+	load func(settingsPath string) (string, error)
+
+	mu       sync.Mutex
+	file     string
+	modTime  time.Time
+	size     int64
+	have     bool
+	cached   string
+	cachedEr error
+}
+
+func (c *houseBankCache) path(settingsPath string) (string, error) {
+	info, statErr := os.Stat(settingsPath)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if statErr == nil && c.have && c.file == settingsPath && c.modTime.Equal(info.ModTime()) && c.size == info.Size() {
+		return c.cached, c.cachedEr
+	}
+	p, err := c.load(settingsPath)
+	if statErr == nil {
+		c.file, c.modTime, c.size, c.have = settingsPath, info.ModTime(), info.Size(), true
+		c.cached, c.cachedEr = p, err
+	} else {
+		c.have = false
+	}
+	return p, err
+}
+
+var liveHouseBank = &houseBankCache{load: func(settingsPath string) (string, error) {
+	vessel, err := loadVesselSettings(settingsPath)
+	if err != nil {
+		return "", err
+	}
+	if vessel.HouseBank == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(vessel.HouseBank.Path), nil
+}}

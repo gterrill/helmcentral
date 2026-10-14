@@ -40,6 +40,7 @@ func runPassageDetection(store *passageStore) error {
 		if err != nil {
 			return fmt.Errorf("store detected passage: %w", err)
 		}
+		store.PassageStatsFor(rec) // warm the stored figures
 		announcePassage(rec.ID)
 	}
 	return store.SetDetectorResume(det.Resume)
