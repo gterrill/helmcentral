@@ -67,6 +67,11 @@ var assistantFindPlacesQueryPattern = regexp.MustCompile(`^[\p{L}\p{N} .,'&()-]+
 type assistantToolDeps struct {
 	now         func() time.Time
 	vesselState func() (vesselStateData, error)
+	// pathHasData reports whether a SignalK data path (no notifications.
+	// prefix) currently has a value in the live self tree. get_active_alarms
+	// uses it so a bus alarm only names a path the history tools can read.
+	// nil means no path is known to have data.
+	pathHasData func(path string) bool
 	weather     func() (weatherProvider, string, error)
 	waves       func() (waveProvider, string, error)
 	tides       func() (tideProvider, string, error)
@@ -204,6 +209,11 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 	return assistantToolDeps{
 		now:         time.Now,
 		vesselState: fetchSignalKVesselState,
+		pathHasData: func(path string) bool {
+			node := globalSignalKSnapshot.nodeAt(path)
+			_, ok := node["value"]
+			return ok
+		},
 		weather: func() (weatherProvider, string, error) {
 			return resolveWeatherProvider(settingsPath)
 		},

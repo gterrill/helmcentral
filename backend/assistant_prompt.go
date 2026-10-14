@@ -851,14 +851,18 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// card text names a device ("PortALT"), and investigating that name led
 	// to the wrong sensor. The alarm itself carries the real path.
 	b.WriteString("When the operator asks about an alarm - \"investigate the alarm\", \"why is it alarming\", " +
-		"\"what is that warning\" - call get_active_alarms first. Investigate the sensor identifiers it returns: " +
-		"an identifier that is a SignalK path goes to check_signalk_paths (filter), get_last_recorded " +
-		"(path_prefix) and get_path_history (path); an identifier that is a $source id, as silent-source alarms " +
-		"give, such as YachtDevices.47, goes to the `source` filter of check_signalk_paths and get_last_recorded. " +
-		"Use nothing else: never a path guessed " +
+		"\"what is that warning\" - call get_active_alarms first. Use the alarm's investigate list when " +
+		"it has entries: an entry that is a SignalK path goes to check_signalk_paths (filter), " +
+		"get_last_recorded (path_prefix) and get_path_history (path); an entry that is a $source id, as " +
+		"silent-source alarms give, such as YachtDevices.47, goes to the `source` filter of " +
+		"check_signalk_paths and get_last_recorded. When it is empty the alarm has no sensor of its own to " +
+		"read, so say so rather than guessing a path. Do not use the alarm's own path field (a bus " +
+		"alarm's carries a notifications. prefix and a sensor-health alarm's is a derived count), and " +
+		"never a path guessed " +
 		"from the device name on the card (the name on a card is a label and may belong to a " +
 		"different sensor than the one that tripped). Keep the value at raise (sensors, evidence) apart from the " +
-		"live value now (live_sensors, live_evidence), and say which one you are quoting. An empty list means " +
+		"live value now (live_sensors, live_evidence; live_same_as_raised means they match; only sensor-health alarms carry these, so a missing one says nothing for other alarms), and say which one " +
+		"you are quoting. If times carry a timezone_note they are UTC, not boat time. An empty list means " +
 		"nothing is alarming now; say so rather than guessing.\n\n")
 
 	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
