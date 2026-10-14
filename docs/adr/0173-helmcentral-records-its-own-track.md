@@ -51,6 +51,14 @@ and water. Three sources already existed and none of them fits.
    recreates a passage the operator hid or edited.
 6. **GPX import** feeds the same detector, with speed derived from successive
    fixes. Imported passages have no readings and show `--` for them.
+   Imported tracks never use the ten-minute segment gap. The daily-gpx plugin
+   simplifies its tracks and writes nothing while the boat is at rest, so a long
+   gap between two fixes is either a straight leg (a few points many minutes
+   apart) or a stop, not missing data. The speed a gap implies decides which: at
+   one knot or more the boat travelled through it and the track is continuous;
+   under one knot it was at rest, and the sixty-minute stop rule decides whether
+   the passage ends. A passage departs at the fix that ends a long rest, not at
+   the fix that began it.
 7. **Simplification happens only on output** (display and export), in a metric
    projection. The log keeps full resolution.
 

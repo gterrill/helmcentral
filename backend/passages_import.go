@@ -20,6 +20,9 @@ const (
 	// A recorded track covers the time between its points while they are no
 	// further apart than this.
 	importCoverageGap = 15 * time.Minute
+
+	// importedSegment is the one segment id of imported points.
+	importedSegment = 1_000_000_000
 )
 
 type gpxFix struct {
@@ -110,9 +113,12 @@ func parseGPX(r io.Reader, maxBytes int64, firstSeg int) ([]gpxFix, int, error) 
 }
 
 // importedTrackPoints orders fixes by time and turns them into track points:
-// unusable positions and jumps over 40 kn are rejected, segments break at a
-// track segment boundary or a gap over ten minutes, and SOG and COG come from
-// the leg to the next fix (the leg from the previous fix for the last one).
+// unusable positions and jumps over 40 kn are rejected, there is a single
+// segment, and SOG and COG come from
+// the leg to the next fix (the leg from the previous fix for the last one). A
+// leg that implies under one knot is rest however long it lasted, so a
+// three-hour gap with 100 m moved is a stop and does not blend into the legs
+// either side.
 func importedTrackPoints(fixes []gpxFix) (pts []recordedTrackPoint, rejected int) {
 	sorted := append([]gpxFix(nil), fixes...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].At.Before(sorted[j].At) })
@@ -138,14 +144,14 @@ func importedTrackPoints(fixes []gpxFix) (pts []recordedTrackPoint, rejected int
 		kept = append(kept, f)
 	}
 
-	segment := 0
-	for i, f := range kept {
-		if i == 0 || f.Seg != kept[i-1].Seg || f.At.Sub(kept[i-1].At) > trackSegmentGap {
-
-			segment = int(f.At.Unix())
-		}
-		p := recordedTrackPoint{At: f.At, Segment: segment, Lat: f.Lat, Lon: f.Lon, Source: trackSourceImported}
-		pts = append(pts, p)
+	// One continuous track. The plugin writes nothing while the boat is at
+	// rest and thins straight legs, so a long gap is either a stop or a leg
+	// sailed in a straight line, never missing data. Which of the two is
+	// decided by the speed the gap implies, below; the 10 minute segment gap
+	// belongs to the dense recorded log only.
+	pts = make([]recordedTrackPoint, 0, len(kept))
+	for _, f := range kept {
+		pts = append(pts, recordedTrackPoint{At: f.At, Segment: importedSegment, Lat: f.Lat, Lon: f.Lon, Source: trackSourceImported})
 	}
 	for i := range pts {
 		var a, b int

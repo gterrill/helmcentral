@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" 
+version="1.1" creator="SignalK Daily GPX Plugin"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
+xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd
+http://www.garmin.com/xmlschemas/TrackPointExtension/v1 https://www8.garmin.com/xmlschemas/TrackPointExtensionv1.xsd">
+<trk><name>2026-03-03</name><trkseg>
+<trkpt lat="-32.920082" lon="151.762060"><time>2026-03-01T02:31:50.832Z</time></trkpt>
+<trkpt lat="-32.919845" lon="151.761474"><time>2026-03-03T20:09:02.814Z</time></trkpt>
+</trkseg></trk></gpx>

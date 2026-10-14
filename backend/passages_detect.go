@@ -18,6 +18,10 @@ const (
 	passageMinDuration   = 15 * time.Minute
 	passageMinDistanceNM = 0.5
 	passageMetersPerMile = 1852.0
+
+	// passageBackdateMaxGap is the longest a rest point can stand alone before
+	// the next point and still be where the boat left from.
+	passageBackdateMaxGap = 15 * time.Minute
 )
 
 // loggedPassage is one detected run. Start is backdated to the last at-rest
@@ -81,6 +85,12 @@ func detectLoggedPassages(pts []recordedTrackPoint) passageDetection {
 	backdate := func(rs int) int {
 		for j := rs - 1; j >= 0 && pts[j].Segment == pts[rs].Segment; j-- {
 			if pointAtRest(pts[j]) {
+				// A rest point whose next fix is long after it (a simplified
+				// import writes nothing while the boat sits) was left at that
+				// next fix, not at this one.
+				if j+1 <= rs && pts[j+1].At.Sub(pts[j].At) > passageBackdateMaxGap {
+					return j + 1
+				}
 				return j
 			}
 		}

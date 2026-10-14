@@ -23,8 +23,18 @@ type passageStats struct {
 
 // A leg joins two consecutive points of one segment no further apart than the
 // segment gap. Anything else is a hole in the record.
+//
+// Imported points are the exception to the gap limit: a simplified GPX track
+// is sparse by design, and a long leg between two of its fixes is the boat
+// travelling (or sitting) there, not a hole.
 func legBetween(a, b recordedTrackPoint) bool {
-	return a.Segment == b.Segment && b.At.After(a.At) && b.At.Sub(a.At) <= trackSegmentGap
+	if a.Segment != b.Segment || !b.At.After(a.At) {
+		return false
+	}
+	if a.Source == trackSourceImported && b.Source == trackSourceImported {
+		return true
+	}
+	return b.At.Sub(a.At) <= trackSegmentGap
 }
 
 func computePassageStats(pts []recordedTrackPoint) passageStats {
