@@ -257,8 +257,13 @@ function hcPassageCardInit(id, maplibregl, doc) {
         type: 'geojson',
         data: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]] } },
       })
-      insetMap.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
-      insetMap.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
+      if (data.insetDot) {
+        insetMap.addSource('hcp-dot', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: centre } } })
+        insetMap.addLayer({ id: 'hcp-dot', type: 'circle', source: 'hcp-dot', paint: { 'circle-radius': 4, 'circle-color': '#e11d48', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } })
+      } else {
+        insetMap.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
+        insetMap.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
+      }
     })
   }
 

@@ -79,8 +79,13 @@ async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTML
         }
         if (o.withBox) {
           m.addSource('hcp-box', { type: 'geojson', data: bboxPolygon(data.bounds) })
-          m.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
-          m.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
+          if (data.insetDot) {
+            m.addSource('hcp-dot', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: o.center ?? [0, 0] } } })
+            m.addLayer({ id: 'hcp-dot', type: 'circle', source: 'hcp-dot', paint: { 'circle-radius': 5, 'circle-color': '#e11d48', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } })
+          } else {
+            m.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
+            m.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
+          }
         }
         m.once('idle', () => { clearTimeout(timer); resolve() })
         m.triggerRepaint()
@@ -130,7 +135,7 @@ export async function renderPassageImage(data: ExportData, kind: ImageKind): Pro
   if (!ctx) throw new Error('This browser cannot draw the image')
   ctx.scale(size.outScale, size.outScale)
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(mapCanvas, 0, 0, size.width, size.height)
+  ctx.drawImage(mapCanvas, 0, 0, mapCanvas.width, mapCanvas.height - layout.band.h * 2, 0, 0, size.width, layout.band.y)
   if (insetCanvas && layout.inset) {
     const r = layout.inset
     ctx.save()

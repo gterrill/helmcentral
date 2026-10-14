@@ -14,6 +14,7 @@ import {
   SEAMARK_SOURCE_ID,
   TRACK_LAYERS,
   exportColour,
+  insetNeedsDot,
   insetZoom,
 } from '@/lib/passage-export-style'
 import {
@@ -89,6 +90,8 @@ export interface ExportData {
   /** Show the overview map during the replay. */
   inset: boolean
   insetZoom: number
+  /** The track is too small to see on the overview: draw a dot. */
+  insetDot: boolean
   /** Underway play length, seconds. */
   play: number
   nightSeconds: number
@@ -305,6 +308,7 @@ export function prepareExport(input: ExportInput): ExportData {
     zone: { o: input.zone.offsetHours, l: input.zone.label },
     inset: input.inset,
     insetZoom: round(insetZoom(bounds), 2),
+    insetDot: insetNeedsDot(bounds, insetZoom(bounds)),
     play: input.playSeconds,
     nightSeconds: NIGHT_SECONDS,
     nightCap: NIGHT_CAP_SECONDS,
@@ -384,7 +388,7 @@ export function generateStandalonePage(input: ExportInput): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(input.title)}</title>`,
-    '<style>body{margin:0;background:#ffffff;color:#1c1917;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}.page{max-width:720px;margin:0 auto;padding:24px 16px}</style>',
+    '<style>body{margin:0;background:#ffffff;color:#1c1917;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}.page{max-width:720px;margin:0 auto;padding:24px 16px}</style>',
     '</head>',
     '<body>',
     '<div class="page">',

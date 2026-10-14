@@ -20,6 +20,8 @@ import {
   type ExportInput,
 } from '@/lib/passage-export'
 import {
+  insetNeedsDot,
+  insetZoom,
   MAPLIBRE_CSS_SRI,
   MAPLIBRE_JS_SRI,
   MAPLIBRE_VERSION,
@@ -224,6 +226,21 @@ describe('stats strip', () => {
     expect(strip.map((s) => [s.l, s.v])).toEqual([
       ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Nights', '5'], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
+  })
+})
+
+describe('overview inset framing', () => {
+  it('shows the coast, not the track: zoom 2.5 to 5, with a dot when the box would vanish', () => {
+    const data = prepareExport(input())
+    expect(data.insetZoom).toBeGreaterThanOrEqual(2.5)
+    expect(data.insetZoom).toBeLessThanOrEqual(5)
+    expect(insetZoom([148, -20.4, 149, -19.9])).toBeCloseTo(Math.log2(360 / (1.0 * 25)), 5)
+    expect(insetZoom([148, -20, 148.001, -20.001])).toBe(5)
+    expect(insetZoom([100, -40, 160, 0])).toBe(2.5)
+    expect(insetNeedsDot([148, -20, 148.01, -20.01], 5)).toBe(true)
+    expect(insetNeedsDot([148, -20.4, 149, -19.9], 3.8)).toBe(false)
+    // The fixture track is about 0.05 degrees across: a dot.
+    expect(data.insetDot).toBe(true)
   })
 })
 

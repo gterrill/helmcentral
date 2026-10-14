@@ -40,9 +40,17 @@ export const TRACK_LAYERS = trackLayerPair(TRACK_SOURCE_ID, 'hcp-track')
 /** The part the boat has already covered, drawn over a dimmed whole track. */
 export const DONE_LAYERS = trackLayerPair(DONE_SOURCE_ID, 'hcp-done')
 
-/** The zoom at which a small overview map shows the surrounding coast: about
- * eight times the track's longest side, between zoom 1 and 8. */
+/** The zoom of the small overview map: the track's bounds about 25 times
+ * over, so the coast and enough of the continent show to place it, between
+ * zoom 2.5 and 5. */
 export function insetZoom(bounds: [number, number, number, number]): number {
   const span = Math.max(bounds[2] - bounds[0], (bounds[3] - bounds[1]) * 1.6, 0.05)
-  return Math.max(1, Math.min(8, Math.log2(360 / (span * 8))))
+  return Math.max(2.5, Math.min(5, Math.log2(360 / (span * 25))))
+}
+
+/** Whether the track's box would be too small to see on the overview (under
+ * 6 px), so a dot is drawn in its place. */
+export function insetNeedsDot(bounds: [number, number, number, number], zoom: number): boolean {
+  const span = Math.max(bounds[2] - bounds[0], bounds[3] - bounds[1])
+  return (256 * 2 ** zoom * span) / 360 < 6
 }

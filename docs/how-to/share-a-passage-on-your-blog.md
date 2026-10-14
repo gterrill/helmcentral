@@ -8,6 +8,8 @@ to reach the boat afterwards.
 ## Before you start
 
 - The blog needs to be a Ghost site where you can add an HTML card to a post.
+- Only finished passages can be exported; a leg still underway is not stored
+  until it ends.
 - Set the passage titles, cruise names and place names the way you want your
   readers to see them first. See [Edit a passage](edit-passages.md).
 
@@ -20,7 +22,7 @@ to reach the boat afterwards.
    boat takes to cover the time actually spent underway. Each night at anchor
    adds a short pause on top.
 4. Tick or untick **Overview map in the corner**. It is the small map that
-   shows where the track sits on the coast.
+   shows where the coast and the track sit in the wider country.
 5. Choose **Copy blog embed**. A message confirms it is on the clipboard.
 6. In your Ghost post, add an **HTML** card and paste.
 
