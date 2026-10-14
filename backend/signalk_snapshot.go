@@ -483,7 +483,7 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 
 			s.pathSeen[d.Context+"|"+val.Path] = now
-			if update.SourceRef != "" {
+			if update.SourceRef != "" && val.Value != nil {
 				s.noteBatteryPublisherLocked(d.Context, val.Path, update.SourceRef)
 			}
 			if radarControlPath(val.Path) {

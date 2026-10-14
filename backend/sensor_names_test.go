@@ -459,3 +459,62 @@ func TestSourceNameFallsBackToManufacturer(t *testing.T) {
 		t.Errorf("entry = %+v", e)
 	}
 }
+
+// A Wakespeed regulator once sent PGN 127506 on instance 1 with only a null
+// value, so SignalK holds batteries.1.capacity.timeRemaining = null from it.
+// A null is no reading: it must not make the regulator a publisher of the
+// solar chargers' panel-voltage instance.
+func feedWakespeedNullOnChargerInstance(snapshot *signalKSnapshot, nullValue any) map[string]sourceDevice {
+	at := sensorNamesTestNow
+	send := func(source, path string, value any) {
+		snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+			SourceRef: source, Timestamp: at.Format(time.RFC3339),
+			Values: []signalKValue{{Path: path, Value: value}},
+		}}}, at)
+	}
+	devices := map[string]sourceDevice{}
+	for _, src := range []string{"YachtDevices.36", "YachtDevices.37", "YachtDevices.38", "YachtDevices.39"} {
+		devices[src] = sourceDevice{DeviceClass: n2kClassElectricalGeneration, DeviceFunction: n2kFunctionCharger}
+		send(src, "electrical.batteries.0.voltage", 28.2)
+		send(src, "electrical.batteries.1.voltage", 75.0)
+	}
+	devices["YachtDevices.224"] = sourceDevice{DeviceClass: n2kClassElectricalGeneration, DeviceFunction: 170}
+	send("YachtDevices.224", "electrical.batteries.0.voltage", 28.2)
+	devices["YachtDevices.47"] = sourceDevice{DeviceFunction: 141, InstallationDescription1: "PortALT", ModelID: "Wakespeed WS500 Alternator Regul"}
+	send("YachtDevices.47", "electrical.batteries.0.voltage", 26.3)
+	send("YachtDevices.47", "electrical.batteries.1.capacity.timeRemaining", nullValue)
+	return devices
+}
+
+func TestNullReadingFromAnotherDeviceDoesNotMakeItAPublisherOfAChargerInstance(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	devices := feedWakespeedNullOnChargerInstance(snapshot, nil)
+	namer := newSensorNamer(snapshot, vesselSettings{}, devices)
+	if !namer.isChargerInstance("1") {
+		t.Fatalf("instance 1 is published only by solar chargers; a null from the regulator must not count")
+	}
+
+	globalSourceDevices.set(devices)
+	t.Cleanup(func() { globalSourceDevices.set(nil) })
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	reading := computeAnomalyReading(snapshot, settingsPath, newAnomalyTrackers(), &twinSteadinessTrackers{}, sensorNamesTestNow)
+	if got := reading.Values[anomalySensorOutOfRangeCountPath]; got != 0 {
+		t.Fatalf("75 V panel input must not alarm, count = %v, sensors = %+v", got, reading.Sensors[anomalySensorOutOfRangeCountPath])
+	}
+}
+
+func TestRealValueFromAnotherDeviceStillMakesItAPublisher(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	devices := feedWakespeedNullOnChargerInstance(snapshot, 3600.0)
+	namer := newSensorNamer(snapshot, vesselSettings{}, devices)
+	if namer.isChargerInstance("1") {
+		t.Fatalf("a regulator publishing a real value on instance 1 is a non-charger publisher")
+	}
+	found := false
+	for _, s := range snapshot.batteryPublishersFor("vessels.self", "1") {
+		found = found || s == "YachtDevices.47"
+	}
+	if !found {
+		t.Errorf("YachtDevices.47 should be recorded as a publisher of instance 1")
+	}
+}
