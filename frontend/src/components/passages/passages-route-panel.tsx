@@ -31,7 +31,6 @@ export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRou
         onOpenPassage={(id) => { openPassage(id) }}
         onOpenCruise={(id) => { openCruise(id) }}
         onCombine={(ids) => { openCombined(ids) }}
-        onChanged={() => { void list.refresh() }}
       />
     )
   }
@@ -52,7 +51,6 @@ export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRou
       onBack={() => { close() }}
       onOpenPassage={(id) => { openPassage(id) }}
       onOpenCruise={(id) => { openCruise(id) }}
-      onListChanged={() => { void list.refresh() }}
     />
   )
 }

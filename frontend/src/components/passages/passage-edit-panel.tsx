@@ -26,13 +26,12 @@ export interface PassageEditPanelProps {
   newerNeighbour: PassageRecord | null
   cursorRef: MutableRefObject<ReplayCursor | null>
   canWrite: boolean
-  onChanged: () => void
   onMerged: (id: string) => void
   onHidden: () => void
 }
 
 export function PassageEditPanel({
-  passage, cruises, olderNeighbour, newerNeighbour, cursorRef, canWrite, onChanged, onMerged, onHidden,
+  passage, cruises, olderNeighbour, newerNeighbour, cursorRef, canWrite, onMerged, onHidden,
 }: PassageEditPanelProps) {
   const [title, setTitle] = useState(passage.title)
   const [fromName, setFromName] = useState(passage.from_name)
@@ -78,7 +77,6 @@ export function PassageEditPanel({
 
   const persist = async () => {
     await passagesApi.patch(passage.id, { title, from_name: fromName, to_name: toName, notes })
-    onChanged()
   }
 
   // Unsaved edits hold any move off this passage. Staying on it (a Split
@@ -122,7 +120,6 @@ export function PassageEditPanel({
   const move = (cruiseId: string | null) =>
     run('move passage', async () => {
       await passagesApi.patch(passage.id, { cruise_id: cruiseId })
-      onChanged()
     })
 
   const disabled = !canWrite || busy
@@ -166,16 +163,16 @@ export function PassageEditPanel({
       >
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
-            withCursor('split passage', async (at) => { await passagesApi.split(passage.id, at); onChanged() })}>
+            withCursor('split passage', async (at) => { await passagesApi.split(passage.id, at) })}>
             <Scissors className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Split here
           </Button>
           <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
-            withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, at, passage.end); onChanged() })}>
+            withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, at, passage.end) })}>
             Trim start to here
           </Button>
           <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
-            withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, passage.start, at); onChanged() })}>
+            withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, passage.start, at) })}>
             Trim end to here
           </Button>
         </div>
@@ -248,7 +245,6 @@ export function PassageEditPanel({
           const cruise = await passagesApi.createCruise(name)
           await passagesApi.patch(passage.id, { cruise_id: cruise.id })
           setNewCruiseOpen(false)
-          onChanged()
         })}
       />
     </>

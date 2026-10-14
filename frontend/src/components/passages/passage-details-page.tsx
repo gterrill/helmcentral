@@ -10,7 +10,7 @@ import { CruiseStatsPanel, PassageStatsStrip } from '@/components/passages/passa
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import { DetailsLayout, FormSection, Page } from '@/components/patterns'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useCruiseDetails, usePassageDetails } from '@/hooks/use-passages'
+import { useCruiseDetails, usePassageDetail, usePassageDetails } from '@/hooks/use-passages'
 import { passagesApi } from '@/lib/passages-api'
 import {
   fmtDuration,
@@ -42,8 +42,6 @@ export interface PassageDetailsPageProps {
   onBack: () => void
   onOpenPassage: (id: string) => void
   onOpenCruise: (id: string) => void
-  /** A record changed: the host refreshes its list and pane. */
-  onListChanged: () => void
 }
 
 function ErrorLine({ message }: { message: string }) {
@@ -96,14 +94,10 @@ export function PassageDetailsPage(props: PassageDetailsPageProps) {
 
 // ── one passage ───────────────────────────────────────────────────────────
 
-function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
-  const [reload, setReload] = useState(0)
-  const { passages, loading, error } = usePassageDetails([id], reload)
+function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
+  const { passage, loading, error } = usePassageDetail(id)
   const cursorRef = useRef<ReplayCursor | null>(null)
-  const passage = passages[0]
   const index = list.findIndex((p) => p.id === id)
-  const changed = () => { setReload((n) => n + 1); onListChanged() }
-
   return (
     <Page
       title={passage ? passageHeading(passage) : 'Passage'}
@@ -121,14 +115,13 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
               newerNeighbour={index > 0 ? list[index - 1] : null}
               cursorRef={cursorRef}
               canWrite={canWrite}
-              onChanged={changed}
-              onMerged={(mergedId) => { onListChanged(); if (mergedId === id) setReload((n) => n + 1); else onOpenPassage(mergedId) }}
-              onHidden={() => { onListChanged(); onBack() }}
+              onMerged={(mergedId) => { if (mergedId !== id) onOpenPassage(mergedId) }}
+              onHidden={onBack}
             />
           }
         >
           <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, firstLon([passage]))}</p>
-          <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
+          <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
           <PassageStatsStrip stats={passage.stats} units={units} />
         </DetailsLayout>
       )}
@@ -138,18 +131,15 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
 
 // ── a cruise ──────────────────────────────────────────────────────────────
 
-function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
-  const [reload, setReload] = useState(0)
-  const { data, loading, error } = useCruiseDetails(id, reload)
+function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
+  const { data, loading, error } = useCruiseDetails(id)
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
-  const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id), reload)
-  const changed = () => { setReload((n) => n + 1); onListChanged() }
+  const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id))
   const lon = firstLon(passages)
 
   const labelRise = async (rise: WaterRise, label: WaterRiseLabel | '') => {
     try {
       await passagesApi.labelWaterRise(id, riseLabelTime(rise), label)
-      setReload((n) => n + 1)
     } catch (err) {
       toast.error('Could not label water', { description: err instanceof Error ? err.message : String(err) })
     }
@@ -165,8 +155,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onListChanged
                 key={`${data.cruise.id}:${data.cruise.name}:${data.cruise.notes}`}
                 cruise={data.cruise}
                 canWrite={canWrite}
-                onChanged={changed}
-                onDeleted={() => { onListChanged(); onBack() }}
+                onDeleted={onBack}
               />
               <FormSection title="Passages">
                 {visible.length === 0
@@ -186,8 +175,8 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onListChanged
 
 // ── an ad-hoc selection ───────────────────────────────────────────────────
 
-function CombinedPassages({ ids, canWrite, isDarkTheme, onBack, onListChanged, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
-  const { passages, loading, error } = usePassageDetails(ids, 0)
+function CombinedPassages({ ids, canWrite, isDarkTheme, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
+  const { passages, loading, error } = usePassageDetails(ids)
   const [saveOpen, setSaveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const ordered = [...passages].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
@@ -200,11 +189,9 @@ function CombinedPassages({ ids, canWrite, isDarkTheme, onBack, onListChanged, o
       const cruise = await passagesApi.createCruise(name)
       for (const p of ordered) await passagesApi.patch(p.id, { cruise_id: cruise.id })
       setSaveOpen(false)
-      onListChanged()
       onOpenCruise(cruise.id)
     } catch (err) {
       toast.error('Could not save cruise', { description: err instanceof Error ? err.message : String(err) })
-      onListChanged()
     } finally {
       setBusy(false)
     }

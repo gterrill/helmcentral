@@ -51,7 +51,6 @@ const baseProps = {
   onOpenPassage: vi.fn(),
   onOpenCruise: vi.fn(),
   onCombine: vi.fn(),
-  onChanged: vi.fn(),
 }
 
 beforeEach(() => {
@@ -106,7 +105,6 @@ describe('PassagesPanel', () => {
     const input = screen.getByTestId('passages-file-input')
     fireEvent.change(input, { target: { files: [new File(['<gpx/>'], 'a.gpx')] } })
     expect(await screen.findByTestId('import-summary')).toHaveTextContent('2 new passages found in 1 file.')
-    expect(baseProps.onChanged).toHaveBeenCalled()
   })
 })
 
@@ -156,7 +154,7 @@ describe('PassageEditPanel', () => {
     const props = {
       passage: detail, cruises: [], olderNeighbour: null, newerNeighbour: null,
       cursorRef: { current: cursor }, canWrite: true,
-      onChanged: vi.fn(), onMerged: vi.fn(), onHidden: vi.fn(),
+      onMerged: vi.fn(), onHidden: vi.fn(),
     }
     render(<PassageEditPanel {...props} />)
     return props
@@ -164,10 +162,9 @@ describe('PassageEditPanel', () => {
 
   it('splits at the replay time', async () => {
     api.split.mockResolvedValue([])
-    const props = make({ id: 'p1', at: Date.UTC(2026, 2, 14, 0, 30) / 1000 })
+    make({ id: 'p1', at: Date.UTC(2026, 2, 14, 0, 30) / 1000 })
     fireEvent.click(screen.getByRole('button', { name: /Split here/ }))
     await waitFor(() => expect(api.split).toHaveBeenCalledWith('p1', '2026-03-14T00:30:00.000Z'))
-    await waitFor(() => expect(props.onChanged).toHaveBeenCalled())
   })
 
   it('asks for a replay position instead of guessing one', () => {
@@ -202,7 +199,7 @@ describe('PassageEditPanel with unsaved edits', () => {
   const props = {
     passage: detail, cruises: [], olderNeighbour: passage('p0'), newerNeighbour: passage('p2'),
     cursorRef: { current: { id: 'p1', at: 1000 } }, canWrite: true,
-    onChanged: vi.fn(), onMerged: vi.fn(), onHidden: vi.fn(),
+    onMerged: vi.fn(), onHidden: vi.fn(),
   }
 
   it('keeps typed notes when the server record changes underneath', () => {

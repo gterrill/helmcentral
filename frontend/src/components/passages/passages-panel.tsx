@@ -60,12 +60,10 @@ export interface PassagesPanelProps {
   onOpenPassage: (id: string) => void
   onOpenCruise: (id: string) => void
   onCombine: (ids: string[]) => void
-  /** Something changed on the server: refresh the list. */
-  onChanged: () => void
 }
 
 export function PassagesPanel({
-  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine, onChanged,
+  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine,
 }: PassagesPanelProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -155,7 +153,6 @@ export function PassagesPanel({
     setImporting(true)
     try {
       setSummary(await passagesApi.importGPX(files))
-      onChanged()
     } catch (err) {
       toast.error('Could not import tracks', { description: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -164,7 +161,7 @@ export function PassagesPanel({
   }
 
   const selectedIds = [...selected]
-  const afterBulk = () => { setSelected(new Set()); onChanged() }
+  const afterBulk = () => { setSelected(new Set()) }
 
   const moveSelected = async (cruiseId: string | null) => {
     setBusy(true)
@@ -190,7 +187,6 @@ export function PassagesPanel({
       onFilter({ kind: 'cruise', id: cruise.id })
     } catch (err) {
       toast.error('Could not create cruise', { description: err instanceof Error ? err.message : String(err) })
-      onChanged()
     } finally {
       setBusy(false)
     }

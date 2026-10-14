@@ -24,7 +24,7 @@ const passage: PassageDetail = {
 const passagePanel = (
   <PassageEditPanel
     passage={passage} cruises={[]} olderNeighbour={null} newerNeighbour={null} cursorRef={{ current: null }}
-    canWrite onChanged={vi.fn()} onMerged={vi.fn()} onHidden={vi.fn()}
+    canWrite onMerged={vi.fn()} onHidden={vi.fn()}
   />
 )
 
@@ -62,7 +62,7 @@ describe('passage details navigation guard', () => {
 
 describe('cruise details navigation guard', () => {
   const cruise = { id: 'c1', name: 'Whitsundays', notes: '', created_at: '' }
-  const panel = <CruiseEditPanel cruise={cruise} canWrite onChanged={vi.fn()} onDeleted={vi.fn()} />
+  const panel = <CruiseEditPanel cruise={cruise} canWrite onDeleted={vi.fn()} />
 
   it('holds a move away while the name or notes are unsaved and saves on request', async () => {
     api.patchCruise.mockResolvedValue({})

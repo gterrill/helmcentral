@@ -13,11 +13,10 @@ import type { CruiseRecord } from '@/lib/passages'
 export interface CruiseEditPanelProps {
   cruise: CruiseRecord
   canWrite: boolean
-  onChanged: () => void
   onDeleted: () => void
 }
 
-export function CruiseEditPanel({ cruise, canWrite, onChanged, onDeleted }: CruiseEditPanelProps) {
+export function CruiseEditPanel({ cruise, canWrite, onDeleted }: CruiseEditPanelProps) {
   const [name, setName] = useState(cruise.name)
   const [notes, setNotes] = useState(cruise.notes)
   const [saving, setSaving] = useState(false)
@@ -26,7 +25,6 @@ export function CruiseEditPanel({ cruise, canWrite, onChanged, onDeleted }: Crui
 
   const persist = async () => {
     await passagesApi.patchCruise(cruise.id, { name: name.trim(), notes })
-    onChanged()
   }
 
   useNavigationGuard(dirty && name.trim() !== ''
