@@ -73,6 +73,10 @@ export interface WaterRise {
   lat: number
   lon: number
   suggested_label: string | null
+  /** found: a marina was beside it. none: checked, no marina. failed: the
+   * check could not run. pending: not checked yet. */
+  suggestion_status: 'found' | 'none' | 'failed' | 'pending'
+  suggestion_error?: string
   looked_up_at: string | null
   label: string | null
 }
@@ -308,4 +312,11 @@ export function clockFor(timeline: Timeline, id: string, at: number): number | n
   const e = timeline.entries.find((x) => x.id === id)
   if (!e) return null
   return e.offset + Math.max(0, Math.min(e.end - e.start, at - e.start))
+}
+
+/** An instant inside a water rise, for labelling it: the middle, not an edge. */
+export function riseLabelTime(rise: Pick<WaterRise, 'start' | 'end'>): string {
+  const a = Date.parse(rise.start)
+  const b = Date.parse(rise.end)
+  return new Date(a + Math.max(0, b - a) / 2).toISOString()
 }

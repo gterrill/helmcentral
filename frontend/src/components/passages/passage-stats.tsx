@@ -80,14 +80,15 @@ const RISE_LABELS: WaterRiseLabel[] = ['Watermaker', 'Dock fill']
 
 export function WaterRiseRow({ rise, lon, units, canWrite, onLabel }: WaterRiseRowProps) {
   const confirmed = rise.label as WaterRiseLabel | null
-  const suggested = confirmed ? null : (rise.suggested_label as WaterRiseLabel | null)
+  const suggested = confirmed || rise.suggestion_status !== 'found' ? null : (rise.suggested_label as WaterRiseLabel | null)
+  const checkFailed = !confirmed && rise.suggestion_status === 'failed'
   return (
     <li className="flex flex-wrap items-center gap-2 text-xs" data-testid="water-rise-row">
       <span className="min-w-0 flex-1 truncate tabular-nums text-foreground">
         {formatLocalDateTime(Date.parse(rise.start) / 1000, lon)} · +{fmtVolume(rise.litres, units)}
       </span>
       <span className="text-muted-foreground">
-        {confirmed ? 'Confirmed' : suggested ? `Suggested: ${suggested}` : 'Not confirmed'}
+        {confirmed ? 'Confirmed' : suggested ? `Suggested: ${suggested}` : checkFailed ? "Couldn't check for a marina" : 'Not confirmed'}
       </span>
       <span className="flex gap-1" role="group" aria-label="Water source">
         {RISE_LABELS.map((label) => (

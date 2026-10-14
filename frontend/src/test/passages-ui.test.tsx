@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PassageEditPanel } from '@/components/passages/passage-edit-panel'
-import { CruiseStatsPanel } from '@/components/passages/passage-stats'
+import { CruiseStatsPanel, WaterRiseRow } from '@/components/passages/passage-stats'
 import { PassagesPanel } from '@/components/passages/passages-panel'
 import type { CruiseStats, PassageDetail, PassageSummary } from '@/lib/passages'
 
@@ -135,7 +135,7 @@ describe('CruiseStatsPanel', () => {
       night_soc: [{ night: '2026-03-13', sunset: '', sunrise: '', min_soc_pct: 50, dawn_soc_pct: 62.4 }],
       water_rises: [{
         start: '2026-03-14T01:00:00Z', end: '2026-03-14T01:20:00Z', litres: 180, lat: 0, lon: 149,
-        suggested_label: 'Dock fill', looked_up_at: '2026-03-14T02:00:00Z', label: null,
+        suggested_label: 'Dock fill', suggestion_status: 'found', looked_up_at: '2026-03-14T02:00:00Z', label: null,
       }],
     }
     const { rerender } = render(<CruiseStatsPanel stats={stats} units="metric" lon={149} canWrite onLabelRise={onLabelRise} />)
@@ -226,5 +226,32 @@ describe('PassageEditPanel with unsaved edits', () => {
       expect(screen.getByRole('button', { name })).toBeDisabled()
     }
     expect(screen.getByText('Save your changes before splitting, trimming or merging.')).toBeInTheDocument()
+  })
+})
+
+describe('water rise suggestion status', () => {
+  const rise = (suggestion_status: 'found' | 'none' | 'failed' | 'pending', suggested_label: string | null = null) => ({
+    start: '2026-03-14T01:00:00Z', end: '2026-03-14T01:20:00Z', litres: 100, lat: 0, lon: 149,
+    suggested_label, suggestion_status, looked_up_at: null, label: null,
+  })
+  const row = (r: ReturnType<typeof rise>) => {
+    render(<WaterRiseRow rise={r} lon={149} units="metric" canWrite onLabel={vi.fn()} />)
+    return screen.getByTestId('water-rise-row')
+  }
+
+  it('says the check failed and offers no suggestion', () => {
+    const el = row(rise('failed', 'Dock fill'))
+    expect(el).toHaveTextContent("Couldn't check for a marina")
+    expect(el).not.toHaveTextContent('Suggested')
+  })
+
+  it('says nothing about a check that is pending or found nothing', () => {
+    for (const status of ['pending', 'none'] as const) {
+      const { unmount } = render(<WaterRiseRow rise={rise(status)} lon={149} units="metric" canWrite onLabel={vi.fn()} />)
+      const el = screen.getByTestId('water-rise-row')
+      expect(el).not.toHaveTextContent('Suggested')
+      expect(el).not.toHaveTextContent("Couldn't")
+      unmount()
+    }
   })
 })

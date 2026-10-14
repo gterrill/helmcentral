@@ -16,6 +16,7 @@ import {
   passageHeading,
   passageRoute,
   positionAt,
+  riseLabelTime,
   segmentBounds,
   segmentsToGeoJSON,
   timedSegments,
@@ -152,5 +153,11 @@ describe('replay timeline', () => {
     expect(clockFor(tl, 'b', 100200)).toBe(1200)
     expect(clockFor(tl, 'a', 0)).toBe(0)
     expect(clockFor(tl, 'zzz', 0)).toBeNull()
+  })
+})
+
+describe('water rise label time', () => {
+  it('names an instant inside the rise, not its edge', () => {
+    expect(riseLabelTime({ start: '2026-03-14T01:00:00Z', end: '2026-03-14T01:20:00Z' })).toBe('2026-03-14T01:10:00.000Z')
   })
 })

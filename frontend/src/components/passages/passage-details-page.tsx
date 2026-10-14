@@ -17,6 +17,7 @@ import {
   fmtNM,
   formatLocalDate,
   passageHeading,
+  riseLabelTime,
   passageRoute,
   type CruiseRecord,
   type PassageDetail,
@@ -147,7 +148,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onListChanged
 
   const labelRise = async (rise: WaterRise, label: WaterRiseLabel | '') => {
     try {
-      await passagesApi.labelWaterRise(id, rise.start, label)
+      await passagesApi.labelWaterRise(id, riseLabelTime(rise), label)
       setReload((n) => n + 1)
     } catch (err) {
       toast.error('Could not label water', { description: err instanceof Error ? err.message : String(err) })
