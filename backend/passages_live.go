@@ -15,7 +15,7 @@ import (
 // same alarmReader the alarm engine and the derived paths use, so there is no
 // second SignalK client.
 //
-// Every measurement older than trackReadingMaxAge is absent (ADR 0173
+// Every measurement older than trackReadingMaxAge is absent (ADR 0176
 // decision 3). The generator state is the one exception: the GX publishes it
 // only when it changes, so an hours-old "stopped" is still the state, not a
 // stale reading.

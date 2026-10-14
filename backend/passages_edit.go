@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Operator edits to passages and cruises (ADR 0173 decision 5). Every change
+// Operator edits to passages and cruises (ADR 0176 decision 5). Every change
 // to a passage marks it edited, which is what stops the detector recreating or
 // altering it.
 

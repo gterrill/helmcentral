@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Read-only passage routes (ADR 0173). Editing arrives with the Passages page.
+// Read-only passage routes (ADR 0176). Editing arrives with the Passages page.
 
 // passageDisplayToleranceMeters is how far the displayed track may stray from
 // the logged one.

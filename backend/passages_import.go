@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// GPX import (ADR 0173 decision 6). Imported points carry position and a speed
+// GPX import (ADR 0176 decision 6). Imported points carry position and a speed
 // and course worked out from successive fixes; every other reading is absent.
 // They are stored with source "imported" and run through the same detector.
 

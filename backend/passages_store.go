@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// The track point log, passages and cruises (ADR 0173), in helmcentral.sqlite.
+// The track point log, passages and cruises (ADR 0176), in helmcentral.sqlite.
 
 var errPassageNotFound = errors.New("passage not found")
 

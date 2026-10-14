@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// The passage detector (ADR 0173 decision 5). It is a pure function over
+// The passage detector (ADR 0176 decision 5). It is a pure function over
 // time-ordered track points so the same rules can later run over a GPX import.
 // Speeds come from each point's SOG reading; a point with no SOG says nothing
 // about whether the boat was moving, so it neither starts a passage nor holds

@@ -262,7 +262,7 @@ func sampleTracks(settingsPath string) {
 		solarPowerHistory.record(solar.CurrentW, now)
 	}
 
-	// The always-on track point log (ADR 0173) does its own fix filtering, so
+	// The always-on track point log (ADR 0176) does its own fix filtering, so
 	// it sees the position before the loose range check below.
 	if err == nil {
 		observeLiveTrack(globalSignalKSnapshot, state, settingsPath, now)

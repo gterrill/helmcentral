@@ -382,7 +382,7 @@ func main() {
 	}
 	globalNearbyContactStore = ncs
 
-	// Track point log and passages (ADR 0173), in the same file. The recorder
+	// Track point log and passages (ADR 0176), in the same file. The recorder
 	// is always on; a log that cannot be opened is a startup failure, not a
 	// feature quietly turned off.
 	pas, err := newPassageStore(helmcentralDBPath())

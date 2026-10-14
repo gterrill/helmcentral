@@ -5,7 +5,7 @@ import "fmt"
 // runPassageDetection reads the track points since the detector last stopped,
 // stores any passage that has ended, and remembers where to resume. A passage
 // that overlaps one already stored, hidden and edited ones included, is left
-// alone: the operator's version wins (ADR 0173 decision 5).
+// alone: the operator's version wins (ADR 0176 decision 5).
 func runPassageDetection(store *passageStore) error {
 	resume, ok, err := store.DetectorResume()
 	if err != nil {

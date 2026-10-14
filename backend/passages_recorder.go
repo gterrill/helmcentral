@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// The track point recorder (ADR 0173 decisions 2 to 4). Observe is fed one
+// The track point recorder (ADR 0176 decisions 2 to 4). Observe is fed one
 // sample per poll tick and decides whether the sample becomes a row in the
 // track point log. It knows nothing about SignalK: passages_live.go builds the
 // samples, so the rules here are testable on their own.
