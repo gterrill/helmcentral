@@ -29,7 +29,7 @@ describe('useForecastWarnings', () => {
       await Promise.resolve()
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith('/api/forecast-warnings')
+    expect(fetchMock).toHaveBeenCalledWith('/api/forecast-warnings', expect.anything())
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(59 * 60 * 1000)

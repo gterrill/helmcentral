@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { ApiError, apiRequest } from '@/lib/api-query'
 import type { PoiFeature } from '@/lib/poi'
 
 interface PoiFeatureApi {
@@ -122,26 +123,9 @@ export function usePoi(rangeNm: number, categories: readonly string[], limit: nu
           categories: categoriesKey,
           limit: String(limit),
         })
-        const res = await fetch(`/api/poi?${params.toString()}`, { signal: controller.signal })
-
-        if (!res.ok) {
-          if (cancelled) return
-          setError(`POI provider unavailable (${res.status})`)
-          setLoading(false)
-          if (res.status === 502 || res.status === 503) {
-            const delay = Math.min(backoffMs, BACKOFF_MAX_MS)
-            backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS)
-            setRetryAt(Date.now() + delay)
-            schedule(delay)
-          } else {
-            backoffMs = BACKOFF_START_MS
-            setRetryAt(Date.now() + POLL_INTERVAL_MS)
-            schedule(POLL_INTERVAL_MS)
-          }
-          return
-        }
-
-        const data = (await res.json()) as PoiResponseApi
+        const data = await apiRequest<PoiResponseApi>(`/api/poi?${params.toString()}`, {
+          signal: controller.signal,
+        })
         if (cancelled) return
 
         const nextFeatures = Array.isArray(data.features)
@@ -165,8 +149,22 @@ export function usePoi(rangeNm: number, categories: readonly string[], limit: nu
         schedule(POLL_INTERVAL_MS)
       } catch (err) {
         if (cancelled || controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'POI fetch failed')
         setLoading(false)
+        if (err instanceof ApiError) {
+          setError(`POI provider unavailable (${err.status})`)
+          if (err.status === 502 || err.status === 503) {
+            const delay = Math.min(backoffMs, BACKOFF_MAX_MS)
+            backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS)
+            setRetryAt(Date.now() + delay)
+            schedule(delay)
+          } else {
+            backoffMs = BACKOFF_START_MS
+            setRetryAt(Date.now() + POLL_INTERVAL_MS)
+            schedule(POLL_INTERVAL_MS)
+          }
+          return
+        }
+        setError(err instanceof Error ? err.message : 'POI fetch failed')
         setRetryAt(Date.now() + POLL_INTERVAL_MS)
         schedule(POLL_INTERVAL_MS)
       }

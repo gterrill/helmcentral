@@ -197,13 +197,9 @@ describe('ProfilesSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument())
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/equipment-profiles/cummins-qsb67-550'),
-      expect.objectContaining({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+    const put = vi.mocked(globalThis.fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put?.[0]).toContain('/api/equipment-profiles/cummins-qsb67-550')
+    expect(new Headers(put?.[1]?.headers).get('Content-Type')).toBe('application/json')
   })
 
   it('creates a new profile from the New profile action', async () => {

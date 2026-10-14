@@ -20,7 +20,7 @@ describe('useAssistantStatus', () => {
     const { result } = renderHook(() => useAssistantStatus())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/status')
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/status', expect.anything())
     expect(result.current.status).toEqual({ enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' })
     expect(result.current.error).toBeNull()
   })
@@ -39,7 +39,7 @@ describe('useAssistantStatus', () => {
   })
 
   it('sets an error message when the fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useAssistantStatus())

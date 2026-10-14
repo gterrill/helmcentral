@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 
 import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
+import { useApiQuery } from '@/lib/api-query'
 
 export interface ForecastWarningSection {
   day: string
@@ -81,74 +82,68 @@ interface ForecastWarningsApi {
   ttl_seconds?: number
 }
 
+interface MappedWarnings {
+  warnings: ForecastWarnings
+  isCached: boolean
+  updatedAt: string | null
+  ttlSeconds: number | null
+}
+
+function mapWarnings(data: ForecastWarningsApi): MappedWarnings {
+  // The plugin providing these warnings already scopes bulletins/sections
+  // to the vessel's own region and filters out cancellations - every
+  // bulletin/section returned here is active and relevant, so there's no
+  // client-side filtering left to do.
+  const warnings: ForecastWarnings = {
+    provider: data.provider ?? '',
+    region: data.region ?? '',
+    bulletins: Array.isArray(data.bulletins)
+      ? data.bulletins.map((bulletin) => ({
+          id: bulletin.id ?? '',
+          title: bulletin.title ?? '',
+          issuedAt: typeof bulletin.issued_at === 'string' && bulletin.issued_at !== '' ? bulletin.issued_at : null,
+          detailsUrl: bulletin.details_url ?? '',
+          category: bulletin.category ?? '',
+          sections: Array.isArray(bulletin.sections)
+            ? bulletin.sections.map((section) => ({
+                day: section.day ?? '',
+                warningType: section.warning_type ?? '',
+              }))
+            : [],
+        }))
+      : [],
+  }
+  return {
+    warnings,
+    isCached: Boolean(data.cached),
+    updatedAt: typeof data.updated_at === 'string' ? data.updated_at : null,
+    ttlSeconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : null,
+  }
+}
+
 export function useForecastWarnings(refreshIntervalSeconds = 3600) {
-  const [warnings, setWarnings] = useState<ForecastWarnings | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [isCached, setIsCached] = useState(false)
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null)
-  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null)
-  const hasLoadedDataRef = useRef(false)
-
-  const fetchWarnings = useCallback(async () => {
-    try {
-      if (!hasLoadedDataRef.current) {
-        setLoading(true)
-      }
-
-      const response = await fetch('/api/forecast-warnings')
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(errorPayload?.error ?? `HTTP error! status: ${response.status}`)
-      }
-
-      const data = (await response.json()) as ForecastWarningsApi
-
-      // The plugin providing these warnings already scopes bulletins/sections
-      // to the vessel's own region and filters out cancellations - every
-      // bulletin/section returned here is active and relevant, so there's no
-      // client-side filtering left to do.
-      const mapped: ForecastWarnings = {
-        provider: data.provider ?? '',
-        region: data.region ?? '',
-        bulletins: Array.isArray(data.bulletins)
-          ? data.bulletins.map((bulletin) => ({
-              id: bulletin.id ?? '',
-              title: bulletin.title ?? '',
-              issuedAt: typeof bulletin.issued_at === 'string' && bulletin.issued_at !== '' ? bulletin.issued_at : null,
-              detailsUrl: bulletin.details_url ?? '',
-              category: bulletin.category ?? '',
-              sections: Array.isArray(bulletin.sections)
-                ? bulletin.sections.map((section) => ({
-                    day: section.day ?? '',
-                    warningType: section.warning_type ?? '',
-                  }))
-                : [],
-            }))
-          : [],
-      }
-
-      hasLoadedDataRef.current = true
-      setWarnings(mapped)
-      setIsCached(Boolean(data.cached))
-      setUpdatedAt(typeof data.updated_at === 'string' ? data.updated_at : null)
-      setTtlSeconds(typeof data.ttl_seconds === 'number' ? data.ttl_seconds : null)
-      setError(null)
-    } catch (err) {
-      console.error('Error fetching forecast warnings:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load forecast warnings')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data, error, isLoading, refetch } = useApiQuery<MappedWarnings>({
+    queryKey: ['/api/forecast-warnings'],
+    path: '/api/forecast-warnings',
+    refetchInterval: refreshIntervalSeconds * 1000,
+    select: mapWarnings,
+  })
 
   useEffect(() => {
-    void fetchWarnings()
-    const interval = setInterval(fetchWarnings, refreshIntervalSeconds * 1000)
-    return () => clearInterval(interval)
-  }, [fetchWarnings, refreshIntervalSeconds])
+    if (error) console.error('Error fetching forecast warnings:', error)
+  }, [error])
 
+  const warnings = data?.warnings ?? null
   const activeWarning = warnings && warnings.bulletins.length > 0 ? warnings : null
 
-  return { warnings, activeWarning, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchWarnings }
+  return {
+    warnings,
+    activeWarning,
+    loading: isLoading,
+    error: error ? error.message || 'Failed to load forecast warnings' : null,
+    isCached: data?.isCached ?? false,
+    updatedAt: data?.updatedAt ?? null,
+    ttlSeconds: data?.ttlSeconds ?? null,
+    refetch,
+  }
 }

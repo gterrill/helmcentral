@@ -40,7 +40,7 @@ describe('IgnoredSensorsList', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
 
     await waitFor(() => expect(screen.queryByText('Port engine exhaust temperature')).toBeNull())
-    expect(fetchMock).toHaveBeenCalledWith('/api/alarms/ignored-sensors/propulsion.port.exhaustTemperature', { method: 'DELETE' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/alarms/ignored-sensors/propulsion.port.exhaustTemperature', expect.objectContaining({ method: 'DELETE' }))
     expect(await screen.findByText('No sensors are currently ignored.')).toBeInTheDocument()
   })
 })

@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { readErrorMessage } from '@/lib/api-error'
-import { InventoryValidationError, type InventoryFieldError } from '@/hooks/use-inventory'
+import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import { todayISO } from '@/lib/local-date'
 import { formatDataAge } from '@/lib/staleness'
 
@@ -24,19 +22,12 @@ function withToday(url: string): string {
 }
 
 // ADR 0138: the Maintenance section's data layer - service rules and the
-// log they're completed into. Same idiom as use-inventory.ts throughout: no
-// react-query, no shared store, one instance per caller, a plain
-// fetch-and-throw-the-server's-own-message write helper (AGENTS.md fallback
-// policy). submitJSON is copied rather than imported from use-inventory.ts -
-// that file's own comment on its identical copy from use-documents.ts
-// explains why: a two-line helper is cheaper to duplicate a third time than
-// to thread a shared-module dependency between features that otherwise
-// don't know about each other. InventoryValidationError IS imported and
-// reused as-is, though - maintenance's own validation errors come back in
-// exactly the same {field, message} shape (backend/maintenance_handlers.go
-// reuses inventoryValidationError directly, since this is a sub-feature of
-// Inventory, not a separate one), so a second class carrying the identical
-// fields would be pure duplication with no behavioural difference.
+// log they're completed into. Reads go through useApiQuery and writes through
+// apiRequest (ADR 0173), which throws the server's own message (AGENTS.md
+// fallback policy); a per-field validation failure arrives as ApiError with
+// fieldErrors, the same {field, message} shape inventory's own writes use.
+// The standalone write functions invalidate the lists they change, so a
+// mounted list refreshes without the component wiring a callback.
 
 export type MaintenanceStatus = 'overdue' | 'due_soon' | 'ok' | 'never_recorded' | 'interval_not_set' | 'hours_unknown' | 'not_applicable'
 
@@ -249,37 +240,23 @@ export interface HourMeterReset {
   created_at: string
 }
 
-// Copied from use-inventory.ts's own submitJSON - see this file's header
-// comment for why.
-async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as {
-      error?: string
-      errors?: InventoryFieldError[]
-      field?: string
-      message?: string
-    }
-    if (Array.isArray(payload.errors) && payload.errors.length > 0) {
-      throw new InventoryValidationError(payload.errors)
-    }
-    if (typeof payload.field === 'string' && typeof payload.message === 'string') {
-      throw new InventoryValidationError([{ field: payload.field, message: payload.message }])
-    }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
-}
-
 export interface MaintenanceRuleFilter {
   equipment?: string
   system?: string
   includeStored?: boolean
+}
+
+const RULES = '/api/inventory/maintenance/rules'
+const LOG = '/api/inventory/maintenance/log'
+const NO_RULES: MaintenanceRule[] = []
+const NO_SCHEDULE_ERRORS: MaintenanceScheduleError[] = []
+const NO_RESETS: HourMeterReset[] = []
+const NO_ENTRIES: MaintenanceLogEntry[] = []
+
+interface RulesResponse {
+  rules?: MaintenanceRule[]
+  removed?: MaintenanceRule[]
+  schedule_errors?: MaintenanceScheduleError[]
 }
 
 /**
@@ -289,87 +266,57 @@ export interface MaintenanceRuleFilter {
  * all, for a caller with no scope yet to filter by.
  */
 export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
-  const [rules, setRules] = useState<MaintenanceRule[]>([])
-  const [removed, setRemoved] = useState<MaintenanceRule[]>([])
-  const [scheduleErrors, setScheduleErrors] = useState<MaintenanceScheduleError[]>([])
-  const [loading, setLoading] = useState(filter !== null)
-  const [error, setError] = useState<string | null>(null)
-  const seqRef = useRef(0)
+  const params = new URLSearchParams()
+  if (filter?.equipment) params.set('equipment', filter.equipment)
+  if (filter?.system) params.set('system', filter.system)
+  if (filter?.includeStored) params.set('include_stored', 'true')
+  params.set('today', todayFromClock())
 
-  const filterKey = filter === null
-    ? null
-    : JSON.stringify([filter.equipment ?? '', filter.system ?? '', filter.includeStored ?? false])
+  // `today` is in the key because it is in the path: two views of different
+  // dates are different reads, and a refresh must refetch each with its own.
+  const { data, error, isLoading, refetch } = useApiQuery<RulesResponse>({
+    queryKey: [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false, today: params.get('today') }],
+    path: `${RULES}?${params.toString()}`,
+    enabled: filter !== null,
+  })
 
-  const refresh = useCallback(async () => {
-    if (filter === null) {
-      seqRef.current += 1
-      setRules([])
-      setRemoved([])
-      setScheduleErrors([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (filter.equipment) params.set('equipment', filter.equipment)
-      if (filter.system) params.set('system', filter.system)
-      if (filter.includeStored) params.set('include_stored', 'true')
-      params.set('today', todayFromClock())
-      const qs = params.toString()
-      const res = await fetch(`${apiBaseUrl}/api/inventory/maintenance/rules${qs ? `?${qs}` : ''}`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as {
-        rules?: MaintenanceRule[]
-        removed?: MaintenanceRule[]
-        schedule_errors?: MaintenanceScheduleError[]
-      }
-      if (seq !== seqRef.current) return
-      setRules(data.rules ?? [])
-      setRemoved(data.removed ?? [])
-      setScheduleErrors(data.schedule_errors ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-    // filterKey stands in for filter's actual fields - the same idiom
-    // useEquipment's own refresh() uses and explains (use-inventory.ts).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { rules, removed, scheduleErrors, loading, error, refresh }
+  return {
+    rules: data?.rules ?? NO_RULES,
+    removed: data?.removed ?? NO_RULES,
+    scheduleErrors: data?.schedule_errors ?? NO_SCHEDULE_ERRORS,
+    loading: isLoading,
+    error: error?.message ?? null,
+    refresh: refetch,
+  }
 }
 
 /** POST /api/inventory/maintenance/rules */
 export async function createMaintenanceRule(input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(withToday(`${apiBaseUrl}/api/inventory/maintenance/rules`), 'POST', input)
+  const data = await apiRequest<{ rule: MaintenanceRule }>(withToday(RULES), { method: 'POST', json: input })
+  invalidateQueries([RULES])
   return data.rule
 }
 
 /** PUT /api/inventory/maintenance/rules/:id */
 export async function updateMaintenanceRule(id: string, input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}`), 'PUT', input)
+  const data = await apiRequest<{ rule: MaintenanceRule }>(withToday(`${RULES}/${encodeURIComponent(id)}`), { method: 'PUT', json: input })
+  invalidateQueries([RULES])
   return data.rule
 }
 
 /** DELETE /api/inventory/maintenance/rules/:id */
 export async function deleteMaintenanceRule(id: string): Promise<void> {
-  await submitJSON<void>(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}`, 'DELETE')
+  await apiRequest<void>(`${RULES}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  invalidateQueries([RULES])
 }
 
 /** POST /api/inventory/maintenance/rules/:id/acknowledge - a blank reason
  * clears the acknowledgement. */
 export async function acknowledgeMaintenanceRule(id: string, reason: string): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/acknowledge`), 'POST', { reason },
+  const data = await apiRequest<{ rule: MaintenanceRule }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/acknowledge`), { method: 'POST', json: { reason } },
   )
+  invalidateQueries([RULES])
   return data.rule
 }
 
@@ -380,9 +327,10 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
   const body: { last_done_at?: string; last_done_hours?: number } = {}
   if (lastDoneAt !== undefined) body.last_done_at = lastDoneAt
   if (lastDoneHours !== undefined) body.last_done_hours = lastDoneHours
-  const data = await submitJSON<{ rule: MaintenanceRule }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/last-done`), 'POST', body,
+  const data = await apiRequest<{ rule: MaintenanceRule }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/last-done`), { method: 'POST', json: body },
   )
+  invalidateQueries([RULES])
   return data.rule
 }
 
@@ -390,104 +338,98 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
  * kind='maintenance' log entry, resets the rule's own baseline to it, and
  * clears any acknowledgement. */
 export async function completeMaintenanceRule(id: string, input: Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'>): Promise<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }> {
-  return submitJSON<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/complete`), 'POST', input,
+  const data = await apiRequest<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/complete`), { method: 'POST', json: input },
   )
+  invalidateQueries([RULES])
+  invalidateQueries([LOG])
+  return data
 }
 
 /** PUT /api/inventory/maintenance/rules/:id/procedure-note - {note_id},
  * blank clears the link. */
 export async function setMaintenanceRuleProcedureNote(id: string, noteId: string): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`), 'PUT', { note_id: noteId },
+  const data = await apiRequest<{ rule: MaintenanceRule }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/procedure-note`), { method: 'PUT', json: { note_id: noteId } },
   )
+  invalidateQueries([RULES])
   return data.rule
 }
 
 /** POST /api/inventory/maintenance/rules/:id/procedure-note - creates a
  * fresh Procedure note titled from the rule and links it. */
 export async function createMaintenanceProcedureNote(id: string): Promise<{ rule: MaintenanceRule; note: { id: string; title: string } }> {
-  return submitJSON<{ rule: MaintenanceRule; note: { id: string; title: string } }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/procedure-note`), 'POST',
+  const data = await apiRequest<{ rule: MaintenanceRule; note: { id: string; title: string } }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/procedure-note`), { method: 'POST' },
   )
+  invalidateQueries([RULES])
+  return data
 }
 
 /** PUT /api/inventory/maintenance/rules/:id/overrides - the only way to
  * change a profile job (ADR 0148). */
 export async function setMaintenanceRuleOverrides(id: string, input: MaintenanceOverridesInput): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/overrides`), 'PUT', input,
+  const data = await apiRequest<{ rule: MaintenanceRule }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/overrides`), { method: 'PUT', json: input },
   )
+  invalidateQueries([RULES])
   return data.rule
 }
 
 /** DELETE /api/inventory/maintenance/rules/:id/overrides/:field - "Reset to
  * profile" for one field. */
 export async function resetMaintenanceRuleOverride(id: string, field: MaintenanceOverrideField): Promise<MaintenanceRule> {
-  const data = await submitJSON<{ rule: MaintenanceRule }>(
-    withToday(`${apiBaseUrl}/api/inventory/maintenance/rules/${encodeURIComponent(id)}/overrides/${encodeURIComponent(field)}`), 'DELETE',
+  const data = await apiRequest<{ rule: MaintenanceRule }>(
+    withToday(`${RULES}/${encodeURIComponent(id)}/overrides/${encodeURIComponent(field)}`), { method: 'DELETE' },
   )
+  invalidateQueries([RULES])
   return data.rule
 }
 
 /** GET /api/inventory/equipment/:id/maintenance/profile-change-preview -
  * which of the item's jobs carry over, leave or arrive if its profile
- * became profileId ('' for no profile). */
+ * became profileId ('' for no profile). A one-shot probe for a dialog, so
+ * it is not cached. */
 export async function previewProfileChange(equipmentId: string, profileId: string): Promise<MaintenanceProfileChangePreview> {
   const qs = new URLSearchParams({ profile_id: profileId }).toString()
-  const data = await submitJSON<Partial<MaintenanceProfileChangePreview>>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/profile-change-preview?${qs}`, 'GET',
+  const data = await apiRequest<Partial<MaintenanceProfileChangePreview>>(
+    `${equipmentMaintenance(equipmentId)}/profile-change-preview?${qs}`,
   )
   return { kept: data.kept ?? [], leaving: data.leaving ?? [], new: data.new ?? [] }
+}
+
+function equipmentMaintenance(equipmentId: string): string {
+  return `/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance`
 }
 
 /** POST /api/inventory/equipment/:id/maintenance/meter-reset - records a
  * meter replacement (old reading, new reading, date) so true hours keep
  * counting across it. */
 export async function recordHourMeterReset(equipmentId: string, oldReading: number, newReading: number, changedAt: string): Promise<HourMeterReset> {
-  const data = await submitJSON<{ reset: HourMeterReset }>(
-    `${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/meter-reset`, 'POST',
-    { old_reading: oldReading, new_reading: newReading, changed_at: changedAt },
+  const data = await apiRequest<{ reset: HourMeterReset }>(
+    `${equipmentMaintenance(equipmentId)}/meter-reset`, {
+      method: 'POST',
+      json: { old_reading: oldReading, new_reading: newReading, changed_at: changedAt },
+    },
   )
+  // The reset changes the hours every job on the item is measured against.
+  invalidateQueries([`${equipmentMaintenance(equipmentId)}/meter-resets`])
+  invalidateQueries([RULES])
   return data.reset
 }
 
 /** GET /api/inventory/equipment/:id/maintenance/meter-resets - the
  * equipment editor's own display of past meter replacements. */
 export function useHourMeterResets(equipmentId: string | null) {
-  const [resets, setResets] = useState<HourMeterReset[]>([])
-  const [loading, setLoading] = useState(equipmentId !== null)
-  const [error, setError] = useState<string | null>(null)
-  const seqRef = useRef(0)
+  const path = `${equipmentMaintenance(equipmentId ?? '')}/meter-resets`
+  const { data, error, isLoading, refetch } = useApiQuery<HourMeterReset[]>({
+    queryKey: [path],
+    path,
+    enabled: equipmentId !== null,
+    select: (raw: { resets?: HourMeterReset[] }) => raw.resets ?? [],
+  })
 
-  const refresh = useCallback(async () => {
-    if (equipmentId === null) {
-      seqRef.current += 1
-      setResets([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance/meter-resets`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as { resets?: HourMeterReset[] }
-      if (seq !== seqRef.current) return
-      setResets(data.resets ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-  }, [equipmentId])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { resets, loading, error, refresh }
+  return { resets: data ?? NO_RESETS, loading: isLoading, error: error?.message ?? null, refresh: refetch }
 }
 
 export interface MaintenanceLogFilter {
@@ -498,62 +440,35 @@ export interface MaintenanceLogFilter {
  * log entries (the equipment editor's Maintenance block) or, with no
  * filter, the whole log. */
 export function useMaintenanceLogEntries(filter: MaintenanceLogFilter | null) {
-  const [entries, setEntries] = useState<MaintenanceLogEntry[]>([])
-  const [loading, setLoading] = useState(filter !== null)
-  const [error, setError] = useState<string | null>(null)
-  const seqRef = useRef(0)
-  const filterKey = filter === null ? null : (filter.equipment ?? '')
+  const { data, error, isLoading, refetch } = useApiQuery<MaintenanceLogEntry[]>({
+    queryKey: [LOG, { equipment: filter?.equipment ?? '' }],
+    path: `${LOG}${filter?.equipment ? `?equipment=${encodeURIComponent(filter.equipment)}` : ''}`,
+    enabled: filter !== null,
+    select: (raw: { entries?: MaintenanceLogEntry[] }) => raw.entries ?? [],
+  })
 
-  const refresh = useCallback(async () => {
-    if (filter === null) {
-      seqRef.current += 1
-      setEntries([])
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const seq = (seqRef.current += 1)
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (filter.equipment) params.set('equipment', filter.equipment)
-      const qs = params.toString()
-      const res = await fetch(`${apiBaseUrl}/api/inventory/maintenance/log${qs ? `?${qs}` : ''}`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as { entries?: MaintenanceLogEntry[] }
-      if (seq !== seqRef.current) return
-      setEntries(data.entries ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { entries, loading, error, refresh }
+  return { entries: data ?? NO_ENTRIES, loading: isLoading, error: error?.message ?? null, refresh: refetch }
 }
 
 /** POST /api/inventory/maintenance/log - a standalone entry (repair,
  * improvement) against an item with no rule. */
 export async function createMaintenanceLogEntry(input: MaintenanceLogEntryInput): Promise<MaintenanceLogEntry> {
-  const data = await submitJSON<{ entry: MaintenanceLogEntry }>(`${apiBaseUrl}/api/inventory/maintenance/log`, 'POST', input)
+  const data = await apiRequest<{ entry: MaintenanceLogEntry }>(LOG, { method: 'POST', json: input })
+  invalidateQueries([LOG])
   return data.entry
 }
 
 /** PUT /api/inventory/maintenance/log/:id */
 export async function updateMaintenanceLogEntry(id: string, input: MaintenanceLogEntryInput): Promise<MaintenanceLogEntry> {
-  const data = await submitJSON<{ entry: MaintenanceLogEntry }>(`${apiBaseUrl}/api/inventory/maintenance/log/${encodeURIComponent(id)}`, 'PUT', input)
+  const data = await apiRequest<{ entry: MaintenanceLogEntry }>(`${LOG}/${encodeURIComponent(id)}`, { method: 'PUT', json: input })
+  invalidateQueries([LOG])
   return data.entry
 }
 
 /** DELETE /api/inventory/maintenance/log/:id */
 export async function deleteMaintenanceLogEntry(id: string): Promise<void> {
-  await submitJSON<void>(`${apiBaseUrl}/api/inventory/maintenance/log/${encodeURIComponent(id)}`, 'DELETE')
+  await apiRequest<void>(`${LOG}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  invalidateQueries([LOG])
 }
 
 /** POST /api/inventory/maintenance/log/:id/photos - one multipart upload,
@@ -562,12 +477,11 @@ export async function deleteMaintenanceLogEntry(id: string): Promise<void> {
 export async function uploadMaintenanceLogPhoto(logEntryId: string, file: Blob, filename: string): Promise<MaintenanceLogEntry> {
   const form = new FormData()
   form.append('file', file, filename)
-  const response = await fetch(`${apiBaseUrl}/api/inventory/maintenance/log/${encodeURIComponent(logEntryId)}/photos`, {
-    method: 'POST',
-    body: form,
-  })
-  if (!response.ok) throw new Error(await readErrorMessage(response))
-  const data = (await response.json()) as { entry: MaintenanceLogEntry }
+  const data = await apiRequest<{ entry: MaintenanceLogEntry }>(
+    `${LOG}/${encodeURIComponent(logEntryId)}/photos`,
+    { method: 'POST', body: form },
+  )
+  invalidateQueries([LOG])
   return data.entry
 }
 
@@ -577,9 +491,10 @@ export async function uploadMaintenanceLogPhoto(logEntryId: string, file: Blob, 
  * still shows it. */
 export async function deleteMaintenanceLogPhoto(logEntryId: string, documentId: string, deletePhoto = false): Promise<MaintenanceLogEntry> {
   const qs = deletePhoto ? '?delete=true' : ''
-  const data = await submitJSON<{ entry: MaintenanceLogEntry }>(
-    `${apiBaseUrl}/api/inventory/maintenance/log/${encodeURIComponent(logEntryId)}/photos/${encodeURIComponent(documentId)}${qs}`, 'DELETE',
+  const data = await apiRequest<{ entry: MaintenanceLogEntry }>(
+    `${LOG}/${encodeURIComponent(logEntryId)}/photos/${encodeURIComponent(documentId)}${qs}`, { method: 'DELETE' },
   )
+  invalidateQueries([LOG])
   return data.entry
 }
 

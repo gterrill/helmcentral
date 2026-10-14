@@ -284,26 +284,21 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => { setCreatingRule(false); setEditingRule(null) }}
         onSave={async (input) => {
           const saved = editingRule ? await updateMaintenanceRule(editingRule.id, input) : await createMaintenanceRule(input)
-          await refresh()
           setCreatingRule(false)
           setEditingRule(null)
           return saved
         }}
         onDelete={async (id) => {
           await deleteMaintenanceRule(id)
-          await refresh()
           setEditingRule(null)
         }}
-        onRuleChanged={() => { void refresh() }}
       />
 
       <MaintenanceCompleteDialog
         rule={completingRule}
-        onCancel={() => { setCompletingRule(null); void refresh() }}
+        onCancel={() => setCompletingRule(null)}
         onComplete={async (input) => {
-          const result = await completeMaintenanceRule(completingRule!.id, input)
-          await refresh()
-          return result
+          return completeMaintenanceRule(completingRule!.id, input)
         }}
       />
 
@@ -312,7 +307,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => setAcknowledgingRule(null)}
         onConfirm={async (reason) => {
           await acknowledgeMaintenanceRule(acknowledgingRule!.id, reason)
-          await refresh()
           setAcknowledgingRule(null)
         }}
       />
@@ -322,7 +316,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => setSettingLastDoneRule(null)}
         onConfirm={async (lastDoneAt, lastDoneHours) => {
           await setMaintenanceRuleLastDone(settingLastDoneRule!.id, lastDoneAt, lastDoneHours)
-          await refresh()
           setSettingLastDoneRule(null)
         }}
       />

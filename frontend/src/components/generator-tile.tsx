@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import { apiRequest } from '@/lib/api-query'
 
 interface GeneratorTileProps {
   generatorState: string | null
@@ -93,11 +94,7 @@ export const GeneratorTile = memo(function GeneratorTile({
     setPending(true)
     try {
       const timerSeconds = timedRunEnabled ? timerHours * 3600 + timerMinutes * 60 : 0
-      await fetch('/api/generator/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timer_seconds: timerSeconds }),
-      })
+      await apiRequest<unknown>('/api/generator/start', { method: 'POST', json: { timer_seconds: timerSeconds } })
     } catch (err) {
       console.error('Generator start failed:', err)
     } finally {
@@ -108,7 +105,7 @@ export const GeneratorTile = memo(function GeneratorTile({
   const handleStop = useCallback(async () => {
     setPending(true)
     try {
-      await fetch('/api/generator/stop', { method: 'POST' })
+      await apiRequest<unknown>('/api/generator/stop', { method: 'POST' })
     } catch (err) {
       console.error('Generator stop failed:', err)
     } finally {

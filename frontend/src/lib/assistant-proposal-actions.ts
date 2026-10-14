@@ -1,4 +1,4 @@
-import { apiBaseUrl } from '@/config/api'
+import { ApiError, apiRequest } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 
@@ -9,39 +9,21 @@ import { todayISO } from '@/lib/local-date'
  * the server's).
  */
 
-/** A refused apply or dismiss. `status` 409 means the proposal can no longer
- * be applied as written (a rule changed since Mate proposed it, or it was
- * already dismissed or applied); `message` is the server's own reason,
- * verbatim. */
-export class ProposalActionError extends Error {
-  readonly status: number
-  /** On a 409, which stored status the server refused for: 'stale',
-   * 'dismissed' or 'applied'. */
-  readonly proposalStatus: string | undefined
+/** A refused apply or dismiss: an ApiError carrying the server's own reason,
+ * verbatim. A 409 means the proposal can no longer be applied as written (a
+ * rule changed since Mate proposed it, or it was already dismissed or
+ * applied). */
+export { ApiError as ProposalActionError } from '@/lib/api-query'
 
-  constructor(status: number, message: string, proposalStatus?: string) {
-    super(message)
-    this.name = 'ProposalActionError'
-    this.status = status
-    this.proposalStatus = proposalStatus
-  }
+/** On a 409, which stored status the server refused for: 'stale',
+ * 'dismissed' or 'applied'. */
+export function refusedProposalStatus(err: ApiError): string | undefined {
+  const status = (err.body as { proposal_status?: unknown } | undefined)?.proposal_status
+  return typeof status === 'string' ? status : undefined
 }
 
 async function post(path: string): Promise<AssistantProposal> {
-  const response = await fetch(`${apiBaseUrl}${path}`, { method: 'POST' })
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`
-    let proposalStatus: string | undefined
-    try {
-      const body = (await response.json()) as { error?: string; message?: string; proposal_status?: string }
-      message = body.message ?? body.error ?? message
-      proposalStatus = body.proposal_status
-    } catch {
-      // Not JSON: keep the status line.
-    }
-    throw new ProposalActionError(response.status, message, proposalStatus)
-  }
-  const body = (await response.json()) as { proposal: ProposalApi }
+  const body = await apiRequest<{ proposal: ProposalApi }>(path, { method: 'POST' })
   return mapProposal(body.proposal)
 }
 

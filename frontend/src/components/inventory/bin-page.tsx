@@ -345,7 +345,7 @@ function BinContents({
   canWrite: boolean
   onOpenDeck: (deckId: string) => void
 }) {
-  const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
+  const { items, loading, error } = useEquipment({ bin: bin.id })
 
   const scrollToPhoto = (itemId: string) => {
     document.getElementById(photoBlockId(itemId))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -384,7 +384,6 @@ function BinContents({
           key={bin.id}
           zoneId={zone.id}
           binId={bin.id}
-          onCreated={() => { void refresh() }}
           canWrite={canWrite}
           binCode={bin.code}
         />

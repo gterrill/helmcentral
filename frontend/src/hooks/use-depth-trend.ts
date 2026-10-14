@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useApiQuery } from '@/lib/api-query'
 
 export interface DepthTrendPoint {
   time: string
@@ -24,31 +24,24 @@ interface DepthTrendApiResponse {
 
 const EMPTY_TREND: DepthTrendData = { points: [], since: 'window' }
 
+// A body without a points array is dropped, as before.
+function toTrend(data: DepthTrendApiResponse): DepthTrendData | null {
+  if (!Array.isArray(data.points)) return null
+  return {
+    points: data.points,
+    since: data.since === 'tide' ? 'tide' : 'window',
+    tideType: data.tide_type === 'high' || data.tide_type === 'low' ? data.tide_type : undefined,
+    tideDepthM: data.tide_depth_m,
+  }
+}
+
 export function useDepthTrend(queryWindow = '3h', refreshInterval = 60): DepthTrendData {
-  const [trend, setTrend] = useState<DepthTrendData>(EMPTY_TREND)
-
-  useEffect(() => {
-    const fetchPoints = async () => {
-      try {
-        const res = await fetch(`/api/depth-trend?window=${encodeURIComponent(queryWindow)}`)
-        if (!res.ok) return
-        const data = (await res.json()) as DepthTrendApiResponse
-        if (!Array.isArray(data.points)) return
-        setTrend({
-          points: data.points,
-          since: data.since === 'tide' ? 'tide' : 'window',
-          tideType: data.tide_type === 'high' || data.tide_type === 'low' ? data.tide_type : undefined,
-          tideDepthM: data.tide_depth_m,
-        })
-      } catch {
-        // leave stale data on error
-      }
-    }
-
-    void fetchPoints()
-    const id = globalThis.setInterval(() => { void fetchPoints() }, refreshInterval * 1000)
-    return () => globalThis.clearInterval(id)
-  }, [queryWindow, refreshInterval])
-
-  return trend
+  // Failures are silent: the last good trend stays on screen.
+  const { data } = useApiQuery<DepthTrendData | null>({
+    queryKey: ['/api/depth-trend', queryWindow],
+    path: `/api/depth-trend?window=${encodeURIComponent(queryWindow)}`,
+    refetchInterval: refreshInterval * 1000,
+    select: toTrend,
+  })
+  return data ?? EMPTY_TREND
 }

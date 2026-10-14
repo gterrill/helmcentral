@@ -20,9 +20,9 @@ import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-stagi
 interface BinQuickAddProps {
   zoneId: string
   binId: string
-  /** Fired once the item is created (whether or not every photo uploaded) -
-   * the bin page's own contents list refresh. */
-  onCreated: () => void
+  /** Fired once the item is created (whether or not every photo uploaded).
+   * The bin's contents list refreshes itself: createEquipment invalidates it. */
+  onCreated?: () => void
   canWrite?: boolean
   /** The bin's code, to tell a move that stays on this bin from one that leaves it. */
   binCode: string
@@ -151,7 +151,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, binCode
       setPhotos((prev) => prev.filter((p) => !uploadedIds.has(p.id)))
       setName((prev) => (prev === nameAtSaveStart ? '' : prev))
       setQuantity(1)
-      onCreated()
+      onCreated?.()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -174,7 +174,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, binCode
       return prev.map((p) => (p.itemId === entry.itemId ? { ...p, failures: stillFailing, notice } : p))
     })
     setRetryingItemId(null)
-    onCreated()
+    onCreated?.()
   }
 
   const photoStripPhotos: PhotoStripPhoto[] = photos.map((p, i) => ({ id: p.id, previewUrl: p.previewUrl, isCover: i === 0 }))

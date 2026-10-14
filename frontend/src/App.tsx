@@ -2299,12 +2299,9 @@ function AppShell() {
                 return updated
               }}
               onDelete={async (id) => {
-                const released = await deleteDisplay(id)
-                // Without this the released pages keep a stale display_id
-                // and show in neither the Dashboard list nor any display
-                // until a reload.
-                if (released) await refetchPages()
-                return released
+                // deleteDisplay refreshes the page list, so the released
+                // pages drop their display_id without a wire-up here.
+                return deleteDisplay(id)
               }}
               onDisplayPatch={handleDisplayPatch}
               onDuplicateToDisplay={(pageId, targetDisplayId) => {

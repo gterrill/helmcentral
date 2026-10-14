@@ -29,7 +29,7 @@ describe('DocumentLinkPicker', () => {
     fireEvent.change(screen.getByLabelText('Search documents'), { target: { value: 'onan' } })
 
     await screen.findByText('Onan Operator Manual')
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/documents?q=onan'))
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/documents?q=onan'), expect.anything())
   })
 
   it('excludes already-linked document ids from the results', async () => {

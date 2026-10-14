@@ -452,22 +452,25 @@ describe('useDocuments', () => {
       },
       'GET /api/documents/tags': () => ok([]),
       'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
+      'DELETE /api/documents/doc-1': () => ({ ok: true, status: 204, json: async () => ({}) }),
     })
     vi.stubGlobal('fetch', fn)
 
     const { result } = renderHook(() => useDocuments(null))
     await waitFor(() => expect(call).toBeGreaterThanOrEqual(1)) // the mount's own refresh, now in flight
 
-    act(() => { void result.current.refresh() }) // e.g. a post-delete refresh, fired while the mount's refresh is still pending
+    // A post-delete refresh, fired while the mount's refresh is still pending.
+    // (A bare refresh() would share the request in flight; a write supersedes it.)
+    act(() => { void result.current.deleteDocument('doc-1') })
     await waitFor(() => expect(call).toBe(2))
 
     // resolve the NEWER call first, with its own data...
-    await act(async () => { resolveSecond(ok(folderPayload({ documents: [docPayload({ id: 'doc-new' })] }))) })
+    await act(async () => { resolveSecond(ok(folderPayload({ documents: [docPayload({ id: 'doc-new', status: 'indexed' })] }))) })
     await waitFor(() => expect(result.current.documents.map((d) => d.id)).toEqual(['doc-new']))
 
     // ...then the STALE older call resolves, with different data. It must
     // not be applied over what the newer call already set.
-    await act(async () => { resolveFirst(ok(folderPayload({ documents: [docPayload({ id: 'doc-stale' })] }))) })
+    await act(async () => { resolveFirst(ok(folderPayload({ documents: [docPayload({ id: 'doc-stale', status: 'indexed' })] }))) })
 
     expect(result.current.documents.map((d) => d.id)).toEqual(['doc-new'])
   })
@@ -517,8 +520,9 @@ describe('useDocuments', () => {
   it('refreshes the tag filter while polling a pending document', async () => {
     let indexed = false
     const { fn } = routedFetch({
-      'GET /api/document-folders': () =>
-        ok(folderPayload({ documents: [docPayload({ status: indexed ? 'indexed' : 'pending' })] })),
+      // Stays pending: one that finishes mid-tick would stop the poll before
+      // the tag request's own timer fires, which is not what this pins.
+      'GET /api/document-folders': () => ok(folderPayload({ documents: [docPayload({ status: 'pending' })] })),
       'GET /api/documents/tags': () =>
         ok(indexed ? [{ tag: 'Receipt', count: 1 }, { tag: 'Johnson', count: 1 }] : [{ tag: 'Receipt', count: 1 }]),
       'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
@@ -531,11 +535,38 @@ describe('useDocuments', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(result.current.tags.map((t) => t.tag)).toEqual(['Receipt'])
+    // The polling interval is set by the render that shows the pending
+    // document, so let that render and its effect land before moving time.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.documents).toHaveLength(1)
 
     indexed = true
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
+    expect(result.current.tags.map((t) => t.tag)).toEqual(['Receipt', 'Johnson'])
+  })
+
+  it('reads the tags once more when the last pending document finishes', async () => {
+    let indexed = false
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () =>
+        ok(folderPayload({ documents: [docPayload({ status: indexed ? 'indexed' : 'pending' })] })),
+      'GET /api/documents/tags': () =>
+        ok(indexed ? [{ tag: 'Receipt', count: 1 }, { tag: 'Johnson', count: 1 }] : [{ tag: 'Receipt', count: 1 }]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.tags.map((t) => t.tag)).toEqual(['Receipt'])
+
+    indexed = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.documents[0].status).toBe('indexed')
     expect(result.current.tags.map((t) => t.tag)).toEqual(['Receipt', 'Johnson'])
   })
 
@@ -731,66 +762,6 @@ describe('useDocuments', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
 
     expect(calls).toHaveLength(0)
-  })
-
-  // Review-finding-shaped guard (same idiom as refresh()/search() above): an
-  // older in-flight embeddings-status GET resolving after a newer one must
-  // not clobber the newer, more-correct state. refreshEmbeddingsStatus isn't
-  // itself exposed on the hook (only refresh() and search() are, which is
-  // what the refresh/search versions of this test call directly) - two
-  // overlapping calls are driven here through the poll effect instead: the
-  // mount call arms it (call 1, resolved immediately with running:true), and
-  // two consecutive 3s ticks each start a new call before the first of the
-  // two (call 2) ever resolves, since firing a timer callback bumps the seq
-  // ref synchronously even while its fetch stays pending.
-  it('an older in-flight embeddings status refresh does not overwrite a newer one\'s state', async () => {
-    let callCount = 0
-    let resolveSecond!: (v: unknown) => void
-    let resolveThird!: (v: unknown) => void
-    const { fn } = routedFetch({
-      'GET /api/document-folders': () => ok(folderPayload()),
-      'GET /api/documents/tags': () => ok([]),
-      'GET /api/documents/embeddings': () => {
-        callCount += 1
-        if (callCount === 1) {
-          return ok(embeddingsStatusPayload({ enabled: true, backfill: { running: true, chunks_embedded: 0, started_at: '' } }))
-        }
-        if (callCount === 2) return new Promise((resolve) => { resolveSecond = resolve })
-        if (callCount === 3) return new Promise((resolve) => { resolveThird = resolve })
-        return ok(embeddingsStatusPayload({ enabled: true }))
-      },
-    })
-    vi.stubGlobal('fetch', fn)
-
-    vi.useFakeTimers()
-    const { result } = renderHook(() => useDocuments(null))
-    await act(async () => { await vi.advanceTimersByTimeAsync(0) }) // flush the mount call (#1)
-    expect(result.current.embeddingsStatus?.backfill.running).toBe(true)
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000) }) // poll tick -> call #2, left pending
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000) }) // poll tick -> call #3, left pending
-    expect(callCount).toBe(3)
-
-    // Resolve the NEWER call (#3) first, with its own data...
-    await act(async () => {
-      resolveThird(ok(embeddingsStatusPayload({
-        enabled: true,
-        counts: { chunks_total: 10, chunks_embedded: 9, chunks_stale: 0, chunks_pending: 1, chars_pending: 100 },
-      })))
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(1)
-
-    // ...then the STALE older call (#2) resolves, with different data. It
-    // must not be applied over what the newer call already set.
-    await act(async () => {
-      resolveSecond(ok(embeddingsStatusPayload({
-        enabled: true,
-        counts: { chunks_total: 10, chunks_embedded: 2, chunks_stale: 0, chunks_pending: 8, chars_pending: 800 },
-      })))
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(1)
   })
 
 })

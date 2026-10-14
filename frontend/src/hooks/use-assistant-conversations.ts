@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
@@ -199,6 +199,20 @@ export function mapProposal(api: ProposalApi): AssistantProposal {
   }
 }
 
+const LIST_PATH = '/api/assistant/conversations'
+const NO_CONVERSATIONS: AssistantConversation[] = []
+
+interface ConversationListApi {
+  conversations?: ConversationApi[]
+}
+
+// The `HTTP <n>` string describeLoadError reads, for a failed request; a
+// network failure keeps whatever its TypeError carries.
+function wireMessage(err: unknown): string {
+  if (err instanceof ApiError) return `HTTP ${err.status}`
+  return err instanceof Error ? err.message : String(err)
+}
+
 function mapConversation(api: ConversationApi): AssistantConversation {
   return { id: api.id, title: api.title, createdAt: api.created_at, updatedAt: api.updated_at }
 }
@@ -264,7 +278,6 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // `initialId` is handled by the separate re-select effect further down,
   // not by re-running the mount fetch.
   const [mountInitialId] = useState(() => initialId)
-  const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   // The active conversation's summary note (ADR 0162), null until the
@@ -275,27 +288,19 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // applied: the previous conversation's messages are still showing, so
   // anything acting on "the active conversation" waits.
   const [conversationLoading, setConversationLoading] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // A failure of select, create or remove. The list's own failure comes from
+  // the query and clears when a later read succeeds.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [reloading, setReloading] = useState(false)
 
-  const fetchConversations = useCallback(async (): Promise<AssistantConversation[]> => {
-    const response = await fetch(`${apiBaseUrl}/api/assistant/conversations`)
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = (await response.json()) as { conversations?: ConversationApi[] }
-    return Array.isArray(data.conversations) ? data.conversations.map(mapConversation) : []
-  }, [])
-
-  const refresh = useCallback(async () => {
-    try {
-      const list = await fetchConversations()
-      setConversations(list)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [fetchConversations])
+  const list = useApiQuery({
+    queryKey: [LIST_PATH],
+    path: LIST_PATH,
+    select: (raw: ConversationListApi) =>
+      Array.isArray(raw.conversations) ? raw.conversations.map(mapConversation) : NO_CONVERSATIONS,
+  })
+  const { refetch: refresh } = list
+  const error = reloading ? null : (actionError ?? (list.error ? wireMessage(list.error) : null))
 
   // Code-review finding: startNew() (and remove(), when it clears the
   // selection outright rather than moving to a next conversation) used to
@@ -309,7 +314,8 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // itself, startNew, and remove's own selection changes - and each
   // select() call only applies its own response if its own sequence number
   // is still the latest one by the time it resolves; anything newer already
-  // won.
+  // won. The messages are local state the thread appends to as it streams,
+  // which is why this read is not a keyed query.
   const selectionSeqRef = useRef(0)
 
   const select = useCallback(async (id: string) => {
@@ -318,75 +324,65 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setSummaryNoteId(null)
     setConversationLoading(true)
     try {
-      const response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}`)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = (await response.json()) as { conversation?: ConversationApi; messages?: MessageApi[] }
+      const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
+        `${LIST_PATH}/${encodeURIComponent(id)}`,
+      )
       if (selectionSeqRef.current !== seq) return
       setMessages(Array.isArray(data.messages) ? data.messages.map(mapMessage) : [])
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
-      setError(null)
+      setActionError(null)
       setConversationLoading(false)
     } catch (err) {
       if (selectionSeqRef.current !== seq) return
-      setError(err instanceof Error ? err.message : String(err))
+      setActionError(wireMessage(err))
       setMessages([])
       setConversationLoading(false)
     }
   }, [])
 
-  // Shared by the mount effect below and by `reload`: fetches the list, then
-  // opens `targetId` only when it names a conversation that actually exists
-  // in the freshly fetched list. Mate UI cycle ("Mate opens on an empty
-  // chat"): this used to fall back to the most recently updated thread when
-  // `targetId` was absent or stale, so a plain open silently resumed
-  // whatever the server considered newest instead of starting blank, and a
-  // link naming a since-deleted conversation landed on an unrelated one with
-  // no indication anything was wrong. Neither happens any more - no match
+  // Shared by the mount effect below and by `reload`: reads the list afresh,
+  // then opens `targetId` only when it names a conversation that actually
+  // exists in it. Mate UI cycle ("Mate opens on an empty chat"): this used
+  // to fall back to the most recently updated thread when `targetId` was
+  // absent or stale, so a plain open silently resumed whatever the server
+  // considered newest instead of starting blank, and a link naming a
+  // since-deleted conversation landed on an unrelated one with no
+  // indication anything was wrong. Neither happens any more - no match
   // means no selection, the same "fresh empty chat" state a mount with no
   // conversations at all has always shown. The operator (or an explicit
   // `initialId`/`select()`/`create()`) is the only thing that ever opens a
-  // conversation now. `isCancelled` lets the mount effect's cleanup skip
-  // state updates after an unmount without `reload` (which always runs to
-  // completion) having to carry that same plumbing.
-  const loadConversationsAndSelect = useCallback(async (targetId: string | null, isCancelled: () => boolean) => {
-    try {
-      const list = await fetchConversations()
-      if (isCancelled()) return
-      setConversations(list)
-      setError(null)
-      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : null
-      if (target !== null) await select(target)
-    } catch (err) {
-      if (!isCancelled()) setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (!isCancelled()) setLoading(false)
-    }
-  }, [fetchConversations, select])
+  // conversation now.
+  const openTarget = useCallback(async (targetId: string | null) => {
+    // Joins the read the mount just started instead of adding a second one.
+    await fetchQuery([LIST_PATH], LIST_PATH)
+    if (targetId === null) return
+    const fresh = getQueryData<ConversationListApi>([LIST_PATH])
+    if (fresh?.conversations?.some((c) => c.id === targetId)) await select(targetId)
+  }, [select])
 
   // A later refresh never changes the selection; only the operator (or
   // create/remove/the re-select effect below, or an explicit `reload`) does
   // that.
   useEffect(() => {
-    let cancelled = false
-    void loadConversationsAndSelect(mountInitialId, () => cancelled)
-    return () => {
-      cancelled = true
-    }
-  }, [loadConversationsAndSelect, mountInitialId])
+    void openTarget(mountInitialId)
+  }, [openTarget, mountInitialId])
 
   // Repeats the initial load on demand: a failed load otherwise has no way
   // out short of remounting the whole hook. Clears the stale error and
   // shows `loading` while it runs, then re-selects `mountInitialId` only
   // when one was given and still exists - the same rule the mount effect
-  // uses (loadConversationsAndSelect's own doc comment), since a caller
-  // asking to reload wants the same starting point it would have gotten on
-  // a fresh mount. With no `mountInitialId` this only ever repopulates
-  // `conversations` - it never selects anything on its own.
+  // uses, since a caller asking to reload wants the same starting point it
+  // would have gotten on a fresh mount. With no `mountInitialId` this only
+  // ever repopulates `conversations` - it never selects anything on its own.
   const reload = useCallback(async (): Promise<void> => {
-    setError(null)
-    setLoading(true)
-    await loadConversationsAndSelect(mountInitialId, () => false)
-  }, [loadConversationsAndSelect, mountInitialId])
+    setActionError(null)
+    setReloading(true)
+    try {
+      await openTarget(mountInitialId)
+    } finally {
+      setReloading(false)
+    }
+  }, [openTarget, mountInitialId])
 
   // Mate UI cycle ("Mate opens on an empty chat"): the sheet/panel's own
   // "New conversation" button used to call `create()`, which POSTs and
@@ -411,7 +407,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setMessages([])
     setSummaryNoteId(null)
     setConversationLoading(false)
-    setError(null)
+    setActionError(null)
   }, [])
 
   // Re-selects when `initialId` changes to a new non-null value after mount
@@ -443,37 +439,34 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
 
   const create = useCallback(async (): Promise<string | null> => {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/assistant/conversations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const created = mapConversation((await response.json()) as ConversationApi)
-      await refresh()
+      const created = mapConversation(await apiRequest<ConversationApi>(LIST_PATH, { method: 'POST', json: {} }))
+      invalidateQueries([LIST_PATH])
       await select(created.id)
       return created.id
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setActionError(wireMessage(err))
       return null
     }
-  }, [refresh, select])
+  }, [select])
 
   const remove = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      })
-      // A 404 here means the conversation is already gone server-side, which
-      // is the outcome the caller wanted anyway - not a failure to surface.
-      if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`)
+      try {
+        await apiRequest<void>(`${LIST_PATH}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      } catch (err) {
+        // A 404 here means the conversation is already gone server-side,
+        // which is the outcome the caller wanted anyway - not a failure to
+        // surface.
+        if (!(err instanceof ApiError && err.status === 404)) throw err
+      }
 
-      const list = await fetchConversations()
-      setConversations(list)
-      setError(null)
+      // The next conversation to open comes from the list as it is after the
+      // delete, so this read is awaited and a failure of it is reported.
+      setQueryData([LIST_PATH], await apiRequest<ConversationListApi>(LIST_PATH))
+      setActionError(null)
 
       if (activeId === id) {
-        const next = list[0] ?? null
+        const next = getQueryData<ConversationListApi>([LIST_PATH])?.conversations?.[0] ?? null
         if (next) {
           await select(next.id)
         } else {
@@ -488,9 +481,9 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setActionError(wireMessage(err))
     }
-  }, [activeId, fetchConversations, select])
+  }, [activeId, select])
 
   // Appends a message already known to the caller - the optimistic user
   // bubble sent before the server has responded, and the final assistant
@@ -525,13 +518,13 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const errorMessage = error !== null ? describeLoadError(error) : null
 
   return {
-    conversations,
+    conversations: list.data ?? NO_CONVERSATIONS,
     activeId,
     messages,
     summaryNoteId,
     setSummaryNoteId,
     conversationLoading,
-    loading,
+    loading: list.isLoading || reloading,
     error,
     errorMessage,
     select,

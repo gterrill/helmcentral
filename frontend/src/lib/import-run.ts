@@ -1,5 +1,4 @@
-import { apiBaseUrl } from '@/config/api'
-import { readErrorMessage } from '@/lib/api-error'
+import { ApiError, apiRequest } from '@/lib/api-query'
 
 // The import wizard's data layer: the run object the server keeps for one
 // uploaded export, the operator's decisions on it, and the six routes that
@@ -187,43 +186,25 @@ export interface ImportCommitResult {
 /** A non-2xx answer from an import route. `message` is the server's own
  * wording, shown to the operator as it came; `status` lets the wizard treat
  * a 409 (something outstanding) differently from a 400. */
-export class ImportApiError extends Error {
-  status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ImportApiError'
-    this.status = status
-  }
-}
+export { ApiError as ImportApiError }
 
-async function readRun<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new ImportApiError(res.status, await readErrorMessage(res))
-  return (await res.json()) as T
-}
-
-function runUrl(id: string, suffix = ''): string {
-  return `${apiBaseUrl}/api/import/runs/${encodeURIComponent(id)}${suffix}`
+function runPath(id: string, suffix = ''): string {
+  return `/api/import/runs/${encodeURIComponent(id)}${suffix}`
 }
 
 export async function createImportRun(source: string, file: File): Promise<ImportRun> {
   const form = new FormData()
   form.append('source', source)
   form.append('file', file, file.name)
-  return readRun<ImportRun>(await fetch(`${apiBaseUrl}/api/import/runs`, { method: 'POST', body: form }))
+  return apiRequest<ImportRun>('/api/import/runs', { method: 'POST', body: form })
 }
 
 export async function fetchImportRun(id: string): Promise<ImportRun> {
-  return readRun<ImportRun>(await fetch(runUrl(id)))
+  return apiRequest<ImportRun>(runPath(id))
 }
 
 export async function patchImportDecisions(id: string, decisions: ImportDecisionsPatch): Promise<ImportRun> {
-  return readRun<ImportRun>(
-    await fetch(runUrl(id), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decisions }),
-    }),
-  )
+  return apiRequest<ImportRun>(runPath(id), { method: 'PATCH', json: { decisions } })
 }
 
 export interface ImportFileUpload {
@@ -235,17 +216,15 @@ export interface ImportFileUpload {
 export async function uploadImportFile(runId: string, fileKey: string, file: Blob, filename: string): Promise<ImportFileUpload> {
   const form = new FormData()
   form.append('file', file, filename)
-  return readRun<ImportFileUpload>(
-    await fetch(runUrl(runId, `/files/${encodeURIComponent(fileKey)}`), { method: 'POST', body: form }),
-  )
+  return apiRequest<ImportFileUpload>(runPath(runId, `/files/${encodeURIComponent(fileKey)}`), { method: 'POST', body: form })
 }
 
 export async function commitImportRun(id: string): Promise<ImportCommitResult> {
-  return readRun<ImportCommitResult>(await fetch(runUrl(id, '/commit'), { method: 'POST' }))
+  return apiRequest<ImportCommitResult>(runPath(id, '/commit'), { method: 'POST' })
 }
 
 export async function abandonImportRun(id: string): Promise<ImportRun> {
-  return readRun<ImportRun>(await fetch(runUrl(id), { method: 'DELETE' }))
+  return apiRequest<ImportRun>(runPath(id), { method: 'DELETE' })
 }
 
 // --- Derived facts the wizard pages share ---------------------------------

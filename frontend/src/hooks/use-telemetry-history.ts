@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
-
-import { apiBaseUrl } from '@/config/api'
+import { ApiError, useApiQuery } from '@/lib/api-query'
 
 export interface TelemetryHistoryPoint {
   time: string
@@ -32,52 +30,26 @@ function pollIntervalMs(window: string): number {
   }
 }
 
+interface TelemetryHistoryBody {
+  points?: unknown
+}
+
 export function useTelemetryHistory(path: string, window: string, enabled: boolean): TelemetryHistoryResult {
-  const [points, setPoints] = useState<TelemetryHistoryPoint[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const active = enabled && path.trim() !== ''
+  const query = new URLSearchParams({ path, window })
+  const { data, error, isLoading } = useApiQuery<TelemetryHistoryPoint[]>({
+    queryKey: ['/api/telemetry/history', { path, window }],
+    path: `/api/telemetry/history?${query}`,
+    refetchInterval: pollIntervalMs(window),
+    enabled: active,
+    select: (body: TelemetryHistoryBody | null) => (Array.isArray(body?.points) ? body.points : []),
+  })
 
-  useEffect(() => {
-    if (!enabled || path.trim() === '') {
-      setPoints([])
-      setError(null)
-      return
-    }
-
-    let cancelled = false
-
-    const load = async () => {
-      setLoading(true)
-      try {
-        const query = new URLSearchParams({ path, window })
-        const response = await fetch(`${apiBaseUrl}/api/telemetry/history?${query}`)
-        const body = await response.json()
-        if (cancelled) return
-
-        if (!response.ok) {
-          setError(typeof body?.error === 'string' ? body.error : 'History is unavailable')
-          setPoints([])
-          return
-        }
-        setError(null)
-        setPoints(Array.isArray(body?.points) ? body.points : [])
-      } catch {
-        if (!cancelled) {
-          setError('History is unavailable')
-          setPoints([])
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    void load()
-    const timer = setInterval(() => void load(), pollIntervalMs(window))
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [path, window, enabled])
-
-  return { points, loading, error }
+  // A failed read clears the line; the server's own reason shows when it
+  // sent one, anything else (a dropped connection) gets the plain message.
+  return {
+    points: error ? [] : (data ?? []),
+    loading: isLoading,
+    error: error ? (error instanceof ApiError ? error.message : 'History is unavailable') : null,
+  }
 }

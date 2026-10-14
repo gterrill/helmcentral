@@ -28,19 +28,6 @@ import type { NoteRecord } from '@/hooks/use-notes'
 
 vi.mock('@/hooks/use-documents')
 vi.mock('@/hooks/use-document-folder-tree')
-// Wraps the real capture sheet only to capture the panel's onCaptured prop, so
-// a test can fire it without driving the editor.
-let captureSheetProps: { onCaptured?: (id: string) => void } | null = null
-vi.mock('@/components/documents/note-capture-sheet', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/documents/note-capture-sheet')>()
-  return {
-    ...actual,
-    NoteCaptureSheet: (props: React.ComponentProps<typeof actual.NoteCaptureSheet>) => {
-      captureSheetProps = props
-      return <actual.NoteCaptureSheet {...props} />
-    },
-  }
-})
 vi.mock('@/hooks/use-document-uploads')
 vi.mock('@/hooks/use-notes')
 // Ask Mate about a selection (ask-mate-selection.tsx) gates on this same
@@ -404,6 +391,7 @@ describe('DocumentsPanel', () => {
     // mocked useDocuments hook.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       json: async () => ({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }], folders: [], documents: [] }),
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -424,7 +412,7 @@ describe('DocumentsPanel', () => {
 
     expect(screen.getByText(/page 4/i)).toBeInTheDocument()
     expect(await screen.findByText(/manuals$/i)).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith('/api/document-folders?parent=f1')
+    expect(fetchMock).toHaveBeenCalledWith('/api/document-folders?parent=f1', expect.anything())
   })
 
   it('shows "Documents" as the folder path for a root-level search hit', async () => {
@@ -755,7 +743,7 @@ describe('DocumentsPanel', () => {
     expect(add).toHaveBeenCalledWith([file])
   })
 
-  it('shows a staged upload\'s progress, then refreshes the listing and clears the chip once it lands', () => {
+  it('shows a staged upload\'s progress, then clears the chip once it lands', () => {
     const refresh = vi.fn()
     const remove = vi.fn()
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ refresh }))
@@ -795,7 +783,6 @@ describe('DocumentsPanel', () => {
     }))
     rerender(<DocumentsPanel initialFolderId="f1" />)
 
-    expect(refresh).toHaveBeenCalled()
     expect(remove).toHaveBeenCalledWith('doc-upload-1')
   })
 
@@ -1139,38 +1126,6 @@ describe('DocumentsPanel', () => {
 
       await waitFor(() => expect(createFolder).toHaveBeenCalledWith('2026', null))
       expect(await screen.findByText('2026')).toBeInTheDocument()
-    })
-
-    // Review finding: the picker owns its own useDocuments(pickerFolderId)
-    // instance, so a folder it creates used to refresh only the picker -
-    // cancelling the dialog left the panel's own listing never having heard
-    // of it, invisible in the table, with a second attempt from the
-    // toolbar's New folder button hitting a 409 for a folder the operator
-    // could not see. A single shared mock object stands in for both
-    // useDocuments instances here (unlike the test above, which needs two
-    // distinct ones to prove the picker's own descend-into-it behaviour) -
-    // this test only cares that creating a folder reaches the panel's own
-    // `refresh`, which nothing in either component calls on its own without
-    // the fix.
-    it('creating a folder from the Move dialog also refreshes the panel\'s own listing', async () => {
-      const createFolder = vi.fn().mockResolvedValue({ id: 'f9', name: '2026', parent_id: null })
-      const refresh = vi.fn()
-      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
-        documents: [doc({ filename: 'receipt.pdf' })],
-        createFolder,
-        refresh,
-      }))
-
-      render(<DocumentsPanel />)
-
-      fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
-      fireEvent.click(screen.getByRole('menuitem', { name: /^move/i }))
-
-      fireEvent.change(screen.getByRole('textbox', { name: /new folder name/i }), { target: { value: '2026' } })
-      fireEvent.click(screen.getByRole('button', { name: 'Create folder' }))
-
-      await waitFor(() => expect(createFolder).toHaveBeenCalledWith('2026', null))
-      await waitFor(() => expect(refresh).toHaveBeenCalled())
     })
 
     it('a rejected create shows the server\'s message and moves nothing', async () => {
@@ -1553,7 +1508,6 @@ describe('DocumentsPanel', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: /treat as a manual/i }))
 
       await waitFor(() => expect(flagManual).toHaveBeenCalledWith('f1'))
-      await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
     })
 
     it('offers no "Treat as a manual" on a folder that is not top-level', () => {
@@ -2337,7 +2291,7 @@ describe('DocumentsPanel folder pane', () => {
     expect(screen.queryByText('Ring Dave')).not.toBeInTheDocument()
   })
 
-  it('the folder menu renames a folder and refreshes the tree', async () => {
+  it('the folder menu renames a folder', async () => {
     setFolderTree(tree)
     const renameFolder = vi.fn().mockResolvedValue({})
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ renameFolder }))
@@ -2350,7 +2304,6 @@ describe('DocumentsPanel folder pane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(renameFolder).toHaveBeenCalledWith('f1', 'Handbooks'))
-    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
   })
 
   it('Move… on a folder moves the folder, not documents', async () => {
@@ -2366,10 +2319,9 @@ describe('DocumentsPanel folder pane', () => {
 
     await waitFor(() => expect(moveFolder).toHaveBeenCalledWith('f1', null))
     expect(moveDocuments).not.toHaveBeenCalled()
-    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
   })
 
-  it('deleting the folder being browsed steps out to its parent and refreshes the tree', async () => {
+  it('deleting the folder being browsed steps out to its parent', async () => {
     setFolderTree(tree)
     const deleteFolder = vi.fn().mockResolvedValue(undefined)
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ deleteFolder, path: [{ id: 'f1', name: 'Manuals', parent_id: null }, { id: 'f2', name: 'Engine', parent_id: 'f1' }] }))
@@ -2382,10 +2334,9 @@ describe('DocumentsPanel folder pane', () => {
 
     await waitFor(() => expect(deleteFolder).toHaveBeenCalledWith('f2'))
     await waitFor(() => expect(onFolderChange).toHaveBeenLastCalledWith('f1'))
-    expect(refreshFolderTree).toHaveBeenCalled()
   })
 
-  it('New folder still creates inside the current folder and refreshes the tree', async () => {
+  it('New folder still creates inside the current folder', async () => {
     setFolderTree(tree)
     const createFolder = vi.fn().mockResolvedValue({ id: 'new', name: 'Spares', parent_id: 'f1' })
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({ createFolder, path: [{ id: 'f1', name: 'Manuals', parent_id: null }] }))
@@ -2397,7 +2348,6 @@ describe('DocumentsPanel folder pane', () => {
     fireEvent.click(screen.getByRole('button', { name: /create/i }))
 
     await waitFor(() => expect(createFolder).toHaveBeenCalledWith('Spares', 'f1'))
-    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
   })
 
   it('dragging a document row onto a folder moves it', async () => {
@@ -2422,7 +2372,6 @@ describe('DocumentsPanel folder pane', () => {
     fireEvent.drop(target, { dataTransfer: dt })
 
     await waitFor(() => expect(moveDocuments).toHaveBeenCalledWith(['d1'], 'm1'))
-    await waitFor(() => expect(refreshFolderTree).toHaveBeenCalled())
   })
 
   it('dragging a selected row carries the whole selection; Documents is the root', async () => {
@@ -2474,19 +2423,6 @@ describe('DocumentsPanel folder pane', () => {
 
     expect(onFolderChange).toHaveBeenCalledWith('m1')
     return waitFor(() => expect(screen.queryByRole('tree', { name: 'Folders' })).not.toBeInTheDocument())
-  })
-
-  it('a note captured from New → Note refreshes the tree counts', async () => {
-    setFolderTree(tree)
-    render(<DocumentsPanel />)
-    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
-    await waitFor(() => expect(captureSheetProps).not.toBeNull())
-    refreshFolderTree.mockClear()
-
-    act(() => { captureSheetProps!.onCaptured?.('note-1') })
-
-    expect(refreshFolderTree).toHaveBeenCalled()
   })
 
   it('ignores a drop whose payload is not a non-empty list of ids', async () => {

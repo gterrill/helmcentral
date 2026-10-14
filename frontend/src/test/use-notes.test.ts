@@ -222,9 +222,10 @@ describe('useNotes', () => {
     await expect(result.current.createNote({ body: '' })).rejects.toThrow('note body is empty')
   })
 
-  // Same ordering-guard shape as use-documents.test.ts's own refresh test:
-  // an older in-flight GET /api/notes resolving after a newer one must not
-  // clobber the newer, more-correct state.
+  // An older in-flight GET /api/notes resolving after the newer one a write
+  // started must not clobber the newer, more-correct state. (A plain
+  // refresh() while a read is in flight now shares that read, so the newer
+  // request here comes from a write's invalidate.)
   it('an older in-flight refresh does not overwrite a newer one\'s state', async () => {
     let resolveFirst!: (v: unknown) => void
     let resolveSecond!: (v: unknown) => void
@@ -236,16 +237,18 @@ describe('useNotes', () => {
         if (call === 2) return new Promise((resolve) => { resolveSecond = resolve })
         return ok({ notes: [] })
       },
+      'PATCH /api/notes/note-1': () => ok({ document: notePayload(), body: '' }),
     })
     vi.stubGlobal('fetch', fn)
 
     const { result } = renderHook(() => useNotes({ unfiledOnly: true }))
     await waitFor(() => expect(call).toBeGreaterThanOrEqual(1)) // the mount's own refresh, in flight
 
-    act(() => { void result.current.refresh() })
+    let patched!: Promise<unknown>
+    act(() => { patched = result.current.patchNote('note-1', { pinned: true }) })
     await waitFor(() => expect(call).toBe(2))
 
-    await act(async () => { resolveSecond(ok({ notes: [notePayload({ id: 'note-new' })] })) })
+    await act(async () => { resolveSecond(ok({ notes: [notePayload({ id: 'note-new' })] })); await patched })
     await waitFor(() => expect(result.current.notes.map((n) => n.id)).toEqual(['note-new']))
 
     await act(async () => { resolveFirst(ok({ notes: [notePayload({ id: 'note-stale' })] })) })

@@ -22,13 +22,13 @@ describe('useGshhgCoastline', () => {
     const { result } = renderHook(() => useGshhgCoastline())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/gshhg-coastline')
+    expect(fetchMock).toHaveBeenCalledWith('/api/gshhg-coastline', expect.anything())
     expect(result.current.data).toEqual({ type: 'FeatureCollection', features: [] })
     expect(result.current.error).toBeNull()
   })
 
   it('sets an error message when the fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { useGshhgCoastline } = await import('@/hooks/use-gshhg-coastline')

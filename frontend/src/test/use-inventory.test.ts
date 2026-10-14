@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
-import { deleteEquipment, useEquipmentItem, InventoryValidationError, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
+import { ApiError } from '@/lib/api-query'
+import { deleteEquipment, useEquipmentItem, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
 
 // ADR 0123: the equipment registry's write path. The one thing worth pinning
 // here is the shape of a rejected write. inventory_handlers.go answers a
@@ -108,11 +109,9 @@ describe('use-inventory writes', () => {
       }
     })
 
-    expect(caught).toBeInstanceOf(InventoryValidationError)
-    const err = caught as InventoryValidationError
-    expect(err.fields).toEqual([
-      { field: 'install_date', message: 'install_date must be blank or YYYY-MM-DD' },
-    ])
+    expect(caught).toBeInstanceOf(ApiError)
+    const err = caught as ApiError
+    expect(err.fieldErrors).toEqual({ install_date: 'install_date must be blank or YYYY-MM-DD' })
     // The message the editor shows is the server's own sentence, not a
     // status code.
     expect(err.message).toBe('install_date must be blank or YYYY-MM-DD')
@@ -139,8 +138,8 @@ describe('use-inventory writes', () => {
       }
     })
 
-    expect(caught).toBeInstanceOf(Error)
-    expect(caught).not.toBeInstanceOf(InventoryValidationError)
+    expect(caught).toBeInstanceOf(ApiError)
+    expect((caught as ApiError).fieldErrors).toBeUndefined()
     expect((caught as Error).message).toBe('zone is in use: 1 bin(s) still reference it')
   })
 })
@@ -192,8 +191,11 @@ describe('deleteEquipment', () => {
 // overwrite the newer, photo-bearing item with whatever it fetched.
 describe('useEquipmentItem: the create-then-upload race', () => {
   it('discards a slow id-change GET that resolves after setItem has already applied a newer item', async () => {
-    let resolveGet!: (value: Response) => void
-    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
+    // Every GET is held until the test answers it. setItem while one is in
+    // flight supersedes it with a fresh read, so the stale answer is the
+    // first request's and the server's current truth is the second's.
+    const gets: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { gets.push(resolve) }))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result, rerender } = renderHook(({ id }) => useEquipmentItem(id), { initialProps: { id: null as string | null } })
@@ -215,10 +217,16 @@ describe('useEquipmentItem: the create-then-upload race', () => {
     // The id-change GET FINALLY resolves - with a STALE item (no photos, as
     // of just after create) fetched before the upload above ever happened.
     await act(async () => {
-      resolveGet(jsonResponse(200, { item: equipmentItem({ photo_ids: [] }), documents: [] }))
+      gets[0](jsonResponse(200, { item: equipmentItem({ photo_ids: [] }), documents: [] }))
       await Promise.resolve()
     })
+    expect(result.current.item).toEqual(newerItem)
 
+    // The read that superseded it carries the upload.
+    await act(async () => {
+      gets[1](jsonResponse(200, { item: newerItem, documents: [] }))
+      await Promise.resolve()
+    })
     expect(result.current.item).toEqual(newerItem)
   })
 })
@@ -255,9 +263,9 @@ describe('useEquipmentItem: a write racing an in-flight GET', () => {
     expect(result.current.loading).toBe(false)
   })
 
-  it('still applies the GET\'s own documents even though its item is superseded by a race-ahead setItem', async () => {
-    let resolveGet!: (value: Response) => void
-    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
+  it('applies the superseding GET\'s documents alongside the race-ahead setItem\'s item', async () => {
+    const gets: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { gets.push(resolve) }))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useEquipmentItem('eq-1'))
@@ -268,13 +276,12 @@ describe('useEquipmentItem: a write racing an in-flight GET', () => {
 
     const docs = [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', kind: 'file', note_type: '', source: 'operator', sort_index: 0, mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }]
     await act(async () => {
-      resolveGet(jsonResponse(200, { item: equipmentItem({ id: 'eq-1' }), documents: docs }))
+      gets[1](jsonResponse(200, { item: newerItem, documents: docs }))
       await Promise.resolve()
     })
 
-    // item stays the race-ahead write's own (the create-then-upload race's
-    // own assertion, above) - but documents, which the write never touched,
-    // is not collateral damage.
+    // item stays the race-ahead write's own, and documents, which the write
+    // never carried, arrive with the read that superseded the stale one.
     expect(result.current.item).toEqual(newerItem)
     expect(result.current.documents).toEqual(docs)
   })
@@ -284,6 +291,8 @@ describe('useEquipmentItem: a write racing an in-flight GET', () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveGet = resolve }))
       .mockImplementationOnce(async () => jsonResponse(200, { item: equipmentItem({ id: 'eq-1', name: 'Updated name' }) }))
+      // update() supersedes the pending GET with a fresh read, which sees the PUT.
+      .mockImplementation(async () => jsonResponse(200, { item: equipmentItem({ id: 'eq-1', name: 'Updated name' }), documents: [] }))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useEquipmentItem('eq-1'))
@@ -329,10 +338,9 @@ describe('useEquipmentItem: a write for a record no longer open', () => {
     rerender({ id: 'eq-b' })
     await waitFor(() => expect(resolvers['eq-b']).toBeDefined())
 
-    // A's photo upload lands late, after the editor has moved on to B.
+    // A's photo upload lands late, after the editor has moved on to B. The
+    // cache is keyed by id, so it lands under A and cannot show under B.
     act(() => { result.current.setItem(equipmentItem({ id: 'eq-a', name: 'Item A', photo_ids: ['photo-a'] })) })
-    // adopt claims an id only while no record is open, so it cannot sneak A in either.
-    act(() => { result.current.setItem(equipmentItem({ id: 'eq-a', name: 'Item A' }), { adopt: true }) })
 
     await act(async () => {
       resolvers['eq-b'](jsonResponse(200, { item: equipmentItem({ id: 'eq-b', name: 'Item B' }), documents: [] }))

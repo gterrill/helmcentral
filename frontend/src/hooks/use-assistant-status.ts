@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { useApiQuery } from '@/lib/api-query'
 
 /**
  * ADR 0093: `problem` is an actionable sentence naming the reason the
@@ -15,25 +14,9 @@ export interface AssistantStatus {
 }
 
 export function useAssistantStatus() {
-  const [status, setStatus] = useState<AssistantStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/assistant/status`)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = (await response.json()) as AssistantStatus
-      setStatus(data)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { status, loading, error, refresh }
+  const { data, isLoading, error, refetch } = useApiQuery<AssistantStatus>({
+    queryKey: ['/api/assistant/status'],
+    path: '/api/assistant/status',
+  })
+  return { status: data ?? null, loading: isLoading, error: error?.message ?? null, refresh: refetch }
 }

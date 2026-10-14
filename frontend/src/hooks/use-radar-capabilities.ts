@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
+import { useApiQuery } from '@/lib/api-query'
 import { buildEchoPalette, parseCapabilities, type RadarCapabilities } from '@/lib/radar-echo/legend'
 
 export interface RadarCapabilitiesResult {
@@ -16,68 +16,8 @@ export interface RadarCapabilitiesResult {
 const IDLE: RadarCapabilitiesResult = { capabilities: null, palette: null, error: null, loading: false }
 const LOADING: RadarCapabilitiesResult = { capabilities: null, palette: null, error: null, loading: true }
 
-/**
- * Per-radar-id cache, module-level rather than per-hook-instance. Tile and
- * drawer can both be showing the overlay for the same radar id at once (the
- * plan's "Two mounted maps"), and capabilities only change on a range
- * change -- which the backend itself already tolerates with a 30s TTL
- * (radarCapabilitiesCacheTTL, backend/radar_capabilities.go) -- so a second
- * mount for the same id reuses this rather than issuing a duplicate GET.
- * A failed result is cached too: an unconfigured or unreachable radar
- * doesn't become configured mid-session, and re-hitting the backend on
- * every remount would just repeat the same 502.
- */
-const cache = new Map<string, RadarCapabilitiesResult>()
-const inflight = new Map<string, Promise<void>>()
-const listeners = new Map<string, Set<(result: RadarCapabilitiesResult) => void>>()
-
-function publish(radarId: string, result: RadarCapabilitiesResult): void {
-  cache.set(radarId, result)
-  for (const listener of listeners.get(radarId) ?? []) listener(result)
-}
-
 function errorResult(message: string): RadarCapabilitiesResult {
   return { capabilities: null, palette: null, error: message, loading: false }
-}
-
-async function load(radarId: string): Promise<void> {
-  try {
-    const response = await fetch(`${apiBaseUrl}/api/radar/capabilities?radar=${encodeURIComponent(radarId)}`)
-    const body: unknown = await response.json().catch(() => null)
-
-    if (!response.ok) {
-      // radarCapabilitiesHandler (backend/radar_capabilities.go) answers a
-      // failure as JSON carrying an `error` key (502), never an empty or
-      // defaulted legend -- surface that message rather than a generic one.
-      const message =
-        body !== null && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
-          ? (body as { error: string }).error
-          : `radar capabilities request for ${radarId} failed with status ${response.status}`
-      publish(radarId, errorResult(message))
-      return
-    }
-
-    const capabilities = parseCapabilities(body)
-    if (capabilities === null) {
-      // Per AGENTS.md's fallback policy: a payload that doesn't parse
-      // cleanly must never fall back to a partial or defaulted legend --
-      // that would draw real returns in synthesized colours. A radar whose
-      // capabilities can't be read is one whose picture must not be drawn.
-      publish(radarId, errorResult(`radar capabilities for ${radarId} could not be parsed`))
-      return
-    }
-
-    const palette = buildEchoPalette(capabilities.legend)
-    publish(radarId, { capabilities, palette, error: null, loading: false })
-  } catch (err) {
-    publish(radarId, errorResult(err instanceof Error ? err.message : `radar capabilities request for ${radarId} failed`))
-  }
-}
-
-function ensureLoaded(radarId: string): void {
-  if (cache.has(radarId) || inflight.has(radarId)) return
-  const promise = load(radarId).finally(() => inflight.delete(radarId))
-  inflight.set(radarId, promise)
 }
 
 /**
@@ -98,30 +38,35 @@ function ensureLoaded(radarId: string): void {
  * just hide it from that consumer instead of fixing it.
  */
 export function useRadarCapabilities(radarId: string | null): RadarCapabilitiesResult {
-  const [result, setResult] = useState<RadarCapabilitiesResult>(() => (radarId !== null ? (cache.get(radarId) ?? LOADING) : IDLE))
+  // Tile and drawer can both be showing the overlay for the same radar id at
+  // once, and capabilities only change on a range change (the backend itself
+  // tolerates a 30s TTL), so the shared query store gives the second mount
+  // the first one's answer instead of a duplicate GET. The body is parsed
+  // below rather than in `select`, so an unparseable payload is reported as
+  // an error instead of throwing during render.
+  const { data, error } = useApiQuery<unknown>({
+    queryKey: ['/api/radar/capabilities', radarId],
+    path: `/api/radar/capabilities?radar=${encodeURIComponent(radarId ?? '')}`,
+    enabled: radarId !== null,
+  })
 
-  useEffect(() => {
-    if (radarId === null) {
-      setResult(IDLE)
-      return
+  return useMemo(() => {
+    if (radarId === null) return IDLE
+    if (data !== undefined) {
+      const capabilities = parseCapabilities(data)
+      if (capabilities === null) {
+        // Per AGENTS.md's fallback policy: a payload that doesn't parse
+        // cleanly must never fall back to a partial or defaulted legend --
+        // that would draw real returns in synthesized colours. A radar whose
+        // capabilities can't be read is one whose picture must not be drawn.
+        return errorResult(`radar capabilities for ${radarId} could not be parsed`)
+      }
+      return { capabilities, palette: buildEchoPalette(capabilities.legend), error: null, loading: false }
     }
-
-    setResult(cache.get(radarId) ?? LOADING)
-
-    let radarListeners = listeners.get(radarId)
-    if (!radarListeners) {
-      radarListeners = new Set()
-      listeners.set(radarId, radarListeners)
-    }
-    radarListeners.add(setResult)
-
-    ensureLoaded(radarId)
-
-    return () => {
-      radarListeners!.delete(setResult)
-      if (radarListeners!.size === 0) listeners.delete(radarId)
-    }
-  }, [radarId])
-
-  return result
+    // radarCapabilitiesHandler (backend/radar_capabilities.go) answers a
+    // failure as JSON carrying an `error` key (502), never an empty or
+    // defaulted legend; ApiError carries that message through.
+    if (error !== null) return errorResult(error.message)
+    return LOADING
+  }, [radarId, data, error])
 }

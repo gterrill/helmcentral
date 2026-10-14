@@ -54,7 +54,7 @@ export interface ManualFolderViewProps {
    * folderIsManual derivation). This component does not decide when it
    * stops being shown; its parent does, from the same manuals list every
    * folder row's badge/menu already reads. */
-  onDemoted: () => void
+  onDemoted?: () => void
   /** A hc-note:/hc-doc: link that resolves to a document OUTSIDE this
    * manual's own tree (or that just isn't worth a special case - see
    * handleNavigate below) opens in Documents' own viewer Sheet instead of
@@ -85,7 +85,7 @@ export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemot
 
   const handleDemote = useCallback(async () => {
     await manuals.clearManual(folderId)
-    onDemoted()
+    onDemoted?.()
   }, [manuals, folderId, onDemoted])
 
   const handleMove = useCallback((parentId: string, siblings: ManualTreeNode[], index: number, direction: 'up' | 'down') => {

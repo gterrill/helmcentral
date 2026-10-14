@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { useMemo } from 'react'
+import { useApiQuery } from '@/lib/api-query'
 
 export interface AppVersion {
   version: string
@@ -24,39 +24,16 @@ export interface UseAppVersionResult {
  * the page is open; a new one implies a new backend and a fresh page load.
  */
 export function useAppVersion(): UseAppVersionResult {
-  const [build, setBuild] = useState<AppVersion | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, error } = useApiQuery<Partial<AppVersion>>({
+    queryKey: ['/api/health'],
+    path: '/api/health',
+  })
 
-  useEffect(() => {
-    let cancelled = false
-
-    const fetchVersion = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/health`)
-        if (!response.ok) {
-          throw new Error(`Health check failed: ${response.status}`)
-        }
-        const data = (await response.json()) as Partial<AppVersion>
-        if (cancelled) return
-        if (!data.version) {
-          throw new Error('Health check returned no version')
-        }
-        setBuild({ version: data.version, revision: data.revision ?? 'unknown' })
-      } catch (err) {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Unable to read build version')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    void fetchVersion()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return { build, loading, error }
+  const build = useMemo(
+    () => (data?.version ? { version: data.version, revision: data.revision ?? 'unknown' } : null),
+    [data],
+  )
+  let message = error?.message ?? null
+  if (!message && data && !data.version) message = 'Health check returned no version'
+  return { build, loading: isLoading, error: message }
 }

@@ -57,8 +57,8 @@ interface MaintenanceEquipmentBlockProps {
 export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, scheduleKey = '', canWrite = true }: MaintenanceEquipmentBlockProps) {
   const { rules, removed, scheduleErrors, loading: rulesLoading, error: rulesError, refresh: refreshRules } = useMaintenanceRules({ equipment: equipmentId, includeStored: true })
   const { profiles } = useEquipmentProfiles(true)
-  const { entries, loading: entriesLoading, refresh: refreshEntries } = useMaintenanceLogEntries({ equipment: equipmentId })
-  const { resets, refresh: refreshResets } = useHourMeterResets(hourMeterPath ? equipmentId : null)
+  const { entries, loading: entriesLoading } = useMaintenanceLogEntries({ equipment: equipmentId })
+  const { resets } = useHourMeterResets(hourMeterPath ? equipmentId : null)
 
   const seenScheduleKey = useRef(scheduleKey)
   useEffect(() => {
@@ -96,7 +96,6 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
     try {
       await deleteMaintenanceRule(deletingRemoved.id)
       setDeletingRemoved(null)
-      await refreshRules()
     } catch (err) {
       setRemovedError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -109,7 +108,6 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
     setMeterError(null)
     try {
       await recordHourMeterReset(equipmentId, Number(oldReading), Number(newReading), meterDate)
-      await refreshResets()
       setShowMeterForm(false)
       setOldReading('')
       setNewReading('0')
@@ -343,17 +341,14 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
         onCancel={() => { setCreatingRule(false); setEditingRule(null) }}
         onSave={async (input) => {
           const saved = editingRule ? await updateMaintenanceRule(editingRule.id, input) : await createMaintenanceRule(input)
-          await refreshRules()
           setCreatingRule(false)
           setEditingRule(null)
           return saved
         }}
         onDelete={async (id) => {
           await deleteMaintenanceRule(id)
-          await refreshRules()
           setEditingRule(null)
         }}
-        onRuleChanged={() => { void refreshRules() }}
       />
 
       <ConfirmDelete
@@ -369,15 +364,13 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
         entry={creatingEntry ? undefined : editingEntry}
         equipmentId={equipmentId}
         open={creatingEntry || editingEntry !== null}
-        onCancel={() => { setCreatingEntry(false); setEditingEntry(null); void refreshEntries() }}
+        onCancel={() => { setCreatingEntry(false); setEditingEntry(null) }}
         onSave={async (input, existingId) => {
           const saved = existingId ? await updateMaintenanceLogEntry(existingId, input) : await createMaintenanceLogEntry(input)
-          await refreshEntries()
           return saved
         }}
         onDelete={async (id) => {
           await deleteMaintenanceLogEntry(id)
-          await refreshEntries()
         }}
       />
     </div>

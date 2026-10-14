@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { useTelemetryEvent } from '@/hooks/use-telemetry-stream'
+import { apiRequest } from '@/lib/api-query'
 
 export type AutopilotSide = 'port' | 'starboard'
 
@@ -55,10 +56,6 @@ function toAutopilotState(payload: AutopilotStreamPayload): AutopilotState {
   }
 }
 
-interface AutopilotErrorBody {
-  error?: string
-}
-
 /**
  * SignalK's v2 autopilot status, as relayed verbatim by GET /api/autopilot.
  * Only `options.modes` is read here: which modes a pilot supports is static
@@ -110,12 +107,7 @@ export function useAutopilot() {
 
     void (async () => {
       try {
-        const response = await fetch('/api/autopilot')
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as AutopilotErrorBody | null
-          throw new Error(body?.error || `Could not read autopilot capabilities (${response.status})`)
-        }
-        const body = (await response.json()) as AutopilotCapabilityBody
+        const body = await apiRequest<AutopilotCapabilityBody>('/api/autopilot')
         if (cancelled) return
         setAvailableModes(body.options?.modes ?? [])
         setCapabilityError(null)
@@ -133,16 +125,7 @@ export function useAutopilot() {
     setPending((prev) => new Set(prev).add(action))
     setError(null)
     try {
-      const response = await fetch(path, {
-        method,
-        ...(body !== undefined
-          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-          : {}),
-      })
-      if (!response.ok) {
-        const errorBody = (await response.json().catch(() => null)) as AutopilotErrorBody | null
-        throw new Error(errorBody?.error || `Autopilot command failed (${response.status})`)
-      }
+      await apiRequest(path, { method, json: body })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Autopilot command failed')
     } finally {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { getQueryData, invalidateQueries } from '@/lib/api-query'
 import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 
@@ -266,6 +267,39 @@ describe('ProviderSettingsModal config fields', () => {
     )
     expect(screen.getByText('Blank uses the public overpass-api.de.')).toBeTruthy()
     expect(screen.getByText(/Applies on the next call/i)).toBeTruthy()
+  })
+
+  it('keeps a typed draft when a background refetch of the provider lands', async () => {
+    let stored = 'https://first.example/api/interpreter'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/plugins/poi/osm-overpass')) {
+          return { ok: true, status: 200, json: async () => osmOverpassInfo(stored) }
+        }
+        if (url.includes('/api/settings/secrets')) {
+          return { ok: true, status: 200, json: async () => secretsGetResponse }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+
+    renderModal('poi', 'osm-overpass')
+    const input = (await screen.findByLabelText('Overpass server')) as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('https://first.example/api/interpreter'))
+    fireEvent.change(input, { target: { value: 'https://typed.example/api/interpreter' } })
+
+    stored = 'https://second.example/api/interpreter'
+    await act(async () => {
+      invalidateQueries(['/api/plugins/poi/osm-overpass'])
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(getQueryData<{ config_fields: { value: string }[] }>(['/api/plugins/poi/osm-overpass'])?.config_fields[0].value).toBe(
+        'https://second.example/api/interpreter',
+      ),
+    )
+    expect(input.value).toBe('https://typed.example/api/interpreter')
   })
 
   it('Save posts the edited config field values to /config', async () => {

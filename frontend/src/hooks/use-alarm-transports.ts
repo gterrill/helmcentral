@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+
+import { apiRequest, useApiQuery } from '@/lib/api-query'
 
 /** Secrets the transports need. Stored encrypted server-side, never echoed back. */
 export const TRANSPORT_SECRET_KEYS = ['NTFY_TOKEN', 'SMTP_PASSWORD'] as const
@@ -51,74 +53,47 @@ export function transportConfigsEqual(a: AlarmTransportConfig, b: AlarmTransport
   return true
 }
 
+const CONFIG_PATH = '/api/alarm-transports'
+const SECRETS_PATH = '/api/settings/secrets'
+const EMPTY_CONFIG = emptyTransportConfig()
+const NO_SECRETS: Record<string, boolean> = {}
+
 export function useAlarmTransports() {
-  const [config, setConfig] = useState<AlarmTransportConfig>(emptyTransportConfig)
-  const [secretsPresent, setSecretsPresent] = useState<Record<string, boolean>>({})
-  const [loading, setLoading] = useState(true)
+  const configQuery = useApiQuery<AlarmTransportConfig>({
+    queryKey: [CONFIG_PATH],
+    path: CONFIG_PATH,
+    select: (payload: AlarmTransportConfig) => ({ ...emptyTransportConfig(), ...payload }),
+  })
+  const secretsQuery = useApiQuery<Record<string, boolean>>({
+    queryKey: [SECRETS_PATH],
+    path: SECRETS_PATH,
+  })
+  const [testResults, setTestResults] = useState<Record<string, string> | null>(null)
+  const [testing, setTesting] = useState(false)
+
   // "Is there a server copy under this config", which is not the same
   // question as "did the last request work". A refresh that fails after a
   // good load leaves the last good config in place and stays loaded, so the
   // settings page can still save against it; a load that never succeeded
   // must not be saved from, because the draft would be an empty config
   // standing in for whatever the server actually holds.
-  const [loaded, setLoaded] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [testResults, setTestResults] = useState<Record<string, string> | null>(null)
-  const [testing, setTesting] = useState(false)
+  const loaded = configQuery.data !== undefined && secretsQuery.data !== undefined
+  const loading = configQuery.isLoading || secretsQuery.isLoading
+  const error = (configQuery.error ?? secretsQuery.error)?.message ?? null
 
-  const refresh = useCallback(async () => {
-    try {
-      const [configResponse, secretsResponse] = await Promise.all([
-        fetch('/api/alarm-transports'),
-        fetch('/api/settings/secrets'),
-      ])
-      // A non-ok response used to be dropped: config stayed at
-      // emptyTransportConfig() with error null, which reads as "loaded, and
-      // nothing is configured" and is indistinguishable from that being the
-      // truth. The fallback policy rules that out.
-      if (!configResponse.ok) throw new Error(`alarm transports: HTTP ${configResponse.status}`)
-      if (!secretsResponse.ok) throw new Error(`secrets status: HTTP ${secretsResponse.status}`)
-      const payload = (await configResponse.json()) as AlarmTransportConfig
-      setConfig({ ...emptyTransportConfig(), ...payload })
-      setSecretsPresent((await secretsResponse.json()) as Record<string, boolean>)
-      setLoaded(true)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
+  const { refetch: refetchConfig } = configQuery
+  const { refetch: refetchSecrets } = secretsQuery
 
   const save = useCallback(async (next: AlarmTransportConfig, secrets: Partial<Record<TransportSecretKey, string>>) => {
     // Secrets first: saving a transport that needs a token before the token
     // exists would leave a window where it is enabled and cannot authenticate.
     const entries = Object.entries(secrets).filter(([, value]) => value.trim() !== '')
     if (entries.length > 0) {
-      const response = await fetch('/api/settings/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(entries)),
-      })
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string }
-        throw new Error(payload.error ?? 'Could not save credentials')
-      }
+      await apiRequest(SECRETS_PATH, { method: 'POST', json: Object.fromEntries(entries) })
     }
-
-    const response = await fetch('/api/alarm-transports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next),
-    })
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      throw new Error(payload.error ?? `HTTP ${response.status}`)
-    }
-    await refresh()
-  }, [refresh])
+    await apiRequest(CONFIG_PATH, { method: 'POST', json: next })
+    await Promise.all([refetchConfig(), refetchSecrets()])
+  }, [refetchConfig, refetchSecrets])
 
   /**
    * Probes every enabled transport. Discovering at 3am that the ntfy topic was
@@ -128,12 +103,7 @@ export function useAlarmTransports() {
     setTesting(true)
     setTestResults(null)
     try {
-      const response = await fetch('/api/alarm-transports/test', { method: 'POST' })
-      const payload = (await response.json().catch(() => ({}))) as { results?: Record<string, string>; error?: string }
-      if (!response.ok) {
-        setTestResults({ error: payload.error ?? `HTTP ${response.status}` })
-        return
-      }
+      const payload = await apiRequest<{ results?: Record<string, string> }>(`${CONFIG_PATH}/test`, { method: 'POST' })
       setTestResults(payload.results ?? {})
     } catch (err) {
       setTestResults({ error: err instanceof Error ? err.message : String(err) })
@@ -142,5 +112,15 @@ export function useAlarmTransports() {
     }
   }, [])
 
-  return { config, secretsPresent, loading, loaded, error, save, test, testResults, testing }
+  return {
+    config: configQuery.data ?? EMPTY_CONFIG,
+    secretsPresent: secretsQuery.data ?? NO_SECRETS,
+    loading,
+    loaded,
+    error,
+    save,
+    test,
+    testResults,
+    testing,
+  }
 }

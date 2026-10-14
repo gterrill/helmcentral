@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest } from '@/lib/api-query'
 
 export interface DiscoveredServer {
   address: string
@@ -53,18 +53,10 @@ export function useSignalKDiscovery(): UseSignalKDiscoveryResult {
     const hint = isIPv4(typed) ? typed : isIPv4(hostname) ? hostname : ''
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/signalk/discover`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hint }),
-      })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(errorPayload?.error ?? 'Unable to search for SignalK servers')
-      }
-
-      const data = (await response.json()) as { servers?: DiscoveredServer[]; scanned_subnet?: string }
+      const data = await apiRequest<{ servers?: DiscoveredServer[]; scanned_subnet?: string }>(
+        '/api/signalk/discover',
+        { method: 'POST', json: { hint } },
+      )
       const found = data.servers ?? []
       setServers(found)
       setScannedSubnet(data.scanned_subnet ?? null)

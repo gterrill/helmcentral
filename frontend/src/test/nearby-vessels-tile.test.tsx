@@ -132,7 +132,7 @@ describe('NearbyVesselsTile', () => {
       await Promise.resolve()
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/316042555/sightings')
+    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/316042555/sightings', expect.anything())
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
     expect(screen.getByText('At Anchor')).toBeInTheDocument()
     expect(screen.getByText(formatCoordinate(-21.59, true), { exact: false })).toBeInTheDocument()

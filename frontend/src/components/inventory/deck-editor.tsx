@@ -92,7 +92,6 @@ export function DeckEditor(
       if (trimmed !== deck.name) await renameDeck(deck.id, trimmed)
       if (layoutChanged) {
         await saveLayout(deck.id, layoutToPayload(layout, zones))
-        await refreshZones()
       }
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, never an invented one.
@@ -101,7 +100,7 @@ export function DeckEditor(
     } finally {
       setSaving(false)
     }
-  }, [deck, name, layout, layoutChanged, zones, renameDeck, saveLayout, refreshZones])
+  }, [deck, name, layout, layoutChanged, zones, renameDeck, saveLayout])
 
   // ADR 0171: this page owns the guard for its name and layout draft.
   useNavigationGuard(dirty
@@ -163,7 +162,6 @@ export function DeckEditor(
     setDeleteError(null)
     try {
       await deleteDeck(deck.id)
-      await refreshZones()
       setPendingDelete(false)
       onDeleted()
     } catch (err) {
