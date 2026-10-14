@@ -23,12 +23,11 @@ to reach the boat afterwards.
    adds a short pause on top.
 4. Tick or untick **Overview map in the corner**. It is the small map that
    shows where the coast and the track sit in the wider country.
-5. Choose **Copy blog embed**. A message confirms it is on the clipboard.
+5. Choose **Copy blog embed**. The embed opens in a box, already selected.
+   Press **Copy**. If the box says to press ⌘C (Ctrl+C), the browser would not
+   copy for Helmcentral, which can happen over a plain `http` address. The
+   text is still selected, so press the keys yourself.
 6. In your Ghost post, add an **HTML** card and paste.
-
-If you open Helmcentral over a plain `http` address, the browser does not let
-it use the clipboard and **Copy blog embed** says so. Use **Download embed as
-HTML** instead, open the file in a text editor, copy everything and paste that.
 
 To look at it before it goes into a post, choose **Download embed as HTML**
 and open the saved file in a browser.
@@ -56,7 +55,8 @@ Scawfell Island", using the place the passage before it ended at. At the end
 the button changes to **Replay**.
 
 Under the map, a row of figures shows distance, time underway, nights (for
-cruises and selections), fuel and the highest gust, in your Units setting. A
+cruises and selections, counted as midnights since the first departure, as on the
+cruise page), fuel and the highest gust, in your Units setting. A
 figure the boat did not record is left out rather than shown as `--`.
 
 ## What goes out, and what does not

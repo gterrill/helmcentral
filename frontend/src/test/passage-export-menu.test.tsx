@@ -34,26 +34,14 @@ function openMenu() {
 beforeEach(() => { vi.clearAllMocks() })
 
 describe('PassageExportMenu', () => {
-  it('copies the blog embed and confirms', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  it('opens the blog embed in a dialog, selected and ready to copy', async () => {
     render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
     openMenu()
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
-    await vi.waitFor(() => expect(toast.success).toHaveBeenCalled())
-    expect(writeText).toHaveBeenCalledTimes(1)
-    expect(writeText.mock.calls[0][0]).toContain('cdn.jsdelivr.net/npm/maplibre-gl@5.24.0')
-    expect(toast.success).toHaveBeenCalledWith('Blog embed copied', expect.anything())
-  })
-
-  it('says what to do instead when the clipboard is withheld, as on plain http', async () => {
-    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
-    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
-    openMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(toast.success).not.toHaveBeenCalled()
-    expect(toast.error.mock.calls[0][1].description).toContain('Download embed as HTML')
+    const box = (await screen.findByRole('textbox', { name: 'Blog embed' })) as HTMLTextAreaElement
+    expect(box.value).toContain('cdn.jsdelivr.net/npm/maplibre-gl@5.24.0')
+    expect(box.selectionEnd - box.selectionStart).toBe(box.value.length)
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('offers the play lengths, both images and the HTML download', async () => {

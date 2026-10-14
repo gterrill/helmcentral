@@ -14,7 +14,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Added
 
 - Passages, cruises and selected passages can be shared from the new **Export**
-  button. **Copy blog embed** puts an animated map on the clipboard to paste
+  button. **Copy blog embed** shows an animated map to copy and paste
   into a Ghost HTML card: readers tap play, the map drops from a view of the
   globe onto the track, and the boat follows it with the local time, each night
   at anchor shown as a short pause, and the distance, time underway, nights,

@@ -2,6 +2,7 @@ import { Share2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { PassageEmbedDialog } from '@/components/passages/passage-embed-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -51,6 +52,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   const [playSeconds, setPlaySeconds] = useState<PlaySeconds>(DEFAULT_PLAY_SECONDS)
   const [inset, setInset] = useInsetPreference()
   const [busy, setBusy] = useState(false)
+  const [embed, setEmbed] = useState<string | null>(null)
   const hasTrack = exportablePassages(passages).length > 0
 
   const exportInput = (): ExportInput => ({ kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds })
@@ -60,17 +62,11 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
     return exportFileName(title, data.start, data.zone.o, ext)
   }
 
-  const copyEmbed = async () => {
+  const showEmbed = () => {
     try {
-      // The boat serves Helmcentral over plain http, where browsers withhold
-      // the clipboard. Say so and point at the file route; do not pretend.
-      if (!navigator.clipboard) {
-        throw new Error("This page can't use the clipboard over a plain http address. Choose Download embed as HTML and copy the card from that file.")
-      }
-      await navigator.clipboard.writeText(generateEmbed(exportInput()))
-      toast.success('Blog embed copied', { description: 'Paste it into a Ghost HTML card.' })
+      setEmbed(generateEmbed(exportInput()))
     } catch (err) {
-      failed('copy the blog embed', err)
+      failed('make the blog embed', err)
     }
   }
 
@@ -104,6 +100,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   }
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -130,11 +127,13 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
           Overview map in the corner
         </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void copyEmbed()}>Copy blog embed</DropdownMenuItem>
+        <DropdownMenuItem onClick={showEmbed}>Copy blog embed</DropdownMenuItem>
         <DropdownMenuItem onClick={downloadPage}>Download embed as HTML</DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <PassageEmbedDialog embed={embed} onClose={() => setEmbed(null)} />
+    </>
   )
 }
