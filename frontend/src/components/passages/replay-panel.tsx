@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { InsetMap, PassageMap, type PassageMapHandle } from '@/components/passages/passage-map'
+import { loadInsetPreference as loadInset, saveInsetPreference as saveInset } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
@@ -18,24 +19,6 @@ import {
 export interface ReplayCursor {
   id: string
   at: number
-}
-
-const INSET_KEY = 'passages.insetMap'
-
-function loadInset(): boolean {
-  try {
-    return localStorage.getItem(INSET_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-function saveInset(on: boolean): void {
-  try {
-    localStorage.setItem(INSET_KEY, on ? '1' : '0')
-  } catch {
-    // Remembering the toggle is a convenience only.
-  }
 }
 
 export interface ReplayPanelProps {

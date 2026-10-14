@@ -5,12 +5,14 @@ import type { DistanceUnits } from '@/config/app-config'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import { passageColour } from '@/components/passages/passage-map'
+import { PassageExportMenu } from '@/components/passages/passage-export-menu'
 import { PassageEditPanel } from '@/components/passages/passage-edit-panel'
 import { CruiseStatsPanel, PassageStatsStrip } from '@/components/passages/passage-stats'
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import { DetailsLayout, FormSection, Page } from '@/components/patterns'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCruiseDetails, usePassageDetail, usePassageDetails } from '@/hooks/use-passages'
+import { combinedTitle } from '@/lib/passage-export'
 import { passagesApi } from '@/lib/passages-api'
 import {
   fmtDuration,
@@ -121,6 +123,9 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
           }
         >
           <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, firstLon([passage]))}</p>
+          <div className="flex justify-end">
+            <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} />
+          </div>
           <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
           <PassageStatsStrip stats={passage.stats} units={units} />
         </DetailsLayout>
@@ -165,7 +170,14 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
             </>
           }
         >
-          {tracksError ? <ErrorLine message={tracksError} /> : <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} />}
+          {tracksError ? <ErrorLine message={tracksError} /> : (
+            <>
+              <div className="flex justify-end">
+                <PassageExportMenu kind="cruise" title={data.cruise.name} passages={passages} cruiseStats={data.stats} units={units} />
+              </div>
+              <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} />
+            </>
+          )}
           <CruiseStatsPanel stats={data.stats} units={units} lon={lon} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
         </DetailsLayout>
       )}
@@ -175,7 +187,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
 
 // ── an ad-hoc selection ───────────────────────────────────────────────────
 
-function CombinedPassages({ ids, canWrite, isDarkTheme, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
+function CombinedPassages({ ids, units, canWrite, isDarkTheme, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
   const { passages, loading, error } = usePassageDetails(ids)
   const [saveOpen, setSaveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -212,6 +224,9 @@ function CombinedPassages({ ids, canWrite, isDarkTheme, onBack, onOpenPassage, o
             </FormSection>
           }
         >
+          <div className="flex justify-end">
+            <PassageExportMenu kind="combined" title={combinedTitle(ordered)} passages={ordered} units={units} />
+          </div>
           <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} />
         </DetailsLayout>
       )}
