@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
 import { ApiError } from '@/lib/api-query'
-import { deleteEquipment, useEquipmentItem, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
+import { useMaintenanceRules } from '@/hooks/use-maintenance'
+import { stubApi } from '@/test/helpers/stub-api'
+import { deleteEquipment, useEquipment, useEquipmentItem, type EquipmentInput, type EquipmentItem } from '@/hooks/use-inventory'
 
 // ADR 0123: the equipment registry's write path. The one thing worth pinning
 // here is the shape of a rejected write. inventory_handlers.go answers a
@@ -189,6 +191,39 @@ describe('deleteEquipment', () => {
 // uses to discard a stale reply - completely untouched, so a slow id-change
 // GET that starts before the uploads but resolves after them was free to
 // overwrite the newer, photo-bearing item with whatever it fetched.
+function deferredResponse() {
+  let resolve!: (v: unknown) => void
+  const promise = new Promise<unknown>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
+describe('deleteEquipment and the queries it leaves behind', () => {
+  it('waits only for the equipment list, and does not re-read the deleted item\'s own maintenance rules', async () => {
+    let rulesReads = 0
+    const slowRules = deferredResponse()
+    stubApi({
+      'GET /api/inventory/equipment': { items: [] },
+      'GET /api/inventory/maintenance/rules': () => {
+        rulesReads += 1
+        // The first read of each answers at once; any later read hangs.
+        return rulesReads <= 2 ? { rules: [] } : slowRules.promise
+      },
+      'DELETE /api/inventory/equipment/eq-1': () => new Response(null, { status: 204 }),
+    })
+    renderHook(() => useEquipment({}))
+    renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    renderHook(() => useMaintenanceRules({ equipment: 'eq-2' }))
+    await waitFor(() => expect(rulesReads).toBe(2))
+
+    // Resolves although the other item's rules refetch is still outstanding.
+    await act(async () => { await deleteEquipment('eq-1') })
+
+    // eq-2's rules were re-read (3rd read); eq-1's, the deleted item's, were not.
+    expect(rulesReads).toBe(3)
+    slowRules.resolve({ rules: [] })
+  })
+})
+
 describe('useEquipmentItem: the create-then-upload race', () => {
   it('discards a slow id-change GET that resolves after setItem has already applied a newer item', async () => {
     // Every GET is held until the test answers it. setItem while one is in

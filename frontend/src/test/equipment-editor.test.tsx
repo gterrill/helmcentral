@@ -7,6 +7,7 @@ import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { downloadDocument } from '@/lib/document-download'
 import { testRouter } from './helpers/router'
+import { invalidateQueries, setQueryData } from '@/lib/api-query'
 
 // ADR 0127: the photo row runs every picked file through downscaleImage
 // before it ever reaches the network (canvas/createImageBitmap aren't
@@ -318,6 +319,57 @@ async function openDeleteDialog() {
 }
 
 describe('EquipmentEditor', () => {
+  // useEquipmentItem answers from the cache first and then revalidates. When
+  // the cached record is stale (a Stocktake changed the item meanwhile), the
+  // draft seeded from it must follow the fresh record, or the editor reads
+  // dirty on arrival and Save would PUT the old values back.
+  describe('when the cached record is stale', () => {
+    async function renderWithHeldRevalidation() {
+      setQueryData(['/api/inventory/equipment/eq-1'], { item: makeItem({ name: 'Stale generator' }), documents: [] })
+      let release: () => void = () => {}
+      const held = new Promise<void>((resolve) => { release = resolve })
+      const baseImpl = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (/\/api\/inventory\/equipment\/eq-1$/.test(String(url)) && (init?.method ?? 'GET') === 'GET') await held
+        return baseImpl(url, init)
+      })
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Stale generator'))
+      return release
+    }
+
+    it('re-seeds an untouched draft from the fresh record and reads clean', async () => {
+      const release = await renderWithHeldRevalidation()
+      await act(async () => { release() })
+      await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Generator'))
+      expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument()
+    })
+
+    it('follows the fresh record field by field, keeping only the fields the operator edited', async () => {
+      const release = await renderWithHeldRevalidation()
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'checked at anchor' } })
+      await act(async () => { release() })
+
+      // The untouched Name takes the fresh value although Notes was edited.
+      await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Generator'))
+      expect(screen.getByLabelText('Notes')).toHaveValue('checked at anchor')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(fetchMock.mock.calls.some(([u, i]) => /equipment\/eq-1$/.test(String(u)) && (i as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+      const put = fetchMock.mock.calls.find(([u, i]) => /equipment\/eq-1$/.test(String(u)) && (i as RequestInit | undefined)?.method === 'PUT')!
+      expect(JSON.parse(String((put[1] as RequestInit).body))).toMatchObject({ name: 'Generator', notes: 'checked at anchor' })
+    })
+
+    it('leaves a draft the operator has edited alone', async () => {
+      const release = await renderWithHeldRevalidation()
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'My edit' } })
+      await act(async () => { release() })
+      await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => /equipment\/eq-1$/.test(String(u)))).toBe(true))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.getByLabelText('Name')).toHaveValue('My edit')
+    })
+  })
+
   // ADR 0142: the Polaris "Details" template - editable content in the main
   // column, scannable status/organisation/location in the aside. Status is
   // the one thing an operator glances at first ("is this thing deployed?"),
@@ -521,6 +573,19 @@ describe('EquipmentEditor', () => {
     failItemGetsWith = null
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await waitForLoaded()
+  })
+
+  it('keeps the form, with the edits pending, and notes the failure when a refresh of a loaded item fails', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'checked at anchor' } })
+
+    failItemGetsWith = 'database is locked'
+    act(() => { invalidateQueries(['/api/inventory/equipment/eq-1']) })
+
+    expect(await screen.findByText(/Couldn't refresh: database is locked/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Notes')).toHaveValue('checked at anchor')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('wraps the not-found state in Page, with a working Back', async () => {

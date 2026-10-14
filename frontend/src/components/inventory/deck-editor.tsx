@@ -5,7 +5,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { DeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { deckPlanUrl, useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
@@ -287,7 +287,10 @@ export function DeckEditor(
           title="Locations on this plan"
           description="Outline each location and pin its bins. Changes are kept as a draft until you save."
         >
-          {zonesError ? (
+          {zonesError && zones.length > 0 && (
+            <RefreshFailedNote reason={zonesError} onRetry={() => { void refreshZones() }} />
+          )}
+          {zonesError && zones.length === 0 ? (
             <div className="flex flex-col items-start gap-2">
               <p role="alert" className="text-sm text-destructive">{zonesError}</p>
               <Button type="button" variant="outline" size="sm" onClick={() => { void refreshZones() }}>Retry</Button>

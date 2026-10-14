@@ -4,7 +4,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, ResourceList, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, ResourceList, SaveBar } from '@/components/patterns'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { BinRow } from '@/components/inventory/location-bin-row'
 import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
@@ -58,7 +58,8 @@ function OnThePlan({
 
   return (
     <FormSection title="On the plan" description="Where this location sits on a deck plan.">
-      {error ? (
+      {error && decks.length > 0 && <RefreshFailedNote reason={error} />}
+      {error && decks.length === 0 ? (
         <p role="alert" className="text-sm text-destructive">{error}</p>
       ) : deck && deck.plan_document_id ? (
         <div className="flex max-w-xl flex-col gap-3">

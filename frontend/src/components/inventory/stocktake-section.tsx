@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
+import { LoadError } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BinPhotoGrid } from '@/components/inventory/bin-page'
@@ -166,9 +167,11 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         setScanError('Locations still loading - scan that bin again in a moment.')
         return
       }
-      if (zonesError) return
       const match = findBinByCode(zones, binCode)
       if (!match) {
+        // With the locations failing to refresh, a miss on the cached list
+        // proves nothing: the bin may be new. The error line says why.
+        if (zonesError) return
         pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
         return
       }
@@ -348,9 +351,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
         {scanError && (
           <p role="alert" className="text-sm text-destructive">{scanError}</p>
         )}
-        {zonesError && (
-          <p role="alert" className="text-sm text-destructive">{zonesError}</p>
-        )}
+        {zonesError && <LoadError reason={zonesError} hasRows={zones.length > 0} />}
       </div>
 
       {currentBin && (

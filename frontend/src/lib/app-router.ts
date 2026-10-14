@@ -237,6 +237,20 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
   // the first click after a clean deep link would replace its own entry.
   let initialised = false
   let previousFirstPageId: string | null = null
+  // Held moves the operator has withdrawn: cancelled, or replaced by another
+  // held move. Saving a guard can itself navigate (a New item lands on the
+  // record it created), which clears `pending` without anyone withdrawing
+  // the move, so "no longer pending" cannot stand for "abandoned".
+  const withdrawn = new WeakSet<PendingNavigation>()
+  // The held move whose guard is saving right now. A move the operator makes
+  // meanwhile (Back, a page switch, a navigation nothing holds) replaces it;
+  // only a forced move is the save's own (a create landing on its new record,
+  // which is also why the force exists), so that one leaves it standing.
+  let saving: PendingNavigation | null = null
+  let activeSave: { pending: PendingNavigation; done: Promise<void> } | null = null
+  function operatorMoved() {
+    if (saving) withdrawn.add(saving)
+  }
 
   function emit(next: Partial<RouterSnapshot>) {
     snapshot = { ...snapshot, ...next }
@@ -266,7 +280,13 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
     if (current.panel === 'display') return
     // Page structure not yet known: leave whatever deep link brought us here
     // alone rather than guessing at a page id that might still turn out valid.
-    if (current.panel === null && context.knownPageIds === null) return
+    // The entry is still the one the app was loaded at, so it counts as
+    // recorded: a move away before the list arrives must push, or Back would
+    // leave the app.
+    if (current.panel === null && context.knownPageIds === null) {
+      initialised = true
+      return
+    }
 
     const first = !initialised
     initialised = true
@@ -322,10 +342,14 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
     if (!options.force) {
       const held = findBlock(snapshot.location, resolved)
       if (held) {
+        if (snapshot.pending) withdrawn.add(snapshot.pending)
         emit({ pending: { ...held, replace: options.replace === true } })
         return false
       }
     }
+    // A replace is the app correcting where it already is (a panel following
+    // a rename or a folder), not the operator going somewhere.
+    if (!options.force && !options.replace) operatorMoved()
     commit(resolved, options.replace === true)
     return true
   }
@@ -352,10 +376,12 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
       // Held: the browser has already moved off the page that is still on
       // screen, so write that page's address back as a new entry. The bar has
       // to agree with what is rendered while the dialog is up.
+      if (snapshot.pending) withdrawn.add(snapshot.pending)
       emit({ pending: held })
       history.push(formatAppLocation(snapshot.location, context))
       return
     }
+    operatorMoved()
     commit(parsed, false)
   }
 
@@ -393,6 +419,7 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
       if (snapshot.location.panel === null) {
         if (snapshot.location.pageId === pageId) return
         const next: AppLocation = { panel: null, pageId }
+        if (!options.replace) operatorMoved()
         snapshot = { ...snapshot, location: next, pageId, pending: null }
         memory.set('dashboard', next)
         writeAddress(options.replace === true)
@@ -420,16 +447,37 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
       commit(pending.target, pending.replace)
     },
     cancelPending() {
-      if (snapshot.pending) emit({ pending: null })
+      if (!snapshot.pending) return
+      withdrawn.add(snapshot.pending)
+      emit({ pending: null })
     },
     async saveAndContinue() {
       const { pending } = snapshot
       if (!pending) return
-      await pending.save?.()
-      // Cancelled (or replaced by another held move) while the save ran: the
-      // operator withdrew this move, so only the save stands.
-      if (snapshot.pending !== pending) return
-      commit(pending.target, pending.replace)
+      // A second press while the save for this same move runs joins it: one
+      // save, one decision about the move.
+      if (activeSave && activeSave.pending === pending) return activeSave.done
+      const done = runSave(pending)
+      activeSave = { pending, done }
+      try {
+        await done
+      } finally {
+        if (activeSave?.done === done) activeSave = null
+      }
     },
+  }
+
+  async function runSave(pending: PendingNavigation): Promise<void> {
+    saving = pending
+    try {
+      await pending.save?.()
+    } finally {
+      saving = null
+    }
+    // Cancelled, replaced by another held move, or overtaken by a move the
+    // operator made elsewhere while the save ran: only the save stands. A
+    // move the save itself cleared by navigating is still wanted.
+    if (withdrawn.has(pending)) return
+    commit(pending.target, pending.replace)
   }
 }

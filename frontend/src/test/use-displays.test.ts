@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
 import { useDisplays } from '@/hooks/use-displays'
 import { useDashboardPages } from '@/hooks/use-dashboard-pages'
-import { stubApi } from '@/test/helpers/stub-api'
+import { jsonResponse, stubApi } from '@/test/helpers/stub-api'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
@@ -36,6 +36,19 @@ describe('useDisplays', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/displays', expect.anything())
     expect(result.current.displays).toEqual([flybridge])
     expect(result.current.error).toBeNull()
+  })
+
+  it('keeps cached displays and reports the error when a later revalidation fails', async () => {
+    let calls = 0
+    stubApi({
+      'GET /api/displays': () => (++calls === 1 ? { displays: [flybridge] } : jsonResponse({ error: 'blip' }, 502)),
+    })
+    const { result } = renderHook(() => useDisplays())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.refetch() })
+    expect(calls).toBe(2)
+    expect(result.current.displays).toEqual([flybridge])
+    expect(result.current.error).toBe('blip')
   })
 
   it('sets an error message when the initial fetch fails', async () => {

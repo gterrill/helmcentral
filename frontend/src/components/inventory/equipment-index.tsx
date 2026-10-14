@@ -147,9 +147,10 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
     if (!pendingDeleteId) return
     setDeleting(true)
     try {
+      // deleteEquipment resolves once the equipment lists have re-read, this
+      // one included, so the dialog closes on fresh rows with a single GET.
       await deleteEquipment(pendingDeleteId)
       setPendingDeleteId(null)
-      await refresh()
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, dialog stays
       // open so the operator sees it (and the item) rather than losing both.

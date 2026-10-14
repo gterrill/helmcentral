@@ -1445,6 +1445,32 @@ describe('DocumentsPanel', () => {
       expect(screen.queryByText('Filed doc')).not.toBeInTheDocument()
     })
 
+    it('lists the notes it has and notes the failure when a refresh of them fails', () => {
+      mockedUseNotes.mockReturnValue(makeNotesMock({
+        notes: [note({ id: 'note-1', title: 'Ring Dave' })],
+        error: 'HTTP 502',
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('treeitem', { name: /unfiled notes/i }))
+
+      expect(screen.getByText('Ring Dave')).toBeInTheDocument()
+      expect(screen.getByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    })
+
+    it('shows the full error with Retry, not a note over an empty view, when the notes cannot load', () => {
+      const refresh = vi.fn()
+      mockedUseNotes.mockReturnValue(makeNotesMock({ notes: [], error: 'HTTP 502', refresh }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('treeitem', { name: /unfiled notes/i }))
+
+      expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502')
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      expect(refresh).toHaveBeenCalled()
+      expect(screen.queryByText(/Couldn't refresh/)).not.toBeInTheDocument()
+    })
+
     it('File… on an unfiled row opens the same Move dialog a document row uses', () => {
       mockedUseNotes.mockReturnValue(makeNotesMock({
         notes: [note({ id: 'note-1', title: 'Ring Dave' })],
@@ -1537,6 +1563,19 @@ describe('DocumentsPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Stop treating as manual' }))
 
       await waitFor(() => expect(clearManual).toHaveBeenCalledWith('m1'))
+    })
+
+    it('does not show the folder listing\'s load error over a manual it is not displaying', () => {
+      mockedUseManuals.mockReturnValue(makeManualsMock({
+        manuals: [{ id: 'm1', name: 'Operations Manual', document_count: 0, updated_at: '2026-01-01T00:00:00Z' }],
+        tree: { type: 'folder', id: 'm1', name: 'Operations Manual', sort_index: 0, updated_at: '2026-01-01T00:00:00Z', children: [] },
+      }))
+      setFolderTree([treeFolder({ id: 'm1', name: 'Operations Manual', is_manual: true })])
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ error: 'HTTP 502' }))
+
+      render(<DocumentsPanel initialFolderId="m1" />)
+
+      expect(screen.queryByText('HTTP 502')).not.toBeInTheDocument()
     })
 
     it('demoting from the folder pane menu also calls clearManual', async () => {
@@ -2252,6 +2291,35 @@ describe('DocumentsPanel folder pane', () => {
 
     expect(screen.queryByRole('columnheader', { name: /name/i })).not.toBeInTheDocument()
     expect(screen.getByText(/Cannot tell whether this folder is a manual \(HTTP 500\)/)).toBeInTheDocument()
+  })
+
+  it('keeps the folder tree and notes the failure when a refresh of it fails', () => {
+    mockedUseFolderTree.mockReturnValue({ folders: [treeFolder({ id: 'f1', name: 'Manuals' })], loading: false, error: 'HTTP 502', refresh: refreshFolderTree })
+    render(<DocumentsPanel />)
+
+    expect(screen.getByRole('treeitem', { name: /Manuals/ })).toBeInTheDocument()
+    expect(screen.getByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows the full error when only folders are loaded, since the table draws documents', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      folders: [{ id: 'f1', name: 'Manuals', parent_id: null }] as never,
+      documents: [],
+      error: 'HTTP 502',
+    }))
+    render(<DocumentsPanel />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502')
+    expect(screen.queryByText(/Couldn't refresh/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the listed documents and notes the failure when a refresh of the listing fails', () => {
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc({ id: 'a', filename: 'keel-bolts.pdf' })], error: 'HTTP 502' }))
+    render(<DocumentsPanel />)
+
+    expect(screen.getByText('keel-bolts.pdf')).toBeInTheDocument()
+    expect(screen.getByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
   })
 
   it('opens with the selected folder\'s ancestors expanded', () => {

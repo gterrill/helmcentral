@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import type { MaintenanceRule } from '@/hooks/use-maintenance'
+import { invalidateQueries } from '@/lib/api-query'
 import { ITEM_RULE_PROVENANCE, makeProfileJob } from './maintenance-fixtures'
 
 // ADR 0138: the Maintenance list's own grouping/sorting and its quick
@@ -168,6 +169,25 @@ describe('MaintenanceSection', () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/complete'))).toBe(true))
     await screen.findByText(/logged/i)
+  })
+
+  it('keeps the rules and notes the failure when a refresh of them fails', async () => {
+    let reads = 0
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) {
+        return ++reads === 1
+          ? jsonResponse(200, { rules: [makeProfileJob({ description: 'Oil change', status: 'ok' })], removed: [], schedule_errors: [] })
+          : jsonResponse(502, { error: 'HTTP 502' })
+      }
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    await screen.findByText('Oil change')
+
+    act(() => { invalidateQueries(['/api/inventory/maintenance/rules']) })
+
+    expect(await screen.findByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.getByText('Oil change')).toBeInTheDocument()
   })
 
   it('marks an overridden profile job, mutes a not-applicable one and lists both', async () => {

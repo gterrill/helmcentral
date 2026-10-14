@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { RefreshFailedNote } from './refresh-failed-note'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -148,6 +149,10 @@ export interface IndexTableProps<T> {
   groupLabel?: (key: string) => string
   loading?: boolean
   error?: string | null
+  /** How many rows were loaded before `rows` was filtered (a search box). A
+   * failed refresh over a filter that hides every row is then a note beside
+   * the empty slot, not the full error. Defaults to `rows.length`. */
+  loadedCount?: number
   onRetry?: () => void
   /** Rendered in place of the table/card list when there are no rows and
    * nothing is loading or errored - an EmptyState, typically. */
@@ -194,6 +199,7 @@ export function IndexTable<T>({
   groupLabel,
   loading = false,
   error = null,
+  loadedCount,
   onRetry,
   empty,
   selectable = false,
@@ -262,7 +268,9 @@ export function IndexTable<T>({
 
   const wrapperClassName = cn('min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card', className)
 
-  if (error) {
+  // Rows already on screen stay, with the failure noted beside them; the full
+  // error state is for when there is nothing else to show.
+  if (error && (loadedCount ?? rows.length) === 0) {
     return (
       <div className={wrapperClassName}>
         <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
@@ -318,6 +326,7 @@ export function IndexTable<T>({
   }
   // Clear selection empties the whole selection, not only the rows on screen.
   const clearSelection = () => emitSelection(new Set())
+  const refreshNote = error ? <RefreshFailedNote reason={error} onRetry={onRetry} className="px-3 py-2" /> : null
   const bulkBar = selectable && selectedVisible.length > 0 ? (
     <div data-slot="index-bulk-bar" className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
       <span className="text-sm font-medium tabular-nums text-foreground">{selectedVisible.length} selected</span>
@@ -343,7 +352,7 @@ export function IndexTable<T>({
     ) : null
 
   if (sortedRows.length === 0) {
-    return <div className={wrapperClassName}>{empty ?? null}</div>
+    return <div className={wrapperClassName}>{error && refreshNote}{empty ?? null}</div>
   }
 
   let groups: { key: string; label: string; rows: TanstackRow<T>[] }[] | null = null
@@ -415,6 +424,7 @@ export function IndexTable<T>({
   if (isMobile) {
     return (
       <div className={cn('flex flex-col gap-3', className)}>
+        {refreshNote}
         {bulkBar && <div className="overflow-hidden rounded-md border border-border">{bulkBar}</div>}
         {groups
           ? groups.map((group) => (
@@ -463,6 +473,7 @@ export function IndexTable<T>({
 
   return (
     <div className={wrapperClassName}>
+      {refreshNote}
       {bulkBar}
       <Table>
         <TableHeader>

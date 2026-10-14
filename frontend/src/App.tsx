@@ -89,6 +89,7 @@ import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-display-rotation'
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
+import { LoadError, RefreshFailedOverlay } from '@/components/patterns/refresh-failed-note'
 import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
 import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
@@ -2294,7 +2295,7 @@ function AppShell() {
                 // Only while the editor is still what is on screen: the save
                 // is async, and the operator may have moved on meanwhile.
                 if (updated && updated.id === editing?.id && router.getSnapshot().location.panel === 'wall-displays') {
-                  navigate({ panel: 'wall-displays', route: { view: 'editor', slug: updated.slug } })
+                  navigate({ panel: 'wall-displays', route: { view: 'editor', slug: updated.slug } }, { replace: true })
                 }
                 return updated
               }}
@@ -2594,10 +2595,11 @@ function AppShell() {
           />
         }
       >
-        {pagesError ? (
+        {pagesError && pages.length === 0 ? (
           // Distinct from the empty-feed message below: a failed fetch is a
           // wall that cannot see its pages, not a wall with none assigned,
-          // and the rotation is already polling its way back.
+          // and the rotation is already polling its way back. With pages
+          // already loaded the wall keeps showing them instead.
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Could not load dashboard pages. Retrying…
           </div>
@@ -2606,7 +2608,10 @@ function AppShell() {
             No pages are assigned to {wallDisplay.name} yet.
           </div>
         ) : (
-          dashboardGrid
+          <>
+            {dashboardGrid}
+            {pagesError && <RefreshFailedOverlay reason={pagesError} />}
+          </>
         )}
         <DisplayRemoteController rotation={displayRotation} onAction={bumpRemoteAnnouncement} />
       </DisplayShell>
@@ -2762,7 +2767,7 @@ function AppShell() {
             </Breadcrumb>
           </div>
           <div className="flex min-w-0 shrink-0 items-center gap-2">
-            {activePanel === null && !pagesError && (
+            {activePanel === null && (!pagesError || pages.length > 0) && (
               <>
                 <DashboardPageSwitcher
                   pages={dashboardSubListPages}
@@ -3018,7 +3023,11 @@ function AppShell() {
 
             <div ref={swipeContainerRef} data-testid="dashboard-swipe-surface" className="min-h-0 flex-1">
               {activePanel === null ? (
-                dashboardGrid
+                <>
+                  {pagesError && pages.length > 0 && <RefreshFailedOverlay reason={pagesError} onRetry={() => { void refetchPages() }} />}
+                  {pagesError && pages.length === 0 && <LoadError reason={pagesError} hasRows={false} onRetry={() => { void refetchPages() }} className="px-1 pb-2" />}
+                  {dashboardGrid}
+                </>
               ) : (
                 <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card p-4">
                   {/* One boundary for every panel, not eight. `key={activePanel}`

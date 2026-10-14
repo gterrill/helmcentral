@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
+import { invalidateQueries } from '@/lib/api-query'
 import { scanTags } from '@/lib/nfc'
 import { testRouter } from './helpers/router'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
@@ -305,6 +306,24 @@ describe('StocktakeSection', () => {
     await screen.findByText('locations unavailable')
 
     await scan('https://boat.example/inventory/bins/LAZ-02')
+    expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
+  })
+
+  it('does not judge a scan that misses the cached locations while their refresh is failing', async () => {
+    const base = fetchMock.getMockImplementation()!
+    let failing = false
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      failing && String(url).endsWith('/api/inventory/zones')
+        ? Promise.resolve({ ok: false, status: 502, json: async () => ({ error: 'locations unavailable' }) })
+        : base(url, init))
+    render(<StocktakeSection />)
+    await waitFor(() => expect(zones.length).toBeGreaterThan(0))
+
+    failing = true
+    act(() => { invalidateQueries(['/api/inventory/zones']) })
+    await screen.findByText(/Couldn't refresh: locations unavailable/)
+
+    await scan('https://boat.example/inventory/bins/NO-SUCH-BIN')
     expect(screen.queryByText(/Not an inventory tag/)).not.toBeInTheDocument()
   })
 

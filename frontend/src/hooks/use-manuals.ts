@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { apiRequest, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 import { invalidateDocumentLists } from '@/hooks/use-documents'
 
 // Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Manuals panel's data
@@ -104,12 +104,13 @@ export function useManuals(manualId: string | null = null) {
   })
   const refreshTree = treeQuery.refetch
 
-  // Resolves once the fresh list has landed; the invalidate comes first so a
-  // read in flight from before the write is superseded, not awaited.
+  // Resolves once the fresh list has landed. The refetch starts a new read, so
+  // one in flight from before the write is superseded, not awaited; it is also
+  // the list's only read here, since invalidating the same key first would
+  // start a second request for the same answer.
   // A manual is a folder with a role, and the folder tree says which are
   // manuals, so every write here refreshes the Documents readers too.
   const reloadManuals = useCallback(async () => {
-    invalidateQueries([MANUALS])
     invalidateDocumentLists({ counts: true })
     await refreshManuals()
   }, [refreshManuals])

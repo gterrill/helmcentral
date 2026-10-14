@@ -162,6 +162,45 @@ describe('query store', () => {
     expect(result.current.isFetching).toBe(false)
   })
 
+  it('setQueryData during the first load does not store a fragment, and the full list comes from a fresh read', async () => {
+    const first = deferred<number[]>()
+    let calls = 0
+    stubApi({ 'GET /api/items': () => (++calls === 1 ? first.promise : [1, 2, 9]) })
+    const { result } = renderHook(() => useApiQuery<number[]>(opts()))
+    await waitFor(() => expect(calls).toBe(1))
+    act(() => setQueryData<number[]>(['items'], (prev) => [...(prev ?? []), 9]))
+    expect(result.current.data).toBeUndefined()
+    await waitFor(() => expect(result.current.data).toEqual([1, 2, 9]))
+    expect(calls).toBe(2)
+    await act(async () => { first.resolve([1, 2]) })
+    expect(result.current.data).toEqual([1, 2, 9])
+  })
+
+  it('a fragment write whose fresh read fails leaves the error, not the fragment as the list', async () => {
+    const first = deferred<number[]>()
+    let calls = 0
+    stubApi({ 'GET /api/items': () => (++calls === 1 ? first.promise : jsonResponse({ error: 'down' }, 502)) })
+    const { result } = renderHook(() => useApiQuery<number[]>(opts()))
+    await waitFor(() => expect(calls).toBe(1))
+    act(() => setQueryData<number[]>(['items'], (prev) => [...(prev ?? []), 9]))
+
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error))
+    expect(result.current.data).toBeUndefined()
+    expect(getQueryData(['items'])).toBeUndefined()
+  })
+
+  it('setQueryData with an updater over an entry whose load failed is followed by a fresh read', async () => {
+    let calls = 0
+    stubApi({ 'GET /api/items': () => (++calls === 1 ? jsonResponse({ error: 'down' }, 502) : [1, 2, 9]) })
+    const { result } = renderHook(() => useApiQuery<number[]>(opts()))
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error))
+
+    act(() => setQueryData<number[]>(['items'], (prev) => [...(prev ?? []), 9]))
+
+    await waitFor(() => expect(result.current.data).toEqual([1, 2, 9]))
+    expect(calls).toBe(2)
+  })
+
   it('a select that throws lands in error instead of throwing during render', async () => {
     stubApi({ 'GET /api/items': null })
     const { result } = renderHook(() =>
