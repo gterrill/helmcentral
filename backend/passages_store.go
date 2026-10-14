@@ -138,6 +138,13 @@ func createPassageSchema(db *sql.DB) error {
 			label TEXT NOT NULL,
 			PRIMARY KEY (cruise_id, at_ms)
 		)`,
+		`CREATE TABLE IF NOT EXISTS water_rise_suggestions (
+			cruise_id TEXT NOT NULL REFERENCES cruises(id) ON DELETE CASCADE,
+			at_ms INTEGER NOT NULL,
+			suggested TEXT,
+			looked_up_ms INTEGER NOT NULL,
+			PRIMARY KEY (cruise_id, at_ms)
+		)`,
 		`CREATE TABLE IF NOT EXISTS passage_detector_state (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			resume_ms INTEGER NOT NULL

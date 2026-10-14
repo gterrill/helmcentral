@@ -1,10 +1,10 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -43,7 +43,9 @@ type waterRise struct {
 	// beside the rise. Anywhere else it is nil: open water does not prove a
 	// watermaker. Label is what the operator confirmed.
 	SuggestedLabel *string `json:"suggested_label"`
-	Label          *string `json:"label"`
+	// LookedUpAt is when the marina check ran; nil means it has not yet.
+	LookedUpAt *time.Time `json:"looked_up_at"`
+	Label      *string    `json:"label"`
 }
 
 type cruiseStats struct {
@@ -382,33 +384,9 @@ var marinaNear = func(lat, lon float64) (bool, error) {
 	return false, nil
 }
 
-var (
-	marinaCacheMu sync.Mutex
-	marinaCache   = map[string]bool{}
-)
-
-func cachedMarinaNear(lat, lon float64) (bool, error) {
-	key := placeNameCacheKey(lat, lon)
-	marinaCacheMu.Lock()
-	v, ok := marinaCache[key]
-	marinaCacheMu.Unlock()
-	if ok {
-		return v, nil
-	}
-	v, err := marinaNear(lat, lon)
-	if err != nil {
-		return false, err
-	}
-	marinaCacheMu.Lock()
-	marinaCache[key] = v
-	marinaCacheMu.Unlock()
-	return v, nil
-}
-
-// CruiseStats loads a cruise and works out its figures, with the operator's
-// water labels and the dock-fill suggestions applied to each rise. A failed
-// marina lookup leaves that rise without a suggestion and is logged.
-func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageRecord, cruiseStats, error) {
+// cruiseCore loads a cruise and works out its figures from the track points.
+// Water labels and suggestions are not applied here.
+func (s *passageStore) cruiseCore(cruiseID string) (cruiseRecord, []passageRecord, cruiseStats, error) {
 	cr, err := s.GetCruise(cruiseID)
 	if err != nil {
 		return cr, nil, cruiseStats{}, err
@@ -438,8 +416,50 @@ func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageReco
 			return cr, nil, cruiseStats{}, err
 		}
 	}
-	st := computeCruiseStats(passages, per, span)
+	return cr, passages, computeCruiseStats(passages, per, span), nil
+}
+
+type storedRiseInfo struct {
+	suggested *string
+	lookedUp  time.Time
+}
+
+func (s *passageStore) storedRiseInfo(cruiseID string) (map[int64]storedRiseInfo, error) {
+	rows, err := s.db.Query(`SELECT at_ms, suggested, looked_up_ms FROM water_rise_suggestions WHERE cruise_id = ?`, cruiseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]storedRiseInfo{}
+	for rows.Next() {
+		var ms, looked int64
+		var sug sql.NullString
+		if err := rows.Scan(&ms, &sug, &looked); err != nil {
+			return nil, err
+		}
+		info := storedRiseInfo{lookedUp: time.UnixMilli(looked).UTC()}
+		if sug.Valid {
+			v := sug.String
+			info.suggested = &v
+		}
+		out[ms] = info
+	}
+	return out, rows.Err()
+}
+
+// CruiseStats is the cruise's figures with the operator's water labels and the
+// stored marina suggestions applied. It only reads: nothing here goes out to a
+// plugin.
+func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageRecord, cruiseStats, error) {
+	cr, passages, st, err := s.cruiseCore(cruiseID)
+	if err != nil {
+		return cr, nil, st, err
+	}
 	labels, err := s.waterRiseLabels(cruiseID)
+	if err != nil {
+		return cr, nil, st, err
+	}
+	info, err := s.storedRiseInfo(cruiseID)
 	if err != nil {
 		return cr, nil, st, err
 	}
@@ -449,13 +469,78 @@ func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageReco
 			l := l
 			r.Label = &l
 		}
-		if inMarina, err := cachedMarinaNear(r.Lat, r.Lon); err != nil {
-			log.Printf("passages: marina lookup for water rise at %s: %v", r.Start.Format(time.RFC3339), err)
-		} else if inMarina {
-			l := waterLabelDockFill
-			r.SuggestedLabel = &l
+		if in, ok := info[r.Start.UnixMilli()]; ok {
+			t := in.lookedUp
+			r.LookedUpAt, r.SuggestedLabel = &t, in.suggested
 		}
 	}
 	sort.Slice(st.WaterRises, func(i, j int) bool { return st.WaterRises[i].Start.Before(st.WaterRises[j].Start) })
 	return cr, passages, st, nil
 }
+
+// LookUpNewWaterRises checks, once per rise, whether the rise happened beside a
+// marina and stores the answer with the time of the check. A rise already
+// checked is skipped. A failed check is logged and stored as no suggestion, so
+// it is not repeated on every pass.
+func (s *passageStore) LookUpNewWaterRises() error {
+	cruises, err := s.ListCruises()
+	if err != nil {
+		return err
+	}
+	for _, cr := range cruises {
+		_, _, st, err := s.cruiseCore(cr.ID)
+		if err != nil {
+			return err
+		}
+		done, err := s.storedRiseInfo(cr.ID)
+		if err != nil {
+			return err
+		}
+		for _, r := range st.WaterRises {
+			if _, ok := done[r.Start.UnixMilli()]; ok {
+				continue
+			}
+			var suggested any
+			near, lerr := marinaNear(r.Lat, r.Lon)
+			switch {
+			case lerr != nil:
+				log.Printf("passages: marina lookup for water rise at %s failed, stored as no suggestion: %v", r.Start.Format(time.RFC3339), lerr)
+			case near:
+				suggested = waterLabelDockFill
+			}
+			if _, err := s.db.Exec(`INSERT OR REPLACE INTO water_rise_suggestions (cruise_id, at_ms, suggested, looked_up_ms) VALUES (?,?,?,?)`,
+				cr.ID, r.Start.UnixMilli(), suggested, time.Now().UnixMilli()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// startMarinaLookups runs the lookups in the background: once at start, then on
+// a wake (a passage filed into a cruise) and on a timer.
+func startMarinaLookups(store *passageStore) {
+	signal := make(chan struct{}, 1)
+	marinaLookupWake = func() {
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+	}
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			if err := store.LookUpNewWaterRises(); err != nil {
+				log.Printf("passages: water rise lookups: %v", err)
+			}
+			select {
+			case <-signal:
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// marinaLookupWake nudges the lookup job; nil until it is running.
+var marinaLookupWake func()

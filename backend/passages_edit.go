@@ -98,6 +98,9 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 		rec.CruiseID = p.CruiseID
 	}
 	rec.Edited = true
+	if p.CruiseIDSet && marinaLookupWake != nil {
+		defer marinaLookupWake()
+	}
 	if _, err := tx.Exec(`UPDATE passages SET title=?, notes=?, from_name=?, to_name=?, hidden=?, cruise_id=?, edited=1 WHERE id=?`,
 		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, id); err != nil {
 		return rec, fmt.Errorf("update passage: %w", err)

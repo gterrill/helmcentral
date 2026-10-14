@@ -197,49 +197,8 @@ func TestCruiseGeneratorGapIsNotCounted(t *testing.T) {
 	}
 }
 
-func TestCruiseStoreLabelsAndMarinaSuggestion(t *testing.T) {
-	s := newTestPassageStore(t)
-	span := cruiseSpan()
-	appendAll(t, s, span)
-	c, _ := s.InsertCruise(cruiseRecord{Name: "C"})
-	for _, w := range [][2]time.Duration{{0, 2 * time.Hour}, {40 * time.Hour, 42 * time.Hour}} {
-		r := seedPassage(t, s, passageEpoch.Add(w[0]), passageEpoch.Add(w[1]))
-		s.PatchPassage(r.ID, passagePatch{CruiseID: &c.ID, CruiseIDSet: true})
-	}
-
-	prev := marinaNear
-	defer func() { marinaNear = prev }()
-	marinaCacheMu.Lock()
-	marinaCache = map[string]bool{}
-	marinaCacheMu.Unlock()
-
-	marinaNear = func(lat, lon float64) (bool, error) { return true, nil }
-	_, _, st, err := s.CruiseStats(c.ID)
-	if err != nil || len(st.WaterRises) != 1 {
-		t.Fatalf("%v %+v", err, st.WaterRises)
-	}
-	if r := st.WaterRises[0]; r.SuggestedLabel == nil || *r.SuggestedLabel != "Dock fill" || r.Label != nil {
-		t.Errorf("%+v", r)
-	}
-
-	if err := s.SetWaterRiseLabel(c.ID, st.WaterRises[0].Start, "Watermaker"); err != nil {
-		t.Fatal(err)
-	}
-	_, _, st, _ = s.CruiseStats(c.ID)
-	if st.WaterRises[0].Label == nil || *st.WaterRises[0].Label != "Watermaker" {
-		t.Errorf("label not stored: %+v", st.WaterRises[0])
-	}
-	if err := s.SetWaterRiseLabel(c.ID, st.WaterRises[0].Start, "Rain"); !errors.Is(err, errPassageInvalid) {
-		t.Errorf("bad label: %v", err)
-	}
-	s.SetWaterRiseLabel(c.ID, st.WaterRises[0].Start, "")
-	_, _, st, _ = s.CruiseStats(c.ID)
-	if st.WaterRises[0].Label != nil {
-		t.Error("label should be cleared")
-	}
-}
-
-func TestCruiseMarinaLookupFailureLeavesNoSuggestion(t *testing.T) {
+func cruiseWithRise(t *testing.T) (*passageStore, cruiseRecord) {
+	t.Helper()
 	s := newTestPassageStore(t)
 	appendAll(t, s, cruiseSpan())
 	c, _ := s.InsertCruise(cruiseRecord{Name: "C"})
@@ -247,26 +206,89 @@ func TestCruiseMarinaLookupFailureLeavesNoSuggestion(t *testing.T) {
 		r := seedPassage(t, s, passageEpoch.Add(w[0]), passageEpoch.Add(w[1]))
 		s.PatchPassage(r.ID, passagePatch{CruiseID: &c.ID, CruiseIDSet: true})
 	}
+	return s, c
+}
+
+func stubMarina(t *testing.T, f func(lat, lon float64) (bool, error)) *int {
+	t.Helper()
+	calls := 0
 	prev := marinaNear
-	defer func() { marinaNear = prev }()
-	marinaCacheMu.Lock()
-	marinaCache = map[string]bool{}
-	marinaCacheMu.Unlock()
-	marinaNear = func(lat, lon float64) (bool, error) { return false, errors.New("overpass unreachable") }
+	marinaNear = func(lat, lon float64) (bool, error) { calls++; return f(lat, lon) }
+	t.Cleanup(func() { marinaNear = prev })
+	return &calls
+}
+
+func TestCruiseStatsReadsStoredValuesAndNeverLooksUp(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	calls := stubMarina(t, func(float64, float64) (bool, error) { return true, nil })
 	_, _, st, err := s.CruiseStats(c.ID)
-	if err != nil {
+	if err != nil || len(st.WaterRises) != 1 {
+		t.Fatalf("%v %+v", err, st.WaterRises)
+	}
+	if *calls != 0 {
+		t.Errorf("GET looked up a marina %d times", *calls)
+	}
+	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt != nil {
+		t.Errorf("nothing stored yet: %+v", r)
+	}
+}
+
+func TestMarinaWorkerStoresSuggestionOnceAndOperatorLabelsSeparately(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	calls := stubMarina(t, func(float64, float64) (bool, error) { return true, nil })
+	if err := s.LookUpNewWaterRises(); err != nil {
 		t.Fatal(err)
 	}
-	if st.WaterRises[0].SuggestedLabel != nil {
-		t.Error("an unreachable lookup must not guess")
+	if err := s.LookUpNewWaterRises(); err != nil {
+		t.Fatal(err)
 	}
-	marinaNear = func(lat, lon float64) (bool, error) { return false, nil }
-	marinaCacheMu.Lock()
-	marinaCache = map[string]bool{}
-	marinaCacheMu.Unlock()
+	if *calls != 1 {
+		t.Errorf("lookups %d, want 1: a stored rise is not looked up again", *calls)
+	}
+	_, _, st, _ := s.CruiseStats(c.ID)
+	r := st.WaterRises[0]
+	if r.SuggestedLabel == nil || *r.SuggestedLabel != "Dock fill" || r.LookedUpAt == nil || r.Label != nil {
+		t.Fatalf("%+v", r)
+	}
+
+	if err := s.SetWaterRiseLabel(c.ID, r.Start, "Watermaker"); err != nil {
+		t.Fatal(err)
+	}
 	_, _, st, _ = s.CruiseStats(c.ID)
-	if st.WaterRises[0].SuggestedLabel != nil {
-		t.Error("no marina nearby means no suggestion, not a Watermaker guess")
+	if st.WaterRises[0].Label == nil || *st.WaterRises[0].Label != "Watermaker" {
+		t.Errorf("label not stored: %+v", st.WaterRises[0])
+	}
+	if err := s.SetWaterRiseLabel(c.ID, r.Start, "Rain"); !errors.Is(err, errPassageInvalid) {
+		t.Errorf("bad label: %v", err)
+	}
+	s.SetWaterRiseLabel(c.ID, r.Start, "")
+	_, _, st, _ = s.CruiseStats(c.ID)
+	if st.WaterRises[0].Label != nil {
+		t.Error("label should be cleared")
+	}
+}
+
+func TestMarinaWorkerFailureStoredAsNoSuggestionAndNotRetried(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	calls := stubMarina(t, func(float64, float64) (bool, error) { return false, errors.New("overpass unreachable") })
+	s.LookUpNewWaterRises()
+	s.LookUpNewWaterRises()
+	if *calls != 1 {
+		t.Errorf("a failed lookup was retried: %d calls", *calls)
+	}
+	_, _, st, _ := s.CruiseStats(c.ID)
+	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt == nil {
+		t.Errorf("want no suggestion with looked_up_at set: %+v", r)
+	}
+}
+
+func TestMarinaWorkerNoMarinaMeansNoSuggestion(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	stubMarina(t, func(float64, float64) (bool, error) { return false, nil })
+	s.LookUpNewWaterRises()
+	_, _, st, _ := s.CruiseStats(c.ID)
+	if r := st.WaterRises[0]; r.SuggestedLabel != nil || r.LookedUpAt == nil {
+		t.Errorf("no marina nearby is no suggestion, not a Watermaker guess: %+v", r)
 	}
 }
 

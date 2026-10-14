@@ -186,6 +186,7 @@ func startPassageRecording(store *passageStore) error {
 	}
 	globalPassageStore = store
 	startPassageNaming(store)
+	startMarinaLookups(store)
 	globalTrackRecord = rec
 	return nil
 }
