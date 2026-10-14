@@ -223,10 +223,26 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	if !end.After(start) || start.Before(rec.Start) || end.After(rec.End) {
 		return rec, invalidf("trim must stay inside the passage and leave something")
 	}
-	if _, err := s.db.Exec(`UPDATE passages SET start_ms=?, end_ms=?, edited=1, stats_json=NULL WHERE id=?`, start.UnixMilli(), end.UnixMilli(), id); err != nil {
+	// A name filled in by the plugin described the old end. Where an end moved
+	// and the operator did not type its name, clear it and queue it for naming
+	// again; an operator's name stays whatever happens to the end.
+	clearFrom := !start.Equal(rec.Start) && !rec.FromNameEdited && rec.FromName != ""
+	clearTo := !end.Equal(rec.End) && !rec.ToNameEdited && rec.ToName != ""
+	if clearFrom {
+		rec.FromName = ""
+	}
+	if clearTo {
+		rec.ToName = ""
+	}
+	if _, err := s.db.Exec(`UPDATE passages SET start_ms=?, end_ms=?, from_name=?, to_name=?, edited=1, stats_json=NULL,
+		name_attempted_ms = CASE WHEN ? THEN NULL ELSE name_attempted_ms END WHERE id=?`,
+		start.UnixMilli(), end.UnixMilli(), rec.FromName, rec.ToName, clearFrom || clearTo, id); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)
 	}
 	rec.Start, rec.End, rec.Edited = start, end, true
+	if (clearFrom || clearTo) && passageNamesWake != nil {
+		passageNamesWake()
+	}
 	return rec, nil
 }
 

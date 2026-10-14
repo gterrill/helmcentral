@@ -255,3 +255,49 @@ func TestFillPassageNamesStaysInsideTheSpan(t *testing.T) {
 		t.Errorf("no points in the span must leave names empty without asking: %+v (%d lookups)", got, calls)
 	}
 }
+
+func TestTrimClearsAndRequeuesMovedEndsNotOperatorNamed(t *testing.T) {
+	wakes := 0
+	prev := passageNamesWake
+	passageNamesWake = func() { wakes++ }
+	defer func() { passageNamesWake = prev }()
+
+	s := newTestPassageStore(t)
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), FromName: "Old A", ToName: "Old B"})
+	s.FillPassageNames(p.ID, func(float64, float64) string { return "" }) // stamps an attempt
+
+	// only the start moves
+	got, err := s.TrimPassage(p.ID, passageEpoch.Add(time.Hour), p.End)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FromName != "" || got.ToName != "Old B" {
+		t.Errorf("only the moved end clears: %+v", got)
+	}
+	stored, _ := s.GetPassage(p.ID)
+	if stored.FromName != "" || stored.ToName != "Old B" {
+		t.Errorf("stored %+v", stored)
+	}
+	ids, _ := s.PassagesNeedingNames(time.Now(), 24*time.Hour)
+	if !idsContain(ids, p.ID) {
+		t.Error("the cleared end must be queued again despite the earlier attempt")
+	}
+	if wakes != 1 {
+		t.Errorf("wakes %d", wakes)
+	}
+
+	// a name the operator typed is never cleared, even when its end moves
+	q, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), FromName: "Mine", ToName: "Plugin", FromNameEdited: true})
+	got, _ = s.TrimPassage(q.ID, passageEpoch.Add(time.Hour), passageEpoch.Add(3*time.Hour))
+	if got.FromName != "Mine" || got.ToName != "" {
+		t.Errorf("%+v", got)
+	}
+
+	// nothing moved on that end, nothing cleared
+	r, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), FromName: "A", ToName: "B"})
+	wakes = 0
+	got, _ = s.TrimPassage(r.ID, r.Start, r.End)
+	if got.FromName != "A" || got.ToName != "B" || wakes != 0 {
+		t.Errorf("%+v wakes %d", got, wakes)
+	}
+}
