@@ -10,7 +10,7 @@ func TestGNSSDepartureDoesNotDependOnAnchoredLabel(t *testing.T) {
 		resetGNSSPositionValidationState()
 		now := time.Now().UTC()
 		good := gnssPositionValidation{Status: "trusted", Trusted: true}
-		first := gnssObservedSample{Latitude: -20, Longitude: 149, Navigation: "anchored", DepthMeters: 10, HasObservedAt: true, ObservedAt: now, EnginesRunning: running}
+		first := gnssObservedSample{HasPosition: true, Latitude: -20, Longitude: 149, Navigation: "anchored", DepthMeters: 10, HasObservedAt: true, ObservedAt: now, EnginesRunning: running}
 		applyGNSSHeuristics(good, first, now)
 		next := first
 		next.Latitude += 0.001
@@ -31,7 +31,7 @@ func TestGNSSRunningEnginesDoNotBypassBadFix(t *testing.T) {
 	t.Cleanup(resetGNSSPositionValidationState)
 	now := time.Now().UTC()
 	bad := gnssPositionValidation{Status: "critical", Critical: true, Reason: "no fix"}
-	got := applyGNSSHeuristics(bad, gnssObservedSample{Latitude: -20, Longitude: 149, Navigation: "anchored", EnginesRunning: true, HasObservedAt: true, ObservedAt: now}, now)
+	got := applyGNSSHeuristics(bad, gnssObservedSample{HasPosition: true, Latitude: -20, Longitude: 149, Navigation: "anchored", EnginesRunning: true, HasObservedAt: true, ObservedAt: now}, now)
 	if !got.Critical || got.Trusted {
 		t.Fatalf("bad fix was bypassed: %+v", got)
 	}

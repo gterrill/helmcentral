@@ -210,9 +210,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		now:         time.Now,
 		vesselState: fetchSignalKVesselState,
 		pathHasData: func(path string) bool {
-			node := globalSignalKSnapshot.nodeAt(path)
-			_, ok := node["value"]
-			return ok
+			return globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()).Sample(path).Present
 		},
 		weather: func() (weatherProvider, string, error) {
 			return resolveWeatherProvider(settingsPath)
@@ -274,13 +272,13 @@ func fuelAboardM3FromDerivedPaths() (float64, bool) {
 // has no self tree yet, which executeEstimatePassage treats as "unknown"
 // rather than "no engines".
 func fuelRateInstancesFromSnapshot() []string {
-	tree := globalSignalKSnapshot.selfTree()
-	if tree == nil {
+	telemetry := globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC())
+	if !telemetry.HasSelf() {
 		return nil
 	}
 
 	var instances []string
-	for _, path := range fuelRatePaths(tree) {
+	for _, path := range fuelRatePaths(telemetry) {
 		if instance := propulsionEngineID(path); instance != "" {
 			instances = append(instances, instance)
 		}

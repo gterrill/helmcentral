@@ -292,7 +292,7 @@ func TestVesselFuelEconomyWithAgeReportsOldestContributingInput(t *testing.T) {
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot.selfTelemetryAt(now), read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
@@ -324,7 +324,7 @@ func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot.selfTelemetryAt(now), read, []string{"propulsion.port.fuel.rate"}, memoEngineStates(snapshot, now), now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
@@ -335,7 +335,7 @@ func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
 
 func TestVesselFuelEconomyWithAgeIsUnknownWhenAbsent(t *testing.T) {
 	read := fakeReader(map[string]float64{"navigation.speedOverGround": 0})
-	if _, age, ok := vesselFuelEconomyWithAge(newSignalKSnapshot(), read, []string{"propulsion.port.fuel.rate"}, func() map[string]engineStateInfo { return nil }, time.Now().UTC()); ok || age != -1 {
+	if _, age, ok := vesselFuelEconomyWithAge(newSignalKSnapshot().selfTelemetry(), read, []string{"propulsion.port.fuel.rate"}, func() map[string]engineStateInfo { return nil }, time.Now().UTC()); ok || age != -1 {
 		t.Fatalf("expected no figure and -1 age, got age=%v ok=%v", age, ok)
 	}
 }

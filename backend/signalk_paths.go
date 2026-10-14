@@ -94,8 +94,8 @@ func unitsFor(node map[string]any) string {
 
 func signalKPathsHandler(c echo.Context) error {
 	paths := []signalKPath{}
-	if tree := globalSignalKSnapshot.selfTree(); tree != nil {
-		paths = collectSignalKPaths(tree)
+	if published := globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()).Paths(); published != nil {
+		paths = published
 	}
 
 	// Hoisted out of the loop below: this used to run inside the loop over
@@ -155,89 +155,92 @@ type signalKPathSample struct {
 	// worth keeping rather than discarding.
 	Timestamp string
 	// AgeSeconds is -1 when unknown (neither the node nor pathSeen has
-	// anything for this path - freshestTimestampAge's own "no evidence"
+	// anything for this path - telemetryAge's own "no evidence"
 	// contract), never a value that reads as freshly measured.
 	AgeSeconds float64
 }
 
-// collectSignalKPathSamples walks tree exactly like collectSignalKPaths, but
-// keeps $source/timestamp per leaf and computes each leaf's age via
-// signalKPathSampleAge, instead of discarding both the way the widget path
-// picker always has. tree may be nil (no self tree yet); the result is then
-// simply empty.
-func collectSignalKPathSamples(snapshot *signalKSnapshot, context string, tree map[string]any, now time.Time) []signalKPathSample {
-	out := make([]signalKPathSample, 0)
-	walkSignalKPathSamples(snapshot, context, tree, nil, 0, now, &out)
+// pathSamples walks the view exactly like collectSignalKPaths, but keeps
+// $source/timestamp per leaf and ages each leaf by the one age rule
+// (telemetryAge), instead of discarding both the way the tile path picker
+// always has. With no self tree yet the result is simply empty.
+func (t *telemetryView) pathSamples() []signalKPathSample {
+	type found struct {
+		sample  signalKPathSample
+		stamp   time.Time
+		stamped bool
+		arrival time.Time
+	}
+	var leaves []found
+	t.withRoot(func(root map[string]any, arrived arrivalFunc) {
+		var walk func(node map[string]any, prefix []string, depth int)
+		walk = func(node map[string]any, prefix []string, depth int) {
+			if depth > signalKPathMaxDepth {
+				return
+			}
+
+			if raw, ok := node["value"]; ok {
+				path := strings.Join(prefix, ".")
+				if path == "" {
+					return
+				}
+				source, _ := node["$source"].(string)
+				timestamp, _ := node["timestamp"].(string)
+				stamp, stamped := newestTimestamp(node)
+				var arrival time.Time
+				if !stamped {
+					arrival = arrived(path)
+				}
+				leaves = append(leaves, found{
+					sample: signalKPathSample{
+						Path:      path,
+						Value:     t.escape(raw),
+						Units:     unitsFor(node),
+						Source:    source,
+						Timestamp: timestamp,
+					},
+					stamp:   stamp,
+					stamped: stamped,
+					arrival: arrival,
+				})
+				return
+			}
+
+			for key, child := range node {
+				if key == "meta" || key == "$source" || key == "timestamp" {
+					continue
+				}
+				asMap, ok := child.(map[string]any)
+				if !ok {
+					continue
+				}
+				walk(asMap, append(append([]string{}, prefix...), key), depth+1)
+			}
+		}
+		if root != nil {
+			walk(root, nil, 0)
+		}
+	})
+
+	out := make([]signalKPathSample, 0, len(leaves))
+	for _, leaf := range leaves {
+		leaf.sample.AgeSeconds = telemetryAgeSeconds(telemetryAge(leaf.stamp, leaf.stamped, leaf.arrival, t.now))
+		out = append(out, leaf.sample)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
 
-func walkSignalKPathSamples(snapshot *signalKSnapshot, context string, node map[string]any, prefix []string, depth int, now time.Time, out *[]signalKPathSample) {
-	if depth > signalKPathMaxDepth {
-		return
-	}
-
-	if raw, ok := node["value"]; ok {
-		path := strings.Join(prefix, ".")
-		if path == "" {
-			return
-		}
-		source, _ := node["$source"].(string)
-		timestamp, _ := node["timestamp"].(string)
-		*out = append(*out, signalKPathSample{
-			Path:       path,
-			Value:      raw,
-			Units:      unitsFor(node),
-			Source:     source,
-			Timestamp:  timestamp,
-			AgeSeconds: signalKPathSampleAge(snapshot, context, path, node, now),
-		})
-		return
-	}
-
-	for key, child := range node {
-		if key == "meta" || key == "$source" || key == "timestamp" {
-			continue
-		}
-		asMap, ok := child.(map[string]any)
-		if !ok {
-			continue
-		}
-		walkSignalKPathSamples(snapshot, context, asMap, append(append([]string{}, prefix...), key), depth+1, now, out)
-	}
-}
-
-// signalKPathSampleAge mirrors pathAge's own preference below - a node's own
-// declared timestamp survives a SignalK reconnect replay and wins whenever
-// it exists; pathSeen (the snapshot's own arrival-time record) is consulted
-// only when the node carries none - but works from a node already in hand
-// from collectSignalKPathSamples' walk, rather than re-resolving it via
-// snapshot.nodeAt(path) the way pathAge itself does: the walk has already
-// found this node once, and re-walking the whole tree per leaf to find it
-// again would cost this diagnostic tool one full path resolution per match.
-func signalKPathSampleAge(snapshot *signalKSnapshot, context, path string, node map[string]any, now time.Time) float64 {
-	if nodeAge := freshestTimestampAge(node, now); nodeAge >= 0 {
-		return nodeAge
-	}
-	seen := snapshot.lastSeen(context, path)
-	if seen.IsZero() {
-		return -1
-	}
-	age := now.Sub(seen).Seconds()
-	if age < 0 {
-		return 0
-	}
-	return roundTo1(age)
-}
-
 // pathAge is the single computation of how stale a snapshot path is, shared
 // between buildGaugeValuesPayload and every derived path that reads through
-// the same alarmReader (ADR 0083), so a widget bound directly to a path and
+// the same alarmReader (ADR 0083), so a tile bound directly to a path and
 // a derived figure computed from that same path can never disagree about
-// its age. Takes the snapshot explicitly, the same way alarmReader itself
-// does, rather than reaching for the global: a derived-path computation
-// tested against a local snapshot must resolve the node from that same
-// snapshot, not whatever globalSignalKSnapshot happens to hold.
+// its age. It applies the view's one age rule (telemetryAge) to whatever
+// node sits at path, with the sample's own arrival time as the fallback
+// evidence. Takes the view explicitly, the same view the alarmReader was
+// built from, rather than reaching for the global: a derived-path
+// computation tested against a local snapshot must resolve the node from
+// that same snapshot, not whatever globalSignalKSnapshot happens to hold.
 //
 // The node's own SignalK timestamp is preferred over the alarm engine's
 // pathSeen record. signalk_stream.go's own comment already notes that the
@@ -250,11 +253,10 @@ func signalKPathSampleAge(snapshot *signalKSnapshot, context, path string, node 
 // is used only when the node carries no timestamp at all -- the same
 // "arrival time is all the evidence there is" case ADR 0068 already accepted
 // for the Solar and Battery & Power tiles it fed directly from REST.
-func pathAge(snapshot *signalKSnapshot, sample alarmSample, path string, now time.Time) float64 {
-	if nodeAge := freshestTimestampAge(snapshot.nodeAt(path), now); nodeAge >= 0 {
-		return nodeAge
-	}
-	return alarmSampleAge(sample, now)
+//
+// -1 is the gauge-values payload's "unknown" on the wire.
+func pathAge(t *telemetryView, sample alarmSample, path string, now time.Time) float64 {
+	return telemetryAgeSeconds(t.ageAt(path, sample.LastSeen, now))
 }
 
 // buildGaugeValuesPayload pushes the current value of every path a gauge is
@@ -274,17 +276,16 @@ func buildGaugeValuesPayload() map[string]any {
 
 	now := time.Now().UTC()
 
-	// One self-tree copy shared by computeDerivedPathsFromTree and the
+	// One self-tree copy shared by computeDerivedPathsWithStates and the
 	// snapshot reader below, instead of each fetching its own -- this used to
 	// cost two whole-tree copies on every build (backend-perf-audit.md
 	// Tier 1 #2), once per second via the hub even before this fix.
-	context := globalSignalKSnapshot.selfContext()
-	tree := globalSignalKSnapshot.selfTree()
+	telemetry := globalSignalKSnapshot.selfTelemetryAt(now)
 	engineStateOf := memoEngineStates(globalSignalKSnapshot, now)
-	derivedValues, derivedAges := computeDerivedPathsWithStates(globalSignalKSnapshot, context, tree, engineStateOf, now)
+	derivedValues, derivedAges := computeDerivedPathsWithStates(telemetry, engineStateOf, now)
 
 	if len(paths) > 0 {
-		read := alarmReaderFromTree(globalSignalKSnapshot, context, tree)
+		read := alarmReaderFromView(telemetry)
 		for _, path := range paths {
 			// A derived path is computed rather than looked up, but rides the
 			// same event so every widget binds it the same way.
@@ -319,7 +320,7 @@ func buildGaugeValuesPayload() map[string]any {
 
 			// -1 when neither the node nor pathSeen has anything, or the
 			// path is absent.
-			ages[path] = pathAge(globalSignalKSnapshot, sample, path, now)
+			ages[path] = pathAge(telemetry, sample, path, now)
 		}
 	}
 

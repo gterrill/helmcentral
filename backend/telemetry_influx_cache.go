@@ -138,8 +138,8 @@ var telemetryInfluxSolarPositionMissing atomic.Bool
 // currentVesselLocalLocation derives the vessel's local timezone from
 // globalSignalKSnapshot's own cached navigation.position - the same
 // delta-stream snapshot readOwnEncounterFacts (collision_ais.go) already
-// reads position from via nodeAt, one small node copy under an RLock, not a
-// fresh SignalK HTTP fetch. sampleTracks (tracks.go) already pays for one
+// reads position from through a live telemetry view, one small leaf copy
+// under an RLock, not a fresh SignalK HTTP fetch. sampleTracks (tracks.go) already pays for one
 // such fetch per 5s tick to seed solarStats.loc for the in-memory tier; this
 // refresher must not add a second fetch of its own every
 // telemetryInfluxRefreshInterval on top of it.
@@ -151,11 +151,7 @@ var telemetryInfluxSolarPositionMissing atomic.Bool
 // solar day-bounded fields as the -1 sentinel for that tick instead of
 // guessing a UTC boundary.
 func currentVesselLocalLocation() (*time.Location, bool) {
-	node := globalSignalKSnapshot.nodeAt("navigation.position")
-	if node == nil {
-		return nil, false
-	}
-	lat, lon, ok := positionFromNode(node)
+	lat, lon, ok := positionLeaf(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()))
 	if !ok || !hasUsableVesselPosition(lat, lon) {
 		return nil, false
 	}

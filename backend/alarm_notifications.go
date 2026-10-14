@@ -552,10 +552,12 @@ func notificationValueAt(snapshot *signalKSnapshot, path string) (map[string]any
 	// other notification comes back with an empty vessel and reads self.
 	branch, vesselID := splitNotificationVessel(path)
 
-	node := snapshot.selfTree()
-	if vesselID != "" {
-		node = snapshot.treeFor(vesselContextPrefix + vesselID)
+	if vesselID == "" {
+		value, ok := snapshot.liveSelfTelemetry(time.Now().UTC()).Sample(notificationsRoot + "." + branch).Value.(map[string]any)
+		return value, ok
 	}
+
+	node := snapshot.treeFor(vesselContextPrefix + vesselID)
 	if node == nil {
 		return nil, false
 	}

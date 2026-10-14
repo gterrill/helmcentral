@@ -104,30 +104,30 @@ func gaugeToTrueHours(resets []hourMeterReset, gauge float64, atDate time.Time) 
 //
 // A value that IS present is Known regardless of its age (this file's own
 // 2026-09-27 amendment) - AsOf carries how long ago it was received, when
-// the snapshot has usable timestamp evidence for it (pathAge returning -1
-// is only reachable for a hand-built fixture missing every timestamp; a
-// real SignalK delta always carries one), so the frontend can show "as of
+// the telemetry has usable age evidence for it (an unknown age is only
+// reachable for a hand-built fixture missing every timestamp; a real
+// SignalK delta always carries one), so the frontend can show "as of
 // <time>" without the reading itself being discarded.
 //
-// reader and snapshot are both injectable (the same idiom
-// assistantToolDeps.signalKDiagnostics uses) so this is testable against a
-// fake reader with no live SignalK connection at all; production always
-// passes snapshotAlarmReader(globalSignalKSnapshot) and
-// globalSignalKSnapshot itself.
-func currentEquipmentHours(reader alarmReader, snapshot *signalKSnapshot, path string, offsetHours float64, now time.Time) maintenanceHourReading {
+// t is injectable so this is testable against fakeTelemetry with no live
+// SignalK connection at all; production passes a live view of
+// globalSignalKSnapshot.
+func currentEquipmentHours(t telemetryReader, path string, offsetHours float64, now time.Time) maintenanceHourReading {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return maintenanceHourReading{}
 	}
 
-	sample := reader(trimmed)
-	if !sample.Present {
+	sample := t.Sample(trimmed)
+	value, ok := numericTelemetryValue(sample.Value)
+	if !sample.Present || !ok {
 		return maintenanceHourReading{}
 	}
 
-	gauge := sample.Value / 3600.0
+	gauge := value / 3600.0
 	reading := maintenanceHourReading{Known: true, Hours: gauge + offsetHours, Gauge: gauge}
-	if age := pathAge(snapshot, sample, trimmed, now); age >= 0 {
+	// Seconds to one decimal, as every age this backend publishes is.
+	if age := telemetryAgeSeconds(sample.Age, sample.AgeKnown); age >= 0 {
 		asOf := now.Add(-time.Duration(age * float64(time.Second)))
 		reading.AsOf = &asOf
 	}

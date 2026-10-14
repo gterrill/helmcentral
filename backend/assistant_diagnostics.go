@@ -60,7 +60,7 @@ const assistantCheckSignalKPathsMaxMatches = 40
 //
 // HasSelfTree distinguishes "SignalK has never sent a hello frame at all"
 // from "the self tree exists but happens to be empty" - the same
-// distinction signalKSnapshot.selfTree()'s own nil return already carries.
+// distinction telemetryView.HasSelf already carries.
 // check_signalk_paths fails explicitly on the former (AGENTS.md's fallback
 // policy) rather than reporting a lookalike empty result.
 //
@@ -84,13 +84,12 @@ type signalKDiagnosticsSnapshot struct {
 // (assistant_tools.go) already uses for estimate_passage.
 func signalKDiagnosticsFromGlobalSnapshot(now time.Time) signalKDiagnosticsSnapshot {
 	connected, lastMessage := globalSignalKSnapshot.status()
-	context := globalSignalKSnapshot.selfContext()
-	tree := globalSignalKSnapshot.selfTree()
+	telemetry := globalSignalKSnapshot.selfTelemetryAt(now)
 	return signalKDiagnosticsSnapshot{
 		Connected:   connected,
 		LastMessage: lastMessage,
-		HasSelfTree: tree != nil,
-		Samples:     collectSignalKPathSamples(globalSignalKSnapshot, context, tree, now),
+		HasSelfTree: telemetry.HasSelf(),
+		Samples:     telemetry.pathSamples(),
 	}
 }
 

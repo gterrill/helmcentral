@@ -144,31 +144,27 @@ func TestGaugeToTrueHours(t *testing.T) {
 func TestCurrentEquipmentHours(t *testing.T) {
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
+	runTime := func(sample telemetrySample) fakeTelemetry {
+		return fakeTelemetry{Samples: map[string]telemetrySample{"propulsion.main.runTime": sample}}
+	}
+
 	t.Run("no path bound at all is unknown", func(t *testing.T) {
-		reader := func(path string) alarmSample {
-			t.Fatalf("reader should not be called with no path")
-			return alarmSample{}
-		}
-		got := currentEquipmentHours(reader, nil, "", 0, now)
+		got := currentEquipmentHours(fakeTelemetry{}, "", 0, now)
 		if got.Known {
 			t.Fatalf("expected Known=false with no path, got %+v", got)
 		}
 	})
 
 	t.Run("path bound with no value at all is unknown", func(t *testing.T) {
-		reader := func(path string) alarmSample { return alarmSample{Present: false} }
-		got := currentEquipmentHours(reader, globalSignalKSnapshot, "propulsion.main.runTime", 0, now)
+		got := currentEquipmentHours(fakeTelemetry{}, "propulsion.main.runTime", 0, now)
 		if got.Known {
 			t.Fatalf("expected Known=false with no sample, got %+v", got)
 		}
 	})
 
 	t.Run("fresh value converts seconds to hours and applies the offset", func(t *testing.T) {
-		snapshot := newSignalKSnapshot()
-		reader := func(path string) alarmSample {
-			return alarmSample{Present: true, Value: 3600 * 100, LastSeen: now}
-		}
-		got := currentEquipmentHours(reader, snapshot, "propulsion.main.runTime", 25, now)
+		reader := runTime(telemetrySample{Present: true, Value: 3600.0 * 100, AgeKnown: true})
+		got := currentEquipmentHours(reader, "propulsion.main.runTime", 25, now)
 		if !got.Known {
 			t.Fatalf("expected Known=true, got %+v", got)
 		}
@@ -186,12 +182,9 @@ func TestCurrentEquipmentHours(t *testing.T) {
 	// "unknown": the last value received IS the current reading, however
 	// old, and only its AsOf timestamp reports how long ago that was.
 	t.Run("an old value is still known - age never makes an hour reading unknown", func(t *testing.T) {
-		snapshot := newSignalKSnapshot()
 		oldTime := now.Add(-6 * time.Hour)
-		reader := func(path string) alarmSample {
-			return alarmSample{Present: true, Value: 3600 * 100, LastSeen: oldTime}
-		}
-		got := currentEquipmentHours(reader, snapshot, "propulsion.main.runTime", 0, now)
+		reader := runTime(telemetrySample{Present: true, Value: 3600.0 * 100, Age: 6 * time.Hour, AgeKnown: true})
+		got := currentEquipmentHours(reader, "propulsion.main.runTime", 0, now)
 		if !got.Known {
 			t.Fatalf("expected Known=true regardless of age, got %+v", got)
 		}
@@ -204,11 +197,8 @@ func TestCurrentEquipmentHours(t *testing.T) {
 	})
 
 	t.Run("a value with no timestamp evidence at all is still known, with no AsOf", func(t *testing.T) {
-		snapshot := newSignalKSnapshot()
-		reader := func(path string) alarmSample {
-			return alarmSample{Present: true, Value: 3600 * 100}
-		}
-		got := currentEquipmentHours(reader, snapshot, "propulsion.main.runTime", 0, now)
+		reader := runTime(telemetrySample{Present: true, Value: 3600.0 * 100})
+		got := currentEquipmentHours(reader, "propulsion.main.runTime", 0, now)
 		if !got.Known {
 			t.Fatalf("expected Known=true, got %+v", got)
 		}
@@ -218,11 +208,7 @@ func TestCurrentEquipmentHours(t *testing.T) {
 	})
 
 	t.Run("no path bound reports no AsOf at all", func(t *testing.T) {
-		reader := func(path string) alarmSample {
-			t.Fatalf("reader should not be called with no path")
-			return alarmSample{}
-		}
-		got := currentEquipmentHours(reader, nil, "", 0, now)
+		got := currentEquipmentHours(fakeTelemetry{}, "", 0, now)
 		if got.AsOf != nil {
 			t.Fatalf("expected no AsOf with no path bound, got %v", got.AsOf)
 		}

@@ -85,7 +85,7 @@ const signalKSentenceSeenMaxDistinct = 200
 // review finding, the 2026-09-21 YachtDevices gateway outage) -- see
 // applyDelta's own comment on why. An update with no parseable timestamp of
 // its own falls back to arrival time, the same "arrival is all the evidence
-// there is" contract pathAge/signalKPathSampleAge already use
+// there is" contract pathAge and the telemetry view already use
 // (signalk_paths.go).
 //
 // EngineBound and BusTyped classify the source for the silent-source check
@@ -144,7 +144,7 @@ const vesselContextPrefix = "vessels."
 // under signalKStreamReadLimit's 4MB, and applyDelta's own segment loop is
 // iterative, so it survives building a million-level-deep nested map. Every
 // *recursive* walker over that tree afterwards -- deepCopyMap/deepCopyValue
-// below, plus freshestTimestampAge and flattenNotificationLeaves elsewhere
+// below, plus newestTimestamp and flattenNotificationLeaves elsewhere
 // in this package -- then blows Go's ~1GB goroutine stack, which is a FATAL
 // runtime error recover() cannot catch (K-1, backend security audit).
 //

@@ -9,36 +9,14 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/labstack/echo/v4"
-	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultDistanceUnits    = "metric"
-	defaultBowRollerHeightM = 1.5
-	defaultChainSizeMM      = 12
-	defaultChainOnboardM    = 150
-	defaultHullType         = "power_cat"
-	defaultScopeMethod      = "ratio"
-	defaultWindageAreaM2    = 35
-	// defaultMinClearanceAtLowM is the generic seamanship margin Anchor
-	// Watch's low-water clearance warning uses until the operator sets
-	// their own (ADR 0135) - not a vessel-specific value.
-	defaultMinClearanceAtLowM = 0.5
-	// defaultMayaraPort is mayara-server's own default REST/WebSocket port.
-	// Used only to clamp an out-of-range settings.mayara.port; unlike
-	// defaultSignalKAddress there is no equivalent default *address* — see
-	// normalizeSettingsPayload.
-	defaultMayaraPort = 6502
-
 	// signalKSelfAPIPath is the v1 REST prefix every read and write of the
 	// self vessel's data model goes through. Reads default to it through
 	// SIGNALK_VESSEL_PATH; writes (czone switches, generatorPut, alarm
@@ -76,945 +54,6 @@ func signalKReadClient() *http.Client {
 	return &http.Client{Timeout: signalKReadTimeout()}
 }
 
-type settingsPayload struct {
-	Signalk struct {
-		Address string `json:"address"`
-		Port    int    `json:"port"`
-	} `json:"signalk"`
-	Boat struct {
-		VesselPrefix string `json:"vessel_prefix"`
-		Model        string `json:"model"`
-	} `json:"boat"`
-	UI struct {
-		TankLabels      map[string]string `json:"tank_labels"`
-		TideProvider    string            `json:"tide_provider"`
-		TideStationID   string            `json:"tide_station_id"`
-		TideStationName string            `json:"tide_station_name"`
-		TideAutoStation bool              `json:"tide_auto_station"`
-		WeatherProvider string            `json:"weather_provider"`
-		WaveProvider    string            `json:"wave_provider"`
-		POIProvider     string            `json:"poi_provider"`
-		// PlaceNameProvider (ADR 0101) selects which installed POI plugin
-		// answers place-name questions (the position tile, the anchor pin,
-		// find_places) - independent of POIProvider (the Nearby widget),
-		// though the two commonly name the same plugin.
-		PlaceNameProvider        string `json:"place_name_provider"`
-		ForecastWarningsProvider string `json:"forecast_warnings_provider"`
-	} `json:"ui"`
-	Anchor struct {
-		BowRollerHeightM float64 `json:"bow_roller_height_m"`
-		ChainSizeMM      float64 `json:"chain_size_mm"`
-		ChainOnboardM    float64 `json:"chain_onboard_m"`
-		HullType         string  `json:"hull_type"`
-		ScopeMethod      string  `json:"scope_method"`
-		WindageAreaM2    float64 `json:"windage_area_m2"`
-		GPSFromBowM      float64 `json:"gps_from_bow_m"`
-		LOAM             float64 `json:"loa_m"`
-		// AutoRaiseOnMotoring gates the server-side anchor auto-raise
-		// watcher (anchor_auto_raise.go, ADR 0099): true unless the
-		// operator has explicitly turned it off. Unlike every other field
-		// on this struct, its zero value is NOT its default - a plain bool
-		// can't tell "the operator saved false" from "this key predates the
-		// feature and was never in the request at all." So the true
-		// default lives only in buildSettingsPayload (applied before the
-		// settings.yaml overlay, below); this field, and
-		// normalizeSettingsPayload's handling of it, both pass the
-		// submitted value straight through with no override.
-		AutoRaiseOnMotoring bool `json:"auto_raise_on_motoring"`
-		// MinClearanceAtLowM is the water the operator wants under the keel
-		// at the next low tide (ADR 0135) before Anchor Watch's low-water
-		// clearance warning fires. Defaults to a generic 0.5m seamanship
-		// margin, not a vessel-specific value. Zero is a valid, deliberate
-		// choice (warn only once the keel would touch), so - like
-		// AutoRaiseOnMotoring above - its zero value is NOT its default: a
-		// bare 0 can't tell "the operator saved zero" from "this
-		// settings.yaml predates the feature." The true default lives only
-		// in buildSettingsPayload (applied before the disk overlay); this
-		// field, and normalizeSettingsPayload's handling of it, only ever
-		// reject a negative or non-finite submission by replacing it with
-		// that same default - a genuine zero or positive value passes
-		// straight through.
-		MinClearanceAtLowM float64 `json:"min_clearance_at_low_m"`
-	} `json:"anchor"`
-	Influxdb struct {
-		Enabled bool   `json:"enabled"`
-		URL     string `json:"url"`
-		Org     string `json:"org"`
-		Bucket  string `json:"bucket"`
-	} `json:"influxdb"`
-	// Mayara is the mayara-server address, used only by the radar picture
-	// overlay. Targets do not need it: they arrive through the SignalK plugin
-	// (ADR 0062 amendment). The overlay does, because the plugin returns 404
-	// for the spoke stream.
-	Mayara struct {
-		Address string `json:"address"`
-		Port    int    `json:"port"`
-	} `json:"mayara"`
-	// Assistant configures the onboard OpenRouter-backed assistant, Mate
-	// (ADR 0093): off by default, BYOK (the key lives in the secrets store,
-	// not here), and Notes are operator standing notes injected verbatim
-	// into every system prompt. VoiceInput/ReadAloud/WakeWord gate the
-	// frontend's voice features (mate-voice-assistant plan phase 1/2); the
-	// backend stores and round-trips them but does not otherwise act on
-	// them.
-	Assistant struct {
-		Enabled bool   `json:"enabled"`
-		Model   string `json:"model"`
-		// DocumentModel is the model the document indexer's enrich stage
-		// (ADR 0106) uses for OCR and suggested title/summary/tags - a
-		// separate setting from Model since it runs unattended on every
-		// upload rather than being picked per conversation.
-		DocumentModel string `json:"document_model"`
-		// EmbeddingModel is the model the document library's semantic-search
-		// embedding stage (E1b) uses to vectorise chunk text - a separate
-		// setting from both Model and DocumentModel, since it runs over
-		// every chunk of every consented document rather than per question
-		// or per upload. A blank value turns semantic search off entirely
-		// (FTS5 stays the only retriever); it does not fall back to either
-		// of the other two models.
-		EmbeddingModel string `json:"embedding_model"`
-		// EmbeddingDimensions is the vector length requested alongside
-		// EmbeddingModel. Smaller than a model's native size trades a
-		// little retrieval accuracy for less work per chunk scanned - the
-		// whole index is scanned in Go, not by a vector database.
-		EmbeddingDimensions int      `json:"embedding_dimensions"`
-		Notes               string   `json:"notes"`
-		AllowedModels       []string `json:"allowed_models"`
-		ExcludedModels      []string `json:"excluded_models"`
-		CostTier            string   `json:"cost_tier"`
-		VoiceInput          bool     `json:"voice_input"`
-		ReadAloud           bool     `json:"read_aloud"`
-		WakeWord            bool     `json:"wake_word"`
-		// WebSearch lets Mate search the web through OpenRouter when it needs
-		// outside information (search_web). Off by default; when off the tool
-		// is not offered to the model at all.
-		WebSearch bool `json:"web_search"`
-		// WebSearchModel carries the search sub-request (ADR 0159). Required
-		// while WebSearch is on: a blank value is rejected on save and never
-		// replaced by the default at search time.
-		WebSearchModel string `json:"web_search_model"`
-	} `json:"assistant"`
-	Auth struct {
-		Mode string `json:"mode"`
-	} `json:"auth"`
-	Units string `json:"units"`
-	// Vessel is the engines and house bank block (vessel_settings.go).
-	// A pointer so a save that omits it leaves the stored block alone:
-	// every other section here is rewritten wholesale from the payload,
-	// but an older client or a scripted partial post must not wipe the
-	// anomaly-detection setup by not mentioning it. GET always returns it.
-	Vessel *vesselSettings `json:"vessel,omitempty"`
-	// VesselError is set by GET only, when the stored vessel block cannot be
-	// parsed: the block is then omitted and this says why. The rest of the
-	// settings still load, so one corrupt section cannot make the page show
-	// defaults and overwrite the others on its next save. Ignored on POST.
-	VesselError string `json:"vessel_error,omitempty"`
-}
-
-func getSettingsHandler(c echo.Context) error {
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
-	}
-
-	payload := buildSettingsPayload(settings)
-	// A corrupt vessel block is surfaced, not masked: it is omitted and named
-	// in vessel_error, while every other setting is still returned.
-	vessel, err := parseVesselBlock(settings)
-	if err != nil {
-		log.Printf("settings: %v", err)
-		payload.VesselError = err.Error()
-		return c.JSON(http.StatusOK, payload)
-	}
-	if vessel.Engines == nil {
-		vessel.Engines = []vesselEngineSetting{}
-	}
-	if vessel.Batteries == nil {
-		vessel.Batteries = []vesselBatterySetting{}
-	}
-	payload.Vessel = &vessel
-
-	return c.JSON(http.StatusOK, payload)
-}
-
-func updateSettingsHandler(c echo.Context) error {
-	var req settingsPayload
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
-	}
-
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
-	}
-
-	normalized := normalizeSettingsPayload(req)
-	current := buildSettingsPayload(settings)
-
-	if invalid := validateSettingsChange(current, normalized); invalid != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{
-			"field": invalid.Field,
-			"error": invalid.Message,
-		})
-	}
-
-	// E-1 (2026-09-19 security audit, ADR 0111 amendment): influxdb.url and
-	// signalk.address/port are free text naming where INFLUXDB_TOKEN and the
-	// SignalK credential pair get sent. Repointing either at a destination
-	// you control is enough to have the credential handed to it on the next
-	// query or auth login - see influx.go's Authorization header and
-	// signalk.go's acquireSignalKToken, which sends username/password in a
-	// cleartext JSON body. Clearing the bound secret the moment its
-	// destination changes (Option B) means the new destination gets nothing
-	// until the credential is re-entered.
-	//
-	// This runs after validateSettingsChange (so a rejected save, e.g. an
-	// unreachable new address, clears nothing - the old destination and old
-	// secret stay paired) and before settings is written below (so a clear
-	// failure aborts the save rather than ever persisting a new destination
-	// next to a secret that should have gone with the old one).
-	if destinationChanged(current.Influxdb.URL, normalized.Influxdb.URL) {
-		reason := fmt.Sprintf("influxdb.url changed from %q to %q", current.Influxdb.URL, normalized.Influxdb.URL)
-		if err := clearBoundSecret("INFLUXDB_TOKEN", reason); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
-		}
-	}
-	if destinationChanged(current.Signalk.Address, normalized.Signalk.Address) || current.Signalk.Port != normalized.Signalk.Port {
-		reason := fmt.Sprintf("signalk address changed from %s:%d to %s:%d",
-			current.Signalk.Address, current.Signalk.Port, normalized.Signalk.Address, normalized.Signalk.Port)
-		if err := clearBoundSecret("SIGNALK_USERNAME", reason); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
-		}
-		// Two separate clears rather than one call for the pair: if this one
-		// fails after SIGNALK_USERNAME already cleared above, the save still
-		// aborts below and the username stays cleared - safe-biased (an
-		// over-cleared secret, never a leaked one), and worth the small
-		// inconsistency it can leave in the secrets store.
-		if err := clearBoundSecret("SIGNALK_PASSWORD", reason); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
-		}
-	}
-
-	settings["signalk"] = map[string]any{
-		"address": normalized.Signalk.Address,
-		"port":    normalized.Signalk.Port,
-	}
-	settings["boat"] = map[string]any{
-		"vessel_prefix": normalized.Boat.VesselPrefix,
-		"model":         normalized.Boat.Model,
-	}
-
-	uiMap := map[string]any{}
-	if existingUI, ok := settings["ui"].(map[string]any); ok {
-		for key, value := range existingUI {
-			uiMap[key] = value
-		}
-	}
-	// The boat's settings.yaml may still carry this retired key from before
-	// the setting was removed. readSettings decodes into a plain map, so a
-	// stale key never breaks loading, but every save must still drop it from
-	// the file for good instead of copying it forward via the loop above.
-	delete(uiMap, "vessel_state_refresh_seconds")
-	if normalized.UI.TankLabels != nil {
-		uiMap["tank_labels"] = normalized.UI.TankLabels
-	}
-	uiMap["tide_provider"] = normalized.UI.TideProvider
-	uiMap["tide_station_id"] = normalized.UI.TideStationID
-	uiMap["tide_station_name"] = normalized.UI.TideStationName
-	uiMap["tide_auto_station"] = normalized.UI.TideAutoStation
-	uiMap["weather_provider"] = normalized.UI.WeatherProvider
-	uiMap["wave_provider"] = normalized.UI.WaveProvider
-	uiMap["poi_provider"] = normalized.UI.POIProvider
-	uiMap["place_name_provider"] = normalized.UI.PlaceNameProvider
-	uiMap["forecast_warnings_provider"] = normalized.UI.ForecastWarningsProvider
-	settings["ui"] = uiMap
-
-	settings["anchor"] = map[string]any{
-		"bow_roller_height_m":    normalized.Anchor.BowRollerHeightM,
-		"chain_size_mm":          normalized.Anchor.ChainSizeMM,
-		"chain_onboard_m":        normalized.Anchor.ChainOnboardM,
-		"hull_type":              normalized.Anchor.HullType,
-		"scope_method":           normalized.Anchor.ScopeMethod,
-		"windage_area_m2":        normalized.Anchor.WindageAreaM2,
-		"gps_from_bow_m":         normalized.Anchor.GPSFromBowM,
-		"loa_m":                  normalized.Anchor.LOAM,
-		"auto_raise_on_motoring": normalized.Anchor.AutoRaiseOnMotoring,
-		"min_clearance_at_low_m": normalized.Anchor.MinClearanceAtLowM,
-	}
-	settings["auth"] = map[string]any{
-		"mode": normalized.Auth.Mode,
-	}
-	settings["influxdb"] = map[string]any{
-		"enabled": normalized.Influxdb.Enabled,
-		"url":     normalized.Influxdb.URL,
-		"org":     normalized.Influxdb.Org,
-		"bucket":  normalized.Influxdb.Bucket,
-	}
-	settings["mayara"] = map[string]any{
-		"address": normalized.Mayara.Address,
-		"port":    normalized.Mayara.Port,
-	}
-	settings["assistant"] = map[string]any{
-		"enabled":              normalized.Assistant.Enabled,
-		"model":                normalized.Assistant.Model,
-		"document_model":       normalized.Assistant.DocumentModel,
-		"embedding_model":      normalized.Assistant.EmbeddingModel,
-		"embedding_dimensions": normalized.Assistant.EmbeddingDimensions,
-		"notes":                normalized.Assistant.Notes,
-		"allowed_models":       normalized.Assistant.AllowedModels,
-		"excluded_models":      normalized.Assistant.ExcludedModels,
-		"cost_tier":            normalized.Assistant.CostTier,
-		"voice_input":          normalized.Assistant.VoiceInput,
-		"read_aloud":           normalized.Assistant.ReadAloud,
-		"wake_word":            normalized.Assistant.WakeWord,
-		"web_search":           normalized.Assistant.WebSearch,
-		"web_search_model":     normalized.Assistant.WebSearchModel,
-	}
-	settings["units"] = normalized.Units
-
-	// vessel is only touched when the request carries it (see the Vessel
-	// field's comment); an explicit empty block clears the setup.
-	if normalized.Vessel != nil {
-		block, err := vesselBlockMap(*normalized.Vessel)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
-		}
-		settings["vessel"] = block
-	}
-
-	if err := writeSettings(settingsPath, settings); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
-	}
-
-	// Engines or a house bank may have just become configured; seed whichever
-	// anomaly-v1 sub-sets that unlocks. A seeding failure is logged, not
-	// returned: the save itself succeeded, every sub-set's marker makes the
-	// call idempotent, and main.go retries it at the next start.
-	if normalized.Vessel != nil {
-		if err := seedAnomalyRules(*normalized.Vessel); err != nil {
-			log.Printf("could not seed the anomaly alarm rules after a settings save: %v", err)
-		}
-	}
-
-	// ADR 0120: this save may be the moment Mate just became ready (a key
-	// pasted in, document/embedding models chosen) - sweep the enrich=0
-	// backlog now rather than waiting for the next boot. sweepDocumentsIfReady
-	// re-reads readiness itself and is a no-op whenever this save didn't
-	// change anything about it, so it is called on every settings save rather
-	// than diffing old vs. new readiness here. It runs in the background: it
-	// waits on the document store's lock, which a long indexing write can
-	// hold, and a settings save has no business waiting on that. A sweep
-	// failure is logged inside sweepDocumentsIfReady and never touches the
-	// save, which has already succeeded.
-	go sweepDocumentsIfReady()
-
-	return c.JSON(http.StatusOK, normalized)
-}
-
-// settingsValidationError identifies which field of a bulk settings save was
-// rejected, so the UI can surface the message against the offending input
-// rather than as a page-level "save failed".
-type settingsValidationError struct {
-	Field   string
-	Message string
-}
-
-func (e *settingsValidationError) Error() string { return e.Message }
-
-// validateSettingsChange gates POST /api/settings, which is a full-payload
-// replace: without it, any value the form happens to be holding gets
-// persisted verbatim — which is how a browser test that filled the address
-// field and clicked "Save and Continue" once repointed the live dashboard at
-// a dead host (docs/adr/0026). Since ADR 0028 removed the old
-// POST /api/settings/signalk, this is the only path that writes the address,
-// so this check is the only thing standing between a typo and an offline
-// dashboard.
-//
-// Checks fire only on *change*. Probing SignalK on every save would mean an
-// unreachable vessel — an entirely normal state, e.g. configuring from home
-// or while the boat is powered down — blocks edits to tank labels, anchor
-// geometry and units that have nothing to do with SignalK. Guarding the
-// transition, not the steady state, is what makes the check safe to apply to
-// an endpoint that saves everything at once.
-func validateSettingsChange(current, next settingsPayload) *settingsValidationError {
-	// Checked on every save, not only on change: web search on with no search
-	// model can never work, and substituting a default here or at search time
-	// would hide the gap (ADR 0159).
-	if next.Assistant.WebSearch && next.Assistant.WebSearchModel == "" {
-		return &settingsValidationError{
-			Field:   "assistant.web_search_model",
-			Message: "choose a search model before turning on web search",
-		}
-	}
-
-	if next.Signalk.Address != current.Signalk.Address || next.Signalk.Port != current.Signalk.Port {
-		signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
-		vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-		if err := probeSignalKReachable(signalkURL, vesselPath); err != nil {
-			return &settingsValidationError{
-				Field:   "signalk.address",
-				Message: fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
-			}
-		}
-	}
-
-	if next.Auth.Mode != current.Auth.Mode {
-		if !validAuthModes[next.Auth.Mode] {
-			return &settingsValidationError{
-				Field:   "auth.mode",
-				Message: fmt.Sprintf("unknown authentication mode %q", next.Auth.Mode),
-			}
-		}
-
-		// Turning auth off is never gated: it is the way out of a lockout, and
-		// requiring a reachable SignalK to disable it would make a broken
-		// server unrecoverable from the UI.
-		if next.Auth.Mode == authModeSignalK {
-			signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
-			enabled, err := probeSignalKSecurityEnabled(signalkURL)
-			if err != nil {
-				return &settingsValidationError{
-					Field:   "auth.mode",
-					Message: fmt.Sprintf("could not check SignalK security at %s — is the server reachable?", signalkURL),
-				}
-			}
-			if !enabled {
-				// Refuse at save time rather than at the next restart. Saving an
-				// unsatisfiable config and only finding out on reboot is exactly
-				// how an operator locks themselves out of a running boat.
-				return &settingsValidationError{
-					Field:   "auth.mode",
-					Message: fmt.Sprintf("SignalK at %s has security disabled — enable it there (Server → Security) before requiring login", signalkURL),
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func buildSettingsPayload(settings map[string]any) settingsPayload {
-	payload := normalizeSettingsPayload(settingsPayload{})
-	// An absent web_search_model defaults; a stored blank stays blank (see the
-	// override in the assistant block below).
-	payload.Assistant.WebSearchModel = defaultWebSearchModel
-	// The true default lives here, not in normalizeSettingsPayload's
-	// baseline call above: that function also normalizes genuine save
-	// requests, where a bare bool can't tell "the operator submitted false"
-	// from "the zero-value baseline." Set explicitly here, before the disk
-	// overlay below, so an absent key on disk surfaces as true and only an
-	// explicit stored value (true or false) overrides it.
-	payload.Anchor.AutoRaiseOnMotoring = true
-	// Same split, same reason as AutoRaiseOnMotoring immediately above: the
-	// true default (a generic 0.5m margin) lives here, not in
-	// normalizeSettingsPayload, because a submitted zero is indistinguishable
-	// from an unset Go zero value once it reaches that function.
-	payload.Anchor.MinClearanceAtLowM = defaultMinClearanceAtLowM
-	// Same split, same reason (see normalizeSettingsPayload's own comment on
-	// EmbeddingModel): an absent embedding_model is a settings.yaml written
-	// before the key existed and defaults here, while a key present and blank
-	// is an operator who turned semantic search off and must stay off.
-	payload.Assistant.EmbeddingModel = defaultEmbeddingModel
-
-	if signalkMap, ok := settings["signalk"].(map[string]any); ok {
-		address := coerceString(signalkMap["address"])
-		if strings.TrimSpace(address) != "" {
-			payload.Signalk.Address = strings.TrimSpace(address)
-		}
-		port := coercePort(signalkMap["port"])
-		if port > 0 && port <= 65535 {
-			payload.Signalk.Port = port
-		}
-	}
-
-	if boatMap, ok := settings["boat"].(map[string]any); ok {
-		if prefix := strings.TrimSpace(coerceString(boatMap["vessel_prefix"])); prefix != "" {
-			payload.Boat.VesselPrefix = prefix
-		}
-		if model := strings.TrimSpace(coerceString(boatMap["model"])); model != "" {
-			payload.Boat.Model = model
-		}
-	}
-
-	if uiMap, ok := settings["ui"].(map[string]any); ok {
-		if labelsMap, ok := uiMap["tank_labels"].(map[string]any); ok {
-			payload.UI.TankLabels = map[string]string{}
-			for key, value := range labelsMap {
-				trimmedKey := strings.TrimSpace(key)
-				if trimmedKey == "" {
-					continue
-				}
-				payload.UI.TankLabels[trimmedKey] = strings.TrimSpace(coerceString(value))
-			}
-		}
-
-		payload.UI.TideProvider = strings.TrimSpace(coerceString(uiMap["tide_provider"]))
-		payload.UI.TideStationID = strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
-		payload.UI.TideStationName = strings.TrimSpace(coerceString(uiMap["tide_station_name"]))
-		if v, ok := uiMap["tide_auto_station"].(bool); ok {
-			payload.UI.TideAutoStation = v
-		}
-		payload.UI.WeatherProvider = strings.TrimSpace(coerceString(uiMap["weather_provider"]))
-		payload.UI.WaveProvider = strings.TrimSpace(coerceString(uiMap["wave_provider"]))
-		payload.UI.POIProvider = strings.TrimSpace(coerceString(uiMap["poi_provider"]))
-		payload.UI.PlaceNameProvider = strings.TrimSpace(coerceString(uiMap["place_name_provider"]))
-		payload.UI.ForecastWarningsProvider = strings.TrimSpace(coerceString(uiMap["forecast_warnings_provider"]))
-	}
-
-	if anchorMap, ok := settings["anchor"].(map[string]any); ok {
-		if value := coerceFloat(anchorMap["bow_roller_height_m"]); value > 0 {
-			payload.Anchor.BowRollerHeightM = value
-		}
-		if value := coerceFloat(anchorMap["chain_size_mm"]); value > 0 {
-			payload.Anchor.ChainSizeMM = value
-		}
-		if value := coerceFloat(anchorMap["chain_onboard_m"]); value > 0 {
-			payload.Anchor.ChainOnboardM = value
-		}
-		if hullType := strings.TrimSpace(coerceString(anchorMap["hull_type"])); isSupportedHullType(hullType) {
-			payload.Anchor.HullType = hullType
-		}
-		if scopeMethod := strings.TrimSpace(coerceString(anchorMap["scope_method"])); isSupportedScopeMethod(scopeMethod) {
-			payload.Anchor.ScopeMethod = scopeMethod
-		}
-		if value := coerceFloat(anchorMap["windage_area_m2"]); value > 0 {
-			payload.Anchor.WindageAreaM2 = value
-		}
-		// gps_from_bow_m defaults to 0 ("no correction"), so 0 is itself a
-		// meaningful, explicit value — unlike the other anchor fields above, it
-		// must not be treated the same as "absent". coerceFloat returns -1 for
-		// a missing/unparseable key, so >= 0 is the correct guard here.
-		if value := coerceFloat(anchorMap["gps_from_bow_m"]); value >= 0 {
-			payload.Anchor.GPSFromBowM = value
-		}
-		if value := coerceFloat(anchorMap["loa_m"]); value > 0 {
-			payload.Anchor.LOAM = value
-		}
-		// Presence, not truthiness, is what distinguishes "the operator
-		// explicitly turned this off" from "this settings.yaml predates the
-		// feature" - the type assertion's ok is the only signal available
-		// for a bool, so an absent key leaves the true default set above
-		// untouched, and only a present key (true or false) overrides it.
-		if v, ok := anchorMap["auto_raise_on_motoring"].(bool); ok {
-			payload.Anchor.AutoRaiseOnMotoring = v
-		}
-		// Presence, not value, distinguishes "the operator explicitly saved
-		// zero" from "this settings.yaml predates the feature" - coerceFloat
-		// returns -1 for a missing/unparseable key, so a non-negative,
-		// finite value is the presence gate (same >= 0 pattern gps_from_bow_m
-		// above uses, plus an explicit +Inf guard since coerceFloat can
-		// return it verbatim from a YAML .inf literal, and +Inf >= 0 is true).
-		if value := coerceFloat(anchorMap["min_clearance_at_low_m"]); value >= 0 && !math.IsInf(value, 0) {
-			payload.Anchor.MinClearanceAtLowM = value
-		}
-	}
-
-	if influxMap, ok := settings["influxdb"].(map[string]any); ok {
-		if v, ok := influxMap["enabled"].(bool); ok {
-			payload.Influxdb.Enabled = v
-		}
-		payload.Influxdb.URL = strings.TrimSpace(coerceString(influxMap["url"]))
-		payload.Influxdb.Org = strings.TrimSpace(coerceString(influxMap["org"]))
-		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
-	}
-
-	if mayaraMap, ok := settings["mayara"].(map[string]any); ok {
-		// Unconditional, like the influxdb fields above: an address stored as
-		// blank must surface as blank, not be mistaken for "absent" and papered
-		// over with whatever normalizeSettingsPayload({}) defaulted payload to.
-		payload.Mayara.Address = strings.TrimSpace(coerceString(mayaraMap["address"]))
-		if port := coercePort(mayaraMap["port"]); port > 0 && port <= 65535 {
-			payload.Mayara.Port = port
-		}
-	}
-
-	if assistantMap, ok := settings["assistant"].(map[string]any); ok {
-		if v, ok := assistantMap["enabled"].(bool); ok {
-			payload.Assistant.Enabled = v
-		}
-		// Unconditional, like the mayara address above: a model or notes
-		// value stored as blank must surface as blank, not be mistaken for
-		// "absent" and papered over with normalizeSettingsPayload({})'s
-		// default model.
-		payload.Assistant.Model = strings.TrimSpace(coerceString(assistantMap["model"]))
-		// document_model (ADR 0106) is newer than the assistant block itself,
-		// so unlike model above, a settings.yaml written before it existed
-		// has the key genuinely absent rather than present-and-blank - and a
-		// plain map lookup can't tell those apart (both come back as the
-		// zero value ""). Only an explicit key, present() checked before
-		// coercing, overrides the normalizeSettingsPayload({}) default set
-		// above; an absent key leaves that default in place, the same
-		// presence-vs-value distinction auto_raise_on_motoring uses below.
-		if raw, ok := assistantMap["document_model"]; ok {
-			payload.Assistant.DocumentModel = strings.TrimSpace(coerceString(raw))
-		}
-		// embedding_model (E1b) is newer still than document_model, so the
-		// same presence-vs-value distinction applies: a settings.yaml
-		// written before it existed has the key genuinely absent, and that
-		// must default (below), not surface as the blank that turns
-		// semantic search off for every installed boat at once.
-		if raw, ok := assistantMap["embedding_model"]; ok {
-			payload.Assistant.EmbeddingModel = strings.TrimSpace(coerceString(raw))
-		}
-		// embedding_dimensions is a number rather than a string, but the
-		// same presence check applies: an absent key must default (below),
-		// not surface as the zero value coercePort already returns for a
-		// missing map entry. A present-but-invalid value (<= 0, or above the
-		// 4096 cap - see normalizeSettingsPayload) is normalised the same
-		// way right here, since buildSettingsPayload never re-runs the
-		// disk-read result back through normalizeSettingsPayload.
-		if raw, ok := assistantMap["embedding_dimensions"]; ok {
-			dims := coercePort(raw)
-			if dims <= 0 {
-				dims = defaultEmbeddingDimensions
-			}
-			if dims > 4096 {
-				dims = 4096
-			}
-			payload.Assistant.EmbeddingDimensions = dims
-		}
-		payload.Assistant.Notes = coerceString(assistantMap["notes"])
-		payload.Assistant.AllowedModels = coerceStringList(assistantMap["allowed_models"])
-		payload.Assistant.ExcludedModels = coerceStringList(assistantMap["excluded_models"])
-		payload.Assistant.CostTier = strings.TrimSpace(strings.ToLower(coerceString(assistantMap["cost_tier"])))
-		// The three voice switches all default false, the same as Enabled -
-		// a settings.yaml written before they existed (or one where the
-		// operator has simply never turned them on) must surface as off,
-		// never a guessed true.
-		if v, ok := assistantMap["voice_input"].(bool); ok {
-			payload.Assistant.VoiceInput = v
-		}
-		if v, ok := assistantMap["read_aloud"].(bool); ok {
-			payload.Assistant.ReadAloud = v
-		}
-		if v, ok := assistantMap["wake_word"].(bool); ok {
-			payload.Assistant.WakeWord = v
-		}
-		if raw, ok := assistantMap["web_search_model"]; ok {
-			payload.Assistant.WebSearchModel = strings.TrimSpace(coerceString(raw))
-		}
-		if v, ok := assistantMap["web_search"].(bool); ok {
-			payload.Assistant.WebSearch = v
-		}
-	}
-
-	if authMap, ok := settings["auth"].(map[string]any); ok {
-		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
-	}
-
-	units := strings.TrimSpace(coerceString(settings["units"]))
-	if strings.EqualFold(units, "metric") || strings.EqualFold(units, "imperial") {
-		payload.Units = strings.ToLower(units)
-	}
-
-	return payload
-}
-
-func normalizeSettingsPayload(req settingsPayload) settingsPayload {
-	normalized := settingsPayload{}
-	normalized.Signalk.Address = strings.TrimSpace(req.Signalk.Address)
-	if normalized.Signalk.Address == "" {
-		normalized.Signalk.Address = defaultSignalKAddress
-	}
-	normalized.Signalk.Port = req.Signalk.Port
-	if normalized.Signalk.Port <= 0 || normalized.Signalk.Port > 65535 {
-		normalized.Signalk.Port = defaultSignalKPort
-	}
-
-	normalized.Boat.VesselPrefix = strings.TrimSpace(req.Boat.VesselPrefix)
-	if normalized.Boat.VesselPrefix == "" {
-		normalized.Boat.VesselPrefix = "M/V"
-	}
-	normalized.Boat.Model = strings.TrimSpace(req.Boat.Model)
-
-	if req.UI.TankLabels != nil {
-		normalized.UI.TankLabels = map[string]string{}
-		for key, value := range req.UI.TankLabels {
-			trimmedKey := strings.TrimSpace(key)
-			if trimmedKey == "" {
-				continue
-			}
-			normalized.UI.TankLabels[trimmedKey] = strings.TrimSpace(value)
-		}
-	}
-
-	normalized.UI.TideProvider = strings.TrimSpace(req.UI.TideProvider)
-	normalized.UI.TideStationID = strings.TrimSpace(req.UI.TideStationID)
-	normalized.UI.TideStationName = strings.TrimSpace(req.UI.TideStationName)
-	normalized.UI.TideAutoStation = req.UI.TideAutoStation
-	normalized.UI.WeatherProvider = strings.TrimSpace(req.UI.WeatherProvider)
-	normalized.UI.WaveProvider = strings.TrimSpace(req.UI.WaveProvider)
-	normalized.UI.POIProvider = strings.TrimSpace(req.UI.POIProvider)
-	normalized.UI.PlaceNameProvider = strings.TrimSpace(req.UI.PlaceNameProvider)
-	normalized.UI.ForecastWarningsProvider = strings.TrimSpace(req.UI.ForecastWarningsProvider)
-
-	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
-	if normalized.Anchor.BowRollerHeightM <= 0 {
-		normalized.Anchor.BowRollerHeightM = defaultBowRollerHeightM
-	}
-	normalized.Anchor.ChainSizeMM = req.Anchor.ChainSizeMM
-	if normalized.Anchor.ChainSizeMM <= 0 {
-		normalized.Anchor.ChainSizeMM = defaultChainSizeMM
-	}
-	normalized.Anchor.ChainOnboardM = req.Anchor.ChainOnboardM
-	if normalized.Anchor.ChainOnboardM <= 0 {
-		normalized.Anchor.ChainOnboardM = defaultChainOnboardM
-	}
-	normalized.Anchor.WindageAreaM2 = req.Anchor.WindageAreaM2
-	if normalized.Anchor.WindageAreaM2 <= 0 {
-		normalized.Anchor.WindageAreaM2 = defaultWindageAreaM2
-	}
-	normalized.Anchor.HullType = strings.TrimSpace(req.Anchor.HullType)
-	if !isSupportedHullType(normalized.Anchor.HullType) {
-		normalized.Anchor.HullType = defaultHullType
-	}
-	normalized.Anchor.ScopeMethod = strings.TrimSpace(req.Anchor.ScopeMethod)
-	if !isSupportedScopeMethod(normalized.Anchor.ScopeMethod) {
-		normalized.Anchor.ScopeMethod = defaultScopeMethod
-	}
-	// gps_from_bow_m and loa_m assign straight through, with no positive-default
-	// clamp: both default to 0 ("no correction" / "not entered"), and 0 must
-	// survive the round-trip rather than being replaced by a guessed value. A
-	// negative submission is still nonsensical, so floor it at 0.
-	normalized.Anchor.GPSFromBowM = req.Anchor.GPSFromBowM
-	if normalized.Anchor.GPSFromBowM < 0 {
-		normalized.Anchor.GPSFromBowM = 0
-	}
-	normalized.Anchor.LOAM = req.Anchor.LOAM
-	if normalized.Anchor.LOAM < 0 {
-		normalized.Anchor.LOAM = 0
-	}
-	// Straight passthrough, deliberately with no override in either
-	// direction - see the comment on the field itself for why this one
-	// field can't use the "default when invalid/absent" pattern every other
-	// field in this function does.
-	normalized.Anchor.AutoRaiseOnMotoring = req.Anchor.AutoRaiseOnMotoring
-	// MinClearanceAtLowM (ADR 0135): unlike BowRollerHeightM/ChainSizeMM/
-	// WindageAreaM2 above, zero is not floored away here - it is a valid,
-	// deliberate margin (warn only once the keel is at the seabed). Only a
-	// negative or non-finite submission gets replaced by the default;
-	// "absent" is handled separately, by buildSettingsPayload's disk-presence
-	// check, for the same reason AutoRaiseOnMotoring's default lives there.
-	normalized.Anchor.MinClearanceAtLowM = req.Anchor.MinClearanceAtLowM
-	if normalized.Anchor.MinClearanceAtLowM < 0 || math.IsNaN(normalized.Anchor.MinClearanceAtLowM) || math.IsInf(normalized.Anchor.MinClearanceAtLowM, 0) {
-		normalized.Anchor.MinClearanceAtLowM = defaultMinClearanceAtLowM
-	}
-
-	normalized.Influxdb.Enabled = req.Influxdb.Enabled
-	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
-	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
-	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
-
-	// Unlike Signalk.Address just above, a blank mayara address stays blank
-	// rather than defaulting to a host: there is no sane address to guess for
-	// a radar, and an unconfigured mayara address is exactly how the radar
-	// picture overlay reports itself as off (plan: "Backend" section).
-	normalized.Mayara.Address = strings.TrimSpace(req.Mayara.Address)
-	normalized.Mayara.Port = req.Mayara.Port
-	if normalized.Mayara.Port <= 0 || normalized.Mayara.Port > 65535 {
-		normalized.Mayara.Port = defaultMayaraPort
-	}
-
-	normalized.Assistant.Enabled = req.Assistant.Enabled
-	normalized.Assistant.Model = strings.TrimSpace(req.Assistant.Model)
-	if normalized.Assistant.Model == "" {
-		normalized.Assistant.Model = defaultAssistantModel
-	}
-	normalized.Assistant.DocumentModel = strings.TrimSpace(req.Assistant.DocumentModel)
-	if normalized.Assistant.DocumentModel == "" {
-		normalized.Assistant.DocumentModel = defaultDocumentModel
-	}
-	// Trimmed, but deliberately NOT defaulted the way Model and
-	// DocumentModel are just above. A blank embedding model is the
-	// documented off switch for semantic search (ADR 0108), so defaulting it
-	// here would mean an operator could never turn it off through the
-	// settings API, and that the first save after an upgrade would silently
-	// switch paid embedding on for every consented document. The default for
-	// an ABSENT key is applied by buildSettingsPayload instead - the same
-	// split Anchor.AutoRaiseOnMotoring already uses, and for the same reason:
-	// this function also normalises genuine save requests, where it cannot
-	// tell "the operator cleared the field" from "the zero-value baseline".
-	normalized.Assistant.EmbeddingModel = strings.TrimSpace(req.Assistant.EmbeddingModel)
-	normalized.Assistant.EmbeddingDimensions = req.Assistant.EmbeddingDimensions
-	if normalized.Assistant.EmbeddingDimensions <= 0 {
-		normalized.Assistant.EmbeddingDimensions = defaultEmbeddingDimensions
-	}
-	// A larger vector is a configuration mistake, not a preference: the
-	// whole index is scanned in Go on an armv7 box, and every extra
-	// dimension is work multiplied by however many chunks are in the
-	// library. Capped, not reset to the default, so an operator dialling
-	// dimensions up for accuracy lands at the ceiling rather than being
-	// bounced back down to 512.
-	if normalized.Assistant.EmbeddingDimensions > 4096 {
-		normalized.Assistant.EmbeddingDimensions = 4096
-	}
-	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
-	normalized.Assistant.AllowedModels = normalizeAssistantModelPatterns(req.Assistant.AllowedModels)
-	normalized.Assistant.ExcludedModels = normalizeAssistantModelPatterns(req.Assistant.ExcludedModels)
-	normalized.Assistant.CostTier = normalizeAssistantCostTier(req.Assistant.CostTier)
-	normalized.Assistant.VoiceInput = req.Assistant.VoiceInput
-	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
-	normalized.Assistant.WakeWord = req.Assistant.WakeWord
-	normalized.Assistant.WebSearch = req.Assistant.WebSearch
-	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
-
-	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
-	if normalized.Auth.Mode == "" {
-		normalized.Auth.Mode = authModeNone
-	}
-
-	if req.Vessel != nil {
-		vessel := *req.Vessel
-		if vessel.Engines == nil {
-			vessel.Engines = []vesselEngineSetting{}
-		}
-		vessel.Batteries = normalizeVesselBatteries(vessel.Batteries)
-		normalized.Vessel = &vessel
-	}
-
-	normalized.Units = strings.ToLower(strings.TrimSpace(req.Units))
-	if normalized.Units != "metric" && normalized.Units != "imperial" {
-		normalized.Units = defaultDistanceUnits
-	}
-
-	return normalized
-}
-
-func isSupportedHullType(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	return trimmed == "power_cat" || trimmed == "sail_mono" || trimmed == "power_mono" || trimmed == "sail_cat"
-}
-
-func isSupportedScopeMethod(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	return trimmed == "catenary" || trimmed == "ratio"
-}
-
-func normalizeAssistantModelPatterns(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		out = append(out, trimmed)
-	}
-	if len(out) == 0 {
-		return []string{}
-	}
-	return out
-}
-
-func normalizeAssistantCostTier(value string) string {
-	switch strings.TrimSpace(strings.ToLower(value)) {
-	case "", "low", "medium", "high", "xhigh", "max":
-		return strings.TrimSpace(strings.ToLower(value))
-	default:
-		return ""
-	}
-}
-
-func coerceStringList(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return []string{}
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		trimmed := strings.TrimSpace(coerceString(item))
-		if trimmed == "" {
-			continue
-		}
-		out = append(out, trimmed)
-	}
-	if len(out) == 0 {
-		return []string{}
-	}
-	return out
-}
-
-func getSignalKSettingsHandler(c echo.Context) error {
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"address": address,
-		"port":    port,
-		"url":     buildSignalKURL(address, port),
-	})
-}
-
-// testSignalKConnectionHandler backs the "Test Connection" button. It is a
-// pure read: it probes the address in the request body and reports what it
-// found, without touching settings.yaml.
-//
-// Its predecessor (POST /api/settings/signalk) both probed and persisted,
-// which gave the SignalK address two independent write paths — the bulk save
-// and this one — and meant a button labelled "Connect" quietly rewrote
-// config as a side effect of a connectivity check. Persisting is now solely
-// the bulk save's job, where validateSettingsChange applies the same probe
-// (ADR 0028). Because nothing here writes, an operator can check an address
-// before committing to it, which the old behaviour made impossible.
-func testSignalKConnectionHandler(c echo.Context) error {
-	var req struct {
-		Address string `json:"address"`
-		Port    int    `json:"port"`
-	}
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
-	}
-
-	// No defaulting here, unlike the old handler: silently probing
-	// "localhost" when the field is blank reports a connectivity failure for
-	// an address the operator never entered, sending them after the wrong
-	// problem. Blank input is input error, and says so.
-	address := strings.TrimSpace(req.Address)
-	if address == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"field": "signalk.address",
-			"error": "enter a SignalK address to test",
-		})
-	}
-
-	if req.Port <= 0 || req.Port > 65535 {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"field": "signalk.port",
-			"error": fmt.Sprintf("port %d is out of range (1-65535)", req.Port),
-		})
-	}
-
-	signalkURL := buildSignalKURL(address, req.Port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-
-	// A direct REST probe, not the delta-stream snapshot: the address under
-	// test is not the configured one and has no stream open, so the snapshot
-	// would answer for the currently configured server no matter what was typed.
-	payload, err := probeSignalKTree(signalkURL, vesselPath)
-	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]any{
-			"field":     "signalk.address",
-			"error":     fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
-			"connected": false,
-		})
-	}
-
-	// The vessel name is the useful half of the answer: "something responded"
-	// does not distinguish your boat from a neighbour's server on the same
-	// marina wifi, and this is the one place that distinction can be shown.
-	return c.JSON(http.StatusOK, map[string]any{
-		"connected":   true,
-		"url":         signalkURL,
-		"vessel_name": strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name"))),
-	})
-}
-
 // criticalVesselState marks state's position/GNSS fields as critical when
 // there's no SignalK payload to validate at all — e.g. the connection itself
 // failed. It freezes position at the last trusted fix (via resolveGNSSPosition)
@@ -1023,7 +62,7 @@ func testSignalKConnectionHandler(c echo.Context) error {
 // alarm don't mistake "can't reach SignalK" for "vessel has moved."
 func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 	validation := criticalGNSSValidation(reason, time.Now().UTC())
-	state.Latitude, state.Longitude = resolveGNSSPosition(-1, -1, validation)
+	state.Latitude, state.Longitude = resolveGNSSPosition(0, 0, false, validation)
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
 	state.GNSSSatellites = validation.Satellites
@@ -1044,48 +83,51 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		// reading, in Current Conditions or in the Wind tile's True mode.
 		WindSpeedTrueKts: -1, WindAngleTrueDeg: -1, WindAngleTrueRelativeDeg: -1, WindDirectionTrueDeg: -1,
 		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
-		// return before the payload is even parsed (signalKSelfPayload
-		// failing below) must never read as "just measured".
+		// return before the payload is even parsed (the stream having no
+		// self tree yet) must never read as "just measured".
 		DepthLastUpdateAge: -1, PositionLastUpdateAge: -1, WindLastUpdateAge: -1,
 	}
 
 	// A stream outage lands here the same way an unreachable REST server does,
 	// so the position freezes at the last trusted fix rather than reading as a
 	// jump to null island and tripping the anchor alarm.
-	payload, err := signalKSelfPayload()
-	if err != nil {
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		err := errSignalKNoSelf
 		return criticalVesselState(state, err.Error()), err
 	}
+	return vesselStateFromTelemetry(t, state), nil
+}
 
-	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
+// vesselStateFromTelemetry fills state from our own boat's telemetry. The
+// -1 and "" sentinels vesselStateData still carries to the browser are
+// produced here, at the payload edge, from ok and AgeKnown (ADR 0178).
+func vesselStateFromTelemetry(t telemetryReader, state vesselStateData) vesselStateData {
+	state.Name = strings.TrimSpace(firstString(t, "name", "design.name"))
 
 	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
-	// REST full tree nests it under a "value" wrapper; some sources publish
-	// the bare path instead - same two-step pattern as environment.depth
-	// below.
-	state.LengthOverallM = lookupNumber(payload, "design", "length", "value", "overall")
-	if state.LengthOverallM == -1 {
-		state.LengthOverallM = lookupNumber(payload, "design", "length", "overall")
+	// full tree nests it inside design.length's value; some sources publish
+	// the bare path instead - the reader resolves both.
+	if v, ok := t.Number("design.length.overall"); ok {
+		state.LengthOverallM = v.Value
 	}
 
 	// ADR 0135: the Anchor Watch low-water clearance warning needs the
 	// boat's draft. Only design.draft.maximum is read - the live server
 	// this feature was verified against never publishes
 	// current/minimum/canoe, and maximum is the only figure that is always
-	// the worst case, so there is no fallback to those. Same two-step
-	// value-then-bare lookup as design.length.overall above.
-	state.DraftM = lookupNumber(payload, "design", "draft", "value", "maximum")
-	if state.DraftM == -1 {
-		state.DraftM = lookupNumber(payload, "design", "draft", "maximum")
+	// the worst case, so there is no fallback to those.
+	if v, ok := t.Number("design.draft.maximum"); ok {
+		state.DraftM = v.Value
 	}
 
-	state.Status = firstNonEmptyString(lookupString(payload, "navigation", "state", "value"), lookupString(payload, "navigation", "state"))
+	state.Status = firstString(t, "navigation.state")
 	if state.Status == "" {
 		state.Status = "Unknown"
 	}
 
 	hasGNSSDatetime := false
-	datetimeString := firstNonEmptyString(lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"), lookupString(payload, "timestamp"))
+	datetimeString := firstString(t, "navigation.datetime", "timestamp")
 	if datetimeString != "" {
 		parsed, err := time.Parse(time.RFC3339, datetimeString)
 		if err == nil {
@@ -1094,36 +136,28 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		}
 	}
 
-	state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer", "value")
-	if state.Depth == -1 {
-		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
+	if v, ok := t.Number("environment.depth.belowTransducer"); ok {
+		state.Depth = v.Value
 	}
 	// Scoped to belowTransducer alone, not the whole environment.depth
 	// branch: a live belowSurface/belowKeel sensor must never paper over a
 	// dead belowTransducer reading, which is the value actually rendered.
-	state.DepthLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "depth", "belowTransducer"), state.Datetime)
+	state.DepthLastUpdateAge = subtreeAgeSeconds(t, "environment.depth.belowTransducer", state.Datetime)
 
-	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(payload)
+	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(t)
 	state.CurrentDriftKts = currentDriftKts
 	state.CurrentSetDeg = currentSetDeg
 	state.CurrentDriftImpactKts = currentDriftImpactKts
 
-	rawLatitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
-	if rawLatitude == -1 {
-		rawLatitude = lookupNumber(payload, "navigation", "position", "latitude")
-	}
+	position, hasPosition := t.Position()
 
-	rawLongitude := lookupNumber(payload, "navigation", "position", "value", "longitude")
-	if rawLongitude == -1 {
-		rawLongitude = lookupNumber(payload, "navigation", "position", "longitude")
-	}
-
-	state.Engine0RPM = readEngineRPM(payload, []string{"0", "port", "main", "engine0", "engine-0"})
-	state.Engine1RPM = readEngineRPM(payload, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
-	validation := parseGNSSPositionValidation(payload)
+	state.Engine0RPM = readEngineRPM(t, []string{"0", "port", "main", "engine0", "engine-0"})
+	state.Engine1RPM = readEngineRPM(t, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
+	validation := parseGNSSPositionValidation(t)
 	validation = applyGNSSHeuristics(validation, gnssObservedSample{
-		Latitude:       rawLatitude,
-		Longitude:      rawLongitude,
+		HasPosition:    hasPosition,
+		Latitude:       position.Latitude,
+		Longitude:      position.Longitude,
 		DepthMeters:    state.Depth,
 		Navigation:     state.Status,
 		EnginesRunning: (state.Engine0RPM > 0 && !math.IsInf(state.Engine0RPM, 0)) || (state.Engine1RPM > 0 && !math.IsInf(state.Engine1RPM, 0)),
@@ -1137,22 +171,22 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	state.GNSSValidationReason = validation.Reason
 	state.GNSSCriticalAlert = validation.Critical
 
-	state.Latitude, state.Longitude = resolveGNSSPosition(rawLatitude, rawLongitude, validation)
+	// -1,-1 reaches the wire only from the gate, when no fix has ever been
+	// trusted.
+	state.Latitude, state.Longitude = resolveGNSSPosition(position.Latitude, position.Longitude, hasPosition, validation)
 
 	// The fix (navigation.position) and its quality figures
 	// (navigation.gnss) are published under two different parents; either
 	// one still ticking means the fix itself is current, so this is the
 	// freshest of the two rather than a single subtree walk.
 	state.PositionLastUpdateAge = freshestAge(
-		freshestTimestampAge(lookupAnyMap(payload, "navigation", "position"), state.Datetime),
-		freshestTimestampAge(lookupAnyMap(payload, "navigation", "gnss"), state.Datetime),
+		subtreeAgeSeconds(t, "navigation.position", state.Datetime),
+		subtreeAgeSeconds(t, "navigation.gnss", state.Datetime),
 	)
 
-	state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue", "value")
-	if state.HeadingTrue == -1 {
-		state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue")
+	if v, ok := t.Number("navigation.headingTrue"); ok {
+		state.HeadingTrue = v.Value
 	}
-
 	if state.HeadingTrue >= 0 {
 		if state.HeadingTrue <= 2*math.Pi {
 			state.HeadingTrue = state.HeadingTrue * 180 / math.Pi
@@ -1160,35 +194,33 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.HeadingTrue = normalizeDegrees(state.HeadingTrue)
 	}
 
-	windSpeedApparent := lookupNumber(payload, "environment", "wind", "speedApparent", "value")
-	if windSpeedApparent == -1 {
-		windSpeedApparent = lookupNumber(payload, "environment", "wind", "speedApparent")
-	}
-	windTimestamp := firstNonEmptyString(lookupString(payload, "environment", "wind", "speedApparent", "timestamp"), lookupString(payload, "environment", "wind", "angleApparent", "timestamp"), lookupString(payload, "environment", "wind", "timestamp"))
+	windSpeedApparent, windSpeedApparentOK := t.Number("environment.wind.speedApparent")
+	windTimestamp := firstNonEmptyString(
+		declaredTimestamp(t, "environment.wind.speedApparent"),
+		declaredTimestamp(t, "environment.wind.angleApparent"),
+		declaredTimestamp(t, "environment.wind"),
+	)
 
 	// Scoped to environment.wind only: environment.current is a different
 	// sensor with its own health and must not be folded into wind's own
 	// freshness. Whole-subtree walk (not windTimestamp's first-found
 	// priority list above) so the tile's age tracks whichever of
 	// speedApparent/angleApparent actually updated most recently.
-	state.WindLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "wind"), state.Datetime)
+	state.WindLastUpdateAge = subtreeAgeSeconds(t, "environment.wind", state.Datetime)
 
 	windDataRecent := isRecentTimestamp(windTimestamp, defaultWindMaxAge)
 	if !windDataRecent {
 		windDataRecent = state.Datetime.After(time.Now().UTC().Add(-defaultWindMaxAge))
 	}
 
-	if windSpeedApparent >= 0 && windDataRecent {
-		state.WindSpeedApparentKts = windSpeedApparent * metersPerSecondToKnots
+	if windSpeedApparentOK && windSpeedApparent.Value >= 0 && windDataRecent {
+		state.WindSpeedApparentKts = windSpeedApparent.Value * metersPerSecondToKnots
 	} else {
 		state.WindSpeedApparentKts = 0
 	}
 
-	windAngleApparent := lookupNumber(payload, "environment", "wind", "angleApparent", "value")
-	if windAngleApparent == -1 {
-		windAngleApparent = lookupNumber(payload, "environment", "wind", "angleApparent")
-	}
-	if windAngleApparent != -1 && windDataRecent {
+	if windAngle, ok := t.Number("environment.wind.angleApparent"); ok && windDataRecent {
+		windAngleApparent := windAngle.Value
 		if windAngleApparent >= -2*math.Pi && windAngleApparent <= 2*math.Pi {
 			windAngleApparent = windAngleApparent * 180 / math.Pi
 		}
@@ -1208,13 +240,13 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	}
 
 	// True wind: environment.wind.speedTrue/angleTrueWater/directionTrue,
-	// parsed the same way as apparent above (value/bare fallbacks, radian
-	// conversion, side from sign) but kept entirely separate, including its
-	// own recency check per leaf — a stale or absent true-wind source must
-	// read as unknown (-1/"") rather than silently reusing apparent's
-	// numbers, which is a different sensor reading a different quantity.
-	// Feeds the Current Conditions tile (ADR 0129: speedTrue/directionTrue)
-	// and the Wind tile's True mode (ADR 0130: adds angleTrueWater).
+	// parsed the same way as apparent above (radian conversion, side from
+	// sign) but kept entirely separate, including its own recency check per
+	// leaf — a stale or absent true-wind source must read as unknown
+	// (-1/"") rather than silently reusing apparent's numbers, which is a
+	// different sensor reading a different quantity. Feeds the Current
+	// Conditions tile (ADR 0129: speedTrue/directionTrue) and the Wind
+	// tile's True mode (ADR 0130: adds angleTrueWater).
 	//
 	// Each of the three leaves is gated on its OWN timestamp
 	// (speedTrue/angleTrueWater/directionTrue independently), not a
@@ -1229,23 +261,16 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// instrument itself is still reporting, so a stale or entirely absent
 	// timestamp on a given leaf leaves only that leaf's own field(s) at
 	// their sentinel.
-	windSpeedTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "speedTrue", "timestamp"), defaultWindMaxAge)
-	windSpeedTrue := lookupNumber(payload, "environment", "wind", "speedTrue", "value")
-	if windSpeedTrue == -1 {
-		windSpeedTrue = lookupNumber(payload, "environment", "wind", "speedTrue")
-	}
-	if windSpeedTrue >= 0 && windSpeedTrueRecent {
-		state.WindSpeedTrueKts = windSpeedTrue * metersPerSecondToKnots
+	windSpeedTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.speedTrue"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.speedTrue"); ok && v.Value >= 0 && windSpeedTrueRecent {
+		state.WindSpeedTrueKts = v.Value * metersPerSecondToKnots
 	} else {
 		state.WindSpeedTrueKts = -1
 	}
 
-	windAngleTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "angleTrueWater", "timestamp"), defaultWindMaxAge)
-	windAngleTrue := lookupNumber(payload, "environment", "wind", "angleTrueWater", "value")
-	if windAngleTrue == -1 {
-		windAngleTrue = lookupNumber(payload, "environment", "wind", "angleTrueWater")
-	}
-	if windAngleTrue != -1 && windAngleTrueRecent {
+	windAngleTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.angleTrueWater"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.angleTrueWater"); ok && windAngleTrueRecent {
+		windAngleTrue := v.Value
 		if windAngleTrue >= -2*math.Pi && windAngleTrue <= 2*math.Pi {
 			windAngleTrue = windAngleTrue * 180 / math.Pi
 		}
@@ -1268,12 +293,9 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// environment.wind.directionTrue is the compass bearing the wind comes
 	// FROM (0..2π already relative to true north, not bow-relative), so it
 	// normalizes straight to 0-360 with no signed/side step.
-	windDirectionTrueRecent := isRecentTimestamp(lookupString(payload, "environment", "wind", "directionTrue", "timestamp"), defaultWindMaxAge)
-	windDirectionTrue := lookupNumber(payload, "environment", "wind", "directionTrue", "value")
-	if windDirectionTrue == -1 {
-		windDirectionTrue = lookupNumber(payload, "environment", "wind", "directionTrue")
-	}
-	if windDirectionTrue != -1 && windDirectionTrueRecent {
+	windDirectionTrueRecent := isRecentTimestamp(declaredTimestamp(t, "environment.wind.directionTrue"), defaultWindMaxAge)
+	if v, ok := t.Number("environment.wind.directionTrue"); ok && windDirectionTrueRecent {
+		windDirectionTrue := v.Value
 		if windDirectionTrue >= -2*math.Pi && windDirectionTrue <= 2*math.Pi {
 			windDirectionTrue = windDirectionTrue * 180 / math.Pi
 		}
@@ -1282,102 +304,65 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		state.WindDirectionTrueDeg = -1
 	}
 
-	sog := lookupNumber(payload, "navigation", "speedOverGround", "value")
-	if sog == -1 {
-		sog = lookupNumber(payload, "navigation", "speedOverGround")
-	}
-	if sog >= 0 {
-		state.SpeedOverGroundKts = math.Round(sog*metersPerSecondToKnots*10) / 10
+	if v, ok := t.Number("navigation.speedOverGround"); ok && v.Value >= 0 {
+		state.SpeedOverGroundKts = math.Round(v.Value*metersPerSecondToKnots*10) / 10
 	}
 
 	// Generator state (com.victronenergy.generator.0 via signalk-venus-plugin)
-	state.GeneratorState = firstNonEmptyString(
-		lookupString(payload, "electrical", "generator", "0", "state", "value"),
-		lookupString(payload, "electrical", "generator", "0", "state"),
-	)
+	state.GeneratorState = firstString(t, "electrical.generator.0.state")
 
-	if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart", "value"); ok {
-		state.GeneratorManualStart = v
-	} else if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart"); ok {
+	if v, ok := t.Bool("electrical.generator.0.manualStart"); ok {
 		state.GeneratorManualStart = v
 	}
 
-	genTimer := lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer", "value")
-	if genTimer == -1 {
-		genTimer = lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer")
-	}
-	if genTimer >= 0 {
-		state.GeneratorManualStartTimer = genTimer
+	if v, ok := t.Number("electrical.generator.0.manualStartTimer"); ok && v.Value >= 0 {
+		state.GeneratorManualStartTimer = v.Value
 	}
 
-	state.GeneratorRunningByCondition = firstNonEmptyString(
-		lookupString(payload, "electrical", "generator", "0", "runningByCondition", "value"),
-		lookupString(payload, "electrical", "generator", "0", "runningByCondition"),
-	)
+	state.GeneratorRunningByCondition = firstString(t, "electrical.generator.0.runningByCondition")
 
-	genRuntime := lookupNumber(payload, "electrical", "generator", "0", "runtime", "value")
-	if genRuntime == -1 {
-		genRuntime = lookupNumber(payload, "electrical", "generator", "0", "runtime")
-	}
-	if genRuntime >= 0 {
-		state.GeneratorRuntime = genRuntime
+	if v, ok := t.Number("electrical.generator.0.runtime"); ok && v.Value >= 0 {
+		state.GeneratorRuntime = v.Value
 	}
 
-	return state, nil
+	return state
 }
 
-func readEngineRPM(payload map[string]any, aliases []string) float64 {
+func readEngineRPM(t telemetryReader, aliases []string) float64 {
 	for _, alias := range aliases {
+		prefix := "propulsion." + alias
 		ts := firstNonEmptyString(
-			lookupString(payload, "propulsion", alias, "revolutions", "timestamp"),
-			lookupString(payload, "propulsion", alias, "rpm", "timestamp"),
-			lookupString(payload, "propulsion", alias, "timestamp"),
+			declaredTimestamp(t, prefix+".revolutions"),
+			declaredTimestamp(t, prefix+".rpm"),
+			declaredTimestamp(t, prefix),
 		)
 		if ts != "" && !isRecentTimestamp(ts, defaultRPMMaxAge) {
 			return -1
 		}
 
-		revPerSecond := lookupFirstNumber(payload,
-			[]string{"propulsion", alias, "revolutions", "value"},
-			[]string{"propulsion", alias, "revolutions"},
-		)
-		if revPerSecond >= 0 {
-			return roundTo1(revPerSecond * 60)
+		if v, ok := t.Number(prefix + ".revolutions"); ok && v.Value >= 0 {
+			return roundTo1(v.Value * 60)
 		}
 
-		rpm := lookupFirstNumber(payload,
-			[]string{"propulsion", alias, "rpm", "value"},
-			[]string{"propulsion", alias, "rpm"},
-		)
-		if rpm >= 0 {
-			return roundTo1(rpm)
+		if v, ok := t.Number(prefix + ".rpm"); ok && v.Value >= 0 {
+			return roundTo1(v.Value)
 		}
 	}
 
 	return -1
 }
 
-func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
-	current := lookupAnyMap(payload, "environment", "current")
-	if current == nil {
-		return -1, -1, nil
-	}
+func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
+	const current = "environment.current"
 
-	drift := lookupNumber(current, "drift", "value")
-	if drift == -1 {
-		drift = lookupNumber(current, "drift")
-	}
-	if drift == -1 {
-		drift = lookupFirstNumber(current,
-			[]string{"drift", "speed"},
-			[]string{"drift", "speed", "value"},
-			[]string{"drift", "value", "speed"},
-		)
-	}
-	if drift >= 0 && drift <= 20 {
-		drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
-	} else if drift < 0 {
-		drift = -1
+	drift := -1.0
+	if v, ok := firstNumber(t, current+".drift", current+".drift.speed"); ok {
+		drift = v
+		if drift >= 0 && drift <= 20 {
+			drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
+		} else if drift < 0 {
+			drift = -1
+		}
 	}
 
 	// setTrue is the official SignalK path (environment.current has no plain
@@ -1385,33 +370,20 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 	// for setTrue: converting it would need a magnetic variation reading
 	// this codebase doesn't have, and displaying an unconverted magnetic
 	// bearing as true would silently misreport direction.
-	setDeg := lookupNumber(current, "setTrue", "value")
-	if setDeg == -1 {
-		setDeg = lookupNumber(current, "setTrue")
-	}
-	if setDeg == -1 {
-		setDeg = lookupFirstNumber(current,
-			[]string{"drift", "direction"},
-			[]string{"drift", "direction", "value"},
-			[]string{"drift", "angle"},
-			[]string{"drift", "angle", "value"},
-		)
-	}
-	// Check the not-found sentinel before the radian/degree heuristic below:
-	// -1 falls inside a valid radian range ([-2pi, 2pi]), so checking ranges
-	// first would silently reinterpret "no data" as a real angle of -1 rad
-	// (~303 deg once normalized) instead of reporting no data.
-	if setDeg == -1 {
-		// leave as -1 (no data)
-	} else if setDeg >= 0 && setDeg <= 2*math.Pi {
-		setDeg = normalizeDegrees(setDeg * 180 / math.Pi)
-	} else {
-		setDeg = normalizeDegrees(setDeg)
+	// A drift published as an object leaf ({"speed", "direction"}) carries
+	// the set as its direction, read the same way as a separate leaf.
+	setDeg := -1.0
+	if v, ok := firstNumber(t, current+".setTrue", current+".drift.direction", current+".drift.angle"); ok {
+		if v >= -2*math.Pi && v <= 2*math.Pi {
+			setDeg = normalizeDegrees(v * 180 / math.Pi)
+		} else {
+			setDeg = normalizeDegrees(v)
+		}
 	}
 
 	var driftImpactKts *float64
-	if lookupAnyMap(current, "driftImpact") != nil {
-		if value, ok := current["driftImpact"].(map[string]any)["value"].(float64); ok {
+	if sample := t.Sample(current + ".driftImpact"); sample.Present {
+		if value, ok := sample.Value.(float64); ok {
 			knots := roundTo1(value * metersPerSecondToKnots)
 			driftImpactKts = &knots
 		}
@@ -1423,12 +395,18 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 func fetchSignalKElectricalState() (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return state, err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return state, errSignalKNoSelf
 	}
+	return electricalStateFromTelemetry(t, state), nil
+}
 
-	datetimeString := firstNonEmptyString(lookupString(payload, "timestamp"), lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"))
+// electricalStateFromTelemetry fills the Battery & Power tile's state. Its
+// unsigned fields keep -1 for unknown on the wire; the signed bank current
+// and power are nil (ADR 0178).
+func electricalStateFromTelemetry(t telemetryReader, state electricalStateData) electricalStateData {
+	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -1440,56 +418,47 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	// subtree, so its freshness is that of the most recent of them. A feed that
 	// has stopped freezes every one of these at once, which is what makes a
 	// single subtree-wide age meaningful here.
-	state.LastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "electrical"), state.Datetime)
+	state.LastUpdateAge = subtreeAgeSeconds(t, "electrical", state.Datetime)
 
 	// Identify the main house battery before reading any values from it.
-	mainBattery := lookupMainBattery(payload)
+	mainBattery, haveMain := lookupMainBattery(t)
 
-	soc := -1.0
-	if mainBattery != nil {
-		soc = lookupNumber(mainBattery, "capacity", "stateOfCharge", "value")
+	soc, socOK := 0.0, false
+	if haveMain {
+		soc, socOK = leafNumber(t, mainBattery+".capacity.stateOfCharge")
 	}
-	if soc == -1 {
-		soc = lookupFirstNumber(payload,
-			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge", "value"},
-			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge"},
-			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge", "value"},
-			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge"},
+	if !socOK {
+		soc, socOK = firstNumber(t,
+			"electrical.batteries.house.capacity.stateOfCharge",
+			"electrical.batteries.service.capacity.stateOfCharge",
 		)
 	}
-	if soc == -1 {
-		soc = lookupFirstNumber(payload,
-			[]string{"electrical", "chargers", "276", "capacity", "stateOfCharge", "value"},
-		)
+	if !socOK {
+		soc, socOK = leafNumber(t, "electrical.chargers.276.capacity.stateOfCharge")
 	}
-	if soc == -1 {
-		soc = lookupNumberFromAnyChild(payload, []string{"electrical", "chargers"}, []string{"capacity", "stateOfCharge", "value"})
+	if !socOK {
+		soc, socOK = leafNumberFromAnyChild(t, "electrical.chargers", "capacity.stateOfCharge")
 	}
-	if soc >= 0 {
+	if socOK && soc >= 0 {
 		if soc <= 1 {
 			soc *= 100
 		}
 		state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
 	}
 
-	batteryCapacityAh := lookupFirstNumber(
-		payload,
-		[]string{"electrical", "batteries", "house", "capacity", "nominal", "value"},
-		[]string{"electrical", "batteries", "house", "capacity", "nominal"},
-		[]string{"electrical", "batteries", "service", "capacity", "nominal", "value"},
-		[]string{"electrical", "batteries", "service", "capacity", "nominal"},
-		[]string{"electrical", "batteries", "house", "capacity", "total", "value"},
-		[]string{"electrical", "batteries", "house", "capacity", "total"},
-		[]string{"electrical", "batteries", "service", "capacity", "total", "value"},
-		[]string{"electrical", "batteries", "service", "capacity", "total"},
+	batteryCapacityAh, capacityOK := firstNumber(t,
+		"electrical.batteries.house.capacity.nominal",
+		"electrical.batteries.service.capacity.nominal",
+		"electrical.batteries.house.capacity.total",
+		"electrical.batteries.service.capacity.total",
 	)
-	if batteryCapacityAh == -1 {
-		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "nominal", "value"})
+	if !capacityOK {
+		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.nominal")
 	}
-	if batteryCapacityAh == -1 {
-		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "total", "value"})
+	if !capacityOK {
+		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.total")
 	}
-	if batteryCapacityAh == -1 {
+	if !capacityOK {
 		batteryCapacityAh = loadHouseBatteryCapacityAh(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	}
 	if batteryCapacityAh > 0 {
@@ -1497,39 +466,34 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	}
 
 	// Identify the main house battery: the one with valid SOC and highest absolute current.
-	batteryVoltage := -1.0
-	if mainBattery != nil {
-		batteryVoltage = lookupNumber(mainBattery, "voltage", "value")
+	batteryVoltage, voltageOK := 0.0, false
+	if haveMain {
+		batteryVoltage, voltageOK = leafNumber(t, mainBattery+".voltage")
 	}
-	if batteryVoltage == -1 {
-		batteryVoltage = lookupFirstNumber(payload,
-			[]string{"electrical", "venus", "batteryVoltage", "value"},
-			[]string{"electrical", "venus", "batteryVoltage"},
-			[]string{"electrical", "batteries", "house", "voltage", "value"},
-			[]string{"electrical", "batteries", "house", "voltage"},
-			[]string{"electrical", "batteries", "service", "voltage", "value"},
-			[]string{"electrical", "batteries", "service", "voltage"},
+	if !voltageOK {
+		batteryVoltage, voltageOK = firstNumber(t,
+			"electrical.venus.batteryVoltage",
+			"electrical.batteries.house.voltage",
+			"electrical.batteries.service.voltage",
 		)
 	}
-	if batteryVoltage == -1 {
-		batteryVoltage = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"voltage", "value"})
+	if !voltageOK {
+		batteryVoltage, voltageOK = leafNumberFromAnyChild(t, "electrical.batteries", "voltage")
+	}
+	if !voltageOK {
+		batteryVoltage = -1
 	}
 
 	// Bank current and power are signed, so no number can stand for "unknown":
 	// they are left nil until a path actually reports one.
 	var current, power *float64
-	if mainBattery != nil {
-		if v, ok := lookupNumberOK(mainBattery, "current", "value"); ok {
+	if haveMain {
+		if v, ok := leafNumber(t, mainBattery+".current"); ok {
 			current = &v
 		}
 	}
 	if current == nil {
-		if v, ok := lookupFirstNumberOK(payload,
-			[]string{"electrical", "batteries", "house", "current", "value"},
-			[]string{"electrical", "batteries", "house", "current"},
-			[]string{"electrical", "batteries", "service", "current", "value"},
-			[]string{"electrical", "batteries", "service", "current"},
-		); ok {
+		if v, ok := firstNumber(t, "electrical.batteries.house.current", "electrical.batteries.service.current"); ok {
 			current = &v
 		}
 	}
@@ -1538,18 +502,13 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 		state.ChargingCurrentA = &v
 	}
 
-	if mainBattery != nil {
-		if v, ok := lookupNumberOK(mainBattery, "power", "value"); ok {
+	if haveMain {
+		if v, ok := leafNumber(t, mainBattery+".power"); ok {
 			power = &v
 		}
 	}
 	if power == nil {
-		if v, ok := lookupFirstNumberOK(payload,
-			[]string{"electrical", "batteries", "house", "power", "value"},
-			[]string{"electrical", "batteries", "house", "power"},
-			[]string{"electrical", "batteries", "service", "power", "value"},
-			[]string{"electrical", "batteries", "service", "power"},
-		); ok {
+		if v, ok := firstNumber(t, "electrical.batteries.house.power", "electrical.batteries.service.power"); ok {
 			power = &v
 		}
 	}
@@ -1566,66 +525,64 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 	}
 
 	// venus.totalPanelPower is the Victron system aggregate; sum individual chargers as fallback.
-	solar := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "totalPanelPower", "value"},
-		[]string{"electrical", "venus", "totalPanelPower"},
-	)
-	if solar == -1 {
-		solar = sumNumberFromAllChildren(payload, []string{"electrical", "solar"}, []string{"panelPower", "value"})
-	}
-	if solar >= 0 {
-		state.SolarOutputW = roundTo1(solar)
+	solar, solarOK := t.Number("electrical.venus.totalPanelPower")
+	if solarOK && solar.Value >= 0 {
+		state.SolarOutputW = roundTo1(solar.Value)
+	} else if !solarOK {
+		if sum, ok := sumLeafNumberOverChildren(t, "electrical.solar", "panelPower"); ok && sum >= 0 {
+			state.SolarOutputW = roundTo1(sum)
+		}
 	}
 
-	acOutput := lookupFirstNumber(payload, []string{"electrical", "inverters", "0", "ac", "output", "power", "value"}, []string{"electrical", "inverters", "0", "ac", "output", "power"}, []string{"electrical", "inverters", "0", "acout", "power", "value"}, []string{"electrical", "inverters", "0", "acout", "power"}, []string{"electrical", "inverters", "0", "acOutputPower", "value"}, []string{"electrical", "inverters", "0", "acOutputPower"}, []string{"electrical", "alternators", "0", "ac", "output", "power", "value"}, []string{"electrical", "alternators", "0", "ac", "output", "power"})
-	if acOutput == -1 {
-		acOutput = lookupNumberFromAnyChild(payload, []string{"electrical", "inverters"}, []string{"acout", "power", "value"})
+	acOutput, acOutputOK := firstNumber(t,
+		"electrical.inverters.0.ac.output.power",
+		"electrical.inverters.0.acout.power",
+		"electrical.inverters.0.acOutputPower",
+		"electrical.alternators.0.ac.output.power",
+	)
+	if !acOutputOK {
+		acOutput, acOutputOK = leafNumberFromAnyChild(t, "electrical.inverters", "acout.power")
 	}
-	if acOutput >= 0 {
+	if acOutputOK && acOutput >= 0 {
 		state.ACOutputW = roundTo1(acOutput)
 	}
 
-	dc12Power := lookupFirstNumber(payload, []string{"electrical", "venus", "dcPower", "value"}, []string{"electrical", "venus", "dcPower"}, []string{"electrical", "dc", "12v", "power", "value"}, []string{"electrical", "dc", "12v", "power"}, []string{"electrical", "loads", "12v", "power", "value"}, []string{"electrical", "loads", "12v", "power"})
-	if dc12Power >= 0 {
+	if dc12Power, ok := firstNumber(t, "electrical.venus.dcPower", "electrical.dc.12v.power", "electrical.loads.12v.power"); ok && dc12Power >= 0 {
 		state.DC12VPowerW = roundTo1(dc12Power)
 	}
 
-	dc12Current := lookupFirstNumber(payload, []string{"electrical", "venus", "dcCurrent", "value"}, []string{"electrical", "venus", "dcCurrent"}, []string{"electrical", "dc", "12v", "current", "value"}, []string{"electrical", "dc", "12v", "current"}, []string{"electrical", "loads", "12v", "current", "value"}, []string{"electrical", "loads", "12v", "current"})
-	if dc12Current >= 0 {
+	if dc12Current, ok := firstNumber(t, "electrical.venus.dcCurrent", "electrical.dc.12v.current", "electrical.loads.12v.current"); ok && dc12Current >= 0 {
 		state.DC12VCurrentA = roundTo1(dc12Current)
 	} else if state.DC12VPowerW >= 0 && batteryVoltage > 0 {
 		state.DC12VCurrentA = roundTo1(state.DC12VPowerW / batteryVoltage)
 	}
 
-	dc24Voltage := lookupFirstNumber(payload, []string{"electrical", "dc", "24v", "voltage", "value"}, []string{"electrical", "dc", "24v", "voltage"}, []string{"electrical", "batteries", "starter", "voltage", "value"}, []string{"electrical", "batteries", "starter", "voltage"})
-	if dc24Voltage >= 0 {
+	if dc24Voltage, ok := firstNumber(t, "electrical.dc.24v.voltage", "electrical.batteries.starter.voltage"); ok && dc24Voltage >= 0 {
 		state.DC24VVoltageV = roundTo1(dc24Voltage)
 	} else if batteryVoltage >= 0 {
 		state.DC24VVoltageV = roundTo1(batteryVoltage)
 	}
 
-	acLoads := lookupFirstNumber(payload, []string{"electrical", "ac", "loads", "total", "power", "value"}, []string{"electrical", "ac", "loads", "total", "power"}, []string{"electrical", "ac", "loads", "power", "value"}, []string{"electrical", "ac", "loads", "power"})
-	if acLoads >= 0 {
+	if acLoads, ok := firstNumber(t, "electrical.ac.loads.total.power", "electrical.ac.loads.power"); ok && acLoads >= 0 {
 		state.ACLoadsW = roundTo1(acLoads)
 	} else if state.ACOutputW >= 0 {
 		state.ACLoadsW = state.ACOutputW
 	}
 
-	generatorPower := lookupFirstNumber(payload,
-		[]string{"electrical", "ac", "1", "phase", "A", "realPower", "value"},
-		[]string{"electrical", "ac", "1", "phaseA", "realPower", "value"},
-		[]string{"electrical", "ac", "1", "realPower", "value"},
-	)
-	if generatorPower >= 0 {
+	if generatorPower, ok := firstLeafNumber(t,
+		"electrical.ac.1.phase.A.realPower",
+		"electrical.ac.1.phaseA.realPower",
+		"electrical.ac.1.realPower",
+	); ok && generatorPower >= 0 {
 		state.GeneratorRealPowerW = roundTo1(generatorPower)
 	}
 
 	// Alternators — read port (index 0) and starboard (index 1) separately.
-	state.Alternator0 = readAlternatorInstance(payload, "0")
-	state.Alternator1 = readAlternatorInstance(payload, "1")
-	state.Charger0 = readChargerInstance(payload, "0")
+	state.Alternator0 = readAlternatorInstance(t, "0")
+	state.Alternator1 = readAlternatorInstance(t, "1")
+	state.Charger0 = readChargerInstance(t, "0")
 
-	return state, nil
+	return state
 }
 
 func fetchSignalKSolarState() (solarStateData, error) {
@@ -1640,12 +597,15 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		Trend24hTotal: []solarTrendPoint{},
 	}
 
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return state, err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return state, errSignalKNoSelf
 	}
+	return solarStateFromTelemetry(t, state), nil
+}
 
-	datetimeString := firstNonEmptyString(lookupString(payload, "timestamp"), lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"))
+func solarStateFromTelemetry(t telemetryReader, state solarStateData) solarStateData {
+	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -1653,14 +613,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	solarMap := lookupAnyMap(payload, "electrical", "solar")
-	if solarMap != nil {
-		ids := make([]string, 0, len(solarMap))
-		for id := range solarMap {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-
+	if ids := t.Children("electrical.solar"); len(ids) > 0 {
 		sumCurrentW := 0.0
 		foundCurrent := false
 		sumTodayKWh := 0.0
@@ -1669,12 +622,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		foundYesterday := false
 
 		for i, id := range ids {
-			entry, ok := solarMap[id].(map[string]any)
-			if !ok {
-				continue
-			}
-
-			controller := readSolarController(entry, id, i, state.Datetime)
+			controller := readSolarController(t, "electrical.solar."+id, id, i, state.Datetime)
 			state.Controllers = append(state.Controllers, controller)
 
 			if controller.CurrentW >= 0 {
@@ -1711,36 +659,24 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	venusCurrent := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "totalPanelPower", "value"},
-		[]string{"electrical", "venus", "totalPanelPower"},
-	)
-	if venusCurrent >= 0 {
-		state.CurrentW = roundTo1(venusCurrent)
+	if v, ok := t.Number("electrical.venus.totalPanelPower"); ok && v.Value >= 0 {
+		state.CurrentW = roundTo1(v.Value)
 	}
 
-	venusTodayKWh := joulesToKWh(lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "yieldToday", "value"},
-		[]string{"electrical", "venus", "yieldToday"},
-	))
-	if venusTodayKWh >= 0 {
-		state.TodayKWh = roundTo3(venusTodayKWh)
+	if v, ok := t.Number("electrical.venus.yieldToday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			state.TodayKWh = roundTo3(kwh)
+		}
 	}
 
-	venusYesterdayKWh := joulesToKWh(lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "yieldYesterday", "value"},
-		[]string{"electrical", "venus", "yieldYesterday"},
-	))
-	if venusYesterdayKWh >= 0 {
-		state.YesterdayKWh = roundTo3(venusYesterdayKWh)
+	if v, ok := t.Number("electrical.venus.yieldYesterday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			state.YesterdayKWh = roundTo3(kwh)
+		}
 	}
 
-	venusPeakW := lookupFirstNumber(payload,
-		[]string{"electrical", "venus", "maxPanelPowerToday", "value"},
-		[]string{"electrical", "venus", "maxPanelPowerToday"},
-	)
-	if venusPeakW >= 0 {
-		state.PeakTodayW = roundTo1(venusPeakW)
+	if v, ok := t.Number("electrical.venus.maxPanelPowerToday"); ok && v.Value >= 0 {
+		state.PeakTodayW = roundTo1(v.Value)
 	}
 
 	if state.CurrentW > 0 {
@@ -1751,10 +687,10 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		}
 	}
 
-	return state, nil
+	return state
 }
 
-func readSolarController(entry map[string]any, id string, index int, sampleTime time.Time) solarControllerData {
+func readSolarController(t telemetryReader, prefix string, id string, index int, sampleTime time.Time) solarControllerData {
 	controller := solarControllerData{
 		ID:            id,
 		Label:         defaultSolarControllerLabel(index, id),
@@ -1765,52 +701,30 @@ func readSolarController(entry map[string]any, id string, index int, sampleTime 
 		Contribution:  -1,
 	}
 
-	powerW := lookupFirstNumber(entry,
-		[]string{"panelPower", "value"},
-		[]string{"panelPower"},
-		[]string{"power", "value"},
-		[]string{"power"},
-	)
-	if powerW >= 0 {
+	if powerW, ok := firstNumber(t, prefix+".panelPower", prefix+".power"); ok && powerW >= 0 {
 		controller.CurrentW = roundTo1(powerW)
 	}
 
-	todayKWh := joulesToKWh(lookupFirstNumber(entry,
-		[]string{"yieldToday", "value"},
-		[]string{"yieldToday"},
-	))
-	if todayKWh >= 0 {
-		controller.TodayKWh = roundTo3(todayKWh)
+	if v, ok := t.Number(prefix + ".yieldToday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			controller.TodayKWh = roundTo3(kwh)
+		}
 	}
 
-	yesterdayKWh := joulesToKWh(lookupFirstNumber(entry,
-		[]string{"yieldYesterday", "value"},
-		[]string{"yieldYesterday"},
-	))
-	if yesterdayKWh >= 0 {
-		controller.YesterdayKWh = roundTo3(yesterdayKWh)
+	if v, ok := t.Number(prefix + ".yieldYesterday"); ok {
+		if kwh := joulesToKWh(v.Value); kwh >= 0 {
+			controller.YesterdayKWh = roundTo3(kwh)
+		}
 	}
 
-	controller.Mode = strings.TrimSpace(firstNonEmptyString(
-		lookupString(entry, "chargingMode", "value"),
-		lookupString(entry, "chargingMode"),
-		lookupString(entry, "state", "value"),
-		lookupString(entry, "state"),
-		lookupString(entry, "mode", "value"),
-		lookupString(entry, "mode"),
-	))
+	controller.Mode = strings.TrimSpace(firstString(t, prefix+".chargingMode", prefix+".state", prefix+".mode"))
 
-	controller.Error = strings.TrimSpace(firstNonEmptyString(
-		lookupString(entry, "error", "value"),
-		lookupString(entry, "error"),
-		lookupString(entry, "alarm", "value"),
-		lookupString(entry, "alarm"),
-	))
+	controller.Error = strings.TrimSpace(firstString(t, prefix+".error", prefix+".alarm"))
 
 	timestamp := firstNonEmptyString(
-		lookupString(entry, "panelPower", "timestamp"),
-		lookupString(entry, "yieldToday", "timestamp"),
-		lookupString(entry, "timestamp"),
+		declaredTimestamp(t, prefix+".panelPower"),
+		declaredTimestamp(t, prefix+".yieldToday"),
+		declaredTimestamp(t, prefix),
 	)
 	if timestamp != "" {
 		parsed, err := time.Parse(time.RFC3339, timestamp)
@@ -1863,83 +777,168 @@ func roundTo3(value float64) float64 {
 	return math.Round(value*1000) / 1000
 }
 
-func readAlternatorInstance(payload map[string]any, index string) alternatorInstanceData {
+func readAlternatorInstance(t telemetryReader, index string) alternatorInstanceData {
 	inst := alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1}
+	prefix := "electrical.alternator." + index
 
-	current := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "current", "value"},
-		[]string{"electrical", "alternator", index, "current"},
-	)
-	if current >= 0 {
-		inst.CurrentA = roundTo1(current)
+	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {
+		inst.CurrentA = roundTo1(v.Value)
 	}
 
-	voltage := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "voltage", "value"},
-		[]string{"electrical", "alternator", index, "voltage"},
-	)
-	if voltage >= 0 {
-		inst.VoltageV = roundTo1(voltage)
+	if v, ok := t.Number(prefix + ".voltage"); ok && v.Value >= 0 {
+		inst.VoltageV = roundTo1(v.Value)
 	}
 
-	power := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "power", "value"},
-		[]string{"electrical", "alternator", index, "power"},
-	)
-	if power == -1 && inst.CurrentA >= 0 && inst.VoltageV > 0 {
-		power = roundTo1(inst.CurrentA * inst.VoltageV)
+	power, powerOK := 0.0, false
+	if v, ok := t.Number(prefix + ".power"); ok {
+		power, powerOK = v.Value, true
+	} else if inst.CurrentA >= 0 && inst.VoltageV > 0 {
+		power, powerOK = roundTo1(inst.CurrentA*inst.VoltageV), true
 	}
-	if power >= 0 {
+	if powerOK && power >= 0 {
 		inst.PowerW = roundTo1(power)
 	}
 
-	tempK := lookupFirstNumber(payload,
-		[]string{"electrical", "alternator", index, "temperature", "value"},
-		[]string{"electrical", "alternator", index, "temperature"},
-	)
-	if tempK >= 0 {
-		inst.TempC = roundTo1(tempK - 273.15)
+	if v, ok := t.Number(prefix + ".temperature"); ok && v.Value >= 0 {
+		inst.TempC = roundTo1(v.Value - 273.15)
 	}
 
 	return inst
 }
 
-func readChargerInstance(payload map[string]any, index string) chargerInstanceData {
+func readChargerInstance(t telemetryReader, index string) chargerInstanceData {
 	inst := chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}
+	prefix := "electrical.chargers." + index
 
-	current := lookupFirstNumber(payload,
-		[]string{"electrical", "chargers", index, "current", "value"},
-		[]string{"electrical", "chargers", index, "current"},
-	)
-	if current >= 0 {
-		inst.CurrentA = roundTo1(current)
+	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {
+		inst.CurrentA = roundTo1(v.Value)
 	}
 
-	acIn1Current := lookupFirstNumber(payload,
-		[]string{"electrical", "chargers", index, "acin", "1", "current", "value"},
-		[]string{"electrical", "chargers", index, "acin", "1", "current"},
-	)
-	if acIn1Current >= 0 {
-		inst.ACIn1CurrentA = roundTo1(acIn1Current)
+	if v, ok := t.Number(prefix + ".acin.1.current"); ok && v.Value >= 0 {
+		inst.ACIn1CurrentA = roundTo1(v.Value)
 	}
 
-	chargingMode := strings.TrimSpace(firstNonEmptyString(
-		lookupString(payload, "electrical", "chargers", index, "chargingMode", "value"),
-		lookupString(payload, "electrical", "chargers", index, "chargingMode"),
-	))
-	if chargingMode != "" {
+	if chargingMode := strings.TrimSpace(firstString(t, prefix+".chargingMode")); chargingMode != "" {
 		inst.ChargingMode = chargingMode
 	}
 
-	errorValue := strings.TrimSpace(firstNonEmptyString(
-		lookupString(payload, "electrical", "chargers", index, "error", "value"),
-		lookupString(payload, "electrical", "chargers", index, "error"),
-	))
-	if errorValue != "" {
+	if errorValue := strings.TrimSpace(firstString(t, prefix+".error")); errorValue != "" {
 		inst.Error = errorValue
 	}
 
 	return inst
+}
+
+// firstNumber reads the first of paths that holds a number.
+func firstNumber(t telemetryReader, paths ...string) (float64, bool) {
+	for _, path := range paths {
+		if v, ok := t.Number(path); ok {
+			return v.Value, true
+		}
+	}
+	return 0, false
+}
+
+// firstString returns the first non-empty string among paths, "" if none.
+func firstString(t telemetryReader, paths ...string) string {
+	for _, path := range paths {
+		if s, ok := t.String(path); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// leafNumber reads the number held by the leaf at exactly path - Sample's
+// form, for the readers that never accepted a bare value there.
+func leafNumber(t telemetryReader, path string) (float64, bool) {
+	sample := t.Sample(path)
+	if !sample.Present {
+		return 0, false
+	}
+	return numericTelemetryValue(sample.Value)
+}
+
+func firstLeafNumber(t telemetryReader, paths ...string) (float64, bool) {
+	for _, path := range paths {
+		if v, ok := leafNumber(t, path); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// leafNumberFromAnyChild reads suffix under the first child of parent, in
+// sorted order, that has it.
+func leafNumberFromAnyChild(t telemetryReader, parent, suffix string) (float64, bool) {
+	for _, child := range t.Children(parent) {
+		if v, ok := leafNumber(t, parent+"."+child+"."+suffix); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// sumLeafNumberOverChildren sums suffix across every child of parent that
+// has it; ok is false when none does.
+func sumLeafNumberOverChildren(t telemetryReader, parent, suffix string) (float64, bool) {
+	sum, found := 0.0, false
+	for _, child := range t.Children(parent) {
+		if v, ok := leafNumber(t, parent+"."+child+"."+suffix); ok {
+			sum += v
+			found = true
+		}
+	}
+	return sum, found
+}
+
+// lookupMainBattery names the battery with valid SOC data and the highest
+// absolute current — i.e. the actively monitored house bank — as its path,
+// "electrical.batteries.<id>".
+func lookupMainBattery(t telemetryReader) (string, bool) {
+	best, found := "", false
+	bestAbsCurrent := -1.0
+
+	for _, id := range t.Children("electrical.batteries") {
+		path := "electrical.batteries." + id
+
+		soc, ok := leafNumber(t, path+".capacity.stateOfCharge")
+		if !ok || soc < 0 || soc > 1.01 {
+			continue
+		}
+
+		current, ok := leafNumber(t, path+".current")
+		if !ok {
+			continue
+		}
+
+		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
+			bestAbsCurrent = absCurrent
+			best, found = path, true
+		}
+	}
+
+	return best, found
+}
+
+// declaredTimestamp is the source timestamp the node at path declares on
+// itself, "" when it declares none. The wind, engine and solar readers judge
+// recency by one named leaf's own clock, in a set order, rather than by the
+// newest anywhere beneath it (Timestamp).
+func declaredTimestamp(t telemetryReader, path string) string {
+	s, _ := t.String(path + ".timestamp")
+	return s
+}
+
+// subtreeAgeSeconds is how long before ref the newest source timestamp at or
+// under path was written, to one decimal, or -1 when there is none - the
+// last_update_age_s the tiles still read.
+func subtreeAgeSeconds(t telemetryReader, path string, ref time.Time) float64 {
+	stamp, ok := t.Timestamp(path)
+	if !ok {
+		return -1
+	}
+	return roundTo1(clampAge(ref.Sub(stamp)).Seconds())
 }
 
 // nearbyVesselMaxAge drops AIS contacts whose position has not been refreshed
@@ -2282,13 +1281,16 @@ func fetchSignalKVesselNameMap() (map[string]string, error) {
 }
 
 func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return nil, time.Now().UTC(), err
+	t := globalSignalKSnapshot.selfTelemetry()
+	if !t.HasSelf() {
+		return nil, time.Now().UTC(), errSignalKNoSelf
 	}
+	tanks, datetime := tanksFromTelemetry(t, labelOverrides, time.Now().UTC())
+	return tanks, datetime, nil
+}
 
-	datetime := time.Now().UTC()
-	datetimeString := firstNonEmptyString(lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"), lookupString(payload, "timestamp"))
+func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, datetime time.Time) ([]tankLevelData, time.Time) {
+	datetimeString := firstString(t, "navigation.datetime", "timestamp")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
 		if parseErr == nil {
@@ -2296,9 +1298,9 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 		}
 	}
 
-	tanksMap := lookupAnyMap(payload, "tanks")
-	if tanksMap == nil {
-		return []tankLevelData{}, datetime, nil
+	present := t.Children("tanks")
+	if len(present) == 0 {
+		return []tankLevelData{}, datetime
 	}
 
 	categoryOrder := []string{"freshWater", "fuel", "blackWater", "greyWater", "liveWell", "lubrication", "water", "wasteWater"}
@@ -2306,14 +1308,18 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 	for _, category := range categoryOrder {
 		knownCategory[category] = struct{}{}
 	}
+	isPresent := map[string]bool{}
+	for _, category := range present {
+		isPresent[category] = true
+	}
 
-	orderedCategories := make([]string, 0, len(tanksMap))
+	orderedCategories := make([]string, 0, len(present))
 	for _, category := range categoryOrder {
-		if _, ok := tanksMap[category]; ok {
+		if isPresent[category] {
 			orderedCategories = append(orderedCategories, category)
 		}
 	}
-	for category := range tanksMap {
+	for _, category := range present {
 		if _, ok := knownCategory[category]; ok {
 			continue
 		}
@@ -2322,34 +1328,15 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 
 	tanks := make([]tankLevelData, 0)
 	for _, category := range orderedCategories {
-		categoryRaw, ok := tanksMap[category]
-		if !ok {
-			continue
-		}
+		for _, entryID := range t.Children("tanks." + category) {
+			entry := "tanks." + category + "." + entryID
 
-		categoryEntries, ok := categoryRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		entryIDs := make([]string, 0, len(categoryEntries))
-		for entryID := range categoryEntries {
-			entryIDs = append(entryIDs, entryID)
-		}
-		sort.Strings(entryIDs)
-
-		for _, entryID := range entryIDs {
-			rawEntry := categoryEntries[entryID]
-			entry, ok := rawEntry.(map[string]any)
-			if !ok {
+			reading, ok := t.Number(entry + ".currentLevel")
+			if !ok || reading.Value < 0 {
 				continue
 			}
 
-			level := lookupFirstNumber(entry, []string{"currentLevel", "value"}, []string{"currentLevel"})
-			if level < 0 {
-				continue
-			}
-
+			level := reading.Value
 			if level <= 1 {
 				level *= 100
 			}
@@ -2363,13 +1350,13 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 			// Mirrors readSolarController (ADR 0068): each tank's age comes
 			// from its own subtree, so one dead sender does not condemn
 			// every tank on the boat.
-			lastUpdateAge := freshestTimestampAge(entry, datetime)
+			lastUpdateAge := subtreeAgeSeconds(t, entry, datetime)
 
 			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level, LastUpdateAge: lastUpdateAge})
 		}
 	}
 
-	return tanks, datetime, nil
+	return tanks, datetime
 }
 
 func loadTankLabelOverrides(settingsPath string) map[string]string {
@@ -2488,38 +1475,6 @@ func lookupNumber(payload map[string]any, keys ...string) float64 {
 	}
 }
 
-// lookupNumberOK is lookupNumber for signed values, where -1 is a real reading.
-func lookupNumberOK(payload map[string]any, keys ...string) (float64, bool) {
-	var current any = payload
-	for _, key := range keys {
-		asMap, ok := current.(map[string]any)
-		if !ok {
-			return 0, false
-		}
-		next, ok := asMap[key]
-		if !ok {
-			return 0, false
-		}
-		current = next
-	}
-	switch v := current.(type) {
-	case float64:
-		return v, true
-	case int:
-		return float64(v), true
-	}
-	return 0, false
-}
-
-func lookupFirstNumberOK(payload map[string]any, paths ...[]string) (float64, bool) {
-	for _, path := range paths {
-		if v, ok := lookupNumberOK(payload, path...); ok {
-			return v, true
-		}
-	}
-	return 0, false
-}
-
 func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
 	var current any = payload
 	for _, key := range keys {
@@ -2542,148 +1497,8 @@ func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
 	return false, false
 }
 
-func lookupFirstNumber(payload map[string]any, paths ...[]string) float64 {
-	for _, path := range paths {
-		value := lookupNumber(payload, path...)
-		if value != -1 {
-			return value
-		}
-	}
-
-	return -1
-}
-
-func lookupNumberFromAnyChild(payload map[string]any, prefix []string, suffix []string) float64 {
-	parent := lookupAnyMap(payload, prefix...)
-	if parent == nil {
-		return -1
-	}
-
-	for _, rawChild := range parent {
-		child, ok := rawChild.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		value := lookupNumber(child, suffix...)
-		if value != -1 {
-			return value
-		}
-	}
-
-	return -1
-}
-
-// sumNumberFromAllChildren sums a numeric field across all children of a map node.
-// Returns -1 if no children have the field.
-func sumNumberFromAllChildren(payload map[string]any, prefix []string, suffix []string) float64 {
-	parent := lookupAnyMap(payload, prefix...)
-	if parent == nil {
-		return -1
-	}
-
-	sum := 0.0
-	found := false
-	for _, rawChild := range parent {
-		child, ok := rawChild.(map[string]any)
-		if !ok {
-			continue
-		}
-		value := lookupNumber(child, suffix...)
-		if value != -1 {
-			sum += value
-			found = true
-		}
-	}
-
-	if !found {
-		return -1
-	}
-	return sum
-}
-
-// lookupMainBattery returns the battery sub-object with valid SOC data and the
-// highest absolute current — i.e. the actively monitored house bank.
-func lookupMainBattery(payload map[string]any) map[string]any {
-	batteries := lookupAnyMap(payload, "electrical", "batteries")
-	if batteries == nil {
-		return nil
-	}
-
-	var best map[string]any
-	bestAbsCurrent := -1.0
-
-	for _, rawBattery := range batteries {
-		battery, ok := rawBattery.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		soc := lookupNumber(battery, "capacity", "stateOfCharge", "value")
-		if soc == -1 || soc < 0 || soc > 1.01 {
-			continue
-		}
-
-		current := lookupNumber(battery, "current", "value")
-		if current == -1 {
-			continue
-		}
-
-		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
-			bestAbsCurrent = absCurrent
-			best = battery
-		}
-	}
-
-	return best
-}
-
-// freshestTimestampAge reports how many seconds before sampleTime the most
-// recent RFC3339 "timestamp" anywhere in the subtree was written.
-//
-// It returns -1 when the subtree carries no usable timestamp at all. That is
-// deliberately distinct from 0: an age we cannot determine must never be
-// presented as freshly measured.
-func freshestTimestampAge(node any, sampleTime time.Time) float64 {
-	newest := time.Time{}
-
-	var walk func(any)
-	walk = func(current any) {
-		entry, ok := current.(map[string]any)
-		if !ok {
-			return
-		}
-		for key, child := range entry {
-			if key == "timestamp" {
-				raw, isString := child.(string)
-				if !isString {
-					continue
-				}
-				parsed, err := time.Parse(time.RFC3339, raw)
-				if err == nil && parsed.After(newest) {
-					newest = parsed.UTC()
-				}
-				continue
-			}
-			walk(child)
-		}
-	}
-	walk(node)
-
-	if newest.IsZero() {
-		return -1
-	}
-
-	age := sampleTime.Sub(newest).Seconds()
-	if age < 0 {
-		// Source clock is marginally ahead of the vessel clock; it is current.
-		return 0
-	}
-	return roundTo1(age)
-}
-
 // freshestAge reduces several last_update_age_s values (each -1 for
-// "unknown", per freshestTimestampAge) down to the one a tile should show:
+// "unknown", per subtreeAgeSeconds) down to the one a tile should show:
 // the freshest (minimum) of whichever inputs are actually known. This is
 // the same "one dead controller among four does not condemn the total"
 // reduction ADR 0068 established for solarStateData.LastUpdateAge across its
@@ -2910,156 +1725,6 @@ func loadSignalKSettings(settingsPath string) (string, int, error) {
 	return address, port, nil
 }
 
-func writeSettings(settingsPath string, settings map[string]any) error {
-
-	content, err := yaml.Marshal(settings)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(settingsPath, content, 0o644); err != nil {
-		return err
-	}
-
-	// Cached bytes-and-mtime alone would not reliably catch a rewrite that
-	// lands on the same size within the filesystem's mtime resolution, so
-	// the write path forces a miss explicitly rather than trusting that.
-	invalidateSettingsCache(settingsPath)
-	return nil
-}
-
-// readSettings reads and YAML-parses settingsPath, serving a deep copy of a
-// cached parse (settings_cache.go) when the file's mtime and size have not
-// changed since it was last parsed. Stat/read errors surface exactly as
-// they did before caching existed: a missing file returns an empty map with
-// no error (a fresh install's normal state), any other stat or read error
-// returns nil and that error.
-func readSettings(settingsPath string) (map[string]any, error) {
-	info, err := os.Stat(settingsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			invalidateSettingsCache(settingsPath)
-			return map[string]any{}, nil
-		}
-		return nil, err
-	}
-
-	if cached, ok := cachedSettingsFor(settingsPath, info); ok {
-		return cached, nil
-	}
-
-	content, err := os.ReadFile(settingsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
-
-		return nil, err
-	}
-
-	settings := map[string]any{}
-	if len(content) > 0 {
-		if err := yaml.Unmarshal(content, &settings); err != nil {
-			return nil, err
-		}
-	}
-
-	// Cache against the Stat result taken before the read, not a fresh
-	// stat after: if the file changed in between, the next call's own Stat
-	// will simply miss this entry and re-parse, which is correct either way.
-	storeSettingsCache(settingsPath, info, settings)
-	return deepCopyMap(settings), nil
-}
-
-func coercePort(value any) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case string:
-		var parsed int
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
-			return parsed
-		}
-	}
-
-	return 0
-}
-
-func coerceString(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	}
-
-	return ""
-}
-
-func coerceFloat(value any) float64 {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed)
-	case int64:
-		return float64(typed)
-	case float64:
-		return typed
-	case string:
-		var parsed float64
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%f", &parsed); err == nil {
-			return parsed
-		}
-	}
-
-	return -1
-}
-
-// loadSettingString retrieves a string value from nested settings by path (e.g., []string{"boat", "name"}).
-// Returns empty string on error or missing path.
-func loadSettingString(settingsPath string, keyPath []string) string {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return ""
-	}
-
-	value := any(settings)
-	for _, key := range keyPath {
-		m, ok := value.(map[string]any)
-		if !ok {
-			return ""
-		}
-		value = m[key]
-	}
-
-	return strings.TrimSpace(coerceString(value))
-}
-
-// loadSettingFloat retrieves a float64 value from nested settings by path.
-// Returns -1 on error or missing path.
-func loadSettingFloat(settingsPath string, keyPath []string) float64 {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return -1
-	}
-
-	value := any(settings)
-	for _, key := range keyPath {
-		m, ok := value.(map[string]any)
-		if !ok {
-			return -1
-		}
-		value = m[key]
-	}
-
-	return coerceFloat(value)
-}
-
 func normalizeDegrees(value float64) float64 {
 	normalized := math.Mod(value, 360)
 	if normalized < 0 {
@@ -3132,11 +1797,7 @@ func loadBoatVesselPrefix(settingsPath string) string {
 }
 
 func fetchSignalKSelfName() string {
-	payload, err := signalKSelfPayload()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
+	return strings.TrimSpace(firstString(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()), "name", "design.name"))
 }
 
 func matchesExcludedName(candidate string, excludedNames []string) bool {
@@ -3168,19 +1829,5 @@ func signalkRoutes() []apiRoute {
 		// any other write. Gated admin, alongside the rest of the settings
 		// workflow it belongs to.
 		{http.MethodPost, "/api/signalk/discover", tierAdmin, discoverSignalKHandler},
-	}
-}
-
-// settingsRoutes returns the /api routes for the admin settings document.
-// Each row carries its own auth tier (docs/adr/0177).
-func settingsRoutes() []apiRoute {
-	return []apiRoute{
-		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
-		{http.MethodPost, "/api/settings", tierAdmin, updateSettingsHandler},
-
-		// Settings -> Vessel (anomaly detection): candidates is a pure read
-		// of live instances for the picker. The vessel.* block itself
-		// loads and saves through /api/settings.
-		{http.MethodGet, "/api/vessel/candidates", tierAdmin, getVesselCandidatesHandler},
 	}
 }

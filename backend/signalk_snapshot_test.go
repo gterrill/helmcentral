@@ -1445,7 +1445,7 @@ func TestApplyDeltaDropsRadarTargetNodesFromTheSnapshot(t *testing.T) {
 // TestApplyDeltaRejectsExcessivePathNesting reproduces K-1: an unbounded
 // segment count in a delta's path let applyDelta build an arbitrarily deep
 // nested tree, which every recursive walker over the snapshot
-// (deepCopyMap/deepCopyValue here, freshestTimestampAge and
+// (deepCopyMap/deepCopyValue here, newestTimestamp and
 // flattenNotificationLeaves elsewhere) would later blow Go's goroutine
 // stack walking -- a FATAL runtime error recover() cannot catch. The fix
 // rejects the value outright at ingestion, before the deep tree is ever

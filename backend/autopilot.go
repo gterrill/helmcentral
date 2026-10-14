@@ -335,22 +335,24 @@ const autopilotStaleAfter = 5 * time.Second
 // the stream at all means no autopilot is present, and the payload says so
 // explicitly rather than reporting a synthesized disengaged pilot.
 func buildAutopilotPayload() map[string]any {
-	tree := globalSignalKSnapshot.selfTree()
-	if tree == nil {
-		return map[string]any{"present": false}
-	}
-	if _, ok := lookupAnyValue(tree, "steering", "autopilot", "engaged", "value"); !ok {
+	telemetry := globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC())
+	engagedLeaf := telemetry.Sample("steering.autopilot.engaged")
+	if !engagedLeaf.Present {
 		return map[string]any{"present": false}
 	}
 
-	engaged, _ := lookupBool(tree, "steering", "autopilot", "engaged", "value")
-	state := lookupString(tree, "steering", "autopilot", "state", "value")
-	mode := lookupString(tree, "steering", "autopilot", "mode", "value")
-	target := lookupNumber(tree, "steering", "autopilot", "target", "value")
+	engaged, _ := boolTelemetryValue(engagedLeaf.Value)
+	state, _ := telemetry.Sample("steering.autopilot.state").Value.(string)
+	mode, _ := telemetry.Sample("steering.autopilot.mode").Value.(string)
+	// The tile still reads -1 as "no target" on the wire.
+	target := -1.0
+	if v, ok := leafNumber(telemetry, "steering.autopilot.target"); ok {
+		target = v
+	}
 
 	availableActions := []string{}
-	if raw, ok := lookupAnyValue(tree, "steering", "autopilot", "availableActions", "value"); ok {
-		if list, ok := raw.([]any); ok {
+	if raw := telemetry.Sample("steering.autopilot.availableActions"); raw.Present {
+		if list, ok := raw.Value.([]any); ok {
 			for _, item := range list {
 				if id, ok := item.(string); ok {
 					availableActions = append(availableActions, id)

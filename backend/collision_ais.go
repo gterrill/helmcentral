@@ -250,43 +250,39 @@ func positionFromNode(node map[string]any) (lat, lon float64, ok bool) {
 	return lat, lon, true
 }
 
+// positionLeaf reads navigation.position in the leaf form the delta stream
+// builds, {"value": {"latitude", "longitude"}}, the same way positionFromNode
+// reads a target's.
+func positionLeaf(t telemetryReader) (lat, lon float64, ok bool) {
+	sample := t.Sample("navigation.position")
+	if !sample.Present {
+		return 0, 0, false
+	}
+	return positionFromNode(map[string]any{"value": sample.Value})
+}
+
 // readOwnEncounterFacts reads our own heading, SOG, navigation state,
-// apparent wind and position off the self tree, through the same nodeAt leaf
-// reader every other alarm path in this package uses.
+// apparent wind and position through a live telemetry view: one leaf copied
+// per read, never the whole tree, since this runs on every activeAlarms()
+// call (TestSignalKCollisionNotificationsEncounterLineCostsNoWholeTreeCopy).
 func readOwnEncounterFacts(snapshot *signalKSnapshot) ownEncounterFacts {
 	var facts ownEncounterFacts
+	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
 
-	if node := snapshot.nodeAt("navigation.headingTrue"); node != nil {
-		if v, ok := node["value"].(float64); ok {
-			facts.inputs.OwnHeadingDeg = v * 180 / math.Pi
-			facts.inputs.OwnHeadingOK = true
-		}
+	if v, ok := leafNumber(telemetry, "navigation.headingTrue"); ok {
+		facts.inputs.OwnHeadingDeg = v * 180 / math.Pi
+		facts.inputs.OwnHeadingOK = true
 	}
-	if node := snapshot.nodeAt("navigation.speedOverGround"); node != nil {
-		if v, ok := node["value"].(float64); ok {
-			facts.inputs.OwnSOGKn = v * metersPerSecondToKnots
-			facts.inputs.OwnSOGOK = true
-		}
+	if v, ok := leafNumber(telemetry, "navigation.speedOverGround"); ok {
+		facts.inputs.OwnSOGKn = v * metersPerSecondToKnots
+		facts.inputs.OwnSOGOK = true
 	}
-	// Not vesselNavigationState (collision_profile.go): that helper reads
-	// selfTree(), a whole-tree deep copy, which is fine for the collision
-	// profile syncer's own slow-timer/transition cadence but not for a path
-	// evaluated on every activeAlarms() call
-	// (TestSignalKCollisionNotificationsEncounterLineCostsNoWholeTreeCopy).
-	if node := snapshot.nodeAt("navigation.state"); node != nil {
-		if v, ok := node["value"].(string); ok {
-			facts.inputs.OwnState = v
-		}
+	facts.inputs.OwnState = vesselNavigationState(snapshot)
+	if v, ok := leafNumber(telemetry, "environment.wind.angleApparent"); ok {
+		facts.inputs.OwnApparentWindAngleDeg = normalizeSignedDegrees(v * 180 / math.Pi)
+		facts.inputs.OwnApparentWindAngleOK = true
 	}
-	if node := snapshot.nodeAt("environment.wind.angleApparent"); node != nil {
-		if v, ok := node["value"].(float64); ok {
-			facts.inputs.OwnApparentWindAngleDeg = normalizeSignedDegrees(v * 180 / math.Pi)
-			facts.inputs.OwnApparentWindAngleOK = true
-		}
-	}
-	if node := snapshot.nodeAt("navigation.position"); node != nil {
-		facts.lat, facts.lon, facts.positionOK = positionFromNode(node)
-	}
+	facts.lat, facts.lon, facts.positionOK = positionLeaf(telemetry)
 
 	return facts
 }
