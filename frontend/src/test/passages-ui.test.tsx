@@ -196,3 +196,35 @@ describe('PassageEditPanel', () => {
     await waitFor(() => expect(props.onHidden).toHaveBeenCalled())
   })
 })
+
+describe('PassageEditPanel with unsaved edits', () => {
+  const detail: PassageDetail = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [] }
+  const props = {
+    passage: detail, cruises: [], olderNeighbour: passage('p0'), newerNeighbour: passage('p2'),
+    cursorRef: { current: { id: 'p1', at: 1000 } }, canWrite: true,
+    onChanged: vi.fn(), onMerged: vi.fn(), onHidden: vi.fn(),
+  }
+
+  it('keeps typed notes when the server record changes underneath', () => {
+    const { rerender } = render(<PassageEditPanel {...props} />)
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Rough crossing' } })
+    rerender(<PassageEditPanel {...props} passage={{ ...detail, to_name: '' }} />)
+    expect(screen.getByLabelText('Notes')).toHaveValue('Rough crossing')
+    expect(screen.getByLabelText('To')).toHaveValue('')
+  })
+
+  it('takes the new server values when nothing has been edited', () => {
+    const { rerender } = render(<PassageEditPanel {...props} />)
+    rerender(<PassageEditPanel {...props} passage={{ ...detail, to_name: 'Mackay' }} />)
+    expect(screen.getByLabelText('To')).toHaveValue('Mackay')
+  })
+
+  it('refuses split, trim and merge until the edits are saved, and says why', () => {
+    render(<PassageEditPanel {...props} />)
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'x' } })
+    for (const name of [/Split here/, /Trim start/, /Trim end/, /Merge with previous/, /Merge with next/]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    expect(screen.getByText('Save your changes before splitting, trimming or merging.')).toBeInTheDocument()
+  })
+})

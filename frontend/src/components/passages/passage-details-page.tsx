@@ -113,7 +113,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
         <DetailsLayout
           aside={
             <PassageEditPanel
-              key={`${passage.id}:${passage.title}:${passage.from_name}:${passage.to_name}:${passage.notes}`}
+              key={passage.id}
               passage={passage}
               cruises={cruises}
               olderNeighbour={index >= 0 ? list[index + 1] ?? null : null}

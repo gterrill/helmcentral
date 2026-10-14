@@ -1,5 +1,5 @@
 import { ChevronDown, EyeOff, GitMerge, Scissors } from 'lucide-react'
-import { useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { toast } from 'sonner'
 
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
@@ -43,6 +43,20 @@ export function PassageEditPanel({
   const [hideOpen, setHideOpen] = useState(false)
   const [newCruiseOpen, setNewCruiseOpen] = useState(false)
   const gate = useRef(false)
+
+  // The record can change underneath (a split clears the first half's To).
+  // Fields the operator has not touched follow it; fields they have typed in
+  // are left alone.
+  const [base, setBase] = useState({ title: passage.title, from: passage.from_name, to: passage.to_name, notes: passage.notes })
+  useEffect(() => {
+    const next = { title: passage.title, from: passage.from_name, to: passage.to_name, notes: passage.notes }
+    if (next.title === base.title && next.from === base.from && next.to === base.to && next.notes === base.notes) return
+    if (title === base.title) setTitle(next.title)
+    if (fromName === base.from) setFromName(next.from)
+    if (toName === base.to) setToName(next.to)
+    if (notes === base.notes) setNotes(next.notes)
+    setBase(next)
+  }, [passage.title, passage.from_name, passage.to_name, passage.notes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = title !== passage.title || fromName !== passage.from_name || toName !== passage.to_name || notes !== passage.notes
 
@@ -112,6 +126,7 @@ export function PassageEditPanel({
     })
 
   const disabled = !canWrite || busy
+  const editDisabled = disabled || dirty
 
   return (
     <>
@@ -143,24 +158,29 @@ export function PassageEditPanel({
         </div>
       </FormSection>
 
-      <FormSection title="Edit passage" description="Split and trim act on the point the replay is showing.">
+      <FormSection
+        title="Edit passage"
+        description={dirty
+          ? 'Save your changes before splitting, trimming or merging.'
+          : 'Split and trim act on the point the replay is showing.'}
+      >
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() =>
+          <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
             withCursor('split passage', async (at) => { await passagesApi.split(passage.id, at); onChanged() })}>
             <Scissors className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Split here
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() =>
+          <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
             withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, at, passage.end); onChanged() })}>
             Trim start to here
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() =>
+          <Button type="button" variant="outline" size="sm" disabled={editDisabled} onClick={() =>
             withCursor('trim passage', async (at) => { await passagesApi.trim(passage.id, passage.start, at); onChanged() })}>
             Trim end to here
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={disabled || !olderNeighbour} onClick={() =>
+          <Button type="button" variant="outline" size="sm" disabled={editDisabled || !olderNeighbour} onClick={() =>
             olderNeighbour && void run('merge passages', async () => {
               const merged = await passagesApi.merge(olderNeighbour.id, passage.id)
               onMerged(merged.id)
@@ -168,7 +188,7 @@ export function PassageEditPanel({
             <GitMerge className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Merge with previous
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={disabled || !newerNeighbour} onClick={() =>
+          <Button type="button" variant="outline" size="sm" disabled={editDisabled || !newerNeighbour} onClick={() =>
             newerNeighbour && void run('merge passages', async () => {
               const merged = await passagesApi.merge(passage.id, newerNeighbour.id)
               onMerged(merged.id)
