@@ -186,6 +186,32 @@ describe('IndexTable', () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
+  it('keeps the rows and notes the failure when a refresh fails over rows already loaded', () => {
+    const onRetry = vi.fn()
+    render(<IndexTable columns={columns} rows={rows} getRowId={(r: Row) => r.id} error="HTTP 502" onRetry={onRetry} />)
+    expect(screen.getByText('Generator')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent("Couldn't refresh: HTTP 502")
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it('notes the failure beside the empty slot when a filter hides every loaded row', () => {
+    render(
+      <IndexTable
+        columns={columns}
+        rows={[]}
+        loadedCount={3}
+        getRowId={(r: Row) => r.id}
+        error="HTTP 502"
+        empty={<p>No matches</p>}
+      />,
+    )
+    expect(screen.getByText('No matches')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent("Couldn't refresh: HTTP 502")
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('shows the empty slot when there are no rows and nothing is loading or errored', () => {
     render(
       <IndexTable

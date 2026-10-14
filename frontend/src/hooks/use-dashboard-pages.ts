@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
-import { readErrorMessage } from '@/lib/api-error'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export interface DashboardPage {
   id: string
@@ -56,33 +56,32 @@ export interface CreatePageInit {
   show_when?: DashboardPage['show_when']
 }
 
+const EMPTY_PAGES: DashboardPage[] = []
+
+const PAGES_KEY = ['/api/dashboard-pages'] as const
+
+// The cache holds the raw list response, so patches keep its shape.
+function patchPages(fn: (pages: DashboardPage[]) => DashboardPage[]) {
+  setQueryData<DashboardPagesListResponse>(PAGES_KEY, (prev) => ({
+    ...prev,
+    pages: fn(Array.isArray(prev?.pages) ? prev.pages : []),
+  }))
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 export function useDashboardPages() {
-  const [pages, setPages] = useState<DashboardPage[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [reordering, setReordering] = useState(false)
   const reorderPending = useRef(false)
 
-  const fetchPages = useCallback(async () => {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/dashboard-pages')
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
-      }
-      const data = (await res.json()) as DashboardPagesListResponse
-      setPages(Array.isArray(data.pages) ? data.pages : [])
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard pages')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void fetchPages()
-  }, [fetchPages])
+  const { data, isLoading, error, refetch } = useApiQuery<DashboardPage[]>({
+    queryKey: PAGES_KEY,
+    path: '/api/dashboard-pages',
+    select: (raw: DashboardPagesListResponse) => (Array.isArray(raw.pages) ? raw.pages : []),
+  })
+  const pages = data ?? EMPTY_PAGES
 
   // Object-form only (ADR 0110 §6 follow-up): App.tsx's one call site now
   // passes `{ widgets: [] }` explicitly rather than a bare array, so the
@@ -96,55 +95,45 @@ export function useDashboardPages() {
     const body = init === undefined
       ? { name, widgets: [] as DashboardLayoutItem[] }
       : { name, ...init }
-    const res = await fetch('/api/dashboard-pages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const message = await readErrorMessage(res)
-      toast.error('Could not create page', { description: message })
+    try {
+      const page = await apiRequest<DashboardPage>('/api/dashboard-pages', { method: 'POST', json: body })
+      // The server appends newly created pages after the saved navigation order.
+      patchPages((prev) => [...prev, page])
+      return page
+    } catch (err) {
+      toast.error('Could not create page', { description: messageOf(err) })
       return null
     }
-    const page = (await res.json()) as DashboardPage
-    // The server appends newly created pages after the saved navigation order.
-    setPages((prev) => [...prev, page])
-    return page
   }, [])
 
   const updatePage = useCallback(async (
     id: string,
     patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero' | 'display_id' | 'dwell_seconds' | 'show_when'>>,
   ): Promise<DashboardPage | null> => {
-    const res = await fetch(`/api/dashboard-pages/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    })
-    // Note: on failure we deliberately do NOT set the `error` state above —
-    // that's reserved for the initial page-list load failure (fetchPages).
-    // App.tsx gates the whole dashboard on `!pagesError`, so routing a save
-    // failure through it would blank the screen on something as routine as
-    // a failed drag; a toast surfaces the problem without doing that.
-    if (!res.ok) {
-      const message = await readErrorMessage(res)
-      toast.error('Could not save dashboard', { description: message })
+    // Note: on failure we deliberately do NOT surface `error` above: that's
+    // reserved for the initial page-list load failure. App.tsx gates the
+    // whole dashboard on `!pagesError`, so routing a save failure through it
+    // would blank the screen on something as routine as a failed drag; a
+    // toast surfaces the problem without doing that.
+    try {
+      const page = await apiRequest<DashboardPage>(`/api/dashboard-pages/${id}`, { method: 'PATCH', json: patch })
+      patchPages((prev) => prev.map((p) => (p.id === id ? page : p)))
+      return page
+    } catch (err) {
+      toast.error('Could not save dashboard', { description: messageOf(err) })
       return null
     }
-    const page = (await res.json()) as DashboardPage
-    setPages((prev) => prev.map((p) => (p.id === id ? page : p)))
-    return page
   }, [])
 
   const deletePage = useCallback(async (id: string): Promise<boolean> => {
-    const res = await fetch(`/api/dashboard-pages/${id}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const message = await readErrorMessage(res)
-      toast.error('Could not delete page', { description: message })
+    try {
+      await apiRequest<void>(`/api/dashboard-pages/${id}`, { method: 'DELETE' })
+      patchPages((prev) => prev.filter((p) => p.id !== id))
+      return true
+    } catch (err) {
+      toast.error('Could not delete page', { description: messageOf(err) })
       return false
     }
-    setPages((prev) => prev.filter((p) => p.id !== id))
-    return true
   }, [])
 
   const reorderPages = useCallback(async (pageIds: string[]): Promise<boolean> => {
@@ -153,19 +142,16 @@ export function useDashboardPages() {
     reorderPending.current = true
     setReordering(true)
     try {
-      const res = await fetch('/api/dashboard-pages/order', {
+      const data = await apiRequest<DashboardPagesListResponse>('/api/dashboard-pages/order', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ page_ids: pageIds }),
+        json: { page_ids: pageIds },
       })
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const data = (await res.json()) as DashboardPagesListResponse
       if (!Array.isArray(data.pages) || data.pages.length !== pageIds.length ||
           data.pages.some((page, index) => page?.id !== pageIds[index])) {
         throw new Error('Invalid page order response')
       }
       const orderedPages = data.pages
-      setPages((current) => {
+      patchPages((current) => {
         // The response is an ordering snapshot, not a refresh of page content.
         // A widget PATCH or create/delete can finish while this request is in
         // flight; don't roll back its content or resurrect a deleted page.
@@ -182,9 +168,7 @@ export function useDashboardPages() {
       return true
     } catch (err) {
       // Keep the last confirmed order and leave the dashboard visible.
-      toast.error('Could not reorder pages', {
-        description: err instanceof Error ? err.message : 'Failed to save page order',
-      })
+      toast.error('Could not reorder pages', { description: messageOf(err) })
       return false
     } finally {
       reorderPending.current = false
@@ -192,5 +176,17 @@ export function useDashboardPages() {
     }
   }, [])
 
-  return { pages, loading, error, refetch: fetchPages, createPage, updatePage, deletePage, reorderPages, reordering }
+  return {
+    pages,
+    loading: isLoading,
+    // Reported alongside the pages: a failed refresh is not hidden, and the
+    // panels that read it keep the cached pages on screen next to the notice.
+    error: error?.message ?? null,
+    refetch,
+    createPage,
+    updatePage,
+    deletePage,
+    reorderPages,
+    reordering,
+  }
 }

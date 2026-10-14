@@ -1,14 +1,16 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
 
-import { __resetDocumentCitationCacheForTests, useDocumentCitation } from '@/hooks/use-document-citation'
+import { useDocumentCitation } from '@/hooks/use-document-citation'
+import { refetchQuery } from '@/lib/api-query'
+import { stubApi, jsonResponse } from '@/test/helpers/stub-api'
 
 // Mate UI cycle: document sources as icons. One citation icon per rendered
 // link needs to know a document's title/mime/kind (for its tooltip and which
 // icon to show) and whether it still exists (an unknown/deleted id must be
 // visibly marked, not silently hidden) - both from the SAME id already
 // carried in the citation link, so this is a plain GET /api/documents/:id,
-// not a second search. The module-level cache is what keeps repeated
+// not a second search. The query store is what keeps repeated
 // citations of the same document (across one reply, or across many) from
 // each firing their own request - AGENTS.md's "no N+1 storm" concern, the
 // same shape as the backend's own per-call folderPaths cache
@@ -17,7 +19,6 @@ import { __resetDocumentCitationCacheForTests, useDocumentCitation } from '@/hoo
 describe('useDocumentCitation', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
-    __resetDocumentCitationCacheForTests()
   })
 
   it('starts loading, then resolves to the document title/mime/kind', async () => {
@@ -111,11 +112,9 @@ describe('useDocumentCitation', () => {
     expect(calls).toHaveLength(2)
   })
 
-  // The other half of the fix: only 'error' is evicted. A confirmed 404 is
-  // a real, stable answer - it must keep the "no N+1 storm" caching an
-  // 'error' no longer gets, or a citation to a genuinely deleted document
-  // would re-fetch it forever, once per mount.
-  it('still caches a confirmed not-found - only error is evicted', async () => {
+  // A confirmed 404 shows as not-found, and the next mount looks again: the
+  // store revalidates on mount, so a document restored since is picked up.
+  it('shows a confirmed not-found, and looks again on the next mount', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'document not found' }) })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -127,7 +126,7 @@ describe('useDocumentCitation', () => {
     await waitFor(() => expect(second.result.current.status).toBe('not-found'))
 
     const calls = fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes('doc-7'))
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
   })
 
   it('shares one fetch across every hook instance citing the same document id', async () => {
@@ -145,6 +144,33 @@ describe('useDocumentCitation', () => {
 
     const calls = fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes('doc-4'))
     expect(calls).toHaveLength(1)
+  })
+
+  it('keeps a resolved document ok when another reader revalidation fails', async () => {
+    let calls = 0
+    stubApi({
+      'GET /api/documents/doc-8': () => (++calls === 1
+        ? { id: 'doc-8', title: 'Manual', filename: 'm.pdf', mime: 'application/pdf', kind: 'file' }
+        : jsonResponse({ error: 'bad gateway' }, 502)),
+    })
+    const { result } = renderHook(() => useDocumentCitation('doc-8'))
+    await waitFor(() => expect(result.current.status).toBe('ok'))
+    await act(async () => { await refetchQuery(['/api/documents/doc-8'], '/api/documents/doc-8') })
+    expect(calls).toBe(2)
+    expect(result.current.status).toBe('ok')
+    expect(result.current.title).toBe('Manual')
+  })
+
+  it('does not request a document again for an icon mounted after it resolved', async () => {
+    const fetchMock = stubApi({
+      'GET /api/documents/doc-9': { id: 'doc-9', title: 'Log', filename: 'l.csv', mime: 'text/csv', kind: 'file' },
+    })
+    const first = renderHook(() => useDocumentCitation('doc-9'))
+    await waitFor(() => expect(first.result.current.status).toBe('ok'))
+    const second = renderHook(() => useDocumentCitation('doc-9'))
+    expect(second.result.current.status).toBe('ok')
+    expect(second.result.current.title).toBe('Log')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('returns idle for a null id (the broken-id sentinel case), issuing no fetch', () => {

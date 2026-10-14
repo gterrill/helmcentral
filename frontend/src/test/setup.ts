@@ -1,5 +1,7 @@
 import '@testing-library/jest-dom'
-import { beforeEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+import { resetQueryStore } from '@/lib/api-query'
+import { resetAppVersionProbe } from '@/hooks/use-app-version'
 import { setViewportWidth } from './viewport'
 
 // jsdom doesn't implement the Popover API. The real @oddbird/popover-polyfill
@@ -146,4 +148,11 @@ if (typeof HTMLCanvasElement.prototype.getContext === 'function') {
 // dashboard.
 beforeEach(() => {
   window.history.replaceState({}, '', '/')
+})
+
+// The query store is module-level (ADR 0173), so a cached response from one
+// test would otherwise answer the next test's request.
+afterEach(() => {
+  resetQueryStore()
+  resetAppVersionProbe()
 })

@@ -201,7 +201,7 @@ describe('ProviderGroup tide provider default', () => {
     screen.getByRole('button', { name: 'Settings' }).click()
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/plugins/poi/osm-overpass')
+      expect(fetchMock).toHaveBeenCalledWith('/api/plugins/poi/osm-overpass', expect.anything())
     })
   })
 })

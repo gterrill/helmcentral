@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiRequest } from '@/lib/api-query'
 
 export interface PrefetchBounds {
   west: number
@@ -15,7 +16,6 @@ export interface PrefetchProgress {
 interface PrefetchStartResponse {
   jobId?: string
   totalTiles?: number
-  error?: string
 }
 
 interface PrefetchStatusResponse {
@@ -52,41 +52,23 @@ export function useImageryPrefetch() {
       setError(null)
       setProgress(null)
 
-      let res: Response
+      let jobId: string
+      let total: number
+
+      // The server's own words reach the operator: a 400 carries "area too
+      // large: N tiles (max 8000)" in its error field.
       try {
-        res = await fetch('/api/world-imagery/prefetch', {
+        const body = await apiRequest<PrefetchStartResponse>('/api/world-imagery/prefetch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          json: {
             west: bounds.west,
             south: bounds.south,
             east: bounds.east,
             north: bounds.north,
             minZoom,
             maxZoom,
-          }),
+          },
         })
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to start prefetch')
-        return null
-      }
-
-      let jobId: string
-      let total: number
-
-      try {
-        if (res.status === 400) {
-          const body = (await res.json()) as PrefetchStartResponse
-          setError(body.error ?? `Area too large: ${body.totalTiles ?? '?'} tiles (max 8000)`)
-          return null
-        }
-
-        if (!res.ok) {
-          setError(`HTTP error! status: ${res.status}`)
-          return null
-        }
-
-        const body = (await res.json()) as PrefetchStartResponse
         if (!body.jobId) {
           setError('Prefetch response missing jobId')
           return null
@@ -97,7 +79,7 @@ export function useImageryPrefetch() {
         setPrefetching(true)
         setProgress({ done: 0, total })
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to parse prefetch response')
+        setError(err instanceof Error ? err.message : 'Failed to start prefetch')
         return null
       }
 
@@ -105,11 +87,7 @@ export function useImageryPrefetch() {
       pollTimerRef.current = setInterval(() => {
         void (async () => {
           try {
-            const statusRes = await fetch(`/api/world-imagery/prefetch/${jobId}`)
-            if (!statusRes.ok) {
-              throw new Error(`HTTP error! status: ${statusRes.status}`)
-            }
-            const status = (await statusRes.json()) as PrefetchStatusResponse
+            const status = await apiRequest<PrefetchStatusResponse>(`/api/world-imagery/prefetch/${jobId}`)
             setProgress({ done: status.done ?? 0, total: status.total ?? total })
             if (status.complete) {
               clearPoll()

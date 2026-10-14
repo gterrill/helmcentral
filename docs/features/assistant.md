@@ -188,6 +188,12 @@ shows. Ask "what does the upper air chart on the forecast panel actually
 show" and it reads the help's own [Forecast](forecast.md) page and quotes
 it back.
 
+Mate can also see the alarms that are active. Ask "investigate the alarm" and
+it starts from the alarm itself, including the reading that tripped it, rather
+than from the device name on the card, then checks that reading's live state
+and history. It tells you what the reading was when the alarm was raised apart
+from what it is now.
+
 See [What Mate can look up](../reference/mate-tools.md) for exactly which
 provider each of these draws on, what counts as "nearby" for a place
 search, and what a failed or unconfigured lookup looks like.

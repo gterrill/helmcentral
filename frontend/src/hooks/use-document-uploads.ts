@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { invalidateDocumentLists } from '@/hooks/use-documents'
+import { ApiError, apiRequest } from '@/lib/api-query'
 
 // ADR 0106 F2: staged attachments for one Mate composer. Each file uploads
 // immediately through POST /api/documents (multipart), then - unless it
@@ -160,6 +162,10 @@ export function useDocumentUploads(folderId?: string | null, options?: UseDocume
 
         if ((xhr.status === 200 || xhr.status === 201) && body?.document) {
           const doc = body.document
+          // The row exists now, in whichever folder it went into: the
+          // Documents listing and folder counts pick it up, and the listing
+          // polls itself while it is pending.
+          invalidateDocumentLists({ counts: true })
 
           // Uploads dedupe by sha256 server-side, so two chips can resolve to
           // the same document id (the same file attached twice, or two files
@@ -288,22 +294,13 @@ export function useDocumentUploads(folderId?: string | null, options?: UseDocume
       // short of removing the chip. Mark it `failed` instead, same outcome
       // as a failed extract/enrich, so the operator can send or remove it.
       try {
-        const response = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(item.documentId as string)}`)
-        if (!response.ok) {
-          if (response.status === 404) {
-            updateItem(item.key, { status: 'failed', error: 'This document is no longer in the library.' })
-            return
-          }
-          const body = parseJSON<{ error?: string }>(await response.text())
-          updateItem(item.key, {
-            status: 'failed',
-            error: body?.error && body.error !== '' ? body.error : `Poll failed (HTTP ${response.status})`,
-          })
-          return
-        }
-        const doc = (await response.json()) as DocumentApi
+        const doc = await apiRequest<DocumentApi>(`/api/documents/${encodeURIComponent(item.documentId as string)}`)
         updateItem(item.key, { status: statusFromDocument(doc), error: doc.status === 'failed' ? (doc.error ?? null) : null })
       } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          updateItem(item.key, { status: 'failed', error: 'This document is no longer in the library.' })
+          return
+        }
         updateItem(item.key, { status: 'failed', error: err instanceof Error ? err.message : String(err) })
       }
     }))

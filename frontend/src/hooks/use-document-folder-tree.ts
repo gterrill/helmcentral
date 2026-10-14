@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-
-import { apiBaseUrl } from '@/config/api'
+import { invalidateQueries, useApiQuery } from '@/lib/api-query'
 
 /** One folder in the whole-library tree: flat, parent by id. */
 export interface DocumentFolderTreeNode {
@@ -14,36 +12,31 @@ export interface DocumentFolderTreeNode {
   subtree_document_count: number
 }
 
+const TREE_PATH = '/api/document-folders/tree'
+const NO_FOLDERS: DocumentFolderTreeNode[] = []
+
+// Invalidates rather than refetches: the caller is reporting a change, so a
+// read already in flight from before it must not be the one that lands.
+async function refreshTree(): Promise<void> {
+  invalidateQueries([TREE_PATH])
+}
+
 /**
  * Every folder in the library in one request, for the Documents page's
- * folder pane. The caller calls `refresh()` after anything that changes a
- * folder or a count; a failure is surfaced, never swallowed.
+ * folder pane. Writes in use-documents.ts invalidate it; `refresh()` is for
+ * the changes made through other hooks (flagging a manual, capturing a
+ * note). A failure is surfaced, never swallowed.
  */
 export function useDocumentFolderTree() {
-  const [folders, setFolders] = useState<DocumentFolderTreeNode[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  // A slow earlier response must not overwrite a newer one.
-  const seqRef = useRef(0)
-
-  const refresh = useCallback(async () => {
-    const seq = (seqRef.current += 1)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/document-folders/tree`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { folders?: DocumentFolderTreeNode[] }
-      if (seq !== seqRef.current) return
-      setFolders(data.folders ?? [])
-      setError(null)
-    } catch (err) {
-      if (seq !== seqRef.current) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  return { folders, loading, error, refresh }
+  const query = useApiQuery({
+    queryKey: [TREE_PATH],
+    path: TREE_PATH,
+    select: (raw: { folders?: DocumentFolderTreeNode[] }) => raw.folders ?? NO_FOLDERS,
+  })
+  return {
+    folders: query.data ?? NO_FOLDERS,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refresh: refreshTree,
+  }
 }

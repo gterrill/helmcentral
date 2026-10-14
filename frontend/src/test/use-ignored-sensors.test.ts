@@ -43,7 +43,7 @@ describe('useIgnoredSensors', () => {
 
     await act(async () => { await result.current.unignore('a') })
     expect(result.current.identifiers).toEqual(['b'])
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/alarms/ignored-sensors/a', { method: 'DELETE' })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/alarms/ignored-sensors/a', expect.objectContaining({ method: 'DELETE' }))
   })
 
   it('surfaces a fetch failure rather than masking it', async () => {

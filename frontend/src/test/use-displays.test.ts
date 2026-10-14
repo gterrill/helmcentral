@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
 import { useDisplays } from '@/hooks/use-displays'
+import { useDashboardPages } from '@/hooks/use-dashboard-pages'
+import { jsonResponse, stubApi } from '@/test/helpers/stub-api'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
@@ -31,13 +33,26 @@ describe('useDisplays', () => {
     const { result } = renderHook(() => useDisplays())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/displays')
+    expect(fetchMock).toHaveBeenCalledWith('/api/displays', expect.anything())
     expect(result.current.displays).toEqual([flybridge])
     expect(result.current.error).toBeNull()
   })
 
+  it('keeps cached displays and reports the error when a later revalidation fails', async () => {
+    let calls = 0
+    stubApi({
+      'GET /api/displays': () => (++calls === 1 ? { displays: [flybridge] } : jsonResponse({ error: 'blip' }, 502)),
+    })
+    const { result } = renderHook(() => useDisplays())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.refetch() })
+    expect(calls).toBe(2)
+    expect(result.current.displays).toEqual([flybridge])
+    expect(result.current.error).toBe('blip')
+  })
+
   it('sets an error message when the initial fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDisplays())
@@ -71,11 +86,7 @@ describe('useDisplays', () => {
       created = await result.current.createDisplay({ name: 'Flybridge' })
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Flybridge' }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Flybridge' }) }))
     expect(created).toEqual(flybridge)
     expect(result.current.displays).toEqual([flybridge])
   })
@@ -113,11 +124,7 @@ describe('useDisplays', () => {
       await result.current.updateDisplay('d1', { scale: 1.5 })
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays/d1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scale: 1.5 }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays/d1', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ scale: 1.5 }) }))
     expect(result.current.displays).toEqual([updated])
   })
 
@@ -157,7 +164,7 @@ describe('useDisplays', () => {
       released = await result.current.deleteDisplay('d1')
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays/d1', { method: 'DELETE' })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/displays/d1', expect.objectContaining({ method: 'DELETE' }))
     expect(released).toEqual(['p1', 'p2'])
     expect(result.current.displays).toEqual([])
   })
@@ -165,7 +172,7 @@ describe('useDisplays', () => {
   it('toasts and returns null when deleteDisplay fails, leaving the display in place', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ displays: [flybridge] }) })
-      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDisplays())
@@ -197,5 +204,33 @@ describe('useDisplays', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.current.displays).toEqual([flybridge])
+  })
+})
+
+describe('useDisplays deleteDisplay refreshes the page list', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('re-reads the dashboard pages so released pages return to the Dashboard list', async () => {
+    let pagesReads = 0
+    stubApi({
+      'GET /api/displays': { displays: [{ id: 'd1', name: 'Flybridge' }] },
+      'GET /api/dashboard-pages': () => {
+        pagesReads += 1
+        return { pages: [{ id: 'p1', name: 'Page A', widgets: [], display_id: pagesReads > 1 ? '' : 'd1', created_at: '', updated_at: '' }] }
+      },
+      'DELETE /api/displays/d1': { status: 'deleted', released_page_ids: ['p1'] },
+    })
+    const pages = renderHook(() => useDashboardPages())
+    const displays = renderHook(() => useDisplays())
+    await waitFor(() => expect(pages.result.current.pages[0]?.display_id).toBe('d1'))
+    await waitFor(() => expect(displays.result.current.loading).toBe(false))
+
+    await act(async () => {
+      await displays.result.current.deleteDisplay('d1')
+    })
+
+    await waitFor(() => expect(pages.result.current.pages[0]?.display_id).toBe(''))
   })
 })

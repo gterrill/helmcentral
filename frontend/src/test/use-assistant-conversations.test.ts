@@ -49,7 +49,7 @@ describe('useAssistantConversations', () => {
     const { result } = renderHook(() => useAssistantConversations())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations')
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations', expect.anything())
     expect(result.current.conversations).toEqual([
       { id: 'c1', title: 'Hook Reef', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' },
     ])
@@ -117,7 +117,7 @@ describe('useAssistantConversations', () => {
       await result.current.select('c2')
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/assistant/conversations/c2')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/assistant/conversations/c2', expect.anything())
     expect(result.current.activeId).toBe('c2')
     expect(result.current.messages).toEqual([{
       id: 'm1',
@@ -434,7 +434,7 @@ describe('useAssistantConversations', () => {
     let serverIsUp = false
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
-        if (!serverIsUp) return { ok: false, status: 502 }
+        if (!serverIsUp) return { ok: false, status: 502, json: async () => ({}) }
         return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
       }
       throw new Error(`unexpected fetch ${url}`)
@@ -464,7 +464,7 @@ describe('useAssistantConversations', () => {
     let serverIsUp = false
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/assistant/conversations') {
-        if (!serverIsUp) return { ok: false, status: 502 }
+        if (!serverIsUp) return { ok: false, status: 502, json: async () => ({}) }
         return {
           ok: true,
           json: async () => ({

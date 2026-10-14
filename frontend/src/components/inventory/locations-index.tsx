@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { PrintBinLabelsDialog } from '@/components/inventory/label-print'
-import { EmptyState, IndexFilters, IndexTable, Page } from '@/components/patterns'
+import { EmptyState, IndexFilters, IndexTable, Page, RefreshFailedNote } from '@/components/patterns'
 import { useInventoryDecks, useInventoryZones, type InventoryDeck, type InventoryZone } from '@/hooks/use-inventory'
 
 // ADR 0142: the Locations index - a name, deck and bin count per location, built
@@ -21,8 +21,10 @@ import { useInventoryDecks, useInventoryZones, type InventoryDeck, type Inventor
 
 // The Deck column names the deck a location is outlined on (ADR 0156), and a
 // structural dash when it is on none. Decks come from their own request, so
-// the columns are built from the loaded decks rather than declared once.
-function buildColumns(decks: InventoryDeck[]): ColumnDef<InventoryZone, unknown>[] {
+// the columns are built from the loaded decks rather than declared once. When
+// that request failed and no deck has ever loaded, a located zone shows `?`:
+// a dash would read as "on no deck".
+function buildColumns(decks: InventoryDeck[], decksUnavailable: boolean): ColumnDef<InventoryZone, unknown>[] {
   const deckNames = new Map(decks.map((d) => [d.id, d.name]))
   return [
     {
@@ -32,7 +34,7 @@ function buildColumns(decks: InventoryDeck[]): ColumnDef<InventoryZone, unknown>
     },
     {
       id: 'deck',
-      accessorFn: (zone) => (zone.deck_id ? deckNames.get(zone.deck_id) ?? '' : ''),
+      accessorFn: (zone) => (zone.deck_id ? deckNames.get(zone.deck_id) ?? (decksUnavailable ? '?' : '') : ''),
       header: 'Deck',
       cell: ({ getValue }) => <span className="truncate text-muted-foreground">{getValue<string>() || '--'}</span>,
     },
@@ -101,7 +103,8 @@ function PlanView({
   const planned = decks.filter((d) => d.plan_document_id)
   const deck = planned.find((d) => d.id === planDeckId) ?? planned[0] ?? null
 
-  if (error) {
+  // Decks already loaded stay on screen with the failure noted above them.
+  if (error && decks.length === 0) {
     return (
       <div className="flex flex-col items-start gap-2">
         <p role="alert" className="text-sm text-destructive">{error}</p>
@@ -124,6 +127,7 @@ function PlanView({
   }
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      {error && <RefreshFailedNote reason={error} onRetry={() => { void refresh() }} />}
       {(planned.length > 1 || canWrite) && (
         <div className="flex flex-wrap items-center gap-2">
           {planned.length > 1 && (
@@ -168,7 +172,10 @@ export function LocationsIndex({
 }: LocationsIndexProps) {
   const { zones, loading, error, refresh, createZone } = useInventoryZones()
   const decksState = useInventoryDecks()
-  const columns = useMemo(() => buildColumns(decksState.decks), [decksState.decks])
+  const columns = useMemo(
+    () => buildColumns(decksState.decks, decksState.error !== null && decksState.decks.length === 0),
+    [decksState.decks, decksState.error],
+  )
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const [printingLabels, setPrintingLabels] = useState(false)
@@ -252,11 +259,12 @@ export function LocationsIndex({
         <IndexTable
           columns={columns}
           rows={rows}
+          loadedCount={zones.length}
           getRowId={(zone) => zone.id}
           onOpen={(zone) => onOpenLocation(zone.id)}
           loading={(loading && zones.length === 0) || (decksState.loading && decksState.decks.length === 0)}
-          // A failed decks load would leave every Deck cell a dash, which
-          // reads as "on no deck" - show the error instead (AGENTS.md).
+          // A failed decks load is reported beside the rows (the Deck cells
+          // read `?`, not a dash that would mean "on no deck").
           error={error ?? decksState.error}
           onRetry={() => { void refresh(); void decksState.refresh() }}
           empty={

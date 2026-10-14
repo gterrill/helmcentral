@@ -61,7 +61,7 @@ describe('AssistantProposalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', status: 'applied' })))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/apply?today=2026-09-30', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/apply?today=2026-09-30', expect.objectContaining({ method: 'POST' }))
   })
 
   it('Dismiss posts and hands the answer up', async () => {
@@ -73,7 +73,7 @@ describe('AssistantProposalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'dismissed' })))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/dismiss', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/dismiss', expect.objectContaining({ method: 'POST' }))
   })
 
   it('Apply refused with 409 because the proposal was dismissed shows as dismissed, not out of date', async () => {

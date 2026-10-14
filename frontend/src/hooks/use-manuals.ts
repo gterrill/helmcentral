@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiBaseUrl } from '@/config/api'
+import { useCallback } from 'react'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { invalidateDocumentLists } from '@/hooks/use-documents'
 
 // Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Manuals panel's data
-// layer. Same idiom as use-notes.ts/use-documents.ts throughout - no
-// react-query, no shared store, one instance per caller, a plain
-// fetch-and-throw-the-server's-own-message write helper (AGENTS.md fallback
-// policy) - and, like use-documents.ts's folderId, this hook is parametrised
+// layer. Reads go through useApiQuery and writes through apiRequest (ADR
+// 0173), which throws the server's own message (AGENTS.md fallback policy).
+// Like use-documents.ts's folderId, this hook is parametrised
 // by the caller-owned "which manual is currently open" selection rather than
 // owning that selection itself.
 //
@@ -75,103 +75,45 @@ export function findManualTreeNode(tree: ManualTreeNode, nodeId: string): Manual
   return null
 }
 
-// Every write below goes through this: a non-2xx response throws with the
-// server's own message (AGENTS.md fallback policy - no invented "something
-// went wrong" standing in for a 409's actual "folder is not a manual" or
-// "only a top-level folder can be a manual"). 204 (DELETE /api/manuals/:id)
-// has no body to parse - copied from use-documents.ts's own submitJSON,
-// which use-notes.ts's copy doesn't need (nothing on the notes API returns
-// 204), rather than importing either: a two-line helper is cheaper to
-// duplicate a third time than to thread a shared-module dependency between
-// three features that otherwise don't know about each other.
-async function submitJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error ?? `HTTP ${response.status}`)
-  }
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
-}
-
 /**
  * `manualId`: the manual currently open in the reading view, null when none
  * is (the "several, nothing picked yet" state, or "none exist at all").
  * Owned by the caller (manuals-panel.tsx), not this hook - same contract as
  * use-documents.ts's own folderId param.
  */
+const MANUALS = '/api/manuals'
+const NO_MANUALS: ManualSummary[] = []
+
 export function useManuals(manualId: string | null = null) {
   // ── the library-wide list (plan §4's GET /api/manuals) ─────────────────
-  const [manuals, setManuals] = useState<ManualSummary[]>([])
-  const [manualsLoading, setManualsLoading] = useState(true)
-  const [manualsError, setManualsError] = useState<string | null>(null)
-
-  // Same ordering guard as use-notes.ts/use-documents.ts's own refresh():
-  // a caller-triggered refresh (after a create/clear) can overlap an
-  // earlier one still in flight, and without this whichever call resolves
-  // LAST wins even if it was the OLDER one.
-  const manualsSeqRef = useRef(0)
-
-  const refreshManuals = useCallback(async () => {
-    const seq = (manualsSeqRef.current += 1)
-    setManualsLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/manuals`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { manuals?: ManualSummary[] }
-      if (seq !== manualsSeqRef.current) return
-      setManuals(data.manuals ?? [])
-      setManualsError(null)
-    } catch (err) {
-      if (seq !== manualsSeqRef.current) return
-      setManualsError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === manualsSeqRef.current) setManualsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refreshManuals() }, [refreshManuals])
+  const list = useApiQuery<ManualSummary[]>({
+    queryKey: [MANUALS],
+    path: MANUALS,
+    select: (raw: { manuals?: ManualSummary[] }) => raw.manuals ?? [],
+  })
+  const refreshManuals = list.refetch
 
   // ── the currently open manual's own ordered subtree (GET .../tree) ─────
-  const [tree, setTree] = useState<ManualTreeNode | null>(null)
-  const [treeLoading, setTreeLoading] = useState(false)
-  const [treeError, setTreeError] = useState<string | null>(null)
-  const treeSeqRef = useRef(0)
+  // Nothing open is not an error, just the ordinary "no manual selected"
+  // state (none exist yet, or the several-manuals list has none picked).
+  const treePath = `${MANUALS}/${encodeURIComponent(manualId ?? '')}/tree`
+  const treeQuery = useApiQuery<ManualTreeNode | null>({
+    queryKey: [treePath],
+    path: treePath,
+    enabled: manualId !== null && manualId !== '',
+  })
+  const refreshTree = treeQuery.refetch
 
-  const refreshTree = useCallback(async () => {
-    const seq = (treeSeqRef.current += 1)
-    if (!manualId) {
-      // Nothing open - not an error, the ordinary "no manual selected"
-      // state (none exist yet, or the several-manuals list hasn't had one
-      // picked). Still bumps the sequence above so a tree fetch already in
-      // flight for a manual the operator has since navigated away from is
-      // superseded rather than landing late and repopulating the pane.
-      setTree(null)
-      setTreeError(null)
-      setTreeLoading(false)
-      return
-    }
-    setTreeLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/manuals/${encodeURIComponent(manualId)}/tree`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as ManualTreeNode
-      if (seq !== treeSeqRef.current) return
-      setTree(data)
-      setTreeError(null)
-    } catch (err) {
-      if (seq !== treeSeqRef.current) return
-      setTreeError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (seq === treeSeqRef.current) setTreeLoading(false)
-    }
-  }, [manualId])
-
-  useEffect(() => { void refreshTree() }, [refreshTree])
+  // Resolves once the fresh list has landed. The refetch starts a new read, so
+  // one in flight from before the write is superseded, not awaited; it is also
+  // the list's only read here, since invalidating the same key first would
+  // start a second request for the same answer.
+  // A manual is a folder with a role, and the folder tree says which are
+  // manuals, so every write here refreshes the Documents readers too.
+  const reloadManuals = useCallback(async () => {
+    invalidateDocumentLists({ counts: true })
+    await refreshManuals()
+  }, [refreshManuals])
 
   // createManual/flagManual are plan §4's two ways to call POST
   // /api/manuals - {name} makes a brand new empty top-level folder (the
@@ -180,27 +122,26 @@ export function useManuals(manualId: string | null = null) {
   // exists. Both refresh the library list; neither is a no-op for the
   // none/one/several state the panel derives from `manuals.length`.
   const createManual = useCallback(async (name: string) => {
-    const created = await submitJSON<ManualSummary>(`${apiBaseUrl}/api/manuals`, 'POST', { name })
-    await refreshManuals()
+    const created = await apiRequest<ManualSummary>(MANUALS, { method: 'POST', json: { name } })
+    await reloadManuals()
     return created
-  }, [refreshManuals])
+  }, [reloadManuals])
 
   const flagManual = useCallback(async (folderId: string) => {
-    const flagged = await submitJSON<ManualSummary>(`${apiBaseUrl}/api/manuals`, 'POST', { folder_id: folderId })
-    await refreshManuals()
+    const flagged = await apiRequest<ManualSummary>(MANUALS, { method: 'POST', json: { folder_id: folderId } })
+    await reloadManuals()
     return flagged
-  }, [refreshManuals])
+  }, [reloadManuals])
 
   // Demotes id back to a plain collection (plan §4: "moves and deletes
-  // nothing beneath it"). Clears the locally-held tree when the manual
-  // demoted is the one currently open - GET .../tree on a non-manual folder
-  // 404s (errNotAManual), and there is nothing sensible left to show in the
-  // reading pane for it.
+  // nothing beneath it"). Empties the tree held for it: GET .../tree on a
+  // non-manual folder 404s (errNotAManual), so a refetch would only put an
+  // error where there is nothing sensible left to show.
   const clearManual = useCallback(async (id: string) => {
-    await submitJSON<void>(`${apiBaseUrl}/api/manuals/${encodeURIComponent(id)}`, 'DELETE')
-    await refreshManuals()
-    if (id === manualId) setTree(null)
-  }, [refreshManuals, manualId])
+    await apiRequest<void>(`${MANUALS}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    setQueryData<ManualTreeNode | null>([`${MANUALS}/${encodeURIComponent(id)}/tree`], null)
+    await reloadManuals()
+  }, [reloadManuals])
 
   // Applies a fresh sort_index to every item in ONE sibling list (plan §4:
   // "whole-sibling-list, not per-item" - Arrange mode's move-up/move-down
@@ -211,24 +152,23 @@ export function useManuals(manualId: string | null = null) {
   // server already did the work of recomputing it.
   const reorder = useCallback(async (parentId: string, items: ManualReorderItem[]) => {
     if (!manualId) throw new Error('no manual is open')
-    const updated = await submitJSON<ManualTreeNode>(
-      `${apiBaseUrl}/api/manuals/${encodeURIComponent(manualId)}/reorder`,
-      'POST',
-      { parent_id: parentId, items },
+    const updated = await apiRequest<ManualTreeNode>(
+      `${MANUALS}/${encodeURIComponent(manualId)}/reorder`,
+      { method: 'POST', json: { parent_id: parentId, items } },
     )
-    setTree(updated)
+    setQueryData<ManualTreeNode | null>([`${MANUALS}/${encodeURIComponent(manualId)}/tree`], updated)
     return updated
   }, [manualId])
 
   return {
-    manuals,
-    manualsLoading,
-    manualsError,
+    manuals: list.data ?? NO_MANUALS,
+    manualsLoading: list.isLoading,
+    manualsError: list.error?.message ?? null,
     refreshManuals,
 
-    tree,
-    treeLoading,
-    treeError,
+    tree: treeQuery.data ?? null,
+    treeLoading: treeQuery.isLoading,
+    treeError: treeQuery.error?.message ?? null,
     refreshTree,
 
     createManual,

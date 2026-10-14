@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { useApiQuery } from '@/lib/api-query'
 
 export interface PlaceNameProviderInfo {
   id: string
@@ -10,31 +11,19 @@ export interface PlaceNameProviderInfo {
 // listing endpoint (backend/place_name_provider.go's
 // placeNameProvidersHandler) - every installed POI plugin that also
 // exports place_name_at/search_places (ADR 0101), not every POI plugin.
+const NONE: PlaceNameProviderInfo[] = []
+
 export function usePlaceNameProviders() {
-  const [providers, setProviders] = useState<PlaceNameProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const path = '/api/place-name-providers'
+  const { data, isLoading, error } = useApiQuery<PlaceNameProviderInfo[]>({
+    queryKey: [path],
+    path,
+    select: (raw: unknown) => (Array.isArray(raw) ? raw : NONE),
+  })
 
   useEffect(() => {
-    const fetchProviders = async () => {
-      try {
-        const response = await fetch('/api/place-name-providers')
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
+    if (error) console.error('Error fetching place-name providers:', error)
+  }, [error])
 
-        const data = await response.json()
-        setProviders(Array.isArray(data) ? data : [])
-      } catch (error) {
-        console.error('Error fetching place-name providers:', error)
-        setError(error instanceof Error ? error.message : String(error))
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    void fetchProviders()
-  }, [])
-
-  return { providers, loading, error }
+  return { providers: data ?? NONE, loading: isLoading, error: error?.message ?? null }
 }

@@ -1,4 +1,5 @@
 import { apiBaseUrl } from '@/config/api'
+import { apiRequest } from '@/lib/api-query'
 import { mapFormDraft, type AssistantFormDraft, type FormDraftApi } from '@/hooks/use-assistant-conversations'
 
 /**
@@ -7,46 +8,24 @@ import { mapFormDraft, type AssistantFormDraft, type FormDraftApi } from '@/hook
  * holds.
  */
 
-/** A refused save or dismiss. `message` is the server's own reason, verbatim. */
-export class FormDraftActionError extends Error {
-  readonly status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'FormDraftActionError'
-    this.status = status
-  }
-}
-
-async function post(path: string, body?: unknown): Promise<Response> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: 'POST',
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  })
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`
-    try {
-      const parsed = (await response.json()) as { error?: string }
-      if (parsed.error) message = parsed.error
-    } catch {
-      // Not JSON: keep the status line.
-    }
-    throw new FormDraftActionError(response.status, message)
-  }
-  return response
-}
+/** A refused save or dismiss: an ApiError carrying the server's own reason, verbatim. */
+export { ApiError as FormDraftActionError } from '@/lib/api-query'
 
 export const formDraftContentUrl = (id: string) =>
   `${apiBaseUrl}/api/assistant/form-drafts/${encodeURIComponent(id)}/content`
 
 export async function saveFormDraft(id: string, title: string, folder: string): Promise<AssistantFormDraft> {
-  const response = await post(`/api/assistant/form-drafts/${encodeURIComponent(id)}/save`, { title, folder })
-  const body = (await response.json()) as { draft: FormDraftApi; document: { id: string } }
+  const body = await apiRequest<{ draft: FormDraftApi; document: { id: string } }>(
+    `/api/assistant/form-drafts/${encodeURIComponent(id)}/save`,
+    { method: 'POST', json: { title, folder } },
+  )
   return mapFormDraft({ ...body.draft, document_id: body.document.id })
 }
 
 export async function dismissFormDraft(id: string): Promise<AssistantFormDraft> {
-  const response = await post(`/api/assistant/form-drafts/${encodeURIComponent(id)}/dismiss`)
-  const body = (await response.json()) as { draft: FormDraftApi }
+  const body = await apiRequest<{ draft: FormDraftApi }>(
+    `/api/assistant/form-drafts/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
+  )
   return mapFormDraft(body.draft)
 }

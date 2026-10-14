@@ -57,11 +57,10 @@ describe('AssistantFormDraftCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save to Documents' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'd1', status: 'saved', documentId: 'doc9' })))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/form-drafts/d1/save', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/form-drafts/d1/save', expect.objectContaining({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Cyclone declaration', folder: 'Insurance' }),
-    })
+    }))
   })
 
   it('Save is not offered without a title', () => {
@@ -81,7 +80,7 @@ describe('AssistantFormDraftCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'd1', status: 'dismissed' })))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/form-drafts/d1/dismiss', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/form-drafts/d1/dismiss', expect.objectContaining({ method: 'POST' }))
   })
 
   it('a refused Save shows the server reason, keeps the buttons and changes nothing', async () => {

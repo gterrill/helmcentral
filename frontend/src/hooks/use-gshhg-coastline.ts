@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { apiRequest } from '@/lib/api-query'
+
 export interface GshhgCoastlineState {
   data: GeoJSON.FeatureCollection | null
   loading: boolean
@@ -10,18 +12,16 @@ let cachedCoastline: GeoJSON.FeatureCollection | null = null
 let inFlight: Promise<GeoJSON.FeatureCollection> | null = null
 
 async function fetchCoastline(): Promise<GeoJSON.FeatureCollection> {
-  const res = await fetch('/api/gshhg-coastline')
-  if (!res.ok) {
-    throw new Error(`HTTP error! status: ${res.status}`)
-  }
-  return (await res.json()) as GeoJSON.FeatureCollection
+  return apiRequest<GeoJSON.FeatureCollection>('/api/gshhg-coastline')
 }
 
 /**
  * Fetches the embedded GSHHG global coastline GeoJSON once per page
  * session. The data is static (compiled into the backend binary), so this
  * does not poll, and the result is cached at module scope so multiple
- * mounts of RoutePlannerMap don't re-fetch a multi-MB payload.
+ * mounts of RoutePlannerMap don't re-fetch a multi-MB payload. It stays on
+ * apiRequest rather than the query store, whose five-minute eviction would
+ * bring the payload back more than once a session.
  */
 export function useGshhgCoastline(): GshhgCoastlineState {
   const [data, setData] = useState<GeoJSON.FeatureCollection | null>(cachedCoastline)

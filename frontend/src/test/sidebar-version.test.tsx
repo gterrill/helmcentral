@@ -6,11 +6,14 @@
  * not part of the release versioning at all.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import { resetAppVersionProbe } from '@/hooks/use-app-version'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { GC_TIME_MS } from '@/lib/api-query'
+import { jsonResponse } from '@/test/helpers/stub-api'
 
 const stubHealth = (payload: unknown, ok = true) => {
-  const fetchMock = vi.fn(async () => ({ ok, json: async () => payload }))
+  const fetchMock = vi.fn(async () => jsonResponse(payload, ok ? 200 : 500))
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -28,13 +31,43 @@ describe('SidebarVersion', () => {
     expect(await screen.findByText('v0.17.0')).toBeInTheDocument()
   })
 
-  it('reads it from the relative /api/health endpoint', async () => {
+  it('reads it from the /api/health endpoint', async () => {
     const fetchMock = stubHealth({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' })
 
     render(<SidebarVersion />)
     await screen.findByText('v0.17.0')
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/health')
+    expect(fetchMock).toHaveBeenCalledWith('/api/health', expect.anything())
+  })
+
+  it('reads the stamp once per page load, even when the sidebar mounts again after the store has collected', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetchMock = stubHealth({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' })
+
+      const first = render(<SidebarVersion />)
+      await screen.findByText('v0.17.0')
+      first.unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(GC_TIME_MS + 1000) })
+      stubHealth({ status: 'ok', version: 'v0.18.0', revision: 'cafef00d' })
+      render(<SidebarVersion />)
+
+      expect(await screen.findByText('v0.17.0')).toBeInTheDocument()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('tries again on the next mount after a failed read', async () => {
+    stubHealth({}, false)
+    const first = render(<SidebarVersion />)
+    await screen.findByText('version unavailable')
+    first.unmount()
+
+    stubHealth({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' })
+    render(<SidebarVersion />)
+    expect(await screen.findByText('v0.17.0')).toBeInTheDocument()
   })
 
   it('carries the build revision for support, without spending sidebar width on it', async () => {
@@ -96,6 +129,8 @@ describe('SidebarVersion', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     unmount()
 
+    // The first probe's answer stands for the page load; start a new one.
+    resetAppVersionProbe()
     stubHealth({}, false)
     render(<SidebarVersion />)
     await screen.findByText('version unavailable')

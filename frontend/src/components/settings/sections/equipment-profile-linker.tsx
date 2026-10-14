@@ -30,7 +30,7 @@ interface EquipmentProfileLinkerProps {
 export function EquipmentProfileLinker({
   equipmentId, onEquipmentIdChange, profileKind, defaultSystem, namePlaceholder, onLinkedItemChange,
 }: EquipmentProfileLinkerProps) {
-  const { items, refresh: refreshItems } = useEquipment({})
+  const { items } = useEquipment({})
   const { profiles } = useEquipmentProfiles(true)
   const kindProfiles = useMemo(() => profiles.filter((p) => p.kind === profileKind), [profiles, profileKind])
 
@@ -71,7 +71,6 @@ export function EquipmentProfileLinker({
       setNewName('')
       setCreating(false)
       onEquipmentIdChange(created.id)
-      void refreshItems()
     } finally {
       setBusy(false)
     }

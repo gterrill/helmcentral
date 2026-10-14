@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { stubApi } from '@/test/helpers/stub-api'
 
 import {
   maintenanceLogExportURL,
@@ -30,6 +31,27 @@ describe('useMaintenanceRules', () => {
     expect(url).toContain('equipment=eq-1')
     expect(url).toContain('system=propulsion')
     expect(url).toContain('include_stored=true')
+  })
+
+  it('keeps a rule view for each date in its own entry, and refreshes each on a write', async () => {
+    const fetchMock = stubApi({
+      'GET /api/inventory/maintenance/rules': { rules: [] },
+      'PUT /api/inventory/maintenance/rules/r1/overrides': { rule: { id: 'r1' } },
+    })
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 9, 13, 12))
+      renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      vi.setSystemTime(new Date(2026, 9, 14, 12))
+      renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      await setMaintenanceRuleOverrides('r1', {} as never)
+      await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-13'))).toHaveLength(2))
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-14'))).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('exposes removed jobs and schedule errors from the response', async () => {

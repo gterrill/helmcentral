@@ -40,7 +40,7 @@ describe('useVesselSightings', () => {
       await Promise.resolve()
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/abc%3A123%20xyz/sightings')
+    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/abc%3A123%20xyz/sightings', expect.anything())
   })
 
   it('returns parsed sightings and flips loading to false once resolved', async () => {

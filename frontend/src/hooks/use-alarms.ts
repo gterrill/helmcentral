@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { apiRequest } from '@/lib/api-query'
 
 /** SignalK's notification states (ADR 0038), worst last. */
 export const ALARM_STATES = ['normal', 'alert', 'warn', 'alarm', 'emergency'] as const
@@ -144,11 +145,7 @@ export function useAlarms() {
   // A refusal is meaningful, not an error to swallow: an emergency cannot be
   // silenced, and SignalK reports per notification which actions it offers.
   const act = useCallback(async (ruleId: string, action: 'acknowledge' | 'silence') => {
-    const response = await fetch(`/api/alarms/${encodeURIComponent(ruleId)}/${action}`, { method: 'POST' })
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string }
-      throw new Error(body.error ?? `Could not ${action} alarm`)
-    }
+    await apiRequest(`/api/alarms/${encodeURIComponent(ruleId)}/${action}`, { method: 'POST' })
   }, [])
 
   const acknowledge = useCallback((ruleId: string) => act(ruleId, 'acknowledge'), [act])

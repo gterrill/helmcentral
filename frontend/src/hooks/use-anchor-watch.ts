@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
-import { anchorRequest } from '@/lib/anchor-request'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
@@ -104,7 +104,7 @@ export interface AnchorWatchResult {
    * wasn't actually moved, so a radius-only Set doesn't ask the backend to
    * treat it as a reposition (self-trail reset, a fresh SignalK publish that
    * 502s if SignalK happens to be down — code-review finding). Mirrors
-   * updateRadius exactly otherwise — awaits anchorRequest, replaces state
+   * updateRadius exactly otherwise — awaits apiRequest, replaces state
    * with the server echo, rethrows on failure rather than swallowing it, so
    * the caller (the Adjust mode's Set button) is what shows a Retry toast.
    *
@@ -130,6 +130,15 @@ const DEFAULT_RADIUS_METERS = 20
 const DEFAULT_SEA_STATE: SeaState = 'calm'
 const DEFAULT_SEABED_TYPE: SeabedType = 'sand'
 
+const ANCHOR_WATCH_KEY = ['/api/anchor-watch'] as const
+const INACTIVE: AnchorWatchServerState = { active: false }
+
+// A successful mutation response is just as authoritative about "we have
+// heard from the server" as a GET (see `loaded`), so it lands in the cache.
+function land(state: AnchorWatchServerState) {
+  setQueryData<AnchorWatchServerState>(ANCHOR_WATCH_KEY, state)
+}
+
 function isSeaState(value: string | undefined): value is SeaState {
   return value === 'calm' || value === 'choppy' || value === 'rough' || value === 'storm'
 }
@@ -143,39 +152,26 @@ export function useAnchorWatch(
   currentLon: number | null,
   gnssCritical = false,
 ): AnchorWatchResult {
-  const [serverState, setServerState] = useState<AnchorWatchServerState>({ active: false })
-  // Only ever set true, and only on a genuine successful response — see the
-  // `loaded` doc comment above for why a failed/errored poll must leave this
-  // false rather than a fallback that reads "attempted" as "confirmed".
-  const [loaded, setLoaded] = useState(false)
-
-  const fetchState = useCallback(async () => {
-    try {
-      const res = await fetch('/api/anchor-watch')
-      if (!res.ok) return
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
-      setLoaded(true)
-    } catch {
-      // silently retain last known state
-    }
-  }, [])
-
-  // Fetched once on mount, independent of the interval below, so a cadence
-  // change (idle -> active or back) never doubles up on an extra immediate
-  // fetch — see ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS/ANCHOR_WATCH_IDLE_REFRESH_SECONDS
-  // (config/app-config.ts) for why the two cadences differ.
-  useEffect(() => {
-    void fetchState()
-  }, [fetchState])
-
-  useEffect(() => {
-    const intervalSeconds = serverState.active
-      ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS
-      : ANCHOR_WATCH_IDLE_REFRESH_SECONDS
-    const timer = setInterval(() => { void fetchState() }, intervalSeconds * 1000)
-    return () => clearInterval(timer)
-  }, [fetchState, serverState.active])
+  // `loaded` stays false until a response has landed: a failed or errored
+  // poll leaves no data, so "attempted" is never read as "confirmed". Once
+  // data exists, a later failed poll keeps the last known state.
+  const { data } = useApiQuery<AnchorWatchServerState>({
+    queryKey: ANCHOR_WATCH_KEY,
+    path: '/api/anchor-watch',
+  })
+  // The poll cadence follows the watch (see ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS/
+  // ANCHOR_WATCH_IDLE_REFRESH_SECONDS in config/app-config.ts for why the two
+  // differ), so the interval is asked for by a second reader of the same
+  // entry once the first has said whether a watch is active. The two share
+  // one request.
+  useApiQuery<AnchorWatchServerState>({
+    queryKey: ANCHOR_WATCH_KEY,
+    path: '/api/anchor-watch',
+    refetchInterval:
+      (data?.active ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS : ANCHOR_WATCH_IDLE_REFRESH_SECONDS) * 1000,
+  })
+  const serverState = data ?? INACTIVE
+  const loaded = data !== undefined
 
   const setAnchorHere = useCallback(async (
     lat: number,
@@ -209,18 +205,10 @@ export function useAnchorWatch(
     }
 
     try {
-      const res = await anchorRequest({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      setServerState(await res.json() as AnchorWatchServerState)
-      // A successful mutation response is just as authoritative about "we
-      // have heard from the server" as a GET — see `loaded`'s own doc
-      // comment. Without this, dropping anchor before the first GET
-      // resolves would leave `loaded` false despite a real, current server
-      // state already sitting in hand.
-      setLoaded(true)
+      // Landing the response also marks `loaded`: dropping anchor before the
+      // first GET resolves would otherwise leave it false despite a real,
+      // current server state already in hand.
+      land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'POST', json: payload }))
     } catch (error) {
       toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
@@ -229,21 +217,15 @@ export function useAnchorWatch(
   // These three PATCH mutations used to swallow a failed response (silent
   // no-op on !res.ok) — the P1 the impeccable critique of the anchor-watch
   // map raised against updateRadius applies just as much to the other two.
-  // anchorRequest throws on a non-OK response or a network error, and
-  // there's no catch here: on a throw, setServerState below never runs, so
+  // apiRequest throws on a non-OK response or a network error, and
+  // there's no catch here: on a throw, land() never runs, so
   // state is left exactly as it was, and the rejection propagates to the
   // caller — the drawer's radius stepper, the rode planner's Apply-as-
   // alarm-radius path, and (for the other two) their own callers, all of
   // which are what actually shows the toast (they know the retry value and
   // want a Retry action, which this hook has no context to build).
   const updateRadius = useCallback(async (radiusMeters: number) => {
-    const res = await anchorRequest({
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ radius_meters: radiusMeters }),
-    })
-    setServerState(await res.json() as AnchorWatchServerState)
-    setLoaded(true)
+    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: { radius_meters: radiusMeters } }))
   }, [])
 
   const adjustAnchor = useCallback(async (
@@ -280,13 +262,7 @@ export function useAnchorWatch(
         place_name: restore.placeName,
       }
     }
-    const res = await anchorRequest({
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    setServerState(await res.json() as AnchorWatchServerState)
-    setLoaded(true)
+    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: body }))
   }, [])
 
   const updateRodeAndConditions = useCallback(async (
@@ -294,40 +270,27 @@ export function useAnchorWatch(
     seaState: SeaState,
     seabedType: SeabedType,
   ) => {
-    const res = await anchorRequest({
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
         rode_deployed_m: rodeDeployedM,
         sea_state: seaState,
         seabed_type: seabedType,
-      }),
-    })
-    setServerState(await res.json() as AnchorWatchServerState)
-    setLoaded(true)
+      } }))
   }, [])
 
   const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
     // The planning depth pair is PATCHable — this is how the operator edits
     // the depth seeded at drop. Follows updateRodeAndConditions exactly:
     // await, replace state with the server echo, no optimistic update.
-    const res = await anchorRequest({
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
         planning_depth_m: depthM,
         planning_tide_height_ft: tideHeightFt,
-      }),
-    })
-    setServerState(await res.json() as AnchorWatchServerState)
-    setLoaded(true)
+      } }))
   }, [])
 
   const clearAnchor = useCallback(async () => {
     try {
-      await anchorRequest({ method: 'DELETE' })
-      setServerState({ active: false })
-      setLoaded(true)
+      await apiRequest<void>('/api/anchor-watch', { method: 'DELETE' })
+      land(INACTIVE)
     } catch (error) {
       toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }

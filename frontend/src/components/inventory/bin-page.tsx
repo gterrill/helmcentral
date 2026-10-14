@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+import { RefreshFailedNote } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -48,16 +49,19 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
 
   if (match) {
     return (
-      <BinContents
-        zone={match.zone}
-        zones={zones}
-        bin={match.bin}
-        onClose={onClose}
-        onOpenEquipment={onOpenEquipment}
-        onNewEquipment={onNewEquipment}
-        canWrite={canWrite}
-        onOpenDeck={onOpenDeck}
-      />
+      <>
+        {zonesError && <RefreshFailedNote reason={zonesError} className="mb-2" />}
+        <BinContents
+          zone={match.zone}
+          zones={zones}
+          bin={match.bin}
+          onClose={onClose}
+          onOpenEquipment={onOpenEquipment}
+          onNewEquipment={onNewEquipment}
+          canWrite={canWrite}
+          onOpenDeck={onOpenDeck}
+        />
+      </>
     )
   }
 
@@ -316,8 +320,9 @@ function BinOnPlan({
 }) {
   const { decks, error } = useInventoryDecks()
   const deck = decks.find((d) => d.id === zone.deck_id)
-  if (error) return <p role="alert" className="text-sm text-destructive">{error}</p>
-  if (!deck) return null
+  // Decks already loaded stay, with the failure noted above the plan.
+  if (error && decks.length === 0) return <p role="alert" className="text-sm text-destructive">{error}</p>
+  if (!deck) return error ? <RefreshFailedNote reason={error} /> : null
   if (!deck.plan_document_id) {
     return (
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
@@ -329,7 +334,10 @@ function BinOnPlan({
     )
   }
   return (
-    <DeckPlan deck={deck} zones={zones} highlightZoneId={zone.id} highlightBinId={bin.id} showPinLabels={false} />
+    <div className="flex flex-col gap-2">
+      {error && <RefreshFailedNote reason={error} />}
+      <DeckPlan deck={deck} zones={zones} highlightZoneId={zone.id} highlightBinId={bin.id} showPinLabels={false} />
+    </div>
   )
 }
 
@@ -345,7 +353,7 @@ function BinContents({
   canWrite: boolean
   onOpenDeck: (deckId: string) => void
 }) {
-  const { items, loading, error, refresh } = useEquipment({ bin: bin.id })
+  const { items, loading, error } = useEquipment({ bin: bin.id })
 
   const scrollToPhoto = (itemId: string) => {
     document.getElementById(photoBlockId(itemId))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -384,7 +392,6 @@ function BinContents({
           key={bin.id}
           zoneId={zone.id}
           binId={bin.id}
-          onCreated={() => { void refresh() }}
           canWrite={canWrite}
           binCode={bin.code}
         />

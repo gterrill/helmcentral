@@ -438,7 +438,7 @@ describe('App-wide voice (ADR 0093)', () => {
     expect(screen.queryByRole('heading', { name: 'Mate' })).not.toBeInTheDocument()
     // The panel's own hook instance opened the same conversation the sheet
     // had active, not whatever it would otherwise have picked as newest.
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/new-1'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/new-1', expect.anything()))
   })
 
   // ADR 0105: the Mate page's thread scrolls inside MessageScroller's own

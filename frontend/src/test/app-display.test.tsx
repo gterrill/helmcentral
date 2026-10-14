@@ -8,7 +8,7 @@
  * (to control which wall displays exist without a real /api/displays fetch).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
@@ -213,6 +213,7 @@ const { mockPagesState, mockCreatePage, mockUpdatePage } = vi.hoisted(() => ({
   mockPagesState: {
     pages: [] as DashboardPage[],
     loading: false,
+    error: null as string | null,
   },
   mockCreatePage: vi.fn(),
   mockUpdatePage: vi.fn(async (id: string, patch: Partial<DashboardPage>) => ({ id, ...patch }) as DashboardPage),
@@ -222,7 +223,7 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
     pages: mockPagesState.pages,
     loading: mockPagesState.loading,
-    error: null,
+    error: mockPagesState.error,
     refetch: vi.fn(),
     createPage: mockCreatePage,
     updatePage: mockUpdatePage,
@@ -389,6 +390,31 @@ describe('App at /display/<slug>', () => {
       page('p2', 'Other page', [WIND_WIDGET]),
     ]
     mockPagesState.loading = false
+    mockPagesState.error = null
+  })
+
+  it('keeps showing the loaded pages, with a refresh line, when the page list fails to refresh', () => {
+    mockPagesState.error = 'HTTP 502'
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+    const note = screen.getByTestId('refresh-failed-overlay')
+    expect(note).toHaveTextContent("Couldn't refresh: HTTP 502")
+    // An overlay, not part of the grid's flow: the wall's fit is computed for
+    // the grid alone and a blip must not shift or clip it.
+    expect(note).toHaveClass('fixed', 'pointer-events-none')
+    expect(screen.getByTestId('display-shell-outer').contains(note)).toBe(true)
+    expect(screen.queryByText(/Could not load dashboard pages/)).not.toBeInTheDocument()
+  })
+
+  it('shows the full failure only when the wall has no pages to show', () => {
+    mockPagesState.error = 'HTTP 502'
+    mockPagesState.pages = []
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    expect(screen.getByText(/Could not load dashboard pages/)).toBeInTheDocument()
   })
 
   it('renders the fullscreen wall root with no sidebar or banners, showing the first assigned page', () => {
@@ -579,6 +605,32 @@ describe('App at / (dashboard authoring)', () => {
       page('p2', 'Other page', [WIND_WIDGET]),
     ]
     mockPagesState.loading = false
+  })
+
+  it('keeps the page list and the dashboard, with a refresh line, when the page list fails to refresh', () => {
+    mockPagesState.error = 'HTTP 502'
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Other page' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Switch dashboard page')).toBeInTheDocument()
+    const note = screen.getByTestId('refresh-failed-overlay')
+    expect(note).toHaveTextContent("Couldn't refresh: HTTP 502")
+    // A corner pill outside the grid's flow, so a blip never shifts the tiles.
+    expect(note).toHaveClass('fixed')
+    expect(within(note).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    mockPagesState.error = null
+  })
+
+  it('shows the full error with Retry on the dashboard when the page list failed and there are no pages', () => {
+    mockPagesState.error = 'HTTP 502'
+    mockPagesState.pages = []
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    mockPagesState.error = null
   })
 
   it('reaches the wall displays index from one sidebar item, listing every display and its address', () => {
@@ -779,6 +831,24 @@ describe('App at / (dashboard authoring)', () => {
 
     await waitFor(() => expect(mockUpdateDisplay).toHaveBeenCalled())
     expect(screen.queryByText(/could not be found/i)).not.toBeInTheDocument()
+  })
+
+  it('replaces the old slug in history on a rename, so Back does not land on a dead address', async () => {
+    mockUpdateDisplay.mockImplementationOnce(async (id: string, patch: Record<string, unknown>) => {
+      const updated = { ...mockDisplaysState.displays.find((d) => d.id === id)!, ...patch }
+      mockDisplaysState.displays = mockDisplaysState.displays.map((d) => (d.id === id ? updated : d))
+      return updated
+    })
+    window.history.replaceState({}, '', '/wall-displays/flybridge')
+    render(<App />)
+    const entries = window.history.length
+
+    const slug = screen.getByLabelText('Address')
+    fireEvent.change(slug, { target: { value: 'flybridge-2' } })
+    fireEvent.blur(slug)
+
+    await waitFor(() => expect(window.location.pathname).toBe('/wall-displays/flybridge-2'))
+    expect(window.history.length).toBe(entries)
   })
 
   it('moves the editor, not just the URL, on Back and Forward', () => {

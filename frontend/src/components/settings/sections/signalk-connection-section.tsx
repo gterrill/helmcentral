@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
-import { apiBaseUrl } from '@/config/api'
+import { apiRequest } from '@/lib/api-query'
 
 interface SignalKConnectionSectionProps {
   draft: RegularSettingsDraft
@@ -68,18 +68,10 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/settings/signalk/test`, {
+      const data = await apiRequest<{ vessel_name?: string }>('/api/settings/signalk/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        json: payload,
       })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(errorPayload?.error ?? 'Unable to connect to SignalK')
-      }
-
-      const data = (await response.json()) as { vessel_name?: string }
       const vesselName = data.vessel_name?.trim()
       // Naming the vessel that answered is the point: "connected" alone
       // can't tell your boat apart from another server on the same network.

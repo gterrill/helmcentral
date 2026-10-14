@@ -55,14 +55,14 @@ describe('useImageryPrefetch', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/world-imagery/prefetch/job-1')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/world-imagery/prefetch/job-1', expect.anything())
     expect(result.current.progress).toEqual({ done: 40, total: 100 })
     expect(result.current.prefetching).toBe(true)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/world-imagery/prefetch/job-1')
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/world-imagery/prefetch/job-1', expect.anything())
     expect(result.current.progress).toEqual({ done: 100, total: 100 })
     expect(result.current.prefetching).toBe(false)
 
@@ -109,7 +109,7 @@ describe('useImageryPrefetch', () => {
         status: 202,
         json: async () => ({ jobId: 'job-2', totalTiles: 10 }),
       })
-      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useImageryPrefetch())

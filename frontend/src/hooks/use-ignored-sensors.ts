@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
-import { readErrorMessage } from '@/lib/api-error'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { SensorHealthEntry } from '@/hooks/use-alarms'
 
 /**
@@ -17,51 +16,51 @@ interface IgnoredSensorsBody {
   sensors?: SensorHealthEntry[]
 }
 
+const PATH = '/api/alarms/ignored-sensors'
+const NO_IDENTIFIERS: string[] = []
+const NO_SENSORS: SensorHealthEntry[] = []
+
+interface IgnoredSensors {
+  identifiers: string[]
+  sensors: SensorHealthEntry[]
+}
+
+function normalise(body: IgnoredSensorsBody): IgnoredSensors {
+  return {
+    identifiers: Array.isArray(body.identifiers) ? body.identifiers : NO_IDENTIFIERS,
+    sensors: Array.isArray(body.sensors) ? body.sensors : NO_SENSORS,
+  }
+}
+
 export function useIgnoredSensors() {
-  const [identifiers, setIdentifiers] = useState<string[]>([])
-  // The same identifiers with the names the operator knows them by; the list
-  // in Settings shows these and never the raw identifier.
-  const [sensors, setSensors] = useState<SensorHealthEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const apply = useCallback((body: IgnoredSensorsBody) => {
-    setIdentifiers(Array.isArray(body.identifiers) ? body.identifiers : [])
-    setSensors(Array.isArray(body.sensors) ? body.sensors : [])
-  }, [])
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/alarms/ignored-sensors`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      apply((await res.json()) as IgnoredSensorsBody)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [apply])
-
-  useEffect(() => { void refresh() }, [refresh])
+  // The sensors are the same identifiers with the names the operator knows
+  // them by; the list in Settings shows these and never the raw identifier.
+  const { data, isLoading, error, refetch } = useApiQuery<IgnoredSensors>({
+    queryKey: [PATH],
+    path: PATH,
+    select: normalise,
+  })
 
   const ignore = useCallback(async (identifier: string): Promise<void> => {
-    const res = await fetch(`${apiBaseUrl}/api/alarms/ignored-sensors`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier }),
-    })
-    if (!res.ok) throw new Error(await readErrorMessage(res))
-    apply((await res.json()) as IgnoredSensorsBody)
-  }, [apply])
-
-  const unignore = useCallback(async (identifier: string): Promise<void> => {
-    const res = await fetch(`${apiBaseUrl}/api/alarms/ignored-sensors/${encodeURIComponent(identifier)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await readErrorMessage(res))
-    setIdentifiers((prev) => prev.filter((id) => id !== identifier))
-    setSensors((prev) => prev.filter((s) => s.identifier !== identifier))
+    const body = await apiRequest<IgnoredSensorsBody>(PATH, { method: 'POST', json: { identifier } })
+    setQueryData<IgnoredSensors>([PATH], normalise(body))
   }, [])
 
-  return { identifiers, sensors, loading, error, ignore, unignore, refresh }
+  const unignore = useCallback(async (identifier: string): Promise<void> => {
+    await apiRequest(`${PATH}/${encodeURIComponent(identifier)}`, { method: 'DELETE' })
+    setQueryData<IgnoredSensors>([PATH], (prev) => ({
+      identifiers: (prev?.identifiers ?? NO_IDENTIFIERS).filter((id) => id !== identifier),
+      sensors: (prev?.sensors ?? NO_SENSORS).filter((s) => s.identifier !== identifier),
+    }))
+  }, [])
+
+  return {
+    identifiers: data?.identifiers ?? NO_IDENTIFIERS,
+    sensors: data?.sensors ?? NO_SENSORS,
+    loading: isLoading,
+    error: error?.message ?? null,
+    ignore,
+    unignore,
+    refresh: refetch,
+  }
 }

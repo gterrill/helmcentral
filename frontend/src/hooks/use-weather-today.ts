@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import { useApiQuery } from '@/lib/api-query';
 
 export interface WeatherToday {
   datetime: string;
@@ -28,59 +29,48 @@ const defaultWeather: WeatherToday = {
   ttl_seconds: 0,
 };
 
+function normalise(data: Partial<WeatherToday>): WeatherToday {
+  // Validate required numeric fields
+  return {
+    datetime: data.datetime || new Date().toISOString(),
+    temperature_f:
+      typeof data.temperature_f === 'number' && data.temperature_f >= -1
+        ? data.temperature_f
+        : -1,
+    condition: data.condition || 'Unknown',
+    wind_speed_kts:
+      typeof data.wind_speed_kts === 'number' && data.wind_speed_kts >= -1
+        ? data.wind_speed_kts
+        : -1,
+    wind_gust_kts:
+      typeof data.wind_gust_kts === 'number' && data.wind_gust_kts >= -1
+        ? data.wind_gust_kts
+        : -1,
+    wind_direction: data.wind_direction || '—',
+    precipitation_pct:
+      typeof data.precipitation_pct === 'number' && data.precipitation_pct >= -1
+        ? data.precipitation_pct
+        : -1,
+    provider: typeof data.provider === 'string' ? data.provider : '',
+    cached: Boolean(data.cached),
+    updated_at: typeof data.updated_at === 'string' ? data.updated_at : '',
+    ttl_seconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : 0,
+  };
+}
+
 export function useWeatherToday(refreshIntervalSeconds = 600) {
-  const [weather, setWeather] = useState<WeatherToday>(defaultWeather);
-  const [loading, setLoading] = useState(true);
+  const { data, error, isLoading } = useApiQuery<WeatherToday>({
+    queryKey: ['/api/weather-today'],
+    path: '/api/weather-today',
+    refetchInterval: refreshIntervalSeconds * 1000,
+    select: normalise,
+  });
 
+  // The tile keeps showing the last reading, so a failure is only logged.
   useEffect(() => {
-    const fetchWeather = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch('/api/weather-today');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
+    if (error) console.error('Error fetching weather:', error);
+  }, [error]);
 
-        // Validate required numeric fields
-        const validWeather: WeatherToday = {
-          datetime: data.datetime || new Date().toISOString(),
-          temperature_f:
-            typeof data.temperature_f === 'number' && data.temperature_f >= -1
-              ? data.temperature_f
-              : -1,
-          condition: data.condition || 'Unknown',
-          wind_speed_kts:
-            typeof data.wind_speed_kts === 'number' && data.wind_speed_kts >= -1
-              ? data.wind_speed_kts
-              : -1,
-          wind_gust_kts:
-            typeof data.wind_gust_kts === 'number' && data.wind_gust_kts >= -1
-              ? data.wind_gust_kts
-              : -1,
-          wind_direction: data.wind_direction || '—',
-          precipitation_pct:
-            typeof data.precipitation_pct === 'number' && data.precipitation_pct >= -1
-              ? data.precipitation_pct
-              : -1,
-          provider: typeof data.provider === 'string' ? data.provider : '',
-          cached: Boolean(data.cached),
-          updated_at: typeof data.updated_at === 'string' ? data.updated_at : '',
-          ttl_seconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : 0,
-        };
-
-        setWeather(validWeather);
-      } catch (error) {
-        console.error('Error fetching weather:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWeather();
-    const interval = setInterval(fetchWeather, refreshIntervalSeconds * 1000);
-    return () => clearInterval(interval);
-  }, [refreshIntervalSeconds]);
-
-  return { weather, loading };
+  const weather = data ?? defaultWeather;
+  return { weather, loading: isLoading };
 }

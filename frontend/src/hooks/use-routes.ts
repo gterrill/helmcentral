@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
+import { ApiError, apiRequest, useApiQuery } from '@/lib/api-query'
 
 export interface RouteWaypoint {
   lat: number
@@ -19,69 +20,61 @@ interface RoutesListResponse {
   routes?: Route[]
 }
 
+const ROUTES_KEY = ['/api/routes'] as const
+const EMPTY_ROUTES: Route[] = []
+
+// A rejected write answers null/false to the caller; a network failure still
+// rejects, as it always has here.
+async function orNull<T>(request: Promise<T>): Promise<T | null> {
+  try {
+    return await request
+  } catch (err) {
+    if (err instanceof ApiError) return null
+    throw err
+  }
+}
+
 export function useRoutes() {
-  const [routes, setRoutes] = useState<Route[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, error, refetch } = useApiQuery<Route[]>({
+    queryKey: ROUTES_KEY,
+    path: '/api/routes',
+    select: (raw: RoutesListResponse) => (Array.isArray(raw.routes) ? raw.routes : []),
+  })
+  const routes = data ?? EMPTY_ROUTES
 
-  const fetchRoutes = useCallback(async () => {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/routes')
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
-      }
-      const data = (await res.json()) as RoutesListResponse
-      setRoutes(Array.isArray(data.routes) ? data.routes : [])
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load routes')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void fetchRoutes()
-  }, [fetchRoutes])
+  // Callers rely on the fresh list being in place when a write resolves.
+  const refreshed = useCallback(async () => {
+    await refetch()
+  }, [refetch])
 
   const createRoute = useCallback(async (
     name: string,
     waypoints: RouteWaypoint[],
     planningSpeedKts: number,
   ): Promise<Route | null> => {
-    const res = await fetch('/api/routes', {
+    const route = await orNull(apiRequest<Route>('/api/routes', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, waypoints, planning_speed_kts: planningSpeedKts }),
-    })
-    if (!res.ok) return null
-    const route = (await res.json()) as Route
-    await fetchRoutes()
+      json: { name, waypoints, planning_speed_kts: planningSpeedKts },
+    }))
+    if (route) await refreshed()
     return route
-  }, [fetchRoutes])
+  }, [refreshed])
 
   const updateRoute = useCallback(async (
     id: string,
     patch: Partial<Pick<Route, 'name' | 'waypoints' | 'planning_speed_kts'>>,
   ): Promise<Route | null> => {
-    const res = await fetch(`/api/routes/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    })
-    if (!res.ok) return null
-    const route = (await res.json()) as Route
-    await fetchRoutes()
+    const route = await orNull(apiRequest<Route>(`/api/routes/${id}`, { method: 'PATCH', json: patch }))
+    if (route) await refreshed()
     return route
-  }, [fetchRoutes])
+  }, [refreshed])
 
   const deleteRoute = useCallback(async (id: string): Promise<boolean> => {
-    const res = await fetch(`/api/routes/${id}`, { method: 'DELETE' })
-    if (!res.ok) return false
-    await fetchRoutes()
+    const done = await orNull(apiRequest<void>(`/api/routes/${id}`, { method: 'DELETE' }).then(() => true))
+    if (!done) return false
+    await refreshed()
     return true
-  }, [fetchRoutes])
+  }, [refreshed])
 
-  return { routes, loading, error, refetch: fetchRoutes, createRoute, updateRoute, deleteRoute }
+  return { routes, loading: isLoading, error: error?.message ?? null, refetch, createRoute, updateRoute, deleteRoute }
 }

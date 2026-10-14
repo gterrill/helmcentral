@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BinPage } from '@/components/inventory/bin-page'
 import type { EquipmentItem, InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
+import { invalidateQueries } from '@/lib/api-query'
 import { stubImageSize } from './stub-image'
 
 // ADR 0127 (the plan's A4): BinQuickAdd and TagRow are each already
@@ -300,6 +301,24 @@ describe('BinPage on the plan (ADR 0156)', () => {
     expect(await screen.findByRole('group', { name: 'Main deck plan' })).toBeInTheDocument()
     expect(document.querySelector('polygon')).toHaveAttribute('data-highlighted', 'true')
     expect(document.querySelector('circle')).toHaveAttribute('data-highlighted', 'true')
+  })
+
+  it('keeps the plan and notes the failure when a refresh of the decks fails', async () => {
+    zones = planned
+    const base = fetchMock.getMockImplementation()!
+    let failing = false
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      failing && String(url).endsWith('/api/inventory/decks')
+        ? Promise.resolve({ ok: false, status: 502, json: async () => ({ error: 'HTTP 502' }) })
+        : base(url, init))
+    render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+    expect(await screen.findByRole('group', { name: 'Main deck plan' })).toBeInTheDocument()
+
+    failing = true
+    act(() => { invalidateQueries(['/api/inventory/decks']) })
+
+    expect(await screen.findByText(/Couldn't refresh: HTTP 502/)).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Main deck plan' })).toBeInTheDocument()
   })
 
   it('says the plan image is missing for a pinned bin whose deck has none', async () => {

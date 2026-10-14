@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { RefreshFailedNote } from '@/components/patterns'
 import { BookOpen, CheckCircle2, Download, Plus, Wrench } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -139,8 +140,9 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         </div>
       )}
 
+      {error && rules.length > 0 && <RefreshFailedNote reason={error} onRetry={() => { void refresh() }} />}
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card">
-        {error ? (
+        {error && rules.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
             <p role="alert" className="text-sm text-destructive">{error}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => { void refresh() }}>Retry</Button>
@@ -284,26 +286,21 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => { setCreatingRule(false); setEditingRule(null) }}
         onSave={async (input) => {
           const saved = editingRule ? await updateMaintenanceRule(editingRule.id, input) : await createMaintenanceRule(input)
-          await refresh()
           setCreatingRule(false)
           setEditingRule(null)
           return saved
         }}
         onDelete={async (id) => {
           await deleteMaintenanceRule(id)
-          await refresh()
           setEditingRule(null)
         }}
-        onRuleChanged={() => { void refresh() }}
       />
 
       <MaintenanceCompleteDialog
         rule={completingRule}
-        onCancel={() => { setCompletingRule(null); void refresh() }}
+        onCancel={() => setCompletingRule(null)}
         onComplete={async (input) => {
-          const result = await completeMaintenanceRule(completingRule!.id, input)
-          await refresh()
-          return result
+          return completeMaintenanceRule(completingRule!.id, input)
         }}
       />
 
@@ -312,7 +309,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => setAcknowledgingRule(null)}
         onConfirm={async (reason) => {
           await acknowledgeMaintenanceRule(acknowledgingRule!.id, reason)
-          await refresh()
           setAcknowledgingRule(null)
         }}
       />
@@ -322,7 +318,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onCancel={() => setSettingLastDoneRule(null)}
         onConfirm={async (lastDoneAt, lastDoneHours) => {
           await setMaintenanceRuleLastDone(settingLastDoneRule!.id, lastDoneAt, lastDoneHours)
-          await refresh()
           setSettingLastDoneRule(null)
         }}
       />

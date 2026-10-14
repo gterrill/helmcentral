@@ -28,7 +28,7 @@ describe('useDashboardRibbon', () => {
     const { result } = renderHook(() => useDashboardRibbon())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-ribbon')
+    expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-ribbon', expect.anything())
     expect(result.current.ribbon).toEqual(sampleRibbon)
     expect(result.current.error).toBeNull()
   })
@@ -44,7 +44,7 @@ describe('useDashboardRibbon', () => {
   })
 
   it('sets an error message when the initial fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardRibbon())
@@ -69,11 +69,7 @@ describe('useDashboardRibbon', () => {
     })
 
     expect(saved).toBe(true)
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-ribbon', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ribbon: sampleRibbon }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-ribbon', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ ribbon: sampleRibbon }) }))
     expect(result.current.ribbon).toEqual(sampleRibbon)
   })
 
@@ -93,11 +89,7 @@ describe('useDashboardRibbon', () => {
     })
 
     expect(saved).toBe(true)
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-ribbon', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ribbon: null }),
-    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-ribbon', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ ribbon: null }) }))
     expect(result.current.ribbon).toBeNull()
   })
 

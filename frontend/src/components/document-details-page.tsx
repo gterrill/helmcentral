@@ -13,9 +13,10 @@ import {
 import { MoveToFolderDialog } from '@/components/documents/move-to-folder-dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
+import { DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { useFollowingDraft } from '@/hooks/use-following-draft'
 import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 import { useDocument, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
@@ -133,22 +134,10 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
 ) {
   const { document, loading, error, patch, move } = useDocument(documentId)
 
-  const [draft, setDraft] = useState<DocumentDraft | null>(null)
-  // Re-seeds only when a *different* document has loaded (its id changes),
-  // not on every incidental re-render of the same one - patch() below
-  // already sets the hook's `document` to the server's echoed-back response
-  // on a successful save, and keying this off `document` itself (rather than
-  // its id) would re-run right after every Save too. That happens to be
-  // harmless the moment it fires (the draft already matches what was just
-  // submitted), but it is the wrong signal to build on: a future caller that
-  // refreshes the same document in the background for some other reason
-  // would silently discard an edit in progress. Keying on the id is what
-  // actually tells "a new document arrived" apart from "the same one came
-  // back again".
-  useEffect(() => {
-    if (document) setDraft(draftFrom(document))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on the id only, see the comment above.
-  }, [document?.id])
+  // Seeded from the record, and each field the operator has not edited follows
+  // it: this page polls a pending document while enrichment writes its
+  // suggested title, and Save would otherwise PATCH the old blank over it.
+  const [draft, setDraft] = useFollowingDraft(document, draftFrom, null, { unordered: ['tags'] })
 
   const [tagInput, setTagInput] = useState('')
   const [saving, setSaving] = useState(false)
@@ -205,7 +194,8 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     }
     return target
   }
-  const treeReady = !folderTree.loading && folderTree.error === null
+  // A tree already loaded still links its crumbs when a later refresh fails.
+  const treeReady = !folderTree.loading && (folderTree.folders.length > 0 || folderTree.error === null)
 
   const displayName = document ? documentDisplayName(document) : null
   useEffect(() => {
@@ -271,7 +261,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     )
   }
 
-  if (error) {
+  if (error && !document) {
     return (
       <Page title="Document" breadcrumb={breadcrumb} className={pageClassName}>
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -420,11 +410,13 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
       className={pageClassName}
       primaryAction={{ label: 'Move', icon: <FolderInput className="h-4 w-4" aria-hidden="true" />, onClick: () => setMoveOpen(true) }}
     >
-      {folderTree.error && (
+      {folderTree.error && folderTree.folders.length > 0 && <RefreshFailedNote reason={folderTree.error} />}
+      {folderTree.error && folderTree.folders.length === 0 && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Folder links unavailable ({folderTree.error})
         </p>
       )}
+      {error && <RefreshFailedNote reason={error} />}
       {moveError && (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {moveError}
@@ -435,7 +427,6 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
         onOpenChange={setMoveOpen}
         label={documentDisplayName(document)}
         onPick={(destination) => { void submitMove(destination) }}
-        onFolderCreated={() => {}}
       />
       <DetailsLayout aside={aside}>
         <FormSection title="Details">

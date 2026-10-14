@@ -33,6 +33,37 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - Trips Helmcentral did not record can be added with **Import GPX** on the
   Passages page. See the new pages on importing GPX tracks and editing
   passages in the help.
+- Mate can see the active alarms, so asking it about an alarm investigates the
+  sensor that raised it, not a guess from the device name on the card.
+
+### Fixed
+
+- The solar chargers' panel voltage (for example 72 V) no longer raises an
+  "Impossible sensor reading" alarm named after an alternator regulator. A
+  device that only reported an empty value for a battery no longer counts as
+  sharing that battery.
+
+### Changed
+
+- In Inventory, clicking **Equipment** while an item is open now takes you
+  back to the equipment list. It used to do nothing.
+- In Inventory, the unsaved-changes prompt now appears only when a click would
+  close the item you are editing or the bin or stocktake you are working in.
+  Moving around Inventory while that stays on screen no longer asks.
+- In Documents, choosing a folder while reading a manual section now takes one
+  press of Back to undo, not two.
+- **New item** in Inventory now always shows the equipment list address, rather
+  than the address of the item you had open before.
+- Going back to a page you opened in the last few minutes shows what it had at
+  once and brings it up to date behind the scenes, instead of a spinner each
+  time. Lists also stay in step with each other: adding an item from a bin, or
+  moving a document, updates every other list showing it without a reload.
+- When the server refuses a change, the message you see is now the server's own
+  reason wherever it gives one, rather than a generic "could not save".
+- If a list can't be refreshed (a dropped link to the boat, a server restart),
+  Inventory, Maintenance, Documents, wall displays and the dashboard keep
+  showing what they last had, with a small "Couldn't refresh" line saying why,
+  instead of replacing the whole list with an error.
 
 ## [0.44.0] - 2026-10-12
 
@@ -55,15 +86,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- In Inventory, clicking **Equipment** while an item is open now takes you
-  back to the equipment list. It used to do nothing.
-- In Inventory, the unsaved-changes prompt now appears only when a click would
-  close the item you are editing or the bin or stocktake you are working in.
-  Moving around Inventory while that stays on screen no longer asks.
-- In Documents, choosing a folder while reading a manual section now takes one
-  press of Back to undo, not two.
-- **New item** in Inventory now always shows the equipment list address, rather
-  than the address of the item you had open before.
 - The Documents page now has a folder pane on the left. It shows every folder
   as a tree with the number of documents in each, so you can jump to any folder
   in one click instead of stepping through the levels. The breadcrumb and the

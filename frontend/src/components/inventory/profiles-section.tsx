@@ -17,6 +17,7 @@ import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet 
 import { Input } from '@/components/ui/input'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
+import { ApiError, apiRequest } from '@/lib/api-query'
 import type { EngineProfile, EquipmentProfileValidationError } from '@/lib/engine-profiles'
 
 type ProfileKind = 'engine' | 'alternator' | 'generator' | 'battery'
@@ -143,9 +144,11 @@ interface ProfileGuard {
   affected: ProfileGuardEntry[]
 }
 
-/** The 409 body's `affected` list, or null when the response is not one. */
-function readGuard(kind: ProfileGuard['kind'], status: number, payload: { error?: string; affected?: unknown } | null): ProfileGuard | null {
-  if (status !== 409 || !Array.isArray(payload?.affected) || payload.affected.length === 0) return null
+/** The 409 body's `affected` list, or null when the failure is not one. */
+function readGuard(kind: ProfileGuard['kind'], err: unknown): ProfileGuard | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null
+  const payload = err.body as { error?: string; affected?: unknown } | undefined
+  if (!Array.isArray(payload?.affected) || payload.affected.length === 0) return null
   return { kind, message: payload.error ?? '', affected: payload.affected as ProfileGuardEntry[] }
 }
 
@@ -190,6 +193,12 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   const [guard, setGuard] = useState<ProfileGuard | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<EquipmentProfileValidationError[]>([])
+  // A rejected profile comes back as {errors: [{path, message}]}, keyed by
+  // JSON path rather than form field, so it is read off the error body.
+  const showValidationErrors = (err: unknown) => {
+    const errors = err instanceof ApiError ? (err.body as { errors?: unknown } | undefined)?.errors : undefined
+    if (Array.isArray(errors) && errors.length > 0) setValidationErrors(errors as EquipmentProfileValidationError[])
+  }
 
   // No fallback here: an id that does not (yet) match any loaded profile
   // means "not found," never "assume the first one." A just-uploaded id is
@@ -280,23 +289,12 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
 
     try {
       setUploading(true)
-      const response = await fetch(`${apiBaseUrl}/api/equipment-profiles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed),
-      })
-
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string
-        errors?: EquipmentProfileValidationError[]
-        profile?: EngineProfile
-      } | null
-
-      if (!response.ok) {
-        if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
-          setValidationErrors(payload.errors)
-        }
-        throw new Error(payload?.error ?? 'Unable to upload profile.')
+      let payload: { profile?: EngineProfile } | undefined
+      try {
+        payload = await apiRequest<{ profile?: EngineProfile }>('/api/equipment-profiles', { method: 'POST', json: parsed })
+      } catch (err) {
+        showValidationErrors(err)
+        throw err
       }
 
       const uploaded = payload?.profile ?? parsed
@@ -320,17 +318,15 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
     setValidationErrors([])
     try {
       setDeleting(true)
-      const response = await fetch(`${apiBaseUrl}/api/equipment-profiles/${encodeURIComponent(profile.id)}`, {
-        method: 'DELETE',
-      })
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string; affected?: unknown } | null
-        const refused = readGuard('delete', response.status, payload)
+      try {
+        await apiRequest(`/api/equipment-profiles/${encodeURIComponent(profile.id)}`, { method: 'DELETE' })
+      } catch (err) {
+        const refused = readGuard('delete', err)
         if (refused) {
           setGuard(refused)
           return
         }
-        throw new Error(payload?.error ?? 'Unable to delete profile.')
+        throw err
       }
 
       setSelectedID(null)
@@ -401,30 +397,19 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
         name: profile.name,
       }
       const endpoint = isCreating
-        ? `${apiBaseUrl}/api/equipment-profiles`
-        : `${apiBaseUrl}/api/equipment-profiles/${encodeURIComponent(profile.id)}${confirmRemoved ? '?confirm_removed=1' : ''}`
+        ? '/api/equipment-profiles'
+        : `/api/equipment-profiles/${encodeURIComponent(profile.id)}${confirmRemoved ? '?confirm_removed=1' : ''}`
 
-      const response = await fetch(endpoint, {
-        method: isCreating ? 'POST' : 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string
-          errors?: EquipmentProfileValidationError[]
-          affected?: unknown
-        } | null
-        const refused = readGuard('save', response.status, payload)
+      try {
+        await apiRequest(endpoint, { method: isCreating ? 'POST' : 'PUT', json: payload })
+      } catch (err) {
+        const refused = readGuard('save', err)
         if (refused) {
           setGuard(refused)
           return
         }
-        if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
-          setValidationErrors(payload.errors)
-        }
-        throw new Error(payload?.error ?? 'Unable to save profile.')
+        showValidationErrors(err)
+        throw err
       }
 
       setProfile((current) => ({ ...current, json: JSON.stringify(payload, null, 2) }))
@@ -476,7 +461,6 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
                 onAdded={(id) => {
                   setIsCreating(false)
                   setSelectedID(id)
-                  reload()
                 }}
               />
               <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>

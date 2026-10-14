@@ -847,6 +847,20 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"passage time windows, then call get_path_history for each window. Documents and past conversations are " +
 		"secondary context, not a substitute for the logged figures.\n\n")
 
+	// 2c1c. Alarms (ADR 0175) - fixed wording, identical for every turn. The
+	// card text names a device ("PortALT"), and investigating that name led
+	// to the wrong sensor. The alarm itself carries the real path.
+	b.WriteString("When the operator asks about an alarm - \"investigate the alarm\", \"why is it alarming\", " +
+		"\"what is that warning\" - call get_active_alarms first. Investigate the sensor identifiers it returns: " +
+		"an identifier that is a SignalK path goes to check_signalk_paths (filter), get_last_recorded " +
+		"(path_prefix) and get_path_history (path); an identifier that is a $source id, as silent-source alarms " +
+		"give, such as YachtDevices.47, goes to the `source` filter of check_signalk_paths and get_last_recorded. " +
+		"Use nothing else: never a path guessed " +
+		"from the device name on the card (the name on a card is a label and may belong to a " +
+		"different sensor than the one that tripped). Keep the value at raise (sensors, evidence) apart from the " +
+		"live value now (live_sensors, live_evidence), and say which one you are quoting. An empty list means " +
+		"nothing is alarming now; say so rather than guessing.\n\n")
+
 	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
 	// chat that prompted this had Mate say it could not sit and watch a
 	// reading; it can now, and must never claim to without one running.

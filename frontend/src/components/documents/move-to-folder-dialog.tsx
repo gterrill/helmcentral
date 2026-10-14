@@ -29,7 +29,7 @@ function FolderPicker({
    * was created; DocumentsPanel below refreshes its own listing in
    * response, leaving the picker's own descend-into-it behaviour (below)
    * unchanged. */
-  onFolderCreated: () => void
+  onFolderCreated?: () => void
 }) {
   const [pickerFolderId, setPickerFolderId] = useState<string | null>(null)
   const picker = useDocuments(pickerFolderId)
@@ -53,7 +53,7 @@ function FolderPicker({
       const created = await picker.createFolder(name, pickerFolderId)
       setPickerFolderId(created.id)
       setNewFolderName('')
-      onFolderCreated()
+      onFolderCreated?.()
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message (e.g. the 409
       // "folder name already exists") rather than an invented one, and the
@@ -135,7 +135,7 @@ export function MoveToFolderDialog({
   /** What is being moved - a document title, a folder name, "3 document(s)". */
   label: string
   onPick: (folderId: string | null) => void
-  onFolderCreated: () => void
+  onFolderCreated?: () => void
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

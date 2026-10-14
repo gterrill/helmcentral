@@ -76,7 +76,11 @@ the code comments record as fixed more than once.
    that finishes under the dialog from swapping Leave/Stay for Save and Continue.
    `NavigationGuardDialog` renders it with the same copy and buttons as before, and Save and
    Continue calls the guard's own `save`. While it runs, Cancel and Discard are disabled and
-   a move cancelled during the save is not made afterwards. A registered guard also means
+   the held move is made once the save resolves unless the operator withdrew it:
+   Stay, a newer held move, or a move of their own while the save ran (Back, a page switch,
+   a push navigation). A forced navigation the save itself makes (a New item landing on its
+   record) and a replace-correction do not count. A second Save and Continue for the same
+   move joins the running save. A registered guard also means
    unsaved work, so the update reload and the sidebar's unsaved dot read the registry
    instead of mirrored flags.
 5. **Panel route hooks.** `useSettingsRoute`, `useDocumentsRoute` and `useInventoryRoute`

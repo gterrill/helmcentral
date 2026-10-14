@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
+import { ApiError, apiRequest } from '@/lib/api-query'
 
 /**
  * A watch Mate started on live readings (ADR 0160), as the chat shows it.
@@ -50,16 +50,6 @@ function mapWatch(api: WatchApi & { status: 'watching' | 'reporting' }): MateTel
   }
 }
 
-async function readError(response: Response): Promise<string> {
-  try {
-    const data = (await response.json()) as { error?: string }
-    if (typeof data.error === 'string' && data.error !== '') return data.error
-  } catch {
-    // Not JSON - fall through.
-  }
-  return `HTTP ${response.status}`
-}
-
 const DEFAULT_POLL_MS = 5000
 
 /**
@@ -106,15 +96,16 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
   const refresh = useCallback(async () => {
     const id = conversationRef.current
     if (id === null) return
-    let response: Response
+    // 204 resolves to undefined: no watch running.
+    let data: { watch: WatchApi } | undefined
     try {
-      response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}/watch`, { method: 'GET' })
+      data = await apiRequest<{ watch: WatchApi } | undefined>(`/api/assistant/conversations/${encodeURIComponent(id)}/watch`)
     } catch (err) {
       if (conversationRef.current === id) setError(err instanceof Error ? err.message : String(err))
       return
     }
     if (conversationRef.current !== id) return
-    if (response.status === 204) {
+    if (data === undefined) {
       firstLookRef.current = false
       const shown = shownRef.current
       if (shown?.conversationId === id) countEnded(id, shown.watchId)
@@ -122,12 +113,6 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
       setWatch(null)
       return
     }
-    if (!response.ok) {
-      setError(await readError(response))
-      return
-    }
-    const data = (await response.json()) as { watch: WatchApi }
-    if (conversationRef.current !== id) return
     const firstLook = firstLookRef.current
     firstLookRef.current = false
     setError(null)
@@ -164,14 +149,15 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
     const id = conversationRef.current
     if (id === null) return
     try {
-      const response = await fetch(`${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(id)}/watch`, { method: 'DELETE' })
-      if (response.status === 409) {
+      await apiRequest<void>(`/api/assistant/conversations/${encodeURIComponent(id)}/watch`, { method: 'DELETE' })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
         // The watch ended before the Stop arrived and Mate is already
         // reading the report: keep following it to the answer.
         await refresh()
         return
       }
-      if (response.status === 404) {
+      if (err instanceof ApiError && err.status === 404) {
         // Nothing left to stop: the watch had already finished and Mate's
         // follow-up is under way (or done). Treat it as a natural end.
         if (conversationRef.current !== id) return
@@ -182,11 +168,6 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
         if (shown?.conversationId === id) countEnded(id, shown.watchId)
         return
       }
-      if (!response.ok) {
-        setError(await readError(response))
-        return
-      }
-    } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       return
     }

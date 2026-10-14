@@ -5,7 +5,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { DeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { deckPlanUrl, useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
@@ -92,7 +92,6 @@ export function DeckEditor(
       if (trimmed !== deck.name) await renameDeck(deck.id, trimmed)
       if (layoutChanged) {
         await saveLayout(deck.id, layoutToPayload(layout, zones))
-        await refreshZones()
       }
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, never an invented one.
@@ -101,7 +100,7 @@ export function DeckEditor(
     } finally {
       setSaving(false)
     }
-  }, [deck, name, layout, layoutChanged, zones, renameDeck, saveLayout, refreshZones])
+  }, [deck, name, layout, layoutChanged, zones, renameDeck, saveLayout])
 
   // ADR 0171: this page owns the guard for its name and layout draft.
   useNavigationGuard(dirty
@@ -163,7 +162,6 @@ export function DeckEditor(
     setDeleteError(null)
     try {
       await deleteDeck(deck.id)
-      await refreshZones()
       setPendingDelete(false)
       onDeleted()
     } catch (err) {
@@ -289,7 +287,10 @@ export function DeckEditor(
           title="Locations on this plan"
           description="Outline each location and pin its bins. Changes are kept as a draft until you save."
         >
-          {zonesError ? (
+          {zonesError && zones.length > 0 && (
+            <RefreshFailedNote reason={zonesError} onRetry={() => { void refreshZones() }} />
+          )}
+          {zonesError && zones.length === 0 ? (
             <div className="flex flex-col items-start gap-2">
               <p role="alert" className="text-sm text-destructive">{zonesError}</p>
               <Button type="button" variant="outline" size="sm" onClick={() => { void refreshZones() }}>Retry</Button>

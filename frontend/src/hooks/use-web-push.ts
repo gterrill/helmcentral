@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { ApiError, apiRequest } from '@/lib/api-query'
+
 /**
  * Web push registration for this browser (ADR 0038, ADR 0045).
  *
@@ -90,10 +92,13 @@ export function useWebPush() {
     if (detected.kind !== 'ok') return
 
     try {
-      const response = await fetch(KEY_URL)
-      if (response.ok) {
-        const payload = (await response.json()) as { subscribed_devices?: number }
+      try {
+        const payload = await apiRequest<{ subscribed_devices?: number }>(KEY_URL)
         setDeviceCount(payload.subscribed_devices ?? 0)
+      } catch (err) {
+        // A refused key read leaves the count alone; only a network failure
+        // is an error here.
+        if (!(err instanceof ApiError)) throw err
       }
 
       // Only ask about an existing subscription if a worker is already
@@ -123,12 +128,7 @@ export function useWebPush() {
         throw new Error('Notifications were not allowed for this site.')
       }
 
-      const keyResponse = await fetch(KEY_URL)
-      if (!keyResponse.ok) {
-        const body = (await keyResponse.json().catch(() => ({}))) as { error?: string }
-        throw new Error(body.error ?? 'Could not read the push key from Helmcentral.')
-      }
-      const { public_key: publicKey } = (await keyResponse.json()) as { public_key: string }
+      const { public_key: publicKey } = await apiRequest<{ public_key: string }>(KEY_URL)
 
       // Registered lazily, on this click. A helm kiosk that will never want
       // push should not have a service worker installed on first paint.
@@ -140,19 +140,14 @@ export function useWebPush() {
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       })
 
-      const response = await fetch(SUBSCRIBE_URL, {
+      await apiRequest(SUBSCRIBE_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           ...subscription.toJSON(),
           label: label.trim(),
           user_agent: navigator.userAgent,
-        }),
+        },
       })
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string }
-        throw new Error(body.error ?? 'Helmcentral rejected this device.')
-      }
 
       setSubscribed(true)
       await refresh()
@@ -177,11 +172,7 @@ export function useWebPush() {
       // Server first. If the browser's own unsubscribe then fails, the row is
       // already gone and nothing pushes at a dead endpoint; the reverse order
       // leaves Helmcentral pushing at a revoked endpoint until a 410 prunes it.
-      await fetch(UNSUBSCRIBE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: subscription.endpoint }),
-      })
+      await apiRequest(UNSUBSCRIBE_URL, { method: 'POST', json: { endpoint: subscription.endpoint } })
       await subscription.unsubscribe()
 
       setSubscribed(false)

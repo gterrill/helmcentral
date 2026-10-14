@@ -84,6 +84,7 @@ describe('useDocumentUploads', () => {
   it('uploads a file and moves it from uploading to pending to indexed via polling', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       json: async () => documentPayload({ status: 'indexed', stage: 'done' }),
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -117,7 +118,7 @@ describe('useDocumentUploads', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
-    expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1')
+    expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1', expect.anything())
     expect(result.current.items[0].status).toBe('indexed')
     expect(result.current.ready).toBe(true)
   })
@@ -373,7 +374,7 @@ describe('useDocumentUploads', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
-      text: async () => JSON.stringify({ error: 'indexer crashed' }),
+      json: async () => ({ error: 'indexer crashed' }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -398,7 +399,7 @@ describe('useDocumentUploads', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
-      text: async () => JSON.stringify({ error: 'document not found' }),
+      json: async () => ({ error: 'document not found' }),
     })
     vi.stubGlobal('fetch', fetchMock)
 

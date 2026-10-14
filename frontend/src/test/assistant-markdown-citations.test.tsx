@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
-import { __resetDocumentCitationCacheForTests } from '@/hooks/use-document-citation'
 
 // Mate UI cycle: document sources as icons. Mate now cites a document as
 // `[Title](/documents?document=<id>)` (assistant_prompt.go's citation
@@ -25,7 +24,6 @@ function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {
 describe('AssistantMarkdown document citations', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
-    __resetDocumentCitationCacheForTests()
   })
 
   it('renders a PDF citation as an icon link, not visible link text', async () => {

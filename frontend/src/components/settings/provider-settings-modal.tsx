@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +12,7 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/secret-field-group'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
+import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-warnings'
 
@@ -80,21 +81,6 @@ const parseList = (value: string) =>
 const buildConfigValues = (fields: PluginConfigField[] | undefined) =>
   Object.fromEntries((fields ?? []).map((field) => [field.key, field.value]))
 
-// extractErrorMessage reads a failed fetch response's {"error": "..."} body
-// (the shape every backend handler in this file's API surface returns),
-// falling back to a generic HTTP-status message when the body isn't JSON or
-// carries no error field - so a 400 naming exactly which config field was
-// invalid reaches the operator instead of a bare status code.
-async function extractErrorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: string }
-    if (typeof body.error === 'string' && body.error) return body.error
-  } catch {
-    // Body wasn't JSON - fall through to the generic message below.
-  }
-  return `HTTP error! status: ${response.status}`
-}
-
 /**
  * Per-provider settings modal: fetches `GET /api/plugins/:type/:id` only
  * while open (not on mount for every card in the grid), shows the
@@ -114,48 +100,47 @@ async function extractErrorMessage(response: Response): Promise<string> {
  */
 export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: ProviderSettingsModalProps) {
   const { saveTouchedKeys } = useSecretsStatusContext()
-  const [info, setInfo] = useState<PluginInfoResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const infoPath = `/api/plugins/${type}/${providerId ?? ''}`
+  const { data: info = null, isLoading: loading, error: loadError } = useApiQuery<PluginInfoResponse>({
+    queryKey: [infoPath],
+    path: infoPath,
+    enabled: open && Boolean(providerId),
+  })
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const error = saveError ?? loadError?.message ?? null
   const [hostsInput, setHostsInput] = useState('')
   const [secretsInput, setSecretsInput] = useState('')
   const [configValues, setConfigValues] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
 
+  const seedDrafts = (from: PluginInfoResponse) => {
+    setHostsInput(from.allowed_hosts.join(', '))
+    setSecretsInput(from.allowed_secrets.join(', '))
+    setConfigValues(buildConfigValues(from.config_fields))
+  }
+
+  // The drafts are seeded once per opening, from the first answer to arrive
+  // (cached or fresh), and again after each save or reset. A background
+  // refetch landing later must not overwrite what the operator is typing.
+  const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!open || !providerId) return
-
-    setInfo(null)
-    setError(null)
-    setLoading(true)
-
-    const fetchInfo = async () => {
-      try {
-        const response = await fetch(`/api/plugins/${type}/${providerId}`)
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        const data = (await response.json()) as PluginInfoResponse
-        setInfo(data)
-        setHostsInput(data.allowed_hosts.join(', '))
-        setSecretsInput(data.allowed_secrets.join(', '))
-        setConfigValues(buildConfigValues(data.config_fields))
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to load plugin info')
-      } finally {
-        setLoading(false)
-      }
+    if (!open) {
+      seededFor.current = null
+      return
     }
+    if (!info || seededFor.current === infoPath) return
+    seededFor.current = infoPath
+    seedDrafts(info)
+  }, [info, open, infoPath])
 
-    void fetchInfo()
+  useEffect(() => {
+    if (open) setSaveError(null)
   }, [open, providerId, type])
 
   const applyResponse = (data: PluginInfoResponse) => {
-    setInfo(data)
-    setHostsInput(data.allowed_hosts.join(', '))
-    setSecretsInput(data.allowed_secrets.join(', '))
-    setConfigValues(buildConfigValues(data.config_fields))
+    setQueryData<PluginInfoResponse>([infoPath], data)
+    seedDrafts(data)
   }
 
   const secretFields = providerId ? PROVIDER_SECRET_FIELDS[type]?.[providerId] : undefined
@@ -173,34 +158,25 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
   const handleSave = async () => {
     if (!providerId) return
     setIsSaving(true)
-    setError(null)
+    setSaveError(null)
     try {
       if (configFields.length > 0) {
-        const response = await fetch(`/api/plugins/${type}/${providerId}/config`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ values: configValues }),
-        })
-        if (!response.ok) {
-          throw new Error(await extractErrorMessage(response))
-        }
-        applyResponse((await response.json()) as PluginInfoResponse)
+        applyResponse(
+          await apiRequest<PluginInfoResponse>(`${infoPath}/config`, {
+            method: 'POST',
+            json: { values: configValues },
+          }),
+        )
       }
 
       const overridesPromise =
         info?.sandboxed === true
-          ? fetch(`/api/plugins/${type}/${providerId}/overrides`, {
+          ? apiRequest<PluginInfoResponse>(`${infoPath}/overrides`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
+              json: {
                 allowed_hosts: parseList(hostsInput),
                 allowed_secrets: parseList(secretsInput),
-              }),
-            }).then(async (response) => {
-              if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`)
-              }
-              return (await response.json()) as PluginInfoResponse
+              },
             })
           : null
 
@@ -215,7 +191,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
         applyResponse(overridesData)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save settings')
+      setSaveError(err instanceof Error ? err.message : 'Unable to save settings')
     } finally {
       setIsSaving(false)
     }
@@ -224,18 +200,12 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
   const handleResetOverrides = async () => {
     if (!providerId) return
     setIsResetting(true)
-    setError(null)
+    setSaveError(null)
     try {
-      const response = await fetch(`/api/plugins/${type}/${providerId}/overrides`, {
-        method: 'DELETE',
-      })
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      const data = (await response.json()) as PluginInfoResponse
+      const data = await apiRequest<PluginInfoResponse>(`${infoPath}/overrides`, { method: 'DELETE' })
       applyResponse(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to reset allowlist overrides')
+      setSaveError(err instanceof Error ? err.message : 'Unable to reset allowlist overrides')
     } finally {
       setIsResetting(false)
     }

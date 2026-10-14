@@ -107,7 +107,13 @@ function buildFetch(
     const runMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run$/)
     if (runMatch && method === 'GET') {
       const id = decodeURIComponent(runMatch[1])
-      if (onAttach) return onAttach(id)
+      if (onAttach) {
+        // A rejoined run's frames arrive after the conversation read has
+        // landed; an instant answer here would let that read's setMessages([])
+        // wipe the frame, an ordering the real server does not produce.
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return onAttach(id)
+      }
       return { ok: true, status: 204 }
     }
 
@@ -724,7 +730,7 @@ describe('MateSheet recoverable load failure', () => {
 
   function buildAlwaysFailingListFetch(status: number) {
     return vi.fn(async (url: string) => {
-      if (url.endsWith('/api/assistant/conversations')) return { ok: false, status }
+      if (url.endsWith('/api/assistant/conversations')) return new Response(null, { status }) as unknown as FetchLike
       throw new Error(`unexpected fetch in this test: ${url}`)
     })
   }

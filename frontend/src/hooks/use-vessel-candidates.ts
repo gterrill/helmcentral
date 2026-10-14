@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
-import { readErrorMessage } from '@/lib/api-error'
+import { useApiQuery } from '@/lib/api-query'
 import { emptyVesselCandidates, type VesselCandidatesResponse } from '@/lib/vessel-settings'
 
 /**
@@ -16,29 +15,28 @@ import { emptyVesselCandidates, type VesselCandidatesResponse } from '@/lib/vess
  * Plain fetch-and-throw: a failure is shown, not masked.
  */
 export function useVesselCandidates(refreshKey?: unknown) {
-  const [candidates, setCandidates] = useState<VesselCandidatesResponse>(emptyVesselCandidates)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, error, refetch } = useApiQuery<VesselCandidatesResponse>({
+    queryKey: ['/api/vessel/candidates'],
+    path: '/api/vessel/candidates',
+    select: (body: VesselCandidatesResponse) => ({
+      engines: Array.isArray(body.engines) ? body.engines : [],
+      batteries: Array.isArray(body.batteries) ? body.batteries : [],
+      detectors: body.detectors ?? {},
+    }),
+  })
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/vessel/candidates`)
-      if (!res.ok) throw new Error(await readErrorMessage(res))
-      const body = (await res.json()) as VesselCandidatesResponse
-      setCandidates({
-        engines: Array.isArray(body.engines) ? body.engines : [],
-        batteries: Array.isArray(body.batteries) ? body.batteries : [],
-        detectors: body.detectors ?? {},
-      })
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // A mount already revalidates, so only a change of key reads again.
+  const seenKey = useRef(refreshKey)
+  useEffect(() => {
+    if (Object.is(seenKey.current, refreshKey)) return
+    seenKey.current = refreshKey
+    void refetch()
+  }, [refetch, refreshKey])
 
-  useEffect(() => { void refresh() }, [refresh, refreshKey])
-
-  return { candidates, loading, error, refresh }
+  return {
+    candidates: data ?? emptyVesselCandidates,
+    loading: isLoading,
+    error: error?.message ?? null,
+    refresh: refetch,
+  }
 }
