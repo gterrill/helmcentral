@@ -40,7 +40,17 @@ type recordedTrackPoint struct {
 	// The detector ends a passage when it sees a value later than the
 	// passage start.
 	AnchorSetAt *time.Time `json:"-"`
+
+	// Source is trackSourceRecorded for points Helmcentral took itself and
+	// trackSourceImported for GPX imports. Imported points never feed the
+	// live recorder or the live detector.
+	Source string `json:"-"`
 }
+
+const (
+	trackSourceRecorded = "recorded"
+	trackSourceImported = "imported"
+)
 
 type passageRecord struct {
 	ID        string    `json:"id"`
@@ -97,7 +107,8 @@ func createPassageSchema(db *sql.DB) error {
 			fuel_lph REAL,
 			water_l REAL,
 			gen_state TEXT,
-			anchor_set_ms INTEGER
+			anchor_set_ms INTEGER,
+			source TEXT NOT NULL DEFAULT 'recorded'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_track_points_t ON track_points(t_ms)`,
 		`CREATE TABLE IF NOT EXISTS cruises (
@@ -130,6 +141,37 @@ func createPassageSchema(db *sql.DB) error {
 			return fmt.Errorf("create passage schema: %w", err)
 		}
 	}
+	return addTrackPointSourceColumn(db)
+}
+
+// addTrackPointSourceColumn upgrades a track_points table created before GPX
+// import existed.
+func addTrackPointSourceColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(track_points)`)
+	if err != nil {
+		return fmt.Errorf("inspect track_points: %w", err)
+	}
+	has := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect track_points: %w", err)
+		}
+		if name == "source" {
+			has = true
+		}
+	}
+	rows.Close()
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE track_points ADD COLUMN source TEXT NOT NULL DEFAULT 'recorded'`); err != nil {
+		return fmt.Errorf("add track_points.source: %w", err)
+	}
 	return nil
 }
 
@@ -148,7 +190,15 @@ func nullToPtr(n sql.NullFloat64) *float64 {
 	return &v
 }
 
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 func (s *passageStore) AppendTrackPoint(p recordedTrackPoint) error {
+	return insertTrackPoint(s.db, p)
+}
+
+func insertTrackPoint(db sqlExecer, p recordedTrackPoint) error {
 	var gen, anchor any
 	if p.GenState != nil {
 		gen = *p.GenState
@@ -156,19 +206,23 @@ func (s *passageStore) AppendTrackPoint(p recordedTrackPoint) error {
 	if p.AnchorSetAt != nil {
 		anchor = p.AnchorSetAt.UnixMilli()
 	}
-	_, err := s.db.Exec(`INSERT INTO track_points
-		(t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	source := p.Source
+	if source == "" {
+		source = trackSourceRecorded
+	}
+	_, err := db.Exec(`INSERT INTO track_points
+		(t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.At.UnixMilli(), p.Segment, p.Lat, p.Lon,
 		nullFloat(p.SOGKts), nullFloat(p.COGDeg), nullFloat(p.TWSKts), nullFloat(p.GustKts),
-		nullFloat(p.SoCPct), nullFloat(p.FuelLph), nullFloat(p.WaterL), gen, anchor)
+		nullFloat(p.SoCPct), nullFloat(p.FuelLph), nullFloat(p.WaterL), gen, anchor, source)
 	if err != nil {
 		return fmt.Errorf("append track point: %w", err)
 	}
 	return nil
 }
 
-const trackPointColumns = `id, t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms`
+const trackPointColumns = `id, t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source`
 
 func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 	var p recordedTrackPoint
@@ -176,7 +230,7 @@ func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 	var sog, cog, tws, gust, soc, fuel, water sql.NullFloat64
 	var gen sql.NullString
 	var anchor sql.NullInt64
-	if err := r.Scan(&p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor); err != nil {
+	if err := r.Scan(&p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor, &p.Source); err != nil {
 		return p, err
 	}
 	p.At = time.UnixMilli(ms).UTC()
@@ -195,8 +249,13 @@ func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 
 // TrackPointsBetween returns the points with from <= time <= to, oldest first.
 func (s *passageStore) TrackPointsBetween(from, to time.Time) ([]recordedTrackPoint, error) {
-	rows, err := s.db.Query(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms, id`,
-		from.UnixMilli(), to.UnixMilli())
+	return s.trackPoints(from, to, "")
+}
+
+// trackPoints reads a time range, optionally only one source.
+func (s *passageStore) trackPoints(from, to time.Time, source string) ([]recordedTrackPoint, error) {
+	rows, err := s.db.Query(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms >= ? AND t_ms <= ? AND (? = '' OR source = ?) ORDER BY t_ms, id`,
+		from.UnixMilli(), to.UnixMilli(), source, source)
 	if err != nil {
 		return nil, fmt.Errorf("query track points: %w", err)
 	}
@@ -212,14 +271,15 @@ func (s *passageStore) TrackPointsBetween(from, to time.Time) ([]recordedTrackPo
 	return out, rows.Err()
 }
 
-// TrackPointsSince returns every point at or after from, oldest first.
+// TrackPointsSince returns the recorded points at or after from, oldest
+// first. Imported points are left out: this feeds the live detector.
 func (s *passageStore) TrackPointsSince(from time.Time) ([]recordedTrackPoint, error) {
-	return s.TrackPointsBetween(from, time.UnixMilli(1<<62-1))
+	return s.trackPoints(from, time.UnixMilli(1<<62-1), trackSourceRecorded)
 }
 
 // LastTrackPoint returns the newest point, or nil for an empty log.
 func (s *passageStore) LastTrackPoint() (*recordedTrackPoint, error) {
-	row := s.db.QueryRow(`SELECT ` + trackPointColumns + ` FROM track_points ORDER BY t_ms DESC, id DESC LIMIT 1`)
+	row := s.db.QueryRow(`SELECT ` + trackPointColumns + ` FROM track_points WHERE source = 'recorded' ORDER BY t_ms DESC, id DESC LIMIT 1`)
 	p, err := scanTrackPoint(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -233,7 +293,7 @@ func (s *passageStore) LastTrackPoint() (*recordedTrackPoint, error) {
 // FirstTrackPointTime returns the oldest point's time, or false for an empty log.
 func (s *passageStore) FirstTrackPointTime() (time.Time, bool, error) {
 	var ms sql.NullInt64
-	if err := s.db.QueryRow(`SELECT MIN(t_ms) FROM track_points`).Scan(&ms); err != nil {
+	if err := s.db.QueryRow(`SELECT MIN(t_ms) FROM track_points WHERE source = 'recorded'`).Scan(&ms); err != nil {
 		return time.Time{}, false, fmt.Errorf("first track point: %w", err)
 	}
 	if !ms.Valid {

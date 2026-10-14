@@ -922,6 +922,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
+		{http.MethodPost, "/api/passages/import", tierWrite, importPassagesHandler},
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
 		{http.MethodPost, "/api/alarms/:id/silence", tierWrite, silenceAlarmHandler},
 		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},

@@ -2,8 +2,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"path"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -81,4 +85,64 @@ func getPassageHandler(c echo.Context) error {
 		track = [][][2]float64{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: computePassageStats(pts), Track: track}})
+}
+
+// importPassagesHandler is POST /api/passages/import: several .gpx files in
+// one multipart request. Every file is checked before anything is stored, so a
+// bad file leaves the log as it was.
+func importPassagesHandler(c echo.Context) error {
+	store, ok := passageStoreOrError(c)
+	if !ok {
+		return nil
+	}
+	req := c.Request()
+	req.Body = http.MaxBytesReader(c.Response(), req.Body, gpxMaxRequestBytes)
+	mr, err := req.MultipartReader()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data with .gpx files"})
+	}
+	var files []gpxFile
+	seg := 0
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "could not read upload: " + err.Error()})
+		}
+		if part.FileName() == "" {
+			part.Close()
+			continue
+		}
+		if len(files) >= gpxMaxFiles {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("at most %d files per import", gpxMaxFiles)})
+		}
+		var fixes []gpxFix
+		fixes, seg, err = parseGPX(part, gpxMaxFileBytes, seg)
+		if err != nil {
+			status := http.StatusUnprocessableEntity
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			return c.JSON(status, map[string]string{"error": filepathBase(part.FileName()) + ": " + err.Error()})
+		}
+		files = append(files, gpxFile{Name: filepathBase(part.FileName()), Fixes: fixes})
+	}
+	if len(files) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no .gpx files in the request"})
+	}
+	sum, err := store.ImportGPX(files)
+	if err != nil {
+		log.Printf("passages: import: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "import failed"})
+	}
+	return c.JSON(http.StatusOK, sum)
+}
+
+// filepathBase keeps only the final element of an uploaded name, so a hostile
+// filename never reaches a response or a log line as a path.
+func filepathBase(name string) string {
+	return path.Base(strings.ReplaceAll(name, "\\", "/"))
 }
