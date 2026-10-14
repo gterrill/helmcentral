@@ -119,7 +119,7 @@ describe('CruiseStatsPanel', () => {
   }
 
   it('prints -- for every figure the log does not hold', () => {
-    render(<CruiseStatsPanel stats={empty} lon={149} canWrite onLabelRise={vi.fn()} />)
+    render(<CruiseStatsPanel stats={empty} units="metric" lon={149} canWrite onLabelRise={vi.fn()} />)
     const grid = screen.getByTestId('cruise-stats-grid')
     expect(grid).toHaveTextContent('Fuel burned--')
     expect(grid).toHaveTextContent('Generator--')
@@ -138,11 +138,13 @@ describe('CruiseStatsPanel', () => {
         suggested_label: 'Dock fill', looked_up_at: '2026-03-14T02:00:00Z', label: null,
       }],
     }
-    render(<CruiseStatsPanel stats={stats} lon={149} canWrite onLabelRise={onLabelRise} />)
+    const { rerender } = render(<CruiseStatsPanel stats={stats} units="metric" lon={149} canWrite onLabelRise={onLabelRise} />)
     expect(screen.getByTestId('night-soc')).toHaveTextContent('13 Mar62%')
     const row = screen.getByTestId('water-rise-row')
     expect(row).toHaveTextContent('Suggested: Dock fill')
     expect(row).toHaveTextContent('+180 L')
+    rerender(<CruiseStatsPanel stats={stats} units="imperial" lon={149} canWrite onLabelRise={onLabelRise} />)
+    expect(screen.getByTestId('water-rise-row')).toHaveTextContent('+48 gal')
     fireEvent.click(screen.getByRole('button', { name: 'Dock fill' }))
     expect(onLabelRise).toHaveBeenCalledWith(expect.objectContaining({ litres: 180 }), 'Dock fill')
   })

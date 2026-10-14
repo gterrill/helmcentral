@@ -7,7 +7,7 @@ import {
   fmtFigure,
   fmtHours,
   fmtKn,
-  fmtLitres,
+  fmtVolume,
   fmtNM,
   fmtPct,
   formatLocalDate,
@@ -24,7 +24,7 @@ import {
 
 describe('figure formatting', () => {
   it('prints -- for absent readings, never a number', () => {
-    for (const f of [fmtNM, fmtKn, fmtLitres, fmtPct, fmtHours, fmtFigure, fmtDuration]) {
+    for (const f of [fmtNM, fmtKn, (v: number | null | undefined) => fmtVolume(v, 'metric'), (v: number | null | undefined) => fmtVolume(v, 'imperial'), fmtPct, fmtHours, fmtFigure, fmtDuration]) {
       expect(f(null)).toBe('--')
       expect(f(undefined)).toBe('--')
       expect(f(Number.NaN)).toBe('--')
@@ -33,7 +33,7 @@ describe('figure formatting', () => {
 
   it('prints zero as a real figure', () => {
     expect(fmtNM(0)).toBe('0.0 NM')
-    expect(fmtLitres(0)).toBe('0 L')
+    expect(fmtVolume(0, 'metric')).toBe('0 L')
     expect(fmtDuration(0)).toBe('0 m')
     expect(fmtPct(0)).toBe('0%')
   })
@@ -41,7 +41,7 @@ describe('figure formatting', () => {
   it('formats units and durations', () => {
     expect(fmtNM(12.34)).toBe('12.3 NM')
     expect(fmtKn(6.07)).toBe('6.1 kn')
-    expect(fmtLitres(341.6)).toBe('342 L')
+    expect(fmtVolume(341.6, 'metric')).toBe('342 L')
     expect(fmtHours(2.26)).toBe('2.3 h')
     expect(fmtDuration(3 * 3600 + 5 * 60)).toBe('3 h 05 m')
     expect(fmtDuration(42 * 60)).toBe('42 m')
@@ -51,6 +51,14 @@ describe('figure formatting', () => {
     expect(passageRoute({ from_name: 'Airlie', to_name: '' })).toBe('Airlie → --')
     expect(passageHeading({ title: '  ', from_name: 'Airlie', to_name: 'Hamilton' })).toBe('Airlie → Hamilton')
     expect(passageHeading({ title: 'Delivery leg', from_name: 'A', to_name: 'B' })).toBe('Delivery leg')
+  })
+})
+
+describe('volume follows the Units setting', () => {
+  it('shows litres for metric and US gallons for imperial', () => {
+    expect(fmtVolume(100, 'metric')).toBe('100 L')
+    expect(fmtVolume(100, 'imperial')).toBe('26 gal')
+    expect(fmtVolume(null, 'imperial')).toBe('--')
   })
 })
 

@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 
+import type { DistanceUnits } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import {
   ABSENT,
   fmtDuration,
   fmtHours,
   fmtKn,
-  fmtLitres,
+  fmtVolume,
   fmtNM,
   fmtPct,
   formatLocalDate,
@@ -39,13 +40,13 @@ function Grid({ children, testId }: { children: ReactNode; testId: string }) {
   )
 }
 
-export function PassageStatsStrip({ stats }: { stats: PassageStats }) {
+export function PassageStatsStrip({ stats, units }: { stats: PassageStats; units: DistanceUnits }) {
   return (
     <Grid testId="passage-stats">
       <Kpi label="Distance" value={fmtNM(stats.distance_nm)} />
       <Kpi label="Underway" value={fmtDuration(stats.underway_seconds)} />
       <Kpi label="Mean speed" value={fmtKn(stats.mean_sog_kts)} sub={`Max ${fmtKn(stats.max_sog_kts)}`} />
-      <Kpi label="Fuel burned" value={fmtLitres(stats.fuel_burned_l)} />
+      <Kpi label="Fuel burned" value={fmtVolume(stats.fuel_burned_l, units)} />
       <Kpi label="Wind" value={fmtKn(stats.tws_mean_kts)} sub={`Gust ${fmtKn(stats.max_gust_kts)}`} />
       <Kpi
         label="House battery"
@@ -70,19 +71,20 @@ function nightLabel(night: string): string {
 interface WaterRiseRowProps {
   rise: WaterRise
   lon: number
+  units: DistanceUnits
   canWrite: boolean
   onLabel: (rise: WaterRise, label: WaterRiseLabel | '') => void
 }
 
 const RISE_LABELS: WaterRiseLabel[] = ['Watermaker', 'Dock fill']
 
-export function WaterRiseRow({ rise, lon, canWrite, onLabel }: WaterRiseRowProps) {
+export function WaterRiseRow({ rise, lon, units, canWrite, onLabel }: WaterRiseRowProps) {
   const confirmed = rise.label as WaterRiseLabel | null
   const suggested = confirmed ? null : (rise.suggested_label as WaterRiseLabel | null)
   return (
     <li className="flex flex-wrap items-center gap-2 text-xs" data-testid="water-rise-row">
       <span className="min-w-0 flex-1 truncate tabular-nums text-foreground">
-        {formatLocalDateTime(Date.parse(rise.start) / 1000, lon)} · +{Math.round(rise.litres)} L
+        {formatLocalDateTime(Date.parse(rise.start) / 1000, lon)} · +{fmtVolume(rise.litres, units)}
       </span>
       <span className="text-muted-foreground">
         {confirmed ? 'Confirmed' : suggested ? `Suggested: ${suggested}` : 'Not confirmed'}
@@ -110,11 +112,12 @@ export interface CruiseStatsPanelProps {
   stats: CruiseStats
   /** Longitude of the cruise, for boat-local dates. */
   lon: number
+  units: DistanceUnits
   canWrite: boolean
   onLabelRise: (rise: WaterRise, label: WaterRiseLabel | '') => void
 }
 
-export function CruiseStatsPanel({ stats, lon, canWrite, onLabelRise }: CruiseStatsPanelProps) {
+export function CruiseStatsPanel({ stats, units, lon, canWrite, onLabelRise }: CruiseStatsPanelProps) {
   const span = stats.departure && stats.arrival
     ? `${formatLocalDate(stats.departure, lon)} to ${formatLocalDate(stats.arrival, lon)}`
     : ABSENT
@@ -125,13 +128,13 @@ export function CruiseStatsPanel({ stats, lon, canWrite, onLabelRise }: CruiseSt
         <Kpi label="Underway" value={fmtDuration(stats.underway_seconds)} />
         <Kpi label="Nights" value={String(stats.nights)} />
         <Kpi label="Distance" value={fmtNM(stats.distance_nm)} />
-        <Kpi label="Fuel burned" value={fmtLitres(stats.fuel_burned_l)} />
+        <Kpi label="Fuel burned" value={fmtVolume(stats.fuel_burned_l, units)} />
         <Kpi label="Wind underway" value={fmtKn(stats.underway_tws_mean_kts)} sub={windSub(stats.underway_max_gust_kts)} />
         <Kpi label="Wind at anchor" value={fmtKn(stats.anchor_tws_mean_kts)} sub={windSub(stats.anchor_max_gust_kts)} />
         <Kpi label="Generator" value={fmtHours(stats.generator_hours)} />
         <Kpi label="Lowest battery" value={fmtPct(stats.lowest_soc_pct)} />
-        <Kpi label="Water used" value={fmtLitres(stats.water_used_l)} />
-        <Kpi label="Water taken on" value={fmtLitres(stats.water_taken_on_l)} />
+        <Kpi label="Water used" value={fmtVolume(stats.water_used_l, units)} />
+        <Kpi label="Water taken on" value={fmtVolume(stats.water_taken_on_l, units)} />
       </Grid>
 
       <section aria-label="Battery at dawn" className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
@@ -157,7 +160,7 @@ export function CruiseStatsPanel({ stats, lon, canWrite, onLabelRise }: CruiseSt
         ) : (
           <ul className="flex flex-col gap-2">
             {stats.water_rises.map((r) => (
-              <WaterRiseRow key={r.start} rise={r} lon={lon} canWrite={canWrite} onLabel={onLabelRise} />
+              <WaterRiseRow key={r.start} rise={r} lon={lon} units={units} canWrite={canWrite} onLabel={onLabelRise} />
             ))}
           </ul>
         )}

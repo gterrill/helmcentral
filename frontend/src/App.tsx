@@ -2379,7 +2379,7 @@ function AppShell() {
         )
       }
       case 'passages':
-        return <PassagesRoutePanel canWrite={canWrite} isDarkTheme={isDarkTheme} />
+        return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':

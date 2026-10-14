@@ -1,3 +1,6 @@
+import type { DistanceUnits } from '@/config/app-config'
+import { formatQuantity, unitOption } from '@/lib/quantities'
+
 // Passages page: the record shapes the backend returns and the pure helpers
 // the page draws from (figure formatting, track segments, replay timeline,
 // boat-local time). Kept React-free so each can be unit tested directly.
@@ -117,7 +120,13 @@ export function fmtFigure(v: number | null | undefined, digits = 1): string {
 
 export const fmtNM = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} NM` : ABSENT)
 export const fmtKn = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} kn` : ABSENT)
-export const fmtLitres = (v: number | null | undefined) => (present(v) ? `${Math.round(v)} L` : ABSENT)
+/** Litres as the Units setting asks: litres for metric, US gallons for
+ * imperial. Distance and speed stay nautical (NM, kn) in both. */
+export function fmtVolume(litres: number | null | undefined, units: DistanceUnits): string {
+  if (!present(litres)) return ABSENT
+  const unitId = units === 'imperial' ? 'gal' : 'L'
+  return `${formatQuantity(litres / 1000, 'volume', unitId)} ${unitOption('volume', unitId).label}`
+}
 export const fmtPct = (v: number | null | undefined) => (present(v) ? `${Math.round(v)}%` : ABSENT)
 export const fmtHours = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} h` : ABSENT)
 

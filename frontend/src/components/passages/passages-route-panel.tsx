@@ -1,9 +1,11 @@
+import type { DistanceUnits } from '@/config/app-config'
 import { PassageDetailsPage } from '@/components/passages/passage-details-page'
 import { PassagesPanel } from '@/components/passages/passages-panel'
 import { usePassageList } from '@/hooks/use-passages'
 import { usePassagesRoute } from '@/hooks/use-passages-route'
 
 export interface PassagesRoutePanelProps {
+  units: DistanceUnits
   canWrite: boolean
   isDarkTheme: boolean
 }
@@ -11,7 +13,7 @@ export interface PassagesRoutePanelProps {
 // ADR 0171: Passages wired to the app location. The listing and the details
 // pages (one passage, one Cruise, a combined selection) are one panel; which
 // renders is the route's view.
-export function PassagesRoutePanel({ canWrite, isDarkTheme }: PassagesRoutePanelProps) {
+export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRoutePanelProps) {
   const { route, showFilter, openPassage, openCruise, openCombined, close } = usePassagesRoute()
   const list = usePassageList()
 
@@ -42,6 +44,7 @@ export function PassagesRoutePanel({ canWrite, isDarkTheme }: PassagesRoutePanel
   return (
     <PassageDetailsPage
       mode={mode}
+      units={units}
       canWrite={canWrite}
       isDarkTheme={isDarkTheme}
       list={list.passages}

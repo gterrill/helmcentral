@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import type { DistanceUnits } from '@/config/app-config'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import { passageColour } from '@/components/passages/passage-map'
@@ -30,6 +31,7 @@ export type PassageDetailsMode =
   | { kind: 'combined'; ids: string[] }
 
 export interface PassageDetailsPageProps {
+  units: DistanceUnits
   mode: PassageDetailsMode
   canWrite: boolean
   isDarkTheme: boolean
@@ -93,7 +95,7 @@ export function PassageDetailsPage(props: PassageDetailsPageProps) {
 
 // ── one passage ───────────────────────────────────────────────────────────
 
-function SinglePassage({ id, canWrite, isDarkTheme, list, cruises, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
+function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const [reload, setReload] = useState(0)
   const { passages, loading, error } = usePassageDetails([id], reload)
   const cursorRef = useRef<ReplayCursor | null>(null)
@@ -126,7 +128,7 @@ function SinglePassage({ id, canWrite, isDarkTheme, list, cruises, onBack, onLis
         >
           <p className="text-sm text-muted-foreground">{passageRoute(passage)} · {formatLocalDate(passage.start, firstLon([passage]))}</p>
           <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
-          <PassageStatsStrip stats={passage.stats} />
+          <PassageStatsStrip stats={passage.stats} units={units} />
         </DetailsLayout>
       )}
     </Page>
@@ -135,7 +137,7 @@ function SinglePassage({ id, canWrite, isDarkTheme, list, cruises, onBack, onLis
 
 // ── a cruise ──────────────────────────────────────────────────────────────
 
-function CruiseDetails({ id, canWrite, isDarkTheme, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
+function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onListChanged, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const [reload, setReload] = useState(0)
   const { data, loading, error } = useCruiseDetails(id, reload)
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
@@ -174,7 +176,7 @@ function CruiseDetails({ id, canWrite, isDarkTheme, onBack, onListChanged, onOpe
           }
         >
           {tracksError ? <ErrorLine message={tracksError} /> : <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} />}
-          <CruiseStatsPanel stats={data.stats} lon={lon} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
+          <CruiseStatsPanel stats={data.stats} units={units} lon={lon} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
         </DetailsLayout>
       )}
     </Page>

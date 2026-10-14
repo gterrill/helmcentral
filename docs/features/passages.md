@@ -109,5 +109,7 @@ unfiled.
   fuel and water figures show `--`. Speed is worked out from the positions.
 - Fuel, battery and water figures need the matching sensors on the boat's
   network, and the house bank chosen under Vessel settings for the battery.
-- Distances are in nautical miles, speeds in knots and volumes in litres.
+- Distances are in nautical miles and speeds in knots. Volumes follow the
+  Units choice in Settings, General: litres for Metric, US gallons for
+  Imperial.
 - A hidden passage does not come back by itself. Its recorded track is kept.
