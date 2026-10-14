@@ -337,40 +337,122 @@ func waterFigures(pts []recordedTrackPoint) (rises []waterRise, used, taken *flo
 
 var errLabelInvalid = errors.New("label must be Watermaker or Dock fill")
 
-// SetWaterRiseLabel stores the operator's label for the rise starting at at.
-// An empty label clears it.
-func (s *passageStore) SetWaterRiseLabel(cruiseID string, at time.Time, label string) error {
-	if _, err := s.GetCruise(cruiseID); err != nil {
-		return err
-	}
-	if label == "" {
-		_, err := s.db.Exec(`DELETE FROM water_rise_labels WHERE cruise_id = ? AND at_ms = ?`, cruiseID, at.UnixMilli())
-		return err
-	}
-	if label != waterLabelWatermaker && label != waterLabelDockFill {
-		return invalidf("%v", errLabelInvalid)
-	}
-	_, err := s.db.Exec(`INSERT INTO water_rise_labels (cruise_id, at_ms, label) VALUES (?,?,?)
-		ON CONFLICT(cruise_id, at_ms) DO UPDATE SET label = excluded.label`, cruiseID, at.UnixMilli(), label)
-	return err
+// riseRow is a stored label or suggestion with the time range of the rise it
+// was given to. Rises are found again on every read by a filter that can start
+// them a little earlier or later when the span changes, so a row belongs to
+// the current rise it overlaps most, never to an exact millisecond.
+type riseRow struct {
+	At, End time.Time
+	Label   string
+	Info    storedRiseInfo
 }
 
-func (s *passageStore) waterRiseLabels(cruiseID string) (map[int64]string, error) {
-	rows, err := s.db.Query(`SELECT at_ms, label FROM water_rise_labels WHERE cruise_id = ?`, cruiseID)
+func overlapMS(aStart, aEnd, bStart, bEnd time.Time) int64 {
+	lo, hi := aStart, aEnd
+	if bStart.After(lo) {
+		lo = bStart
+	}
+	if bEnd.Before(hi) {
+		hi = bEnd
+	}
+	if d := hi.Sub(lo).Milliseconds(); d > 0 {
+		return d
+	}
+	if !hi.Before(lo) { // a single instant inside the other range
+		return 1
+	}
+	return 0
+}
+
+// matchRiseRows pairs rises with stored rows, largest overlap first, each rise
+// and each row used once. The result maps a rise index to a row index.
+func matchRiseRows(rises []waterRise, rows []riseRow) map[int]int {
+	type pair struct {
+		ri, rj  int
+		overlap int64
+	}
+	var pairs []pair
+	for i, r := range rises {
+		for j, row := range rows {
+			if o := overlapMS(r.Start, r.End, row.At, row.End); o > 0 {
+				pairs = append(pairs, pair{i, j, o})
+			}
+		}
+	}
+	sort.SliceStable(pairs, func(x, y int) bool { return pairs[x].overlap > pairs[y].overlap })
+	out := map[int]int{}
+	usedRow := map[int]bool{}
+	for _, p := range pairs {
+		if _, taken := out[p.ri]; taken || usedRow[p.rj] {
+			continue
+		}
+		out[p.ri], usedRow[p.rj] = p.rj, true
+	}
+	return out
+}
+
+func riseEnd(atMs int64, end sql.NullInt64) time.Time {
+	if end.Valid {
+		return time.UnixMilli(end.Int64).UTC()
+	}
+	return time.UnixMilli(atMs).UTC()
+}
+
+func (s *passageStore) waterLabelRows(cruiseID string) ([]riseRow, error) {
+	rows, err := s.db.Query(`SELECT at_ms, end_ms, label FROM water_rise_labels WHERE cruise_id = ? ORDER BY at_ms`, cruiseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[int64]string{}
+	var out []riseRow
 	for rows.Next() {
 		var ms int64
+		var end sql.NullInt64
 		var l string
-		if err := rows.Scan(&ms, &l); err != nil {
+		if err := rows.Scan(&ms, &end, &l); err != nil {
 			return nil, err
 		}
-		out[ms] = l
+		out = append(out, riseRow{At: time.UnixMilli(ms).UTC(), End: riseEnd(ms, end), Label: l})
 	}
 	return out, rows.Err()
+}
+
+// SetWaterRiseLabel stores the operator's label for the water rise that
+// contains at. An empty label clears it. A time inside no rise is refused.
+func (s *passageStore) SetWaterRiseLabel(cruiseID string, at time.Time, label string) error {
+	_, _, st, err := s.cruiseCore(cruiseID)
+	if err != nil {
+		return err
+	}
+	if label != "" && label != waterLabelWatermaker && label != waterLabelDockFill {
+		return invalidf("%v", errLabelInvalid)
+	}
+	ri := -1
+	for i, r := range st.WaterRises {
+		if !at.Before(r.Start) && !at.After(r.End) {
+			ri = i
+			break
+		}
+	}
+	if ri < 0 {
+		return invalidf("no water rise at that time")
+	}
+	rise := st.WaterRises[ri]
+	rows, err := s.waterLabelRows(cruiseID)
+	if err != nil {
+		return err
+	}
+	if j, ok := matchRiseRows(st.WaterRises, rows)[ri]; ok {
+		if _, err := s.db.Exec(`DELETE FROM water_rise_labels WHERE cruise_id = ? AND at_ms = ?`, cruiseID, rows[j].At.UnixMilli()); err != nil {
+			return err
+		}
+	}
+	if label == "" {
+		return nil
+	}
+	_, err = s.db.Exec(`INSERT OR REPLACE INTO water_rise_labels (cruise_id, at_ms, end_ms, label) VALUES (?,?,?,?)`,
+		cruiseID, rise.Start.UnixMilli(), rise.End.UnixMilli(), label)
+	return err
 }
 
 // marinaNear reports whether the place-data plugin knows a marina within
@@ -460,18 +542,19 @@ func classifyLookupError(err error) string {
 	return "error"
 }
 
-func (s *passageStore) storedRiseInfo(cruiseID string) (map[int64]storedRiseInfo, error) {
-	rows, err := s.db.Query(`SELECT at_ms, suggested, looked_up_ms, status, error_class FROM water_rise_suggestions WHERE cruise_id = ?`, cruiseID)
+func (s *passageStore) suggestionRows(cruiseID string) ([]riseRow, error) {
+	rows, err := s.db.Query(`SELECT at_ms, end_ms, suggested, looked_up_ms, status, error_class FROM water_rise_suggestions WHERE cruise_id = ? ORDER BY at_ms`, cruiseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[int64]storedRiseInfo{}
+	var out []riseRow
 	for rows.Next() {
 		var ms, looked int64
+		var end sql.NullInt64
 		var sug sql.NullString
 		var status, class string
-		if err := rows.Scan(&ms, &sug, &looked, &status, &class); err != nil {
+		if err := rows.Scan(&ms, &end, &sug, &looked, &status, &class); err != nil {
 			return nil, err
 		}
 		info := storedRiseInfo{lookedUp: time.UnixMilli(looked).UTC(), status: status, errClass: class}
@@ -485,7 +568,7 @@ func (s *passageStore) storedRiseInfo(cruiseID string) (map[int64]storedRiseInfo
 				info.status = suggestionFound
 			}
 		}
-		out[ms] = info
+		out = append(out, riseRow{At: time.UnixMilli(ms).UTC(), End: riseEnd(ms, end), Info: info})
 	}
 	return out, rows.Err()
 }
@@ -498,29 +581,31 @@ func (s *passageStore) CruiseStats(cruiseID string) (cruiseRecord, []passageReco
 	if err != nil {
 		return cr, nil, st, err
 	}
-	labels, err := s.waterRiseLabels(cruiseID)
+	sort.Slice(st.WaterRises, func(i, j int) bool { return st.WaterRises[i].Start.Before(st.WaterRises[j].Start) })
+	labelRows, err := s.waterLabelRows(cruiseID)
 	if err != nil {
 		return cr, nil, st, err
 	}
-	info, err := s.storedRiseInfo(cruiseID)
+	sugRows, err := s.suggestionRows(cruiseID)
 	if err != nil {
 		return cr, nil, st, err
 	}
+	labelAt := matchRiseRows(st.WaterRises, labelRows)
+	sugAt := matchRiseRows(st.WaterRises, sugRows)
 	for i := range st.WaterRises {
 		r := &st.WaterRises[i]
-		if l, ok := labels[r.Start.UnixMilli()]; ok {
-			l := l
+		if j, ok := labelAt[i]; ok {
+			l := labelRows[j].Label
 			r.Label = &l
 		}
-		if in, ok := info[r.Start.UnixMilli()]; ok {
+		r.SuggestionStatus = suggestionPending
+		if j, ok := sugAt[i]; ok {
+			in := sugRows[j].Info
 			t := in.lookedUp
 			r.LookedUpAt, r.SuggestedLabel = &t, in.suggested
 			r.SuggestionStatus, r.SuggestionError = in.status, in.errClass
-		} else {
-			r.SuggestionStatus = suggestionPending
 		}
 	}
-	sort.Slice(st.WaterRises, func(i, j int) bool { return st.WaterRises[i].Start.Before(st.WaterRises[j].Start) })
 	return cr, passages, st, nil
 }
 
@@ -540,12 +625,33 @@ func (s *passageStore) LookUpNewWaterRisesAt(now time.Time) error {
 		if err != nil {
 			return err
 		}
-		done, err := s.storedRiseInfo(cr.ID)
+		sort.Slice(st.WaterRises, func(i, j int) bool { return st.WaterRises[i].Start.Before(st.WaterRises[j].Start) })
+		sugRows, err := s.suggestionRows(cr.ID)
 		if err != nil {
 			return err
 		}
-		for _, r := range st.WaterRises {
-			if in, ok := done[r.Start.UnixMilli()]; ok && !(in.status == suggestionFailed && now.Sub(in.lookedUp) >= marinaRetryAfter) {
+		labelRows, err := s.waterLabelRows(cr.ID)
+		if err != nil {
+			return err
+		}
+		sugAt := matchRiseRows(st.WaterRises, sugRows)
+		labelAt := matchRiseRows(st.WaterRises, labelRows)
+		for i, r := range st.WaterRises {
+			// keep the stored ranges following the rises they belong to
+			if j, ok := labelAt[i]; ok && (!labelRows[j].At.Equal(r.Start) || !labelRows[j].End.Equal(r.End)) {
+				if _, err := s.db.Exec(`UPDATE water_rise_labels SET at_ms = ?, end_ms = ? WHERE cruise_id = ? AND at_ms = ?`,
+					r.Start.UnixMilli(), r.End.UnixMilli(), cr.ID, labelRows[j].At.UnixMilli()); err != nil {
+					return err
+				}
+			}
+			j, have := sugAt[i]
+			if have && !(sugRows[j].Info.status == suggestionFailed && now.Sub(sugRows[j].Info.lookedUp) >= marinaRetryAfter) {
+				if !sugRows[j].At.Equal(r.Start) || !sugRows[j].End.Equal(r.End) {
+					if _, err := s.db.Exec(`UPDATE water_rise_suggestions SET at_ms = ?, end_ms = ? WHERE cruise_id = ? AND at_ms = ?`,
+						r.Start.UnixMilli(), r.End.UnixMilli(), cr.ID, sugRows[j].At.UnixMilli()); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 			var suggested any
@@ -558,8 +664,13 @@ func (s *passageStore) LookUpNewWaterRisesAt(now time.Time) error {
 			case near:
 				status, suggested = suggestionFound, waterLabelDockFill
 			}
-			if _, err := s.db.Exec(`INSERT OR REPLACE INTO water_rise_suggestions (cruise_id, at_ms, suggested, looked_up_ms, status, error_class) VALUES (?,?,?,?,?,?)`,
-				cr.ID, r.Start.UnixMilli(), suggested, now.UnixMilli(), status, class); err != nil {
+			if have {
+				if _, err := s.db.Exec(`DELETE FROM water_rise_suggestions WHERE cruise_id = ? AND at_ms = ?`, cr.ID, sugRows[j].At.UnixMilli()); err != nil {
+					return err
+				}
+			}
+			if _, err := s.db.Exec(`INSERT OR REPLACE INTO water_rise_suggestions (cruise_id, at_ms, end_ms, suggested, looked_up_ms, status, error_class) VALUES (?,?,?,?,?,?,?)`,
+				cr.ID, r.Start.UnixMilli(), r.End.UnixMilli(), suggested, now.UnixMilli(), status, class); err != nil {
 				return err
 			}
 		}

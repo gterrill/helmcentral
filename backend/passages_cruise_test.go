@@ -325,3 +325,100 @@ func TestDeleteCruiseRemovesLabelsKeepsTrackPoints(t *testing.T) {
 		t.Errorf("labels %d", n)
 	}
 }
+
+// Review finding 9: a label belongs to the rise it was given to, not to the
+// exact millisecond the zig-zag filter happened to start it on.
+func TestWaterLabelAndSuggestionSurviveARiseThatMoved(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	stubMarina(t, func(float64, float64) (bool, error) { return true, nil })
+	s.LookUpNewWaterRises()
+	_, _, st, _ := s.CruiseStats(c.ID)
+	r := st.WaterRises[0]
+	if err := s.SetWaterRiseLabel(c.ID, r.Start, "Watermaker"); err != nil {
+		t.Fatal(err)
+	}
+
+	// the filter now starts this rise 20 minutes later and ends it 10 earlier
+	moved := r.Start.Add(20 * time.Minute).UnixMilli()
+	movedEnd := r.End.Add(-10 * time.Minute).UnixMilli()
+	for _, q := range []string{
+		`UPDATE water_rise_labels SET at_ms = ?, end_ms = ?`,
+		`UPDATE water_rise_suggestions SET at_ms = ?, end_ms = ?`,
+	} {
+		if _, err := s.db.Exec(q, moved, movedEnd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, st, _ = s.CruiseStats(c.ID)
+	got := st.WaterRises[0]
+	if got.Label == nil || *got.Label != "Watermaker" {
+		t.Errorf("label orphaned: %+v", got)
+	}
+	if got.SuggestionStatus != "found" {
+		t.Errorf("suggestion orphaned: %+v", got)
+	}
+}
+
+func TestWaterLabelAnywhereInsideTheRiseFindsIt(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	_, _, st, _ := s.CruiseStats(c.ID)
+	r := st.WaterRises[0]
+	mid := r.Start.Add(r.End.Sub(r.Start) / 2)
+	if err := s.SetWaterRiseLabel(c.ID, mid, "Dock fill"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, st, _ = s.CruiseStats(c.ID)
+	if l := st.WaterRises[0].Label; l == nil || *l != "Dock fill" {
+		t.Errorf("%+v", st.WaterRises[0])
+	}
+	// clearing by any time inside it works too
+	s.SetWaterRiseLabel(c.ID, r.Start, "")
+	_, _, st, _ = s.CruiseStats(c.ID)
+	if st.WaterRises[0].Label != nil {
+		t.Error("not cleared")
+	}
+	if err := s.SetWaterRiseLabel(c.ID, passageEpoch.Add(30*time.Hour), "Dock fill"); !errors.Is(err, errPassageInvalid) {
+		t.Errorf("a time that is in no rise: %v", err)
+	}
+}
+
+func TestRiseMatchingPicksLargestOverlap(t *testing.T) {
+	t0 := passageEpoch
+	rises := []waterRise{{Start: t0, End: t0.Add(2 * time.Hour)}, {Start: t0.Add(3 * time.Hour), End: t0.Add(5 * time.Hour)}}
+	rows := []riseRow{{At: t0.Add(90 * time.Minute), End: t0.Add(4 * time.Hour)}} // overlaps both; 30 min vs 60 min
+	m := matchRiseRows(rises, rows)
+	if _, ok := m[1]; !ok || len(m) != 1 {
+		t.Errorf("%v: the row belongs to the rise it overlaps most", m)
+	}
+}
+
+func TestWaterLabelSurvivesFilingAnotherPassage(t *testing.T) {
+	s, c := cruiseWithRise(t)
+	_, _, st, _ := s.CruiseStats(c.ID)
+	if err := s.SetWaterRiseLabel(c.ID, st.WaterRises[0].Start, "Watermaker"); err != nil {
+		t.Fatal(err)
+	}
+	// a later leg with the tanks topped right up widens the span and the deadband
+	var more []recordedTrackPoint
+	for i := 1; i <= 18*6; i++ {
+		h := 42 + float64(i)/6
+		more = append(more, recordedTrackPoint{At: passageEpoch.Add(time.Duration(42*60+i*10) * time.Minute), Lat: -20, Lon: 149, WaterL: pfloat(300 + 70*(h-42))})
+	}
+	appendAll(t, s, more)
+	p := seedPassage(t, s, passageEpoch.Add(58*time.Hour), passageEpoch.Add(60*time.Hour))
+	s.PatchPassage(p.ID, passagePatch{CruiseID: &c.ID, CruiseIDSet: true})
+
+	_, _, st, _ = s.CruiseStats(c.ID)
+	var labelled int
+	for _, r := range st.WaterRises {
+		if r.Label != nil && *r.Label == "Watermaker" {
+			labelled++
+			if h := r.Start.Sub(passageEpoch).Hours(); h > 12 {
+				t.Errorf("the label moved to a different rise at %.1f h", h)
+			}
+		}
+	}
+	if labelled != 1 {
+		t.Errorf("labelled rises %d, want the original one: %+v", labelled, st.WaterRises)
+	}
+}

@@ -142,12 +142,14 @@ func createPassageSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
 			cruise_id TEXT NOT NULL REFERENCES cruises(id) ON DELETE CASCADE,
 			at_ms INTEGER NOT NULL,
+			end_ms INTEGER,
 			label TEXT NOT NULL,
 			PRIMARY KEY (cruise_id, at_ms)
 		)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_suggestions (
 			cruise_id TEXT NOT NULL REFERENCES cruises(id) ON DELETE CASCADE,
 			at_ms INTEGER NOT NULL,
+			end_ms INTEGER,
 			suggested TEXT,
 			looked_up_ms INTEGER NOT NULL,
 			status TEXT NOT NULL DEFAULT '',
@@ -485,6 +487,11 @@ func ensureColumn(db *sql.DB, table, column, ddl string) error {
 }
 
 func addPassageNameAttemptColumn(db *sql.DB) error {
+	for _, table := range []string{"water_rise_labels", "water_rise_suggestions"} {
+		if err := ensureColumn(db, table, "end_ms", "INTEGER"); err != nil {
+			return err
+		}
+	}
 	if err := ensureColumn(db, "water_rise_suggestions", "status", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}

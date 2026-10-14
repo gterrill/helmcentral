@@ -108,8 +108,8 @@ func TestCruiseHandlers(t *testing.T) {
 	if code, _ := send(t, patchCruiseHandler, http.MethodPatch, `{"name":"Renamed"}`, "id", id); code != 200 {
 		t.Errorf("patch %d", code)
 	}
-	if code, _ := send(t, putWaterRiseLabelHandler, http.MethodPut, `{"at":"2026-10-14T00:00:00Z","label":"Watermaker"}`, "id", id); code != 200 {
-		t.Errorf("label %d", code)
+	if code, _ := send(t, putWaterRiseLabelHandler, http.MethodPut, `{"at":"2026-10-14T00:00:00Z","label":"Watermaker"}`, "id", id); code != 400 {
+		t.Errorf("a time in no water rise is refused: %d", code)
 	}
 	if code, _ := send(t, putWaterRiseLabelHandler, http.MethodPut, `{"at":"2026-10-14T00:00:00Z","label":"Rain"}`, "id", id); code != 400 {
 		t.Errorf("bad label %d", code)
