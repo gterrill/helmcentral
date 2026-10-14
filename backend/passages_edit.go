@@ -131,13 +131,13 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	}
 	first, second = rec, rec
 	first.End, first.ToName, first.Edited = at, "", true
-	second.ID, second.Start, second.FromName, second.Edited = uuid.NewString(), at, "", true
+	second.ID, second.Start, second.FromName, second.Title, second.Edited = uuid.NewString(), at, "", "", true
 	second.CreatedAt = time.Now().UTC()
 	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', edited=1 WHERE id=?`, at.UnixMilli(), id); err != nil {
 		return
 	}
 	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), "", second.ToName, second.Title, "",
+		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), "", second.ToName, "", "",
 		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli()); err != nil {
 		return
 	}

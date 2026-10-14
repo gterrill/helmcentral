@@ -72,6 +72,13 @@ func TestSplitPassage(t *testing.T) {
 	if !a.Edited || !b.Edited {
 		t.Error("both halves are edited")
 	}
+	if a.Title != "T" || b.Title != "" {
+		t.Errorf("titles %q %q: the second half starts untitled so the page shows From to To", a.Title, b.Title)
+	}
+	stored, _ := s.GetPassage(b.ID)
+	if stored.Title != "" {
+		t.Errorf("stored second half title %q", stored.Title)
+	}
 	for _, bad := range []time.Time{passageEpoch, p.End, passageEpoch.Add(-time.Hour), p.End.Add(time.Hour)} {
 		if _, _, err := s.SplitPassage(b.ID, bad); !errors.Is(err, errPassageInvalid) {
 			t.Errorf("split at %v: %v", bad, err)
