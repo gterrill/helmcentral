@@ -252,7 +252,7 @@ func sampleTracks(settingsPath string) {
 	}
 
 	// Only the total is recorded here, so controller names do not matter.
-	solar, solarErr := fetchSignalKSolarState(vesselSettings{})
+	solar, solarErr := fetchSignalKSolarState(vesselView{})
 	if solarErr == nil && solar.CurrentW >= 0 {
 		if hasUsableVesselPosition(state.Latitude, state.Longitude) {
 			solarStats.mu.Lock()

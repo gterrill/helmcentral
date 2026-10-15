@@ -95,7 +95,7 @@ func TestComputeAnomalyReadingBatteryWiringPublishesLevel(t *testing.T) {
 	setupBatteryProfileFixture(t)
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{
 			Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8,
 		},
@@ -140,7 +140,7 @@ func TestComputeAnomalyReadingBatteryNotSetUpWithoutLinkedProfile(t *testing.T) 
 	}
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: item.ID, CapacityAh: 400, Cells: 8},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
@@ -162,7 +162,7 @@ func TestComputeAnomalyReadingBatteryNotSetUpWithoutLinkedProfile(t *testing.T) 
 func setUpTwinEngineVessel(t *testing.T) string {
 	t.Helper()
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		Engines: []vesselEngineSetting{
 			{Instance: "port", Name: "Port"},
 			{Instance: "starboard", Name: "Starboard"},
@@ -203,7 +203,7 @@ func tickTwinGateSteady(t *testing.T, settingsPath string, portOilPa, stbdOilPa 
 
 func TestComputeAnomalyReadingOffForFewerThanTwoEngines(t *testing.T) {
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
@@ -629,7 +629,7 @@ func TestComputeAnomalyReadingEngineDifferentialPressureEvidenceUsesConsistentUn
 // new display name.
 func TestComputeAnomalyReadingEngineResidualPathStaysStableAcrossRename(t *testing.T) {
 	before := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(before, vesselSettings{
+	if err := saveVesselFixture(t, before, vesselView{
 		Engines: []vesselEngineSetting{
 			{Instance: "port", Name: "Port"},
 			{Instance: "starboard", Name: "Starboard"},
@@ -638,7 +638,7 @@ func TestComputeAnomalyReadingEngineResidualPathStaysStableAcrossRename(t *testi
 		t.Fatalf("saveVesselSettings: %v", err)
 	}
 	after := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(after, vesselSettings{
+	if err := saveVesselFixture(t, after, vesselView{
 		Engines: []vesselEngineSetting{
 			{Instance: "port", Name: "Port Main"}, // renamed, same instance
 			{Instance: "starboard", Name: "Starboard"},
@@ -697,7 +697,7 @@ func TestComputeAnomalyReadingFrozenClearsOnceEngineIsUnticked(t *testing.T) {
 	trackers.frozenPaths["propulsion.port.oilPressure"] = true
 
 	// The operator unticks port: the vessel settings no longer list it.
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		Engines: []vesselEngineSetting{{Instance: "starboard", Name: "Starboard"}},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
@@ -1150,7 +1150,7 @@ func TestComputeAnomalyReadingBatteryLevel2ViaRisingVoltage(t *testing.T) {
 	setupBatteryProfileFixture(t) // full_soc 0.95, charge_warn 3.5, charge_high 3.6 (pack: warn 28.0V, high 28.8V @ 8 cells)
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
@@ -1185,7 +1185,7 @@ func TestComputeAnomalyReadingBatteryStaysLevel1WithNoisyFlatVoltage(t *testing.
 	setupBatteryProfileFixture(t)
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -11,111 +12,68 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// vessel_handlers.go is Settings -> Vessel's own read/write surface:
-// GET /api/vessel/candidates lists what the boat is currently publishing so
-// the operator picks engines and a house bank from live readings rather
-// than typing a SignalK path. The vessel.* block itself (vessel_settings.go)
-// loads and saves with the rest of the settings (GET/POST /api/settings),
-// which re-seeds whichever anomaly-v1 sub-sets just became configured
-// (alarm_seed_anomaly.go).
+// vessel_handlers.go is Settings -> SignalK's Discovery read surface:
+// GET /api/vessel/discovery lists what the boat is currently reporting, grouped
+// by kind, with which equipment item (if any) owns each source, so the
+// operator assigns a source to an item or creates one from live readings
+// rather than typing a SignalK path (ADR 0185). The roles block itself
+// (vessel_roles.go) loads and saves with the rest of the settings (GET/POST
+// /api/settings), which re-seeds whichever anomaly-v1 sub-sets just became
+// configured (alarm_seed_anomaly.go).
 
-// vesselEngineCandidate is one propulsion.<instance> the boat is currently
-// publishing, with its live rpm and coolant temperature so the operator
-// recognises it ("that's port, it's running warm") rather than having to
-// know the SignalK instance name in advance. RPM and CoolantC are already
-// converted to the units an operator reads (rpm, degC) -- unlike most of
-// this backend's numeric APIs, this endpoint exists purely for a human
-// picker to render, not for further arithmetic, so there is nothing to
-// gain from making the frontend re-derive what convertFromSI would give it
-// straight back.
-type vesselEngineCandidate struct {
-	Instance string   `json:"instance"`
-	RPM      *float64 `json:"rpm"`
-	CoolantC *float64 `json:"coolant_c"`
+// discoveryMetric is one live figure shown beside a source so the operator
+// recognises it ("that's port, it's running warm"). Text is already in the
+// units an operator reads; this endpoint exists purely for a human picker to
+// render, so there is nothing to gain from making the frontend re-derive what
+// convertFromSI would give it straight back.
+type discoveryMetric struct {
+	Label string `json:"label"`
+	Text  string `json:"text"`
 }
 
-// vesselBatteryCandidate is one electrical.batteries.<id> the boat is
-// currently publishing. Showing voltage, current and SoC side by side is
-// how an operator resolves ambiguity like two IDs that are really the same
-// physical bank reported two ways.
-type vesselBatteryCandidate struct {
-	Path string `json:"path"`
-	// Instance is the <id> in electrical.batteries.<id>, the key an operator
-	// battery name is stored under. BusName is what the bus itself calls it
-	// (its .name path, or its device's installation or product name), shown
-	// as the hint beside the operator's own name field; empty when the bus
-	// says nothing. ChargerInput marks an instance that is a charger's
-	// own input (published only by chargers that feed another
-	// bank), which the impossible-reading check does not treat as a battery.
-	Instance     string   `json:"instance"`
-	BusName      string   `json:"bus_name"`
-	ChargerInput bool     `json:"charger_input"`
-	Voltage      *float64 `json:"voltage"`
-	Current      *float64 `json:"current"`
-	SoC          *float64 `json:"soc"`
+// discoveryItemRef is the equipment item that owns a source.
+type discoveryItemRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-// vesselAlternatorCandidate is one electrical.alternator.<instance> the boat
-// is currently publishing, with its live current so the operator can tell
-// which is which by the one that is charging.
-type vesselAlternatorCandidate struct {
-	Instance string   `json:"instance"`
-	Current  *float64 `json:"current"`
+// discoveryRow is one source: something the boat reports now, or something an
+// item still owns that has gone quiet (Reporting false).
+type discoveryRow struct {
+	Source string `json:"source"`
+	// Instance is the <id> segment ("port", "1", "fuel.2").
+	Instance string `json:"instance"`
+	// BusName is what the bus itself calls a battery (its .name path, or its
+	// device's installation or product name); empty when it says nothing.
+	BusName string `json:"bus_name"`
+	// ChargerInput marks a battery instance that is a charger's own input
+	// (published only by chargers that feed another bank), which the
+	// impossible-reading check does not treat as a battery.
+	ChargerInput bool              `json:"charger_input"`
+	Reporting    bool              `json:"reporting"`
+	Metrics      []discoveryMetric `json:"metrics"`
+	Item         *discoveryItemRef `json:"item"`
 }
 
-// vesselGeneratorCandidate is one electrical.generator.<instance> with its
-// state word when it is reporting now.
-type vesselGeneratorCandidate struct {
-	Instance string  `json:"instance"`
-	State    *string `json:"state"`
-}
-
-// vesselACCandidate is one electrical.ac.<instance> with its real power.
-type vesselACCandidate struct {
-	Instance  string   `json:"instance"`
-	RealPower *float64 `json:"real_power"`
-}
-
-// vesselChargerCandidate is one electrical.chargers.<instance> with its
-// output current and its AC input current.
-type vesselChargerCandidate struct {
-	Instance    string   `json:"instance"`
-	Current     *float64 `json:"current"`
-	ACInCurrent *float64 `json:"acin_current"`
-}
-
-// vesselInverterCandidate is one electrical.inverters.<instance> with its AC
-// output power.
-type vesselInverterCandidate struct {
-	Instance string   `json:"instance"`
-	ACOut    *float64 `json:"ac_out"`
-}
-
-// vesselSolarCandidate is one electrical.solar.<instance> with its panel
-// power.
-type vesselSolarCandidate struct {
-	Instance   string   `json:"instance"`
-	PanelPower *float64 `json:"panel_power"`
+// discoveryGroup is one kind of source. Mappable false marks a group an item
+// cannot own (AC inputs, which only the generator AC input role picks from).
+type discoveryGroup struct {
+	Kind     string         `json:"kind"`
+	Mappable bool           `json:"mappable"`
+	Rows     []discoveryRow `json:"rows"`
 }
 
 // vesselDetectorStatus is one detector's setup state for the Settings page:
 // Ready false always carries Missing, the single next thing the operator
-// needs to do ("Pick your house bank"), never a generic "not configured".
+// needs to do ("Choose your house bank"), never a generic "not configured".
 type vesselDetectorStatus struct {
 	Ready   bool   `json:"ready"`
 	Missing string `json:"missing,omitempty"`
 }
 
-type vesselCandidatesResponse struct {
-	Engines     []vesselEngineCandidate         `json:"engines"`
-	Batteries   []vesselBatteryCandidate        `json:"batteries"`
-	Alternators []vesselAlternatorCandidate     `json:"alternators"`
-	Generators  []vesselGeneratorCandidate      `json:"generators"`
-	AC          []vesselACCandidate             `json:"ac"`
-	Chargers    []vesselChargerCandidate        `json:"chargers"`
-	Inverters   []vesselInverterCandidate       `json:"inverters"`
-	Solar       []vesselSolarCandidate          `json:"solar"`
-	Detectors   map[string]vesselDetectorStatus `json:"detectors"`
+type discoveryResponse struct {
+	Groups    []discoveryGroup                `json:"groups"`
+	Detectors map[string]vesselDetectorStatus `json:"detectors"`
 }
 
 var (
@@ -177,23 +135,111 @@ func candidateInstances(paths []signalKPath, re *regexp.Regexp) []string {
 	return ids
 }
 
-// electricalCandidates lists the generators, AC inputs, chargers, inverters
-// and solar controllers the boat is publishing, each with a reading only when
-// it is fresh.
-func electricalCandidates(t telemetryReader, paths []signalKPath) (
-	[]vesselGeneratorCandidate, []vesselACCandidate, []vesselChargerCandidate, []vesselInverterCandidate, []vesselSolarCandidate,
-) {
-	generators := []vesselGeneratorCandidate{}
-	for _, id := range candidateInstances(paths, vesselCandidateGeneratorRe) {
-		generators = append(generators, vesselGeneratorCandidate{Instance: id, State: freshCandidateString(t, "electrical.generator."+id+".state")})
+// addMetric appends "label: value+unit" when v holds a reading.
+func addMetric(out []discoveryMetric, label string, v *float64, format, unit string) []discoveryMetric {
+	if v == nil {
+		return out
 	}
+	return append(out, discoveryMetric{Label: label, Text: fmt.Sprintf(format, *v) + unit})
+}
 
-	ac := []vesselACCandidate{}
+// liveCandidateNumber reads path's number whatever its age. Engines,
+// batteries and alternators are listed by what the tree holds now; the
+// freshness cut-off applies to the electrical sources, which linger in the
+// tree after they go quiet.
+func liveCandidateNumber(t telemetryReader, path string) *float64 {
+	v, ok := t.Number(path)
+	if !ok {
+		return nil
+	}
+	n := v.Value
+	return &n
+}
+
+// tankInstances lists "<category>.<id>" for every tank the boat publishes a
+// level for.
+func tankInstances(t telemetryReader) []string {
+	var ids []string
+	for _, category := range t.Children("tanks") {
+		for _, id := range t.Children("tanks." + category) {
+			if t.Sample("tanks." + category + "." + id + ".currentLevel").Present {
+				ids = append(ids, category+"."+id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// discoveredInstances is the instance ids each group is reporting now.
+func discoveredInstances(t telemetryReader, paths []signalKPath) map[sourceGroup][]string {
+	return map[sourceGroup][]string{
+		sourceEngine:     candidateInstances(paths, vesselCandidatePropulsionRe),
+		sourceBattery:    candidateInstances(paths, vesselCandidateBatteryRe),
+		sourceAlternator: candidateInstances(paths, vesselCandidateAlternatorRe),
+		sourceSolar:      candidateInstances(paths, vesselCandidateSolarRe),
+		sourceTank:       tankInstances(t),
+		sourceGenerator:  candidateInstances(paths, vesselCandidateGeneratorRe),
+		sourceCharger:    candidateInstances(paths, vesselCandidateChargerRe),
+		sourceInverter:   candidateInstances(paths, vesselCandidateInverterRe),
+	}
+}
+
+// sourceMetrics are the live figures shown beside a source; empty when it is
+// not reporting fresh data.
+func sourceMetrics(t telemetryReader, group sourceGroup, instance string) []discoveryMetric {
+	prefix := sourcePath(group, instance)
+	var out []discoveryMetric
+	switch group {
+	case sourceEngine:
+		if hz, ok := t.Number(prefix + ".revolutions"); ok {
+			rpm := hz.Value * 60
+			out = addMetric(out, "RPM", &rpm, "%.0f", " rpm")
+		}
+		if k, ok := t.Number(prefix + ".temperature"); ok {
+			c := k.Value - 273.15
+			out = addMetric(out, "Coolant", &c, "%.0f", " °C")
+		}
+	case sourceBattery:
+		out = addMetric(out, "Voltage", liveCandidateNumber(t, prefix+".voltage"), "%.2f", " V")
+		out = addMetric(out, "Current", liveCandidateNumber(t, prefix+".current"), "%.1f", " A")
+		if soc := liveCandidateNumber(t, prefix+".capacity.stateOfCharge"); soc != nil {
+			pct := *soc * 100
+			out = addMetric(out, "State of charge", &pct, "%.0f", "%")
+		}
+	case sourceAlternator:
+		out = addMetric(out, "Current", liveCandidateNumber(t, prefix+".current"), "%.1f", " A")
+	case sourceSolar:
+		out = addMetric(out, "Panel power", freshCandidateNumber(t, prefix+".panelPower", prefix+".power"), "%.0f", " W")
+	case sourceTank:
+		if level := freshCandidateNumber(t, prefix+".currentLevel"); level != nil {
+			pct := *level
+			if pct <= 1 {
+				pct *= 100
+			}
+			out = addMetric(out, "Level", &pct, "%.0f", "%")
+		}
+	case sourceGenerator:
+		if state := freshCandidateString(t, prefix+".state"); state != nil {
+			out = append(out, discoveryMetric{Label: "State", Text: *state})
+		}
+	case sourceCharger:
+		out = addMetric(out, "Output", freshCandidateNumber(t, prefix+".current"), "%.1f", " A")
+		out = addMetric(out, "AC in", freshCandidateNumber(t, prefix+".acin.1.current"), "%.1f", " A")
+	case sourceInverter:
+		out = addMetric(out, "AC out", freshCandidateNumber(t, prefix+".ac.output.power", prefix+".acout.power", prefix+".acOutputPower"), "%.0f", " W")
+	}
+	return out
+}
+
+// acInputRows lists the AC inputs the boat reports, with their real power. Only
+// a node that carries one of the real-power leaves the generator reading uses is
+// an AC input; electrical.ac.loads and the like are not.
+func acInputRows(t telemetryReader, paths []signalKPath) []discoveryRow {
+	rows := []discoveryRow{}
 	for _, id := range candidateInstances(paths, vesselCandidateACRe) {
 		prefix := "electrical.ac." + id
 		leaves := []string{prefix + ".phase.A.realPower", prefix + ".phaseA.realPower", prefix + ".realPower"}
-		// Only a node that carries one of the real-power leaves the generator
-		// reading uses is an AC input; electrical.ac.loads and the like are not.
 		carries := false
 		for _, leaf := range leaves {
 			if t.Sample(leaf).Present {
@@ -203,154 +249,115 @@ func electricalCandidates(t telemetryReader, paths []signalKPath) (
 		if !carries {
 			continue
 		}
-		ac = append(ac, vesselACCandidate{Instance: id, RealPower: freshCandidateNumber(t, leaves...)})
+		row := discoveryRow{Source: prefix, Instance: id, Reporting: true, Metrics: []discoveryMetric{}}
+		row.Metrics = addMetric(row.Metrics, "Real power", freshCandidateNumber(t, leaves...), "%.0f", " W")
+		rows = append(rows, row)
 	}
-
-	chargers := []vesselChargerCandidate{}
-	for _, id := range candidateInstances(paths, vesselCandidateChargerRe) {
-		prefix := "electrical.chargers." + id
-		chargers = append(chargers, vesselChargerCandidate{
-			Instance:    id,
-			Current:     freshCandidateNumber(t, prefix+".current"),
-			ACInCurrent: freshCandidateNumber(t, prefix+".acin.1.current"),
-		})
-	}
-
-	inverters := []vesselInverterCandidate{}
-	for _, id := range candidateInstances(paths, vesselCandidateInverterRe) {
-		prefix := "electrical.inverters." + id
-		inverters = append(inverters, vesselInverterCandidate{Instance: id, ACOut: freshCandidateNumber(t, prefix+".ac.output.power", prefix+".acout.power", prefix+".acOutputPower")})
-	}
-
-	solar := []vesselSolarCandidate{}
-	for _, id := range candidateInstances(paths, vesselCandidateSolarRe) {
-		prefix := "electrical.solar." + id
-		solar = append(solar, vesselSolarCandidate{Instance: id, PanelPower: freshCandidateNumber(t, prefix+".panelPower", prefix+".power")})
-	}
-
-	return generators, ac, chargers, inverters, solar
+	return rows
 }
 
-// vesselCandidates builds the whole GET /api/vessel/candidates response:
-// every propulsion/battery instance the boat is currently publishing (built
-// on signalk_paths.go's collectSignalKPaths and the snapshot, per the plan
-// -- signalk_discovery.go is the unrelated LAN scanner), plus each
-// detector's current setup status against vessel.
-func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCandidatesResponse {
+// vesselDiscovery builds the whole GET /api/vessel/discovery response: every
+// source the boat is currently reporting, plus every source an item still owns
+// that has gone quiet, each with the item that owns it, and each detector's
+// current setup status against vessel.
+func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourceItem) discoveryResponse {
 	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
 	paths := telemetry.Paths()
-
-	engineInstances := map[string]bool{}
-	batteryInstances := map[string]bool{}
-	for _, p := range paths {
-		if m := vesselCandidatePropulsionRe.FindStringSubmatch(p.Path); m != nil {
-			engineInstances[m[1]] = true
-		}
-		if m := vesselCandidateBatteryRe.FindStringSubmatch(p.Path); m != nil {
-			batteryInstances[m[1]] = true
-		}
-	}
-
-	engines := make([]vesselEngineCandidate, 0, len(engineInstances))
-	for instance := range engineInstances {
-		candidate := vesselEngineCandidate{Instance: instance}
-		if hz, ok := numericFromPath(snapshot, "propulsion."+instance+".revolutions"); ok {
-			rpm := hz * 60
-			candidate.RPM = &rpm
-		}
-		if k, ok := numericFromPath(snapshot, "propulsion."+instance+".temperature"); ok {
-			c := k - 273.15
-			candidate.CoolantC = &c
-		}
-		engines = append(engines, candidate)
-	}
-	sort.Slice(engines, func(i, j int) bool { return engines[i].Instance < engines[j].Instance })
-
+	live := discoveredInstances(telemetry, paths)
 	namer := newSensorNamer(snapshot, vessel, globalSourceDevices.get())
-	batteries := make([]vesselBatteryCandidate, 0, len(batteryInstances))
-	for instance := range batteryInstances {
-		path := "electrical.batteries." + instance
-		candidate := vesselBatteryCandidate{
-			Path:         path,
-			Instance:     instance,
-			BusName:      namer.busBatteryName(instance),
-			ChargerInput: namer.isChargerInstance(instance),
-		}
-		if v, ok := numericFromPath(snapshot, path+".voltage"); ok {
-			candidate.Voltage = &v
-		}
-		if c, ok := numericFromPath(snapshot, path+".current"); ok {
-			candidate.Current = &c
-		}
-		if soc, ok := numericFromPath(snapshot, path+".capacity.stateOfCharge"); ok {
-			candidate.SoC = &soc
-		}
-		batteries = append(batteries, candidate)
-	}
-	sort.Slice(batteries, func(i, j int) bool { return batteries[i].Path < batteries[j].Path })
 
-	alternators := []vesselAlternatorCandidate{}
-	for _, instance := range candidateInstances(paths, vesselCandidateAlternatorRe) {
-		candidate := vesselAlternatorCandidate{Instance: instance}
-		if v, ok := telemetry.Number("electrical.alternator." + instance + ".current"); ok {
-			c := v.Value
-			candidate.Current = &c
-		}
-		alternators = append(alternators, candidate)
+	owner := map[string]sourceItem{}
+	for _, it := range items {
+		owner[it.Source] = it
 	}
 
-	generators, ac, chargers, inverters, solar := electricalCandidates(telemetry, paths)
+	groups := make([]discoveryGroup, 0, len(sourceGroupOrder)+1)
+	for _, group := range sourceGroupOrder {
+		ids := map[string]bool{}
+		for _, id := range live[group] {
+			ids[id] = true
+		}
+		reporting := map[string]bool{}
+		for id := range ids {
+			reporting[id] = true
+		}
+		for _, it := range items {
+			if it.Group == group {
+				ids[it.Instance] = true
+			}
+		}
+		sorted := make([]string, 0, len(ids))
+		for id := range ids {
+			sorted = append(sorted, id)
+		}
+		sort.Slice(sorted, func(i, j int) bool { return instanceLess(sorted[i], sorted[j]) })
 
-	return vesselCandidatesResponse{
-		Engines:     engines,
-		Batteries:   batteries,
-		Alternators: alternators,
-		Generators:  generators,
-		AC:          ac,
-		Chargers:    chargers,
-		Inverters:   inverters,
-		Solar:       solar,
-		Detectors:   vesselDetectorStatuses(vessel),
+		rows := make([]discoveryRow, 0, len(sorted))
+		for _, id := range sorted {
+			source := sourcePath(group, id)
+			row := discoveryRow{Source: source, Instance: id, Reporting: reporting[id], Metrics: []discoveryMetric{}}
+			if row.Reporting {
+				row.Metrics = sourceMetrics(telemetry, group, id)
+			}
+			if group == sourceBattery && row.Reporting {
+				row.BusName = namer.busBatteryName(id)
+				row.ChargerInput = namer.isChargerInstance(id)
+			}
+			if it, ok := owner[source]; ok {
+				row.Item = &discoveryItemRef{ID: it.ID, Name: it.Name}
+			}
+			rows = append(rows, row)
+		}
+		groups = append(groups, discoveryGroup{Kind: string(group), Mappable: true, Rows: rows})
 	}
+	groups = append(groups, discoveryGroup{Kind: "ac", Mappable: false, Rows: acInputRows(telemetry, paths)})
+
+	return discoveryResponse{Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed
 // its setup and, when not, the single next thing missing.
-func vesselDetectorStatuses(vessel vesselSettings) map[string]vesselDetectorStatus {
+func vesselDetectorStatuses(vessel vesselView) map[string]vesselDetectorStatus {
 	statuses := map[string]vesselDetectorStatus{}
 
 	if len(vessel.Engines) >= 1 {
 		statuses["frozen"] = vesselDetectorStatus{Ready: true}
 	} else {
-		statuses["frozen"] = vesselDetectorStatus{Missing: "Tick at least one engine"}
+		statuses["frozen"] = vesselDetectorStatus{Missing: "Assign an engine to a propulsion source"}
 	}
 
 	if vesselHouseBankReady(vessel.HouseBank) {
 		statuses["battery"] = vesselDetectorStatus{Ready: true}
 	} else if vessel.HouseBank == nil || vessel.HouseBank.Path == "" {
-		statuses["battery"] = vesselDetectorStatus{Missing: "Pick your house bank"}
-	} else if vessel.HouseBank.EquipmentID == "" {
-		statuses["battery"] = vesselDetectorStatus{Missing: "Link an inventory item with a battery profile"}
+		statuses["battery"] = vesselDetectorStatus{Missing: "Choose your house bank under Roles"}
+	} else if vessel.HouseBank.CapacityAh <= 0 || vessel.HouseBank.Cells <= 0 {
+		statuses["battery"] = vesselDetectorStatus{Missing: "Enter the house bank item's capacity and cell count"}
+	} else if _, ok := equipmentProfile(vessel.HouseBank.EquipmentID); !ok {
+		statuses["battery"] = vesselDetectorStatus{Missing: "Give the house bank item a battery profile"}
 	} else {
-		statuses["battery"] = vesselDetectorStatus{Missing: "Fill in the linked profile's full_soc and charge_warn"}
+		statuses["battery"] = vesselDetectorStatus{Missing: "Fill in the battery profile's full_soc and charge_warn"}
 	}
 
 	if len(vessel.Engines) >= 2 {
 		statuses["engines"] = vesselDetectorStatus{Ready: true}
 	} else {
-		statuses["engines"] = vesselDetectorStatus{Missing: "Tick a second engine"}
+		statuses["engines"] = vesselDetectorStatus{Missing: "Assign a second engine"}
 	}
 
 	return statuses
 }
 
-// GET /api/vessel/candidates
-func getVesselCandidatesHandler(c echo.Context) error {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+// GET /api/vessel/discovery
+func getVesselDiscoveryHandler(c echo.Context) error {
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read the vessel"})
 	}
-	return c.JSON(http.StatusOK, vesselCandidates(globalSignalKSnapshot, vessel))
+	items, err := listSourceItems()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
+	}
+	return c.JSON(http.StatusOK, vesselDiscovery(globalSignalKSnapshot, vessel, items))
 }
 
 // instanceLess orders instance ids naturally: numeric ids by value (1, 2, 12),

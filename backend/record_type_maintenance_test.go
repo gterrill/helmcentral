@@ -254,7 +254,7 @@ func TestCompleteValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 func TestProposeMaintenanceChanges_WritesNothing(t *testing.T) {
 	deps, store := proposeDeps(t)
 	oil := fptr(250)
-	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan", HourMeterPath: "electrical.generator.0.runtime"})
+	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", ProfileID: "onan", SignalKSource: "electrical.generator.0"})
 	rule := mustToolRule(t, store, maintenanceRuleInput{EquipmentID: &gen.ID, Description: "Oil and filter", IntervalHours: oil})
 	before := countMaintenanceRows(t, store)
 	beforeRule, _ := store.GetMaintenanceRuleRow(rule.ID)

@@ -63,6 +63,13 @@ type alarmRule struct {
 	Path  string `json:"path"`
 	Label string `json:"label"`
 
+	// PathRole, when set, binds the rule to a role instead of a literal path
+	// (ADR 0185): the server keeps Path equal to that role's current SignalK
+	// path, so changing the house bank moves the rule with it. The only role
+	// a rule can follow is house_bank_soc, the house bank's state of charge.
+	// With the role unset the rule has no path and never fires.
+	PathRole string `json:"path_role,omitempty"`
+
 	Op    string  `json:"op"`
 	Value float64 `json:"value"`
 
@@ -330,7 +337,17 @@ func deleteAlarmRule(id string) error {
 // than no rule, because it is trusted and silent.
 func validateAlarmRule(rule *alarmRule) error {
 	rule.Path = strings.TrimSpace(rule.Path)
-	if rule.Path == "" {
+	rule.PathRole = strings.TrimSpace(rule.PathRole)
+	if rule.PathRole != "" {
+		if rule.PathRole != alarmPathRoleHouseBankSoC {
+			return fmt.Errorf("unknown path role %q", rule.PathRole)
+		}
+		path, err := alarmRolePath(rule.PathRole)
+		if err != nil {
+			return err
+		}
+		rule.Path = path
+	} else if rule.Path == "" {
 		return fmt.Errorf("alarm rule requires a SignalK path")
 	}
 
@@ -379,5 +396,56 @@ func validateAlarmRule(rule *alarmRule) error {
 		rule.StaleAfterSeconds = 60
 	}
 
+	return nil
+}
+
+// alarmPathRoleHouseBankSoC is the one role a rule can follow: the house
+// bank's state of charge.
+const alarmPathRoleHouseBankSoC = "house_bank_soc"
+
+// alarmRolePath is the SignalK path a role resolves to now, "" when the role is
+// not set. A rule saved while the role is unset is refused: it would watch
+// nothing, and a rule that watches nothing is trusted and silent.
+func alarmRolePath(role string) (string, error) {
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", role, err)
+	}
+	path := vessel.houseBankSocPath()
+	if path == "" {
+		return "", fmt.Errorf("choose a house bank in Settings first: this rule follows it")
+	}
+	return path, nil
+}
+
+// syncRoleBoundRules moves every rule that follows a role onto the role's
+// current path. A role that is not set leaves its rules with no path, so they
+// stop watching the bank they used to follow instead of watching a stale one.
+// It writes only when something moved.
+func syncRoleBoundRules(vessel vesselView) error {
+	alarmRulesMu.Lock()
+	defer alarmRulesMu.Unlock()
+
+	want := vessel.houseBankSocPath()
+	now := time.Now().UTC()
+	previous := map[string]alarmRule{}
+	for id, rule := range alarmRulesState {
+		if rule.PathRole != alarmPathRoleHouseBankSoC || rule.Path == want {
+			continue
+		}
+		previous[id] = *rule
+		rule.Path = want
+		rule.UpdatedAt = now
+	}
+	if len(previous) == 0 {
+		return nil
+	}
+	if err := saveAlarmRulesLocked(); err != nil {
+		for id, old := range previous {
+			restored := old
+			alarmRulesState[id] = &restored
+		}
+		return err
+	}
 	return nil
 }

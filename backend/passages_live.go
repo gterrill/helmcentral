@@ -140,10 +140,10 @@ func observeLiveTrack(snapshot *signalKSnapshot, state vesselStateData, settings
 		return
 	}
 
-	// loadVesselSettings decodes the vessel block only after settings.yaml
+	// loadVesselView decodes the vessel block only after settings.yaml
 	// changes, so reading it every five-second tick costs a stat.
 	var houseBank string
-	vessel, err := loadVesselSettings(settingsPath)
+	vessel, err := loadVesselView(settingsPath)
 	if err == nil {
 		houseBank = vessel.houseBankPath()
 	} else {

@@ -296,6 +296,10 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err := applyEquipmentSourceColumns(db); err != nil {
+		return err
+	}
+
 	if err := createImportSchema(db); err != nil {
 		return err
 	}
@@ -873,6 +877,31 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("apply document store migrations: create index: %w", err)
 		}
+	}
+	return nil
+}
+
+// applyEquipmentSourceColumns adds the ADR 0185 columns to equipment: the
+// SignalK source an item owns and a battery item's bank figures. It runs after
+// rebuildEquipmentForSpares, which builds a new table from equipmentTableBody
+// and would drop columns added before it. hour_meter_path stays in the table
+// as a dead column; the vessel conversion reads it once.
+func applyEquipmentSourceColumns(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE equipment ADD COLUMN signalk_source TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE equipment ADD COLUMN capacity_ah REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE equipment ADD COLUMN cells INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE equipment ADD COLUMN warn_voltage REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE equipment ADD COLUMN high_voltage REAL NOT NULL DEFAULT 0`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("apply equipment source columns: %w", err)
+		}
+	}
+	// One source, one item. Partial, because most items own none.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS equipment_signalk_source ON equipment (signalk_source) WHERE signalk_source <> ''`); err != nil {
+		return fmt.Errorf("apply equipment source columns: create index: %w", err)
 	}
 	return nil
 }

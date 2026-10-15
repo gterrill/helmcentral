@@ -445,7 +445,7 @@ func (p overnightPaths) cacheKey() string {
 // the generator runs. A misnamed path yields no points, and no points means
 // no exclusions, which is why the response carries the excluded counts.
 func overnightMeasurementPaths() (overnightPaths, error) {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		return overnightPaths{}, err
 	}
@@ -580,15 +580,15 @@ func electricalOvernightHandler(c echo.Context) error {
 	now := time.Now().UTC()
 
 	paths, socErr := overnightMeasurementPaths()
-	noteVesselRead("overnight", socErr, "overnight model: vessel settings unreadable, no projection: %v")
+	noteVesselRead("overnight", socErr, "overnight model: vessel unreadable, no projection: %v")
 	if socErr != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "vessel settings unreadable; dawn projection needs the house bank",
+			"error": "vessel unreadable; dawn projection needs the house bank",
 		})
 	}
 	if paths.Soc == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "no house bank is set in Vessel settings; dawn projection needs one",
+			"error": "no house bank is chosen under Settings > SignalK > Roles; dawn projection needs one",
 		})
 	}
 	cacheKey := paths.cacheKey()

@@ -58,17 +58,23 @@ type equipmentRequest struct {
 	Quantity     *int   `json:"quantity"`
 	// RequiredQuantity is how many of a spare the boat should carry; null or
 	// absent when nobody has said.
-	RequiredQuantity *int     `json:"required_quantity"`
-	Status           string   `json:"status"`
-	ZoneID           *string  `json:"zone_id"`
-	BinID            *string  `json:"bin_id"`
-	LocationDetail   string   `json:"location_detail"`
-	InstallDate      string   `json:"install_date"`
-	HourMeterPath    string   `json:"hour_meter_path"`
-	ProfileID        string   `json:"profile_id"`
-	Aliases          []string `json:"aliases"`
-	VerifiedAboard   bool     `json:"verified_aboard"`
-	Notes            string   `json:"notes"`
+	RequiredQuantity *int    `json:"required_quantity"`
+	Status           string  `json:"status"`
+	ZoneID           *string `json:"zone_id"`
+	BinID            *string `json:"bin_id"`
+	LocationDetail   string  `json:"location_detail"`
+	InstallDate      string  `json:"install_date"`
+	// SignalKSource is the one SignalK node the item owns; the bank figures
+	// apply to a battery item. validateEquipmentSource (the store) checks them.
+	SignalKSource  string   `json:"signalk_source"`
+	CapacityAh     float64  `json:"capacity_ah"`
+	Cells          int      `json:"cells"`
+	WarnVoltage    float64  `json:"warn_voltage"`
+	HighVoltage    float64  `json:"high_voltage"`
+	ProfileID      string   `json:"profile_id"`
+	Aliases        []string `json:"aliases"`
+	VerifiedAboard bool     `json:"verified_aboard"`
+	Notes          string   `json:"notes"`
 }
 
 // trimStringPtr trims *p and collapses it to nil when the result is blank -
@@ -101,7 +107,7 @@ func trimStringPtr(p *string) *string {
 // edit of that record for a field the request never touched. Leaving
 // profile_id exactly as it already was is therefore always accepted without
 // a fresh lookup; only a NEW or CHANGED value is re-validated. install_date
-// blank or YYYY-MM-DD; hour_meter_path trimmed with no embedded whitespace.
+// blank or YYYY-MM-DD.
 // It does NOT re-validate the zone_id/
 // bin_id pairing - that needs a database lookup (does this bin's own zone
 // match?) that only the store can cheaply make inside the same transaction
@@ -159,11 +165,6 @@ func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equ
 		return equipmentItem{}, &inventoryValidationError{Field: "install_date", Message: "install_date must be blank or YYYY-MM-DD"}
 	}
 
-	hourMeterPath := strings.TrimSpace(req.HourMeterPath)
-	if strings.ContainsAny(hourMeterPath, " \t\n") {
-		return equipmentItem{}, &inventoryValidationError{Field: "hour_meter_path", Message: "hour_meter_path cannot contain spaces"}
-	}
-
 	// Omitted quantity is one (a new item is one of something); an explicit
 	// zero is a spare that has run out and is kept as zero. Only a negative
 	// is refused.
@@ -193,7 +194,11 @@ func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equ
 		BinID:            trimStringPtr(req.BinID),
 		LocationDetail:   strings.TrimSpace(req.LocationDetail),
 		InstallDate:      installDate,
-		HourMeterPath:    hourMeterPath,
+		SignalKSource:    strings.TrimSpace(req.SignalKSource),
+		CapacityAh:       req.CapacityAh,
+		Cells:            req.Cells,
+		WarnVoltage:      req.WarnVoltage,
+		HighVoltage:      req.HighVoltage,
 		ProfileID:        profileID,
 		Aliases:          normalizeAliases(req.Aliases),
 		VerifiedAboard:   req.VerifiedAboard,
@@ -407,7 +412,7 @@ func getEquipmentHandler(c echo.Context) error {
 // never re-checked against engineProfiles() (validateEquipmentInput's own
 // doc comment explains why) - then UpdateEquipment's whole-record replace.
 //
-// reseedAnomalyRulesIfHouseBank runs afterward because vesselHouseBankReady
+// reseedAnomalyRulesAfterItemSave runs afterward because vesselHouseBankReady
 // (alarm_seed_anomaly.go) resolves the house bank's linked profile through
 // THIS record's own profile_id (equipmentProfile, anomaly_detector.go) -
 // changing it here is the other half of that readiness gate besides the
@@ -435,32 +440,35 @@ func updateEquipmentHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 
-	reseedAnomalyRulesIfHouseBank(updated.ID)
+	reseedAnomalyRulesAfterItemSave(updated.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{"item": updated})
 }
 
-// reseedAnomalyRulesIfHouseBank re-seeds the anomaly-v1 rule sets when
-// equipmentID is the vessel's own currently-linked house bank - the
-// Inventory-side half of vesselHouseBankReady's dependency on a linked
-// profile (equipmentProfile reads the item's own profile_id), alongside
-// seedAnomalyRulesAfterProfileSave's existing battery-profile-edit half
-// (code review finding 3). Scoped to the house bank specifically, the same
-// way that one is scoped to profileKindBattery saves only: no other
-// equipment update has any bearing on an anomaly-v1 readiness gate, and
-// loading vessel settings plus running a full seedAnomalyRules pass on
-// every inventory save would be needless work for no operator-visible
-// effect. A failure here is logged, not returned as an error, the same
-// non-fatal treatment every other seed call in this codebase gets - the
-// equipment save itself already succeeded.
-func reseedAnomalyRulesIfHouseBank(equipmentID string) {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+// reseedAnomalyRulesAfterItemSave re-seeds the anomaly-v1 rule sets, and moves
+// any alarm rule bound to the house bank role onto the bank's current source,
+// when equipmentID is an engine or the house bank. Mapping an item to a source,
+// or changing the profile a bank follows, is what completes or moves those
+// gates (vesselHouseBankReady resolves the profile through the item's own
+// profile_id). No other item has any bearing on them. A failure is logged, not
+// returned: the equipment save itself already succeeded.
+func reseedAnomalyRulesAfterItemSave(equipmentID string) {
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
-		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+		log.Printf("could not load vessel view for anomaly rule seeding: %v", err)
 		return
 	}
-	if vessel.HouseBank == nil || vessel.HouseBank.EquipmentID != equipmentID {
+	relevant := vessel.HouseBank != nil && vessel.HouseBank.EquipmentID == equipmentID
+	for _, e := range vessel.Engines {
+		if e.EquipmentID == equipmentID {
+			relevant = true
+		}
+	}
+	if !relevant {
 		return
+	}
+	if err := syncRoleBoundRules(vessel); err != nil {
+		log.Printf("could not move house bank alarm rules after an equipment save: %v", err)
 	}
 	if err := seedAnomalyRules(vessel); err != nil {
 		log.Printf("could not seed the anomaly alarm rules after an equipment save: %v", err)

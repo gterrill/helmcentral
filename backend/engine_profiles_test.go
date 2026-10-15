@@ -376,7 +376,7 @@ func TestUpdateEquipmentProfileHandlerSeedsFullBankRuleOnceProfileCompletes(t *t
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)

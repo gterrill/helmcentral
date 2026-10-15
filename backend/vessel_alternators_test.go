@@ -18,19 +18,19 @@ const alternatorTree = `{"electrical":{"alternator":{
 	"12":{"current":{"value":28.5},"voltage":{"value":28.3},"temperature":{"value":325.15}}
 }}}`
 
-func configuredAlternators(t *testing.T) vesselSettings {
+func configuredAlternators(t *testing.T) vesselView {
 	t.Helper()
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return vessel
 }
 
-func TestElectricalPayloadLogsAnUnreadableVesselBlockAndKeepsOtherFigures(t *testing.T) {
+func TestElectricalPayloadLogsAnUnreadableRolesBlockAndKeepsOtherFigures(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	resetVesselReadLog()
@@ -40,7 +40,7 @@ func TestElectricalPayloadLogsAnUnreadableVesselBlockAndKeepsOtherFigures(t *tes
 	seedSelfTree(t, alternatorTree)
 
 	payload := buildElectricalStatePayload()
-	if !strings.Contains(buf.String(), "vessel settings unreadable") {
+	if !strings.Contains(buf.String(), "vessel unreadable") {
 		t.Fatalf("expected a log line, got %q", buf.String())
 	}
 	if payload["alternator_0_current_a"] != -1.0 {
@@ -48,18 +48,31 @@ func TestElectricalPayloadLogsAnUnreadableVesselBlockAndKeepsOtherFigures(t *tes
 	}
 }
 
-func TestVesselCandidatesSortAlternatorsNumerically(t *testing.T) {
+// discoveryGroupRows is the rows of one kind in a discovery response.
+func discoveryGroupRows(r discoveryResponse, kind string) []discoveryRow {
+	for _, g := range r.Groups {
+		if g.Kind == kind {
+			return g.Rows
+		}
+	}
+	return nil
+}
+
+func TestVesselDiscoverySortsAlternatorsNumerically(t *testing.T) {
 	seedSelfTree(t, alternatorTree)
-	got := vesselCandidates(globalSignalKSnapshot, vesselSettings{})
-	if len(got.Alternators) != 3 || got.Alternators[0].Instance != "1" || got.Alternators[1].Instance != "2" || got.Alternators[2].Instance != "12" {
-		t.Fatalf("got %+v", got.Alternators)
+	got := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil), "alternator")
+	if len(got) != 3 || got[0].Instance != "1" || got[1].Instance != "2" || got[2].Instance != "12" {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].Source != "electrical.alternator.1" {
+		t.Fatalf("a row carries the source an item would own: %+v", got[0])
 	}
 }
 
 func TestElectricalStateReadsTheConfiguredAlternatorInstances(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{Alternators: vesselAlternatorSettings{PortInstance: "2", StarboardInstance: "12"}}); err != nil {
+	if err := saveVesselFixture(t, settingsPath, vesselView{Alternators: vesselAlternatorSettings{PortInstance: "2", StarboardInstance: "12"}}); err != nil {
 		t.Fatal(err)
 	}
 	seedSelfTree(t, alternatorTree)
@@ -94,7 +107,7 @@ func TestElectricalStateWithNoAlternatorsSetHasNoAlternatorData(t *testing.T) {
 func TestElectricalStateWithOnlyStarboardSet(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{Alternators: vesselAlternatorSettings{StarboardInstance: "12"}}); err != nil {
+	if err := saveVesselFixture(t, settingsPath, vesselView{Alternators: vesselAlternatorSettings{StarboardInstance: "12"}}); err != nil {
 		t.Fatal(err)
 	}
 	seedSelfTree(t, alternatorTree)
@@ -108,22 +121,27 @@ func TestElectricalStateWithOnlyStarboardSet(t *testing.T) {
 	}
 }
 
-func TestValidateVesselAlternators(t *testing.T) {
+func TestValidateVesselRolesAlternators(t *testing.T) {
+	items := []sourceItem{
+		{ID: "a2", Name: "Port alt", Source: "electrical.alternator.2", Group: sourceAlternator, Instance: "2"},
+		{ID: "a12", Name: "Stbd alt", Source: "electrical.alternator.12", Group: sourceAlternator, Instance: "12"},
+		{ID: "b1", Name: "Bank", Source: "electrical.batteries.1", Group: sourceBattery, Instance: "1"},
+	}
 	cases := []struct {
 		name    string
-		in      vesselAlternatorSettings
+		in      vesselRoles
 		wantErr string
 	}{
-		{"both unset", vesselAlternatorSettings{}, ""},
-		{"one set", vesselAlternatorSettings{PortInstance: "2"}, ""},
-		{"zero is an instance", vesselAlternatorSettings{PortInstance: "0", StarboardInstance: "1"}, ""},
-		{"different", vesselAlternatorSettings{PortInstance: "2", StarboardInstance: "12"}, ""},
-		{"same", vesselAlternatorSettings{PortInstance: "2", StarboardInstance: "2"}, "vessel.alternators.starboard_instance"},
-		{"dotted", vesselAlternatorSettings{PortInstance: "2.current"}, "vessel.alternators.port_instance"},
-		{"slash", vesselAlternatorSettings{StarboardInstance: "a/b"}, "vessel.alternators.starboard_instance"},
+		{"both unset", vesselRoles{}, ""},
+		{"one set", vesselRoles{PortAlternator: "a2"}, ""},
+		{"different", vesselRoles{PortAlternator: "a2", StarboardAlternator: "a12"}, ""},
+		{"same", vesselRoles{PortAlternator: "a2", StarboardAlternator: "a2"}, "roles.starboard_alternator"},
+		{"not an item", vesselRoles{PortAlternator: "nope"}, "roles.port_alternator"},
+		{"wrong kind", vesselRoles{PortAlternator: "b1"}, "roles.port_alternator"},
+		{"dotted ac instance", vesselRoles{GeneratorACInstance: "2.current"}, "roles.generator_ac_instance"},
 	}
 	for _, c := range cases {
-		got := validateVesselAlternators(c.in)
+		got := validateVesselRoles(c.in, items)
 		switch {
 		case c.wantErr == "" && got != nil:
 			t.Errorf("%s: unexpected error %+v", c.name, got)
@@ -133,18 +151,27 @@ func TestValidateVesselAlternators(t *testing.T) {
 	}
 }
 
-func TestUpdateSettingsSavesAndRejectsAlternators(t *testing.T) {
+func TestUpdateSettingsSavesAndRejectsAlternatorRoles(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
 	withTempAlarmRules(t)
+	store := vesselFixtureStore(t)
+	port, err := store.CreateEquipment(equipmentItem{Name: "Port alternator", SignalKSource: "electrical.alternator.2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stbd, err := store.CreateEquipment(equipmentItem{Name: "Starboard alternator", SignalKSource: "electrical.alternator.12"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
-		p.Vessel = &vesselSettings{Alternators: vesselAlternatorSettings{PortInstance: " 2 ", StarboardInstance: "12"}}
+		p.Roles = &vesselRoles{PortAlternator: " " + port.ID + " ", StarboardAlternator: stbd.ID}
 	})
 	if code != http.StatusOK {
 		t.Fatalf("got %d", code)
 	}
-	saved, err := loadVesselSettings(settingsPath)
+	saved, err := loadVesselView(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,31 +180,31 @@ func TestUpdateSettingsSavesAndRejectsAlternators(t *testing.T) {
 	}
 
 	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
-		p.Vessel = &vesselSettings{Alternators: vesselAlternatorSettings{PortInstance: "2", StarboardInstance: "2"}}
+		p.Roles = &vesselRoles{PortAlternator: port.ID, StarboardAlternator: port.ID}
 	})
 	if code == http.StatusOK {
-		t.Fatalf("same instance on both sides must be rejected, body %v", body)
+		t.Fatalf("same alternator on both sides must be rejected, body %v", body)
 	}
-	saved, _ = loadVesselSettings(settingsPath)
+	saved, _ = loadVesselView(settingsPath)
 	if saved.Alternators.StarboardInstance != "12" {
 		t.Fatalf("a rejected save must not change the stored value, got %+v", saved.Alternators)
 	}
 }
 
-func TestVesselCandidatesListAlternatorInstancesWithLiveCurrent(t *testing.T) {
+func TestVesselDiscoveryListsAlternatorInstancesWithLiveCurrent(t *testing.T) {
 	seedSelfTree(t, alternatorTree)
-	got := vesselCandidates(globalSignalKSnapshot, vesselSettings{})
-	var ids []string
-	cur := map[string]*float64{}
-	for _, a := range got.Alternators {
-		ids = append(ids, a.Instance)
-		cur[a.Instance] = a.Current
+	rows := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil), "alternator")
+	if len(rows) != 3 {
+		t.Fatalf("instances: %+v", rows)
 	}
-	if len(ids) != 3 {
-		t.Fatalf("instances: %v", ids)
+	var twelve discoveryRow
+	for _, r := range rows {
+		if r.Instance == "12" {
+			twelve = r
+		}
 	}
-	if cur["12"] == nil || *cur["12"] != 28.5 {
-		t.Fatalf("instance 12 current: %v", cur["12"])
+	if len(twelve.Metrics) != 1 || twelve.Metrics[0].Text != "28.5 A" {
+		t.Fatalf("instance 12 current: %+v", twelve.Metrics)
 	}
 }
 

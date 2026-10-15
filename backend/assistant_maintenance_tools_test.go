@@ -61,7 +61,7 @@ func TestFindEquipment_ReportsHoursAndEffectiveJobs(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
 
 	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", Manufacturer: "Onan", Model: "MDKBH", System: "electrical",
-		HourMeterPath: "electrical.generator.0.runtime", ProfileID: "sched-a"})
+		SignalKSource: "electrical.generator.0", ProfileID: "sched-a"})
 	mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion"})
 	oil := maintenanceJobID(gen.ID, "engine-oil")
 	impeller := maintenanceJobID(gen.ID, "impeller")
@@ -119,7 +119,7 @@ func TestFindEquipment_UnknownHoursAreReportedUnknownNeverZero(t *testing.T) {
 	deps, store := maintenanceToolDeps(t)
 	withGlobalSnapshot(t, snapshotWithSelfValues(map[string]any{}))
 	mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion"})
-	mustToolEquipment(t, store, equipmentItem{Name: "Watermaker", System: "water", HourMeterPath: "watermaker.runtime"})
+	mustToolEquipment(t, store, equipmentItem{Name: "Watermaker", System: "electrical", SignalKSource: "electrical.generator.7"})
 
 	raw := runMaintenanceTool(t, deps, "find_equipment", `{}`)
 	if strings.Contains(raw, `"current_meter_reading"`) {
@@ -193,8 +193,8 @@ func TestFindEquipment_FiltersBySystem(t *testing.T) {
 
 func seedMaintenanceRules(t *testing.T, store *documentStore) (gen, engine equipmentItem) {
 	t.Helper()
-	gen = mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", HourMeterPath: "electrical.generator.0.runtime"})
-	engine = mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion", HourMeterPath: "propulsion.main.runTime"})
+	gen = mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", SignalKSource: "electrical.generator.0"})
+	engine = mustToolEquipment(t, store, equipmentItem{Name: "Main engine", System: "propulsion", SignalKSource: "propulsion.main"})
 
 	months := 6
 	hours := 250.0
@@ -422,7 +422,7 @@ func TestListMaintenance_MeterReadingsSurviveAMeterReplacement(t *testing.T) {
 	deps, store := maintenanceToolDeps(t)
 	// New meter reads 50 h; the old one had 2200 h when it was replaced.
 	withGlobalSnapshot(t, snapshotWithSelfValues(map[string]any{"electrical.generator.0.runtime": 3600.0 * 50}))
-	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", HourMeterPath: "electrical.generator.0.runtime"})
+	gen := mustToolEquipment(t, store, equipmentItem{Name: "Generator", System: "electrical", SignalKSource: "electrical.generator.0"})
 	if _, err := store.RecordHourMeterReset(gen.ID, 2200, 0, "2026-01-01"); err != nil {
 		t.Fatalf("RecordHourMeterReset: %v", err)
 	}

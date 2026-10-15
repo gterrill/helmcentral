@@ -70,7 +70,7 @@ func loadSensorBatteriesFixture(t *testing.T, snapshot *signalKSnapshot) {
 	}
 }
 
-func newSensorNamesFixtureNamer(t *testing.T, vessel vesselSettings) (*sensorNamer, *signalKSnapshot) {
+func newSensorNamesFixtureNamer(t *testing.T, vessel vesselView) (*sensorNamer, *signalKSnapshot) {
 	t.Helper()
 	snapshot := newAnomalyTestSnapshot()
 	loadSensorBatteriesFixture(t, snapshot)
@@ -78,7 +78,7 @@ func newSensorNamesFixtureNamer(t *testing.T, vessel vesselSettings) (*sensorNam
 }
 
 func TestChargerInputInstanceIsSkippedButBanksAreNot(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 
 	// Instance 1 is published only by YachtDevices.36-39, the four BlueSolar
 	// MPPT chargers: their 76 V is the panel array, not a battery.
@@ -99,14 +99,14 @@ func TestChargerInstanceWithUnknownSourceInfoStaysChecked(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
 	loadSensorBatteriesFixture(t, snapshot)
 	// No sources directory at all: the conservative answer is "a battery".
-	namer := newSensorNamer(snapshot, vesselSettings{}, nil)
+	namer := newSensorNamer(snapshot, vesselView{}, nil)
 	if namer.isChargerInstance("1") {
 		t.Errorf("with no source information instance 1 must keep being checked as a battery")
 	}
 	// One of its four publishers unknown is the same: not EVERY source is known to be a charger.
 	devices := loadSensorSourcesFixture(t)
 	delete(devices, "YachtDevices.39")
-	if newSensorNamer(snapshot, vesselSettings{}, devices).isChargerInstance("1") {
+	if newSensorNamer(snapshot, vesselView{}, devices).isChargerInstance("1") {
 		t.Errorf("an unknown publisher must keep the instance in the battery check")
 	}
 }
@@ -154,7 +154,7 @@ func TestImpossibleReadingStillFlagsARealBankAt757Volts(t *testing.T) {
 }
 
 func TestBatteryNameChain(t *testing.T) {
-	vessel := vesselSettings{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}
+	vessel := vesselView{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}
 	namer, _ := newSensorNamesFixtureNamer(t, vessel)
 
 	cases := []struct{ path, want string }{
@@ -177,7 +177,7 @@ func TestBatteryNameChain(t *testing.T) {
 }
 
 func TestBatteryNamePrefersABatteryDeviceOverAChargerOnTheSameInstance(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 	// Instance 0 is published by chargers, a Quattro and the Batrium BMS; the
 	// BMS (function 170, battery) is the one that names the bank.
 	if got := namer.thingName("electrical.batteries.0.voltage"); got != "Batrium-BMS (Victron profile)" {
@@ -187,7 +187,7 @@ func TestBatteryNamePrefersABatteryDeviceOverAChargerOnTheSameInstance(t *testin
 
 func TestEngineNameChain(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
-	vessel := vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "stbd", Name: "Starboard engine"}}}
+	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "stbd", Name: "Starboard engine"}}}
 	namer := newSensorNamer(snapshot, vessel, nil)
 	cases := []struct{ path, want string }{
 		{"propulsion.port.temperature", "Port engine"},
@@ -223,7 +223,7 @@ func TestSensorQuantityWords(t *testing.T) {
 }
 
 func TestImpossibleReadingTextPerQuantity(t *testing.T) {
-	vessel := vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}
+	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}
 	namer := newSensorNamer(newAnomalyTestSnapshot(), vessel, nil)
 	cases := []struct {
 		path  string
@@ -253,7 +253,7 @@ func TestImpossibleReadingTextPerQuantity(t *testing.T) {
 }
 
 func TestFrozenAndSilentSourceTexts(t *testing.T) {
-	vessel := vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}
+	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}
 	namer, _ := newSensorNamesFixtureNamer(t, vessel)
 
 	frozen := namer.frozenEntry("propulsion.port.oilPressure")
@@ -313,15 +313,15 @@ func TestParseSourceDevicesReadsClassFunctionAndNames(t *testing.T) {
 	}
 }
 
-func TestVesselCandidatesListBatteryInstancesWithBusNamesAndSolarFlag(t *testing.T) {
+func TestVesselDiscoveryListsBatteryInstancesWithBusNamesAndSolarFlag(t *testing.T) {
 	globalSourceDevices.set(loadSensorSourcesFixture(t))
 	t.Cleanup(func() { globalSourceDevices.set(nil) })
 	snapshot := newAnomalyTestSnapshot()
 	loadSensorBatteriesFixture(t, snapshot)
 
-	resp := vesselCandidates(snapshot, vesselSettings{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}})
-	byInstance := map[string]vesselBatteryCandidate{}
-	for _, b := range resp.Batteries {
+	resp := vesselDiscovery(snapshot, vesselView{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}, nil)
+	byInstance := map[string]discoveryRow{}
+	for _, b := range discoveryGroupRows(resp, "battery") {
 		byInstance[b.Instance] = b
 	}
 	if b := byInstance["1"]; !b.ChargerInput || b.BusName != "BlueSolar Charger MPPT 100/50 re" {
@@ -336,26 +336,15 @@ func TestVesselCandidatesListBatteryInstancesWithBusNamesAndSolarFlag(t *testing
 	}
 }
 
-func TestNormalizeVesselBatteries(t *testing.T) {
-	got := normalizeVesselBatteries([]vesselBatterySetting{
-		{Instance: " 3 ", Name: "  Port Engine Starter Battery "},
-		{Instance: "2", Name: "   "},
-		{Instance: "3", Name: "duplicate"},
-		{Instance: "", Name: "orphan"},
-		{Instance: "1", Name: "Solar array"},
-	})
-	if len(got) != 2 || got[0] != (vesselBatterySetting{Instance: "1", Name: "Solar array"}) || got[1] != (vesselBatterySetting{Instance: "3", Name: "Port Engine Starter Battery"}) {
-		t.Errorf("normalized = %+v", got)
-	}
-}
-
-func TestVesselBatteryNamesRoundTripThroughTheVesselBlock(t *testing.T) {
+// A battery's name is its item's name: the fixture maps an item to instance 3
+// and the view carries that name, with nothing stored in settings.
+func TestVesselBatteryNamesComeFromMappedItems(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.yaml")
-	want := vesselSettings{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}
-	if err := saveVesselSettings(path, want); err != nil {
+	want := vesselView{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}
+	if err := saveVesselFixture(t, path, want); err != nil {
 		t.Fatal(err)
 	}
-	got, err := loadVesselSettings(path)
+	got, err := loadVesselView(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +354,7 @@ func TestVesselBatteryNamesRoundTripThroughTheVesselBlock(t *testing.T) {
 }
 
 func TestIdentifierEntryNamesPathsAndSources(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 	if e := namer.identifierEntry("electrical.batteries.2.voltage"); e.Label != "STBD START BATT voltage" || e.Identifier != "electrical.batteries.2.voltage" {
 		t.Errorf("path entry = %+v", e)
 	}
@@ -383,7 +372,7 @@ func TestLoneChargerInstanceStaysChecked(t *testing.T) {
 		SourceRef: "YachtDevices.42", Timestamp: sensorNamesTestNow.Format(time.RFC3339),
 		Values: []signalKValue{{Path: "electrical.batteries.9.voltage", Value: 76.0}},
 	}}}, sensorNamesTestNow)
-	namer := newSensorNamer(snapshot, vesselSettings{}, loadSensorSourcesFixture(t))
+	namer := newSensorNamer(snapshot, vesselView{}, loadSensorSourcesFixture(t))
 	if namer.isChargerInstance("9") {
 		t.Errorf("a lone Skylla-like source on its only instance must still be range-checked")
 	}
@@ -398,7 +387,7 @@ func TestLoneChargerInstanceStaysChecked(t *testing.T) {
 }
 
 func TestSilentSourceTakesABankNameOnlyAsItsSolePublisher(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 	// YachtDevices.224 is the only publisher of instance 3: it takes the bank's name.
 	if got := namer.silentSourceEntry("YachtDevices.224").Name; got != "PORT START BATT" {
 		t.Errorf("sole publisher name = %q", got)
@@ -411,7 +400,7 @@ func TestSilentSourceTakesABankNameOnlyAsItsSolePublisher(t *testing.T) {
 			Values: []signalKValue{{Path: "electrical.batteries.7.voltage", Value: 27.0}},
 		}}}, sensorNamesTestNow)
 	}
-	n := newSensorNamer(snapshot, vesselSettings{Batteries: []vesselBatterySetting{{Instance: "7", Name: "House Bank"}}}, loadSensorSourcesFixture(t))
+	n := newSensorNamer(snapshot, vesselView{Batteries: []vesselBatterySetting{{Instance: "7", Name: "House Bank"}}}, loadSensorSourcesFixture(t))
 	if got := n.silentSourceEntry("YachtDevices.36").Text; got != "BlueSolar Charger MPPT 100/50 re has stopped sending" {
 		t.Errorf("shared-instance charger text = %q", got)
 	}
@@ -441,7 +430,7 @@ func TestSourceDeviceRefresherRetriesQuicklyUntilFirstRead(t *testing.T) {
 }
 
 func TestIgnoredSensorEntriesNumberIdenticalNames(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 	out := ignoredSensorEntries(namer, []string{"YachtDevices.36", "YachtDevices.37", "YachtDevices.224"})
 	if out[0].Label != "BlueSolar Charger MPPT 100/50 re (1 of 2)" || out[1].Label != "BlueSolar Charger MPPT 100/50 re (2 of 2)" || out[2].Label != "PORT START BATT" {
 		t.Errorf("labels = %q %q %q", out[0].Label, out[1].Label, out[2].Label)
@@ -452,7 +441,7 @@ func TestIgnoredSensorEntriesNumberIdenticalNames(t *testing.T) {
 }
 
 func TestSourceNameFallsBackToManufacturer(t *testing.T) {
-	namer, _ := newSensorNamesFixtureNamer(t, vesselSettings{})
+	namer, _ := newSensorNamesFixtureNamer(t, vesselView{})
 	namer.devices = map[string]sourceDevice{"ydwg.12": {Manufacturer: "Victron Energy", DeviceClass: "Electrical Generation"}}
 	e := namer.silentSourceEntry("ydwg.12")
 	if e.Name != "Victron Energy device" || e.Text != "Victron Energy device has stopped sending" || e.Identifier != "ydwg.12" {
@@ -489,7 +478,7 @@ func feedWakespeedNullOnChargerInstance(snapshot *signalKSnapshot, nullValue any
 func TestNullReadingFromAnotherDeviceDoesNotMakeItAPublisherOfAChargerInstance(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
 	devices := feedWakespeedNullOnChargerInstance(snapshot, nil)
-	namer := newSensorNamer(snapshot, vesselSettings{}, devices)
+	namer := newSensorNamer(snapshot, vesselView{}, devices)
 	if !namer.isChargerInstance("1") {
 		t.Fatalf("instance 1 is published only by solar chargers; a null from the regulator must not count")
 	}
@@ -506,7 +495,7 @@ func TestNullReadingFromAnotherDeviceDoesNotMakeItAPublisherOfAChargerInstance(t
 func TestRealValueFromAnotherDeviceStillMakesItAPublisher(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
 	devices := feedWakespeedNullOnChargerInstance(snapshot, 3600.0)
-	namer := newSensorNamer(snapshot, vesselSettings{}, devices)
+	namer := newSensorNamer(snapshot, vesselView{}, devices)
 	if namer.isChargerInstance("1") {
 		t.Fatalf("a regulator publishing a real value on instance 1 is a non-charger publisher")
 	}

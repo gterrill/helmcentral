@@ -295,7 +295,7 @@ func seededRuleMatchesExisting(existing, want alarmRule) bool {
 // startup, and again on every vessel-settings save (main.go and the
 // vessel-settings save handler) -- since each sub-set's own marker makes
 // every call after the first a no-op for that sub-set.
-func seedAnomalyRules(vessel vesselSettings) error {
+func seedAnomalyRules(vessel vesselView) error {
 	if err := seedAnomalySet(anomalyBaseSeedMarker, anomalyBaseSeedRules()); err != nil {
 		return err
 	}

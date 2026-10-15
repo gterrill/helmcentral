@@ -100,10 +100,10 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// The configured engines say which propulsion instances to read. An
 	// unreadable vessel block is logged and reads as no engines configured,
 	// so engine state is unknown rather than guessed.
-	vessel, vesselErr := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, vesselErr := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	noteVesselRead("vessel state", vesselErr, "vessel state: engines unreadable, engine and generator state unknown: %v")
 	if vesselErr != nil {
-		vessel = vesselSettings{}
+		vessel = vesselView{}
 	}
 	return vesselStateFromTelemetry(t, state, vessel), nil
 }
@@ -111,7 +111,7 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 // vesselStateFromTelemetry fills state from our own boat's telemetry. The
 // -1 and "" sentinels vesselStateData still carries to the browser are
 // produced here, at the payload edge, from ok and AgeKnown (ADR 0178).
-func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel vesselSettings) vesselStateData {
+func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel vesselView) vesselStateData {
 	state.Name = strings.TrimSpace(firstString(t, "name", "design.name"))
 
 	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
@@ -430,7 +430,7 @@ func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 	return drift, setDeg, driftImpactKts
 }
 
-func fetchSignalKElectricalState(vessel vesselSettings) (electricalStateData, error) {
+func fetchSignalKElectricalState(vessel vesselView) (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, VoltageReadoutV: -1, ACLoadsW: -1, GeneratorRealPowerW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	t := globalSignalKSnapshot.selfTelemetry()
@@ -443,7 +443,7 @@ func fetchSignalKElectricalState(vessel vesselSettings) (electricalStateData, er
 // electricalStateFromTelemetry fills the Battery & Power tile's state. Its
 // unsigned fields keep -1 for unknown on the wire; the signed bank current
 // and power are nil (ADR 0178).
-func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, vessel vesselSettings) electricalStateData {
+func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, vessel vesselView) electricalStateData {
 	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
@@ -576,7 +576,7 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 	return state
 }
 
-func fetchSignalKSolarState(vessel vesselSettings) (solarStateData, error) {
+func fetchSignalKSolarState(vessel vesselView) (solarStateData, error) {
 	state := solarStateData{
 		Datetime:      time.Now().UTC(),
 		CurrentW:      -1,
@@ -595,7 +595,7 @@ func fetchSignalKSolarState(vessel vesselSettings) (solarStateData, error) {
 	return solarStateFromTelemetry(t, state, vessel), nil
 }
 
-func solarStateFromTelemetry(t telemetryReader, state solarStateData, vessel vesselSettings) solarStateData {
+func solarStateFromTelemetry(t telemetryReader, state solarStateData, vessel vesselView) solarStateData {
 	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
@@ -733,7 +733,7 @@ func readSolarController(t telemetryReader, prefix string, id string, label stri
 // solarLabel is the operator's name for solar controller id, or "Array <id>"
 // when it has none. Position in the list says nothing about which array a
 // controller is, so no name is ever derived from it.
-func (v vesselSettings) solarLabel(id string) string {
+func (v vesselView) solarLabel(id string) string {
 	if name := v.solarName(id); name != "" {
 		return name
 	}
@@ -743,7 +743,7 @@ func (v vesselSettings) solarLabel(id string) string {
 // voltageReadoutLabel names the voltage readout battery: the operator's name
 // from Vessel settings, then the name the bus publishes for it, then
 // "Battery <id>".
-func voltageReadoutLabel(t telemetryReader, vessel vesselSettings, id string) string {
+func voltageReadoutLabel(t telemetryReader, vessel vesselView, id string) string {
 	for _, b := range vessel.Batteries {
 		if b.Instance == id && strings.TrimSpace(b.Name) != "" {
 			return strings.TrimSpace(b.Name)
@@ -1333,41 +1333,6 @@ func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, dat
 	}
 
 	return tanks, datetime
-}
-
-func loadTankLabelOverrides(settingsPath string) map[string]string {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return map[string]string{}
-	}
-
-	uiMap, ok := settings["ui"].(map[string]any)
-	if !ok {
-		return map[string]string{}
-	}
-
-	rawLabels, ok := uiMap["tank_labels"].(map[string]any)
-	if !ok {
-		return map[string]string{}
-	}
-
-	labels := map[string]string{}
-	for key, value := range rawLabels {
-		label, ok := value.(string)
-		if !ok {
-			continue
-		}
-
-		normalizedKey := strings.ToLower(strings.TrimSpace(key))
-		normalizedLabel := strings.TrimSpace(label)
-		if normalizedKey == "" || normalizedLabel == "" {
-			continue
-		}
-
-		labels[normalizedKey] = normalizedLabel
-	}
-
-	return labels
 }
 
 func tankLabelOverride(overrides map[string]string, category string, entryID string) string {

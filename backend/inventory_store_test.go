@@ -468,7 +468,7 @@ func TestDocumentStore_CreateEquipmentRequiresName(t *testing.T) {
 // (old clients and bin quick-add still send one).
 func TestDocumentStore_CreateEquipmentDerivesCategoryFromHourMeter(t *testing.T) {
 	store := newTestDocumentStore(t)
-	with, err := store.CreateEquipment(equipmentItem{Name: "Genset", Category: "general", HourMeterPath: "electrical.generator.0.runTime"})
+	with, err := store.CreateEquipment(equipmentItem{Name: "Genset", Category: "general", SignalKSource: "electrical.generator.0"})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestDocumentStore_CreateEquipmentDerivesCategoryFromHourMeter(t *testing.T)
 	if without.Category != "general" {
 		t.Fatalf("no hour meter: expected general, got %q", without.Category)
 	}
-	blank, err := store.CreateEquipment(equipmentItem{Name: "Blank", Category: "mechanical", HourMeterPath: "   "})
+	blank, err := store.CreateEquipment(equipmentItem{Name: "Blank", Category: "mechanical", SignalKSource: "   "})
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestDocumentStore_UpdateEquipmentRederivesCategoryFromHourMeter(t *testing.
 	if err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
-	item.HourMeterPath = "electrical.generator.0.runTime"
+	item.SignalKSource = "electrical.generator.0"
 	item.Category = "general" // client says general; the meter wins
 	updated, err := store.UpdateEquipment(item.ID, item)
 	if err != nil {
@@ -517,7 +517,7 @@ func TestDocumentStore_UpdateEquipmentRederivesCategoryFromHourMeter(t *testing.
 	if updated.Category != "mechanical" {
 		t.Fatalf("meter added: expected mechanical, got %q", updated.Category)
 	}
-	updated.HourMeterPath = ""
+	updated.SignalKSource = ""
 	updated.Category = "mechanical"
 	cleared, err := store.UpdateEquipment(item.ID, updated)
 	if err != nil {
@@ -720,7 +720,7 @@ func TestDocumentStore_ListEquipmentFiltersByCategorySystemStatusZoneAndQuery(t 
 	}
 	generator, err := store.CreateEquipment(equipmentItem{
 		Name: "Generator", System: "electrical", Status: "deployed",
-		ZoneID: &zone.ID, Aliases: []string{"genset"}, HourMeterPath: "electrical.generator.0.runTime",
+		ZoneID: &zone.ID, Aliases: []string{"genset"}, SignalKSource: "electrical.generator.0",
 	})
 	if err != nil {
 		t.Fatalf("CreateEquipment (generator): %v", err)

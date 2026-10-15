@@ -431,7 +431,7 @@ func TestVesselStateHoldsTheTrustedFixThroughATickWithNoPosition(t *testing.T) {
 			navigation["position"] = map[string]any{"value": position}
 		}
 		view := telemetryViewFromTree(map[string]any{"navigation": navigation}, now)
-		return vesselStateFromTelemetry(view, vesselStateData{Status: "Unknown", Datetime: now, Depth: -1, Latitude: -1, Longitude: -1}, vesselSettings{})
+		return vesselStateFromTelemetry(view, vesselStateData{Status: "Unknown", Datetime: now, Depth: -1, Latitude: -1, Longitude: -1}, vesselView{})
 	}
 	fix := map[string]any{"latitude": -19.25, "longitude": 146.82}
 

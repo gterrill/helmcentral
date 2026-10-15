@@ -610,7 +610,7 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 		return "", fmt.Errorf("estimate_passage: the vessel settings could not be read, so the engines are unknown: %w", instErr)
 	}
 	if len(instances) == 0 {
-		return "", fmt.Errorf("estimate_passage: engines are not set up in Settings > Vessel, so there is no per-engine fuel history to estimate from")
+		return "", fmt.Errorf("estimate_passage: engines are not set up (no engine item is assigned to a propulsion source in Settings > SignalK), so there is no per-engine fuel history to estimate from")
 	}
 
 	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)

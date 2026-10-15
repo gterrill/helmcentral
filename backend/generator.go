@@ -34,13 +34,13 @@ func generatorPut(signalkURL, settingsPath, path string, value any) error {
 // in Vessel settings. problem is a plain sentence for the operator when there
 // is no usable generator. The id is checked again here because it is spliced
 // into a URL path that carries a write.
-func generatorBasePath(vessel vesselSettings) (path string, problem string) {
+func generatorBasePath(vessel vesselView) (path string, problem string) {
 	id := vessel.Electrical.GeneratorInstance
 	if id == "" {
-		return "", "the generator is not set up in Vessel settings"
+		return "", "the generator is not chosen under Settings > SignalK > Roles"
 	}
 	if !alternatorInstanceIDRe.MatchString(id) {
-		return "", "the generator in Vessel settings is not a valid instance id"
+		return "", "the generator role points at an item with no valid generator source"
 	}
 	return "/signalk/v1/api/vessels/self/electrical/generator/" + id, ""
 }
@@ -49,9 +49,9 @@ func generatorBasePath(vessel vesselSettings) (path string, problem string) {
 // When it cannot, the reply has already been written and handled is true. A
 // vessel block that cannot be read is a server error, not "not set up".
 func resolveGeneratorPath(c echo.Context, settingsPath string) (path string, handled bool, err error) {
-	vessel, loadErr := loadVesselSettings(settingsPath)
+	vessel, loadErr := loadVesselView(settingsPath)
 	if loadErr != nil {
-		return "", true, c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
+		return "", true, c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read the vessel"})
 	}
 	path, problem := generatorBasePath(vessel)
 	if problem != "" {

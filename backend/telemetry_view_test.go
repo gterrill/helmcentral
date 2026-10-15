@@ -309,7 +309,7 @@ func TestRealNegativeOneAmpReachesTheElectricalPayload(t *testing.T) {
 	if v, ok := globalSignalKSnapshot.selfTelemetry().Number("electrical.batteries.0.current"); !ok || v.Value != -1 {
 		t.Fatalf("view: got %+v ok=%v, want -1 ok=true", v, ok)
 	}
-	state, err := fetchSignalKElectricalState(vesselSettings{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0"}})
+	state, err := fetchSignalKElectricalState(vesselView{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestFallbackChainStopsAtARealNegativeOne(t *testing.T) {
 	// The 12 V current is unsigned on the tile, so a -1 is not shown as a
 	// current; it is worked out from power and voltage instead, never taken
 	// from the next path in the chain.
-	state := electricalStateFromTelemetry(reader, electricalStateData{DC12VPowerW: -1, DC12VCurrentA: -1, VoltageReadoutV: -1, ACOutputW: -1, ACLoadsW: -1, SolarOutputW: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, LastUpdateAge: -1}, vesselSettings{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.51"}})
+	state := electricalStateFromTelemetry(reader, electricalStateData{DC12VPowerW: -1, DC12VCurrentA: -1, VoltageReadoutV: -1, ACOutputW: -1, ACLoadsW: -1, SolarOutputW: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, LastUpdateAge: -1}, vesselView{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.51"}})
 	if state.DC12VCurrentA != 2 {
 		t.Fatalf("DC12VCurrentA: got %v, want 2 (24 W / 12 V), not 5 from the next path", state.DC12VCurrentA)
 	}
@@ -355,7 +355,7 @@ func TestHalfAPositionIsNoFix(t *testing.T) {
 		t.Fatalf("expected no position, got %+v", p)
 	}
 
-	state := vesselStateFromTelemetry(view, vesselStateData{Status: "Unknown", Datetime: telemetryTestNow, Depth: -1, Latitude: -1, Longitude: -1}, vesselSettings{})
+	state := vesselStateFromTelemetry(view, vesselStateData{Status: "Unknown", Datetime: telemetryTestNow, Depth: -1, Latitude: -1, Longitude: -1}, vesselView{})
 	if state.Latitude != -1 || state.Longitude != -1 {
 		t.Fatalf("expected no fix (-1, -1) on the wire, got (%v, %v)", state.Latitude, state.Longitude)
 	}

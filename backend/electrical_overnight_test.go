@@ -643,7 +643,7 @@ func TestSocMeasurementPathIgnoresTheRetiredEnvVar(t *testing.T) {
 func TestSocMeasurementPathFailsOnUnreadableSettings(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := overnightMeasurementPaths(); err == nil {
@@ -802,7 +802,7 @@ func TestOvernightCache_KeyedOnSocPath(t *testing.T) {
 // ── exclusion paths come from Vessel settings ──────────────────────────
 
 func TestOvernightMeasurementPathsFollowTheChosenInstances(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{
+	saveElectricalVessel(t, vesselView{
 		HouseBank:  &vesselHouseBankSetting{Path: "electrical.batteries.51"},
 		Electrical: vesselElectricalSettings{GeneratorInstance: "3", ShoreChargerInstance: "276"},
 	})
@@ -816,7 +816,7 @@ func TestOvernightMeasurementPathsFollowTheChosenInstances(t *testing.T) {
 }
 
 func TestOvernightMeasurementPathsAreEmptyWhenTheInstancesAreNotSet(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.51"}})
+	saveElectricalVessel(t, vesselView{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.51"}})
 	t.Setenv("INFLUX_GENERATOR_MEASUREMENT", "electrical.generator.0.stateNumber")
 	t.Setenv("INFLUX_SHORE_MEASUREMENT", "electrical.chargers.0.acin.1.current")
 	paths, err := overnightMeasurementPaths()
