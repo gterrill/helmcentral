@@ -40,6 +40,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   old house bank were converted to follow it. Add new ones with **Follow the
   house bank's state of charge** in the Alarms drawer.
 
+- **Engine, gauge group and indicator tiles now show equipment you choose.**
+  On the first start after upgrading, each Engine Cluster, each gauge group of
+  one engine or alternator, and each indicator lamp that read a SignalK path
+  under an engine, generator, charger, inverter or alternator is switched to the
+  equipment item that owns that source, keeping its layout and display choices.
+  A tile whose source has no item yet, and the fuel bars of a tank with no item,
+  show **Pick equipment**: open the tile's settings in Layout mode and choose
+  the equipment, mapping the item first under **Settings → SignalK → Discovery**
+  if it has no source. A reading the old tile took from outside its engine, such
+  as an exhaust temperature under `propulsion.0` on a boat whose engines are
+  `port` and `starboard`, is dropped and has to be re-added to a tile that can
+  read it. The startup log lists each one.
+- **Gauge zones live on the equipment profile.** A zone on one of those tiles
+  moved to the engine's profile when the profile had none for that reading. Where
+  the profile already had its own zones, the tile's were dropped and the log says
+  which. Edit them on the profile or from a tile that shows the equipment; the
+  change applies to every tile and alarm using that profile. The alarms raised
+  from zones on these tiles have new names and start with no history or
+  acknowledgement; look in the Alarms drawer to confirm they are all there.
+- **Apply gauge zones is gone** from the equipment page, along with the equipment
+  profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
+  Add an Engine Cluster or a gauge group and choose the equipment instead.
+
 ### Added
 
 - **Settings → SignalK → Discovery** lists what the boat reports (engines,
@@ -47,8 +70,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   inverters) with live readings and the equipment item each belongs to. Assign
   a source to an item, or create an item for it.
 - **Source** on the equipment page picks the item's SignalK source from what the
-  boat reports. A battery item holds its cell count and capacity, and an engine
-  item with a profile has **Apply gauge zones**.
+  boat reports. A battery item holds its cell count and capacity.
+- **Tiles pick equipment from a list.** An Engine Cluster, a gauge group set to
+  show equipment, and an indicator lamp for an engine, generator, charger,
+  inverter or alternator choose an item instead of a SignalK path, so a tile
+  follows the item when its source changes and shares the profile's alarm limits
+  with every other tile and alarm for that equipment. An item that is not mapped
+  yet can be mapped from the picker. A tile whose equipment is missing, not
+  mapped or not reporting says so, with a link to the item.
 
 ## [0.46.0] - 2026-10-15
 

@@ -48,10 +48,10 @@ number.
 An engine is an equipment item mapped to a `propulsion.` source. Map one for
 each engine the boat has.
 
-- Give the item an engine profile and **Apply gauge zones** appears under
-  **SignalK source** on its page. It adds a gauge tile for that engine to your
-  first dashboard page, with the profile's ranges marked. Each use adds another
-  tile, so move or remove it from the dashboard afterwards.
+- Give the item an engine profile and the engine's tiles take that profile's
+  ranges and alarm limits. Add an Engine Cluster tile and choose the engine
+  from the list; see [Show equipment on a tile](show-equipment-on-a-tile.md).
+  There is nothing to copy across, and no per-tile limits to keep in step.
 - The Alternators tile appears when a mapped engine is turning, and anchor
   auto-raise only acts while one is. With no engine mapped, or none reporting,
   the tile stays hidden and auto-raise does nothing.
@@ -150,9 +150,7 @@ service rules counted in hours cannot count hours for it.
 Assigning a source or creating an item takes effect at once, like any change on
 an item's own page. The roles save together with the rest of Settings. The bar
 appears as soon as you change one, **Discard** puts it back, and if you try to
-leave Settings with changes unsaved you are asked first. **Apply gauge zones**
-is not part of that: it adds the gauge tile to your first dashboard page
-straight away.
+leave Settings with changes unsaved you are asked first.
 
 Under **Roles**, each check shows whether it is ready, or what is still
 missing, so you always know what saving will turn on.

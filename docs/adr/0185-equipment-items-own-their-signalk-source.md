@@ -6,7 +6,7 @@ Accepted (2026-10-16). Supersedes
 [ADR 0181](0181-engines-and-house-bank-come-from-vessel-settings.md) and
 [ADR 0182](0182-electrical-instances-and-solar-names-are-vessel-settings.md).
 Builds on [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md), whose
-alternator instances are now a role. Phase 1 is built; phases 2 and 3 are
+alternator instances are now a role. Phases 1 and 2 are built; phase 3 is
 decided and not yet built.
 
 ## Context
@@ -95,14 +95,75 @@ items.
    removed from settings.yaml, which ends the conversion; a block that does not
    parse stops startup.
 
-## Later phases
+## Phase 2: tiles reference items (built)
 
-2. **Tiles reference items.** A tile stores the id of the item it shows instead
-   of an instance string, and reads its source from the item. Gauge zones come
-   live from the item's profile, so Apply gauge zones goes away. A one-shot
-   conversion maps existing tiles by instance; a tile that cannot be matched
-   shows "Pick equipment".
-3. **Dependants are visible.** Unassigning a source or deleting an item shows a
+Tiles that show a piece of equipment store the item, not paths.
+
+1. **The record.** An engine cluster has `equipmentId`; a gauge group has
+   `equipmentKind` (the source group) and `equipmentId`; a lamp for
+   multi-instance equipment has `equipmentId` and a `suffix`; a cluster fuel bar
+   has a `tankId`. Each slot stores a `suffix` (`oilPressure`, `fuel.rate`)
+   plus the operator's display choices (label, display, units, scale, ring
+   options), and never a path or zones. The title is an optional override and
+   defaults to the item's name. A gauge group with no `equipmentKind` stays a
+   plain list of paths, and a lamp with a `path` stays a direct lamp, for
+   single-instance signals such as a bilge float. Single-instance gauges
+   (depth, wind) are unchanged. The server refuses a slot that holds a path or
+   zones on an equipment tile, and a bar that still holds level and capacity
+   paths. A tile with no item picked yet may hold empty suffixes, so it can be
+   moved and resized while it waits.
+2. **Resolution.** A path is the item's source plus the suffix, worked out on
+   every read: in the browser for drawing (`lib/equipment-tiles.ts`) and in the
+   backend for the paths it streams and for alarms (`dashboard_equipment.go`).
+   The two walk the same rules. A fuel bar's level and capacity are the tank
+   item's source plus `currentLevel` and `capacity`, read as a ratio and a
+   volume, which removes the old rule that refused a tank saved without units.
+3. **Zones live on the profile.** A slot's bands are the zones of the gauge on
+   the item's profile with the same suffix, anchored to the slot's scale, and a
+   zone with no threshold draws nothing. `gauge_zone_alarms.go` reads the same
+   gauges, so a tile and its alarm cannot differ. Alarm ids for these are
+   `zone:item:<item id>:<suffix>:<n>`: one alarm per item and reading however
+   many tiles show it, named for the item ("Port engine Oil Press"). There is
+   no per-tile override. Editing a zone in a tile's form edits the profile (the
+   tile's save writes the profile first and stops if the server refuses it), and
+   the form names the profile and the items that follow it. A reading the
+   profile has no gauge for has no zones; the form says so.
+4. **The picker.** The tile dialogs list mapped items of the right kind. An item
+   with no source is listed separately and, when chosen, offers a list of
+   discovered reporting sources of that kind that no item owns; mapping writes
+   the item's `signalk_source`, the field on the item page, and the notice says
+   it changes the item for every tile and feature.
+5. **Statuses.** A tile with no item shows "Pick equipment", one whose item was
+   deleted "Equipment removed", an item with no source "Not mapped", and an item
+   whose source Discovery does not list "Not reporting", each with a link to the
+   item. Discovery not having answered is not "Not reporting", and an engine the
+   server knows is switched off still draws its tile with OFF. There is no
+   fallback to a path the tile once held. A lamp whose item is unmapped reads as
+   no data, with the strip still drawn.
+6. **Removed.** Apply gauge zones, the equipment profile dialog (and its Add Tile
+   entry), the gauge group's Apply profile merge and its retarget helper, the
+   free-text engine instance and the path-pattern ribbon suggestions. The ribbon
+   now suggests one lamp per mapped engine, generator, charger, inverter and
+   alternator, labelled with the item's name.
+7. **One-shot conversion** (`dashboard_equipment_convert.go`), after the vessel
+   conversion and after profiles load, recorded by `equipment_converted` in the
+   pages file so a plain group of paths made later is never converted. A tile
+   whose paths sit under a mapped item's source becomes a reference and keeps
+   its display choices. A slot reading outside the tile's source is dropped and
+   logged. A tile that matches no item keeps its readings as suffixes with no
+   item and asks for one. A tile's zones move onto the profile gauge when the
+   profile has none for that reading; when it has its own they are dropped and
+   logged once; a band that floats mid-scale, a reading the profile has no gauge
+   for, or an item with no profile are dropped and logged. Lamps with a
+   mapped source become references; an unowned lamp keeps its path and is
+   logged. A profile or pages file that cannot be written stops startup.
+
+Mate has no tool that builds or edits these tiles, and the record registry
+does not carry dashboard records, so nothing there changed.
+
+## Phase 3 (not built)
+
+1. **Dependants are visible.** Unassigning a source or deleting an item shows a
    "used by" list (roles, tiles, alarm rules, maintenance rules), and anything
    that depended on it shows "Not mapped" instead of going quietly blank.
 

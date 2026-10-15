@@ -44,3 +44,8 @@ hand: colouring part of the dial is the same action.
 A rule made this way appears in the Alarms drawer's rules list marked as
 coming from a gauge, and stays edited on the gauge rather than in the list.
 Removing the zone removes the rule.
+
+On a tile that shows a piece of equipment, such as an engine cluster, the zones
+belong to the equipment's profile. The form shows the profile's zones and says
+what else the change applies to; saving the tile saves the profile. Every other
+tile and alarm using that profile follows.

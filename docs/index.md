@@ -68,6 +68,7 @@ Steps for specific tasks.
 - [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
   house bank anomaly detection watches, and entering owner and insurance
   details.
+- [Show equipment on a tile](how-to/show-equipment-on-a-tile.md)
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
 - [Tag bins and equipment](how-to/tag-bins-and-equipment.md), writing and
   using an NFC tag, and the iPhone Copy route.
