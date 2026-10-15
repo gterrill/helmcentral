@@ -149,22 +149,34 @@ func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef,
 	}
 
 	gauge := profile.Gauges[index]
-	min, max := 0.0, 100.0
-	switch {
-	case slot.Min != nil:
-		min = *slot.Min
-	case gauge.Min != nil:
-		min = *gauge.Min
-	}
-	switch {
-	case slot.Max != nil:
-		max = *slot.Max
-	case gauge.Max != nil:
-		max = *gauge.Max
-	}
+	// The tile's thresholds are in the tile's unit and its scale; the profile
+	// holds them in its gauge's unit. Convert, or drop what cannot be converted.
+	// The tile judged its bands against its own scale, 0..100 when it set none,
+	// so that is the scale to read them against here.
+	min, max := gaugeScale(slot.Min, slot.Max, nil)
 	tileZones, unrepresentable := storedZonesToProfile(slot.Zones, min, max)
 	if unrepresentable {
 		c.logOnce("%s: left out a band on %q that floats mid-scale; a profile zone is a direction and a threshold", where, label)
+	}
+	if slot.Quantity != gauge.Quantity || slot.Unit != gauge.Unit {
+		converted := tileZones[:0]
+		for _, z := range tileZones {
+			v, err := convertBetweenUnits(*z.Threshold, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit)
+			if err != nil {
+				c.logOnce("%s: dropped a zone on %q; its unit %s %s does not convert to the profile's %s %s: %v",
+					where, label, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit, err)
+				continue
+			}
+			z.Threshold = &v
+			converted = append(converted, z)
+		}
+		tileZones = converted
+		// A scale put on a profile gauge that has none is in the profile's unit.
+		pmin, err1 := convertBetweenUnits(min, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit)
+		pmax, err2 := convertBetweenUnits(max, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit)
+		if err1 == nil && err2 == nil {
+			min, max = pmin, pmax
+		}
 	}
 
 	var existing []engineProfileZone
@@ -323,6 +335,9 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 			} else {
 				c.logOnce("%s: no equipment item owns the tank %q, so its fuel bar asks for one", where, bar.Level.Path)
 			}
+			if len(bar.Level.Zones) > 0 {
+				bar.Zones = c.fuelZonesInPercent(where, bar.Level)
+			}
 			bar.Level, bar.Capacity = nil, nil
 		}
 	}
@@ -374,4 +389,24 @@ func (c *tileConverter) convertLamps(where string, lamps []dashboardLamp) {
 		}
 		l.EquipmentID, l.Suffix, l.Path = item.ID, suffix, ""
 	}
+}
+
+// fuelZonesInPercent carries a fuel bar's zones onto the bar. A tank has no
+// profile, so the bar keeps them (as bands of the level in percent), and the
+// low-fuel alarm they raise is kept. A unit other than percent is converted.
+func (c *tileConverter) fuelZonesInPercent(where string, level *dashboardGaugeConfig) []gaugeZone {
+	if level.Quantity == "ratio" && level.Unit == "percent" {
+		return level.Zones
+	}
+	var out []gaugeZone
+	for _, z := range level.Zones {
+		from, err1 := convertBetweenUnits(z.From, level.Quantity, level.Unit, "ratio", "percent")
+		to, err2 := convertBetweenUnits(z.To, level.Quantity, level.Unit, "ratio", "percent")
+		if err1 != nil || err2 != nil {
+			c.logOnce("%s: dropped a zone on the fuel bar %q; its unit %s %s does not convert to percent", where, level.Label, level.Quantity, level.Unit)
+			continue
+		}
+		out = append(out, gaugeZone{From: from, To: to, State: z.State})
+	}
+	return out
 }

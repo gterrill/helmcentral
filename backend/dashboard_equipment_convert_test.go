@@ -240,3 +240,71 @@ func TestConvertDashboardTilesLeavesUnmatchedTilesWaitingForAnItem(t *testing.T)
 		t.Errorf("a tile waiting for an item must still save: %s", msg)
 	}
 }
+
+const unitsAndFuelFixture = `{"pages":[{"id":"p1","name":"Engines","position":0,"widgets":[
+  {"id":"cluster:port00001","x":0,"y":0,"w":5,"h":7,"cluster":{"title":"Port",
+    "ring":{"path":"propulsion.port.oilPressure","label":"Oil","display":"radial","quantity":"pressure","unit":"psi","zones":[{"from":0,"to":14.5038,"state":"alarm"}]},
+    "centre":{"path":"propulsion.port.runTime","label":"Hours","display":"numeric","quantity":"duration","unit":"h"},
+    "fuel":{"side":"left","bars":[{"level":{"path":"tanks.fuel.5.currentLevel","label":"Fwd","display":"bar","quantity":"ratio","unit":"percent","zones":[{"from":0,"to":15,"state":"warn"}]},"capacity":{"path":"tanks.fuel.5.capacity","label":"","display":"numeric","quantity":"volume","unit":"L"}}]}}}
+ ],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]}`
+
+// A tile whose unit differs from the profile's moves its zones in the
+// profile's unit, and a fuel bar keeps its zones, which raise the low-fuel
+// alarm, because a tank has no profile to hold them.
+func TestConvertDashboardTilesConvertsUnitsAndKeepsFuelBarZones(t *testing.T) {
+	setupDashboardPagesTest(t)
+	path := filepath.Join(t.TempDir(), "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", path)
+	if err := os.WriteFile(path, []byte(unitsAndFuelFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := vesselFixtureStore(t)
+	ps, err := newProfileStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := globalProfileStore
+	globalProfileStore = ps
+	t.Cleanup(func() { globalProfileStore = prev })
+	if err := ps.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, barProfileWithoutZones(), profileBasedOn{}) }); err != nil {
+		t.Fatal(err)
+	}
+	loadEngineProfiles()
+	t.Cleanup(loadEngineProfiles)
+	port := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	tank := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
+
+	loadDashboardPages()
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		t.Fatal(err)
+	}
+
+	profiles, _ := engineProfiles()
+	zones := profiles[0].Gauges[0].Zones
+	if len(zones) != 1 || zones[0].Direction != "below" || zones[0].Threshold == nil || *zones[0].Threshold < 0.99 || *zones[0].Threshold > 1.01 {
+		t.Errorf("14.5 psi is 1 bar on the profile, got %+v", zones)
+	}
+
+	dashboardPagesMu.RLock()
+	bar := dashboardPagesState["p1"].Widgets[0].Cluster.Fuel.Bars[0]
+	dashboardPagesMu.RUnlock()
+	if bar.TankID != tank || len(bar.Zones) != 1 || bar.Zones[0].To != 15 || bar.Zones[0].State != alarmStateWarn {
+		t.Errorf("the fuel bar keeps its low-fuel zone: %+v", bar)
+	}
+	rules := zoneDerivedAlarmRules()
+	var low bool
+	for _, r := range rules {
+		if r.ID == "zone:tank:"+tank+":0" {
+			low = true
+		}
+	}
+	if !low {
+		t.Errorf("the low-fuel alarm must survive the conversion, got %+v (engine %s)", rules, port)
+	}
+}
+
+func barProfileWithoutZones() engineProfile {
+	p := barProfile()
+	p.Gauges[0].Zones = nil
+	return p
+}

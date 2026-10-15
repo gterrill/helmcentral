@@ -295,6 +295,10 @@ type dashboardClusterFuelBar struct {
 	// TankID and clears them); a save that still carries one is refused.
 	Level    *dashboardGaugeConfig `json:"level,omitempty"`
 	Capacity *dashboardGaugeConfig `json:"capacity,omitempty"`
+	// Zones are bands of the tank's level in percent. A tank has no equipment
+	// profile to hold them, so a bar keeps its own (the one exception to zones
+	// living on the profile) and a low-fuel zone raises its alarm.
+	Zones []gaugeZone `json:"zones,omitempty"`
 }
 
 // dashboardClusterFuelRail is the curved bar gauge down one edge of the tile
@@ -1506,6 +1510,18 @@ func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 		}
 		if len(bar.Label) > gaugeLabelMaxLen {
 			return "cluster fuel label too long: " + ctx
+		}
+		level := dashboardGaugeConfig{Path: "tank.level", Label: bar.Label, Display: "bar", Quantity: "ratio", Unit: "percent"}
+		for i, zone := range bar.Zones {
+			if _, ok := alarmStateRank[zone.State]; !ok {
+				return "unknown fuel zone state: " + zone.State
+			}
+			if zone.State == alarmStateNormal {
+				continue
+			}
+			if _, err := gaugeZoneRule("validate", level, zone, i); err != nil {
+				return fmt.Sprintf("fuel zone %d cannot raise an alarm (%v): %s", i+1, err, ctx)
+			}
 		}
 	}
 	return ""

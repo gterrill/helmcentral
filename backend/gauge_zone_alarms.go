@@ -175,15 +175,29 @@ func zoneDerivedAlarmRules() []alarmRule {
 	collect := func(widgetID string, gaugeIndex int, gauge dashboardGaugeConfig) {
 		add(fmt.Sprintf("%s:%d", widgetID, gaugeIndex), gauge)
 	}
+	// One alarm per item and reading, built from the item and its profile alone
+	// (never from a slot), so the label, scale and unit are the same however
+	// many tiles show the reading and whichever the walk meets first.
+	seenReading := map[string]bool{}
 	collectSlot := func(equipmentID string, slot dashboardGaugeConfig) {
-		resolved, item, ok := ix.resolveSlot(equipmentID, slot)
-		if !ok {
+		item, ok := ix.items[equipmentID]
+		suffix := strings.TrimSpace(slot.Suffix)
+		if !ok || suffix == "" || seenReading[item.ID+"\x00"+suffix] {
 			return
 		}
-		// The alarm card names the item, not just the slot: "Port engine Oil
-		// Press" says which engine without anyone reading a path.
-		resolved.Label = strings.TrimSpace(item.Name + " " + firstNonEmpty(slot.Label, slot.Suffix))
-		add(fmt.Sprintf("item:%s:%s", item.ID, strings.TrimSpace(slot.Suffix)), resolved)
+		seenReading[item.ID+"\x00"+suffix] = true
+		if reading, ok := ix.itemReading(item, suffix); ok {
+			add(fmt.Sprintf("item:%s:%s", item.ID, suffix), reading)
+		}
+	}
+	collectTank := func(bar dashboardClusterFuelBar) {
+		if len(bar.Zones) == 0 || seenReading["tank\x00"+bar.TankID] {
+			return
+		}
+		seenReading["tank\x00"+bar.TankID] = true
+		if reading, ok := ix.tankLevelReading(bar.TankID, bar.Zones); ok {
+			add("tank:"+bar.TankID, reading)
+		}
 	}
 
 	for _, page := range dashboardPagesState {
@@ -200,9 +214,9 @@ func zoneDerivedAlarmRules() []alarmRule {
 					}
 				}
 			}
-			// A cluster slot's zones alarm like any other gauge's. The fuel bars
-			// carry none: a tank has no profile gauges, and a capacity is a
-			// constant an alarm derived from would never clear.
+			// A cluster slot's zones alarm like any other gauge's. A fuel bar has
+			// no profile to hold zones, so it keeps its own and they alarm on the
+			// tank's level; a capacity is a constant an alarm would never clear.
 			if widget.Cluster != nil {
 				id := widget.Cluster.EquipmentID
 				collectSlot(id, widget.Cluster.Ring)
@@ -214,6 +228,11 @@ func zoneDerivedAlarmRules() []alarmRule {
 				}
 				for _, telltale := range widget.Cluster.Telltales {
 					collectSlot(id, telltale)
+				}
+				if widget.Cluster.Fuel != nil {
+					for _, bar := range widget.Cluster.Fuel.Bars {
+						collectTank(bar)
+					}
 				}
 			}
 		}

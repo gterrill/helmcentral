@@ -181,36 +181,78 @@ func profileZonesToStored(zones []engineProfileZone, min, max float64) []gaugeZo
 	return out
 }
 
+// gaugeScale is the scale a slot's zones are anchored to: the slot's own
+// minimum and maximum when it sets them, else the profile gauge's, else 0..100.
+// It is the one place that rule lives; resolving a slot, building an alarm and
+// moving a tile's zones onto a profile all call it.
+func gaugeScale(slotMin, slotMax *float64, gauge *engineProfileGauge) (min, max float64) {
+	min, max = 0, 100
+	switch {
+	case slotMin != nil:
+		min = *slotMin
+	case gauge != nil && gauge.Min != nil:
+		min = *gauge.Min
+	}
+	switch {
+	case slotMax != nil:
+		max = *slotMax
+	case gauge != nil && gauge.Max != nil:
+		max = *gauge.Max
+	}
+	return min, max
+}
+
 // resolveSlot turns a slot on a tile that shows item equipmentID into a gauge
 // with a path and the profile's zones. ok is false when the item does not
 // exist, owns no source, or the slot names no reading.
+//
+// When the profile has a gauge for the reading, the quantity and unit are the
+// profile's, because its thresholds are in that unit, and the returned slot
+// carries the scale its zones were anchored to.
 func (ix equipmentIndex) resolveSlot(equipmentID string, slot dashboardGaugeConfig) (dashboardGaugeConfig, equipmentRef, bool) {
 	item, found := ix.items[equipmentID]
 	if !found || item.Source == "" || strings.TrimSpace(slot.Suffix) == "" {
 		return dashboardGaugeConfig{}, item, false
 	}
+	suffix := strings.TrimSpace(slot.Suffix)
 	out := slot
-	out.Path = item.Source + "." + strings.TrimSpace(slot.Suffix)
+	out.Path = item.Source + "." + suffix
 	out.Zones = nil
 	if profile, ok := ix.profiles[item.ProfileID]; ok {
-		if gauge, ok := profileGaugeFor(profile, strings.TrimSpace(slot.Suffix)); ok {
-			min, max := 0.0, 100.0
-			switch {
-			case slot.Min != nil:
-				min = *slot.Min
-			case gauge.Min != nil:
-				min = *gauge.Min
-			}
-			switch {
-			case slot.Max != nil:
-				max = *slot.Max
-			case gauge.Max != nil:
-				max = *gauge.Max
-			}
+		if gauge, ok := profileGaugeFor(profile, suffix); ok {
+			min, max := gaugeScale(slot.Min, slot.Max, &gauge)
+			out.Quantity, out.Unit = gauge.Quantity, gauge.Unit
+			out.Min, out.Max = &min, &max
 			out.Zones = profileZonesToStored(gauge.Zones, min, max)
 		}
 	}
 	return out, item, true
+}
+
+// itemReading is the gauge an alarm is raised from for one reading of an item:
+// built from the item and its profile's gauge alone, so what the alarm says and
+// where it fires never depends on which tile happened to show the reading.
+// ok is false when the item has no source or the profile has no such gauge.
+func (ix equipmentIndex) itemReading(item equipmentRef, suffix string) (dashboardGaugeConfig, bool) {
+	profile, found := ix.profiles[item.ProfileID]
+	if !found || item.Source == "" {
+		return dashboardGaugeConfig{}, false
+	}
+	gauge, found := profileGaugeFor(profile, suffix)
+	if !found {
+		return dashboardGaugeConfig{}, false
+	}
+	min, max := gaugeScale(nil, nil, &gauge)
+	return dashboardGaugeConfig{
+		Path:     item.Source + "." + suffix,
+		Label:    strings.TrimSpace(item.Name + " " + firstNonEmpty(gauge.Label, suffix)),
+		Display:  gauge.Display,
+		Quantity: gauge.Quantity,
+		Unit:     gauge.Unit,
+		Min:      &min,
+		Max:      &max,
+		Zones:    profileZonesToStored(gauge.Zones, min, max),
+	}, true
 }
 
 // resolveTank gives the level and capacity readings of the tank item tankID.
@@ -220,6 +262,26 @@ func (ix equipmentIndex) resolveTank(tankID string) (level, capacity string, ok 
 		return "", "", false
 	}
 	return item.Source + ".currentLevel", item.Source + ".capacity", true
+}
+
+// tankLevelReading is the gauge a low-fuel alarm is raised from: the tank item's
+// level as a percentage of full, with the zones the fuel bar carries.
+func (ix equipmentIndex) tankLevelReading(tankID string, zones []gaugeZone) (dashboardGaugeConfig, bool) {
+	level, _, ok := ix.resolveTank(tankID)
+	if !ok {
+		return dashboardGaugeConfig{}, false
+	}
+	min, max := 0.0, 100.0
+	return dashboardGaugeConfig{
+		Path:     level,
+		Label:    ix.items[tankID].Name + " level",
+		Display:  "bar",
+		Quantity: "ratio",
+		Unit:     "percent",
+		Min:      &min,
+		Max:      &max,
+		Zones:    zones,
+	}, true
 }
 
 // resolveLamp gives the path a lamp reads: its own, or its item's source plus

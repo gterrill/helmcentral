@@ -235,7 +235,7 @@ func TestZoneDerivedAlarmRulesCoversClusterSlotsFromTheProfile(t *testing.T) {
 	if !ok || oil.Op != alarmOpBelow {
 		t.Fatalf("expected a below rule on the resolved oil pressure path, got %+v", rules)
 	}
-	if oil.Label != "Port engine Oil" {
+	if oil.Label != "Port engine Oil Press" {
 		t.Fatalf("the alarm names the engine by its item, got %q", oil.Label)
 	}
 	if rpm := byPath["propulsion.port.revolutions"]; rpm.Op != alarmOpAbove {
@@ -333,5 +333,140 @@ func TestZoneDerivedAlarmRulesSkipATileWithNoItem(t *testing.T) {
 	})
 	if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
 		t.Fatalf("expected no rules, got %+v", rules)
+	}
+}
+
+// barProfile is an engine profile whose oil pressure is in bar on a 0..10 scale,
+// with an alarm above 8 bar.
+func barProfile() engineProfile {
+	min, max, high := 0.0, 10.0, 8.0
+	return engineProfile{
+		SchemaVersion: 1, Kind: profileKindEngine, ID: "bar-engine", Name: "Bar engine",
+		Gauges: []engineProfileGauge{{
+			PathSuffix: "oilPressure", Label: "Oil Press", Display: "radial", Quantity: "pressure", Unit: "bar", Min: &min, Max: &max,
+			Zones: []engineProfileZone{{Direction: "above", Threshold: &high, State: alarmStateAlarm}},
+		}},
+	}
+}
+
+func oilCluster(itemID string, slot dashboardGaugeConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: itemID,
+			Ring:        slot,
+			Centre:      dashboardGaugeConfig{Suffix: "fuel.rate", Display: "numeric", Quantity: "raw", Unit: "raw"},
+		},
+	}
+}
+
+// A slot that sets no scale of its own takes the profile gauge's, for the
+// alarm as well as the band. A 0..10 bar scale with a band from 8 is anchored
+// to the top; judged against a default 0..100 scale it floats mid-scale and
+// the alarm was skipped without a word.
+func TestZoneDerivedAlarmRulesUseTheProfileScaleWhenTheSlotHasNone(t *testing.T) {
+	useProfiles(t, barProfile())
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	withPages(t, oilCluster(itemID, dashboardGaugeConfig{Suffix: "oilPressure", Display: "radial", Quantity: "pressure", Unit: "bar"}))
+
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 {
+		t.Fatalf("expected the alarm above 8 bar, got %+v", rules)
+	}
+	if math.Abs(rules[0].Value-800000) > 1 {
+		t.Fatalf("8 bar is 800000 Pa, got %v", rules[0].Value)
+	}
+
+	ix := currentEquipmentIndex()
+	resolved, _, ok := ix.resolveSlot(itemID, dashboardGaugeConfig{Suffix: "oilPressure", Display: "radial", Quantity: "pressure", Unit: "bar"})
+	if !ok || resolved.Min == nil || resolved.Max == nil || *resolved.Min != 0 || *resolved.Max != 10 {
+		t.Fatalf("the resolved slot carries the scale its zones were anchored to: %+v", resolved)
+	}
+}
+
+// Profile thresholds are in the profile gauge's unit. A slot set to psi must
+// not reinterpret 8 bar as 8 psi.
+func TestZoneDerivedAlarmRulesReadProfileThresholdsInTheProfileUnit(t *testing.T) {
+	useProfiles(t, barProfile())
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	psiSlot := dashboardGaugeConfig{Suffix: "oilPressure", Display: "radial", Quantity: "pressure", Unit: "psi"}
+	withPages(t, oilCluster(itemID, psiSlot))
+
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 || math.Abs(rules[0].Value-800000) > 1 {
+		t.Fatalf("the alarm stays at 8 bar whatever unit the slot was set to, got %+v", rules)
+	}
+	resolved, _, _ := currentEquipmentIndex().resolveSlot(itemID, psiSlot)
+	if resolved.Unit != "bar" || resolved.Quantity != "pressure" {
+		t.Fatalf("an equipment slot takes its unit from the profile, got %s %s", resolved.Quantity, resolved.Unit)
+	}
+}
+
+// Two tiles that differ in label and scale give one alarm whose label, scale and
+// unit come from the item and the profile, not from whichever tile was met first.
+func TestZoneDerivedAlarmRulesDoNotDependOnWhichTileIsMetFirst(t *testing.T) {
+	useProfiles(t, barProfile())
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	lo, hi := 0.0, 20.0
+	a := oilCluster(itemID, dashboardGaugeConfig{Suffix: "oilPressure", Label: "Oil A", Display: "radial", Quantity: "pressure", Unit: "psi", Min: &lo, Max: &hi})
+	b := oilCluster(itemID, dashboardGaugeConfig{Suffix: "oilPressure", Label: "Oil B", Display: "radial", Quantity: "pressure", Unit: "bar"})
+	b.ID = "cluster:efgh5678"
+
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"p1": {ID: "p1", Widgets: []dashboardLayoutItem{a}},
+		"p2": {ID: "p2", Widgets: []dashboardLayoutItem{b}},
+		"p3": {ID: "p3", Widgets: []dashboardLayoutItem{a}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	for i := 0; i < 40; i++ {
+		rules := zoneDerivedAlarmRules()
+		if len(rules) != 1 {
+			t.Fatalf("expected one rule, got %+v", rules)
+		}
+		if rules[0].Label != "Port engine Oil Press" || math.Abs(rules[0].Value-800000) > 1 {
+			t.Fatalf("run %d: label and value must come from the item and profile, got %q %v", i, rules[0].Label, rules[0].Value)
+		}
+	}
+}
+
+// A fuel bar's zones stay on the tile record, because a tank has no profile,
+// and raise a low-fuel alarm keyed by the tank item.
+func TestZoneDerivedAlarmRulesRaiseLowFuelFromABarsOwnZones(t *testing.T) {
+	tank := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
+		Cluster: &dashboardClusterConfig{
+			Ring:   dashboardGaugeConfig{Display: "radial", Quantity: "raw", Unit: "raw"},
+			Centre: dashboardGaugeConfig{Display: "numeric", Quantity: "raw", Unit: "raw"},
+			Fuel: &dashboardClusterFuelRail{Side: "left", Bars: []dashboardClusterFuelBar{{
+				TankID: tank, Label: "Fwd", Zones: []gaugeZone{{From: 0, To: 15, State: alarmStateWarn}},
+			}}},
+		},
+	})
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 {
+		t.Fatalf("expected the low fuel alarm, got %+v", rules)
+	}
+	r := rules[0]
+	if r.Path != "tanks.fuel.5.currentLevel" || r.Op != alarmOpBelow || math.Abs(r.Value-0.15) > 1e-9 {
+		t.Fatalf("below 15 percent on the tank's level, got %+v", r)
+	}
+	if r.ID != "zone:tank:"+tank+":0" || r.Label != "Port forward fuel level" {
+		t.Fatalf("keyed by the tank item and named for it, got %q %q", r.ID, r.Label)
+	}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10, Cluster: &dashboardClusterConfig{
+		Ring:   dashboardGaugeConfig{Display: "radial", Quantity: "raw", Unit: "raw"},
+		Centre: dashboardGaugeConfig{Display: "numeric", Quantity: "raw", Unit: "raw"},
+		Fuel:   &dashboardClusterFuelRail{Side: "left", Bars: []dashboardClusterFuelBar{{TankID: tank, Zones: []gaugeZone{{From: 40, To: 60, State: alarmStateWarn}}}}},
+	}}}, ""); msg == "" {
+		t.Fatal("a mid-scale fuel zone cannot raise an alarm and must be refused")
 	}
 }
