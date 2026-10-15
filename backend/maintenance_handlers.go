@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -616,12 +615,7 @@ func createMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdCreateMaintenanceRule(tx, now, req)
-		return err
-	})
+	rule, err := globalDocumentStore.CreateMaintenanceRuleCmd(req)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -645,12 +639,7 @@ func updateMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdUpdateMaintenanceRule(tx, now, c.Param("id"), req)
-		return err
-	})
+	rule, err := globalDocumentStore.UpdateMaintenanceRuleCmd(c.Param("id"), req)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -695,12 +684,7 @@ func setMaintenanceRuleOverridesHandler(c echo.Context) error {
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdSetMaintenanceRuleOverrides(tx, now, c.Param("id"), in)
-		return err
-	})
+	rule, err := globalDocumentStore.SetMaintenanceRuleOverridesCmd(c.Param("id"), in)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -721,12 +705,7 @@ func resetMaintenanceRuleOverrideHandler(c echo.Context) error {
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdResetMaintenanceRuleOverride(tx, now, c.Param("id"), c.Param("field"))
-		return err
-	})
+	rule, err := globalDocumentStore.ResetMaintenanceRuleOverrideCmd(c.Param("id"), c.Param("field"))
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -836,12 +815,7 @@ func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdAcknowledgeMaintenanceRule(tx, now, c.Param("id"), req.Reason)
-		return err
-	})
+	rule, err := globalDocumentStore.AcknowledgeMaintenanceRuleCmd(c.Param("id"), req.Reason)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -874,12 +848,7 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	var rule maintenanceRule
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, err = cmdSetMaintenanceRuleLastDone(tx, now, today, c.Param("id"), req)
-		return err
-	})
+	rule, err := globalDocumentStore.SetMaintenanceRuleLastDoneCmd(today, c.Param("id"), req)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
@@ -907,13 +876,7 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	var rule maintenanceRule
-	var entry maintenanceLogEntry
-	err := globalDocumentStore.RunTx(func(tx *sql.Tx, now time.Time) error {
-		var err error
-		rule, entry, err = cmdCompleteMaintenanceRule(tx, now, c.Param("id"), req)
-		return err
-	})
+	rule, entry, err := globalDocumentStore.CompleteMaintenanceRuleCmd(c.Param("id"), req)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}

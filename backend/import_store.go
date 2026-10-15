@@ -352,56 +352,51 @@ func (s *documentStore) GetImportRun(id string) (importRun, error) {
 // it is set only by an upload (SetImportFileDocument), so a stale client can
 // not wipe a file the operator already handed over.
 func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (importRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var out importRun
+	err := s.RunTx("merge import decisions", func(tx *sql.Tx, now time.Time) error {
+		run, err := importRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		if run.Status != importStatusDraft {
+			return errImportRunNotDraft
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return importRun{}, fmt.Errorf("merge import decisions: begin: %w", err)
-	}
-	defer tx.Rollback()
+		d := run.Decisions
+		for k, v := range patch.Particulars {
+			d.Particulars[k] = v
+		}
+		for k, v := range patch.Zones {
+			d.Zones[k] = v
+		}
+		for k, v := range patch.Records {
+			d.Records[k] = v
+		}
+		for k, v := range patch.LogEquipment {
+			d.LogEquipment[k] = v
+		}
+		for k, v := range patch.Files {
+			v.DocumentID = d.Files[k].DocumentID
+			d.Files[k] = v
+		}
 
-	run, err := importRunByID(tx, id)
-	if err != nil {
-		return importRun{}, err
-	}
-	if run.Status != importStatusDraft {
-		return importRun{}, errImportRunNotDraft
-	}
-
-	d := run.Decisions
-	for k, v := range patch.Particulars {
-		d.Particulars[k] = v
-	}
-	for k, v := range patch.Zones {
-		d.Zones[k] = v
-	}
-	for k, v := range patch.Records {
-		d.Records[k] = v
-	}
-	for k, v := range patch.LogEquipment {
-		d.LogEquipment[k] = v
-	}
-	for k, v := range patch.Files {
-		v.DocumentID = d.Files[k].DocumentID
-		d.Files[k] = v
-	}
-
-	if err := validateImportDecisions(run.Staged, d); err != nil {
-		return importRun{}, err
-	}
-	if err := checkImportMatchTargets(tx, run.Staged, d, importInvalidf); err != nil {
-		return importRun{}, err
-	}
-	if err := saveImportDecisionsTx(tx, id, d, s.now()); err != nil {
-		return importRun{}, err
-	}
-	out, err := importRunByID(tx, id)
+		if err := validateImportDecisions(run.Staged, d); err != nil {
+			return err
+		}
+		if err := checkImportMatchTargets(tx, run.Staged, d, importInvalidf); err != nil {
+			return err
+		}
+		if err := saveImportDecisionsTx(tx, id, d, now); err != nil {
+			return err
+		}
+		out, err = importRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return importRun{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return importRun{}, fmt.Errorf("merge import decisions: commit: %w", err)
 	}
 	return out, nil
 }
@@ -409,53 +404,48 @@ func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (
 // SetImportFileDocument records the stored document the operator handed over
 // for one staged file, and clears its skipped flag.
 func (s *documentStore) SetImportFileDocument(id, fileKey, documentID string) (importRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return importRun{}, fmt.Errorf("set import file: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	run, err := importRunByID(tx, id)
-	if err != nil {
-		return importRun{}, err
-	}
-	if run.Status != importStatusDraft {
-		return importRun{}, errImportRunNotDraft
-	}
-	known := false
-	for _, f := range run.Staged.Files {
-		if f.Key == fileKey {
-			known = true
+	var out importRun
+	err := s.RunTx("set import file", func(tx *sql.Tx, now time.Time) error {
+		run, err := importRunByID(tx, id)
+		if err != nil {
+			return err
 		}
-	}
-	if !known {
-		return importRun{}, importInvalidf("no file %q in this export", fileKey)
-	}
-	ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, documentID)
-	if err != nil {
-		return importRun{}, fmt.Errorf("set import file: check document: %w", err)
-	}
-	if !ok {
-		return importRun{}, errDocumentNotFound
-	}
+		if run.Status != importStatusDraft {
+			return errImportRunNotDraft
+		}
+		known := false
+		for _, f := range run.Staged.Files {
+			if f.Key == fileKey {
+				known = true
+			}
+		}
+		if !known {
+			return importInvalidf("no file %q in this export", fileKey)
+		}
+		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, documentID)
+		if err != nil {
+			return fmt.Errorf("set import file: check document: %w", err)
+		}
+		if !ok {
+			return errDocumentNotFound
+		}
 
-	d := run.Decisions
-	fd := d.Files[fileKey]
-	fd.DocumentID = documentID
-	fd.Skipped = false
-	d.Files[fileKey] = fd
-	if err := saveImportDecisionsTx(tx, id, d, s.now()); err != nil {
-		return importRun{}, err
-	}
-	out, err := importRunByID(tx, id)
+		d := run.Decisions
+		fd := d.Files[fileKey]
+		fd.DocumentID = documentID
+		fd.Skipped = false
+		d.Files[fileKey] = fd
+		if err := saveImportDecisionsTx(tx, id, d, now); err != nil {
+			return err
+		}
+		out, err = importRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return importRun{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return importRun{}, fmt.Errorf("set import file: commit: %w", err)
 	}
 	return out, nil
 }
@@ -475,31 +465,26 @@ func saveImportDecisionsTx(tx *sql.Tx, id string, d importDecisions, now time.Ti
 // run is a record of what was uploaded); nothing it would have written
 // exists. Files already stored for it stay in the document library.
 func (s *documentStore) AbandonImportRun(id string) (importRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return importRun{}, fmt.Errorf("abandon import run: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	run, err := importRunByID(tx, id)
-	if err != nil {
-		return importRun{}, err
-	}
-	if run.Status != importStatusDraft {
-		return importRun{}, errImportRunNotDraft
-	}
-	if _, err := tx.Exec(`UPDATE import_runs SET status = 'abandoned', updated_at = ? WHERE id = ?`, s.now().Unix(), id); err != nil {
-		return importRun{}, fmt.Errorf("abandon import run: %w", err)
-	}
-	out, err := importRunByID(tx, id)
+	var out importRun
+	err := s.RunTx("abandon import run", func(tx *sql.Tx, now time.Time) error {
+		run, err := importRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		if run.Status != importStatusDraft {
+			return errImportRunNotDraft
+		}
+		if _, err := tx.Exec(`UPDATE import_runs SET status = 'abandoned', updated_at = ? WHERE id = ?`, now.Unix(), id); err != nil {
+			return fmt.Errorf("abandon import run: %w", err)
+		}
+		out, err = importRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return importRun{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return importRun{}, fmt.Errorf("abandon import run: commit: %w", err)
 	}
 	return out, nil
 }

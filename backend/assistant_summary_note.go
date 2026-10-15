@@ -200,27 +200,6 @@ func resolveSummaryEquipment(store *documentStore, names []string) ([]assistantS
 	return out, nil
 }
 
-// equipmentLinkedToDocument is the set of equipment ids a document is linked
-// to, so an update can show which suggested links already exist.
-func equipmentLinkedToDocument(store *documentStore, docID string) (map[string]bool, error) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	rows, err := store.db.Query(`SELECT equipment_id FROM equipment_documents WHERE document_id = ?`, docID)
-	if err != nil {
-		return nil, fmt.Errorf("list equipment links: %w", err)
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out[id] = true
-	}
-	return out, rows.Err()
-}
-
 // liveAssistantSummaryNoteID returns the conversation's summary note id, or
 // "" when it has none or the note has since been deleted. A deleted note is
 // plain state (the operator removed it), not an upstream error, so it reads
@@ -439,7 +418,7 @@ func postAssistantSummaryDraftHandler(c echo.Context) error {
 			return fail(http.StatusInternalServerError, err.Error())
 		}
 		if existing != "" {
-			linked, err := equipmentLinkedToDocument(globalDocumentStore, existing)
+			linked, err := globalDocumentStore.EquipmentLinkedToDocument(existing)
 			if err != nil {
 				return fail(http.StatusInternalServerError, err.Error())
 			}
@@ -555,7 +534,7 @@ func saveAssistantSummaryNoteHandler(c echo.Context) error {
 	// Links follow what the dialog showed: every ticked equipment is linked
 	// and every removal unlinked, diffed against the note's real links (a
 	// note just created has none, even if the draft showed some as linked).
-	current, err := equipmentLinkedToDocument(globalDocumentStore, noteID)
+	current, err := globalDocumentStore.EquipmentLinkedToDocument(noteID)
 	if err != nil {
 		return fail(http.StatusInternalServerError, err.Error())
 	}

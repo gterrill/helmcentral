@@ -104,6 +104,21 @@ func legacyPluginOverridesDBPath() string {
 // busy_timeout is meant to cover, and only then does the transaction's own
 // reads and writes proceed against a snapshot nothing else can invalidate
 // out from under it.
+// resolvedDBPath is the absolute, symlink-free path of an opened database
+// file: what two stores compare to know they share one file. The file exists
+// by the time a store calls it, so a failure is a real error.
+func resolvedDBPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve database path %s: %w", path, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve database path %s: %w", path, err)
+	}
+	return resolved, nil
+}
+
 func openHelmcentralDB(path string) (*sql.DB, error) {
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {

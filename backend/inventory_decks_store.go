@@ -129,7 +129,7 @@ func deckByID(q sqlQueryer, id string) (inventoryDeck, error) {
 
 // CreateDeck adds a deck at the next sort_index.
 func (s *documentStore) CreateDeck(name string) (d inventoryDeck, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("create deck", func(tx *sql.Tx, now time.Time) error {
 		d, err = createDeckTx(tx, now, name)
 		return err
 	})
@@ -164,7 +164,7 @@ func createDeckTx(tx *sql.Tx, now time.Time, name string) (inventoryDeck, error)
 
 // UpdateDeck renames a deck.
 func (s *documentStore) UpdateDeck(id, name string) (d inventoryDeck, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("update deck", func(tx *sql.Tx, now time.Time) error {
 		d, err = updateDeckTx(tx, now, id, name)
 		return err
 	})
@@ -195,7 +195,7 @@ func updateDeckTx(tx *sql.Tx, now time.Time, id, name string) (inventoryDeck, er
 // SetDeckPlan points a deck at its plan image document. The previous plan
 // document, if any, stays in Documents.
 func (s *documentStore) SetDeckPlan(deckID, documentID string) (d inventoryDeck, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("set deck plan", func(tx *sql.Tx, now time.Time) error {
 		d, err = setDeckPlanTx(tx, now, deckID, documentID)
 		return err
 	})
@@ -279,7 +279,7 @@ func (s *documentStore) ListDecks() ([]inventoryDeck, error) {
 // pins cleared) and deletes it, returning how many zones lost their outline.
 // The plan document stays in Documents.
 func (s *documentStore) DeleteDeck(id string) (cleared int, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("delete deck", func(tx *sql.Tx, now time.Time) error {
 		cleared, err = deleteDeckTx(tx, now, id)
 		return err
 	})
@@ -313,7 +313,7 @@ func deleteDeckTx(tx *sql.Tx, now time.Time, id string) (int, error) {
 // listed or de-listed zone loses its pin, then the listed pins are set. Any
 // validation failure changes nothing.
 func (s *documentStore) SaveDeckLayout(deckID string, zones []deckLayoutZone, bins []deckLayoutBin) error {
-	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return saveDeckLayoutTx(tx, now, deckID, zones, bins) })
+	return s.RunTx("save deck layout", func(tx *sql.Tx, now time.Time) error { return saveDeckLayoutTx(tx, now, deckID, zones, bins) })
 }
 
 func saveDeckLayoutTx(tx *sql.Tx, now time.Time, deckID string, zones []deckLayoutZone, bins []deckLayoutBin) error {

@@ -14,7 +14,8 @@ import (
 // The maintenance write commands (ADR 0146). Each is one rule write with its
 // validation, its gauge-to-true hours conversion and its store call, taking
 // an open transaction so the HTTP handlers (which run one command in a
-// transaction of their own, via documentStore.RunTx) and Mate's
+// transaction of their own, via the *Cmd store methods at the foot of this
+// file) and Mate's
 // proposal apply (which runs several in one transaction and commits only if
 // every one succeeds) execute exactly the same code. A command never touches
 // the store's mutex, the echo context or the wall clock: now and today come
@@ -249,4 +250,77 @@ func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req mainte
 	}
 
 	return completeMaintenanceRuleTx(tx, now, id, in, newFixedDueDate)
+}
+
+// ── store entry points ──────────────────────────────────────────────────
+
+// The REST handlers' way into the commands above: each runs one command in a
+// transaction of its own through RunTx, so no handler holds a *sql.Tx
+// (ADR 0181). A Mate changeset runs the same commands, several to a
+// transaction, through the record registry instead.
+
+// runCmd runs one command in its own RunTx and returns what it wrote.
+func runCmd[T any](s *documentStore, op string, cmd func(tx *sql.Tx, now time.Time) (T, error)) (T, error) {
+	var out T
+	err := s.RunTx(op, func(tx *sql.Tx, now time.Time) error {
+		var err error
+		out, err = cmd(tx, now)
+		return err
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return out, nil
+}
+
+func (s *documentStore) CreateMaintenanceRuleCmd(req maintenanceRuleRequest) (maintenanceRule, error) {
+	return runCmd(s, "create maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdCreateMaintenanceRule(tx, now, req)
+	})
+}
+
+func (s *documentStore) UpdateMaintenanceRuleCmd(id string, req maintenanceRuleRequest) (maintenanceRule, error) {
+	return runCmd(s, "update maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdUpdateMaintenanceRule(tx, now, id, req)
+	})
+}
+
+func (s *documentStore) SetMaintenanceRuleOverridesCmd(id string, in maintenanceOverridesInput) (maintenanceRule, error) {
+	return runCmd(s, "set maintenance rule overrides", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdSetMaintenanceRuleOverrides(tx, now, id, in)
+	})
+}
+
+func (s *documentStore) ResetMaintenanceRuleOverrideCmd(id, field string) (maintenanceRule, error) {
+	return runCmd(s, "reset maintenance rule override", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdResetMaintenanceRuleOverride(tx, now, id, field)
+	})
+}
+
+func (s *documentStore) AcknowledgeMaintenanceRuleCmd(id, reason string) (maintenanceRule, error) {
+	return runCmd(s, "acknowledge maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdAcknowledgeMaintenanceRule(tx, now, id, reason)
+	})
+}
+
+func (s *documentStore) SetMaintenanceRuleLastDoneCmd(today time.Time, id string, req maintenanceLastDoneRequest) (maintenanceRule, error) {
+	return runCmd(s, "set maintenance rule last done", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+		return cmdSetMaintenanceRuleLastDone(tx, now, today, id, req)
+	})
+}
+
+// completedMaintenanceRule is what completing a rule writes: the rule and
+// its new log entry.
+type completedMaintenanceRule struct {
+	rule  maintenanceRule
+	entry maintenanceLogEntry
+}
+
+func (s *documentStore) CompleteMaintenanceRuleCmd(id string, req maintenanceLogEntryRequest) (maintenanceRule, maintenanceLogEntry, error) {
+	done, err := runCmd(s, "complete maintenance rule", func(tx *sql.Tx, now time.Time) (completedMaintenanceRule, error) {
+		rule, entry, err := cmdCompleteMaintenanceRule(tx, now, id, req)
+		return completedMaintenanceRule{rule, entry}, err
+	})
+	return done.rule, done.entry, err
 }

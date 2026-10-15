@@ -40,7 +40,7 @@ func newTestProfileStore(t *testing.T) *profileStore {
 // documents the loader has to refuse.
 func seedRawProfileRow(t *testing.T, store *profileStore, id, body string) {
 	t.Helper()
-	if _, err := store.db.Exec(`INSERT INTO equipment_profiles (id, kind, body, created_at, updated_at) VALUES (?, 'engine', ?, 0, 0)`, id, body); err != nil {
+	if _, err := store.ds.db.Exec(`INSERT INTO equipment_profiles (id, kind, body, created_at, updated_at) VALUES (?, 'engine', ?, 0, 0)`, id, body); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }

@@ -29,32 +29,6 @@ var (
 	errMaintenanceLogEntryNotFound = errors.New("log entry not found")
 )
 
-// RunTx runs fn in one transaction on this store's connection,
-// holding the store mutex for its duration, and commits only when fn
-// returns nil. now is the store's own clock. Every maintenance and inventory
-// write the HTTP handlers make goes through it, so a handler and a Mate
-// changeset (ADR 0158), which runs several of the same commands in one
-// transaction of its own, execute identical code. fn must not call another
-// documentStore method: they take the same mutex.
-func (s *documentStore) RunTx(fn func(tx *sql.Tx, now time.Time) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("write: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := fn(tx, s.now()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("write: commit: %w", err)
-	}
-	return nil
-}
-
 // ── types ────────────────────────────────────────────────────────────────
 
 // maintenanceRule is one row of maintenance_rules. EquipmentID is nil for a
@@ -256,7 +230,7 @@ func maintenanceRuleByID(q sqlQueryer, id string) (maintenanceRule, error) {
 // writing.
 func (s *documentStore) CreateMaintenanceRule(in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("create maintenance rule", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = createMaintenanceRuleTx(tx, now, in)
 		return err
@@ -309,7 +283,7 @@ func createMaintenanceRuleTx(tx *sql.Tx, now time.Time, in maintenanceRuleInput)
 // created_at.
 func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("update maintenance rule", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = updateMaintenanceRuleTx(tx, now, id, in)
 		return err
@@ -373,7 +347,7 @@ func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanc
 // own doc comment) - history is never erased by deleting the rule that
 // generated it.
 func (s *documentStore) DeleteMaintenanceRule(id string) error {
-	return s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx("delete maintenance rule", func(tx *sql.Tx, now time.Time) error {
 		return cmdDeleteMaintenanceRule(tx, id)
 	})
 }
@@ -403,7 +377,7 @@ func (s *documentStore) ListMaintenanceRuleRows(filter maintenanceRuleFilter) ([
 // clears it, independently of this method.
 func (s *documentStore) AcknowledgeMaintenanceRule(id, reason string) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("acknowledge maintenance rule", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = acknowledgeMaintenanceRuleTx(tx, now, id, reason)
 		return err
@@ -449,7 +423,7 @@ func acknowledgeMaintenanceRuleTx(tx *sql.Tx, now time.Time, id, reason string) 
 // "date and/or hours" (spec's own wording).
 func (s *documentStore) SetMaintenanceRuleLastDone(id string, at *string, hours *float64) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("set maintenance rule last done", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = setMaintenanceRuleLastDoneTx(tx, now, id, at, hours)
 		return err
@@ -499,7 +473,7 @@ func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *stri
 // note - spec §8.
 func (s *documentStore) SetMaintenanceRuleProcedureNote(id, noteID string) (maintenanceRule, error) {
 	var out maintenanceRule
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("set maintenance rule procedure note", func(tx *sql.Tx, now time.Time) error {
 		if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
 			return err
 		}
@@ -693,44 +667,39 @@ func insertMaintenanceLogPartsTx(tx *sql.Tx, logEntryID string, parts []maintena
 // input, because linking a rule is what CompleteMaintenanceRule (below,
 // the only path that ever sets rule_id) means.
 func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var created maintenanceLogEntry
+	err := s.RunTx("create log entry", func(tx *sql.Tx, now time.Time) error {
+		if in.EquipmentID != nil {
+			ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, *in.EquipmentID)
+			if err != nil {
+				return fmt.Errorf("create log entry: check equipment: %w", err)
+			}
+			if !ok {
+				return errEquipmentNotFound
+			}
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("create log entry: begin: %w", err)
-	}
-	defer tx.Rollback()
+		id := uuid.NewString()
+		if _, err := tx.Exec(`
+			INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at)
+			VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, nullableString(in.EquipmentID), in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
+		); err != nil {
+			return fmt.Errorf("create log entry: %w", err)
+		}
+		if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
+			return err
+		}
 
-	if in.EquipmentID != nil {
-		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, *in.EquipmentID)
+		var err error
+		created, err = maintenanceLogEntryByID(tx, id)
 		if err != nil {
-			return maintenanceLogEntry{}, fmt.Errorf("create log entry: check equipment: %w", err)
+			return err
 		}
-		if !ok {
-			return maintenanceLogEntry{}, errEquipmentNotFound
-		}
-	}
-
-	now := s.now()
-	id := uuid.NewString()
-	if _, err := tx.Exec(`
-		INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at)
-		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, nullableString(in.EquipmentID), in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
-	); err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("create log entry: %w", err)
-	}
-	if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
-		return maintenanceLogEntry{}, err
-	}
-
-	created, err := maintenanceLogEntryByID(tx, id)
+		return nil
+	})
 	if err != nil {
 		return maintenanceLogEntry{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("create log entry: commit: %w", err)
 	}
 	return created, nil
 }
@@ -744,41 +713,35 @@ func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (
 // CompleteMaintenanceRule or SetMaintenanceRuleLastDone (a documented cut,
 // not an oversight - see ADR 0138's consequences).
 func (s *documentStore) UpdateMaintenanceLogEntry(id string, in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var updated maintenanceLogEntry
+	err := s.RunTx("update log entry", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("update log entry: check exists: %w", err)
+		}
+		if !ok {
+			return errMaintenanceLogEntryNotFound
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("update log entry: begin: %w", err)
-	}
-	defer tx.Rollback()
+		if _, err := tx.Exec(`
+			UPDATE maintenance_log_entries SET performed_at = ?, hours = ?, kind = ?, description = ?, who = ?, cost = ?, currency = ?, updated_at = ?
+			WHERE id = ?`,
+			in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), id,
+		); err != nil {
+			return fmt.Errorf("update log entry: %w", err)
+		}
+		if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
+			return err
+		}
 
-	ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, id)
-	if err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("update log entry: check exists: %w", err)
-	}
-	if !ok {
-		return maintenanceLogEntry{}, errMaintenanceLogEntryNotFound
-	}
-
-	now := s.now()
-	if _, err := tx.Exec(`
-		UPDATE maintenance_log_entries SET performed_at = ?, hours = ?, kind = ?, description = ?, who = ?, cost = ?, currency = ?, updated_at = ?
-		WHERE id = ?`,
-		in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), id,
-	); err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("update log entry: %w", err)
-	}
-	if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
-		return maintenanceLogEntry{}, err
-	}
-
-	updated, err := maintenanceLogEntryByID(tx, id)
+		updated, err = maintenanceLogEntryByID(tx, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return maintenanceLogEntry{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return maintenanceLogEntry{}, fmt.Errorf("update log entry: commit: %w", err)
 	}
 	return updated, nil
 }
@@ -893,7 +856,7 @@ func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) (
 func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 	var out0 maintenanceRule
 	var out1 maintenanceLogEntry
-	err := s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx("complete maintenance rule", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, out1, err = completeMaintenanceRuleTx(tx, now, ruleID, in, newFixedDueDate)
 		return err
@@ -989,46 +952,38 @@ var errMaintenanceLogPhotoNotFound = errors.New("photo not found on this log ent
 // AddMaintenanceLogPhoto links documentID to logEntryID, at the end of the
 // entry's current photo order.
 func (s *documentStore) AddMaintenanceLogPhoto(logEntryID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx("add log photo", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, logEntryID)
+		if err != nil {
+			return fmt.Errorf("add log photo: check log entry: %w", err)
+		}
+		if !ok {
+			return errMaintenanceLogEntryNotFound
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("add log photo: begin: %w", err)
-	}
-	defer tx.Rollback()
+		already, err := rowExists(tx, `SELECT 1 FROM maintenance_log_photos WHERE log_entry_id = ? AND document_id = ?`, logEntryID, documentID)
+		if err != nil {
+			return fmt.Errorf("add log photo: check existing: %w", err)
+		}
+		if already {
+			return nil
+		}
 
-	ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, logEntryID)
-	if err != nil {
-		return fmt.Errorf("add log photo: check log entry: %w", err)
-	}
-	if !ok {
-		return errMaintenanceLogEntryNotFound
-	}
+		var maxSort sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(sort_index) FROM maintenance_log_photos WHERE log_entry_id = ?`, logEntryID).Scan(&maxSort); err != nil {
+			return fmt.Errorf("add log photo: max sort: %w", err)
+		}
+		next := 0
+		if maxSort.Valid {
+			next = int(maxSort.Int64) + 1
+		}
 
-	already, err := rowExists(tx, `SELECT 1 FROM maintenance_log_photos WHERE log_entry_id = ? AND document_id = ?`, logEntryID, documentID)
-	if err != nil {
-		return fmt.Errorf("add log photo: check existing: %w", err)
-	}
-	if already {
-		return tx.Commit()
-	}
-
-	var maxSort sql.NullInt64
-	if err := tx.QueryRow(`SELECT MAX(sort_index) FROM maintenance_log_photos WHERE log_entry_id = ?`, logEntryID).Scan(&maxSort); err != nil {
-		return fmt.Errorf("add log photo: max sort: %w", err)
-	}
-	next := 0
-	if maxSort.Valid {
-		next = int(maxSort.Int64) + 1
-	}
-
-	now := s.now().Unix()
-	if _, err := tx.Exec(`INSERT INTO maintenance_log_photos (log_entry_id, document_id, sort_index, created_at) VALUES (?, ?, ?, ?)`,
-		logEntryID, documentID, next, now); err != nil {
-		return fmt.Errorf("add log photo: link: %w", err)
-	}
-	return tx.Commit()
+		if _, err := tx.Exec(`INSERT INTO maintenance_log_photos (log_entry_id, document_id, sort_index, created_at) VALUES (?, ?, ?, ?)`,
+			logEntryID, documentID, next, now.Unix()); err != nil {
+			return fmt.Errorf("add log photo: link: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveMaintenanceLogPhoto unlinks documentID from logEntryID - unlink
@@ -1070,33 +1025,28 @@ func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) 
 // live reading or an operator-typed gauge reading (gaugeToTrueHours) is
 // actually converted with.
 func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, newReading float64, changedAt string) (hourMeterReset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var reset hourMeterReset
+	err := s.RunTx("record meter reset", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+		if err != nil {
+			return fmt.Errorf("record meter reset: check equipment: %w", err)
+		}
+		if !ok {
+			return errEquipmentNotFound
+		}
 
-	tx, err := s.db.Begin()
+		id := uuid.NewString()
+		if _, err := tx.Exec(`INSERT INTO hour_meter_resets (id, equipment_id, old_reading, new_reading, changed_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			id, equipmentID, oldReading, newReading, changedAt, now.Unix()); err != nil {
+			return fmt.Errorf("record meter reset: %w", err)
+		}
+		reset = hourMeterReset{ID: id, OldReading: oldReading, NewReading: newReading, ChangedAt: changedAt, CreatedAt: now}
+		return nil
+	})
 	if err != nil {
-		return hourMeterReset{}, fmt.Errorf("record meter reset: begin: %w", err)
+		return hourMeterReset{}, err
 	}
-	defer tx.Rollback()
-
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
-	if err != nil {
-		return hourMeterReset{}, fmt.Errorf("record meter reset: check equipment: %w", err)
-	}
-	if !ok {
-		return hourMeterReset{}, errEquipmentNotFound
-	}
-
-	now := s.now()
-	id := uuid.NewString()
-	if _, err := tx.Exec(`INSERT INTO hour_meter_resets (id, equipment_id, old_reading, new_reading, changed_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, equipmentID, oldReading, newReading, changedAt, now.Unix()); err != nil {
-		return hourMeterReset{}, fmt.Errorf("record meter reset: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return hourMeterReset{}, fmt.Errorf("record meter reset: commit: %w", err)
-	}
-	return hourMeterReset{ID: id, OldReading: oldReading, NewReading: newReading, ChangedAt: changedAt, CreatedAt: now}, nil
+	return reset, nil
 }
 
 // ListHourMeterResets returns equipmentID's own meter-reset history,

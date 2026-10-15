@@ -77,6 +77,9 @@ starting the generator, switching a CZone circuit, raising the anchor watch.
    transaction, so only types stored in `helmcentral.sqlite` register. Types
    still kept in JSON files (alarm rules, dashboard pages, routes) register
    once their store moves into the database, in their own change.
+   Amended by [ADR 0181](0181-one-transaction-convention-for-the-record-store.md):
+   that transaction runs on the document store's connection and mutex, with
+   the proposal's applied mark written inside it.
 10. **Maintenance proposals become changesets.** Maintenance rules and log
     entries are registered types, and `propose_maintenance_changes` is
     replaced by `propose_changes`. Stored maintenance proposals are converted

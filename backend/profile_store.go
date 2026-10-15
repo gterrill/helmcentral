@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -26,14 +25,14 @@ var (
 // copied from. Writes are exposed as functions over a *sql.Tx so a caller
 // can run them in the same transaction as other writes.
 //
-// The store does not own a connection. It borrows the document store's, so a
+// The store does not own a connection. It holds the document store, so a
 // profile write and a maintenance_rules check run in ONE transaction (a
 // profile edit that would strand job state, a profile delete while an item
-// still points at it). mu is that document store's mutex: every use of the
-// shared single connection, from either side, goes through it.
+// still points at it). Writes go through ds.RunTx and reads through ds.Read,
+// so every use of the shared connection takes the document store's mutex
+// (ADR 0181).
 type profileStore struct {
-	db *sql.DB
-	mu *sync.Mutex
+	ds *documentStore
 }
 
 // profileBasedOn names the catalogue entry a profile was copied from. All
@@ -67,27 +66,14 @@ func newProfileStore(ds *documentStore) (*profileStore, error) {
 	if err := createProfileSchema(ds.db); err != nil {
 		return nil, err
 	}
-	return &profileStore{db: ds.db, mu: &ds.mu}, nil
+	return &profileStore{ds: ds}, nil
 }
 
-// inTx runs fn in one transaction, committing when it returns nil. The
-// transaction is the document store's own connection, so fn may read and
-// write maintenance_rules and equipment as well as equipment_profiles.
+// inTx runs fn in one document store transaction (RunTx), committing when it
+// returns nil, so fn may read and write maintenance_rules and equipment as
+// well as equipment_profiles.
 func (s *profileStore) inTx(fn func(tx *sql.Tx) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("profile store: begin: %w", err)
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("profile store: commit: %w", err)
-	}
-	return nil
+	return s.ds.RunTx("profile store", func(tx *sql.Tx, _ time.Time) error { return fn(tx) })
 }
 
 func profileExistsTx(tx *sql.Tx, id string) (bool, error) {
@@ -193,32 +179,37 @@ type profileRow struct {
 
 // allRows returns every stored row, oldest id first.
 func (s *profileStore) allRows() ([]profileRow, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, body FROM equipment_profiles ORDER BY id`)
-	if err != nil {
-		return nil, fmt.Errorf("profile store: list: %w", err)
-	}
-	defer rows.Close()
 	var out []profileRow
-	for rows.Next() {
-		var r profileRow
-		if err := rows.Scan(&r.ID, &r.Body); err != nil {
-			return nil, fmt.Errorf("profile store: list: %w", err)
+	err := s.ds.Read(func(q sqlQueryer) error {
+		rows, err := q.Query(`SELECT id, body FROM equipment_profiles ORDER BY id`)
+		if err != nil {
+			return fmt.Errorf("profile store: list: %w", err)
 		}
-		out = append(out, r)
+		defer rows.Close()
+		for rows.Next() {
+			var r profileRow
+			if err := rows.Scan(&r.ID, &r.Body); err != nil {
+				return fmt.Errorf("profile store: list: %w", err)
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *profileStore) count() (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM equipment_profiles`).Scan(&n); err != nil {
-		return 0, fmt.Errorf("profile store: count: %w", err)
-	}
-	return n, nil
+	err := s.ds.Read(func(q sqlQueryer) error {
+		if err := q.QueryRow(`SELECT COUNT(*) FROM equipment_profiles`).Scan(&n); err != nil {
+			return fmt.Errorf("profile store: count: %w", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 func (s *profileStore) ids() (map[string]bool, error) {

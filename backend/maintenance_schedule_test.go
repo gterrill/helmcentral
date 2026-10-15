@@ -45,7 +45,7 @@ func scheduleFixture(t *testing.T) (*documentStore, equipmentItem) {
 
 func runScheduleTx(t *testing.T, store *documentStore, fn func(tx *sql.Tx, now time.Time) error) error {
 	t.Helper()
-	return store.RunTx(fn)
+	return store.RunTx("test write", fn)
 }
 
 func mustScheduleTx(t *testing.T, store *documentStore, fn func(tx *sql.Tx, now time.Time) error) {

@@ -15,7 +15,7 @@ import (
 // back, writes one operator-words line per operation and returns the whole
 // thing as a proposal. It writes nothing: the runner saves the proposal with
 // the assistant message that carries it, and the operator's Apply tap runs it
-// (assistantStore.ApplyProposal, assistant_proposals.go).
+// (applyAssistantProposal, assistant_proposals.go).
 
 const assistantProposalToolTag = "propose_changes"
 

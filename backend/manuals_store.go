@@ -150,33 +150,30 @@ func (s *documentStore) CreateManual(name string) (manualSummary, error) {
 		return manualSummary{}, err
 	}
 
-	tx, err := s.db.Begin()
+	var summary manualSummary
+	err = s.runTxLocked("create manual", func(tx *sql.Tx, now time.Time) error {
+		taken, err := folderNameTaken(tx, nil, trimmed, "")
+		if err != nil {
+			return fmt.Errorf("create manual: check name: %w", err)
+		}
+		if taken {
+			return errFolderNameTaken
+		}
+
+		id := uuid.NewString()
+		if _, err := tx.Exec(
+			`INSERT INTO document_folders (id, parent_id, name, created_at, updated_at, role) VALUES (?, NULL, ?, ?, ?, 'manual')`,
+			id, trimmed, now.Unix(), now.Unix(),
+		); err != nil {
+			return fmt.Errorf("create manual: insert: %w", err)
+		}
+		summary = manualSummary{ID: id, Name: trimmed, DocumentCount: 0, UpdatedAt: now}
+		return nil
+	})
 	if err != nil {
-		return manualSummary{}, fmt.Errorf("create manual: begin: %w", err)
+		return manualSummary{}, err
 	}
-	defer tx.Rollback()
-
-	taken, err := folderNameTaken(tx, nil, trimmed, "")
-	if err != nil {
-		return manualSummary{}, fmt.Errorf("create manual: check name: %w", err)
-	}
-	if taken {
-		return manualSummary{}, errFolderNameTaken
-	}
-
-	now := s.now()
-	id := uuid.NewString()
-	if _, err := tx.Exec(
-		`INSERT INTO document_folders (id, parent_id, name, created_at, updated_at, role) VALUES (?, NULL, ?, ?, ?, 'manual')`,
-		id, trimmed, now.Unix(), now.Unix(),
-	); err != nil {
-		return manualSummary{}, fmt.Errorf("create manual: insert: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return manualSummary{}, fmt.Errorf("create manual: commit: %w", err)
-	}
-	return manualSummary{ID: id, Name: trimmed, DocumentCount: 0, UpdatedAt: now}, nil
+	return summary, nil
 }
 
 // FlagManual marks an EXISTING top-level folder role='manual' - the second
@@ -186,42 +183,36 @@ func (s *documentStore) CreateManual(name string) (manualSummary, error) {
 // idempotent, not an error - the operator clicking the same "make this a
 // manual" action twice is not a mistake worth surfacing.
 func (s *documentStore) FlagManual(folderID string) (manualSummary, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var summary manualSummary
+	err := s.RunTx("flag manual", func(tx *sql.Tx, now time.Time) error {
+		var name string
+		var parentID sql.NullString
+		err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, folderID).Scan(&name, &parentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errFolderNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("flag manual: read folder: %w", err)
+		}
+		if parentID.Valid {
+			return errManualNotTopLevel
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return manualSummary{}, fmt.Errorf("flag manual: begin: %w", err)
-	}
-	defer tx.Rollback()
+		if _, err := tx.Exec(`UPDATE document_folders SET role = 'manual', updated_at = ? WHERE id = ?`, now.Unix(), folderID); err != nil {
+			return fmt.Errorf("flag manual: update: %w", err)
+		}
 
-	var name string
-	var parentID sql.NullString
-	err = tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, folderID).Scan(&name, &parentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return manualSummary{}, errFolderNotFound
-	}
-	if err != nil {
-		return manualSummary{}, fmt.Errorf("flag manual: read folder: %w", err)
-	}
-	if parentID.Valid {
-		return manualSummary{}, errManualNotTopLevel
-	}
-
-	now := s.now()
-	if _, err := tx.Exec(`UPDATE document_folders SET role = 'manual', updated_at = ? WHERE id = ?`, now.Unix(), folderID); err != nil {
-		return manualSummary{}, fmt.Errorf("flag manual: update: %w", err)
-	}
-
-	count, err := manualSubtreeDocumentCount(tx, folderID)
+		count, err := manualSubtreeDocumentCount(tx, folderID)
+		if err != nil {
+			return err
+		}
+		summary = manualSummary{ID: folderID, Name: name, DocumentCount: count, UpdatedAt: now}
+		return nil
+	})
 	if err != nil {
 		return manualSummary{}, err
 	}
-
-	if err := tx.Commit(); err != nil {
-		return manualSummary{}, fmt.Errorf("flag manual: commit: %w", err)
-	}
-	return manualSummary{ID: folderID, Name: name, DocumentCount: count, UpdatedAt: now}, nil
+	return summary, nil
 }
 
 // ClearManual demotes id back to an ordinary collection: role resets to ”
@@ -482,76 +473,69 @@ func (s *documentStore) ManualSectionNames(manualID string) ([]string, error) {
 // collection just because the caller supplied the "wrong" parent_id
 // alongside a manual's own :id.
 func (s *documentStore) ReorderManualChildren(manualID, parentID string, items []manualReorderItem) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("reorder manual children: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	var role string
-	err = tx.QueryRow(`SELECT role FROM document_folders WHERE id = ?`, manualID).Scan(&role)
-	if errors.Is(err, sql.ErrNoRows) {
-		return errFolderNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("reorder manual children: read manual: %w", err)
-	}
-	if role != "manual" {
-		return errNotAManual
-	}
-
-	subtree, err := folderSubtreeIDs(tx, manualID)
-	if err != nil {
-		return fmt.Errorf("reorder manual children: subtree: %w", err)
-	}
-	inSubtree := false
-	for _, id := range subtree {
-		if id == parentID {
-			inSubtree = true
-			break
+	return s.RunTx("reorder manual children", func(tx *sql.Tx, now time.Time) error {
+		var role string
+		err := tx.QueryRow(`SELECT role FROM document_folders WHERE id = ?`, manualID).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errFolderNotFound
 		}
-	}
-	if !inSubtree {
-		return errFolderNotFound
-	}
-
-	now := s.now().Unix()
-	for _, item := range items {
-		switch item.Kind {
-		case "folder":
-			res, err := tx.Exec(
-				`UPDATE document_folders SET sort_index = ?, updated_at = ? WHERE id = ? AND parent_id = ?`,
-				item.SortIndex, now, item.ID, parentID,
-			)
-			if err != nil {
-				return fmt.Errorf("reorder manual children: update folder %s: %w", item.ID, err)
-			}
-			if err := checkRowsAffected(res, errFolderNotFound); err != nil {
-				return err
-			}
-		case "document":
-			res, err := tx.Exec(
-				`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ? AND folder_id = ?`,
-				item.SortIndex, now, item.ID, parentID,
-			)
-			if err != nil {
-				return fmt.Errorf("reorder manual children: update document %s: %w", item.ID, err)
-			}
-			if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
-				return err
-			}
-		default:
-			// The handler validates kind before ever calling this method
-			// (manuals_handlers.go) - reaching here means something upstream
-			// didn't, which is a real bug, not a request-shape problem this
-			// method should quietly paper over (AGENTS.md's fallback
-			// policy).
-			return fmt.Errorf("reorder manual children: unknown item kind %q for id %s", item.Kind, item.ID)
+		if err != nil {
+			return fmt.Errorf("reorder manual children: read manual: %w", err)
 		}
-	}
+		if role != "manual" {
+			return errNotAManual
+		}
 
-	return tx.Commit()
+		subtree, err := folderSubtreeIDs(tx, manualID)
+		if err != nil {
+			return fmt.Errorf("reorder manual children: subtree: %w", err)
+		}
+		inSubtree := false
+		for _, id := range subtree {
+			if id == parentID {
+				inSubtree = true
+				break
+			}
+		}
+		if !inSubtree {
+			return errFolderNotFound
+		}
+
+		stamp := now.Unix()
+		for _, item := range items {
+			switch item.Kind {
+			case "folder":
+				res, err := tx.Exec(
+					`UPDATE document_folders SET sort_index = ?, updated_at = ? WHERE id = ? AND parent_id = ?`,
+					item.SortIndex, stamp, item.ID, parentID,
+				)
+				if err != nil {
+					return fmt.Errorf("reorder manual children: update folder %s: %w", item.ID, err)
+				}
+				if err := checkRowsAffected(res, errFolderNotFound); err != nil {
+					return err
+				}
+			case "document":
+				res, err := tx.Exec(
+					`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ? AND folder_id = ?`,
+					item.SortIndex, stamp, item.ID, parentID,
+				)
+				if err != nil {
+					return fmt.Errorf("reorder manual children: update document %s: %w", item.ID, err)
+				}
+				if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
+					return err
+				}
+			default:
+				// The handler validates kind before ever calling this method
+				// (manuals_handlers.go) - reaching here means something upstream
+				// didn't, which is a real bug, not a request-shape problem this
+				// method should quietly paper over (AGENTS.md's fallback
+				// policy).
+				return fmt.Errorf("reorder manual children: unknown item kind %q for id %s", item.Kind, item.ID)
+			}
+		}
+
+		return nil
+	})
 }

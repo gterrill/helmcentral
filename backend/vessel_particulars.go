@@ -184,21 +184,20 @@ func (s *documentStore) SetVesselParticulars(v vesselParticulars) (vesselParticu
 		return vesselParticulars{}, verr
 	}
 
-	tx, err := s.db.Begin()
+	var saved vesselParticulars
+	err := s.runTxLocked("set vessel particulars", func(tx *sql.Tx, now time.Time) error {
+		if err := upsertVesselParticularsTx(tx, v, now); err != nil {
+			return err
+		}
+		var err error
+		saved, err = vesselParticularsFrom(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return vesselParticulars{}, fmt.Errorf("set vessel particulars: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := upsertVesselParticularsTx(tx, v, s.now()); err != nil {
 		return vesselParticulars{}, err
-	}
-	saved, err := vesselParticularsFrom(tx)
-	if err != nil {
-		return vesselParticulars{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return vesselParticulars{}, fmt.Errorf("set vessel particulars: commit: %w", err)
 	}
 	return saved, nil
 }

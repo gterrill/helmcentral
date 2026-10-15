@@ -13,7 +13,7 @@ import (
 // Mate's proposals (ADR 0146, generalised by ADR 0158). Mate never writes a
 // record: propose_changes validates a changeset and returns it as data, the
 // runner saves it with the assistant message that carries it, and the
-// operator's Apply tap runs it (ApplyProposal below) through the same
+// operator's Apply tap runs it (applyAssistantProposal below) through the same
 // commands the records' HTTP handlers use. This file is the persistence half;
 // changeset.go is the type-agnostic logic and record_type_*.go the types.
 
@@ -187,20 +187,51 @@ func (s *assistantStore) GetProposal(id string) (assistantProposal, error) {
 	return assistantProposalByID(s.db, id)
 }
 
-// DismissProposal marks a pending proposal dismissed. Dismissing a dismissed
-// one is a no-op; an applied one cannot be dismissed (its writes happened) and
-// neither can a stale one (there is nothing left to dismiss: it can no longer
-// be applied, and the card says why).
-func (s *assistantStore) DismissProposal(id string) (assistantProposal, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// Proposal status writes and the record store (ADR 0181).
+//
+// A proposal's status lives in assistant_message_proposals, the assistant
+// store's table, but every write that resolves one (apply, the stale mark
+// after a failed apply, dismiss) runs on the record store's connection under
+// the record store's mutex. That is what lets an apply's records and its
+// applied mark commit in one transaction, and what keeps a Dismiss from
+// landing between a failed apply and its stale mark. Only the assistant
+// store's mutex is never taken on this path, so there is no lock order
+// between the two to get wrong. The assistant store still creates the rows
+// (with their message) and reads them.
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return assistantProposal{}, fmt.Errorf("begin dismiss proposal: %w", err)
+// checkProposalStores fails fast unless the assistant store and the record
+// store were opened on the same database file: the proposal row is written
+// through the record store's handle, so a second file would put the applied
+// mark and the records in different transactions.
+func checkProposalStores(assistant *assistantStore, records *documentStore) error {
+	if assistant.path != records.path {
+		return fmt.Errorf("proposals: the assistant store (%s) and the record store (%s) are on different database files; a proposal must resolve in the same transaction as its records", assistant.path, records.path)
 	}
-	defer tx.Rollback()
+	return nil
+}
 
+// dismissAssistantProposal marks a pending proposal dismissed. Dismissing a
+// dismissed one is a no-op; an applied one cannot be dismissed (its writes
+// happened) and neither can a stale one (there is nothing left to dismiss: it
+// can no longer be applied, and the card says why). It runs in records.RunTx,
+// so it waits for any apply in progress and then sees its outcome.
+func dismissAssistantProposal(assistant *assistantStore, records *documentStore, id string) (assistantProposal, error) {
+	if err := checkProposalStores(assistant, records); err != nil {
+		return assistantProposal{}, err
+	}
+	var p assistantProposal
+	err := records.RunTx("dismiss proposal", func(tx *sql.Tx, now time.Time) error {
+		var err error
+		p, err = dismissProposalTx(tx, now, id)
+		return err
+	})
+	if err != nil {
+		return assistantProposal{}, err
+	}
+	return p, nil
+}
+
+func dismissProposalTx(tx *sql.Tx, now time.Time, id string) (assistantProposal, error) {
 	p, err := assistantProposalByID(tx, id)
 	if err != nil {
 		return assistantProposal{}, err
@@ -213,109 +244,181 @@ func (s *assistantStore) DismissProposal(id string) (assistantProposal, error) {
 	case assistantProposalStale:
 		return assistantProposal{}, &staleProposalError{reason: p.StaleReason}
 	}
-
-	now := s.now()
 	if _, err := tx.Exec(`UPDATE assistant_message_proposals SET status = 'dismissed', resolved_at = ? WHERE id = ?`, now.Unix(), id); err != nil {
 		return assistantProposal{}, fmt.Errorf("dismiss proposal: %w", err)
 	}
-	p, err = assistantProposalByID(tx, id)
-	if err != nil {
-		return assistantProposal{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return assistantProposal{}, fmt.Errorf("commit dismiss proposal: %w", err)
-	}
-	return p, nil
+	return assistantProposalByID(tx, id)
 }
 
-// ApplyProposal runs a pending proposal's operations, all in one transaction:
-// every operation succeeds and the proposal is marked applied, or nothing is
-// written at all. Before the first write it checks that every rule an
-// operation targets is exactly as it was when Mate proposed (updated_at
-// against the snapshot), so a proposal built on a stale picture of the
-// schedule can never overwrite a later edit.
+// applyAssistantProposal runs a pending proposal's operations, all in one
+// transaction: every operation succeeds and the proposal is marked applied,
+// or nothing is written at all. Before the first write it checks that every
+// rule an operation targets is exactly as it was when Mate proposed
+// (updated_at against the snapshot), so a proposal built on a stale picture
+// of the schedule can never overwrite a later edit.
 //
 // When the schedule no longer matches the proposal (that check, an operation
 // the commands now refuse, or a target that is gone), the transaction
 // rolls back and the proposal is then marked stale, with the reason, in a
-// separate transaction. The card and Mate's next turn both see that; Apply can
+// second transaction. The card and Mate's next turn both see that; Apply can
 // never be offered again for something that can only fail the same way.
 //
 // An already-applied proposal returns its stored result and writes nothing, so
 // a double tap or a retried request is safe; a dismissed one is refused, and a
 // stale one answers with its stored reason.
 //
-// The transaction is opened on this store's connection but writes the
-// maintenance tables, which live in the same database file (ADR 0141). That is
-// what makes "the operations and the applied mark commit together" true; the
-// commands read only through tx, never through globalDocumentStore, whose
-// separate connection would not see the transaction's own writes.
-func (s *assistantStore) ApplyProposal(id string, today time.Time) (assistantProposal, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p, err := s.applyProposalTx(id, today)
-	if err == nil || !proposalGoesStale(err) {
-		return p, err
+// Both transactions run on the record store's connection with records.mu held
+// once across the pair, so nothing else that resolves a proposal can land
+// between them. The commands read only through tx: calling any documentStore
+// method from inside would deadlock on records.mu. The post-commit hooks run
+// after the lock is released.
+func applyAssistantProposal(assistant *assistantStore, records *documentStore, id string, today time.Time) (assistantProposal, error) {
+	if err := checkProposalStores(assistant, records); err != nil {
+		return assistantProposal{}, err
 	}
-	stale := &staleProposalError{reason: err.Error()}
-	if _, uerr := s.db.Exec(
-		`UPDATE assistant_message_proposals SET status = 'stale', stale_reason = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`,
-		stale.reason, s.now().Unix(), id); uerr != nil {
-		return assistantProposal{}, fmt.Errorf("mark proposal stale: %w (after: %v)", uerr, err)
-	}
-	return assistantProposal{}, stale
-}
-
-// applyProposalTx is ApplyProposal's transaction; the caller holds s.mu.
-func (s *assistantStore) applyProposalTx(id string, today time.Time) (assistantProposal, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return assistantProposal{}, fmt.Errorf("begin apply proposal: %w", err)
-	}
-	defer tx.Rollback()
-
-	p, err := assistantProposalByID(tx, id)
+	records.lockForTx()
+	p, results, err := applyAssistantProposalLocked(records, id, today)
+	records.mu.Unlock()
 	if err != nil {
 		return assistantProposal{}, err
 	}
-	switch p.Status {
+	defaultRecordRegistry.afterCommit(results)
+	return p, nil
+}
+
+// applyAssistantProposalLocked is applyAssistantProposal's body; the caller
+// holds records.mu.
+func applyAssistantProposalLocked(records *documentStore, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
+	var (
+		p       assistantProposal
+		results []changeOpResult
+	)
+	err := records.runTxLocked("apply proposal", func(tx *sql.Tx, now time.Time) error {
+		var err error
+		p, results, err = applyProposalTx(tx, now, today, id)
+		return err
+	})
+	if err == nil {
+		return p, results, nil
+	}
+	if !proposalGoesStale(err) {
+		return assistantProposal{}, nil, err
+	}
+	settled, serr := recordProposalStaleLocked(records, id, err.Error())
+	if serr != nil {
+		if errors.Is(serr, errAssistantProposalStale) || errors.Is(serr, errAssistantProposalDismissed) {
+			return assistantProposal{}, nil, serr
+		}
+		return assistantProposal{}, nil, fmt.Errorf("mark proposal stale: %w (after: %v)", serr, err)
+	}
+	// Applied meanwhile: answer as a repeated Apply would.
+	return settled, nil, nil
+}
+
+// recordProposalStaleLocked marks a pending proposal stale with reason and
+// returns the stale refusal. If the proposal is no longer pending, nothing is
+// written and it answers with what the proposal actually is: the stored
+// proposal for an applied one, the dismissed or stored-stale refusal
+// otherwise. The caller holds records.mu.
+func recordProposalStaleLocked(records *documentStore, id, reason string) (assistantProposal, error) {
+	var (
+		marked  bool
+		current assistantProposal
+	)
+	if err := records.runTxLocked("mark proposal stale", func(tx *sql.Tx, now time.Time) error {
+		var err error
+		marked, current, err = markProposalStaleTx(tx, now, id, reason)
+		return err
+	}); err != nil {
+		return assistantProposal{}, err
+	}
+	if marked {
+		return assistantProposal{}, &staleProposalError{reason: reason}
+	}
+	switch current.Status {
 	case assistantProposalApplied:
-		return p, nil
+		return current, nil
 	case assistantProposalDismissed:
 		return assistantProposal{}, errAssistantProposalDismissed
 	case assistantProposalStale:
-		return assistantProposal{}, &staleProposalError{reason: p.StaleReason}
+		return assistantProposal{}, &staleProposalError{reason: current.StaleReason}
+	}
+	return assistantProposal{}, fmt.Errorf("proposal %s is still %q but the stale mark changed no row", id, current.Status)
+}
+
+// applyProposalTx is applyAssistantProposal's transaction body. It returns the
+// proposal as stored after the apply and the results for the post-commit
+// hooks; an already-applied proposal comes back as stored with no results.
+func applyProposalTx(tx *sql.Tx, now, today time.Time, id string) (assistantProposal, []changeOpResult, error) {
+	p, err := assistantProposalByID(tx, id)
+	if err != nil {
+		return assistantProposal{}, nil, err
+	}
+	switch p.Status {
+	case assistantProposalApplied:
+		return p, nil, nil
+	case assistantProposalDismissed:
+		return assistantProposal{}, nil, errAssistantProposalDismissed
+	case assistantProposalStale:
+		return assistantProposal{}, nil, &staleProposalError{reason: p.StaleReason}
 	}
 
-	now := s.now()
 	results, err := defaultRecordRegistry.apply(tx, now, today, p.Ops)
 	if err != nil {
 		var oerr *changeOpError
 		if errors.As(err, &oerr) {
 			// The operator reads which change failed and why; the original
 			// error stays in the chain for proposalGoesStale.
-			return assistantProposal{}, &appliedOpError{msg: oerr.applyMessage(len(p.Ops)), cause: err}
+			return assistantProposal{}, nil, &appliedOpError{msg: oerr.applyMessage(len(p.Ops)), cause: err}
 		}
-		return assistantProposal{}, err
+		return assistantProposal{}, nil, err
 	}
-	resultJSON, err := json.Marshal(changeResult{Ops: results})
-	if err != nil {
-		return assistantProposal{}, fmt.Errorf("encode proposal result: %w", err)
-	}
-	if _, err := tx.Exec(`UPDATE assistant_message_proposals SET status = 'applied', resolved_at = ?, result = ? WHERE id = ?`,
-		now.Unix(), string(resultJSON), id); err != nil {
-		return assistantProposal{}, fmt.Errorf("mark proposal applied: %w", err)
+	if err := markProposalAppliedTx(tx, now, id, results); err != nil {
+		return assistantProposal{}, nil, err
 	}
 	p, err = assistantProposalByID(tx, id)
 	if err != nil {
-		return assistantProposal{}, err
+		return assistantProposal{}, nil, err
 	}
-	if err := tx.Commit(); err != nil {
-		return assistantProposal{}, fmt.Errorf("commit apply proposal: %w", err)
+	return p, results, nil
+}
+
+// markProposalAppliedTx stores the apply's result on the proposal row and
+// marks it applied, inside the transaction that wrote the records.
+func markProposalAppliedTx(tx *sql.Tx, now time.Time, id string, results []changeOpResult) error {
+	resultJSON, err := json.Marshal(changeResult{Ops: results})
+	if err != nil {
+		return fmt.Errorf("encode proposal result: %w", err)
 	}
-	defaultRecordRegistry.afterCommit(results)
-	return p, nil
+	if _, err := tx.Exec(`UPDATE assistant_message_proposals SET status = 'applied', resolved_at = ?, result = ? WHERE id = ?`,
+		now.Unix(), string(resultJSON), id); err != nil {
+		return fmt.Errorf("mark proposal applied: %w", err)
+	}
+	return nil
+}
+
+// markProposalStaleTx records why a pending proposal can no longer be
+// applied. marked is false, and nothing written, when the proposal is no
+// longer pending; current is then the proposal as it now stands.
+func markProposalStaleTx(tx *sql.Tx, now time.Time, id, reason string) (marked bool, current assistantProposal, err error) {
+	res, err := tx.Exec(
+		`UPDATE assistant_message_proposals SET status = 'stale', stale_reason = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`,
+		reason, now.Unix(), id)
+	if err != nil {
+		return false, assistantProposal{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, assistantProposal{}, fmt.Errorf("mark proposal stale: rows affected: %w", err)
+	}
+	if n == 1 {
+		return true, assistantProposal{}, nil
+	}
+	current, err = assistantProposalByID(tx, id)
+	if err != nil {
+		return false, assistantProposal{}, err
+	}
+	return false, current, nil
 }
 
 // appliedOpError is a failed operation of an Apply, worded for the card and
