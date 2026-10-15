@@ -11,10 +11,9 @@ before:
     - sh -c "cd frontend && npm ci"
     # The page carries its own build stamp, the same values the binary reports
     # on /api/health (see ldflags below).
-    - cmd: sh -c "cd frontend && npm run build"
-      env:
-        - APP_VERSION={{ .Version }}
-        - APP_REVISION={{ .FullCommit }}
+    # Global hooks only take plain strings in GoReleaser OSS (the cmd/env map
+    # form is Pro-only), so the stamp is set inline.
+    - sh -c "cd frontend && APP_VERSION={{ .Version }} APP_REVISION={{ .FullCommit }} npm run build"
     # .gitkeep is restored because it is the tracked placeholder that keeps
     # `//go:embed all:dist` compiling for developers who have not built the
     # frontend; without it a release build leaves the repo unable to `go build`.
