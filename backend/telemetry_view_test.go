@@ -309,7 +309,7 @@ func TestRealNegativeOneAmpReachesTheElectricalPayload(t *testing.T) {
 	if v, ok := globalSignalKSnapshot.selfTelemetry().Number("electrical.batteries.0.current"); !ok || v.Value != -1 {
 		t.Fatalf("view: got %+v ok=%v, want -1 ok=true", v, ok)
 	}
-	state, err := fetchSignalKElectricalState()
+	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestFallbackChainStopsAtARealNegativeOne(t *testing.T) {
 	// The 12 V current is unsigned on the tile, so a -1 is not shown as a
 	// current; it is worked out from power and voltage instead, never taken
 	// from the next path in the chain.
-	state := electricalStateFromTelemetry(reader, electricalStateData{DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACOutputW: -1, ACLoadsW: -1, SolarOutputW: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, LastUpdateAge: -1})
+	state := electricalStateFromTelemetry(reader, electricalStateData{DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACOutputW: -1, ACLoadsW: -1, SolarOutputW: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, LastUpdateAge: -1}, vesselAlternatorSettings{})
 	if state.DC12VCurrentA != 2 {
 		t.Fatalf("DC12VCurrentA: got %v, want 2 (24 W / 12 V), not 5 from the next path", state.DC12VCurrentA)
 	}

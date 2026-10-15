@@ -27,13 +27,25 @@ export interface VesselBatterySetting {
   name: string
 }
 
+/** Which electrical.alternator.<id> instances are port and starboard. '' is not set. */
+export interface VesselAlternatorSettings {
+  port_instance: string
+  starboard_instance: string
+}
+
 export interface VesselSettings {
   engines: VesselEngineSetting[]
   house_bank: VesselHouseBankSetting | null
   batteries: VesselBatterySetting[]
+  alternators: VesselAlternatorSettings
 }
 
-export const emptyVesselSettings: VesselSettings = { engines: [], house_bank: null, batteries: [] }
+export const emptyVesselSettings: VesselSettings = {
+  engines: [],
+  house_bank: null,
+  batteries: [],
+  alternators: { port_instance: '', starboard_instance: '' },
+}
 
 export interface VesselEngineCandidate {
   instance: string
@@ -54,6 +66,13 @@ export interface VesselBatteryCandidate {
   soc: number | null
 }
 
+export interface VesselAlternatorCandidate {
+  /** The <id> in electrical.alternator.<id>. */
+  instance: string
+  /** Live output current in amps; null when the instance reports nothing. */
+  current: number | null
+}
+
 export interface VesselDetectorStatus {
   ready: boolean
   missing?: string
@@ -62,10 +81,11 @@ export interface VesselDetectorStatus {
 export interface VesselCandidatesResponse {
   engines: VesselEngineCandidate[]
   batteries: VesselBatteryCandidate[]
+  alternators: VesselAlternatorCandidate[]
   detectors: Record<string, VesselDetectorStatus>
 }
 
-export const emptyVesselCandidates: VesselCandidatesResponse = { engines: [], batteries: [], detectors: {} }
+export const emptyVesselCandidates: VesselCandidatesResponse = { engines: [], batteries: [], alternators: [], detectors: {} }
 
 /** "propulsion.port" style display, or a raw instance id if that's all there is: "port" -> "Port". */
 export function titleCaseInstance(instance: string): string {

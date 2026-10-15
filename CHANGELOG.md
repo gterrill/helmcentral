@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- Choose your port and starboard alternators in **Settings → Vessel →
+  Alternators** after upgrading. Until you do, the Alternators tile shows
+  nothing, because Helmcentral no longer assumes which of the boat's alternator
+  numbers is port and which is starboard. Each list shows the alternators the
+  boat reports, with their live current, so you can tell them apart with the
+  engines running. Leave a side as Not set if the boat has none there.
+
 ### Changed
 
 - A phone, tablet or laptop no longer reloads itself when a new version is

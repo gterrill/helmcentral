@@ -130,7 +130,7 @@ func TestOwnBoatReadersErrorWhenStreamHasNoData(t *testing.T) {
 	if _, err := fetchSignalKVesselState(); err == nil {
 		t.Fatalf("expected an error when the stream has no data, got nil")
 	}
-	if _, err := fetchSignalKElectricalState(); err == nil {
+	if _, err := fetchSignalKElectricalState(vesselAlternatorSettings{}); err == nil {
 		t.Fatalf("expected an error when the stream has no data, got nil")
 	}
 }

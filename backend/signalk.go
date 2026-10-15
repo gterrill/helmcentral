@@ -392,20 +392,20 @@ func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 	return drift, setDeg, driftImpactKts
 }
 
-func fetchSignalKElectricalState() (electricalStateData, error) {
+func fetchSignalKElectricalState(alternators vesselAlternatorSettings) (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	t := globalSignalKSnapshot.selfTelemetry()
 	if !t.HasSelf() {
 		return state, errSignalKNoSelf
 	}
-	return electricalStateFromTelemetry(t, state), nil
+	return electricalStateFromTelemetry(t, state, alternators), nil
 }
 
 // electricalStateFromTelemetry fills the Battery & Power tile's state. Its
 // unsigned fields keep -1 for unknown on the wire; the signed bank current
 // and power are nil (ADR 0178).
-func electricalStateFromTelemetry(t telemetryReader, state electricalStateData) electricalStateData {
+func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, alternators vesselAlternatorSettings) electricalStateData {
 	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
@@ -577,9 +577,10 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData) 
 		state.GeneratorRealPowerW = roundTo1(generatorPower)
 	}
 
-	// Alternators — read port (index 0) and starboard (index 1) separately.
-	state.Alternator0 = readAlternatorInstance(t, "0")
-	state.Alternator1 = readAlternatorInstance(t, "1")
+	// Alternators: port and starboard come from the operator's Vessel
+	// settings. A side that is not set reads as no data (-1).
+	state.Alternator0 = readAlternatorInstance(t, alternators.PortInstance)
+	state.Alternator1 = readAlternatorInstance(t, alternators.StarboardInstance)
 	state.Charger0 = readChargerInstance(t, "0")
 
 	return state
@@ -779,6 +780,9 @@ func roundTo3(value float64) float64 {
 
 func readAlternatorInstance(t telemetryReader, index string) alternatorInstanceData {
 	inst := alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1}
+	if index == "" {
+		return inst
+	}
 	prefix := "electrical.alternator." + index
 
 	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {

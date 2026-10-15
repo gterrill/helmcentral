@@ -7,7 +7,7 @@ func TestFetchSignalKElectricalState_BankCurrentUnknownIsNil(t *testing.T) {
 		"timestamp": "2026-09-02T00:00:00Z",
 		"electrical": {"batteries": {"house": {"capacity": {"stateOfCharge": {"value": 0.46}}}}}
 	}`)
-	state, err := fetchSignalKElectricalState()
+	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestFetchSignalKElectricalState_RealMinusOneDischargeIsKept(t *testing.T) {
 			"power": {"value": -1.0}
 		}}}
 	}`)
-	state, err := fetchSignalKElectricalState()
+	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}

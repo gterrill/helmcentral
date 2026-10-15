@@ -62,7 +62,28 @@ least two.
 Alarms and the Ignored sensors list use these names. An engine's name
 is the one you gave it under **Engines**.
 
-Engines, battery names and the house bank save together with the rest of Settings. The bar
+## Alternators
+
+The Alternators tile shows what each engine's alternator is putting out. The
+boat's instruments number the alternators in their own order, and that order can
+change when equipment is reinstalled, so Helmcentral does not assume which
+number is port and which is starboard.
+
+1. Under **Settings → Vessel**, find **Alternators**.
+2. Open **Port alternator**. Every alternator the boat reports is listed with
+   its live output current, for example "12 · 28.5 A". Pick the one on the port
+   engine. With the engines running, the one that is charging shows a current;
+   an alternator showing "--" is not reporting.
+3. Do the same for **Starboard alternator**. A number picked for one side cannot
+   be picked for the other.
+4. Leave a side as **Not set** if the boat has no alternator there. With only one
+   side set, the tile shows a single alternator.
+5. Choose **Save** in the bar across the top of the screen.
+
+A side that is not set shows no reading on the Alternators tile. Until you pick
+at least one side, the tile is empty.
+
+Engines, battery names, alternators and the house bank save together with the rest of Settings. The bar
 appears as soon as you change anything, **Discard** puts it all back, and if
 you try to leave Settings with changes unsaved you are asked first. **Apply
 gauge zones** is not part of that: it adds the gauge tile to your first

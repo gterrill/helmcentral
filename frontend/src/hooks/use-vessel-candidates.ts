@@ -21,6 +21,7 @@ export function useVesselCandidates(refreshKey?: unknown) {
     select: (body: VesselCandidatesResponse) => ({
       engines: Array.isArray(body.engines) ? body.engines : [],
       batteries: Array.isArray(body.batteries) ? body.batteries : [],
+      alternators: Array.isArray(body.alternators) ? body.alternators : [],
       detectors: body.detectors ?? {},
     }),
   })

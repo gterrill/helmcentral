@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -69,8 +70,15 @@ func buildElectricalStatePayload() map[string]any {
 
 	signalkURL := buildSignalKURL(address, port)
 
+	// A vessel block that cannot be read is logged, and both alternator
+	// sides then read as not set. Every other electrical figure is unaffected.
+	alternators, altErr := loadVesselAlternators()
+	if altErr != nil {
+		log.Printf("electrical state: alternator instances unreadable, alternators show no data: %v", altErr)
+	}
+
 	if signalkURL != "" {
-		electrical, fetchErr := fetchSignalKElectricalState()
+		electrical, fetchErr := fetchSignalKElectricalState(alternators)
 		if fetchErr == nil {
 			state = electrical
 			source = "signalk"
