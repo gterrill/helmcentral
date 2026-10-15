@@ -288,58 +288,54 @@ func (w *importWriter) record(kind, key, targetID, label, action string) error {
 
 // commitImportRunTx writes everything in one transaction.
 func (s *documentStore) commitImportRunTx(run importRun, noteDocs map[string]string) (importCommitResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return importCommitResult{}, fmt.Errorf("commit import: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Re-read inside the transaction: the decisions that were checked a
-	// moment ago are the ones that get written, and nothing else can change
-	// them now.
-	fresh, err := importRunByID(tx, run.ID)
-	if err != nil {
-		return importCommitResult{}, err
-	}
-	if fresh.Status != importStatusDraft {
-		return importCommitResult{}, errImportRunNotDraft
-	}
-	if err := checkImportReady(tx, fresh); err != nil {
-		return importCommitResult{}, err
-	}
-
-	w := &importWriter{
-		tx: tx, run: fresh, now: s.now(),
-		summary:      importSummary{Counts: map[string]importCount{}, Records: []importSummaryRecord{}},
-		zoneIDs:      map[string]string{},
-		equipmentIDs: map[string]string{},
-	}
-	for _, kind := range []string{"particulars", "zones", "bins", "equipment", "log_entries", "notes", "files"} {
-		w.summary.Counts[kind] = importCount{}
-	}
-
-	steps := []func() error{w.writeParticulars, w.writeZones, w.writeEquipment, w.writeSpares, w.writeLog, w.writeNotes(noteDocs), w.writeFiles}
-	for _, step := range steps {
-		if err := step(); err != nil {
-			return importCommitResult{}, err
+	var result importCommitResult
+	err := s.RunTx("commit import", func(tx *sql.Tx, now time.Time) error {
+		// Re-read inside the transaction: the decisions that were checked a
+		// moment ago are the ones that get written, and nothing else can change
+		// them now.
+		fresh, err := importRunByID(tx, run.ID)
+		if err != nil {
+			return err
 		}
-	}
+		if fresh.Status != importStatusDraft {
+			return errImportRunNotDraft
+		}
+		if err := checkImportReady(tx, fresh); err != nil {
+			return err
+		}
 
-	if _, err := tx.Exec(`UPDATE import_runs SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ?`,
-		w.now.Unix(), w.now.Unix(), fresh.ID); err != nil {
-		return importCommitResult{}, fmt.Errorf("commit import: mark committed: %w", err)
-	}
-	out, err := importRunByID(tx, fresh.ID)
+		w := &importWriter{
+			tx: tx, run: fresh, now: now,
+			summary:      importSummary{Counts: map[string]importCount{}, Records: []importSummaryRecord{}},
+			zoneIDs:      map[string]string{},
+			equipmentIDs: map[string]string{},
+		}
+		for _, kind := range []string{"particulars", "zones", "bins", "equipment", "log_entries", "notes", "files"} {
+			w.summary.Counts[kind] = importCount{}
+		}
+
+		steps := []func() error{w.writeParticulars, w.writeZones, w.writeEquipment, w.writeSpares, w.writeLog, w.writeNotes(noteDocs), w.writeFiles}
+		for _, step := range steps {
+			if err := step(); err != nil {
+				return err
+			}
+		}
+
+		if _, err := tx.Exec(`UPDATE import_runs SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ?`,
+			w.now.Unix(), w.now.Unix(), fresh.ID); err != nil {
+			return fmt.Errorf("commit import: mark committed: %w", err)
+		}
+		out, err := importRunByID(tx, fresh.ID)
+		if err != nil {
+			return err
+		}
+		result = importCommitResult{Run: out, Summary: w.summary}
+		return nil
+	})
 	if err != nil {
 		return importCommitResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return importCommitResult{}, fmt.Errorf("commit import: commit: %w", err)
-	}
-	return importCommitResult{Run: out, Summary: w.summary}, nil
+	return result, nil
 }
 
 // ── particulars ──────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import {
 } from '@/hooks/use-assistant-conversations'
 
 /**
- * One Mate surface's conversation (ADR 0179): which conversation is open,
+ * One Mate surface's conversation (ADR 0180): which conversation is open,
  * its messages, asking Mate a question and reading the answer back
  * (ADR 0093, streamed per ADR 0105), rejoining an answer still being
  * written, and stopping one.
@@ -100,7 +100,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
 
   const send = useCallback(async (text: string, sendOptions: MateSendOptions = {}): Promise<MateSendResult> => {
     const attachments = sendOptions.attachments ?? []
-    // One question at a time per session (ADR 0179). A question for a fresh
+    // One question at a time per session (ADR 0180). A question for a fresh
     // conversation is the exception: the answer still streaming carries on
     // server side and the "Mate answered" toast covers it.
     if (!sendOptions.newConversation && (inFlightRef.current > 0 || sendingRef.current)) {

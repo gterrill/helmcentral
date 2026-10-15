@@ -20,7 +20,7 @@ func applyAssistantProposalHandler(c echo.Context) error {
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
-	p, err := globalAssistantStore.ApplyProposal(c.Param("id"), today)
+	p, err := applyAssistantProposal(globalAssistantStore, globalDocumentStore, c.Param("id"), today)
 	if err != nil {
 		return writeAssistantProposalError(c, err)
 	}
@@ -29,7 +29,7 @@ func applyAssistantProposalHandler(c echo.Context) error {
 
 // POST /api/assistant/proposals/:id/dismiss
 func dismissAssistantProposalHandler(c echo.Context) error {
-	p, err := globalAssistantStore.DismissProposal(c.Param("id"))
+	p, err := dismissAssistantProposal(globalAssistantStore, globalDocumentStore, c.Param("id"))
 	if err != nil {
 		return writeAssistantProposalError(c, err)
 	}

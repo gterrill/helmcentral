@@ -74,6 +74,10 @@ shipped; making it a declared constraint is left for later, once the six
 stores have been sharing a file long enough to be confident about what
 enforcing it would actually catch.
 
+Amended by [ADR 0181](0181-one-transaction-convention-for-the-record-store.md):
+the record tables have one writer handle, the document store's, and a Mate
+changeset is now applied through it rather than the assistant store's.
+
 ### 2. Secrets, sessions and the tile cache stay exactly where they are
 
 Only these three now stay separate, for three different reasons:

@@ -258,11 +258,17 @@ func documentsDirPath() string {
 // sqlite surfaces concurrent writes as "database is locked" rather than
 // queueing them itself), a mutex serializing every method since the pool
 // is one connection wide, and an injectable now so tests can control
-// timestamps without a real sleep.
+// timestamps without a real sleep. Every transaction it opens goes through
+// RunTx (store_tx.go, ADR 0181).
 type documentStore struct {
 	mu  sync.Mutex
 	db  *sql.DB
 	now func() time.Time
+	// path is the database file this store was opened on, so a caller that
+	// needs two stores on one file (a changeset apply) can check they are.
+	path string
+	// lockWaitHook is a test seam: nil in production (store_tx.go).
+	lockWaitHook func()
 }
 
 // createDocumentsSchema creates every documents-store table, index and FTS5
@@ -343,8 +349,13 @@ func openDocumentStore(dbPath string) (*documentStore, error) {
 		db.Close()
 		return nil, err
 	}
+	resolved, err := resolvedDBPath(dbPath)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 
-	return &documentStore{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &documentStore{db: db, path: resolved, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 // documentStoreSchema is applied in order by newDocumentStore. Every
@@ -1310,7 +1321,6 @@ func (s *documentStore) Insert(doc document) (document, error) {
 		}
 	}
 
-	now := s.now()
 	if doc.ID == "" {
 		doc.ID = uuid.NewString()
 	}
@@ -1326,44 +1336,41 @@ func (s *documentStore) Insert(doc document) (document, error) {
 	doc.Stage = "extract"
 	doc.IndexedWith = ""
 	doc.Error = ""
-	if doc.CreatedAt.IsZero() {
-		doc.CreatedAt = now
-	}
-	doc.UpdatedAt = now
 	doc.IndexedAt = nil
 	initialTags := doc.OperatorTags
 
-	tx, err := s.db.Begin()
+	err = s.runTxLocked("insert document", func(tx *sql.Tx, now time.Time) error {
+		if doc.CreatedAt.IsZero() {
+			doc.CreatedAt = now
+		}
+		doc.UpdatedAt = now
+		if _, err := tx.Exec(
+			`INSERT INTO documents (id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count, summary, markdown, status, stage, enrich, force_ocr, indexed_with, error, index_model, index_cost_usd, created_at, updated_at, indexed_at, kind, note_type, note_type_source, pinned, sort_index)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			doc.ID, doc.SHA256, nullableString(doc.FolderID), doc.Filename, doc.Title, doc.Notes, doc.MIME, doc.SizeBytes, doc.PageCount,
+			doc.Summary, doc.Markdown, doc.Status, doc.Stage, boolToInt(doc.Enrich), boolToInt(doc.ForceOCR), doc.IndexedWith, doc.Error,
+			doc.IndexModel, doc.IndexCostUSD, doc.CreatedAt.Unix(), now.Unix(), nil,
+			doc.Kind, doc.NoteType, doc.NoteTypeSource, boolToInt(doc.Pinned), doc.SortIndex,
+		); err != nil {
+			return fmt.Errorf("insert document: %w", err)
+		}
+
+		if err := insertOperatorTagsTx(tx, doc.ID, initialTags); err != nil {
+			return fmt.Errorf("insert document: tags: %w", err)
+		}
+
+		if err := s.rebuildMetaChunkTx(tx, doc.ID); err != nil {
+			return err
+		}
+
+		if err := s.attachTags(tx, &doc); err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
-		return document{}, fmt.Errorf("insert document: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(
-		`INSERT INTO documents (id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count, summary, markdown, status, stage, enrich, force_ocr, indexed_with, error, index_model, index_cost_usd, created_at, updated_at, indexed_at, kind, note_type, note_type_source, pinned, sort_index)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		doc.ID, doc.SHA256, nullableString(doc.FolderID), doc.Filename, doc.Title, doc.Notes, doc.MIME, doc.SizeBytes, doc.PageCount,
-		doc.Summary, doc.Markdown, doc.Status, doc.Stage, boolToInt(doc.Enrich), boolToInt(doc.ForceOCR), doc.IndexedWith, doc.Error,
-		doc.IndexModel, doc.IndexCostUSD, doc.CreatedAt.Unix(), now.Unix(), nil,
-		doc.Kind, doc.NoteType, doc.NoteTypeSource, boolToInt(doc.Pinned), doc.SortIndex,
-	); err != nil {
-		return document{}, fmt.Errorf("insert document: %w", err)
-	}
-
-	if err := insertOperatorTagsTx(tx, doc.ID, initialTags); err != nil {
-		return document{}, fmt.Errorf("insert document: tags: %w", err)
-	}
-
-	if err := s.rebuildMetaChunkTx(tx, doc.ID); err != nil {
 		return document{}, err
-	}
-
-	if err := s.attachTags(tx, &doc); err != nil {
-		return document{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return document{}, fmt.Errorf("insert document: commit: %w", err)
 	}
 	return doc, nil
 }
@@ -1700,22 +1707,12 @@ func (s *documentStore) updateMetaTx(tx *sql.Tx, now time.Time, id string, title
 // operator source rather than duplicated. The meta chunk is rebuilt
 // afterward so search reflects the edit immediately.
 func (s *documentStore) UpdateMeta(id string, title, notes *string, tags []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("update meta: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := s.updateMetaTx(tx, s.now(), id, title, notes, tags); err != nil {
-		return err
-	}
-	if err := s.rebuildMetaChunkTx(tx, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.RunTx("update meta", func(tx *sql.Tx, now time.Time) error {
+		if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
+			return err
+		}
+		return s.rebuildMetaChunkTx(tx, id)
+	})
 }
 
 // SetSuggested records Mate's enrichment proposal (B4): summary is always
@@ -1725,49 +1722,38 @@ func (s *documentStore) UpdateMeta(id string, title, notes *string, tags []strin
 // source rather than being duplicated or downgraded. The meta chunk is
 // rebuilt afterward.
 func (s *documentStore) SetSuggested(id, title, summary string, tags []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("set suggested: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	var currentTitle string
-	if err := tx.QueryRow(`SELECT title FROM documents WHERE id = ?`, id).Scan(&currentTitle); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errDocumentNotFound
+	return s.RunTx("set suggested", func(tx *sql.Tx, now time.Time) error {
+		var currentTitle string
+		if err := tx.QueryRow(`SELECT title FROM documents WHERE id = ?`, id).Scan(&currentTitle); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errDocumentNotFound
+			}
+			return fmt.Errorf("set suggested: read document: %w", err)
 		}
-		return fmt.Errorf("set suggested: read document: %w", err)
-	}
 
-	now := s.now()
-	newTitle := currentTitle
-	if strings.TrimSpace(currentTitle) == "" {
-		newTitle = title
-	}
-	if _, err := tx.Exec(`UPDATE documents SET title = ?, summary = ?, updated_at = ? WHERE id = ?`, newTitle, summary, now.Unix(), id); err != nil {
-		return fmt.Errorf("set suggested: update: %w", err)
-	}
-
-	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
+		newTitle := currentTitle
+		if strings.TrimSpace(currentTitle) == "" {
+			newTitle = title
 		}
-		if _, err := tx.Exec(
-			`INSERT INTO document_tags (document_id, tag, source) VALUES (?, ?, 'suggested') ON CONFLICT(document_id, tag) DO NOTHING`,
-			id, tag,
-		); err != nil {
-			return fmt.Errorf("set suggested: insert tag %q: %w", tag, err)
+		if _, err := tx.Exec(`UPDATE documents SET title = ?, summary = ?, updated_at = ? WHERE id = ?`, newTitle, summary, now.Unix(), id); err != nil {
+			return fmt.Errorf("set suggested: update: %w", err)
 		}
-	}
 
-	if err := s.rebuildMetaChunkTx(tx, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+		for _, tag := range tags {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				continue
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO document_tags (document_id, tag, source) VALUES (?, ?, 'suggested') ON CONFLICT(document_id, tag) DO NOTHING`,
+				id, tag,
+			); err != nil {
+				return fmt.Errorf("set suggested: insert tag %q: %w", tag, err)
+			}
+		}
+
+		return s.rebuildMetaChunkTx(tx, id)
+	})
 }
 
 // ReplaceChunks atomically swaps every chunk whose source is in sources for
@@ -1777,39 +1763,31 @@ func (s *documentStore) SetSuggested(id, title, summary string, tags []string) e
 // sources - callers replacing extracted or OCR'd body text pass
 // []string{"local"} or []string{"local","ocr"}, never "meta".
 func (s *documentStore) ReplaceChunks(id string, sources []string, chunks []documentChunk) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("replace chunks: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("replace chunks: check document: %w", err)
-	}
-	if !ok {
-		return errDocumentNotFound
-	}
-
-	for _, source := range sources {
-		if _, err := tx.Exec(`DELETE FROM document_chunks WHERE document_id = ? AND source = ?`, id, source); err != nil {
-			return fmt.Errorf("replace chunks: delete %s: %w", source, err)
+	return s.RunTx("replace chunks", func(tx *sql.Tx, _ time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("replace chunks: check document: %w", err)
 		}
-	}
-
-	for _, chunk := range chunks {
-		if _, err := tx.Exec(
-			`INSERT INTO document_chunks (document_id, seq, source, page_start, page_end, heading, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			id, chunk.Seq, chunk.Source, chunk.PageStart, chunk.PageEnd, chunk.Heading, chunk.Text,
-		); err != nil {
-			return fmt.Errorf("replace chunks: insert: %w", err)
+		if !ok {
+			return errDocumentNotFound
 		}
-	}
 
-	return tx.Commit()
+		for _, source := range sources {
+			if _, err := tx.Exec(`DELETE FROM document_chunks WHERE document_id = ? AND source = ?`, id, source); err != nil {
+				return fmt.Errorf("replace chunks: delete %s: %w", source, err)
+			}
+		}
+
+		for _, chunk := range chunks {
+			if _, err := tx.Exec(
+				`INSERT INTO document_chunks (document_id, seq, source, page_start, page_end, heading, text) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				id, chunk.Seq, chunk.Source, chunk.PageStart, chunk.PageEnd, chunk.Heading, chunk.Text,
+			); err != nil {
+				return fmt.Errorf("replace chunks: insert: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // ChunksFrom returns id's chunks with seq >= fromSeq, ordered by seq - the
@@ -2078,29 +2056,21 @@ func (s *documentStore) NextPending() (document, bool, error) {
 // itself never touches the filesystem: a failed file removal must not be
 // able to leave a half-deleted database row behind.
 func (s *documentStore) Delete(id string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", fmt.Errorf("delete document: begin: %w", err)
-	}
-	defer tx.Rollback()
-
 	var sha string
-	if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, id).Scan(&sha); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", errDocumentNotFound
+	err := s.RunTx("delete document", func(tx *sql.Tx, _ time.Time) error {
+		if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, id).Scan(&sha); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errDocumentNotFound
+			}
+			return fmt.Errorf("delete document: lookup: %w", err)
 		}
-		return "", fmt.Errorf("delete document: lookup: %w", err)
-	}
-
-	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, id); err != nil {
-		return "", fmt.Errorf("delete document: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("delete document: commit: %w", err)
+		if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete document: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return sha, nil
 }
@@ -2141,19 +2111,9 @@ func (s *documentStore) moveDocumentsTx(tx *sql.Tx, now time.Time, ids []string,
 // the whole call with errDocumentNotFound - a partial bulk move that
 // silently skips ids it doesn't recognize would hide a caller's bug.
 func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("move documents: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := s.moveDocumentsTx(tx, s.now(), ids, folderID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.RunTx("move documents", func(tx *sql.Tx, now time.Time) error {
+		return s.moveDocumentsTx(tx, now, ids, folderID)
+	})
 }
 
 // PatchDocument applies patchDocumentHandler's whole PATCH body in ONE
@@ -2171,66 +2131,61 @@ func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
 // sort_index never feeds the meta chunk (it isn't searchable text), so a
 // sort_index-only patch needs no rebuild of its own.
 func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool, sortIndex *int) (document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var doc document
+	err := s.RunTx("patch document", func(tx *sql.Tx, now time.Time) error {
+		metaChanged := title != nil || notes != nil || tags != nil
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return document{}, fmt.Errorf("patch document: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	now := s.now()
-	metaChanged := title != nil || notes != nil || tags != nil
-
-	if metaChanged {
-		if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
-			return document{}, err
+		if metaChanged {
+			if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
+				return err
+			}
+		} else if !moveFolder && sortIndex == nil {
+			// Nothing else below performs its own existence check in this
+			// combination (no move, no sort_index) - this is the only place
+			// that would otherwise happen, e.g. a PATCH body that only carried
+			// fields this handler doesn't recognise.
+			ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
+			if err != nil {
+				return fmt.Errorf("patch document: check document: %w", err)
+			}
+			if !ok {
+				return errDocumentNotFound
+			}
 		}
-	} else if !moveFolder && sortIndex == nil {
-		// Nothing else below performs its own existence check in this
-		// combination (no move, no sort_index) - this is the only place
-		// that would otherwise happen, e.g. a PATCH body that only carried
-		// fields this handler doesn't recognise.
-		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
+
+		if moveFolder {
+			if err := s.moveDocumentsTx(tx, now, []string{id}, folderID); err != nil {
+				return err
+			}
+		} else if metaChanged {
+			if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+				return err
+			}
+		}
+
+		if sortIndex != nil {
+			res, err := tx.Exec(`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ?`, *sortIndex, now.Unix(), id)
+			if err != nil {
+				return fmt.Errorf("patch document: sort index: %w", err)
+			}
+			if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
+				return err
+			}
+		}
+
+		var err error
+		doc, err = scanDocument(tx.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE id = ?`, id))
 		if err != nil {
-			return document{}, fmt.Errorf("patch document: check document: %w", err)
+			return fmt.Errorf("patch document: read back: %w", err)
 		}
-		if !ok {
-			return document{}, errDocumentNotFound
+		if err := s.attachTags(tx, &doc); err != nil {
+			return err
 		}
-	}
 
-	if moveFolder {
-		if err := s.moveDocumentsTx(tx, now, []string{id}, folderID); err != nil {
-			return document{}, err
-		}
-	} else if metaChanged {
-		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
-			return document{}, err
-		}
-	}
-
-	if sortIndex != nil {
-		res, err := tx.Exec(`UPDATE documents SET sort_index = ?, updated_at = ? WHERE id = ?`, *sortIndex, now.Unix(), id)
-		if err != nil {
-			return document{}, fmt.Errorf("patch document: sort index: %w", err)
-		}
-		if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
-			return document{}, err
-		}
-	}
-
-	doc, err := scanDocument(tx.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE id = ?`, id))
+		return nil
+	})
 	if err != nil {
-		return document{}, fmt.Errorf("patch document: read back: %w", err)
-	}
-	if err := s.attachTags(tx, &doc); err != nil {
 		return document{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return document{}, fmt.Errorf("patch document: commit: %w", err)
 	}
 	return doc, nil
 }
@@ -2382,13 +2337,12 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 		units[chunkID] = unit
 	}
 
-	now := s.now().Unix()
 	for start := 0; start < len(ids); start += chunkEmbeddingsBatchSize {
 		end := start + chunkEmbeddingsBatchSize
 		if end > len(ids) {
 			end = len(ids)
 		}
-		if err := s.setChunkEmbeddingsBatchTx(model, dims, units, ids[start:end], now); err != nil {
+		if err := s.setChunkEmbeddingsBatchTx(model, dims, units, ids[start:end]); err != nil {
 			return err
 		}
 	}
@@ -2397,31 +2351,24 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 
 // setChunkEmbeddingsBatchTx commits one batch of SetChunkEmbeddings'
 // already-validated, normalised vectors in its own transaction. Callers
-// already hold s.mu.
-func (s *documentStore) setChunkEmbeddingsBatchTx(model string, dims int, units map[int64][]float32, ids []int64, now int64) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("set chunk embeddings: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, chunkID := range ids {
-		if _, err := tx.Exec(
-			`INSERT INTO document_chunk_embeddings (chunk_id, model, dims, vector, created_at) VALUES (?, ?, ?, ?, ?)
+// already hold s.mu, hence runTxLocked; each batch is stamped with its own
+// transaction's now.
+func (s *documentStore) setChunkEmbeddingsBatchTx(model string, dims int, units map[int64][]float32, ids []int64) error {
+	return s.runTxLocked("set chunk embeddings", func(tx *sql.Tx, now time.Time) error {
+		for _, chunkID := range ids {
+			if _, err := tx.Exec(
+				`INSERT INTO document_chunk_embeddings (chunk_id, model, dims, vector, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(chunk_id) DO UPDATE SET model = excluded.model, dims = excluded.dims, vector = excluded.vector, created_at = excluded.created_at`,
-			chunkID, model, dims, encodeEmbedding(units[chunkID]), now,
-		); err != nil {
-			if isForeignKeyConstraintErr(err) {
-				return fmt.Errorf("set chunk embeddings: chunk %d does not exist: %w", chunkID, err)
+				chunkID, model, dims, encodeEmbedding(units[chunkID]), now.Unix(),
+			); err != nil {
+				if isForeignKeyConstraintErr(err) {
+					return fmt.Errorf("set chunk embeddings: chunk %d does not exist: %w", chunkID, err)
+				}
+				return fmt.Errorf("set chunk embeddings: chunk %d: %w", chunkID, err)
 			}
-			return fmt.Errorf("set chunk embeddings: chunk %d: %w", chunkID, err)
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("set chunk embeddings: commit: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 // EmbeddingCounts reports how much of the chunk library is embedded under
@@ -2691,41 +2638,38 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 		return documentFolder{}, err
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return documentFolder{}, fmt.Errorf("create folder: begin: %w", err)
-	}
-	defer tx.Rollback()
+	var folder documentFolder
+	err = s.runTxLocked("create folder", func(tx *sql.Tx, now time.Time) error {
+		if parentID != nil {
+			ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *parentID)
+			if err != nil {
+				return fmt.Errorf("create folder: check parent: %w", err)
+			}
+			if !ok {
+				return errFolderNotFound
+			}
+		}
 
-	if parentID != nil {
-		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *parentID)
+		taken, err := folderNameTaken(tx, parentID, trimmed, "")
 		if err != nil {
-			return documentFolder{}, fmt.Errorf("create folder: check parent: %w", err)
+			return fmt.Errorf("create folder: check name: %w", err)
 		}
-		if !ok {
-			return documentFolder{}, errFolderNotFound
+		if taken {
+			return errFolderNameTaken
 		}
-	}
 
-	taken, err := folderNameTaken(tx, parentID, trimmed, "")
+		folder = documentFolder{ID: uuid.NewString(), ParentID: parentID, Name: trimmed, CreatedAt: now, UpdatedAt: now}
+		if _, err := tx.Exec(
+			`INSERT INTO document_folders (id, parent_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			folder.ID, nullableString(parentID), folder.Name, now.Unix(), now.Unix(),
+		); err != nil {
+			return fmt.Errorf("create folder: insert: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return documentFolder{}, fmt.Errorf("create folder: check name: %w", err)
-	}
-	if taken {
-		return documentFolder{}, errFolderNameTaken
-	}
-
-	now := s.now()
-	folder := documentFolder{ID: uuid.NewString(), ParentID: parentID, Name: trimmed, CreatedAt: now, UpdatedAt: now}
-	if _, err := tx.Exec(
-		`INSERT INTO document_folders (id, parent_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		folder.ID, nullableString(parentID), folder.Name, now.Unix(), now.Unix(),
-	); err != nil {
-		return documentFolder{}, fmt.Errorf("create folder: insert: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return documentFolder{}, fmt.Errorf("create folder: commit: %w", err)
+		return documentFolder{}, err
 	}
 	return folder, nil
 }
@@ -2761,82 +2705,77 @@ func (s *documentStore) PatchFolder(id string, name *string, parentID *string, m
 		return errFolderCycle
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("patch folder: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	var currentName string
-	var currentParent sql.NullString
-	if err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, id).Scan(&currentName, &currentParent); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errFolderNotFound
+	return s.runTxLocked("patch folder", func(tx *sql.Tx, now time.Time) error {
+		var currentName string
+		var currentParent sql.NullString
+		if err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, id).Scan(&currentName, &currentParent); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errFolderNotFound
+			}
+			return fmt.Errorf("patch folder: read: %w", err)
 		}
-		return fmt.Errorf("patch folder: read: %w", err)
-	}
 
-	if name == nil && !moveParent {
-		return tx.Commit()
-	}
-
-	newName := currentName
-	if name != nil {
-		newName = trimmedName
-	}
-
-	targetParent := parentID
-	if !moveParent {
-		targetParent = nil
-		if currentParent.Valid {
-			v := currentParent.String
-			targetParent = &v
+		if name == nil && !moveParent {
+			return nil
 		}
-	}
 
-	if moveParent && targetParent != nil {
-		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *targetParent)
+		newName := currentName
+		if name != nil {
+			newName = trimmedName
+		}
+
+		targetParent := parentID
+		if !moveParent {
+			targetParent = nil
+			if currentParent.Valid {
+				v := currentParent.String
+				targetParent = &v
+			}
+		}
+
+		if moveParent && targetParent != nil {
+			ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *targetParent)
+			if err != nil {
+				return fmt.Errorf("patch folder: check parent: %w", err)
+			}
+			if !ok {
+				return errFolderNotFound
+			}
+
+			cyclic, err := rowExists(tx, `
+				WITH RECURSIVE anc(fid) AS (
+					SELECT parent_id FROM document_folders WHERE id = ?
+					UNION ALL
+					SELECT f.parent_id FROM document_folders f JOIN anc ON f.id = anc.fid WHERE f.parent_id IS NOT NULL
+				)
+				SELECT 1 FROM anc WHERE fid = ? LIMIT 1`, *targetParent, id)
+			if err != nil {
+				return fmt.Errorf("patch folder: check cycle: %w", err)
+			}
+			if cyclic {
+				return errFolderCycle
+			}
+		}
+
+		taken, err := folderNameTaken(tx, targetParent, newName, id)
 		if err != nil {
-			return fmt.Errorf("patch folder: check parent: %w", err)
+			return fmt.Errorf("patch folder: check name: %w", err)
 		}
-		if !ok {
-			return errFolderNotFound
+		if taken {
+			return errFolderNameTaken
 		}
 
-		cyclic, err := rowExists(tx, `
-			WITH RECURSIVE anc(fid) AS (
-				SELECT parent_id FROM document_folders WHERE id = ?
-				UNION ALL
-				SELECT f.parent_id FROM document_folders f JOIN anc ON f.id = anc.fid WHERE f.parent_id IS NOT NULL
-			)
-			SELECT 1 FROM anc WHERE fid = ? LIMIT 1`, *targetParent, id)
-		if err != nil {
-			return fmt.Errorf("patch folder: check cycle: %w", err)
+		if _, err := tx.Exec(`UPDATE document_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?`,
+			newName, nullableString(targetParent), now.Unix(), id); err != nil {
+			return fmt.Errorf("patch folder: update: %w", err)
 		}
-		if cyclic {
-			return errFolderCycle
+
+		if err := s.rebuildMetaChunksUnderFolderTx(tx, id); err != nil {
+			return err
 		}
-	}
 
-	taken, err := folderNameTaken(tx, targetParent, newName, id)
-	if err != nil {
-		return fmt.Errorf("patch folder: check name: %w", err)
-	}
-	if taken {
-		return errFolderNameTaken
-	}
-
-	now := s.now()
-	if _, err := tx.Exec(`UPDATE document_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?`,
-		newName, nullableString(targetParent), now.Unix(), id); err != nil {
-		return fmt.Errorf("patch folder: update: %w", err)
-	}
-
-	if err := s.rebuildMetaChunksUnderFolderTx(tx, id); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 // RenameFolder is a thin wrapper over PatchFolder for callers that only
@@ -2856,39 +2795,32 @@ func (s *documentStore) MoveFolder(id string, parentID *string) error {
 // 0106): an operator emptying a folder is a deliberate, visible act, not a
 // side effect of deleting its parent.
 func (s *documentStore) DeleteFolder(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx("delete folder", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("delete folder: check exists: %w", err)
+		}
+		if !ok {
+			return errFolderNotFound
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("delete folder: begin: %w", err)
-	}
-	defer tx.Rollback()
+		hasSub, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE parent_id = ? LIMIT 1`, id)
+		if err != nil {
+			return fmt.Errorf("delete folder: check subfolders: %w", err)
+		}
+		hasDocs, err := rowExists(tx, `SELECT 1 FROM documents WHERE folder_id = ? LIMIT 1`, id)
+		if err != nil {
+			return fmt.Errorf("delete folder: check documents: %w", err)
+		}
+		if hasSub || hasDocs {
+			return errFolderNotEmpty
+		}
 
-	ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete folder: check exists: %w", err)
-	}
-	if !ok {
-		return errFolderNotFound
-	}
-
-	hasSub, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE parent_id = ? LIMIT 1`, id)
-	if err != nil {
-		return fmt.Errorf("delete folder: check subfolders: %w", err)
-	}
-	hasDocs, err := rowExists(tx, `SELECT 1 FROM documents WHERE folder_id = ? LIMIT 1`, id)
-	if err != nil {
-		return fmt.Errorf("delete folder: check documents: %w", err)
-	}
-	if hasSub || hasDocs {
-		return errFolderNotEmpty
-	}
-
-	if _, err := tx.Exec(`DELETE FROM document_folders WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("delete folder: %w", err)
-	}
-	return tx.Commit()
+		if _, err := tx.Exec(`DELETE FROM document_folders WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete folder: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListFolder returns parentID's immediate subfolders and the documents

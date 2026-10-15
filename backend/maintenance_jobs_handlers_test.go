@@ -540,8 +540,8 @@ func TestProfileGuardAndMaintenanceWriteShareOneTransaction(t *testing.T) {
 	store, item := scheduleFixture(t)
 	// The guard reads maintenance_rules and equipment inside the profile
 	// store's own transaction: it is the document store's connection.
-	if globalProfileStore.db != store.db {
-		t.Fatal("the profile store must run on the document store's connection")
+	if globalProfileStore.ds != store {
+		t.Fatal("the profile store must run on the document store")
 	}
 	id := maintenanceJobID(item.ID, "impeller")
 	err := globalProfileStore.inTx(func(tx *sql.Tx) error {

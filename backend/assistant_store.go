@@ -91,6 +91,9 @@ type assistantStore struct {
 	mu  sync.Mutex
 	db  *sql.DB
 	now func() time.Time
+	// path is the resolved database file, checked against the record store's
+	// before a proposal is applied or dismissed through that store.
+	path string
 }
 
 // globalAssistantStore is the process-wide assistant conversation store,
@@ -234,8 +237,13 @@ func newAssistantStore(dbPath string) (*assistantStore, error) {
 		db.Close()
 		return nil, err
 	}
+	resolved, err := resolvedDBPath(dbPath)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 
-	return &assistantStore{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &assistantStore{db: db, path: resolved, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 func (s *assistantStore) Close() error {

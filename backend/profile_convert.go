@@ -93,8 +93,15 @@ func convertProfileRulesSteps(dir string, opts conversionOptions) []conversionSt
 // runConversion runs every step in one transaction. Without apply the
 // transaction is rolled back at the end, so a dry run exercises exactly the
 // checks a real run does.
+//
+// It begins its own transaction on the document store's handle rather than
+// going through RunTx (ADR 0181) because it only ever runs in the
+// convert-profile-rules subcommand: a separate, operator-run process that
+// opened this store itself and serves nothing, so no other goroutine shares
+// the handle. A running server in another process is kept apart by SQLite's
+// file lock, as any second process is.
 func runConversion(store *profileStore, steps []conversionStep, out io.Writer, apply bool) error {
-	tx, err := store.db.Begin()
+	tx, err := store.ds.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}

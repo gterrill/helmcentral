@@ -152,7 +152,7 @@ func (e *changesetEnv) prepare(t *testing.T, ops []changeOp) ([]changeOp, error)
 func (e *changesetEnv) apply(t *testing.T, ops []changeOp) ([]changeOpResult, error) {
 	t.Helper()
 	var res []changeOpResult
-	err := e.store.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := e.store.RunTx("apply", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		res, err = e.reg.apply(tx, now, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), ops)
 		return err

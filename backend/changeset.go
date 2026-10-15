@@ -460,7 +460,7 @@ func (r *recordRegistry) prepare(store *documentStore, today time.Time, in []cha
 		}
 	}
 
-	err := store.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err := store.RunTx("dry run changeset", func(tx *sql.Tx, now time.Time) error {
 		env := changeEnv{tx: tx, now: now, today: today}
 		for i := range ops {
 			if err := r.attach(env, i, &ops[i]); err != nil {

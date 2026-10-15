@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // This file is the note-scoped half of documentStore (documents_store.go):
@@ -109,30 +110,26 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 		return "", fmt.Errorf("replace note body: check collision: %w", err)
 	}
 
-	tx, err := s.db.Begin()
+	err = s.runTxLocked("replace note body", func(tx *sql.Tx, now time.Time) error {
+		res, err := tx.Exec(
+			`UPDATE documents SET sha256 = ?, size_bytes = ?, updated_at = ?, status = 'pending', stage = 'extract', error = '', reindex_seq = reindex_seq + 1 WHERE id = ?`,
+			newSHA, size, now.Unix(), id,
+		)
+		if err != nil {
+			return fmt.Errorf("replace note body: %w", err)
+		}
+		if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
+			return err
+		}
+
+		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("replace note body: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	now := s.now()
-	res, err := tx.Exec(
-		`UPDATE documents SET sha256 = ?, size_bytes = ?, updated_at = ?, status = 'pending', stage = 'extract', error = '', reindex_seq = reindex_seq + 1 WHERE id = ?`,
-		newSHA, size, now.Unix(), id,
-	)
-	if err != nil {
-		return "", fmt.Errorf("replace note body: %w", err)
-	}
-	if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
 		return "", err
-	}
-
-	if err := s.rebuildMetaChunkTx(tx, id); err != nil {
-		return "", err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("replace note body: commit: %w", err)
 	}
 	return currentSHA, nil
 }

@@ -322,7 +322,7 @@ var (
 // the same sort_index and ListZones' own ORDER BY falls back to
 // lower(name).
 func (s *documentStore) CreateZone(name string) (zone inventoryZone, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("create zone", func(tx *sql.Tx, now time.Time) error {
 		zone, err = createZoneTx(tx, now, name)
 		return err
 	})
@@ -358,7 +358,7 @@ func createZoneTx(tx *sql.Tx, now time.Time, name string) (inventoryZone, error)
 // CRUD ever changes on a zone (sort_index has no editor this cycle; see
 // CreateZone's own comment).
 func (s *documentStore) UpdateZone(id, name string) (zone inventoryZone, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("update zone", func(tx *sql.Tx, now time.Time) error {
 		zone, err = updateZoneTx(tx, now, id, name)
 		return err
 	})
@@ -401,7 +401,7 @@ func updateZoneTx(tx *sql.Tx, now time.Time, id, name string) (inventoryZone, er
 // comment for why this pre-checks with COUNT(*) rather than attempting the
 // DELETE and inspecting what SQLite's RESTRICT violation says.
 func (s *documentStore) DeleteZone(id string) error {
-	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return deleteZoneTx(tx, id) })
+	return s.RunTx("delete zone", func(tx *sql.Tx, now time.Time) error { return deleteZoneTx(tx, id) })
 }
 
 func deleteZoneTx(tx *sql.Tx, id string) error {
@@ -565,7 +565,7 @@ func binsForZone(q sqlQueryer, zoneID string) ([]inventoryBin, error) {
 // (case-insensitively, boat-wide - inventory_bins_code's own schema
 // comment), then inserts.
 func (s *documentStore) CreateBin(zoneID, code, name string) (bin inventoryBin, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("create bin", func(tx *sql.Tx, now time.Time) error {
 		bin, err = createBinTx(tx, now, zoneID, code, name)
 		return err
 	})
@@ -610,7 +610,7 @@ func createBinTx(tx *sql.Tx, now time.Time, zoneID, code, name string) (inventor
 // cycle, so zone_id is fixed at creation and every equipment record already
 // pointing at this bin keeps a location that still makes sense.
 func (s *documentStore) UpdateBin(id, code, name string) (bin inventoryBin, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("update bin", func(tx *sql.Tx, now time.Time) error {
 		bin, err = updateBinTx(tx, now, id, code, name)
 		return err
 	})
@@ -650,7 +650,7 @@ func updateBinTx(tx *sql.Tx, now time.Time, id, code, name string) (inventoryBin
 // pointing at it - see inventoryInUseError's own doc comment for why this
 // pre-checks with COUNT(*) rather than attempting the DELETE.
 func (s *documentStore) DeleteBin(id string) error {
-	return s.RunTx(func(tx *sql.Tx, now time.Time) error { return deleteBinTx(tx, id) })
+	return s.RunTx("delete bin", func(tx *sql.Tx, now time.Time) error { return deleteBinTx(tx, id) })
 }
 
 func deleteBinTx(tx *sql.Tx, id string) error {
@@ -1045,7 +1045,7 @@ func validateEquipmentQuantities(item equipmentItem) (quantity int, required any
 // bin_id go through validateEquipmentLocation before anything is written,
 // so a bad or contradictory location never reaches the INSERT at all.
 func (s *documentStore) CreateEquipment(item equipmentItem) (created equipmentItem, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("create equipment", func(tx *sql.Tx, now time.Time) error {
 		created, err = createEquipmentTx(tx, now, item)
 		return err
 	})
@@ -1116,7 +1116,7 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 // identical to CreateEquipment's rather than a second, subtly different
 // copy of it.
 func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (updated equipmentItem, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("update equipment", func(tx *sql.Tx, now time.Time) error {
 		updated, err = updateEquipmentTx(tx, now, id, item)
 		return err
 	})
@@ -1213,7 +1213,7 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 // this item, then delete its now-orphaned photos" atomic is to run both
 // steps' SQL inside the one transaction this method already holds.
 func (s *documentStore) DeleteEquipment(id string, deletePhotos bool) (deletedPhotoSHAs []string, err error) {
-	err = s.RunTx(func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx("delete equipment", func(tx *sql.Tx, now time.Time) error {
 		deletedPhotoSHAs, err = deleteEquipmentTx(tx, id, deletePhotos)
 		return err
 	})
@@ -1454,6 +1454,27 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 	return out, nil
 }
 
+// EquipmentLinkedToDocument is the set of equipment ids a document is linked
+// to, so an update can show which suggested links already exist.
+func (s *documentStore) EquipmentLinkedToDocument(docID string) (map[string]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT equipment_id FROM equipment_documents WHERE document_id = ?`, docID)
+	if err != nil {
+		return nil, fmt.Errorf("list equipment links: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // PatchEquipmentDocuments applies a DIFF to id's linked-document set in one
 // transaction, PHOTOS INCLUDED (same "no tagged carve-out" rule
 // SetEquipmentDocuments used to state, now on this method instead - a photo
@@ -1507,106 +1528,98 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 // id in both lists; this is a documented tie-break for a case the spec
 // leaves open, not a behaviour anything currently exercises.
 func (s *documentStore) PatchEquipmentDocuments(id string, add, remove []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("patch equipment documents: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("patch equipment documents: check equipment: %w", err)
-	}
-	if !ok {
-		return errEquipmentNotFound
-	}
-
-	removeSet := map[string]bool{}
-	removeOrdered := make([]string, 0, len(remove))
-	for _, docID := range remove {
-		if removeSet[docID] {
-			continue
+	return s.RunTx("patch equipment documents", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("patch equipment documents: check equipment: %w", err)
 		}
-		removeSet[docID] = true
-		removeOrdered = append(removeOrdered, docID)
-	}
-
-	addSeen := map[string]bool{}
-	addOrdered := make([]string, 0, len(add))
-	for _, docID := range add {
-		if addSeen[docID] || removeSet[docID] {
-			// Deduped, and remove wins when an id names both - see this
-			// method's own doc comment for why.
-			continue
+		if !ok {
+			return errEquipmentNotFound
 		}
-		addSeen[docID] = true
-		addOrdered = append(addOrdered, docID)
-	}
 
-	for _, docID := range removeOrdered {
-		if _, err := tx.Exec(
-			`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
-			id, docID,
-		); err != nil {
-			return fmt.Errorf("patch equipment documents: unlink %s: %w", docID, err)
+		removeSet := map[string]bool{}
+		removeOrdered := make([]string, 0, len(remove))
+		for _, docID := range remove {
+			if removeSet[docID] {
+				continue
+			}
+			removeSet[docID] = true
+			removeOrdered = append(removeOrdered, docID)
 		}
-	}
 
-	if len(addOrdered) == 0 {
-		return tx.Commit()
-	}
+		addSeen := map[string]bool{}
+		addOrdered := make([]string, 0, len(add))
+		for _, docID := range add {
+			if addSeen[docID] || removeSet[docID] {
+				// Deduped, and remove wins when an id names both - see this
+				// method's own doc comment for why.
+				continue
+			}
+			addSeen[docID] = true
+			addOrdered = append(addOrdered, docID)
+		}
 
-	existing := map[string]bool{}
-	rows, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("patch equipment documents: read existing links: %w", err)
-	}
-	for rows.Next() {
-		var docID string
-		if err := rows.Scan(&docID); err != nil {
+		for _, docID := range removeOrdered {
+			if _, err := tx.Exec(
+				`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
+				id, docID,
+			); err != nil {
+				return fmt.Errorf("patch equipment documents: unlink %s: %w", docID, err)
+			}
+		}
+
+		if len(addOrdered) == 0 {
+			return nil
+		}
+
+		existing := map[string]bool{}
+		rows, err := tx.Query(`SELECT document_id FROM equipment_documents WHERE equipment_id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("patch equipment documents: read existing links: %w", err)
+		}
+		for rows.Next() {
+			var docID string
+			if err := rows.Scan(&docID); err != nil {
+				rows.Close()
+				return fmt.Errorf("patch equipment documents: scan existing link: %w", err)
+			}
+			existing[docID] = true
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			return fmt.Errorf("patch equipment documents: scan existing link: %w", err)
+			return fmt.Errorf("patch equipment documents: read existing links: %w", err)
 		}
-		existing[docID] = true
-	}
-	if err := rows.Err(); err != nil {
 		rows.Close()
-		return fmt.Errorf("patch equipment documents: read existing links: %w", err)
-	}
-	rows.Close()
 
-	// Same "never take the cover" rule SetEquipmentDocuments enforced: every
-	// id this call actually links gets max(sort_index)+1 among id's OWN
-	// existing links (computed AFTER remove above has already run, so a
-	// remove+add pair for the same slot lands after whatever remains), in
-	// add's own order.
-	var maxSort sql.NullInt64
-	if err := tx.QueryRow(`SELECT MAX(sort_index) FROM equipment_documents WHERE equipment_id = ?`, id).Scan(&maxSort); err != nil {
-		return fmt.Errorf("patch equipment documents: max sort: %w", err)
-	}
-	nextSort := 0
-	if maxSort.Valid {
-		nextSort = int(maxSort.Int64) + 1
-	}
-
-	now := s.now().Unix()
-	for _, docID := range addOrdered {
-		if existing[docID] {
-			continue
+		// Same "never take the cover" rule SetEquipmentDocuments enforced: every
+		// id this call actually links gets max(sort_index)+1 among id's OWN
+		// existing links (computed AFTER remove above has already run, so a
+		// remove+add pair for the same slot lands after whatever remains), in
+		// add's own order.
+		var maxSort sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(sort_index) FROM equipment_documents WHERE equipment_id = ?`, id).Scan(&maxSort); err != nil {
+			return fmt.Errorf("patch equipment documents: max sort: %w", err)
 		}
-		if _, err := tx.Exec(
-			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
-			id, docID, nextSort, now,
-		); err != nil {
-			return fmt.Errorf("patch equipment documents: link %s: %w", docID, err)
+		nextSort := 0
+		if maxSort.Valid {
+			nextSort = int(maxSort.Int64) + 1
 		}
-		nextSort++
-	}
 
-	return tx.Commit()
+		for _, docID := range addOrdered {
+			if existing[docID] {
+				continue
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
+				id, docID, nextSort, now.Unix(),
+			); err != nil {
+				return fmt.Errorf("patch equipment documents: link %s: %w", docID, err)
+			}
+			nextSort++
+		}
+
+		return nil
+	})
 }
 
 // ── equipment photos ─────────────────────────────────────────────────────
@@ -1672,52 +1685,44 @@ func sameIDSet(a, b []string) bool {
 // document the operator filed for some other reason; it is simply linked,
 // the same as any other existing document would be.
 func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx("add equipment photo", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+		if err != nil {
+			return fmt.Errorf("add equipment photo: check equipment: %w", err)
+		}
+		if !ok {
+			return errEquipmentNotFound
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("add equipment photo: begin: %w", err)
-	}
-	defer tx.Rollback()
+		already, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`, equipmentID, documentID)
+		if err != nil {
+			return fmt.Errorf("add equipment photo: check existing link: %w", err)
+		}
+		if already {
+			return nil
+		}
 
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
-	if err != nil {
-		return fmt.Errorf("add equipment photo: check equipment: %w", err)
-	}
-	if !ok {
-		return errEquipmentNotFound
-	}
+		var maxSort sql.NullInt64
+		if err := tx.QueryRow(`
+			SELECT MAX(ed.sort_index) FROM equipment_documents ed
+			JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
+			WHERE ed.equipment_id = ?`, equipmentID).Scan(&maxSort); err != nil {
+			return fmt.Errorf("add equipment photo: max sort: %w", err)
+		}
+		next := 0
+		if maxSort.Valid {
+			next = int(maxSort.Int64) + 1
+		}
 
-	already, err := rowExists(tx, `SELECT 1 FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`, equipmentID, documentID)
-	if err != nil {
-		return fmt.Errorf("add equipment photo: check existing link: %w", err)
-	}
-	if already {
-		return tx.Commit()
-	}
+		if _, err := tx.Exec(
+			`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
+			equipmentID, documentID, next, now.Unix(),
+		); err != nil {
+			return fmt.Errorf("add equipment photo: link: %w", err)
+		}
 
-	var maxSort sql.NullInt64
-	if err := tx.QueryRow(`
-		SELECT MAX(ed.sort_index) FROM equipment_documents ed
-		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
-		WHERE ed.equipment_id = ?`, equipmentID).Scan(&maxSort); err != nil {
-		return fmt.Errorf("add equipment photo: max sort: %w", err)
-	}
-	next := 0
-	if maxSort.Valid {
-		next = int(maxSort.Int64) + 1
-	}
-
-	now := s.now().Unix()
-	if _, err := tx.Exec(
-		`INSERT INTO equipment_documents (equipment_id, document_id, source, sort_index, created_at) VALUES (?, ?, 'operator', ?, ?)`,
-		equipmentID, documentID, next, now,
-	); err != nil {
-		return fmt.Errorf("add equipment photo: link: %w", err)
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 // SetEquipmentPhotoOrder rewrites sort_index on equipmentID's existing
@@ -1727,41 +1732,34 @@ func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error 
 // its own doc comment for why a partial reorder isn't accepted the way
 // PatchEquipmentDocuments' add/remove diff is for ordinary links).
 func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("set equipment photo order: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
-	if err != nil {
-		return fmt.Errorf("set equipment photo order: check equipment: %w", err)
-	}
-	if !ok {
-		return errEquipmentNotFound
-	}
-
-	photoMap, err := photoIDsForEquipmentIDs(tx, []string{equipmentID})
-	if err != nil {
-		return err
-	}
-	if !sameIDSet(photoMap[equipmentID], order) {
-		return errEquipmentPhotoSetMismatch
-	}
-
-	for i, docID := range order {
-		if _, err := tx.Exec(
-			`UPDATE equipment_documents SET sort_index = ? WHERE equipment_id = ? AND document_id = ?`,
-			i, equipmentID, docID,
-		); err != nil {
-			return fmt.Errorf("set equipment photo order: %w", err)
+	return s.RunTx("set equipment photo order", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+		if err != nil {
+			return fmt.Errorf("set equipment photo order: check equipment: %w", err)
 		}
-	}
+		if !ok {
+			return errEquipmentNotFound
+		}
 
-	return tx.Commit()
+		photoMap, err := photoIDsForEquipmentIDs(tx, []string{equipmentID})
+		if err != nil {
+			return err
+		}
+		if !sameIDSet(photoMap[equipmentID], order) {
+			return errEquipmentPhotoSetMismatch
+		}
+
+		for i, docID := range order {
+			if _, err := tx.Exec(
+				`UPDATE equipment_documents SET sort_index = ? WHERE equipment_id = ? AND document_id = ?`,
+				i, equipmentID, docID,
+			); err != nil {
+				return fmt.Errorf("set equipment photo order: %w", err)
+			}
+		}
+
+		return nil
+	})
 }
 
 // RemoveEquipmentPhoto detaches documentID from equipmentID's photo strip -
@@ -1775,42 +1773,35 @@ func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []strin
 // more). errEquipmentPhotoNotFound if documentID isn't currently one of
 // equipmentID's own photos (linked AND image/jpeg or image/png).
 func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.RunTx("remove equipment photo", func(tx *sql.Tx, now time.Time) error {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
+		if err != nil {
+			return fmt.Errorf("remove equipment photo: check equipment: %w", err)
+		}
+		if !ok {
+			return errEquipmentNotFound
+		}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("remove equipment photo: begin: %w", err)
-	}
-	defer tx.Rollback()
+		isPhoto, err := rowExists(tx, `
+			SELECT 1 FROM equipment_documents ed
+			JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
+			WHERE ed.equipment_id = ? AND ed.document_id = ?`, equipmentID, documentID)
+		if err != nil {
+			return fmt.Errorf("remove equipment photo: check link: %w", err)
+		}
+		if !isPhoto {
+			return errEquipmentPhotoNotFound
+		}
 
-	ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
-	if err != nil {
-		return fmt.Errorf("remove equipment photo: check equipment: %w", err)
-	}
-	if !ok {
-		return errEquipmentNotFound
-	}
+		if _, err := tx.Exec(
+			`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
+			equipmentID, documentID,
+		); err != nil {
+			return fmt.Errorf("remove equipment photo: unlink: %w", err)
+		}
 
-	isPhoto, err := rowExists(tx, `
-		SELECT 1 FROM equipment_documents ed
-		JOIN documents d ON d.id = ed.document_id AND `+photoMIMEsClause+`
-		WHERE ed.equipment_id = ? AND ed.document_id = ?`, equipmentID, documentID)
-	if err != nil {
-		return fmt.Errorf("remove equipment photo: check link: %w", err)
-	}
-	if !isPhoto {
-		return errEquipmentPhotoNotFound
-	}
-
-	if _, err := tx.Exec(
-		`DELETE FROM equipment_documents WHERE equipment_id = ? AND document_id = ?`,
-		equipmentID, documentID,
-	); err != nil {
-		return fmt.Errorf("remove equipment photo: unlink: %w", err)
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 // DocumentDeletableAsOrphanPhoto reports whether documentID may be deleted

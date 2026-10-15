@@ -82,7 +82,20 @@ func (e *proposalEnv) saveOnMessage(t *testing.T, content string, proposals ...a
 }
 
 func (e *proposalEnv) apply(id string) (assistantProposal, error) {
-	return e.asst.ApplyProposal(id, e.deps.today)
+	return applyAssistantProposal(e.asst, e.docs, id, e.deps.today)
+}
+
+func (e *proposalEnv) dismiss(id string) (assistantProposal, error) {
+	return dismissAssistantProposal(e.asst, e.docs, id)
+}
+
+// watchLockWaits returns a channel that receives each time a writer reaches
+// the record store's lock (documentStore.lockWaitHook). Set it before
+// starting the goroutine it watches.
+func (e *proposalEnv) watchLockWaits() <-chan struct{} {
+	ch := make(chan struct{}, 8)
+	e.docs.lockWaitHook = func() { ch <- struct{}{} }
+	return ch
 }
 
 func (e *proposalEnv) equipment(t *testing.T, item equipmentItem) equipmentItem {
@@ -212,6 +225,162 @@ func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 	}
 }
 
+// An apply is a write to the record tables, so it takes the record store's
+// lock like every REST command does (ADR 0181). While anything else holds
+// that lock (a REST command mid-transaction, here the test itself), the
+// apply waits on the Go mutex rather than racing the other writer at the
+// SQLite file lock on a second connection.
+func TestApplyProposal_WaitsForTheRecordStoreLockLikeARESTCommand(t *testing.T) {
+	env := newProposalEnv(t)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
+	before := env.counts(t)
+
+	waiting := env.watchLockWaits()
+	env.docs.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			env.docs.mu.Unlock()
+		}
+	}()
+	done := make(chan proposalOutcome, 1)
+	go func() {
+		got, err := env.apply(p.ID)
+		done <- proposalOutcome{got, err}
+	}()
+
+	waitForLockWait(t, waiting) // the apply has reached the record store's lock
+	select {
+	case o := <-done:
+		t.Fatalf("apply finished (%q, err %v) while the record store's lock was held", o.p.Status, o.err)
+	default:
+	}
+
+	env.docs.mu.Unlock()
+	locked = false
+	o := <-done
+	if o.err != nil {
+		t.Fatalf("apply after the lock was released: %v", o.err)
+	}
+	if o.p.Status != assistantProposalApplied {
+		t.Fatalf("expected applied, got %q", o.p.Status)
+	}
+	if after := env.counts(t); after.rules != before.rules+1 {
+		t.Fatalf("expected the rule written once the lock was free, rows %+v -> %+v", before, after)
+	}
+}
+
+// A Dismiss tapped while an apply holds the record store's lock waits for
+// it, then finds the proposal applied: it can never land between an apply's
+// transaction and the stale mark that follows a failed one.
+func TestDismissProposal_WaitsForAnApplyHoldingTheRecordStoreLock(t *testing.T) {
+	env := newProposalEnv(t)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
+
+	waiting := env.watchLockWaits()
+	env.docs.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			env.docs.mu.Unlock()
+		}
+	}()
+	done := make(chan proposalOutcome, 1)
+	go func() {
+		got, err := env.dismiss(p.ID)
+		done <- proposalOutcome{got, err}
+	}()
+	waitForLockWait(t, waiting) // the dismiss has reached the record store's lock
+	select {
+	case o := <-done:
+		t.Fatalf("dismiss finished (%q, err %v) while an apply held the record store's lock", o.p.Status, o.err)
+	default:
+	}
+
+	// The apply, run under the lock the test holds, as applyAssistantProposal
+	// runs it under the lock it takes.
+	applied, _, err := applyAssistantProposalLocked(env.docs, p.ID, env.deps.today)
+	if err != nil || applied.Status != assistantProposalApplied {
+		t.Fatalf("apply under the lock: %q, %v", applied.Status, err)
+	}
+	env.docs.mu.Unlock()
+	locked = false
+
+	if o := <-done; !errors.Is(o.err, errAssistantProposalApplied) {
+		t.Fatalf("expected the dismiss to land after the apply and be refused as applied, got %q, %v", o.p.Status, o.err)
+	}
+	if got, _ := env.asst.GetProposal(p.ID); got.Status != assistantProposalApplied {
+		t.Fatalf("expected the proposal to stay applied, got %q", got.Status)
+	}
+}
+
+// When a failed apply comes to mark its proposal stale and finds it already
+// resolved, it answers with what the proposal actually is, not a stale it
+// never stored.
+func TestRecordProposalStale_StatusChangedMeanwhileReturnsTheRealStatus(t *testing.T) {
+	env := newProposalEnv(t)
+	dismissed := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"A","interval_months":12}}]}`)
+	if _, err := env.dismiss(dismissed.ID); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	applied := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"B","interval_months":12}}]}`)
+	if _, err := env.apply(applied.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	env.docs.mu.Lock()
+	_, dErr := recordProposalStaleLocked(env.docs, dismissed.ID, "a record changed")
+	got, aErr := recordProposalStaleLocked(env.docs, applied.ID, "a record changed")
+	env.docs.mu.Unlock()
+
+	if !errors.Is(dErr, errAssistantProposalDismissed) {
+		t.Fatalf("a dismissed proposal must answer dismissed, got %v", dErr)
+	}
+	if aErr != nil || got.Status != assistantProposalApplied {
+		t.Fatalf("an applied proposal must answer with itself, applied, got %q, %v", got.Status, aErr)
+	}
+	for _, id := range []string{dismissed.ID, applied.ID} {
+		if p, _ := env.asst.GetProposal(id); p.Status == assistantProposalStale {
+			t.Fatalf("proposal %s was overwritten to stale", id)
+		}
+	}
+}
+
+// The applied mark lives in the assistant's table and is written in the
+// record store's transaction, so the two stores must be one file.
+func TestApplyProposal_RefusesStoresOnDifferentFiles(t *testing.T) {
+	env := newProposalEnv(t)
+	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"A","interval_months":12}}]}`)
+	other, err := newDocumentStore(filepath.Join(t.TempDir(), "other.sqlite"))
+	if err != nil {
+		t.Fatalf("newDocumentStore: %v", err)
+	}
+	t.Cleanup(func() { other.Close() })
+
+	if _, err := applyAssistantProposal(env.asst, other, p.ID, env.deps.today); err == nil || !strings.Contains(err.Error(), "different database files") {
+		t.Fatalf("expected apply to refuse stores on different files, got %v", err)
+	}
+	if _, err := dismissAssistantProposal(env.asst, other, p.ID); err == nil || !strings.Contains(err.Error(), "different database files") {
+		t.Fatalf("expected dismiss to refuse stores on different files, got %v", err)
+	}
+}
+
+// waitForLockWait waits for a writer to reach the record store's lock. The
+// deadline only stops a regression hanging the suite; it proves nothing.
+func waitForLockWait(t *testing.T, waiting <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the writer never reached the record store's lock: it does not write through the record store")
+	}
+}
+
+type proposalOutcome struct {
+	p   assistantProposal
+	err error
+}
+
 func TestApplyProposal_StaleRuleIs409AndNothingIsWritten(t *testing.T) {
 	env := newProposalEnv(t)
 	gen := env.equipment(t, equipmentItem{Name: "Generator", System: "electrical"})
@@ -315,10 +484,10 @@ func TestApplyProposal_DismissedCannotBeAppliedAndAppliedCannotBeDismissed(t *te
 	dismissed := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"A","interval_months":12}}]}`)
 	applied := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"B","interval_months":12}}]}`)
 
-	if _, err := env.asst.DismissProposal(dismissed.ID); err != nil {
+	if _, err := env.dismiss(dismissed.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
-	if again, err := env.asst.DismissProposal(dismissed.ID); err != nil || again.Status != assistantProposalDismissed {
+	if again, err := env.dismiss(dismissed.ID); err != nil || again.Status != assistantProposalDismissed {
 		t.Fatalf("dismissing twice is a no-op, got %+v %v", again, err)
 	}
 	before := env.counts(t)
@@ -332,7 +501,7 @@ func TestApplyProposal_DismissedCannotBeAppliedAndAppliedCannotBeDismissed(t *te
 	if _, err := env.apply(applied.ID); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if _, err := env.asst.DismissProposal(applied.ID); !errors.Is(err, errAssistantProposalApplied) {
+	if _, err := env.dismiss(applied.ID); !errors.Is(err, errAssistantProposalApplied) {
 		t.Fatalf("expected an applied proposal to refuse dismissal, got %v", err)
 	}
 	if _, err := env.asst.GetProposal("nope"); !errors.Is(err, errAssistantProposalNotFound) {
@@ -415,7 +584,7 @@ func TestApplyAssistantProposalHandler_StaleIs409WithTheReason(t *testing.T) {
 func TestApplyAssistantProposalHandler_ConflictNamesTheProposalStatus(t *testing.T) {
 	env := newProposalEnv(t)
 	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Dismissed one","interval_months":12}}]}`)
-	if _, err := env.asst.DismissProposal(p.ID); err != nil {
+	if _, err := env.dismiss(p.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
 
@@ -464,7 +633,7 @@ func TestAssistantHistoryMessages_CarriesEachProposalsSummaryAndStatus(t *testin
 	if _, err := env.apply(applied.ID); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if _, err := env.asst.DismissProposal(dismissed.ID); err != nil {
+	if _, err := env.dismiss(dismissed.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
 
@@ -665,7 +834,7 @@ func TestApplyProposal_AStaleProposalCanNeitherBeAppliedNorDismissedAndHistoryTe
 	if _, err := env.apply("p-bad"); !errors.Is(err, errAssistantProposalStale) {
 		t.Fatalf("a stale proposal cannot be applied, got %v", err)
 	}
-	if _, err := env.asst.DismissProposal("p-bad"); !errors.Is(err, errAssistantProposalStale) {
+	if _, err := env.dismiss("p-bad"); !errors.Is(err, errAssistantProposalStale) {
 		t.Fatalf("a stale proposal cannot be dismissed, got %v", err)
 	}
 	if env.counts(t) != before {
@@ -866,4 +1035,3 @@ func TestProposal_NotApplicableIsRefusedOnAHandRule(t *testing.T) {
 		t.Fatalf("got %q", msg)
 	}
 }
-

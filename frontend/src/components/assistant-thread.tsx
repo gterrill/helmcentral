@@ -243,7 +243,7 @@ function MateWatchChip({ watch, canWrite }: { watch: NonNullable<ReturnType<type
 
 interface AssistantThreadProps {
   canWrite: boolean
-  /** The surface's Mate session (ADR 0179): the panel and the sheet each
+  /** The surface's Mate session (ADR 0180): the panel and the sheet each
    * hand over their own. */
   session: MateSession
   /** Focuses the composer as soon as it mounts - the Mate sheet (ADR 0093
@@ -309,7 +309,7 @@ function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: st
  * AssistantDrawer so both the full panel (which also owns a
  * conversation-list column) and the quick Mate sheet can host the same
  * thread over whatever page is behind it. It owns no conversation data
- * itself: both hand it their own Mate session (ADR 0179).
+ * itself: both hand it their own Mate session (ADR 0180).
  *
  * Built on shadcn's chat primitives (MessageScroller/Message/Bubble/
  * Marker, ADR 0104): MessageScroller owns the scroll position and the
