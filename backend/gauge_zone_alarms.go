@@ -69,13 +69,7 @@ func gaugeZoneRule(id string, gauge dashboardGaugeConfig, zone gaugeZone, zoneIn
 		return alarmRule{}, fmt.Errorf("normal bands are not alarms")
 	}
 
-	min, max := 0.0, 100.0
-	if gauge.Min != nil {
-		min = *gauge.Min
-	}
-	if gauge.Max != nil {
-		max = *gauge.Max
-	}
+	min, max := gaugeScale(gauge.Min, gauge.Max, nil)
 	if max <= min {
 		return alarmRule{}, fmt.Errorf("gauge range is not usable")
 	}
