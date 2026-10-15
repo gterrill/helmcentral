@@ -453,12 +453,25 @@ func updateEquipmentHandler(c echo.Context) error {
 // profile_id). No other item has any bearing on them. A failure is logged, not
 // returned: the equipment save itself already succeeded.
 func reseedAnomalyRulesAfterItemSave(equipmentID string) {
-	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	// The list of items that own a source is reused for a second; a save or a
+	// delete has just changed it, so the view below must be built from fresh
+	// items, or the rule would be moved onto the source it just left.
+	invalidateSourceItems()
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	vessel, err := loadVesselView(settingsPath)
 	if err != nil {
 		log.Printf("could not load vessel view for anomaly rule seeding: %v", err)
 		return
 	}
-	relevant := vessel.HouseBank != nil && vessel.HouseBank.EquipmentID == equipmentID
+	// The house bank is found by its role, not by the resolved view: an item
+	// that has lost its source (or been deleted) no longer resolves, and that
+	// is exactly when the rules that follow it must be emptied.
+	roles, err := loadVesselRoles(settingsPath)
+	if err != nil {
+		log.Printf("could not load the vessel roles after an equipment save: %v", err)
+		return
+	}
+	relevant := roles.HouseBank != "" && roles.HouseBank == equipmentID
 	for _, e := range vessel.Engines {
 		if e.EquipmentID == equipmentID {
 			relevant = true
@@ -533,6 +546,8 @@ func deleteEquipmentHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
+	// A deleted house bank leaves the rules that follow it watching nothing.
+	reseedAnomalyRulesAfterItemSave(id)
 
 	failed := 0
 	for _, sha := range deletedPhotoSHAs {

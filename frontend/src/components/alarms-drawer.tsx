@@ -614,6 +614,11 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
             />
             Follow the house bank's state of charge
           </label>
+          {draft.path_role === 'house_bank_soc' && draft.path === '' && (
+            <p role="status" className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              No house bank is chosen, so this rule watches nothing. Choose one under Settings, SignalK, Roles.
+            </p>
+          )}
         </Field>
         <Field>
           <FieldLabel htmlFor="alarm-op">Condition</FieldLabel>

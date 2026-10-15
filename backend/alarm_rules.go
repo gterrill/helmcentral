@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -289,7 +290,8 @@ func createSeededAlarmRule(rule alarmRule) (alarmRule, error) {
 }
 
 func updateAlarmRule(id string, next alarmRule) (alarmRule, error) {
-	if err := validateAlarmRule(&next); err != nil {
+	_, exists := getAlarmRule(id)
+	if err := validateAlarmRuleFor(&next, exists); err != nil {
 		return alarmRule{}, err
 	}
 
@@ -336,6 +338,19 @@ func deleteAlarmRule(id string) error {
 // deliberately strict: a rule that does not do what its author meant is worse
 // than no rule, because it is trusted and silent.
 func validateAlarmRule(rule *alarmRule) error {
+	return validateAlarmRuleFor(rule, false)
+}
+
+// errHouseBankNotChosen is what resolving a role says when no house bank is set.
+var errHouseBankNotChosen = errors.New("choose a house bank in Settings first: this rule follows it")
+
+// validateAlarmRuleFor is validateAlarmRule, for a rule that may already
+// exist. A rule that follows the house bank can be saved with no path when it
+// is disabled, or when it is an existing rule being edited: it then simply
+// does not evaluate, so it can still be switched off or reworded while the
+// bank is unchosen. A new enabled rule is still refused, because it would watch
+// nothing from the moment it was made.
+func validateAlarmRuleFor(rule *alarmRule, existing bool) error {
 	rule.Path = strings.TrimSpace(rule.Path)
 	rule.PathRole = strings.TrimSpace(rule.PathRole)
 	if rule.PathRole != "" {
@@ -343,7 +358,10 @@ func validateAlarmRule(rule *alarmRule) error {
 			return fmt.Errorf("unknown path role %q", rule.PathRole)
 		}
 		path, err := alarmRolePath(rule.PathRole)
-		if err != nil {
+		switch {
+		case errors.Is(err, errHouseBankNotChosen) && (existing || !rule.Enabled):
+			path = ""
+		case err != nil:
 			return err
 		}
 		rule.Path = path
@@ -413,7 +431,7 @@ func alarmRolePath(role string) (string, error) {
 	}
 	path := vessel.houseBankSocPath()
 	if path == "" {
-		return "", fmt.Errorf("choose a house bank in Settings first: this rule follows it")
+		return "", errHouseBankNotChosen
 	}
 	return path, nil
 }
