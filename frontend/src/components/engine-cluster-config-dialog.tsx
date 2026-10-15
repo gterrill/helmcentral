@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -11,31 +11,30 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
-import { GaugeFields } from '@/components/gauge-fields'
+import { GaugeFields, slotFromProfileGauge } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
-import { useEngineProfiles } from '@/hooks/use-engine-profiles'
-import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import { EquipmentPicker } from '@/components/equipment-picker'
+import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
+import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import {
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
   CLUSTER_MAX_FUEL_BARS,
   CLUSTER_MAX_TELLTALES,
   GAUGE_GROUP_TITLE_MAX_LENGTH,
-  type ClusterFuelRail,
+  type ClusterFuelRailRef,
   type DashboardLayoutItem,
   type EngineClusterConfig,
-  type FuelBarConfig,
+  type FuelBarRef,
   type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
-import { QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
-import { commonInstancePrefix, instancePrefixCandidates, profileToGauges, type EngineProfile } from '@/lib/engine-profiles'
+import { findItem, profileGaugeFor } from '@/lib/equipment-tiles'
+import type { EngineProfile } from '@/lib/engine-profiles'
 
 /**
  * The slots a cluster fills from a profile, and the suffix each looks for.
- * Anything the profile does not cover stays blank and is typed by hand — which
- * is how exhaust temperature gets in, since it lives under propulsion.0 rather
- * than the engine node and no suffix can reach it.
+ * Anything the profile does not cover keeps the suffix and is set by hand.
  */
 const SLOT_SUFFIXES = {
   ring: 'revolutions',
@@ -56,62 +55,26 @@ const SLOT_SUFFIXES = {
     // engines running (ADR 0055).
     { label: 'Fuel', suffixes: ['fuel.rate'] },
   ],
-  // Exhaust is deliberately absent: it lives under propulsion.0 rather than the
-  // engine node, so no suffix reaches it and it stays hand-typed.
+  // Exhaust is absent: on this vessel it lives under propulsion.0, outside the
+  // engine's own source, so a tile that reads one engine cannot show it.
   telltales: ['temperature', 'transmission.oilTemperature'],
 } as const
 
 function blankSlot(label: string): GaugeWidgetConfig {
-  return { path: '', label, display: 'numeric', quantity: 'raw', unit: 'raw' }
+  return { path: '', suffix: '', label, display: 'numeric', quantity: 'raw', unit: 'raw' }
 }
 
-/**
- * A blank fuel bar (ADR 0061).
- *
- * The quantities are set here rather than left for the operator to pick,
- * because no tank path on this vessel publishes meta.units: the path picker
- * would preselect Unitless, convertFromSI would be the identity, and the rail
- * would read 1.2 where it should read 890. The backend rejects that config, so
- * seeding it correctly is what keeps the rule invisible.
- */
-function blankFuelBar(label: string): FuelBarConfig {
-  return {
-    level: { path: '', label, display: 'bar', quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100 },
-    capacity: { path: '', label: '', display: 'numeric', quantity: 'volume', unit: 'L', decimals: 0 },
+/** A blank fuel bar: the tank is picked from the equipment list. */
+function blankFuelBar(label: string): FuelBarRef {
+  return { tankId: '', label }
+}
+
+/** Builds the slots of a cluster from a profile; the equipment is already chosen. */
+function clusterFromProfile(profile: EngineProfile, current: EngineClusterConfig): EngineClusterConfig {
+  const pick = (suffix: string, fallbackLabel: string): GaugeWidgetConfig => {
+    const gauge = profileGaugeFor(profile, suffix)
+    return gauge ? slotFromProfileGauge({ ...blankSlot(''), suffix }, gauge) : { ...blankSlot(fallbackLabel), suffix }
   }
-}
-
-/**
- * The capacity path that goes with a level path.
- *
- * SignalK names them as siblings, so picking `tanks.fuel.5.currentLevel` all
- * but names `tanks.fuel.5.capacity`. Filling it is what makes a rail a
- * half-minute of configuration instead of eight paths typed by hand.
- */
-function capacityPathFor(levelPath: string): string {
-  return levelPath.endsWith('.currentLevel') ? levelPath.replace(/\.currentLevel$/, '.capacity') : ''
-}
-
-/**
- * Hold a fuel slot to the quantity the rail needs.
- *
- * GaugeFields preselects the quantity from SignalK's meta.units whenever a path
- * is picked, which is right everywhere else and wrong here: no tank path on
- * this vessel publishes units, so it infers Unitless and silently undoes the
- * seed. The backend then refuses the save, and the operator gets an error about
- * a field the form never showed them. The rail's quantities are fixed by what
- * it computes, so pin them rather than asking.
- */
-function pinQuantity(slot: GaugeWidgetConfig, quantity: string): GaugeWidgetConfig {
-  if (slot.quantity === quantity) return slot
-  return { ...slot, quantity, unit: unitOption(quantity, slot.unit).id }
-}
-
-/** Builds a whole cluster from a profile and an instance prefix. */
-function clusterFromProfile(profile: EngineProfile, instance: string, title: string): EngineClusterConfig {
-  const gauges = profileToGauges(profile, instance)
-  const bySuffix = new Map((profile.gauges ?? []).map((g, i) => [g.path_suffix, gauges[i]]))
-  const pick = (suffix: string, fallbackLabel: string) => bySuffix.get(suffix) ?? blankSlot(fallbackLabel)
 
   const ring = { ...pick(SLOT_SUFFIXES.ring, 'RPM') }
   // RPM reads better as a divided scale, the way every tachometer draws it.
@@ -121,7 +84,7 @@ function clusterFromProfile(profile: EngineProfile, instance: string, title: str
   if (ring.max === undefined) ring.max = 3000
 
   return {
-    title,
+    ...current,
     ring,
     centre: pick(SLOT_SUFFIXES.centre, 'Hours'),
     corners: SLOT_SUFFIXES.corners.map((corner) => ({
@@ -141,63 +104,58 @@ interface EngineClusterConfigDialogProps {
 }
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
-  const { paths } = useSignalKPaths(widget !== null)
-  const { profiles: allProfiles, error: profilesError } = useEngineProfiles(widget !== null)
-  // A cluster's ring/centre/corner slots come from an engine profile's own
-  // gauges; a battery profile has none, so it is excluded from this picker
-  // the same way EngineProfileDialog excludes it from its own.
-  const profiles = useMemo(() => allProfiles.filter((p) => p.kind !== 'battery'), [allProfiles])
+  const ctx = useEquipmentTileContext(widget !== null)
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
-  const [profileID, setProfileID] = useState('')
-  const [instance, setInstance] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     setConfig(widget?.cluster ? structuredClone(widget.cluster) : null)
-    setProfileID('')
+    setSaveError(null)
   }, [widget?.id, widget?.cluster])
 
-  const profile = useMemo(() => profiles.find((p) => p.id === profileID) ?? profiles[0], [profiles, profileID])
-
-  const candidates = useMemo(
-    () => (profile ? instancePrefixCandidates(profile, paths) : []),
-    [profile, paths],
-  )
-
-  // Seed from the cluster's own slots when it has any, so re-opening an
-  // existing tile never proposes the other engine.
-  const seeded = useMemo(() => {
-    const slots = config
-      ? [config.ring, config.centre, ...config.corners.flatMap((c) => c.rows), ...(config.telltales ?? [])]
-      : []
-    const own = profile
-      ? commonInstancePrefix(slots.filter((s) => s.path.trim() !== ''), (profile.gauges ?? []).map((g) => g.path_suffix))
-      : null
-    return own ?? candidates[0] ?? ''
-  }, [config, candidates, profile])
-
-  useEffect(() => { setInstance(seeded) }, [seeded])
-
-  const applyProfile = () => {
-    if (!profile || instance.trim() === '') return
-    const title = config?.title?.trim() || instanceTitle(instance)
-    setConfig(clusterFromProfile(profile, instance.trim(), title))
-  }
+  const item = findItem(ctx, config?.equipmentId)
+  const zoneEditing = useSlotZoneEditing(ctx, item)
+  const { profile } = zoneEditing
 
   const setSlot = (update: (current: EngineClusterConfig) => EngineClusterConfig) =>
     setConfig((current) => (current ? update(current) : current))
 
-  const setFuel = (update: (rail: ClusterFuelRail) => ClusterFuelRail) =>
+  const setFuel = (update: (rail: ClusterFuelRailRef) => ClusterFuelRailRef) =>
     setSlot((c) => (c.fuel ? { ...c, fuel: update(c.fuel) } : c))
+
+  const slotsFilled = (c: EngineClusterConfig) =>
+    [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows), ...(c.telltales ?? [])]
+      .every((slot) => (slot.suffix ?? '').trim() !== '')
 
   const canSave =
     config !== null &&
-    config.title.trim() !== '' &&
-    config.ring.path.trim() !== '' &&
-    config.corners.every((corner) => corner.rows.every((row) => row.path.trim() !== ''))
-    && (config.telltales ?? []).every((telltale) => telltale.path.trim() !== '')
-    && (config.fuel === undefined ||
-        (config.fuel.bars.length > 0 &&
-         config.fuel.bars.every((bar) => bar.level.path.trim() !== '' && bar.capacity.path.trim() !== '')))
+    (config.equipmentId ?? '') !== '' &&
+    slotsFilled(config) &&
+    (config.fuel === undefined || (config.fuel.bars.length > 0 && config.fuel.bars.every((bar) => (bar.tankId ?? '') !== '')))
+
+  const save = async () => {
+    if (!config) return
+    // Nothing to write to a profile: save the tile at once, in the same tick.
+    if (!zoneEditing.dirty) {
+      onSave(config)
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await zoneEditing.commit()
+      onSave(config)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const slotForm = (slot: GaugeWidgetConfig, idPrefix: string, onChange: (next: GaugeWidgetConfig) => void) => (
+    <GaugeFields value={slot} paths={[]} idPrefix={idPrefix} onChange={onChange} equipment={zoneEditing.modeFor(slot)} />
+  )
 
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => { if (!open) onCancel() }}>
@@ -205,43 +163,35 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         <DialogHeader>
           <DialogTitle>Engine Cluster</DialogTitle>
           <DialogDescription>
-            A ticked ring with the primary reading inside it and four corner cards. Pick an engine to
-            fill it from a profile, then adjust any slot.
+            A ticked ring with the primary reading inside it and four corner cards. Pick the engine, fill
+            the slots from its profile, then adjust any slot.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3">
-          {/* An empty Profile list means "none installed". A failed fetch has
-              to say so instead of borrowing that same empty look, or a broken
-              backend reads as a bare cupboard. */}
-          {profilesError && (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
-              Could not load engine profiles: {profilesError}
-            </p>
+          {config && (
+            <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+              <EquipmentPicker
+                idPrefix="cluster"
+                label="Engine"
+                kind="engine"
+                value={config.equipmentId ?? ''}
+                onChange={(id) => setSlot((c) => ({ ...c, equipmentId: id }))}
+                ctx={ctx}
+              />
+              <Button
+                variant="secondary"
+                disabled={!profile}
+                onClick={() => setSlot((c) => clusterFromProfile(profile!, c))}
+              >
+                Fill slots from profile
+              </Button>
+            </div>
           )}
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-            <Field>
-              <FieldLabel htmlFor="cluster-profile">Profile</FieldLabel>
-              <select id="cluster-profile" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                value={profile?.id ?? ''} onChange={(e) => setProfileID(e.target.value)}>
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="cluster-instance">Engine instance</FieldLabel>
-              <Input id="cluster-instance" list="cluster-instance-options" value={instance}
-                onChange={(e) => setInstance(e.target.value)} placeholder="propulsion.port" />
-              <datalist id="cluster-instance-options">
-                {candidates.map((c) => <option key={c} value={c} />)}
-              </datalist>
-            </Field>
-            <Button variant="secondary" disabled={!profile || instance.trim() === ''} onClick={applyProfile}>
-              Fill slots
-            </Button>
-          </div>
           <FieldDescription>
-            Filling replaces every slot. Anything the profile does not cover — exhaust temperature, on
-            a vessel that publishes it outside the engine node — stays blank for you to type.
+            The tile reads this engine's readings live and takes its zones from the engine's profile.
+            {item && !profile ? ' This engine has no profile, so there is nothing to fill from and no zones.' : ''}
+            {profile ? ' Filling replaces every slot.' : ''}
           </FieldDescription>
 
           {config && (
@@ -250,23 +200,26 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 <Field>
                   <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
                   <Input id="cluster-title" maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH} value={config.title}
-                    onChange={(e) => setSlot((c) => ({ ...c, title: e.target.value }))} placeholder="Port" />
+                    onChange={(e) => setSlot((c) => ({ ...c, title: e.target.value }))} placeholder={item?.name ?? 'Engine name'} />
+                  <FieldDescription>Blank shows the engine's name.</FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="cluster-centre-icon">Centre icon</FieldLabel>
                   <select id="cluster-centre-icon" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
                     value={config.centreIcon ?? ''}
                     onChange={(e) => setSlot((c) => ({ ...c, centreIcon: e.target.value === '' ? undefined : e.target.value }))}>
-                    <option value="">Auto ({iconForSlot(config.centre)})</option>
+                    <option value="">Auto ({iconForSlot({ path: config.centre.suffix ?? '', quantity: config.centre.quantity })})</option>
                     {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
                   </select>
                 </Field>
               </div>
 
-              <SlotSection title="Ring" idPrefix="cluster-ring" paths={paths} value={config.ring}
-                onChange={(next) => setSlot((c) => ({ ...c, ring: next }))} />
-              <SlotSection title="Centre" idPrefix="cluster-centre" paths={paths} value={config.centre}
-                onChange={(next) => setSlot((c) => ({ ...c, centre: next }))} />
+              <SlotSection title="Ring">
+                {slotForm(config.ring, 'cluster-ring', (next) => setSlot((c) => ({ ...c, ring: next })))}
+              </SlotSection>
+              <SlotSection title="Centre">
+                {slotForm(config.centre, 'cluster-centre', (next) => setSlot((c) => ({ ...c, centre: next })))}
+              </SlotSection>
 
               {config.corners.map((corner, cornerIndex) => (
                 <div key={cornerIndex} className="rounded-md border border-border p-3">
@@ -289,7 +242,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                       }))}
                     >
                       <option value="">
-                        Auto{corner.rows[0] ? ` (${iconForSlot(corner.rows[0])})` : ''}
+                        Auto{corner.rows[0] ? ` (${iconForSlot({ path: corner.rows[0].suffix ?? '', quantity: corner.rows[0].quantity })})` : ''}
                       </option>
                       {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
                     </select>
@@ -302,13 +255,12 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
 
                   {corner.rows.map((row, rowIndex) => (
                     <div key={rowIndex} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
-                      <GaugeFields value={row} paths={paths} idPrefix={`cluster-${cornerIndex}-${rowIndex}`}
-                        onChange={(next) => setSlot((c) => ({
-                          ...c,
-                          corners: c.corners.map((x, i) => (i === cornerIndex
-                            ? { ...x, rows: x.rows.map((r, j) => (j === rowIndex ? next : r)) }
-                            : x)),
-                        }))} />
+                      {slotForm(row, `cluster-${cornerIndex}-${rowIndex}`, (next) => setSlot((c) => ({
+                        ...c,
+                        corners: c.corners.map((x, i) => (i === cornerIndex
+                          ? { ...x, rows: x.rows.map((r, j) => (j === rowIndex ? next : r)) }
+                          : x)),
+                      })))}
                       <Button size="sm" variant="ghost" aria-label={`Remove corner ${cornerIndex + 1} row ${rowIndex + 1}`}
                         onClick={() => setSlot((c) => ({
                           ...c,
@@ -348,11 +300,10 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
 
                 {(config.telltales ?? []).map((telltale, index) => (
                   <div key={index} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
-                    <GaugeFields value={telltale} paths={paths} idPrefix={`cluster-telltale-${index}`}
-                      onChange={(next) => setSlot((c) => ({
-                        ...c,
-                        telltales: (c.telltales ?? []).map((t, i) => (i === index ? next : t)),
-                      }))} />
+                    {slotForm(telltale, `cluster-telltale-${index}`, (next) => setSlot((c) => ({
+                      ...c,
+                      telltales: (c.telltales ?? []).map((t, i) => (i === index ? next : t)),
+                    })))}
                     <Button size="sm" variant="ghost" aria-label={`Remove telltale ${index + 1}`}
                       onClick={() => setSlot((c) => ({
                         ...c,
@@ -373,9 +324,8 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               <div className="rounded-md border border-border p-3">
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Fuel rail</p>
                 <FieldDescription className="mb-2">
-                  A bar per tank down one edge of the tile, with the side's total underneath.
-                  Each tank needs two paths: the level, and the capacity that turns it into a
-                  volume. Picking a <code>.currentLevel</code> path fills the capacity for you.
+                  A bar per tank down one edge of the tile, with the side's total underneath. Pick the
+                  tank items; their level and capacity are read live.
                 </FieldDescription>
 
                 {config.fuel === undefined ? (
@@ -385,7 +335,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                       // Left for a cluster titled Port, right otherwise, so a
                       // facing pair puts its rails outboard without being told.
                       fuel: {
-                        side: /^p(ort)?\b/i.test(c.title.trim()) ? 'left' : 'right',
+                        side: /^p(ort)?\b/i.test((c.title.trim() || item?.name || '')) ? 'left' : 'right',
                         bars: [blankFuelBar('Fwd'), blankFuelBar('Aft')],
                       },
                     }))}>
@@ -395,12 +345,12 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                   <>
                     <Field className="mb-2">
                       {/* "Edge", not "side": which side of the boat the tanks
-                          are on is carried by their paths and the tile title. */}
+                          are on is the tanks' own business. */}
                       <FieldLabel htmlFor="cluster-fuel-side">Tile edge</FieldLabel>
                       <select id="cluster-fuel-side"
                         className="h-9 rounded-md border bg-transparent px-3 text-sm"
                         value={config.fuel.side}
-                        onChange={(e) => setFuel((f) => ({ ...f, side: e.target.value as ClusterFuelRail['side'] }))}>
+                        onChange={(e) => setFuel((f) => ({ ...f, side: e.target.value as ClusterFuelRailRef['side'] }))}>
                         <option value="left">Left</option>
                         <option value="right">Right</option>
                       </select>
@@ -414,29 +364,29 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                     </Field>
 
                     {config.fuel.bars.map((bar, index) => (
-                      <div key={index} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
-                        <GaugeFields value={bar.level} paths={paths} idPrefix={`cluster-fuel-${index}`}
-                          onChange={(next) => setFuel((f) => ({
+                      <div key={index} className="mb-2 grid gap-2 border-b border-border/60 pb-2 last:border-b-0">
+                        <EquipmentPicker
+                          idPrefix={`cluster-fuel-${index}`}
+                          label={`Tank ${index + 1}`}
+                          kind="tank"
+                          value={bar.tankId ?? ''}
+                          ctx={ctx}
+                          onChange={(id) => setFuel((f) => ({
                             ...f,
                             bars: f.bars.map((b, i) => (i === index
-                              ? {
-                                  ...b,
-                                  level: pinQuantity(next, 'ratio'),
-                                  // Only when the operator has not typed one:
-                                  // overwriting a hand-picked path would be the
-                                  // convenience undoing their work.
-                                  capacity: b.capacity.path.trim() === ''
-                                    ? { ...b.capacity, path: capacityPathFor(next.path.trim()) }
-                                    : b.capacity,
-                                }
+                              ? { ...b, tankId: id, label: b.label || (findItem(ctx, id)?.name ?? '') }
                               : b)),
-                          }))} />
-                        <CapacityFields value={bar.capacity} paths={paths} index={index}
-                          onChange={(next) => setFuel((f) => ({
-                            ...f,
-                            bars: f.bars.map((b, i) => (i === index ? { ...b, capacity: pinQuantity(next, 'volume') } : b)),
-                          }))} />
-                        <Button size="sm" variant="ghost" aria-label={`Remove fuel tank ${index + 1}`}
+                          }))}
+                        />
+                        <Field>
+                          <FieldLabel htmlFor={`cluster-fuel-label-${index}`}>Label</FieldLabel>
+                          <Input id={`cluster-fuel-label-${index}`} maxLength={12} value={bar.label ?? ''}
+                            onChange={(e) => setFuel((f) => ({
+                              ...f,
+                              bars: f.bars.map((b, i) => (i === index ? { ...b, label: e.target.value } : b)),
+                            }))} />
+                        </Field>
+                        <Button size="sm" variant="ghost" className="w-fit" aria-label={`Remove fuel tank ${index + 1}`}
                           onClick={() => setFuel((f) => ({ ...f, bars: f.bars.filter((_, i) => i !== index) }))}>
                           <Trash2 className="size-3.5" /> Remove tank
                         </Button>
@@ -462,84 +412,20 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         </div>
 
         <DialogFooter>
+          {saveError && <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button disabled={!canSave} onClick={() => config && onSave(config)}>Save</Button>
+          <Button disabled={!canSave || saving} onClick={() => { void save() }}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-/**
- * The capacity slot's form: path, quantity, unit and nothing else.
- *
- * Not the full GaugeFields, because a tank's capacity is a constant: min, max,
- * zones and a history window are all meaningless on it, and a form offering
- * them invites a config the renderer will ignore. Not a `compact` flag on
- * GaugeFields either, since four dialogs share that component and a mode flag
- * there is the kind of thing that grows.
- */
-function CapacityFields({ value, paths, index, onChange }: {
-  value: GaugeWidgetConfig
-  paths: { path: string }[]
-  index: number
-  onChange: (next: GaugeWidgetConfig) => void
-}) {
-  const quantity = quantityById(value.quantity)
-  return (
-    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-      <Field className="sm:col-span-1">
-        <FieldLabel htmlFor={`cluster-fuel-cap-${index}`}>Capacity path</FieldLabel>
-        <Input id={`cluster-fuel-cap-${index}`} value={value.path}
-          list={`cluster-fuel-cap-list-${index}`}
-          placeholder="tanks.fuel.5.capacity"
-          onChange={(e) => onChange({ ...value, path: e.target.value })} />
-        <datalist id={`cluster-fuel-cap-list-${index}`}>
-          {paths.map((p) => <option key={p.path} value={p.path} />)}
-        </datalist>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`cluster-fuel-capq-${index}`}>Quantity</FieldLabel>
-        <select id={`cluster-fuel-capq-${index}`}
-          className="h-9 rounded-md border bg-transparent px-3 text-sm"
-          value={value.quantity}
-          onChange={(e) => {
-            const next = quantityById(e.target.value)
-            onChange({ ...value, quantity: next.id, unit: next.units[0].id })
-          }}>
-          {QUANTITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
-        </select>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`cluster-fuel-capu-${index}`}>Unit</FieldLabel>
-        <select id={`cluster-fuel-capu-${index}`}
-          className="h-9 rounded-md border bg-transparent px-3 text-sm"
-          value={unitOption(value.quantity, value.unit).id}
-          onChange={(e) => onChange({ ...value, unit: e.target.value })}>
-          {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-        </select>
-      </Field>
-    </div>
-  )
-}
-
-function SlotSection({ title, idPrefix, value, onChange, paths }: {
-  title: string
-  idPrefix: string
-  value: GaugeWidgetConfig
-  onChange: (next: GaugeWidgetConfig) => void
-  paths: ReturnType<typeof useSignalKPaths>['paths']
-}) {
+function SlotSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-border p-3">
       <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{title}</p>
-      <GaugeFields value={value} onChange={onChange} paths={paths} idPrefix={idPrefix} />
+      {children}
     </div>
   )
-}
-
-/** "propulsion.port" -> "Port" */
-function instanceTitle(instance: string): string {
-  const last = instance.split('.').filter(Boolean).slice(-1)[0] ?? ''
-  return last.charAt(0).toUpperCase() + last.slice(1)
 }

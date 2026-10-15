@@ -3,16 +3,27 @@ import { describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
 import type { DashboardLayoutItem, EngineClusterConfig } from '@/lib/dashboard-widgets'
+import type { EquipmentTileContext } from '@/lib/equipment-tiles'
 
-vi.mock('@/hooks/use-signalk-paths', () => ({
-  useSignalKPaths: () => ({ paths: [{ path: 'tanks.fuel.5.currentLevel' }, { path: 'tanks.fuel.5.capacity' }], loading: false }),
+const ctx: EquipmentTileContext = {
+  items: [
+    { id: 'eng-port', name: 'Port engine', signalk_source: 'propulsion.port', source_kind: 'engine', profile_id: '' },
+    { id: 'tank-5', name: 'Port forward fuel', signalk_source: 'tanks.fuel.5', source_kind: 'tank', profile_id: '' },
+    { id: 'tank-4', name: 'Port aft fuel', signalk_source: 'tanks.fuel.4', source_kind: 'tank', profile_id: '' },
+  ],
+  profiles: [],
+  reporting: null,
+}
+vi.mock('@/hooks/use-equipment-tile-context', () => ({ useEquipmentTileContext: () => ctx }))
+vi.mock('@/hooks/use-vessel-discovery', () => ({
+  useVesselDiscovery: () => ({ discovery: { connected: true, groups: [], detectors: {} }, loading: false, error: null }),
 }))
-vi.mock('@/hooks/use-engine-profiles', () => ({ useEngineProfiles: () => ({ profiles: [] }) }))
 
 const cluster: EngineClusterConfig = {
+  equipmentId: 'eng-port',
   title: 'Port',
-  ring: { path: 'propulsion.port.revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm' },
-  centre: { path: 'propulsion.port.runTime', label: 'Hours', display: 'numeric', quantity: 'duration', unit: 'h' },
+  ring: { path: '', suffix: 'revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm' },
+  centre: { path: '', suffix: 'runTime', label: 'Hours', display: 'numeric', quantity: 'duration', unit: 'h' },
   corners: [],
 }
 const widget: DashboardLayoutItem = { id: 'cluster:abcd1234', x: 0, y: 0, w: 6, h: 8, cluster }
@@ -25,20 +36,15 @@ function open(overrides: Partial<EngineClusterConfig> = {}) {
   return onSave
 }
 
-/**
- * The bar's own level input, by id. A cluster has a path field per slot, so
- * indexing the whole form would have picked up the ring.
- */
-function levelInput(index: number) {
-  return document.querySelector(`#cluster-fuel-${index}-path`) as HTMLInputElement
-}
+const tankSelect = (index: number) => document.querySelector(`#cluster-fuel-${index}-equipment`) as HTMLSelectElement
 
 describe('the fuel rail section', () => {
-  test('starts a rail with a forward and an aft tank', () => {
+  test('starts a rail with a forward and an aft tank to pick', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
     expect(screen.getByLabelText(/tile edge/i)).toBeInTheDocument()
-    expect(screen.getAllByLabelText(/capacity path/i)).toHaveLength(2)
+    expect(tankSelect(0)).toBeInTheDocument()
+    expect(tankSelect(1)).toBeInTheDocument()
   })
 
   /**
@@ -57,38 +63,24 @@ describe('the fuel rail section', () => {
     expect(screen.getByLabelText(/tile edge/i)).toHaveValue('right')
   })
 
-  /** SignalK names them as siblings, so one path all but names the other. */
-  test('fills the capacity path from the level path', () => {
-    open()
-    fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    fireEvent.change(levelInput(0), { target: { value: 'tanks.fuel.5.currentLevel' } })
-    expect(screen.getAllByLabelText(/capacity path/i)[0]).toHaveValue('tanks.fuel.5.capacity')
-  })
-
-  /**
-   * The quantities the backend insists on, set without the operator being asked.
-   * No tank path here publishes meta.units, so a picker left on its default
-   * would make the rail read 1.2 where it should read 890.
-   */
-  test('sets the quantities the backend requires', () => {
+  test('offers the tanks and stores the one picked', () => {
     const onSave = open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    for (const [i, path] of ['tanks.fuel.5.currentLevel', 'tanks.fuel.4.currentLevel'].entries()) {
-      fireEvent.change(levelInput(i), { target: { value: path } })
-    }
+    fireEvent.change(tankSelect(0), { target: { value: 'tank-5' } })
+    fireEvent.change(tankSelect(1), { target: { value: 'tank-4' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
 
-    const saved = onSave.mock.calls[0][0] as EngineClusterConfig
-    for (const bar of saved.fuel!.bars) {
-      expect(bar.level.quantity).toBe('ratio')
-      expect(bar.capacity.quantity).toBe('volume')
-    }
+    return vi.waitFor(() => {
+      const saved = onSave.mock.calls[0][0] as EngineClusterConfig
+      expect(saved.fuel!.bars.map((b) => b.tankId)).toEqual(['tank-5', 'tank-4'])
+      expect(saved.fuel!.bars[0].label).toBe('Fwd')
+    })
   })
 
-  test('will not save a tank with no capacity path', () => {
+  test('will not save a bar with no tank picked', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    fireEvent.change(levelInput(0), { target: { value: 'a.b.c' } })
+    fireEvent.change(tankSelect(0), { target: { value: 'tank-5' } })
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
   })
 

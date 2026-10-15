@@ -1225,8 +1225,6 @@ export function EquipmentEditor(
           draft={draft}
           setDraft={setDraft}
           discovery={discovery}
-          savedProfileId={item?.profile_id ?? ''}
-          savedSource={item?.signalk_source ?? ''}
           canWrite={canWrite}
         />
 

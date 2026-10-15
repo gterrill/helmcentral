@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 
 import { FormRow, FormSection } from '@/components/patterns'
-import { ApplyGaugeZones } from '@/components/inventory/apply-gauge-zones'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
@@ -20,10 +19,6 @@ interface EquipmentSourceSectionProps {
   draft: EquipmentInput
   setDraft: Dispatch<SetStateAction<EquipmentInput>>
   discovery: VesselDiscoveryResponse
-  /** The profile the item has saved, for Apply gauge zones. */
-  savedProfileId: string
-  /** The source the item has saved. Apply gauge zones needs it unchanged. */
-  savedSource: string
   canWrite: boolean
 }
 
@@ -44,7 +39,7 @@ function rowLabel(row: DiscoveryRow): string {
  * A battery item also carries its bank's capacity, cell count and optional
  * voltage overrides, which no instrument reports reliably.
  */
-export function EquipmentSourceSection({ id, draft, setDraft, discovery, savedProfileId, savedSource, canWrite }: EquipmentSourceSectionProps) {
+export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrite }: EquipmentSourceSectionProps) {
   const kind = sourceKindOf(draft.signalk_source)
   const known = discovery.groups.some((g) => g.rows.some((r) => r.source === draft.signalk_source))
   const noData = !discovery.connected && discovery.groups.length === 0
@@ -71,7 +66,7 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, savedPr
   return (
     <FormSection
       title="SignalK source"
-      description="The one thing the boat reports that this item is: an engine, a battery, a tank and so on. Other gear leaves it empty. The item's name is what tiles, alarms and Mate call the source."
+      description="The one thing the boat reports that this item is: an engine, a battery, a tank and so on. Other gear leaves it empty. Tiles showing this item follow its source, and its name is what tiles, alarms and Mate call it."
     >
       <FieldGroup>
         <Field>
@@ -181,11 +176,6 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, savedPr
           </FieldDescription>
         )}
 
-        {canWrite && id !== null && kind === 'engine' && savedProfileId !== '' && draft.signalk_source === savedSource && (
-          <div>
-            <ApplyGaugeZones profileId={savedProfileId} source={savedSource} />
-          </div>
-        )}
       </FieldGroup>
     </FormSection>
   )

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
   GAUGE_GROUP_TITLE_MAX_LENGTH,
@@ -22,7 +23,7 @@ import {
   type LampStripWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { LAMP_ICON_NAMES } from '@/lib/lamp-icons'
-import { suggestRibbonLamps } from '@/lib/ribbon-defaults'
+import { LAMP_READINGS, suggestRibbonLamps } from '@/lib/ribbon-defaults'
 
 /**
  * A `Pick` of `DashboardLayoutItem` rather than the full type, so this dialog
@@ -58,6 +59,8 @@ interface LampStripConfigDialogProps {
 
 export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: LampStripConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
+  const ctx = useEquipmentTileContext(widget !== null)
+  const mappedItems = ctx.items.filter((i) => i.signalk_source !== '')
   const [config, setConfig] = useState<LampStripWidgetConfig>(() => defaultStripConfig(widget?.id ?? ''))
 
   // Re-seed per instance, so editing one strip never shows another's settings.
@@ -65,16 +68,17 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
     setConfig(widget?.lamps ? structuredClone(widget.lamps) : defaultStripConfig(widget?.id ?? ''))
   }, [widget?.id, widget?.lamps])
 
-  // A fresh ribbon (ADR 0085): once the vessel's published paths have loaded,
-  // replace the single blank lamp with a suggested set resolved against them.
+  // A fresh ribbon (ADR 0085): once the equipment items have loaded, replace
+  // the single blank lamp with a suggested set built from the mapped ones.
   // Never runs for an existing ribbon config or a per-page widget, and never
   // overwrites lamps the operator has already started editing.
   useEffect(() => {
-    if (widget?.id !== RIBBON_DIALOG_ID || widget?.lamps || paths.length === 0) return
-    const suggested = suggestRibbonLamps(paths)
+    if (widget?.id !== RIBBON_DIALOG_ID || widget?.lamps || mappedItems.length === 0) return
+    const suggested = suggestRibbonLamps(ctx.items)
     if (suggested.length === 0) return
-    setConfig((current) => ({ ...current, lamps: suggested }))
-  }, [widget?.id, widget?.lamps, paths])
+    setConfig((current) => (current.lamps.every((l) => l.path === '' && !l.equipmentId) ? { ...current, lamps: suggested } : current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget?.id, widget?.lamps, ctx.items])
 
   const setLamp = (index: number, patch: Partial<LampStripWidgetConfig['lamps'][number]>) =>
     setConfig((current) => ({
@@ -91,11 +95,11 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
       return { ...current, lamps }
     })
 
-  // Every suggested lamp not already on the strip by path, for the "Suggest
-  // lamps" button — offered only for the ribbon; empty (and so disabled)
-  // until paths have loaded, since suggestRibbonLamps([]) is always [].
-  const missingSuggestions = suggestRibbonLamps(paths).filter(
-    (suggested) => !config.lamps.some((lamp) => lamp.path === suggested.path),
+  // Every suggested lamp not already on the strip for the same item and
+  // reading, for the "Suggest lamps" button — offered only for the ribbon;
+  // empty (and so disabled) until the items have loaded.
+  const missingSuggestions = suggestRibbonLamps(ctx.items).filter(
+    (suggested) => !config.lamps.some((lamp) => lamp.equipmentId === suggested.equipmentId && lamp.suffix === suggested.suffix),
   )
 
   // A strip with neither lamps nor the rollup renders nothing at all, which the
@@ -103,7 +107,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
   const canSave =
     config.title.trim() !== '' &&
     config.lamps.length <= LAMP_STRIP_MAX_LAMPS &&
-    config.lamps.every((lamp) => lamp.path.trim() !== '') &&
+    config.lamps.every((lamp) => (lamp.equipmentId ? (lamp.suffix ?? '').trim() !== '' : lamp.path.trim() !== '')) &&
     (config.lamps.length > 0 || config.showCheck === true)
 
   return (
@@ -146,16 +150,69 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
 
           {config.lamps.map((lamp, index) => (
             <div key={index} className="grid items-end gap-2 sm:grid-cols-[2fr_1fr_1fr_1fr_auto_auto]">
-              <Field>
-                <FieldLabel htmlFor={`lamp-${index}-path`}>Path</FieldLabel>
-                <Input
-                  id={`lamp-${index}-path`}
-                  list="lamp-path-options"
-                  value={lamp.path}
-                  onChange={(e) => setLamp(index, { path: e.target.value, label: lamp.label || e.target.value.split('.').slice(-1)[0] })}
-                  placeholder="electrical.generator.state"
-                />
-              </Field>
+              <div className="grid gap-1">
+                <div className="grid grid-cols-[auto_1fr] items-end gap-2">
+                  <Field>
+                    <FieldLabel htmlFor={`lamp-${index}-kind`}>Reads</FieldLabel>
+                    <select
+                      id={`lamp-${index}-kind`}
+                      className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                      value={lamp.equipmentId === undefined ? 'path' : 'equipment'}
+                      onChange={(e) =>
+                        setLamp(index, e.target.value === 'path'
+                          ? { equipmentId: undefined, suffix: undefined }
+                          : { equipmentId: '', suffix: '', path: '' })}
+                    >
+                      <option value="path">A path</option>
+                      <option value="equipment">Equipment</option>
+                    </select>
+                  </Field>
+                  {lamp.equipmentId === undefined ? (
+                    <Field>
+                      <FieldLabel htmlFor={`lamp-${index}-path`}>Path</FieldLabel>
+                      <Input
+                        id={`lamp-${index}-path`}
+                        list="lamp-path-options"
+                        value={lamp.path}
+                        onChange={(e) => setLamp(index, { path: e.target.value, label: lamp.label || e.target.value.split('.').slice(-1)[0] })}
+                        placeholder="electrical.switches.bilge"
+                      />
+                    </Field>
+                  ) : (
+                    <Field>
+                      <FieldLabel htmlFor={`lamp-${index}-item`}>Equipment</FieldLabel>
+                      <select
+                        id={`lamp-${index}-item`}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                        value={lamp.equipmentId}
+                        onChange={(e) => {
+                          const picked = mappedItems.find((i) => i.id === e.target.value)
+                          const reading = picked?.source_kind ? LAMP_READINGS[picked.source_kind]?.[0] : undefined
+                          setLamp(index, {
+                            equipmentId: e.target.value,
+                            ...(lamp.suffix ? {} : { suffix: reading ?? '' }),
+                            label: lamp.label || (picked?.name ?? '').slice(0, LAMP_LABEL_MAX_LENGTH),
+                          })
+                        }}
+                      >
+                        <option value="">Pick equipment…</option>
+                        {mappedItems.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+                {lamp.equipmentId !== undefined && (
+                  <Field>
+                    <FieldLabel htmlFor={`lamp-${index}-suffix`}>Reading</FieldLabel>
+                    <Input
+                      id={`lamp-${index}-suffix`}
+                      value={lamp.suffix ?? ''}
+                      onChange={(e) => setLamp(index, { suffix: e.target.value })}
+                      placeholder="revolutions"
+                    />
+                  </Field>
+                )}
+              </div>
               <Field>
                 <FieldLabel htmlFor={`lamp-${index}-label`}>Label</FieldLabel>
                 <Input
