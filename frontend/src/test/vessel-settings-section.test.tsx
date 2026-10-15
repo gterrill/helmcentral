@@ -39,6 +39,7 @@ const profiles = [
 ]
 
 let savedPortInstance = ''
+let savedEngines: { instance: string; name: string; equipment_id: string }[] = []
 let savedElectrical: Record<string, string> = {}
 const fetchMock = vi.fn()
 
@@ -127,6 +128,7 @@ function stubFetch() {
 beforeEach(() => {
   dashboardPage = { id: 'page-1', widgets: [] }
   savedPortInstance = ''
+  savedEngines = []
   savedElectrical = {}
   fetchMock.mockReset()
   stubFetch()
@@ -134,7 +136,7 @@ beforeEach(() => {
 })
 
 function SectionHarness() {
-  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: savedPortInstance, starboard_instance: '' }, electrical: { ...emptyVesselElectrical, ...savedElectrical }, solar: [] } }))
+  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: savedEngines, house_bank: null, batteries: [], alternators: { port_instance: savedPortInstance, starboard_instance: '' }, electrical: { ...emptyVesselElectrical, ...savedElectrical }, solar: [] } }))
   latestDraft = draft
   return <BoatUiSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
 }
@@ -157,6 +159,24 @@ describe('Settings -> Vessel: Engines and Power', () => {
     expect(screen.getByText('propulsion.starboard')).toBeInTheDocument()
     expect(screen.getByText(/1800 rpm/)).toBeInTheDocument()
     expect(screen.getByText(/76°C/)).toBeInTheDocument()
+  })
+
+  it('keeps a saved engine the boat has stopped reporting, and says Not reporting', async () => {
+    savedEngines = [{ instance: 'wing', name: 'Wing', equipment_id: '' }]
+    renderSection()
+
+    await screen.findByText('propulsion.wing')
+    expect(screen.getByText('Not reporting')).toBeInTheDocument()
+  })
+
+  it('shows both engine checks under Engines, not Power', async () => {
+    renderSection()
+
+    const heading = await screen.findByRole('heading', { name: 'Engines' })
+    const engines = heading.closest('[data-slot="card"]')
+    if (!(engines instanceof HTMLElement)) throw new Error('Engines heading is not inside a card')
+    expect(within(engines).getByText(/Tick at least one engine/)).toBeInTheDocument()
+    expect(within(engines).getByText(/Tick a second engine/)).toBeInTheDocument()
   })
 
   it('shows each detector as not set up with what is missing, on a fresh install', async () => {

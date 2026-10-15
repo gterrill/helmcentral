@@ -11,6 +11,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings → Vessel → Engines** explains what ticking an engine does and
+  that linking an equipment item is optional. An engine with no reading says
+  Not reporting, and the engine differential check now sits under Engines
+  instead of Power.
+
 ## [0.46.0] - 2026-10-15
 
 ### Breaking

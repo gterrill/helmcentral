@@ -12,19 +12,22 @@ stay off, rather than guessing from whatever the boat reports.
 ## Engines
 
 1. Open **Settings → Vessel**.
-2. Under **Engines**, tick every propulsion instance you want watched. Each
+2. Under **Engines**, each row is an engine the boat is reporting, or one you
+   saved that has since gone quiet. Tick the ones that are your engines. Each
    row shows its live rpm and coolant temperature so you can tell which is
-   which.
+   which; a row with no reading says **Not reporting**.
 3. Give each engine a name (Port, Starboard, and so on).
-4. Under **Linked equipment item**, pick the matching item from your
-   equipment registry, or choose **+ Create new item** and name one on the
-   spot.
+4. Linking an equipment item is optional; you only need one for the gauge
+   zones in steps 5 and 6. Under **Linked equipment item**, pick the
+   matching item from your equipment registry, or choose **+ Create new
+   item** and name one on the spot.
 5. Once an item is linked, pick its **Equipment profile** from the same
    row. This is the same profile your engine gauges already use, so
    assigning it here and in Inventory is the same edit.
-6. With a profile picked, an **Apply gauge zones** button appears. Use it to
-   set that engine's gauge tile up from the profile, the same step you would
-   otherwise reach from the dashboard, with the engine already filled in.
+6. With a profile picked, an **Apply gauge zones** button appears. It adds a
+   new gauge tile for that engine to your first dashboard page, with the
+   profile's ranges marked. Each use adds another tile, so move or remove it
+   from the dashboard afterwards.
 7. Choose **Save** in the bar across the top of the screen.
 
 The frozen-sensor check is ready once at least one engine is ticked. The
