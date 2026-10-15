@@ -39,6 +39,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   boat reports, with their live current, so you can tell them apart with the
   engines running. Leave a side as Not set if the boat has none there.
 
+- Choose your generator, generator AC input, shore charger, inverter and voltage
+  readout battery in **Settings → Vessel → Electrical**, and name your solar
+  controllers under **Solar names**, after upgrading. Helmcentral no longer
+  assumes which of the boat's numbers is which. Until you do: the Generator tile
+  says the generator is not set up and its Start and Stop buttons are gone
+  (before, they sent the command to whichever generator was number 0); the
+  Shore line, the generator's power and the AC part of Loads on the Battery &
+  Power tile are blank; the voltage beside the charge rate in that tile's
+  footer is left out; and each solar controller is named "Array" and its
+  number. The voltage that used to be labelled 24V is now whichever battery you
+  pick, with that battery's name.
+- The `INFLUX_SHORE_MEASUREMENT` and `INFLUX_GENERATOR_MEASUREMENT` settings are
+  gone, so remove them from your environment; they are ignored. The dawn
+  projection now skips nights when shore power was connected or the generator
+  ran by looking at the shore charger and generator you pick under Electrical.
+  A night is not screened for one you leave as Not set.
+
 ### Changed
 
 - A phone, tablet or laptop no longer reloads itself when a new version is

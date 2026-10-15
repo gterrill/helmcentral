@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -62,6 +63,41 @@ type vesselAlternatorCandidate struct {
 	Current  *float64 `json:"current"`
 }
 
+// vesselGeneratorCandidate is one electrical.generator.<instance> with its
+// state word when it is reporting now.
+type vesselGeneratorCandidate struct {
+	Instance string  `json:"instance"`
+	State    *string `json:"state"`
+}
+
+// vesselACCandidate is one electrical.ac.<instance> with its real power.
+type vesselACCandidate struct {
+	Instance  string   `json:"instance"`
+	RealPower *float64 `json:"real_power"`
+}
+
+// vesselChargerCandidate is one electrical.chargers.<instance> with its
+// output current and its AC input current.
+type vesselChargerCandidate struct {
+	Instance    string   `json:"instance"`
+	Current     *float64 `json:"current"`
+	ACInCurrent *float64 `json:"acin_current"`
+}
+
+// vesselInverterCandidate is one electrical.inverters.<instance> with its AC
+// output power.
+type vesselInverterCandidate struct {
+	Instance string   `json:"instance"`
+	ACOut    *float64 `json:"ac_out"`
+}
+
+// vesselSolarCandidate is one electrical.solar.<instance> with its panel
+// power.
+type vesselSolarCandidate struct {
+	Instance   string   `json:"instance"`
+	PanelPower *float64 `json:"panel_power"`
+}
+
 // vesselDetectorStatus is one detector's setup state for the Settings page:
 // Ready false always carries Missing, the single next thing the operator
 // needs to do ("Pick your house bank"), never a generic "not configured".
@@ -74,6 +110,11 @@ type vesselCandidatesResponse struct {
 	Engines     []vesselEngineCandidate         `json:"engines"`
 	Batteries   []vesselBatteryCandidate        `json:"batteries"`
 	Alternators []vesselAlternatorCandidate     `json:"alternators"`
+	Generators  []vesselGeneratorCandidate      `json:"generators"`
+	AC          []vesselACCandidate             `json:"ac"`
+	Chargers    []vesselChargerCandidate        `json:"chargers"`
+	Inverters   []vesselInverterCandidate       `json:"inverters"`
+	Solar       []vesselSolarCandidate          `json:"solar"`
 	Detectors   map[string]vesselDetectorStatus `json:"detectors"`
 }
 
@@ -81,7 +122,114 @@ var (
 	vesselCandidatePropulsionRe = regexp.MustCompile(`^propulsion\.([^.]+)\.`)
 	vesselCandidateBatteryRe    = regexp.MustCompile(`^electrical\.batteries\.([^.]+)\.`)
 	vesselCandidateAlternatorRe = regexp.MustCompile(`^electrical\.alternator\.([^.]+)\.`)
+	vesselCandidateGeneratorRe  = regexp.MustCompile(`^electrical\.generator\.([^.]+)\.`)
+	vesselCandidateACRe         = regexp.MustCompile(`^electrical\.ac\.([^.]+)\.`)
+	vesselCandidateChargerRe    = regexp.MustCompile(`^electrical\.chargers\.([^.]+)\.`)
+	vesselCandidateInverterRe   = regexp.MustCompile(`^electrical\.inverters\.([^.]+)\.`)
+	vesselCandidateSolarRe      = regexp.MustCompile(`^electrical\.solar\.([^.]+)\.`)
 )
+
+// vesselCandidateMaxAge is how old a reading can be and still be shown beside
+// a candidate as live. An instance that has gone quiet is still listed, since
+// the operator may have chosen it, but without a figure.
+const vesselCandidateMaxAge = 5 * time.Minute
+
+// freshCandidateNumber reads the first of paths that holds a number reported
+// within vesselCandidateMaxAge. A reading with no known arrival is not shown.
+func freshCandidateNumber(t telemetryReader, paths ...string) *float64 {
+	for _, path := range paths {
+		sample := t.Sample(path)
+		if !sample.Present || !sample.AgeKnown || sample.Age > vesselCandidateMaxAge {
+			continue
+		}
+		if v, ok := numericTelemetryValue(sample.Value); ok {
+			return &v
+		}
+	}
+	return nil
+}
+
+// freshCandidateString reads a string reported within vesselCandidateMaxAge,
+// by the same rule as freshCandidateNumber.
+func freshCandidateString(t telemetryReader, path string) *string {
+	sample := t.Sample(path)
+	if !sample.Present || !sample.AgeKnown || sample.Age > vesselCandidateMaxAge {
+		return nil
+	}
+	state, ok := sample.Value.(string)
+	if !ok || strings.TrimSpace(state) == "" {
+		return nil
+	}
+	return &state
+}
+
+// candidateInstances collects the <id> segment of every path matching re.
+func candidateInstances(paths []signalKPath, re *regexp.Regexp) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, p := range paths {
+		if m := re.FindStringSubmatch(p.Path); m != nil && !seen[m[1]] {
+			seen[m[1]] = true
+			ids = append(ids, m[1])
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return instanceLess(ids[i], ids[j]) })
+	return ids
+}
+
+// electricalCandidates lists the generators, AC inputs, chargers, inverters
+// and solar controllers the boat is publishing, each with a reading only when
+// it is fresh.
+func electricalCandidates(t telemetryReader, paths []signalKPath) (
+	[]vesselGeneratorCandidate, []vesselACCandidate, []vesselChargerCandidate, []vesselInverterCandidate, []vesselSolarCandidate,
+) {
+	generators := []vesselGeneratorCandidate{}
+	for _, id := range candidateInstances(paths, vesselCandidateGeneratorRe) {
+		generators = append(generators, vesselGeneratorCandidate{Instance: id, State: freshCandidateString(t, "electrical.generator."+id+".state")})
+	}
+
+	ac := []vesselACCandidate{}
+	for _, id := range candidateInstances(paths, vesselCandidateACRe) {
+		prefix := "electrical.ac." + id
+		leaves := []string{prefix + ".phase.A.realPower", prefix + ".phaseA.realPower", prefix + ".realPower"}
+		// Only a node that carries one of the real-power leaves the generator
+		// reading uses is an AC input; electrical.ac.loads and the like are not.
+		carries := false
+		for _, leaf := range leaves {
+			if t.Sample(leaf).Present {
+				carries = true
+			}
+		}
+		if !carries {
+			continue
+		}
+		ac = append(ac, vesselACCandidate{Instance: id, RealPower: freshCandidateNumber(t, leaves...)})
+	}
+
+	chargers := []vesselChargerCandidate{}
+	for _, id := range candidateInstances(paths, vesselCandidateChargerRe) {
+		prefix := "electrical.chargers." + id
+		chargers = append(chargers, vesselChargerCandidate{
+			Instance:    id,
+			Current:     freshCandidateNumber(t, prefix+".current"),
+			ACInCurrent: freshCandidateNumber(t, prefix+".acin.1.current"),
+		})
+	}
+
+	inverters := []vesselInverterCandidate{}
+	for _, id := range candidateInstances(paths, vesselCandidateInverterRe) {
+		prefix := "electrical.inverters." + id
+		inverters = append(inverters, vesselInverterCandidate{Instance: id, ACOut: freshCandidateNumber(t, prefix+".ac.output.power", prefix+".acout.power", prefix+".acOutputPower")})
+	}
+
+	solar := []vesselSolarCandidate{}
+	for _, id := range candidateInstances(paths, vesselCandidateSolarRe) {
+		prefix := "electrical.solar." + id
+		solar = append(solar, vesselSolarCandidate{Instance: id, PanelPower: freshCandidateNumber(t, prefix+".panelPower", prefix+".power")})
+	}
+
+	return generators, ac, chargers, inverters, solar
+}
 
 // vesselCandidates builds the whole GET /api/vessel/candidates response:
 // every propulsion/battery instance the boat is currently publishing (built
@@ -94,11 +242,7 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 
 	engineInstances := map[string]bool{}
 	batteryInstances := map[string]bool{}
-	alternatorInstances := map[string]bool{}
 	for _, p := range paths {
-		if m := vesselCandidateAlternatorRe.FindStringSubmatch(p.Path); m != nil {
-			alternatorInstances[m[1]] = true
-		}
 		if m := vesselCandidatePropulsionRe.FindStringSubmatch(p.Path); m != nil {
 			engineInstances[m[1]] = true
 		}
@@ -145,8 +289,8 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 	}
 	sort.Slice(batteries, func(i, j int) bool { return batteries[i].Path < batteries[j].Path })
 
-	alternators := make([]vesselAlternatorCandidate, 0, len(alternatorInstances))
-	for instance := range alternatorInstances {
+	alternators := []vesselAlternatorCandidate{}
+	for _, instance := range candidateInstances(paths, vesselCandidateAlternatorRe) {
 		candidate := vesselAlternatorCandidate{Instance: instance}
 		if v, ok := telemetry.Number("electrical.alternator." + instance + ".current"); ok {
 			c := v.Value
@@ -154,12 +298,18 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 		}
 		alternators = append(alternators, candidate)
 	}
-	sort.Slice(alternators, func(i, j int) bool { return instanceLess(alternators[i].Instance, alternators[j].Instance) })
+
+	generators, ac, chargers, inverters, solar := electricalCandidates(telemetry, paths)
 
 	return vesselCandidatesResponse{
 		Engines:     engines,
 		Batteries:   batteries,
 		Alternators: alternators,
+		Generators:  generators,
+		AC:          ac,
+		Chargers:    chargers,
+		Inverters:   inverters,
+		Solar:       solar,
 		Detectors:   vesselDetectorStatuses(vessel),
 	}
 }

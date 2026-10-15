@@ -22,6 +22,11 @@ export function useVesselCandidates(refreshKey?: unknown) {
       engines: Array.isArray(body.engines) ? body.engines : [],
       batteries: Array.isArray(body.batteries) ? body.batteries : [],
       alternators: Array.isArray(body.alternators) ? body.alternators : [],
+      generators: Array.isArray(body.generators) ? body.generators : [],
+      ac: Array.isArray(body.ac) ? body.ac : [],
+      chargers: Array.isArray(body.chargers) ? body.chargers : [],
+      inverters: Array.isArray(body.inverters) ? body.inverters : [],
+      solar: Array.isArray(body.solar) ? body.solar : [],
       detectors: body.detectors ?? {},
     }),
   })

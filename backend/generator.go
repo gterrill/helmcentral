@@ -30,6 +30,36 @@ func generatorPut(signalkURL, settingsPath, path string, value any) error {
 	return err
 }
 
+// generatorBasePath is the SignalK path of the generator the operator chose
+// in Vessel settings. problem is a plain sentence for the operator when there
+// is no usable generator. The id is checked again here because it is spliced
+// into a URL path that carries a write.
+func generatorBasePath(vessel vesselSettings) (path string, problem string) {
+	id := vessel.Electrical.GeneratorInstance
+	if id == "" {
+		return "", "the generator is not set up in Vessel settings"
+	}
+	if !alternatorInstanceIDRe.MatchString(id) {
+		return "", "the generator in Vessel settings is not a valid instance id"
+	}
+	return "/signalk/v1/api/vessels/self/electrical/generator/" + id, ""
+}
+
+// resolveGeneratorPath loads Vessel settings and resolves the generator path.
+// When it cannot, the reply has already been written and handled is true. A
+// vessel block that cannot be read is a server error, not "not set up".
+func resolveGeneratorPath(c echo.Context, settingsPath string) (path string, handled bool, err error) {
+	vessel, loadErr := loadVesselSettings(settingsPath)
+	if loadErr != nil {
+		return "", true, c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
+	}
+	path, problem := generatorBasePath(vessel)
+	if problem != "" {
+		return "", true, c.JSON(http.StatusConflict, map[string]string{"error": problem})
+	}
+	return path, false, nil
+}
+
 func postGeneratorStartHandler(c echo.Context) error {
 	var req struct {
 		TimerSeconds int `json:"timer_seconds"`
@@ -38,6 +68,10 @@ func postGeneratorStartHandler(c echo.Context) error {
 	_ = c.Bind(&req)
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	basePath, handled, err := resolveGeneratorPath(c, settingsPath)
+	if handled {
+		return err
+	}
 	address, port, err := loadSignalKSettings(settingsPath)
 	if err != nil {
 		address = defaultSignalKAddress
@@ -45,7 +79,6 @@ func postGeneratorStartHandler(c echo.Context) error {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	basePath := "/signalk/v1/api/vessels/self/electrical/generator/0"
 
 	// Set timer first (0 = run indefinitely)
 	if err := generatorPut(signalkURL, settingsPath, basePath+"/manualStartTimer", req.TimerSeconds); err != nil {
@@ -61,6 +94,10 @@ func postGeneratorStartHandler(c echo.Context) error {
 
 func postGeneratorStopHandler(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	basePath, handled, err := resolveGeneratorPath(c, settingsPath)
+	if handled {
+		return err
+	}
 	address, port, err := loadSignalKSettings(settingsPath)
 	if err != nil {
 		address = defaultSignalKAddress
@@ -68,7 +105,6 @@ func postGeneratorStopHandler(c echo.Context) error {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	basePath := "/signalk/v1/api/vessels/self/electrical/generator/0"
 
 	if err := generatorPut(signalkURL, settingsPath, basePath+"/manualStartTimer", 0); err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "failed to clear timer: " + err.Error()})

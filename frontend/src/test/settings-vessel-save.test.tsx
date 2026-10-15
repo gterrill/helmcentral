@@ -9,6 +9,7 @@ import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testin
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { emptyVesselElectrical } from '@/lib/vessel-settings'
 import { SettingsPage } from '@/components/settings/settings-page'
 import type { SecretKey } from '@/hooks/use-secrets-status'
 
@@ -243,7 +244,11 @@ describe('the vessel part of the settings draft', () => {
   it('is left out of the patch when the server block was never read, so a save cannot wipe it', async () => {
     const { buildRegularSettingsPatch, hydrateDraftFromSettings } = await import('@/components/settings/settings-draft')
     expect(buildRegularSettingsPatch(hydrateDraftFromSettings({})).vessel).toBeUndefined()
-    expect(buildRegularSettingsPatch(hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: '', starboard_instance: '' } } })).vessel)
-      .toEqual({ engines: [], house_bank: null, batteries: [], alternators: { port_instance: '', starboard_instance: '' } })
+    expect(buildRegularSettingsPatch(hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: '', starboard_instance: '' }, electrical: emptyVesselElectrical, solar: [] } })).vessel)
+      .toEqual({
+        engines: [], house_bank: null, batteries: [], alternators: { port_instance: '', starboard_instance: '' },
+        electrical: { generator_instance: '', generator_ac_instance: '', shore_charger_instance: '', inverter_instance: '', voltage_readout_battery: '' },
+        solar: [],
+      })
   })
 })

@@ -2,6 +2,8 @@ import type { DeepPartial, SettingsPayload } from '@/hooks/use-settings-form'
 import {
   titleCaseInstance,
   type VesselAlternatorSettings,
+  type VesselElectricalSettings,
+  type VesselSolarSetting,
   type VesselBatterySetting,
   type VesselEngineSetting,
   type VesselHouseBankSetting,
@@ -46,6 +48,18 @@ export interface VesselDraft {
   batteryNames: Record<string, string>
   /** The port and starboard alternator instances; '' is not set. */
   alternators: VesselAlternatorSettings
+  /** The generator, AC input, shore charger, inverter and voltage readout battery; '' is not set. */
+  electrical: VesselElectricalSettings
+  /** Operator names for solar controllers, keyed by instance id. */
+  solarNames: Record<string, string>
+}
+
+/** The solar names a draft saves: non-empty names only, in instance order. */
+export function vesselSolarFromDraft(vessel: VesselDraft): VesselSolarSetting[] {
+  return Object.keys(vessel.solarNames)
+    .filter((instance) => vessel.solarNames[instance].trim() !== '')
+    .sort()
+    .map((instance) => ({ instance, name: vessel.solarNames[instance].trim() }))
 }
 
 /** The battery names a draft saves: non-empty names only, in instance order. */
@@ -95,6 +109,19 @@ function vesselDraftsEqual(a: VesselDraft | null, b: VesselDraft | null): boolea
     if (ba[i].instance !== bb[i].instance || ba[i].name !== bb[i].name) return false
   }
   if (a.alternators.port_instance !== b.alternators.port_instance || a.alternators.starboard_instance !== b.alternators.starboard_instance) return false
+  const electricalA = a.electrical
+  const electricalB = b.electrical
+  if (electricalA.generator_instance !== electricalB.generator_instance
+    || electricalA.generator_ac_instance !== electricalB.generator_ac_instance
+    || electricalA.shore_charger_instance !== electricalB.shore_charger_instance
+    || electricalA.inverter_instance !== electricalB.inverter_instance
+    || electricalA.voltage_readout_battery !== electricalB.voltage_readout_battery) return false
+  const sa = vesselSolarFromDraft(a)
+  const sb = vesselSolarFromDraft(b)
+  if (sa.length !== sb.length) return false
+  for (let i = 0; i < sa.length; i++) {
+    if (sa[i].instance !== sb[i].instance || sa[i].name !== sb[i].name) return false
+  }
   return houseBanksEqual(a.houseBank, b.houseBank)
 }
 
@@ -316,6 +343,10 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
     for (const b of Array.isArray(settings.vessel.batteries) ? settings.vessel.batteries : []) {
       batteryNames[b.instance] = b.name
     }
+    const solarNames: Record<string, string> = {}
+    for (const sc of Array.isArray(settings.vessel.solar) ? settings.vessel.solar : []) {
+      solarNames[sc.instance] = sc.name
+    }
     draft.vessel = {
       engineRows,
       houseBank: settings.vessel.house_bank ?? null,
@@ -324,6 +355,14 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
         port_instance: settings.vessel.alternators?.port_instance ?? '',
         starboard_instance: settings.vessel.alternators?.starboard_instance ?? '',
       },
+      electrical: {
+        generator_instance: settings.vessel.electrical?.generator_instance ?? '',
+        generator_ac_instance: settings.vessel.electrical?.generator_ac_instance ?? '',
+        shore_charger_instance: settings.vessel.electrical?.shore_charger_instance ?? '',
+        inverter_instance: settings.vessel.electrical?.inverter_instance ?? '',
+        voltage_readout_battery: settings.vessel.electrical?.voltage_readout_battery ?? '',
+      },
+      solarNames,
     }
   }
 
@@ -485,6 +524,6 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     // Omitted while the vessel block was never read (see the draft field).
     ...(draft.vessel === null
       ? {}
-      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank, batteries: vesselBatteriesFromDraft(draft.vessel), alternators: draft.vessel.alternators } }),
+      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank, batteries: vesselBatteriesFromDraft(draft.vessel), alternators: draft.vessel.alternators, electrical: draft.vessel.electrical, solar: vesselSolarFromDraft(draft.vessel) } }),
   }
 }

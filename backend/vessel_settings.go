@@ -38,6 +38,79 @@ type vesselSettings struct {
 	// data. There is no default, because the Victron GX numbers instances
 	// per installation.
 	Alternators vesselAlternatorSettings `yaml:"alternators" json:"alternators"`
+	// Electrical says which generator, AC meter, shore charger, inverter and
+	// voltage-readout battery the electrical tiles and the overnight model
+	// read. Empty means not set: that figure has no data.
+	Electrical vesselElectricalSettings `yaml:"electrical" json:"electrical"`
+	// Solar are the operator's own names for electrical.solar.<id>
+	// controllers, in the same shape as Batteries.
+	Solar []vesselSolarSetting `yaml:"solar" json:"solar"`
+}
+
+// vesselElectricalSettings holds bare SignalK instance ids as strings, so "0"
+// stays distinct from unset. There are no defaults: the Victron GX numbers
+// instances per installation.
+type vesselElectricalSettings struct {
+	// GeneratorInstance is the <id> in electrical.generator.<id>.
+	GeneratorInstance string `yaml:"generator_instance" json:"generator_instance"`
+	// GeneratorACInstance is the <id> in electrical.ac.<id>, the AC input
+	// that measures the generator's real power.
+	GeneratorACInstance string `yaml:"generator_ac_instance" json:"generator_ac_instance"`
+	// ShoreChargerInstance is the <id> in electrical.chargers.<id>.
+	ShoreChargerInstance string `yaml:"shore_charger_instance" json:"shore_charger_instance"`
+	// InverterInstance is the <id> in electrical.inverters.<id>.
+	InverterInstance string `yaml:"inverter_instance" json:"inverter_instance"`
+	// VoltageReadoutBattery is the <id> in electrical.batteries.<id> whose
+	// voltage the Battery & Power tile shows as its extra voltage row.
+	VoltageReadoutBattery string `yaml:"voltage_readout_battery" json:"voltage_readout_battery"`
+}
+
+// vesselSolarSetting names one electrical.solar.<id> controller.
+type vesselSolarSetting struct {
+	Instance string `yaml:"instance" json:"instance"`
+	Name     string `yaml:"name" json:"name"`
+}
+
+// validateVesselElectrical checks that every chosen electrical instance is a
+// plain id. The ids are spliced into SignalK paths, so anything with path
+// characters is refused.
+func validateVesselElectrical(e vesselElectricalSettings) *settingsValidationError {
+	fields := []struct {
+		field, label, value string
+	}{
+		{"vessel.electrical.generator_instance", "the generator", e.GeneratorInstance},
+		{"vessel.electrical.generator_ac_instance", "the generator's AC input", e.GeneratorACInstance},
+		{"vessel.electrical.shore_charger_instance", "the shore charger", e.ShoreChargerInstance},
+		{"vessel.electrical.inverter_instance", "the inverter", e.InverterInstance},
+		{"vessel.electrical.voltage_readout_battery", "the voltage readout battery", e.VoltageReadoutBattery},
+	}
+	for _, f := range fields {
+		if f.value != "" && !alternatorInstanceIDRe.MatchString(f.value) {
+			return &settingsValidationError{Field: f.field, Message: f.label + " must be an instance id (letters, digits, _ or -)"}
+		}
+	}
+	return nil
+}
+
+// solarName is the operator's name for solar controller id, or "".
+func (v vesselSettings) solarName(id string) string {
+	for _, s := range v.Solar {
+		if s.Instance == id {
+			return strings.TrimSpace(s.Name)
+		}
+	}
+	return ""
+}
+
+// normalizeVesselElectrical trims every chosen instance id.
+func normalizeVesselElectrical(e vesselElectricalSettings) vesselElectricalSettings {
+	return vesselElectricalSettings{
+		GeneratorInstance:     strings.TrimSpace(e.GeneratorInstance),
+		GeneratorACInstance:   strings.TrimSpace(e.GeneratorACInstance),
+		ShoreChargerInstance:  strings.TrimSpace(e.ShoreChargerInstance),
+		InverterInstance:      strings.TrimSpace(e.InverterInstance),
+		VoltageReadoutBattery: strings.TrimSpace(e.VoltageReadoutBattery),
+	}
 }
 
 // vesselAlternatorSettings holds the operator's port and starboard
@@ -138,6 +211,8 @@ func parseVesselBlock(settings map[string]any) (vesselSettings, error) {
 	if err := yaml.Unmarshal(buf, &result); err != nil {
 		return vesselSettings{}, fmt.Errorf("vessel settings: parsing vessel block: %w", err)
 	}
+	// Ids are trimmed once, here, so no reader has to.
+	result.Electrical = normalizeVesselElectrical(result.Electrical)
 	return result, nil
 }
 

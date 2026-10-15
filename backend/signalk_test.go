@@ -1582,7 +1582,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{Electrical: vesselElectricalSettings{ShoreChargerInstance: "0"}})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -1622,7 +1622,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{Electrical: vesselElectricalSettings{ShoreChargerInstance: "0"}})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -1675,7 +1675,7 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -1692,8 +1692,8 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 	if len(state.Controllers) != 2 {
 		t.Fatalf("expected 2 controllers, got %d", len(state.Controllers))
 	}
-	if state.Controllers[0].Label != "Port" {
-		t.Fatalf("expected first controller label Port, got %q", state.Controllers[0].Label)
+	if state.Controllers[0].Label != "Array 0" {
+		t.Fatalf("expected an unnamed controller to read Array 0, got %q", state.Controllers[0].Label)
 	}
 	if state.Controllers[1].Mode != "absorption" {
 		t.Fatalf("expected second controller mode absorption, got %q", state.Controllers[1].Mode)
@@ -1722,7 +1722,7 @@ func TestFetchSignalKSolarState_ConvertsJoulesYieldToKWh(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -1752,7 +1752,7 @@ func TestFetchSignalKSolarState_ConvertsVenusJoulesYieldToKWh(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -1792,7 +1792,7 @@ func TestFetchSignalKSolarState_IgnoresDailyYieldFallbackPaths(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -1852,7 +1852,7 @@ func TestFetchSignalKSolarState_ReportsAgeOfFreshestController(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -1882,7 +1882,7 @@ func TestFetchSignalKSolarState_AgeIsUnknownWithoutTimestamps(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState()
+	state, err := fetchSignalKSolarState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
