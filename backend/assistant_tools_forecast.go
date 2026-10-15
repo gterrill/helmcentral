@@ -361,15 +361,6 @@ const (
 	assistantEstimatePassageMaxHistoryDays     = 365
 )
 
-// assistantEstimatePassageFallbackInstances is what estimate_passage assumes
-// when the SignalK snapshot has no propulsion tree to discover instance
-// names from at all (a dev backend with no SignalK connected) - this
-// vessel's two actual engines, named directly rather than guessed at any
-// wider scope. A result built on this fallback carries instances_assumed:
-// true so the model and operator both know it is an assumption, not a
-// discovery.
-var assistantEstimatePassageFallbackInstances = []string{"port", "starboard"}
-
 // assistantEstimatePassageArgs is estimate_passage's argument shape.
 // SpeedKts is a pointer so "the model left it out" (nil, use the
 // most-sampled cruising band) is distinguishable from a genuine zero, which
@@ -386,16 +377,15 @@ type assistantEstimatePassageResult struct {
 	// SpeedSource is "requested" when speed_kts came from the model, or
 	// "most_sampled_band" when it was omitted and estimate_passage picked
 	// the vessel's most-sampled cruising band instead.
-	SpeedSource      string            `json:"speed_source"`
-	Hours            float64           `json:"hours"`
-	Litres           float64           `json:"litres"`
-	LPerH            float64           `json:"l_per_h"`
-	RPM              float64           `json:"rpm"`
-	HistoryDays      int               `json:"history_days"`
-	Samples          int               `json:"samples"`
-	Instances        []string          `json:"instances"`
-	InstancesAssumed bool              `json:"instances_assumed"`
-	Table            []performanceBand `json:"table"`
+	SpeedSource string            `json:"speed_source"`
+	Hours       float64           `json:"hours"`
+	Litres      float64           `json:"litres"`
+	LPerH       float64           `json:"l_per_h"`
+	RPM         float64           `json:"rpm"`
+	HistoryDays int               `json:"history_days"`
+	Samples     int               `json:"samples"`
+	Instances   []string          `json:"instances"`
+	Table       []performanceBand `json:"table"`
 	// FuelAboardL and FuelAfterL are omitted entirely (nil pointers,
 	// omitempty) when fuelAboardM3 reports the fuel volume as not
 	// currently defined - the note says so instead, rather than the model
@@ -615,11 +605,12 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	stop := d.now()
 	start := stop.AddDate(0, 0, -days)
 
-	instances := d.fuelRateInstances()
-	instancesAssumed := false
+	instances, instErr := d.fuelRateInstances()
+	if instErr != nil {
+		return "", fmt.Errorf("estimate_passage: the vessel settings could not be read, so the engines are unknown: %w", instErr)
+	}
 	if len(instances) == 0 {
-		instances = assistantEstimatePassageFallbackInstances
-		instancesAssumed = true
+		return "", fmt.Errorf("estimate_passage: engines are not set up in Settings > Vessel, so there is no per-engine fuel history to estimate from")
 	}
 
 	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)
@@ -702,21 +693,20 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	}
 
 	result := assistantEstimatePassageResult{
-		DistanceNm:       args.DistanceNm,
-		SpeedKts:         roundTo1(speedKts),
-		SpeedSource:      speedSource,
-		Hours:            roundTo1(hours),
-		Litres:           litresRounded,
-		LPerH:            roundTo1(lPerH),
-		RPM:              math.Round(rpmAtSpeed),
-		HistoryDays:      days,
-		Samples:          totalSamples,
-		Instances:        instances,
-		InstancesAssumed: instancesAssumed,
-		Table:            table,
-		FuelAboardL:      fuelAboardL,
-		FuelAfterL:       fuelAfterL,
-		Note:             note,
+		DistanceNm:  args.DistanceNm,
+		SpeedKts:    roundTo1(speedKts),
+		SpeedSource: speedSource,
+		Hours:       roundTo1(hours),
+		Litres:      litresRounded,
+		LPerH:       roundTo1(lPerH),
+		RPM:         math.Round(rpmAtSpeed),
+		HistoryDays: days,
+		Samples:     totalSamples,
+		Instances:   instances,
+		Table:       table,
+		FuelAboardL: fuelAboardL,
+		FuelAfterL:  fuelAfterL,
+		Note:        note,
 	}
 
 	shrink := func() bool {

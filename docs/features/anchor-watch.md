@@ -101,8 +101,9 @@ covers every screen.
 
 The watch comes up when all of these have held for 15 seconds straight:
 
-- At least one main engine shows rpm above zero, from a reading less than
-	30 seconds old.
+- At least one of the engines you ticked in Settings → Vessel shows rpm
+	above zero, from a reading less than 30 seconds old. With no engine
+	ticked, or none reporting, it never raises.
 - The GNSS fix is usable and puts the boat more than the watch radius plus
 	4.572 metres (15 feet) from the anchor.
 - Speed over ground is at least 3 knots.

@@ -5,9 +5,9 @@ import "testing"
 func TestFetchSignalKElectricalState_BankCurrentUnknownIsNil(t *testing.T) {
 	seedSelfTree(t, `{
 		"timestamp": "2026-09-02T00:00:00Z",
-		"electrical": {"batteries": {"house": {"capacity": {"stateOfCharge": {"value": 0.46}}}}}
+		"electrical": {"batteries": {"51": {"capacity": {"stateOfCharge": {"value": 0.46}}}}}
 	}`)
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"}))
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -19,13 +19,13 @@ func TestFetchSignalKElectricalState_BankCurrentUnknownIsNil(t *testing.T) {
 func TestFetchSignalKElectricalState_RealMinusOneDischargeIsKept(t *testing.T) {
 	seedSelfTree(t, `{
 		"timestamp": "2026-09-02T00:00:00Z",
-		"electrical": {"batteries": {"house": {
+		"electrical": {"batteries": {"51": {
 			"capacity": {"stateOfCharge": {"value": 0.46}},
 			"current": {"value": -1.0},
 			"power": {"value": -1.0}
 		}}}
 	}`)
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"}))
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}

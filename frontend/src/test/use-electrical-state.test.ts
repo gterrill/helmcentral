@@ -61,3 +61,18 @@ describe('useElectricalState charge rate', () => {
     expect(result.current.timeToGoHours).toBeCloseTo(-10, 4)
   })
 })
+
+describe('useElectricalState socPath', () => {
+  it('is null before any tick', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.socPath).toBeNull()
+  })
+
+  it('carries the house bank state-of-charge path, and drops it when the bank is unset', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', soc_path: 'electrical.batteries.51.capacity.stateOfCharge' })
+    expect(result.current.socPath).toBe('electrical.batteries.51.capacity.stateOfCharge')
+    emit({ datetime: '2026-09-14T00:00:05Z' })
+    expect(result.current.socPath).toBeNull()
+  })
+})

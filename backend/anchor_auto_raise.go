@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"math"
 	"sync"
 	"time"
 )
@@ -63,10 +62,10 @@ type autoRaiseSample struct {
 	// -1 means unavailable, which this feature treats as NOT eligible, not
 	// as "assume stationary" or "assume moving."
 	SOGKts float64
-	// Engine0RPM/Engine1RPM are readEngineRPM's own values: -1 for both "no
-	// reading at all" and "the reading is older than defaultRPMMaxAge."
-	Engine0RPM float64
-	Engine1RPM float64
+	// EnginesRunning is nil when no engine is configured in Vessel settings
+	// or none has a fresh reading. Nil is not evidence of motoring, so it
+	// never raises.
+	EnginesRunning *bool
 }
 
 type anchorAutoRaiseWatcher struct {
@@ -123,13 +122,12 @@ func newAnchorAutoRaiseWatcher() *anchorAutoRaiseWatcher {
 				return autoRaiseSample{}, false
 			}
 			return autoRaiseSample{
-				Lat:          state.Latitude,
-				Lon:          state.Longitude,
-				PositionOK:   hasUsableVesselPosition(state.Latitude, state.Longitude),
-				GNSSCritical: state.GNSSCriticalAlert,
-				SOGKts:       state.SpeedOverGroundKts,
-				Engine0RPM:   state.Engine0RPM,
-				Engine1RPM:   state.Engine1RPM,
+				Lat:            state.Latitude,
+				Lon:            state.Longitude,
+				PositionOK:     hasUsableVesselPosition(state.Latitude, state.Longitude),
+				GNSSCritical:   state.GNSSCriticalAlert,
+				SOGKts:         state.SpeedOverGroundKts,
+				EnginesRunning: state.EnginesRunning,
 			}, true
 		},
 		raise: func(expectedSetAt time.Time) (bool, error) {
@@ -158,10 +156,6 @@ func newAnchorAutoRaiseWatcher() *anchorAutoRaiseWatcher {
 	}
 }
 
-func engineRunning(rpm float64) bool {
-	return rpm > 0 && !math.IsInf(rpm, 0)
-}
-
 // check evaluates one tick. now is injected so tests control the sustain
 // window without sleeping - same pattern as anchorDragWatcher.check.
 func (w *anchorAutoRaiseWatcher) check(now time.Time) {
@@ -184,7 +178,7 @@ func (w *anchorAutoRaiseWatcher) check(now time.Time) {
 		return
 	}
 
-	engines := engineRunning(sample.Engine0RPM) || engineRunning(sample.Engine1RPM)
+	engines := sample.EnginesRunning != nil && *sample.EnginesRunning
 
 	positionValid := sample.PositionOK && !sample.GNSSCritical
 	var distance float64
@@ -225,8 +219,8 @@ func (w *anchorAutoRaiseWatcher) check(now time.Time) {
 	}
 
 	w.raiseAttempted = true
-	log.Printf("anchor auto-raise: conditions sustained %ds - rpm0=%.0f rpm1=%.0f distance=%.0fm radius=%.0fm sog=%.1fkt: raising",
-		autoRaiseSustainSeconds, sample.Engine0RPM, sample.Engine1RPM, distance, anchor.RadiusMeters, sample.SOGKts)
+	log.Printf("anchor auto-raise: conditions sustained %ds - engines running distance=%.0fm radius=%.0fm sog=%.1fkt: raising",
+		autoRaiseSustainSeconds, distance, anchor.RadiusMeters, sample.SOGKts)
 
 	raised, err := w.raise(anchor.SetAt)
 	if err != nil {

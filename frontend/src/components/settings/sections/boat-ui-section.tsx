@@ -216,7 +216,7 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     <>
       <FormSection
         title="Engines"
-        description="Tick every engine the frozen-sensor and engine-differential checks should watch. Each needs a linked inventory item so its equipment profile applies gauge zones and pack thresholds."
+        description="Tick every engine on the boat. The sensor checks, the Alternators tile, anchor auto-raise and Mate's passage estimates all use this list; with none ticked they treat engines as not set up. Each needs a linked inventory item so its equipment profile applies gauge zones and pack thresholds."
       >
         <div className="flex flex-col gap-2">
           {instances.length === 0 && (
@@ -245,7 +245,7 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
 
       <FormSection
         title="Power"
-        description="Pick which battery bank is the house bank the full-bank-charging check watches. Live voltage, current and state of charge are shown for every bank so you can tell which one is which."
+        description="Pick which battery bank is the house bank. The Battery & Power tile, its dawn projection and state-of-charge bands, and the full-bank-charging check all read this bank; with none picked they show no data. Live voltage, current and state of charge are shown for every bank so you can tell which one is which."
       >
         <PowerFieldset
           houseBank={houseBank}
@@ -334,7 +334,7 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
           id={`engine-include-${instance}`}
           checked={row.included}
           onCheckedChange={(checked) => onToggle(checked === true)}
-          aria-label={`Include ${instance} in anomaly detection`}
+          aria-label={`Include ${instance} as an engine`}
         />
         <FieldLabel htmlFor={`engine-include-${instance}`} className="text-xs text-muted-foreground">
           propulsion.{instance}

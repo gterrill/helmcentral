@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -25,6 +27,7 @@ type chargerInstanceData struct {
 type electricalStateData struct {
 	Datetime            time.Time
 	BatterySocPercent   float64
+	SocPath             string // the house bank's state-of-charge path; "" with no bank
 	BatteryCapacityAh   float64
 	ChargingCurrentA    *float64 // nil when unreported; signed, so no sentinel number fits
 	ChargingPowerW      *float64
@@ -70,22 +73,26 @@ func buildElectricalStatePayload() map[string]any {
 
 	signalkURL := buildSignalKURL(address, port)
 
-	// A vessel block that cannot be read is logged, and both alternator
-	// sides then read as not set. Every other electrical figure is unaffected.
-	alternators, altErr := loadVesselAlternators()
-	if altErr != nil {
-		log.Printf("electrical state: alternator instances unreadable, alternators show no data: %v", altErr)
+	// A vessel block that cannot be read is logged, and the alternators and
+	// the house bank figures then read as not set. Every other electrical
+	// figure is unaffected.
+	vessel, vesselErr := loadVesselSettings(settingsPath)
+	noteVesselRead("electrical state", vesselErr, "electrical state: vessel settings unreadable, alternator instances and house bank show no data: %v")
+	if vesselErr != nil {
+		vessel = vesselSettings{}
+	} else {
+		noteHouseBank(vessel.HouseBank)
 	}
 
 	if signalkURL != "" {
-		electrical, fetchErr := fetchSignalKElectricalState(alternators)
+		electrical, fetchErr := fetchSignalKElectricalState(vessel)
 		if fetchErr == nil {
 			state = electrical
 			source = "signalk"
 		}
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"datetime":                   state.Datetime.Format(time.RFC3339),
 		"last_update_age_s":          state.LastUpdateAge,
 		"battery_soc_percent":        state.BatterySocPercent,
@@ -114,6 +121,29 @@ func buildElectricalStatePayload() map[string]any {
 		"charger_0_charging_mode":    state.Charger0.ChargingMode,
 		"charger_0_error":            state.Charger0.Error,
 		"source":                     source,
+	}
+	// The house bank's state-of-charge path, for the tile's bands. Absent
+	// with no bank, and independent of position or the dawn projection.
+	if state.SocPath != "" {
+		payload["soc_path"] = state.SocPath
+	}
+	return payload
+}
+
+// houseBankUnsetLogged makes the "no house bank" line appear once, not on
+// every tick. It resets when a bank is set, so removing the bank later logs
+// again.
+var houseBankUnsetLogged atomic.Bool
+
+func resetHouseBankUnsetLog() { houseBankUnsetLogged.Store(false) }
+
+func noteHouseBank(bank *vesselHouseBankSetting) {
+	if bank != nil && strings.TrimSpace(bank.Path) != "" {
+		houseBankUnsetLogged.Store(false)
+		return
+	}
+	if houseBankUnsetLogged.CompareAndSwap(false, true) {
+		log.Printf("electrical state: no house bank is set in Vessel settings, so the Battery & Power bank figures show no data")
 	}
 }
 

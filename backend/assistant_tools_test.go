@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -905,23 +906,49 @@ func TestExecuteGetTides_EmptyWindowAddsNote(t *testing.T) {
 
 // ── estimate_passage ────────────────────────────────────────────────────
 
-func TestFuelRateInstancesFromSnapshot_DiscoversInstanceNames(t *testing.T) {
-	withGlobalSnapshot(t, snapshotWithSelfValues(map[string]any{
-		"propulsion.port.fuel.rate":      1e-05,
-		"propulsion.starboard.fuel.rate": 1e-05,
-	}))
+func TestConfiguredEngineInstances_ReadsVesselSettings(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := saveVesselSettings(settingsPath, vesselSettings{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}}}); err != nil {
+		t.Fatal(err)
+	}
 
-	got := fuelRateInstancesFromSnapshot()
+	got, err := configuredEngineInstances(settingsPath)()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0] != "port" || got[1] != "starboard" {
 		t.Fatalf("expected [port starboard], got %v", got)
 	}
 }
 
-func TestFuelRateInstancesFromSnapshot_NoTreeIsNil(t *testing.T) {
-	withGlobalSnapshot(t, newSignalKSnapshot())
+func TestConfiguredEngineInstances_UnreadableSettingsIsAnError(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configuredEngineInstances(settingsPath)(); err == nil {
+		t.Fatal("expected an error, not a silent nil")
+	}
+}
 
-	if got := fuelRateInstancesFromSnapshot(); got != nil {
-		t.Fatalf("expected nil when the snapshot has no self tree, got %v", got)
+func TestExecuteEstimatePassage_UnreadableSettingsIsNotReportedAsNotSetUp(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() ([]string, error) { return nil, errors.New("boom") },
+	}
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err == nil || !strings.Contains(err.Error(), "settings could not be read") || strings.Contains(err.Error(), "not set up") {
+		t.Fatalf("expected a settings-unreadable error, got %v", err)
+	}
+}
+
+func TestConfiguredEngineInstances_NoneConfiguredIsNil(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+
+	if got, err := configuredEngineInstances(settingsPath)(); got != nil || err != nil {
+		t.Fatalf("expected nil and no error with no engines configured, got %v, %v", got, err)
 	}
 }
 
@@ -965,7 +992,7 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
 	}
 
 	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
@@ -1008,9 +1035,6 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	if len(result.Instances) != 2 || result.Instances[0] != "port" || result.Instances[1] != "starboard" {
 		t.Errorf("expected instances=[port starboard], got %v", result.Instances)
 	}
-	if result.InstancesAssumed {
-		t.Errorf("expected instances_assumed=false when the snapshot named the instances")
-	}
 	if len(result.Table) != 1 || result.Table[0].SOGKtsMin != 9 {
 		t.Errorf("expected a single band 9 in the table, got %+v", result.Table)
 	}
@@ -1023,7 +1047,7 @@ func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
 	}
 
 	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
@@ -1056,7 +1080,7 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(map[string][]telemetryPoint{}), // every path comes back empty
-		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
 	}
 
 	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
@@ -1068,34 +1092,19 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 	}
 }
 
-func TestExecuteEstimatePassage_UnknownInstancesFallsBackAndFlagsAssumed(t *testing.T) {
+func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() []string { return nil }, // snapshot has no propulsion tree yet
+		fuelRateInstances: func() ([]string, error) { return nil, nil }, // no vessel.engines
 	}
 
-	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
-	if err != nil {
-		t.Fatalf("execute estimate_passage: %v", err)
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err == nil {
+		t.Fatalf("expected an error when no engines are configured, not an assumed pair")
 	}
-
-	var result assistantEstimatePassageResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
-	}
-	if !result.InstancesAssumed {
-		t.Errorf("expected instances_assumed=true when the snapshot named no instances")
-	}
-	if len(result.Instances) != 2 || result.Instances[0] != "port" || result.Instances[1] != "starboard" {
-		t.Errorf("expected the port/starboard fallback, got %v", result.Instances)
-	}
-	// The fallback names must actually be the ones queried, not just
-	// reported: singleBandPerformanceSeries only has data under
-	// propulsion.port.* and propulsion.starboard.*, so a wrong guess would
-	// have produced the empty-table error instead of a result.
-	if len(result.Table) == 0 {
-		t.Fatalf("expected a non-empty table, proving the fallback names were actually queried")
+	if !strings.Contains(err.Error(), "engines are not set up") {
+		t.Errorf("expected the error to say engines are not set up, got %q", err.Error())
 	}
 }
 
@@ -1103,7 +1112,7 @@ func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
 		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
 	}
 
@@ -1134,7 +1143,7 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
 		fuelAboardM3:      func() (float64, bool) { return 0, false },
 	}
 

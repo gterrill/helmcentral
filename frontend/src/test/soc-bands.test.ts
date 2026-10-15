@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  DEFAULT_SOC_PATH,
   hoursToBand,
   socBandsFromRules,
   socSeverity,
@@ -9,7 +8,7 @@ import {
 } from '@/lib/soc-bands'
 import type { AlarmRule } from '@/hooks/use-alarm-rules'
 
-const SOC_PATH = DEFAULT_SOC_PATH
+const SOC_PATH = 'electrical.batteries.0.capacity.stateOfCharge'
 
 function rule(overrides: Partial<AlarmRule> = {}): AlarmRule {
   return {
