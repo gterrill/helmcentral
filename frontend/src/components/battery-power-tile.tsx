@@ -12,7 +12,9 @@ export interface BatteryPowerTileProps {
   solarOutputW: number | null
   acOutputW: number | null
   dc12vPowerW: number | null
-  dc24vVoltageV: number | null
+  /** The chosen voltage readout battery, with its name; both null when none is set. */
+  voltageReadoutV: number | null
+  voltageReadoutLabel: string | null
   charger0CurrentA: number | null
   charger0AcIn1CurrentA: number | null
   charger0ChargingMode: string | null
@@ -110,7 +112,8 @@ const NO_READINGS = {
   solarOutputW: null,
   acOutputW: null,
   dc12vPowerW: null,
-  dc24vVoltageV: null,
+  voltageReadoutV: null,
+  voltageReadoutLabel: null,
   charger0CurrentA: null,
   charger0AcIn1CurrentA: null,
   charger0ChargingMode: null,
@@ -128,7 +131,8 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     solarOutputW,
     acOutputW,
     dc12vPowerW,
-    dc24vVoltageV,
+    voltageReadoutV,
+    voltageReadoutLabel,
     charger0CurrentA,
     charger0AcIn1CurrentA,
     charger0ChargingMode,
@@ -177,7 +181,9 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     ? Math.round(acOutputW + dc12vPowerW).toString()
     : '—'
 
-  const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
+  // With no readout battery chosen the voltage is not shown at all, rather than
+  // a dash under a name nothing has been picked for.
+  const voltageReadoutShown = voltageReadoutV !== null && voltageReadoutLabel !== null
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
@@ -310,9 +316,15 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               figure the footer exists to show. */}
           <div className="mt-2 space-y-1 font-display text-xs tabular-nums text-muted-foreground">
             <span className="block truncate">
-              {dc24vVoltageLabel}
-              <span className="font-display text-muted-foreground">V</span>
-              {' · '}
+              {voltageReadoutShown && (
+                <>
+                  <span title={voltageReadoutLabel ?? undefined}>{voltageReadoutV.toFixed(2)}</span>
+                  <span className="font-display text-muted-foreground">V</span>
+                  {' '}
+                  <span className="font-display text-muted-foreground">{voltageReadoutLabel}</span>
+                  {' · '}
+                </>
+              )}
               <span className={readoutClass}>{chargeRateLabel}</span>
               <span className="ml-1 font-display text-muted-foreground">%/h</span>
             </span>

@@ -5,6 +5,8 @@ import { Tile } from '@/components/ui/tile'
 import { apiRequest } from '@/lib/api-query'
 
 interface GeneratorTileProps {
+  /** A generator instance is chosen in Vessel settings; null while that is not known. */
+  generatorConfigured: boolean | null
   generatorState: string | null
   generatorManualStart: boolean
   generatorManualStartTimer: number
@@ -45,6 +47,7 @@ function formatRunReason(condition: string | null): string | null {
 }
 
 export const GeneratorTile = memo(function GeneratorTile({
+  generatorConfigured,
   generatorState,
   generatorManualStart,
   generatorManualStartTimer,
@@ -72,10 +75,9 @@ export const GeneratorTile = memo(function GeneratorTile({
     generatorState === 'cool down' ||
     (generatorRealPowerW !== null && generatorRealPowerW > 0)
 
+  // No reading from the generator AC input is "--", never a made-up 0 W.
   const powerLabel =
-    generatorRealPowerW !== null && generatorRealPowerW > 0
-      ? Math.round(generatorRealPowerW).toString()
-      : '0'
+    generatorRealPowerW === null ? '--' : generatorRealPowerW > 0 ? Math.round(generatorRealPowerW).toString() : '0'
 
   const runReason = formatRunReason(generatorRunningByCondition)
 
@@ -113,13 +115,31 @@ export const GeneratorTile = memo(function GeneratorTile({
     }
   }, [])
 
+  if (generatorConfigured === null) {
+    return (
+      <Tile title="Generator">
+        <p className="mt-2 text-sm text-muted-foreground">--</p>
+      </Tile>
+    )
+  }
+
+  if (!generatorConfigured) {
+    return (
+      <Tile title="Generator">
+        <p className="mt-2 text-sm text-muted-foreground">
+          The generator is not set up. Choose it in Settings, Vessel, under Electrical.
+        </p>
+      </Tile>
+    )
+  }
+
   return (
     <Tile title="Generator">
       <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-2">
         <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-gauge-secondary/30' : ''}`}>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
           <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-gauge-secondary' : 'text-muted-foreground'}`}>
-            {powerLabel}<span className="ml-1 text-base text-muted-foreground">W</span>
+            {powerLabel}{powerLabel !== '--' && <span className="ml-1 text-base text-muted-foreground">W</span>}
           </p>
         </div>
 

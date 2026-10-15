@@ -1,7 +1,7 @@
 /**
  * Smoke test: renders <App> with all hooks mocked.
  *
- * This catches ReferenceErrors like "dc24vVoltageLabel is not defined" that
+ * This catches ReferenceErrors like "voltageReadoutShown is not defined" that
  * only surface at runtime when a derived variable is accidentally omitted from
  * the component body but still referenced in JSX.
  */
@@ -36,8 +36,8 @@ vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
     batterySocPercent: null, batteryCapacityAh: null, chargingCurrentA: null,
     chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
-    dc12vCurrentA: null, dc24vVoltageV: null, acLoadsW: null,
-    generatorRealPowerW: null, batteryRatePercentPerHour: null, timeToGoHours: null,
+    dc12vCurrentA: null, voltageReadoutV: null, voltageReadoutLabel: null, acLoadsW: null,
+    generatorRealPowerW: null, generatorConfigured: true, batteryRatePercentPerHour: null, timeToGoHours: null,
     charger0CurrentA: null, charger0AcIn1CurrentA: null,
     charger0ChargingMode: null, charger0Error: null,
   }),
@@ -161,7 +161,7 @@ describe('App smoke test', () => {
   })
 
   it('renders without throwing a ReferenceError', () => {
-    // If any derived variable (e.g. dc24vVoltageLabel) is missing from the
+    // If any derived variable (e.g. voltageReadoutShown) is missing from the
     // component body but used in JSX, this render call will throw and fail.
     render(<App />)
   })

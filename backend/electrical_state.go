@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,7 +36,8 @@ type electricalStateData struct {
 	ACOutputW           float64
 	DC12VPowerW         float64
 	DC12VCurrentA       float64
-	DC24VVoltageV       float64
+	VoltageReadoutV     float64 // the chosen voltage readout battery; -1 when unset or silent
+	VoltageReadoutLabel string
 	ACLoadsW            float64
 	GeneratorRealPowerW float64
 	LastUpdateAge       float64
@@ -55,7 +57,7 @@ func buildElectricalStatePayload() map[string]any {
 		ACOutputW:           -1,
 		DC12VPowerW:         -1,
 		DC12VCurrentA:       -1,
-		DC24VVoltageV:       -1,
+		VoltageReadoutV:     -1,
 		ACLoadsW:            -1,
 		GeneratorRealPowerW: -1,
 		Alternator0:         alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1},
@@ -77,11 +79,20 @@ func buildElectricalStatePayload() map[string]any {
 	// the house bank figures then read as not set. Every other electrical
 	// figure is unaffected.
 	vessel, vesselErr := loadVesselSettings(settingsPath)
-	noteVesselRead("electrical state", vesselErr, "electrical state: vessel settings unreadable, alternator instances and house bank show no data: %v")
+	noteVesselRead("electrical state", vesselErr, "electrical state: vessel settings unreadable, alternator, electrical instances and house bank show no data: %v")
 	if vesselErr != nil {
 		vessel = vesselSettings{}
 	} else {
 		noteHouseBank(vessel.HouseBank)
+		noteElectricalInstances(vessel.Electrical)
+	}
+
+	// Whether a generator is chosen comes from the settings alone, so a
+	// SignalK drop never reads as "not set up". It is null (unknown) when the
+	// vessel block cannot be read.
+	var generatorConfigured any
+	if vesselErr == nil {
+		generatorConfigured = vessel.Electrical.GeneratorInstance != ""
 	}
 
 	if signalkURL != "" {
@@ -105,9 +116,11 @@ func buildElectricalStatePayload() map[string]any {
 		"dc_current_a":               state.DC12VCurrentA,
 		"dc_12v_power_w":             state.DC12VPowerW,
 		"dc_12v_current_a":           state.DC12VCurrentA,
-		"dc_24v_voltage_v":           state.DC24VVoltageV,
+		"voltage_readout_v":          state.VoltageReadoutV,
+		"voltage_readout_label":      state.VoltageReadoutLabel,
 		"ac_loads_w":                 state.ACLoadsW,
 		"generator_real_power_w":     state.GeneratorRealPowerW,
+		"generator_configured":       generatorConfigured,
 		"alternator_0_current_a":     state.Alternator0.CurrentA,
 		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
 		"alternator_0_power_w":       state.Alternator0.PowerW,
@@ -144,6 +157,49 @@ func noteHouseBank(bank *vesselHouseBankSetting) {
 	}
 	if houseBankUnsetLogged.CompareAndSwap(false, true) {
 		log.Printf("electrical state: no house bank is set in Vessel settings, so the Battery & Power bank figures show no data")
+	}
+}
+
+// electricalUnsetLogged remembers which electrical instances the last log
+// line named as unset, so an unchanged gap is logged once, not every tick. A
+// different set logs again; nothing unset forgets it.
+var electricalUnsetLogged = struct {
+	mu   sync.Mutex
+	last string
+}{}
+
+func resetElectricalUnsetLog() {
+	electricalUnsetLogged.mu.Lock()
+	defer electricalUnsetLogged.mu.Unlock()
+	electricalUnsetLogged.last = ""
+}
+
+// noteElectricalInstances logs, once, which of the generator, generator AC
+// input, shore charger, inverter and voltage readout battery are not set in
+// Vessel settings, and so show no data.
+func noteElectricalInstances(e vesselElectricalSettings) {
+	var unset []string
+	for _, item := range []struct{ name, value string }{
+		{"generator", e.GeneratorInstance},
+		{"generator AC input", e.GeneratorACInstance},
+		{"shore charger", e.ShoreChargerInstance},
+		{"inverter", e.InverterInstance},
+		{"voltage readout battery", e.VoltageReadoutBattery},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			unset = append(unset, item.name)
+		}
+	}
+	line := strings.Join(unset, ", ")
+
+	electricalUnsetLogged.mu.Lock()
+	defer electricalUnsetLogged.mu.Unlock()
+	if line == electricalUnsetLogged.last {
+		return
+	}
+	electricalUnsetLogged.last = line
+	if line != "" {
+		log.Printf("electrical state: not set in Vessel settings, so these show no data: %s", line)
 	}
 }
 

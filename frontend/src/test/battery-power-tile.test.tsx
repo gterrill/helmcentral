@@ -11,7 +11,8 @@ const baseProps = {
   solarOutputW: 520.2,
   acOutputW: 780,
   dc12vPowerW: 144,
-  dc24vVoltageV: 26.7,
+  voltageReadoutV: 26.7,
+  voltageReadoutLabel: 'Aft House',
   charger0CurrentA: null,
   charger0AcIn1CurrentA: null,
   charger0ChargingMode: null,
@@ -552,4 +553,21 @@ test('a stale feed still blanks the dawn estimate even with the charger drawing 
 
   const estimate = screen.getByTestId('dawn-estimate')
   expect(estimate).toHaveTextContent('—')
+})
+
+test('the voltage row is labelled with the chosen battery, not a fixed 24V', () => {
+  render(<BatteryPowerTile {...baseProps} />)
+
+  const row = screen.getByText('26.70').parentElement
+  expect(row).toHaveTextContent('Aft House')
+  expect(row).not.toHaveTextContent('24V')
+})
+
+test('the voltage row is hidden when no readout battery is set', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} voltageReadoutV={null} voltageReadoutLabel={null} />)
+
+  expect(screen.queryByText('26.70')).not.toBeInTheDocument()
+  expect(container.textContent).not.toContain('Aft House')
+  // The charge rate beside it still reads.
+  expect(screen.getByText('%/h')).toBeInTheDocument()
 })

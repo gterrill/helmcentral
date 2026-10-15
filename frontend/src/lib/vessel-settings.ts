@@ -33,11 +33,39 @@ export interface VesselAlternatorSettings {
   starboard_instance: string
 }
 
+/**
+ * The electrical.<kind>.<id> instances the tiles and the overnight model read.
+ * Bare instance ids; '' is not set.
+ */
+export interface VesselElectricalSettings {
+  generator_instance: string
+  generator_ac_instance: string
+  shore_charger_instance: string
+  inverter_instance: string
+  voltage_readout_battery: string
+}
+
+/** The operator's own name for one electrical.solar.<id> controller. */
+export interface VesselSolarSetting {
+  instance: string
+  name: string
+}
+
 export interface VesselSettings {
   engines: VesselEngineSetting[]
   house_bank: VesselHouseBankSetting | null
   batteries: VesselBatterySetting[]
   alternators: VesselAlternatorSettings
+  electrical: VesselElectricalSettings
+  solar: VesselSolarSetting[]
+}
+
+export const emptyVesselElectrical: VesselElectricalSettings = {
+  generator_instance: '',
+  generator_ac_instance: '',
+  shore_charger_instance: '',
+  inverter_instance: '',
+  voltage_readout_battery: '',
 }
 
 export const emptyVesselSettings: VesselSettings = {
@@ -45,6 +73,8 @@ export const emptyVesselSettings: VesselSettings = {
   house_bank: null,
   batteries: [],
   alternators: { port_instance: '', starboard_instance: '' },
+  electrical: emptyVesselElectrical,
+  solar: [],
 }
 
 export interface VesselEngineCandidate {
@@ -73,6 +103,33 @@ export interface VesselAlternatorCandidate {
   current: number | null
 }
 
+/** Each reading is null when the instance has not reported recently. */
+export interface VesselGeneratorCandidate {
+  instance: string
+  state: string | null
+}
+
+export interface VesselACCandidate {
+  instance: string
+  real_power: number | null
+}
+
+export interface VesselChargerCandidate {
+  instance: string
+  current: number | null
+  acin_current: number | null
+}
+
+export interface VesselInverterCandidate {
+  instance: string
+  ac_out: number | null
+}
+
+export interface VesselSolarCandidate {
+  instance: string
+  panel_power: number | null
+}
+
 export interface VesselDetectorStatus {
   ready: boolean
   missing?: string
@@ -82,10 +139,17 @@ export interface VesselCandidatesResponse {
   engines: VesselEngineCandidate[]
   batteries: VesselBatteryCandidate[]
   alternators: VesselAlternatorCandidate[]
+  generators: VesselGeneratorCandidate[]
+  ac: VesselACCandidate[]
+  chargers: VesselChargerCandidate[]
+  inverters: VesselInverterCandidate[]
+  solar: VesselSolarCandidate[]
   detectors: Record<string, VesselDetectorStatus>
 }
 
-export const emptyVesselCandidates: VesselCandidatesResponse = { engines: [], batteries: [], alternators: [], detectors: {} }
+export const emptyVesselCandidates: VesselCandidatesResponse = {
+  engines: [], batteries: [], alternators: [], generators: [], ac: [], chargers: [], inverters: [], solar: [], detectors: {},
+}
 
 /** "propulsion.port" style display, or a raw instance id if that's all there is: "port" -> "Port". */
 export function titleCaseInstance(instance: string): string {

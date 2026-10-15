@@ -562,3 +562,21 @@ func normalizeVesselBatteries(in []vesselBatterySetting) []vesselBatterySetting 
 	sort.Slice(out, func(i, j int) bool { return out[i].Instance < out[j].Instance })
 	return out
 }
+
+// normalizeVesselSolar tidies the operator's solar controller names for
+// saving, the same way normalizeVesselBatteries does for batteries.
+func normalizeVesselSolar(in []vesselSolarSetting) []vesselSolarSetting {
+	seen := map[string]bool{}
+	out := []vesselSolarSetting{}
+	for _, s := range in {
+		instance := strings.TrimSpace(s.Instance)
+		name := strings.TrimSpace(s.Name)
+		if instance == "" || name == "" || seen[instance] {
+			continue
+		}
+		seen[instance] = true
+		out = append(out, vesselSolarSetting{Instance: instance, Name: name})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Instance < out[j].Instance })
+	return out
+}

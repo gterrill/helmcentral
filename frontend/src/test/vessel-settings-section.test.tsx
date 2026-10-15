@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
+import { emptyVesselElectrical } from '@/lib/vessel-settings'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { VesselParticularsProvider } from '@/components/settings/vessel-particulars-context'
@@ -19,7 +20,7 @@ import {
 // through one mock, the same pattern equipment-editor.test.tsx uses for its
 // own multi-endpoint component.
 
-type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown; batteries: { instance: string; name: string }[]; alternators: { port_instance: string; starboard_instance: string } }
+type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown; batteries: { instance: string; name: string }[]; alternators: { port_instance: string; starboard_instance: string }; electrical: Record<string, string>; solar: { instance: string; name: string }[] }
 let latestDraft: RegularSettingsDraft
 // What the next Save would send as `vessel`.
 const pendingVessel = () => buildRegularSettingsPatch(latestDraft).vessel as unknown as SavedVessel
@@ -38,6 +39,7 @@ const profiles = [
 ]
 
 let savedPortInstance = ''
+let savedElectrical: Record<string, string> = {}
 const fetchMock = vi.fn()
 
 function stubFetch() {
@@ -63,6 +65,14 @@ function stubFetch() {
             { instance: '2', current: 31.5 },
             { instance: '12', current: 28.5 },
           ],
+          generators: [
+            { instance: '0', state: 'stopped' },
+            { instance: '12', state: null },
+          ],
+          ac: [{ instance: '5', real_power: 1250 }, { instance: '40', real_power: null }],
+          chargers: [{ instance: '5', current: 20, acin_current: 6 }, { instance: '276', current: null, acin_current: null }],
+          inverters: [{ instance: '5', ac_out: 420 }, { instance: '276', ac_out: null }],
+          solar: [{ instance: '288', panel_power: 110 }, { instance: '289', panel_power: null }],
           detectors: {
             frozen: { ready: false, missing: 'Tick at least one engine' },
             battery: { ready: false, missing: 'Pick your house bank' },
@@ -117,13 +127,14 @@ function stubFetch() {
 beforeEach(() => {
   dashboardPage = { id: 'page-1', widgets: [] }
   savedPortInstance = ''
+  savedElectrical = {}
   fetchMock.mockReset()
   stubFetch()
   vi.stubGlobal('fetch', fetchMock)
 })
 
 function SectionHarness() {
-  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: savedPortInstance, starboard_instance: '' } } }))
+  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: savedPortInstance, starboard_instance: '' }, electrical: { ...emptyVesselElectrical, ...savedElectrical }, solar: [] } }))
   latestDraft = draft
   return <BoatUiSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
 }
@@ -202,6 +213,59 @@ describe('Settings -> Vessel: Engines and Power', () => {
     expect(within(port).getByRole('option', { name: '7 · not reporting' })).toBeInTheDocument()
     // A live instance with no current reads "--"; a vanished one says so.
     expect(within(port).getByRole('option', { name: '1 · --' })).toBeInTheDocument()
+  })
+
+  it('lists the discovered electrical instances with live readings, and Not set', async () => {
+    renderSection()
+
+    const generator = await screen.findByLabelText('Generator')
+    expect(within(generator).getByRole('option', { name: 'Not set' })).toBeInTheDocument()
+    expect(within(generator).getByRole('option', { name: '0 · stopped' })).toBeInTheDocument()
+    expect(within(generator).getByRole('option', { name: '12 · --' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Generator AC input')).getByRole('option', { name: '5 · 1250 W' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Shore charger')).getByRole('option', { name: '5 · 20.0 A out · 6.0 A AC in' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Shore charger')).getByRole('option', { name: '276 · --' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Inverter')).getByRole('option', { name: '5 · 420 W' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Voltage readout battery')).getByRole('option', { name: '0 · 27.2 V' })).toBeInTheDocument()
+    // A charger input is not a battery and is not offered.
+    expect(within(screen.getByLabelText('Voltage readout battery')).queryByRole('option', { name: /^1 ·/ })).toBeNull()
+    expect((generator as HTMLSelectElement).value).toBe('')
+    expect(pendingVessel().electrical).toEqual({ generator_instance: '', generator_ac_instance: '', shore_charger_instance: '', inverter_instance: '', voltage_readout_battery: '' })
+  })
+
+  it('picking the electrical instances carries them into what a save sends', async () => {
+    renderSection()
+
+    fireEvent.change(await screen.findByLabelText('Generator'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText('Generator AC input'), { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText('Shore charger'), { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText('Inverter'), { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText('Voltage readout battery'), { target: { value: '512' } })
+
+    await waitFor(() => expect(pendingVessel().electrical).toEqual({
+      generator_instance: '0', generator_ac_instance: '5', shore_charger_instance: '5', inverter_instance: '5', voltage_readout_battery: '512',
+    }))
+  })
+
+  it('keeps a saved electrical instance the boat no longer reports, marked not reporting', async () => {
+    savedElectrical = { inverter_instance: '9' }
+    renderSection()
+
+    const inverter = await screen.findByLabelText('Inverter')
+    expect((inverter as HTMLSelectElement).value).toBe('9')
+    expect(within(inverter).getByRole('option', { name: '9 · not reporting' })).toBeInTheDocument()
+  })
+
+  it('names solar controllers by instance and saves only the named ones', async () => {
+    renderSection()
+
+    const first = await screen.findByLabelText('Name for solar controller 288')
+    expect(first).toHaveAttribute('placeholder', 'Array 288')
+    expect(screen.getByText(/Instance 288 · 110 W/)).toBeInTheDocument()
+    fireEvent.change(first, { target: { value: ' Port arch ' } })
+
+    await waitFor(() => expect(pendingVessel().solar).toEqual([{ instance: '288', name: 'Port arch' }]))
+    expect(screen.getByLabelText('Name for solar controller 289')).toHaveValue('')
   })
 
   it('has no Save button of its own: the page Save bar owns it', async () => {

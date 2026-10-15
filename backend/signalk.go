@@ -100,19 +100,18 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	// The configured engines say which propulsion instances to read. An
 	// unreadable vessel block is logged and reads as no engines configured,
 	// so engine state is unknown rather than guessed.
-	var engines []vesselEngineSetting
 	vessel, vesselErr := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	noteVesselRead("vessel state", vesselErr, "vessel state: engines unreadable, engine state unknown: %v")
-	if vesselErr == nil {
-		engines = vessel.Engines
+	noteVesselRead("vessel state", vesselErr, "vessel state: engines unreadable, engine and generator state unknown: %v")
+	if vesselErr != nil {
+		vessel = vesselSettings{}
 	}
-	return vesselStateFromTelemetry(t, state, engines), nil
+	return vesselStateFromTelemetry(t, state, vessel), nil
 }
 
 // vesselStateFromTelemetry fills state from our own boat's telemetry. The
 // -1 and "" sentinels vesselStateData still carries to the browser are
 // produced here, at the payload edge, from ok and AgeKnown (ADR 0178).
-func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, engines []vesselEngineSetting) vesselStateData {
+func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel vesselSettings) vesselStateData {
 	state.Name = strings.TrimSpace(firstString(t, "name", "design.name"))
 
 	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
@@ -161,7 +160,7 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, engines 
 
 	position, hasPosition := t.Position()
 
-	state.EnginesRunning = readEnginesRunning(t, engines)
+	state.EnginesRunning = readEnginesRunning(t, vessel.Engines)
 	validation := parseGNSSPositionValidation(t)
 	validation = applyGNSSHeuristics(validation, gnssObservedSample{
 		HasPosition: hasPosition,
@@ -318,21 +317,26 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, engines 
 		state.SpeedOverGroundKts = math.Round(v.Value*metersPerSecondToKnots*10) / 10
 	}
 
-	// Generator state (com.victronenergy.generator.0 via signalk-venus-plugin)
-	state.GeneratorState = firstString(t, "electrical.generator.0.state")
+	// Generator state comes from the generator instance the operator chose in
+	// Vessel settings. With none chosen the fields stay empty: no instance is
+	// guessed.
+	if gen := vessel.Electrical.GeneratorInstance; gen != "" {
+		prefix := "electrical.generator." + gen
+		state.GeneratorState = firstString(t, prefix+".state")
 
-	if v, ok := t.Bool("electrical.generator.0.manualStart"); ok {
-		state.GeneratorManualStart = v
-	}
+		if v, ok := t.Bool(prefix + ".manualStart"); ok {
+			state.GeneratorManualStart = v
+		}
 
-	if v, ok := t.Number("electrical.generator.0.manualStartTimer"); ok && v.Value >= 0 {
-		state.GeneratorManualStartTimer = v.Value
-	}
+		if v, ok := t.Number(prefix + ".manualStartTimer"); ok && v.Value >= 0 {
+			state.GeneratorManualStartTimer = v.Value
+		}
 
-	state.GeneratorRunningByCondition = firstString(t, "electrical.generator.0.runningByCondition")
+		state.GeneratorRunningByCondition = firstString(t, prefix+".runningByCondition")
 
-	if v, ok := t.Number("electrical.generator.0.runtime"); ok && v.Value >= 0 {
-		state.GeneratorRuntime = v.Value
+		if v, ok := t.Number(prefix + ".runtime"); ok && v.Value >= 0 {
+			state.GeneratorRuntime = v.Value
+		}
 	}
 
 	return state
@@ -427,7 +431,7 @@ func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 }
 
 func fetchSignalKElectricalState(vessel vesselSettings) (electricalStateData, error) {
-	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
+	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, VoltageReadoutV: -1, ACLoadsW: -1, GeneratorRealPowerW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	t := globalSignalKSnapshot.selfTelemetry()
 	if !t.HasSelf() {
@@ -517,17 +521,14 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 		}
 	}
 
-	acOutput, acOutputOK := firstNumber(t,
-		"electrical.inverters.0.ac.output.power",
-		"electrical.inverters.0.acout.power",
-		"electrical.inverters.0.acOutputPower",
-		"electrical.alternators.0.ac.output.power",
-	)
-	if !acOutputOK {
-		acOutput, acOutputOK = leafNumberFromAnyChild(t, "electrical.inverters", "acout.power")
-	}
-	if acOutputOK && acOutput >= 0 {
-		state.ACOutputW = roundTo1(acOutput)
+	// Inverter AC output comes from the inverter the operator chose, and only
+	// that one. With none chosen it is unknown, and so are the AC loads that
+	// would otherwise fall back to it.
+	if inverter := vessel.Electrical.InverterInstance; inverter != "" {
+		prefix := "electrical.inverters." + inverter
+		if acOutput, ok := firstNumber(t, prefix+".ac.output.power", prefix+".acout.power", prefix+".acOutputPower"); ok && acOutput >= 0 {
+			state.ACOutputW = roundTo1(acOutput)
+		}
 	}
 
 	if dc12Power, ok := firstNumber(t, "electrical.venus.dcPower", "electrical.dc.12v.power", "electrical.loads.12v.power"); ok && dc12Power >= 0 {
@@ -540,10 +541,13 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 		state.DC12VCurrentA = roundTo1(state.DC12VPowerW / batteryVoltage)
 	}
 
-	if dc24Voltage, ok := firstNumber(t, "electrical.dc.24v.voltage", "electrical.batteries.starter.voltage"); ok && dc24Voltage >= 0 {
-		state.DC24VVoltageV = roundTo1(dc24Voltage)
-	} else if batteryVoltage >= 0 {
-		state.DC24VVoltageV = roundTo1(batteryVoltage)
+	// The extra voltage row reads the battery the operator chose, labelled
+	// with its name. Nothing else stands in for it.
+	if readout := vessel.Electrical.VoltageReadoutBattery; readout != "" {
+		if v, ok := leafNumber(t, "electrical.batteries."+readout+".voltage"); ok && v >= 0 {
+			state.VoltageReadoutV = roundTo1(v)
+			state.VoltageReadoutLabel = voltageReadoutLabel(t, vessel, readout)
+		}
 	}
 
 	if acLoads, ok := firstNumber(t, "electrical.ac.loads.total.power", "electrical.ac.loads.power"); ok && acLoads >= 0 {
@@ -552,24 +556,27 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 		state.ACLoadsW = state.ACOutputW
 	}
 
-	if generatorPower, ok := firstLeafNumber(t,
-		"electrical.ac.1.phase.A.realPower",
-		"electrical.ac.1.phaseA.realPower",
-		"electrical.ac.1.realPower",
-	); ok && generatorPower >= 0 {
-		state.GeneratorRealPowerW = roundTo1(generatorPower)
+	if ac := vessel.Electrical.GeneratorACInstance; ac != "" {
+		prefix := "electrical.ac." + ac
+		if generatorPower, ok := firstLeafNumber(t,
+			prefix+".phase.A.realPower",
+			prefix+".phaseA.realPower",
+			prefix+".realPower",
+		); ok && generatorPower >= 0 {
+			state.GeneratorRealPowerW = roundTo1(generatorPower)
+		}
 	}
 
 	// Alternators: port and starboard come from the operator's Vessel
 	// settings. A side that is not set reads as no data (-1).
 	state.Alternator0 = readAlternatorInstance(t, vessel.Alternators.PortInstance)
 	state.Alternator1 = readAlternatorInstance(t, vessel.Alternators.StarboardInstance)
-	state.Charger0 = readChargerInstance(t, "0")
+	state.Charger0 = readChargerInstance(t, vessel.Electrical.ShoreChargerInstance)
 
 	return state
 }
 
-func fetchSignalKSolarState() (solarStateData, error) {
+func fetchSignalKSolarState(vessel vesselSettings) (solarStateData, error) {
 	state := solarStateData{
 		Datetime:      time.Now().UTC(),
 		CurrentW:      -1,
@@ -585,10 +592,10 @@ func fetchSignalKSolarState() (solarStateData, error) {
 	if !t.HasSelf() {
 		return state, errSignalKNoSelf
 	}
-	return solarStateFromTelemetry(t, state), nil
+	return solarStateFromTelemetry(t, state, vessel), nil
 }
 
-func solarStateFromTelemetry(t telemetryReader, state solarStateData) solarStateData {
+func solarStateFromTelemetry(t telemetryReader, state solarStateData, vessel vesselSettings) solarStateData {
 	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
@@ -605,8 +612,8 @@ func solarStateFromTelemetry(t telemetryReader, state solarStateData) solarState
 		sumYesterdayKWh := 0.0
 		foundYesterday := false
 
-		for i, id := range ids {
-			controller := readSolarController(t, "electrical.solar."+id, id, i, state.Datetime)
+		for _, id := range ids {
+			controller := readSolarController(t, "electrical.solar."+id, id, vessel.solarLabel(id), state.Datetime)
 			state.Controllers = append(state.Controllers, controller)
 
 			if controller.CurrentW >= 0 {
@@ -674,10 +681,10 @@ func solarStateFromTelemetry(t telemetryReader, state solarStateData) solarState
 	return state
 }
 
-func readSolarController(t telemetryReader, prefix string, id string, index int, sampleTime time.Time) solarControllerData {
+func readSolarController(t telemetryReader, prefix string, id string, label string, sampleTime time.Time) solarControllerData {
 	controller := solarControllerData{
 		ID:            id,
-		Label:         defaultSolarControllerLabel(index, id),
+		Label:         label,
 		CurrentW:      -1,
 		TodayKWh:      -1,
 		YesterdayKWh:  -1,
@@ -723,21 +730,29 @@ func readSolarController(t telemetryReader, prefix string, id string, index int,
 	return controller
 }
 
-func defaultSolarControllerLabel(index int, id string) string {
-	switch index {
-	case 0:
-		return "Port"
-	case 1:
-		return "Starboard"
-	case 2:
-		return "Salon"
-	default:
-		trimmed := strings.TrimSpace(id)
-		if trimmed == "" {
-			return fmt.Sprintf("Array %d", index+1)
-		}
-		return "Array " + strings.ToUpper(trimmed)
+// solarLabel is the operator's name for solar controller id, or "Array <id>"
+// when it has none. Position in the list says nothing about which array a
+// controller is, so no name is ever derived from it.
+func (v vesselSettings) solarLabel(id string) string {
+	if name := v.solarName(id); name != "" {
+		return name
 	}
+	return "Array " + strings.TrimSpace(id)
+}
+
+// voltageReadoutLabel names the voltage readout battery: the operator's name
+// from Vessel settings, then the name the bus publishes for it, then
+// "Battery <id>".
+func voltageReadoutLabel(t telemetryReader, vessel vesselSettings, id string) string {
+	for _, b := range vessel.Batteries {
+		if b.Instance == id && strings.TrimSpace(b.Name) != "" {
+			return strings.TrimSpace(b.Name)
+		}
+	}
+	if name, ok := t.String("electrical.batteries." + id + ".name"); ok && strings.TrimSpace(name) != "" {
+		return strings.TrimSpace(name)
+	}
+	return "Battery " + id
 }
 
 // joulesToKWh converts a raw electrical.solar.<id>.yieldToday/yieldYesterday
@@ -795,6 +810,9 @@ func readAlternatorInstance(t telemetryReader, index string) alternatorInstanceD
 
 func readChargerInstance(t telemetryReader, index string) chargerInstanceData {
 	inst := chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}
+	if index == "" {
+		return inst
+	}
 	prefix := "electrical.chargers." + index
 
 	if v, ok := t.Number(prefix + ".current"); ok && v.Value >= 0 {

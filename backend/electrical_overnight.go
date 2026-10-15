@@ -33,7 +33,7 @@ import (
 // every recompute that lands on it.
 //
 // The history scan excludes any night shore power or the generator ran
-// (electrical_overnight.go's shore/generator constants below), on top of the
+// (the shore charger and generator the operator picked in Vessel settings), on top of the
 // pre-existing gap and net-rise checks. This was added after a marina week
 // of shore-power nights passed the net-rise check outright - a charger in
 // float holds the state of charge flat, which reads as a quiet night at
@@ -189,6 +189,12 @@ type overnightResult struct {
 	LookbackNights          int       `json:"lookback_nights"`
 	NightsConsidered        int       `json:"nights_considered"`
 	NightsUsed              int       `json:"nights_used"`
+	// ShoreChecked and GeneratorChecked say whether nights were screened for
+	// shore power and generator running. They are false when Vessel settings
+	// name no shore charger or generator, so a zero count beside them means
+	// "not checked", not "none found".
+	ShoreChecked            bool      `json:"shore_checked"`
+	GeneratorChecked        bool      `json:"generator_checked"`
 	NightsExcludedShore     int       `json:"nights_excluded_shore"`
 	NightsExcludedGenerator int       `json:"nights_excluded_generator"`
 	NightsExcludedGap       int       `json:"nights_excluded_gap"`
@@ -293,15 +299,17 @@ func anyPointExceedsInWindow(points []telemetryPoint, w nightWindow, threshold f
 func computeOvernight(
 	now time.Time,
 	lat, lon float64,
-	socPath string,
+	paths overnightPaths,
 	linearFallback bool,
 	influxConfigured bool,
 	query func(path string, start, stop time.Time, every string) ([]telemetryPoint, error),
 ) overnightResult {
 	result := overnightResult{
-		SocPath:        socPath,
-		ComputedAt:     now,
-		LookbackNights: overnightLookbackNights,
+		SocPath:          paths.Soc,
+		ShoreChecked:     paths.Shore != "",
+		GeneratorChecked: paths.Generator != "",
+		ComputedAt:       now,
+		LookbackNights:   overnightLookbackNights,
 	}
 
 	sunset, sunrise, ok := nextSunEvents(now, lat, lon)
@@ -330,26 +338,31 @@ func computeOvernight(
 	// need, rather than one query per night - the oldest window in the list
 	// is the earliest data any of the nights below could touch.
 	queryStart := windows[len(windows)-1].Start
-	socSeries, err := query(socPath, queryStart, now, overnightQueryEvery)
+	socSeries, err := query(paths.Soc, queryStart, now, overnightQueryEvery)
 	if err != nil {
 		result.Basis = resolveNonHistoryBasis(linearFallback)
 		result.Reason = stringPtr("influxdb query failed: " + err.Error())
 		return result
 	}
-	shoreSeries, err := query(shoreMeasurementPath(), queryStart, now, overnightQueryEvery)
-	if err != nil {
-		// Fail fast exactly as a SoC query failure does: an errored shore
-		// query must never be read as "shore power was never seen", which
-		// would silently let marina nights back into the median.
-		result.Basis = resolveNonHistoryBasis(linearFallback)
-		result.Reason = stringPtr("influxdb query failed: " + err.Error())
-		return result
+	// A series is only queried when the operator has chosen the device. A
+	// failed query is never read as "it never ran": it fails the history
+	// basis exactly as a SoC query failure does.
+	var shoreSeries, generatorSeries []telemetryPoint
+	if paths.Shore != "" {
+		shoreSeries, err = query(paths.Shore, queryStart, now, overnightQueryEvery)
+		if err != nil {
+			result.Basis = resolveNonHistoryBasis(linearFallback)
+			result.Reason = stringPtr("influxdb query failed: " + err.Error())
+			return result
+		}
 	}
-	generatorSeries, err := query(generatorMeasurementPath(), queryStart, now, overnightQueryEvery)
-	if err != nil {
-		result.Basis = resolveNonHistoryBasis(linearFallback)
-		result.Reason = stringPtr("influxdb query failed: " + err.Error())
-		return result
+	if paths.Generator != "" {
+		generatorSeries, err = query(paths.Generator, queryStart, now, overnightQueryEvery)
+		if err != nil {
+			result.Basis = resolveNonHistoryBasis(linearFallback)
+			result.Reason = stringPtr("influxdb query failed: " + err.Error())
+			return result
+		}
 	}
 
 	var slopes []float64
@@ -400,53 +413,56 @@ func computeOvernight(
 	return result
 }
 
-// socMeasurementPath is the state-of-charge path the overnight model reads
-// from history: the house bank the operator chose in Vessel settings, so the
-// history, the bands and the alarm rule all agree on which bank "the bank"
-// is. It is empty when no house bank is set, and an error when the vessel
-// block cannot be read.
-func socMeasurementPath() (string, error) {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	if err != nil {
-		return "", err
-	}
-	return vessel.houseBankSocPath(), nil
+// overnightPaths is every series the overnight model reads, all taken from
+// Vessel settings so the history, the bands and the alarm rules agree. Shore
+// and Generator are the two series a night has to clear before its slope is
+// judged: the shore charger's AC input current and the generator's state.
+// Either is empty when the operator has not chosen that device, and that
+// exclusion is then skipped.
+type overnightPaths struct {
+	Soc       string
+	Shore     string
+	Generator string
 }
 
-// defaultShoreMeasurement and defaultGeneratorMeasurement are the two
-// exclusion checks a night's window has to clear before its slope is judged
-// at all. Confirmed against the live InfluxDB on 2026-09-07: the shore path
-// has points only while shore power is actually connected (a charger in
-// float can hold the state of charge flat for the whole night, which passes
-// the net-rise check and would otherwise score a marina night as a quiet
-// one at anchor); the generator path is recorded continuously and reads > 0
-// while the generator runs. electrical.chargers.0.chargingMode was also
-// considered and rejected - it is a string and InfluxDB cannot aggregate it.
+// cacheKey tells a cached result which paths it was computed for: choosing
+// another bank, charger or generator must not be served the old projection.
+func (p overnightPaths) cacheKey() string {
+	return p.Soc + "|" + p.Shore + "|" + p.Generator
+}
+
+// overnightMeasurementPaths resolves the overnight series from Vessel
+// settings. The state-of-charge path is the house bank's; the shore path is
+// the chosen shore charger's AC input current; the generator path is the
+// chosen generator's state number. Each is empty when not set, and the call
+// is an error when the vessel block cannot be read.
 //
-// A misnamed path here yields no points at all, and no points means no
-// exclusions - silently, since an absent series looks identical to "never
-// ran". That is why nights_excluded_shore and nights_excluded_generator are
-// both in the response and in the recompute log line: an operator who
-// watches a marina week go by with nights_excluded_shore stuck at 0 knows
-// the path is wrong, not that the boat was quietly at anchor the whole
-// time.
-const (
-	defaultShoreMeasurement     = "electrical.chargers.0.acin.1.current"
-	defaultGeneratorMeasurement = "electrical.generator.0.stateNumber"
-)
+// Confirmed against the live InfluxDB on 2026-09-07: the shore path has
+// points only while shore power is actually connected (a charger in float
+// can hold the state of charge flat for the whole night, which passes the
+// net-rise check and would otherwise score a marina night as a quiet one at
+// anchor); the generator path is recorded continuously and reads > 0 while
+// the generator runs. A misnamed path yields no points, and no points means
+// no exclusions, which is why the response carries the excluded counts.
+func overnightMeasurementPaths() (overnightPaths, error) {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return overnightPaths{}, err
+	}
+	paths := overnightPaths{Soc: vessel.houseBankSocPath()}
+	if id := vessel.Electrical.ShoreChargerInstance; id != "" {
+		paths.Shore = "electrical.chargers." + id + ".acin.1.current"
+	}
+	if id := vessel.Electrical.GeneratorInstance; id != "" {
+		paths.Generator = "electrical.generator." + id + ".stateNumber"
+	}
+	return paths, nil
+}
 
 // shorePowerPresentAmps is the current above which the shore path counts as
 // "shore power connected" for one sample - comfortably above sensor noise
 // on an idle AC-in circuit and comfortably below any real charger current.
 const shorePowerPresentAmps = 0.5
-
-func shoreMeasurementPath() string {
-	return trimEnvValue(getEnv("INFLUX_SHORE_MEASUREMENT", defaultShoreMeasurement))
-}
-
-func generatorMeasurementPath() string {
-	return trimEnvValue(getEnv("INFLUX_GENERATOR_MEASUREMENT", defaultGeneratorMeasurement))
-}
 
 // dawnLinearFallbackEnabled resolves DAWN_LINEAR_FALLBACK, defaulting to
 // true per Decision 5: without an operator-approved linear fallback, an
@@ -497,9 +513,10 @@ type overnightCache struct {
 	// moves about four minutes per degree of longitude, so a result is
 	// only reusable near where it was made; a passage invalidates it.
 	latKey, lonKey int
-	// The state-of-charge path the result was computed for: choosing another
-	// house bank must not be served the old bank's projection.
-	socKey string
+	// The paths the result was computed for (overnightPaths.cacheKey):
+	// choosing another bank, charger or generator must not be served the old
+	// projection.
+	key string
 }
 
 var globalOvernightCache = &overnightCache{}
@@ -509,10 +526,10 @@ var globalOvernightCache = &overnightCache{}
 // last fifteen minutes, and the GNSS gate flapping in the meantime (it
 // suppresses the position while it waits for a stable fix) does not move
 // the sun.
-func (c *overnightCache) fresh(now time.Time, socPath string) (overnightResult, bool) {
+func (c *overnightCache) fresh(now time.Time, key string) (overnightResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if now.Before(c.expiresAt) && c.socKey == socPath {
+	if now.Before(c.expiresAt) && c.key == key {
 		return c.result, true
 	}
 	return overnightResult{}, false
@@ -521,17 +538,17 @@ func (c *overnightCache) fresh(now time.Time, socPath string) (overnightResult, 
 // get returns the cached result if still fresh and computed near this
 // position, otherwise recomputes via compute and caches the new result for
 // overnightCacheTTL.
-func (c *overnightCache) get(now time.Time, lat, lon float64, socPath string, compute func() overnightResult) overnightResult {
+func (c *overnightCache) get(now time.Time, lat, lon float64, key string, compute func() overnightResult) overnightResult {
 	latKey, lonKey := int(math.Round(lat)), int(math.Round(lon))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if now.Before(c.expiresAt) && c.latKey == latKey && c.lonKey == lonKey && c.socKey == socPath {
+	if now.Before(c.expiresAt) && c.latKey == latKey && c.lonKey == lonKey && c.key == key {
 		return c.result
 	}
 	result := compute()
 	c.result = result
 	c.expiresAt = now.Add(overnightCacheTTL)
-	c.latKey, c.lonKey, c.socKey = latKey, lonKey, socPath
+	c.latKey, c.lonKey, c.key = latKey, lonKey, key
 	return result
 }
 
@@ -562,19 +579,20 @@ func positionForSun(state vesselStateData) (lat, lon float64, ok bool) {
 func electricalOvernightHandler(c echo.Context) error {
 	now := time.Now().UTC()
 
-	socPath, socErr := socMeasurementPath()
+	paths, socErr := overnightMeasurementPaths()
 	noteVesselRead("overnight", socErr, "overnight model: vessel settings unreadable, no projection: %v")
 	if socErr != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "vessel settings unreadable; dawn projection needs the house bank",
 		})
 	}
-	if socPath == "" {
+	if paths.Soc == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "no house bank is set in Vessel settings; dawn projection needs one",
 		})
 	}
-	if cached, ok := globalOvernightCache.fresh(now, socPath); ok {
+	cacheKey := paths.cacheKey()
+	if cached, ok := globalOvernightCache.fresh(now, cacheKey); ok {
 		return c.JSON(http.StatusOK, cached)
 	}
 
@@ -586,12 +604,12 @@ func electricalOvernightHandler(c echo.Context) error {
 		})
 	}
 
-	result := globalOvernightCache.get(now, lat, lon, socPath, func() overnightResult {
-		r := computeOvernight(now, lat, lon, socPath, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
+	result := globalOvernightCache.get(now, lat, lon, cacheKey, func() overnightResult {
+		r := computeOvernight(now, lat, lon, paths, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
 		if r.Basis == "history" {
 			log.Printf(
-				"overnight model: basis=history nights_used=%d scanned=%d excluded shore=%d generator=%d gap=%d rise=%d oldest=%s",
-				r.NightsUsed, r.NightsConsidered, r.NightsExcludedShore, r.NightsExcludedGenerator, r.NightsExcludedGap, r.NightsExcludedRise, r.OldestNightStart.Format(time.RFC3339),
+				"overnight model: basis=history nights_used=%d scanned=%d excluded shore=%d (checked=%t) generator=%d (checked=%t) gap=%d rise=%d oldest=%s",
+				r.NightsUsed, r.NightsConsidered, r.NightsExcludedShore, r.ShoreChecked, r.NightsExcludedGenerator, r.GeneratorChecked, r.NightsExcludedGap, r.NightsExcludedRise, r.OldestNightStart.Format(time.RFC3339),
 			)
 		} else {
 			reason := ""

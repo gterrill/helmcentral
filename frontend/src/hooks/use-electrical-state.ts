@@ -22,9 +22,13 @@ interface ElectricalState {
   ac_output_w: number
   dc_12v_power_w: number
   dc_12v_current_a: number
-  dc_24v_voltage_v: number
+  /** The chosen voltage readout battery; -1 and an empty label when none is set. */
+  voltage_readout_v: number
+  voltage_readout_label: string
   ac_loads_w: number
   generator_real_power_w: number
+  /** A generator instance is chosen in Vessel settings. */
+  generator_configured: boolean | null
   alternator_0_current_a: number
   alternator_0_voltage_v: number
   alternator_0_power_w: number
@@ -60,7 +64,9 @@ export function useElectricalState() {
   const [acOutputW, setAcOutputW] = useState<number | null>(null)
   const [dc12vPowerW, setDc12vPowerW] = useState<number | null>(null)
   const [dc12vCurrentA, setDc12vCurrentA] = useState<number | null>(null)
-  const [dc24vVoltageV, setDc24vVoltageV] = useState<number | null>(null)
+  const [voltageReadoutV, setVoltageReadoutV] = useState<number | null>(null)
+  const [voltageReadoutLabel, setVoltageReadoutLabel] = useState<string | null>(null)
+  const [generatorConfigured, setGeneratorConfigured] = useState<boolean | null>(null)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
   const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
   const [alternator0, setAlternator0] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
@@ -89,7 +95,12 @@ export function useElectricalState() {
         setAcOutputW(typeof data.ac_output_w === 'number' && data.ac_output_w >= 0 ? data.ac_output_w : null)
         setDc12vPowerW(typeof data.dc_12v_power_w === 'number' && data.dc_12v_power_w >= 0 ? data.dc_12v_power_w : null)
         setDc12vCurrentA(typeof data.dc_12v_current_a === 'number' && data.dc_12v_current_a >= 0 ? data.dc_12v_current_a : null)
-        setDc24vVoltageV(typeof data.dc_24v_voltage_v === 'number' && data.dc_24v_voltage_v >= 0 ? data.dc_24v_voltage_v : null)
+        const readoutV = typeof data.voltage_readout_v === 'number' && data.voltage_readout_v >= 0 ? data.voltage_readout_v : null
+        const readoutLabel = typeof data.voltage_readout_label === 'string' && data.voltage_readout_label.trim() !== '' ? data.voltage_readout_label.trim() : null
+        // A figure without its name, or a name without a figure, is not a row.
+        setVoltageReadoutV(readoutV !== null && readoutLabel !== null ? readoutV : null)
+        setVoltageReadoutLabel(readoutV !== null && readoutLabel !== null ? readoutLabel : null)
+        setGeneratorConfigured(typeof data.generator_configured === 'boolean' ? data.generator_configured : null)
         setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
         setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
         setAlternator0({ currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) })
@@ -147,9 +158,11 @@ export function useElectricalState() {
     acOutputW,
     dc12vPowerW,
     dc12vCurrentA,
-    dc24vVoltageV,
+    voltageReadoutV,
+    voltageReadoutLabel,
     acLoadsW,
     generatorRealPowerW,
+    generatorConfigured,
     alternator0,
     alternator1,
     charger0CurrentA,

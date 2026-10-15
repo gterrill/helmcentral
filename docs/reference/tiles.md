@@ -112,7 +112,13 @@ anything:
   state of the bank itself.
 - **Shore**: the charger's mode and AC input current. Absent, not blank,
   while nothing is plugged in. A charger error always shows, in red, even
-  before anything else about the charger has reported.
+  before anything else about the charger has reported. It reads the shore
+  charger you picked in Settings, Vessel, under Electrical.
+
+The footer's left side shows the voltage of the **Voltage readout battery** you
+picked under Electrical, with the name you gave that battery, followed by the
+charge rate. With no readout battery picked, or one that is not reporting, the
+voltage is left out rather than replaced by another battery's.
 
 The state-of-charge number and bar only turn amber or red once you have set
 a matching alarm rule; see [Set battery state-of-charge
@@ -129,7 +135,8 @@ Helmcentral takes the median discharge rate from the most recent *clean*
 nights it can find, up to seven, searching back as far as thirty, and
 applies it to tonight after first running the current rate forward to
 sunset. A clean night runs sunset to sunrise with no shore power and no
-generator run, has enough samples to trust the slope, and did not somehow
+generator run (checked against the shore charger and generator you picked
+under Electrical; a night is not screened for one you left as Not set), has enough samples to trust the slope, and did not somehow
 see the bank rise; a night that fails any of those is skipped rather than
 averaged in. Hovering the figure shows how many nights were skipped and why.
 

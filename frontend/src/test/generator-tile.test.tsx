@@ -10,6 +10,7 @@ const baseProps = {
   generatorRunningByCondition: null,
   generatorRuntime: 600,
   generatorRealPowerW: 3000,
+  generatorConfigured: true,
 }
 
 test('shows a projected battery percentage at the end of the timer while charging', () => {
@@ -152,4 +153,44 @@ test('Start is enabled when not readOnly', () => {
   )
 
   expect(screen.getByRole('button', { name: 'Start' })).not.toBeDisabled()
+})
+
+test('says the generator is not set up, and offers no Start or Stop, when none is chosen', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorConfigured={false}
+      generatorState={null}
+      generatorRealPowerW={null}
+      batterySocPercent={70}
+      batteryRatePercentPerHour={10}
+    />,
+  )
+
+  expect(screen.getByText(/not set up/i)).toBeInTheDocument()
+  expect(screen.getByText(/Settings/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+})
+
+test('shows neither the not-set-up message nor Start and Stop while it is not yet known whether a generator is set up', () => {
+  render(<GeneratorTile {...baseProps} generatorConfigured={null} batterySocPercent={null} batteryRatePercentPerHour={null} />)
+
+  expect(screen.queryByText(/not set up/i)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+})
+
+test('shows -- for power when the generator AC input reports nothing, not 0 W', () => {
+  render(<GeneratorTile {...baseProps} generatorState="stopped" generatorRealPowerW={null} batterySocPercent={null} batteryRatePercentPerHour={null} />)
+
+  const power = screen.getByText('Power').nextElementSibling as HTMLElement
+  expect(power).toHaveTextContent('--')
+  expect(power).not.toHaveTextContent('0')
+})
+
+test('shows 0 W for a measured zero', () => {
+  render(<GeneratorTile {...baseProps} generatorState="stopped" generatorRealPowerW={0} batterySocPercent={null} batteryRatePercentPerHour={null} />)
+
+  expect(screen.getByText('Power').nextElementSibling).toHaveTextContent('0W')
 })

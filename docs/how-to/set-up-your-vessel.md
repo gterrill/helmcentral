@@ -1,11 +1,11 @@
 # Set up your vessel
 
-Helmcentral needs to know which engines and which battery bank are yours
-before it can show or watch them. The Alternators tile, the Battery & Power
-tile (including its dawn projection and state-of-charge bands), anchor
-auto-raise, Mate's passage estimates and anomaly detection (frozen and
-impossible sensor readings, charging into a full house bank, twin engines
-pulling apart) all read the engines and house bank you pick here. Nothing is
+Helmcentral needs to know which engines, battery bank, generator, charger and
+inverter are yours before it can show or watch them. The Alternators tile, the
+Battery & Power tile (including its dawn projection and state-of-charge bands),
+the Generator and Solar tiles, anchor auto-raise, Mate's passage estimates and
+anomaly detection (frozen and impossible sensor readings, charging into a full
+house bank, twin engines pulling apart) all read what you pick here. Nothing is
 pre-filled for your boat: until you pick them, those features show no data or
 stay off, rather than guessing from whatever the boat reports.
 
@@ -100,7 +100,58 @@ number is port and which is starboard.
 A side that is not set shows no reading on the Alternators tile. Until you pick
 at least one side, the tile is empty.
 
-Engines, battery names, alternators and the house bank save together with the rest of Settings. The bar
+## Electrical
+
+The boat's instruments number the generator, the AC meters, the chargers and
+the inverters in their own order, and that order can change when equipment is
+reinstalled, so Helmcentral does not assume which number is which.
+
+1. Under **Settings → Vessel**, find **Electrical**.
+2. Open **Generator** and pick yours. Each is listed with its live state, for
+   example "0 · running". One showing "--" is not reporting.
+3. Open **Generator AC input** and pick the AC circuit the generator feeds. The
+   list shows each circuit's live power, so start the generator and pick the one
+   that reads load. This is the figure on the Generator tile's Power card.
+4. Open **Shore charger** and pick the charger that takes shore power. Each is
+   listed with its output current and its AC input current, for example "5 ·
+   20.0 A out · 6.0 A AC in". Plug in shore power and pick the one with an AC
+   input reading.
+5. Open **Inverter** and pick the inverter whose AC output you want counted as a
+   load. Each is listed with its live output power.
+6. Open **Voltage readout battery** and pick the battery whose voltage the
+   Battery & Power tile shows beside the charge rate. It is labelled with the name
+   you gave that battery under **Battery names**, or what the boat calls it.
+7. Leave any of them as **Not set** if the boat has none. Choose **Save** in the
+   bar across the top of the screen.
+
+What each one does:
+
+- **Generator.** The Generator tile reads its state and runtime from it, and its
+  Start and Stop buttons control it. With none picked the tile says the generator
+  is not set up and offers no Start or Stop.
+- **Generator AC input** is the Generator tile's Power card. Not set shows `--`.
+- **Shore charger** is the Shore line on the Battery & Power tile.
+- **Inverter** is the AC part of Loads on the Battery & Power tile. Not set
+  leaves it blank, and Loads reads `--` because the total would otherwise leave
+  out the AC draw.
+- **Voltage readout battery** is the voltage in the tile's footer. Not set, or a
+  battery that is not reporting, leaves the voltage out.
+
+The shore charger and the generator also decide which nights the dawn projection
+trusts: a night when shore power was connected or the generator ran is skipped
+because the bank did not discharge naturally. A night is only screened for the
+ones you picked.
+
+## Solar names
+
+1. Still under **Settings → Vessel**, find **Solar names**.
+2. Every solar controller the boat reports is listed with its live panel power.
+3. Type the name you use for it, for example "Port arch". Leave the box empty and
+   the Solar tile shows "Array" followed by the controller's number.
+4. Choose **Save** in the bar across the top of the screen.
+
+Engines, battery names, alternators, the house bank, the electrical choices and
+solar names save together with the rest of Settings. The bar
 appears as soon as you change anything, **Discard** puts it all back, and if
 you try to leave Settings with changes unsaved you are asked first. **Apply
 gauge zones** is not part of that: it adds the gauge tile to your first

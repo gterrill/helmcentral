@@ -189,6 +189,9 @@ func getSettingsHandler(c echo.Context) error {
 	if vessel.Batteries == nil {
 		vessel.Batteries = []vesselBatterySetting{}
 	}
+	if vessel.Solar == nil {
+		vessel.Solar = []vesselSolarSetting{}
+	}
 	payload.Vessel = &vessel
 
 	return c.JSON(http.StatusOK, payload)
@@ -407,6 +410,9 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 
 	if next.Vessel != nil {
 		if invalid := validateVesselAlternators(next.Vessel.Alternators); invalid != nil {
+			return invalid
+		}
+		if invalid := validateVesselElectrical(next.Vessel.Electrical); invalid != nil {
 			return invalid
 		}
 	}
@@ -835,6 +841,8 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		vessel.Batteries = normalizeVesselBatteries(vessel.Batteries)
 		vessel.Alternators.PortInstance = strings.TrimSpace(vessel.Alternators.PortInstance)
 		vessel.Alternators.StarboardInstance = strings.TrimSpace(vessel.Alternators.StarboardInstance)
+		vessel.Electrical = normalizeVesselElectrical(vessel.Electrical)
+		vessel.Solar = normalizeVesselSolar(vessel.Solar)
 		normalized.Vessel = &vessel
 	}
 

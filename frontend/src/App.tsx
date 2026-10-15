@@ -1054,8 +1054,10 @@ function AppShell() {
     solarOutputW,
     acOutputW,
     dc12vPowerW,
-    dc24vVoltageV,
+    voltageReadoutV,
+    voltageReadoutLabel,
     generatorRealPowerW,
+    generatorConfigured,
     alternator0,
     alternator1,
     charger0CurrentA,
@@ -1847,7 +1849,8 @@ function AppShell() {
             solarOutputW={solarOutputW}
             acOutputW={acOutputW}
             dc12vPowerW={dc12vPowerW}
-            dc24vVoltageV={dc24vVoltageV}
+            voltageReadoutV={voltageReadoutV}
+            voltageReadoutLabel={voltageReadoutLabel}
             charger0CurrentA={charger0CurrentA}
             charger0AcIn1CurrentA={charger0AcIn1CurrentA}
             charger0ChargingMode={charger0ChargingMode}
@@ -1881,6 +1884,7 @@ function AppShell() {
             generatorRunningByCondition={generatorRunningByCondition}
             generatorRuntime={generatorRuntime}
             generatorRealPowerW={generatorRealPowerW}
+            generatorConfigured={generatorConfigured}
             batterySocPercent={batterySocPercent}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             readOnly={!canWrite}

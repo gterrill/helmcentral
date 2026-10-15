@@ -16,7 +16,13 @@ import { apiRequest } from '@/lib/api-query'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
 import { useVesselCandidates } from '@/hooks/use-vessel-candidates'
 import { newGaugeGroupWidgetId, type GaugeWidgetConfig } from '@/lib/dashboard-widgets'
-import { titleCaseInstance, type VesselAlternatorCandidate, type VesselBatteryCandidate, type VesselHouseBankSetting } from '@/lib/vessel-settings'
+import {
+  titleCaseInstance,
+  type VesselBatteryCandidate,
+  type VesselElectricalSettings,
+  type VesselHouseBankSetting,
+  type VesselSolarCandidate,
+} from '@/lib/vessel-settings'
 
 interface BoatUiSectionProps {
   draft: RegularSettingsDraft
@@ -127,6 +133,31 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     }
     return [...byInstance.values()].sort((a, b) => a.instance.localeCompare(b.instance, undefined, { numeric: true }))
   }, [candidates.batteries, vessel])
+
+  // A charger's own input is not a battery, so it is not offered as the
+  // voltage readout.
+  const readoutBatteries = useMemo(
+    () => candidates.batteries.filter((b) => !b.charger_input).sort((a, b) => a.instance.localeCompare(b.instance, undefined, { numeric: true })),
+    [candidates.batteries],
+  )
+
+  // Every solar controller the boat is publishing, plus every one already
+  // named (even one that has gone quiet since).
+  const solarInstances = useMemo(() => {
+    const byInstance = new Map<string, VesselSolarCandidate>()
+    for (const sc of candidates.solar) byInstance.set(sc.instance, sc)
+    for (const instance of Object.keys(vessel?.solarNames ?? {})) {
+      if (!byInstance.has(instance)) byInstance.set(instance, { instance, panel_power: null })
+    }
+    return [...byInstance.values()].sort((a, b) => a.instance.localeCompare(b.instance, undefined, { numeric: true }))
+  }, [candidates.solar, vessel])
+
+  const alternatorOptions = candidates.alternators.map((c) => ({ instance: c.instance, reading: c.current === null ? '--' : `${c.current.toFixed(1)} A` }))
+
+  const setElectrical = (patch: Partial<VesselElectricalSettings>) => {
+    if (vessel === null) return
+    onChange({ vessel: { ...vessel, electrical: { ...vessel.electrical, ...patch } } })
+  }
 
   const setRow = (instance: string, patch: Partial<VesselEngineRowDraft>) => {
     if (vessel === null) return
@@ -280,22 +311,84 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
         description="Pick which alternator is port and which is starboard. The boat's instruments number them in their own order, so check the live current while an engine is charging. Leave a side as Not set if the boat does not have one."
       >
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <AlternatorPicker
+          <InstancePicker
             label="Port alternator"
             id="alternator-port"
             value={vessel.alternators.port_instance}
-            other={vessel.alternators.starboard_instance}
-            candidates={candidates.alternators}
+            disabledInstance={vessel.alternators.starboard_instance}
+            options={alternatorOptions}
             onChange={(port_instance) => onChange({ vessel: { ...vessel, alternators: { ...vessel.alternators, port_instance } } })}
           />
-          <AlternatorPicker
+          <InstancePicker
             label="Starboard alternator"
             id="alternator-starboard"
             value={vessel.alternators.starboard_instance}
-            other={vessel.alternators.port_instance}
-            candidates={candidates.alternators}
+            disabledInstance={vessel.alternators.port_instance}
+            options={alternatorOptions}
             onChange={(starboard_instance) => onChange({ vessel: { ...vessel, alternators: { ...vessel.alternators, starboard_instance } } })}
           />
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Electrical"
+        description="Pick the generator, the AC input that measures it, the shore charger, the inverter, and the battery whose voltage the Battery & Power tile shows as its extra row. The boat's instruments number these in their own order, so check the live reading with the equipment running. Anything left as Not set shows no data, and the overnight projection skips its shore power and generator check."
+      >
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          <InstancePicker
+            label="Generator"
+            id="electrical-generator"
+            value={vessel.electrical.generator_instance}
+            options={candidates.generators.map((g) => ({ instance: g.instance, reading: g.state ?? '--' }))}
+            onChange={(generator_instance) => setElectrical({ generator_instance })}
+          />
+          <InstancePicker
+            label="Generator AC input"
+            id="electrical-generator-ac"
+            value={vessel.electrical.generator_ac_instance}
+            options={candidates.ac.map((a) => ({ instance: a.instance, reading: a.real_power === null ? '--' : `${Math.round(a.real_power)} W` }))}
+            onChange={(generator_ac_instance) => setElectrical({ generator_ac_instance })}
+          />
+          <InstancePicker
+            label="Shore charger"
+            id="electrical-shore-charger"
+            value={vessel.electrical.shore_charger_instance}
+            options={candidates.chargers.map((c) => ({ instance: c.instance, reading: chargerReading(c.current, c.acin_current) }))}
+            onChange={(shore_charger_instance) => setElectrical({ shore_charger_instance })}
+          />
+          <InstancePicker
+            label="Inverter"
+            id="electrical-inverter"
+            value={vessel.electrical.inverter_instance}
+            options={candidates.inverters.map((i) => ({ instance: i.instance, reading: i.ac_out === null ? '--' : `${Math.round(i.ac_out)} W` }))}
+            onChange={(inverter_instance) => setElectrical({ inverter_instance })}
+          />
+          <InstancePicker
+            label="Voltage readout battery"
+            id="electrical-voltage-readout"
+            value={vessel.electrical.voltage_readout_battery}
+            options={readoutBatteries.map((b) => ({ instance: b.instance, reading: b.voltage === null ? '--' : `${b.voltage.toFixed(1)} V` }))}
+            onChange={(voltage_readout_battery) => setElectrical({ voltage_readout_battery })}
+          />
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Solar names"
+        description="Name each solar controller the way you talk about it. The Solar tile uses your name; leave it empty and the tile shows Array with the controller's number."
+      >
+        <div className="flex flex-col gap-2">
+          {solarInstances.length === 0 && (
+            <p className="text-sm text-muted-foreground">No solar controllers published yet.</p>
+          )}
+          {solarInstances.map((sc) => (
+            <SolarNameRow
+              key={sc.instance}
+              candidate={sc}
+              name={vessel.solarNames[sc.instance] ?? ''}
+              onNameChange={(name) => onChange({ vessel: { ...vessel, solarNames: { ...vessel.solarNames, [sc.instance]: name } } })}
+            />
+          ))}
         </div>
       </FormSection>
 
@@ -374,20 +467,29 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
   )
 }
 
-interface AlternatorPickerProps {
+function chargerReading(current: number | null, acIn: number | null): string {
+  const parts = [
+    current === null ? null : `${current.toFixed(1)} A out`,
+    acIn === null ? null : `${acIn.toFixed(1)} A AC in`,
+  ].filter((part): part is string => part !== null)
+  return parts.length === 0 ? '--' : parts.join(' · ')
+}
+
+interface InstancePickerProps {
   label: string
   id: string
   value: string
-  /** The instance chosen for the other side; it cannot be picked here too. */
-  other: string
-  candidates: VesselAlternatorCandidate[]
+  options: { instance: string; reading: string }[]
+  /** An instance already chosen elsewhere, which cannot be picked here too. */
+  disabledInstance?: string
   onChange: (instance: string) => void
 }
 
-function AlternatorPicker({ label, id, value, other, candidates, onChange }: AlternatorPickerProps) {
+/** One electrical instance, picked from what the boat reports; '' is Not set. */
+function InstancePicker({ label, id, value, options, disabledInstance, onChange }: InstancePickerProps) {
   // A saved instance the boat is no longer publishing stays selectable, so
   // the operator sees what is stored rather than a silently blank choice.
-  const missing = value !== '' && !candidates.some((c) => c.instance === value)
+  const missing = value !== '' && !options.some((o) => o.instance === value)
 
   return (
     <div className="grid min-w-0 gap-1.5">
@@ -399,13 +501,36 @@ function AlternatorPicker({ label, id, value, other, candidates, onChange }: Alt
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">Not set</option>
-        {candidates.map((c) => (
-          <option key={c.instance} value={c.instance} disabled={c.instance === other}>
-            {c.instance} · {c.current === null ? '--' : `${c.current.toFixed(1)} A`}
+        {options.map((o) => (
+          <option key={o.instance} value={o.instance} disabled={disabledInstance !== undefined && disabledInstance !== '' && o.instance === disabledInstance}>
+            {o.instance} · {o.reading}
           </option>
         ))}
         {missing && <option value={value}>{value} · not reporting</option>}
       </select>
+    </div>
+  )
+}
+
+interface SolarNameRowProps {
+  candidate: VesselSolarCandidate
+  name: string
+  onNameChange: (name: string) => void
+}
+
+function SolarNameRow({ candidate, name, onNameChange }: SolarNameRowProps) {
+  return (
+    <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-md border border-border/60 bg-background/40 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <Input
+        value={name}
+        onChange={(e) => onNameChange(e.target.value)}
+        placeholder={`Array ${candidate.instance}`}
+        className="h-8 text-sm"
+        aria-label={`Name for solar controller ${candidate.instance}`}
+      />
+      <p className="min-w-0 truncate pt-1.5 text-xs text-muted-foreground tabular-nums">
+        Instance {candidate.instance} · {candidate.panel_power === null ? '--' : `${Math.round(candidate.panel_power)} W`}
+      </p>
     </div>
   )
 }

@@ -76,3 +76,41 @@ describe('useElectricalState socPath', () => {
     expect(result.current.socPath).toBeNull()
   })
 })
+
+describe('useElectricalState voltage readout and generator', () => {
+  it('carries the chosen battery voltage and its label', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', voltage_readout_v: 27.9, voltage_readout_label: 'Aft House' })
+    expect(result.current.voltageReadoutV).toBe(27.9)
+    expect(result.current.voltageReadoutLabel).toBe('Aft House')
+  })
+
+  it('reads no voltage readout when none is set (the backend sends -1 and no label)', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', voltage_readout_v: -1, voltage_readout_label: '' })
+    expect(result.current.voltageReadoutV).toBeNull()
+    expect(result.current.voltageReadoutLabel).toBeNull()
+  })
+
+  it('does not read the retired 24 V field', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', dc_24v_voltage_v: 24.4 })
+    expect(result.current.voltageReadoutV).toBeNull()
+  })
+
+  it('says whether a generator is set up', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: true })
+    expect(result.current.generatorConfigured).toBe(true)
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: false })
+    expect(result.current.generatorConfigured).toBe(false)
+  })
+
+  it('does not know whether a generator is set up until the backend says (initially, or null)', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.generatorConfigured).toBeNull()
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: true })
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: null })
+    expect(result.current.generatorConfigured).toBeNull()
+  })
+})
