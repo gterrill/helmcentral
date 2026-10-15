@@ -55,6 +55,9 @@ var retiredDashboardWidgetIDs = map[string]bool{
 
 const dashboardLayoutMaxCoord = 1000
 
+// equipmentIDMaxLen bounds an equipment item id stored on a tile.
+const equipmentIDMaxLen = 64
+
 // Embed widgets (ADR 0031) are the one widget type that can appear more than
 // once on a page, so their id carries a per-instance token: "embed:<token>".
 // The token only needs to be unique within a page — it is a layout key, not a
@@ -114,8 +117,15 @@ var lampIconNames = map[string]bool{
 }
 
 type dashboardLamp struct {
-	Path  string `json:"path"`
-	Label string `json:"label"`
+	// Path is a SignalK path read directly, for a single-instance signal (a
+	// bilge float, a fault line). A lamp for something with several instances
+	// (an engine, the generator, an alternator) names its equipment item and a
+	// suffix instead, and the path is worked out from the item's source
+	// (ADR 0185). Exactly one of the two forms is set.
+	Path        string `json:"path"`
+	EquipmentID string `json:"equipmentId,omitempty"`
+	Suffix      string `json:"suffix,omitempty"`
+	Label       string `json:"label"`
 	// Invert lights the lamp when the value is zero or absent, for a signal
 	// whose healthy state is "off" (a bilge float, a fault line).
 	Invert bool `json:"invert,omitempty"`
@@ -254,6 +264,11 @@ type dashboardClusterCorner struct {
 // decision that made gauge groups cheap: zones, units and scales all work per
 // slot with no new machinery.
 type dashboardClusterConfig struct {
+	// EquipmentID is the engine item the cluster shows (ADR 0185). Empty means
+	// none is picked yet and the tile asks for one. Every slot below reads a
+	// suffix of that item's source, and its zones come from the item's profile.
+	EquipmentID string `json:"equipmentId,omitempty"`
+	// Title overrides the item's name; empty shows the name.
 	Title      string                   `json:"title"`
 	Ring       dashboardGaugeConfig     `json:"ring"`
 	Centre     dashboardGaugeConfig     `json:"centre"`
@@ -268,11 +283,18 @@ type dashboardClusterConfig struct {
 	Fuel *dashboardClusterFuelRail `json:"fuel,omitempty"`
 }
 
-// dashboardClusterFuelBar is one tank. Two gauge slots rather than one because
-// litres needs two readings: a 0..1 ratio and a capacity in m3.
+// dashboardClusterFuelBar is one tank, by the equipment item that owns its
+// source (ADR 0185). Its level and capacity are that source's currentLevel and
+// capacity, read as a ratio and a volume. Empty TankID is a bar with no tank
+// picked yet.
 type dashboardClusterFuelBar struct {
-	Level    dashboardGaugeConfig `json:"level"`
-	Capacity dashboardGaugeConfig `json:"capacity"`
+	TankID string `json:"tankId,omitempty"`
+	Label  string `json:"label,omitempty"`
+	// Level and Capacity are the two paths a bar held before it named a tank.
+	// Only the one-off conversion at startup reads them (it turns them into
+	// TankID and clears them); a save that still carries one is refused.
+	Level    *dashboardGaugeConfig `json:"level,omitempty"`
+	Capacity *dashboardGaugeConfig `json:"capacity,omitempty"`
 }
 
 // dashboardClusterFuelRail is the curved bar gauge down one edge of the tile
@@ -284,6 +306,14 @@ type dashboardClusterFuelRail struct {
 }
 
 type dashboardGaugeGroupConfig struct {
+	// EquipmentKind marks a group that shows one piece of equipment (ADR 0185):
+	// the source group its item belongs to, such as "engine" or "alternator".
+	// Its gauges then read suffixes of the item's source and take their zones
+	// from the item's profile. Empty is a plain group of directly picked paths.
+	EquipmentKind string `json:"equipmentKind,omitempty"`
+	// EquipmentID is the item shown; empty until one is picked.
+	EquipmentID string `json:"equipmentId,omitempty"`
+	// Title overrides the item's name; empty shows the name.
 	Title   string                 `json:"title"`
 	Columns *int                   `json:"columns,omitempty"`
 	Hero    *int                   `json:"hero,omitempty"`
@@ -319,7 +349,10 @@ type dashboardLayoutItem struct {
 // config it is per-instance and per-page, so it rides on the layout item.
 // omitempty keeps existing dashboard-pages.json files byte-identical.
 type dashboardGaugeConfig struct {
-	Path     string      `json:"path"`
+	Path string `json:"path"`
+	// Suffix replaces Path on a slot of a tile that shows an equipment item:
+	// the reading under the item's source, such as oilPressure or fuel.rate.
+	Suffix   string      `json:"suffix,omitempty"`
 	Label    string      `json:"label"`
 	Display  string      `json:"display"`
 	Quantity string      `json:"quantity"`
@@ -462,6 +495,10 @@ type dashboardPagesFile struct {
 	// make that two writes to keep in sync. omitempty keeps a file with no
 	// displays byte-identical to one written before this field existed.
 	Displays []*displayData `json:"displays,omitempty"`
+	// EquipmentConverted records that the one-off conversion of tiles to
+	// equipment items has run (dashboard_equipment_convert.go), so a plain
+	// group of paths made afterwards is never converted by a later start.
+	EquipmentConverted bool `json:"equipment_converted,omitempty"`
 }
 
 // dashboardPagesListResponse is the wire shape for GET /api/dashboard-pages
@@ -481,6 +518,9 @@ var (
 	// of that file must carry it forward (see saveDashboardPagesLocked and
 	// reorderDashboardPagesHandler, the two places that actually touch disk).
 	dashboardRibbonState *dashboardLampStripConfig
+	// dashboardEquipmentConverted is guarded by dashboardPagesMu and written
+	// back with every save, so the marker is never lost to an unrelated edit.
+	dashboardEquipmentConverted bool
 )
 
 func dashboardPagesFilePath() string {
@@ -516,6 +556,8 @@ func dashboardPagesSnapshotLocked() dashboardPagesFile {
 		Pages:    orderedDashboardPagesLocked(),
 		Ribbon:   dashboardRibbonState,
 		Displays: orderedDisplaysLocked(),
+
+		EquipmentConverted: dashboardEquipmentConverted,
 	}
 }
 
@@ -797,6 +839,7 @@ func loadDashboardPages() {
 
 	dashboardPagesState = make(map[string]*dashboardPageData)
 	dashboardRibbonState = nil
+	dashboardEquipmentConverted = false
 	displaysState = make(map[string]*displayData)
 
 	// Try loading new format first
@@ -806,6 +849,7 @@ func loadDashboardPages() {
 		var loaded dashboardPagesFile
 		if err := json.Unmarshal(data, &loaded); err == nil {
 			dashboardRibbonState = loaded.Ribbon
+			dashboardEquipmentConverted = loaded.EquipmentConverted
 			for _, d := range loaded.Displays {
 				displaysState[d.ID] = d
 			}
@@ -1282,8 +1326,8 @@ func validateGaugeWidget(w dashboardLayoutItem) string {
 }
 
 // validateGaugeConfig holds the rules for a single bound gauge, whether it is a
-// standalone `gauge:` widget or one member of a `gauge-group:` cluster. ctx
-// names the offending widget so a rejection points somewhere useful.
+// standalone `gauge:` widget or one member of a plain `gauge-group:`. ctx names
+// the offending widget so a rejection points somewhere useful.
 func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
 	path := strings.TrimSpace(g.Path)
 	if path == "" {
@@ -1292,6 +1336,31 @@ func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
 	if len(path) > gaugePathMaxLen {
 		return "gauge path too long: " + ctx
 	}
+	if g.Suffix != "" {
+		return "a gauge that reads a path takes no suffix: " + ctx
+	}
+	if msg := validateGaugeSettings(g, ctx); msg != "" {
+		return msg
+	}
+	for i, zone := range g.Zones {
+		if _, ok := alarmStateRank[zone.State]; !ok {
+			return "unknown gauge zone state: " + zone.State
+		}
+		if zone.State == alarmStateNormal {
+			continue
+		}
+		// A zone is the alarm (ADR 0050), so a band that cannot become a
+		// threshold is rejected here rather than silently never firing.
+		if _, err := gaugeZoneRule("validate", g, zone, i); err != nil {
+			return fmt.Sprintf("gauge zone %d cannot raise an alarm (%v): %s", i+1, err, ctx)
+		}
+	}
+	return ""
+}
+
+// validateGaugeSettings holds what a gauge slot has in common whether it reads
+// a path or an item's suffix: its label, display, scale and ring options.
+func validateGaugeSettings(g dashboardGaugeConfig, ctx string) string {
 	if len(g.Label) > gaugeLabelMaxLen {
 		return "gauge label too long: " + ctx
 	}
@@ -1313,20 +1382,31 @@ func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
 	if g.Window != "" && !validTelemetryHistoryWindow(g.Window) {
 		return "unknown gauge history window: " + g.Window
 	}
-	for i, zone := range g.Zones {
-		if _, ok := alarmStateRank[zone.State]; !ok {
-			return "unknown gauge zone state: " + zone.State
-		}
-		if zone.State == alarmStateNormal {
-			continue
-		}
-		// A zone is the alarm (ADR 0050), so a band that cannot become a
-		// threshold is rejected here rather than silently never firing.
-		if _, err := gaugeZoneRule("validate", g, zone, i); err != nil {
-			return fmt.Sprintf("gauge zone %d cannot raise an alarm (%v): %s", i+1, err, ctx)
-		}
-	}
 	return ""
+}
+
+// validateSlotConfig guards one slot of a tile that shows an equipment item
+// (ADR 0185). It reads a suffix of the item's source, never a path, and
+// carries no zones: those come from the item's profile. A tile with no item
+// picked yet may hold slots with no suffix, so it can still be moved and
+// resized while it waits to be picked; once an item is set every slot names
+// its reading.
+func validateSlotConfig(g dashboardGaugeConfig, hasItem bool, ctx string) string {
+	if strings.TrimSpace(g.Path) != "" {
+		return "a slot on an equipment tile reads a suffix of the item's source, not a path: " + ctx
+	}
+	if len(g.Zones) > 0 {
+		return "zones belong to the equipment profile, not the tile: " + ctx
+	}
+	suffix := strings.TrimSpace(g.Suffix)
+	if suffix == "" {
+		if hasItem {
+			return "a slot on an equipment tile needs a reading: " + ctx
+		}
+	} else if len(suffix) > dashboardSuffixMaxLen || !dashboardSuffixPattern.MatchString(suffix) {
+		return "invalid reading name: " + ctx
+	}
+	return validateGaugeSettings(g, ctx)
 }
 
 // validateClusterWidget guards the fifth operator-configured widget.
@@ -1347,10 +1427,14 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 	if !validClusterIcons[w.Cluster.CentreIcon] {
 		return "unknown cluster icon: " + w.Cluster.CentreIcon
 	}
-	if msg := validateGaugeConfig(w.Cluster.Ring, w.ID+" ring"); msg != "" {
+	if len(w.Cluster.EquipmentID) > equipmentIDMaxLen {
+		return "cluster equipment id too long: " + w.ID
+	}
+	hasItem := w.Cluster.EquipmentID != ""
+	if msg := validateSlotConfig(w.Cluster.Ring, hasItem, w.ID+" ring"); msg != "" {
 		return msg
 	}
-	if msg := validateGaugeConfig(w.Cluster.Centre, w.ID+" centre"); msg != "" {
+	if msg := validateSlotConfig(w.Cluster.Centre, hasItem, w.ID+" centre"); msg != "" {
 		return msg
 	}
 	if len(w.Cluster.Corners) > clusterMaxCorners {
@@ -1367,7 +1451,7 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 			return fmt.Sprintf("cluster corner %d has too many rows: %s", i+1, w.ID)
 		}
 		for _, row := range corner.Rows {
-			if msg := validateGaugeConfig(row, w.ID); msg != "" {
+			if msg := validateSlotConfig(row, hasItem, w.ID); msg != "" {
 				return msg
 			}
 		}
@@ -1376,7 +1460,7 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 		return "cluster has too many telltales: " + w.ID
 	}
 	for _, telltale := range w.Cluster.Telltales {
-		if msg := validateGaugeConfig(telltale, w.ID+" telltale"); msg != "" {
+		if msg := validateSlotConfig(telltale, hasItem, w.ID+" telltale"); msg != "" {
 			return msg
 		}
 	}
@@ -1389,12 +1473,10 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 /*
 validateClusterFuelRail guards the fuel rail (ADR 0061).
 
-The quantity rules are the load-bearing part. Not one tank path on this vessel
-publishes meta.units, so the config dialog's path picker has nothing to infer
-from and preselects Unitless. Left that way convertFromSI is the identity and
-the rail reads 1.2 where it should read 890. A fuel figure that is wrong but
-plausible is worse on a helm than no figure at all, so rather than guessing a
-unit this refuses the save.
+A bar names a tank by its equipment item (ADR 0185). Its level and capacity are
+that item's source plus currentLevel and capacity, read as a ratio and a
+volume, so there is no quantity or unit to get wrong and a tank path with no
+meta.units can no longer read 1.2 where it should read 890.
 */
 func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 	if rail == nil {
@@ -1416,17 +1498,14 @@ func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 	}
 	for i, bar := range rail.Bars {
 		ctx := fmt.Sprintf("%s fuel bar %d", id, i+1)
-		if msg := validateGaugeConfig(bar.Level, ctx+" level"); msg != "" {
-			return msg
+		if bar.Level != nil || bar.Capacity != nil {
+			return "a fuel bar names its tank, not level and capacity paths: " + ctx
 		}
-		if msg := validateGaugeConfig(bar.Capacity, ctx+" capacity"); msg != "" {
-			return msg
+		if len(bar.TankID) > equipmentIDMaxLen {
+			return "cluster fuel tank id too long: " + ctx
 		}
-		if bar.Level.Quantity != "ratio" {
-			return "cluster fuel level must be measured as a ratio: " + ctx
-		}
-		if bar.Capacity.Quantity != "volume" {
-			return "cluster fuel capacity must be measured as a volume: " + ctx
+		if len(bar.Label) > gaugeLabelMaxLen {
+			return "cluster fuel label too long: " + ctx
 		}
 	}
 	return ""
@@ -1475,11 +1554,29 @@ func validateLampStripConfig(cfg *dashboardLampStripConfig, where string) string
 	}
 	for _, lamp := range cfg.Lamps {
 		path := strings.TrimSpace(lamp.Path)
-		if path == "" {
-			return "lamp requires a SignalK path: " + where
-		}
-		if len(path) > gaugePathMaxLen {
-			return "lamp path too long: " + where
+		if lamp.EquipmentID != "" {
+			// A lamp for a piece of equipment (ADR 0185) reads a suffix of the
+			// item's source; the two forms never mix.
+			suffix := strings.TrimSpace(lamp.Suffix)
+			if path != "" {
+				return "a lamp for equipment reads a suffix, not a path: " + where
+			}
+			if len(lamp.EquipmentID) > equipmentIDMaxLen {
+				return "lamp equipment id too long: " + where
+			}
+			if len(suffix) > dashboardSuffixMaxLen || !dashboardSuffixPattern.MatchString(suffix) {
+				return "lamp needs a valid reading name: " + where
+			}
+		} else {
+			if lamp.Suffix != "" {
+				return "a lamp that reads a path takes no suffix: " + where
+			}
+			if path == "" {
+				return "lamp requires a SignalK path: " + where
+			}
+			if len(path) > gaugePathMaxLen {
+				return "lamp path too long: " + where
+			}
 		}
 		if len(lamp.Label) > lampStripLabelMaxLen {
 			return "lamp label too long: " + where
@@ -1538,8 +1635,25 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 	if w.GaugeGroup.Hero != nil && (*w.GaugeGroup.Hero < 0 || *w.GaugeGroup.Hero >= len(w.GaugeGroup.Gauges)) {
 		return "gauge group hero out of range: " + w.ID
 	}
+	kind := sourceGroup(w.GaugeGroup.EquipmentKind)
+	if w.GaugeGroup.EquipmentKind == "" {
+		if w.GaugeGroup.EquipmentID != "" {
+			return "gauge group names an equipment item but no equipment kind: " + w.ID
+		}
+	} else if !validSourceGroup(kind) {
+		return "unknown gauge group equipment kind: " + w.GaugeGroup.EquipmentKind
+	}
+	if len(w.GaugeGroup.EquipmentID) > equipmentIDMaxLen {
+		return "gauge group equipment id too long: " + w.ID
+	}
 	for _, g := range w.GaugeGroup.Gauges {
-		if msg := validateGaugeConfig(g, w.ID); msg != "" {
+		if kind == "" {
+			if msg := validateGaugeConfig(g, w.ID); msg != "" {
+				return msg
+			}
+			continue
+		}
+		if msg := validateSlotConfig(g, w.GaugeGroup.EquipmentID != "", w.ID); msg != "" {
 			return msg
 		}
 	}
@@ -1595,6 +1709,12 @@ func gaugeBoundPaths() []string {
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 
+	// Read once for the whole walk: a tile that shows an equipment item binds
+	// the item's source plus a suffix (ADR 0185), so the paths move with the
+	// item. A tile whose item is gone, unmapped or unpicked binds nothing and
+	// shows that, rather than falling back to a path it once held.
+	ix := currentEquipmentIndex()
+
 	seen := map[string]bool{}
 	var paths []string
 	add := func(path string) {
@@ -1604,6 +1724,11 @@ func gaugeBoundPaths() []string {
 		}
 		seen[path] = true
 		paths = append(paths, path)
+	}
+	addSlot := func(equipmentID string, slot dashboardGaugeConfig) {
+		if resolved, _, ok := ix.resolveSlot(equipmentID, slot); ok {
+			add(resolved.Path)
+		}
 	}
 
 	for _, page := range dashboardPagesState {
@@ -1615,7 +1740,11 @@ func gaugeBoundPaths() []string {
 			// in every group renders the structural dash forever, silently.
 			if widget.GaugeGroup != nil {
 				for _, g := range widget.GaugeGroup.Gauges {
-					add(g.Path)
+					if widget.GaugeGroup.EquipmentKind == "" {
+						add(g.Path)
+					} else {
+						addSlot(widget.GaugeGroup.EquipmentID, g)
+					}
 				}
 			}
 			// Every widget that binds a path must register here. This walker
@@ -1624,28 +1753,33 @@ func gaugeBoundPaths() []string {
 			// nothing in any log to say why.
 			if widget.Lamps != nil {
 				for _, lamp := range widget.Lamps.Lamps {
-					add(lamp.Path)
+					if path, ok := ix.resolveLamp(lamp); ok {
+						add(path)
+					}
 				}
 			}
 			if widget.Cluster != nil {
-				add(widget.Cluster.Ring.Path)
-				add(widget.Cluster.Centre.Path)
+				id := widget.Cluster.EquipmentID
+				addSlot(id, widget.Cluster.Ring)
+				addSlot(id, widget.Cluster.Centre)
 				for _, corner := range widget.Cluster.Corners {
 					for _, row := range corner.Rows {
-						add(row.Path)
+						addSlot(id, row)
 					}
 				}
 				for _, telltale := range widget.Cluster.Telltales {
-					add(telltale.Path)
+					addSlot(id, telltale)
 				}
 				if widget.Cluster.Fuel != nil {
 					for _, bar := range widget.Cluster.Fuel.Bars {
-						add(bar.Level.Path)
 						// The capacity too. Forgetting it is the subtler
 						// failure: the bars still draw and only the litres and
 						// the total are dashes, which reads as a units problem
 						// rather than a missing subscription.
-						add(bar.Capacity.Path)
+						if level, capacity, ok := ix.resolveTank(bar.TankID); ok {
+							add(level)
+							add(capacity)
+						}
 					}
 				}
 			}
@@ -1658,7 +1792,9 @@ func gaugeBoundPaths() []string {
 	// log to say why, the same failure mode this walker exists to prevent.
 	if dashboardRibbonState != nil {
 		for _, lamp := range dashboardRibbonState.Lamps {
-			add(lamp.Path)
+			if path, ok := ix.resolveLamp(lamp); ok {
+				add(path)
+			}
 		}
 	}
 

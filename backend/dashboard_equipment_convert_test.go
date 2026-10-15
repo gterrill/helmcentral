@@ -1,0 +1,242 @@
+package main
+
+import (
+	"database/sql"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// The fixture is shaped like the boat's own dashboard-pages.json: twin engine
+// clusters with oil zones, a wall copy with extra RPM zones and an exhaust
+// telltale under propulsion.0, a fuel rail on tanks that do and do not have an
+// item, an alternator gauge group, a standalone economy gauge and a ribbon
+// holding an engine lamp, an unowned alternator lamp and a bilge float.
+const tileConvertFixture = `{
+  "pages": [
+    {"id":"p1","name":"Underway","position":0,"widgets":[
+      {"id":"cluster:port00001","x":0,"y":0,"w":5,"h":7,"cluster":{"title":"Port",
+        "ring":{"path":"propulsion.port.revolutions","label":"RPM","display":"radial","quantity":"frequency","unit":"rpm","min":0,"max":3000,"ringStyle":"instrument","labelDivisor":100},
+        "centre":{"path":"propulsion.port.runTime","label":"Hours","display":"numeric","quantity":"duration","unit":"h"},
+        "corners":[{"label":"Oil","rows":[{"path":"propulsion.port.oilPressure","label":"Oil Press","display":"radial","quantity":"pressure","unit":"psi","min":0,"max":100,"zones":[{"from":40,"to":100,"state":"normal"}]}]}],
+        "telltales":[{"path":"propulsion.port.transmission.oilTemperature","label":"Gearbox","display":"numeric","quantity":"temperature","unit":"C","min":0,"max":120,"zones":[{"from":0,"to":104,"state":"normal"}]}]}},
+      {"id":"cluster:star0001","x":7,"y":0,"w":5,"h":7,"cluster":{"title":"Starboard",
+        "ring":{"path":"propulsion.starboard.revolutions","label":"RPM","display":"radial","quantity":"frequency","unit":"rpm","min":0,"max":3000},
+        "centre":{"path":"propulsion.starboard.runTime","label":"Hours","display":"numeric","quantity":"duration","unit":"h"},
+        "corners":[{"label":"Oil","rows":[{"path":"propulsion.starboard.oilPressure","label":"Oil Press","display":"radial","quantity":"pressure","unit":"psi","min":0,"max":100,"zones":[{"from":40,"to":100,"state":"normal"}]}]}]}},
+      {"id":"gauge-group:alt00001","x":8,"y":14,"w":2,"h":6,"gaugeGroup":{"title":"Port Alternator","hero":0,"gauges":[
+        {"path":"electrical.alternator.0.power","label":"Output","display":"numeric","quantity":"power","unit":"W"},
+        {"path":"electrical.alternator.0.current","label":"Amps","display":"numeric","quantity":"current","unit":"A","min":0,"max":400,"zones":[{"from":320,"to":400,"state":"warn"}]}]}},
+      {"id":"gauge:econ0001","x":5,"y":0,"w":2,"h":2,"gauge":{"path":"helmcentral.propulsion.fuelEconomy","label":"fuelEconomy","display":"numeric","quantity":"fuelEconomy","unit":"nmpl"}}
+    ],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"},
+    {"id":"p2","name":"Wall: Engines","position":1,"widgets":[
+      {"id":"cluster:preview01","x":0,"y":0,"w":5,"h":6,"cluster":{"title":"Port",
+        "ring":{"path":"propulsion.port.revolutions","label":"RPM","display":"radial","quantity":"frequency","unit":"rpm","min":0,"max":3300,"zones":[{"from":0,"to":3000,"state":"normal"},{"from":3000,"to":3300,"state":"alarm"}]},
+        "centre":{"path":"propulsion.port.runTime","label":"Hours","display":"numeric","quantity":"duration","unit":"h"},
+        "corners":[{"label":"Oil","rows":[{"path":"propulsion.port.oilPressure","label":"Oil","display":"numeric","quantity":"pressure","unit":"psi","min":0,"max":100,"zones":[{"from":40,"to":100,"state":"normal"}]}]}],
+        "telltales":[{"path":"propulsion.0.exhaustTemperature","label":"Exhaust","display":"numeric","quantity":"temperature","unit":"C","min":0,"max":600}],
+        "fuel":{"side":"left","bars":[
+          {"level":{"path":"tanks.fuel.5.currentLevel","label":"Fwd","display":"bar","quantity":"ratio","unit":"percent"},"capacity":{"path":"tanks.fuel.5.capacity","label":"","display":"numeric","quantity":"volume","unit":"L"}},
+          {"level":{"path":"tanks.fuel.2.currentLevel","label":"Aft","display":"bar","quantity":"ratio","unit":"percent"},"capacity":{"path":"tanks.fuel.2.capacity","label":"","display":"numeric","quantity":"volume","unit":"L"}}]}}}
+    ],"created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T00:00:00Z"},
+    {"id":"p3","name":"Wall: Nearby","position":2,"widgets":[{"id":"wind","x":0,"y":0,"w":4,"h":4}],
+     "created_at":"2026-01-03T00:00:00Z","updated_at":"2026-01-03T00:00:00Z"}
+  ],
+  "ribbon": {"title":"Indicators","showCheck":true,"lamps":[
+    {"path":"propulsion.port.revolutions","label":"Port","group":"Propulsion","icon":"engine"},
+    {"path":"electrical.alternator.7.chargingModeNumber","label":"Alt 7","icon":"alternator"},
+    {"path":"electrical.switches.bilge","label":"Bilge","invert":true}]}
+}`
+
+func mustJSONDecodeProfile(t *testing.T) engineProfile {
+	t.Helper()
+	min, max := 0.0, 100.0
+	rpmMax, gbMax := 3300.0, 140.0
+	gearbox := 120.0
+	return engineProfile{
+		SchemaVersion: 1, Kind: profileKindEngine, ID: "yanmar-4jh", Name: "Yanmar 4JH",
+		Gauges: []engineProfileGauge{
+			{PathSuffix: "oilPressure", Label: "Oil", Display: "radial", Quantity: "pressure", Unit: "psi", Min: &min, Max: &max},
+			{PathSuffix: "revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm", Min: &min, Max: &rpmMax},
+			{PathSuffix: "transmission.oilTemperature", Label: "Gearbox", Display: "numeric", Quantity: "temperature", Unit: "C", Min: &min, Max: &gbMax,
+				Zones: []engineProfileZone{{Direction: "above", Threshold: &gearbox, State: alarmStateWarn}}},
+		},
+	}
+}
+
+func TestConvertDashboardTilesToEquipment(t *testing.T) {
+	setupDashboardPagesTest(t)
+	path := filepath.Join(t.TempDir(), "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", path)
+	if err := os.WriteFile(path, []byte(tileConvertFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := vesselFixtureStore(t)
+	ps, err := newProfileStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevStore := globalProfileStore
+	globalProfileStore = ps
+	t.Cleanup(func() { globalProfileStore = prevStore })
+	if err := ps.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, mustJSONDecodeProfile(t), profileBasedOn{}) }); err != nil {
+		t.Fatal(err)
+	}
+	loadEngineProfiles()
+	t.Cleanup(loadEngineProfiles)
+
+	port := newTileItem(t, "Port engine", "propulsion.port", "yanmar-4jh")
+	star := newTileItem(t, "Starboard engine", "propulsion.starboard", "yanmar-4jh")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.0", "")
+	fwd := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
+
+	loadDashboardPages()
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+
+	widget := func(page, id string) dashboardLayoutItem {
+		t.Helper()
+		dashboardPagesMu.RLock()
+		defer dashboardPagesMu.RUnlock()
+		for _, p := range dashboardPagesState {
+			if p.ID != page {
+				continue
+			}
+			for _, w := range p.Widgets {
+				if w.ID == id {
+					return w
+				}
+			}
+		}
+		t.Fatalf("widget %s not found", id)
+		return dashboardLayoutItem{}
+	}
+
+	pc := widget("p1", "cluster:port00001").Cluster
+	if pc.EquipmentID != port || pc.Title != "Port" {
+		t.Errorf("port cluster should reference the port engine and keep its title: %+v", pc)
+	}
+	if pc.Ring.Path != "" || pc.Ring.Suffix != "revolutions" || pc.Ring.LabelDivisor == nil || pc.Ring.RingStyle != "instrument" {
+		t.Errorf("ring should become a suffix and keep its display choices: %+v", pc.Ring)
+	}
+	if pc.Corners[0].Rows[0].Suffix != "oilPressure" || len(pc.Corners[0].Rows[0].Zones) != 0 {
+		t.Errorf("oil row should hold a suffix and no zones: %+v", pc.Corners[0].Rows[0])
+	}
+	if sc := widget("p1", "cluster:star0001").Cluster; sc.EquipmentID != star {
+		t.Errorf("starboard cluster should reference the starboard engine: %+v", sc)
+	}
+
+	g := widget("p1", "gauge-group:alt00001").GaugeGroup
+	if g.EquipmentKind != "alternator" || g.EquipmentID != alt || g.Gauges[1].Suffix != "current" || len(g.Gauges[1].Zones) != 0 {
+		t.Errorf("alternator group should become an equipment group: %+v", g)
+	}
+	if econ := widget("p1", "gauge:econ0001").Gauge; econ.Path != "helmcentral.propulsion.fuelEconomy" {
+		t.Errorf("a single-instance gauge keeps its path: %+v", econ)
+	}
+
+	wc := widget("p2", "cluster:preview01").Cluster
+	if wc.EquipmentID != port || len(wc.Telltales) != 0 {
+		t.Errorf("the exhaust telltale reads outside propulsion.port and is dropped: %+v", wc)
+	}
+	if len(wc.Fuel.Bars) != 2 || wc.Fuel.Bars[0].TankID != fwd || wc.Fuel.Bars[0].Label != "Fwd" || wc.Fuel.Bars[0].Level != nil {
+		t.Errorf("a tank with an item becomes a reference: %+v", wc.Fuel.Bars[0])
+	}
+	if wc.Fuel.Bars[1].TankID != "" || wc.Fuel.Bars[1].Label != "Aft" {
+		t.Errorf("a tank with no item keeps its label and asks for one: %+v", wc.Fuel.Bars[1])
+	}
+
+	// Zones moved to the profile where it had none, and the profile's own
+	// gearbox zone won over the tile's.
+	profiles, _ := engineProfiles()
+	var got engineProfile
+	for _, p := range profiles {
+		if p.ID == "yanmar-4jh" {
+			got = p
+		}
+	}
+	zones := func(suffix string) []engineProfileZone {
+		g, _ := profileGaugeFor(got, suffix)
+		return g.Zones
+	}
+	if z := zones("oilPressure"); len(z) != 1 || z[0].Direction != "above" || *z[0].Threshold != 40 || z[0].State != alarmStateNormal {
+		t.Errorf("oil zones should have moved to the profile: %+v", z)
+	}
+	if z := zones("revolutions"); len(z) != 2 {
+		t.Errorf("rpm zones should have moved to the profile: %+v", z)
+	}
+	if z := zones("transmission.oilTemperature"); len(z) != 1 || z[0].State != alarmStateWarn || *z[0].Threshold != 120 {
+		t.Errorf("the profile's own gearbox zone must stay: %+v", z)
+	}
+
+	// Ribbon: the engine lamp follows the item, the unowned alternator and the
+	// bilge float keep their paths.
+	dashboardPagesMu.RLock()
+	lamps := dashboardRibbonState.Lamps
+	marker := dashboardEquipmentConverted
+	dashboardPagesMu.RUnlock()
+	if lamps[0].EquipmentID != port || lamps[0].Suffix != "revolutions" || lamps[0].Path != "" {
+		t.Errorf("engine lamp should reference the port engine: %+v", lamps[0])
+	}
+	if lamps[1].Path == "" || lamps[2].Path != "electrical.switches.bilge" {
+		t.Errorf("unowned and single-instance lamps keep their paths: %+v %+v", lamps[1], lamps[2])
+	}
+	if !marker {
+		t.Error("the conversion should record that it has run")
+	}
+
+	// Survives a reload and does not run twice.
+	before, _ := os.ReadFile(path)
+	loadDashboardPages()
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Errorf("a second start rewrote the file:\n%s\n---\n%s", before, after)
+	}
+
+	// The converted file must pass the same validation a save does.
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	for _, p := range dashboardPagesState {
+		if msg := validateDashboardWidgets(p.Widgets, ""); msg != "" {
+			t.Errorf("page %s no longer validates: %s", p.Name, msg)
+		}
+	}
+	if msg := validateLampStripConfig(dashboardRibbonState, "ribbon"); msg != "" {
+		t.Errorf("ribbon no longer validates: %s", msg)
+	}
+}
+
+// A tile that matches no item keeps its display choices and asks for one.
+func TestConvertDashboardTilesLeavesUnmatchedTilesWaitingForAnItem(t *testing.T) {
+	setupDashboardPagesTest(t)
+	path := filepath.Join(t.TempDir(), "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", path)
+	if err := os.WriteFile(path, []byte(tileConvertFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vesselFixtureStore(t)
+	loadDashboardPages()
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		t.Fatal(err)
+	}
+
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	for _, p := range dashboardPagesState {
+		for _, w := range p.Widgets {
+			if w.Cluster == nil {
+				continue
+			}
+			if w.Cluster.EquipmentID != "" || w.Cluster.Ring.Path != "" || w.Cluster.Ring.Suffix != "revolutions" {
+				t.Errorf("%s should wait for an item and keep its reading: %+v", w.ID, w.Cluster.Ring)
+			}
+		}
+	}
+	if msg := validateDashboardWidgets(dashboardPagesState["p1"].Widgets, ""); msg != "" {
+		t.Errorf("a tile waiting for an item must still save: %s", msg)
+	}
+}

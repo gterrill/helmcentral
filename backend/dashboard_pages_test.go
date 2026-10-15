@@ -2921,16 +2921,17 @@ func clusterWidget(id string, config *dashboardClusterConfig) dashboardLayoutIte
 
 func validClusterConfig() *dashboardClusterConfig {
 	return &dashboardClusterConfig{
-		Title:  "Port",
-		Ring:   dashboardGaugeConfig{Path: "propulsion.port.revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm"},
-		Centre: dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Label: "Fuel", Display: "numeric", Quantity: "volumetricFlow", Unit: "Lph"},
+		EquipmentID: "item-port",
+		Title:       "Port",
+		Ring:        dashboardGaugeConfig{Suffix: "revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+		Centre:      dashboardGaugeConfig{Suffix: "fuel.rate", Label: "Fuel", Display: "numeric", Quantity: "volumetricFlow", Unit: "Lph"},
 		Corners: []dashboardClusterCorner{
 			{Label: "Oil", Rows: []dashboardGaugeConfig{
-				{Path: "propulsion.port.oilPressure", Label: "Oil", Display: "numeric", Quantity: "pressure", Unit: "psi"},
+				{Suffix: "oilPressure", Label: "Oil", Display: "numeric", Quantity: "pressure", Unit: "psi"},
 			}},
 			{Label: "Temps", Rows: []dashboardGaugeConfig{
-				{Path: "propulsion.port.temperature", Label: "Coolant", Display: "numeric", Quantity: "temperature", Unit: "C"},
-				{Path: "propulsion.0.exhaustTemperature", Label: "Exhaust", Display: "numeric", Quantity: "temperature", Unit: "C"},
+				{Suffix: "temperature", Label: "Coolant", Display: "numeric", Quantity: "temperature", Unit: "C"},
+				{Suffix: "transmission.oilTemperature", Label: "Gearbox", Display: "numeric", Quantity: "temperature", Unit: "C"},
 			}},
 		},
 	}
@@ -2946,11 +2947,20 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	noRing := validClusterConfig()
 	noRing.Ring = dashboardGaugeConfig{}
 
+	pathSlot := validClusterConfig()
+	pathSlot.Corners[0].Rows[0].Path = "propulsion.port.oilPressure"
+
+	zonedSlot := validClusterConfig()
+	zonedSlot.Ring.Zones = []gaugeZone{{From: 0, To: 10, State: alarmStateAlarm}}
+
+	badSuffix := validClusterConfig()
+	badSuffix.Corners[0].Rows[0].Suffix = "../../etc"
+
 	tooManyCorners := validClusterConfig()
 	tooManyCorners.Corners = make([]dashboardClusterCorner, clusterMaxCorners+1)
 	for i := range tooManyCorners.Corners {
 		tooManyCorners.Corners[i] = dashboardClusterCorner{Label: "X", Rows: []dashboardGaugeConfig{
-			{Path: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"},
+			{Suffix: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"},
 		}}
 	}
 
@@ -2961,12 +2971,12 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	badRow.Corners[0].Rows[0].Display = "hologram"
 
 	badTelltale := validClusterConfig()
-	badTelltale.Telltales = []dashboardGaugeConfig{{Path: "a.b", Display: "hologram", Quantity: "raw", Unit: "raw"}}
+	badTelltale.Telltales = []dashboardGaugeConfig{{Suffix: "a.b", Display: "hologram", Quantity: "raw", Unit: "raw"}}
 
 	tooManyTelltales := validClusterConfig()
 	tooManyTelltales.Telltales = make([]dashboardGaugeConfig, clusterMaxTelltales+1)
 	for i := range tooManyTelltales.Telltales {
-		tooManyTelltales.Telltales[i] = dashboardGaugeConfig{Path: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"}
+		tooManyTelltales.Telltales[i] = dashboardGaugeConfig{Suffix: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"}
 	}
 
 	cases := []struct {
@@ -2975,7 +2985,10 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	}{
 		{"short token", clusterWidget("cluster:abc", validClusterConfig())},
 		{"missing config", clusterWidget("cluster:abcd1234", nil)},
-		{"ring with no path", clusterWidget("cluster:abcd1234", noRing)},
+		{"ring with no reading", clusterWidget("cluster:abcd1234", noRing)},
+		{"a slot that holds a path", clusterWidget("cluster:abcd1234", pathSlot)},
+		{"a slot that holds zones", clusterWidget("cluster:abcd1234", zonedSlot)},
+		{"a suffix that escapes the source", clusterWidget("cluster:abcd1234", badSuffix)},
 		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
 		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},
 		{"bad row", clusterWidget("cluster:abcd1234", badRow)},
@@ -2991,23 +3004,14 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 }
 
 func TestGaugeBoundPathsIncludesClusterTelltales(t *testing.T) {
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "")
 	cluster := validClusterConfig()
+	cluster.EquipmentID = itemID
 	cluster.Telltales = []dashboardGaugeConfig{
-		{Path: "propulsion.port.temperature", Display: "numeric", Quantity: "temperature", Unit: "C"},
+		{Suffix: "temperature", Display: "numeric", Quantity: "temperature", Unit: "C"},
 	}
 
-	dashboardPagesMu.Lock()
-	previous := dashboardPagesState
-	dashboardPagesState = map[string]*dashboardPageData{"p1": {
-		ID: "p1", Name: "Telltales",
-		Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", cluster)},
-	}}
-	dashboardPagesMu.Unlock()
-	t.Cleanup(func() {
-		dashboardPagesMu.Lock()
-		dashboardPagesState = previous
-		dashboardPagesMu.Unlock()
-	})
+	withPages(t, clusterWidget("cluster:abcd1234", cluster))
 
 	var found bool
 	for _, p := range gaugeBoundPaths() {
@@ -3040,24 +3044,17 @@ func TestValidateDashboardWidgetsRejectsMismatchedClusterConfig(t *testing.T) {
 // Fifth widget kind to need this walker. Miss it and every reading in the
 // cluster is a dash, with nothing in any log to say why.
 func TestGaugeBoundPathsIncludesClusterSlots(t *testing.T) {
-	dashboardPagesMu.Lock()
-	previous := dashboardPagesState
-	dashboardPagesState = map[string]*dashboardPageData{
-		"a": {ID: "a", Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", validClusterConfig())}},
-	}
-	dashboardPagesMu.Unlock()
-	t.Cleanup(func() {
-		dashboardPagesMu.Lock()
-		dashboardPagesState = previous
-		dashboardPagesMu.Unlock()
-	})
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "")
+	cluster := validClusterConfig()
+	cluster.EquipmentID = itemID
+	withPages(t, clusterWidget("cluster:abcd1234", cluster))
 
 	want := []string{
-		"propulsion.0.exhaustTemperature",
 		"propulsion.port.fuel.rate",
 		"propulsion.port.oilPressure",
 		"propulsion.port.revolutions",
 		"propulsion.port.temperature",
+		"propulsion.port.transmission.oilTemperature",
 	}
 	paths := gaugeBoundPaths()
 	if len(paths) != len(want) {
@@ -3067,6 +3064,25 @@ func TestGaugeBoundPathsIncludesClusterSlots(t *testing.T) {
 		if paths[i] != want[i] {
 			t.Fatalf("expected %v, got %v", want, paths)
 		}
+	}
+}
+
+// A tile whose item is unmapped or gone binds nothing, and never falls back to
+// a path it once held.
+func TestGaugeBoundPathsSkipsAClusterWhoseItemHasNoSource(t *testing.T) {
+	itemID := newTileItem(t, "Spare engine", "", "")
+	cluster := validClusterConfig()
+	cluster.EquipmentID = itemID
+	withPages(t,
+		clusterWidget("cluster:abcd1234", cluster),
+		clusterWidget("cluster:efgh5678", func() *dashboardClusterConfig {
+			c := validClusterConfig()
+			c.EquipmentID = ""
+			return c
+		}()),
+	)
+	if paths := gaugeBoundPaths(); len(paths) != 0 {
+		t.Fatalf("expected no bound paths, got %v", paths)
 	}
 }
 
@@ -3170,21 +3186,13 @@ func TestValidateGaugeConfigRejectsANonPositiveLabelDivisor(t *testing.T) {
 
 // --- Fuel rail (ADR 0061) ---------------------------------------------------
 
-// The live vessel's port side: forward and aft, each with a capacity path
-// alongside its level. Captured from the running server rather than assumed,
-// which is how ADR 0054 found that three of its own suffixes matched nothing.
+// The live vessel's port side: forward and aft, each a tank item.
 func validFuelRail() *dashboardClusterFuelRail {
 	return &dashboardClusterFuelRail{
 		Side: "left",
 		Bars: []dashboardClusterFuelBar{
-			{
-				Level:    dashboardGaugeConfig{Path: "tanks.fuel.5.currentLevel", Label: "Fwd", Display: "bar", Quantity: "ratio", Unit: "percent"},
-				Capacity: dashboardGaugeConfig{Path: "tanks.fuel.5.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
-			},
-			{
-				Level:    dashboardGaugeConfig{Path: "tanks.fuel.4.currentLevel", Label: "Aft", Display: "bar", Quantity: "ratio", Unit: "percent"},
-				Capacity: dashboardGaugeConfig{Path: "tanks.fuel.4.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
-			},
+			{TankID: "tank-5", Label: "Fwd"},
+			{TankID: "tank-4", Label: "Aft"},
 		},
 	}
 }
@@ -3201,40 +3209,13 @@ func TestValidateClusterAcceptsAFuelRail(t *testing.T) {
 	}
 }
 
-/*
-The rule that matters most here.
-
-No tank path on this vessel publishes meta.units, so the path picker preselects
-Unitless. Left that way convertFromSI is the identity and the total reads 1.2
-where it should read 890. A fuel figure that is wrong but plausible is worse on
-a helm than no figure at all, so the config that produces it cannot be saved.
-*/
-func TestValidateClusterRejectsFuelSlotsWithTheWrongQuantity(t *testing.T) {
-	rawLevel := clusterWithFuel()
-	rawLevel.Fuel.Bars[0].Level.Quantity = "raw"
-	rawLevel.Fuel.Bars[0].Level.Unit = "raw"
-
-	rawCapacity := clusterWithFuel()
-	rawCapacity.Fuel.Bars[0].Capacity.Quantity = "raw"
-	rawCapacity.Fuel.Bars[0].Capacity.Unit = "raw"
-
-	pressureCapacity := clusterWithFuel()
-	pressureCapacity.Fuel.Bars[0].Capacity.Quantity = "pressure"
-	pressureCapacity.Fuel.Bars[0].Capacity.Unit = "psi"
-
-	for _, tc := range []struct {
-		name   string
-		config *dashboardClusterConfig
-	}{
-		{"level not a ratio", rawLevel},
-		{"capacity not a volume", rawCapacity},
-		{"capacity measured as pressure", pressureCapacity},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}, ""); msg == "" {
-				t.Fatal("expected a fuel slot with the wrong quantity to be rejected")
-			}
-		})
+// A bar names its tank; it carries no level or capacity path of its own, so a
+// save that still holds one is refused rather than half-read.
+func TestValidateClusterRejectsABarThatStillHoldsPaths(t *testing.T) {
+	config := clusterWithFuel()
+	config.Fuel.Bars[0].Level = &dashboardGaugeConfig{Path: "tanks.fuel.5.currentLevel", Display: "bar", Quantity: "ratio", Unit: "percent"}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", config)}, ""); msg == "" {
+		t.Fatal("expected a bar holding a level path to be rejected")
 	}
 }
 
@@ -3250,8 +3231,8 @@ func TestValidateClusterRejectsBadFuelRails(t *testing.T) {
 		tooManyBars.Fuel.Bars = append(tooManyBars.Fuel.Bars, validFuelRail().Bars[0])
 	}
 
-	noCapacityPath := clusterWithFuel()
-	noCapacityPath.Fuel.Bars[1].Capacity.Path = ""
+	longLabel := clusterWithFuel()
+	longLabel.Fuel.Bars[1].Label = strings.Repeat("x", gaugeLabelMaxLen+1)
 
 	for _, tc := range []struct {
 		name   string
@@ -3262,7 +3243,7 @@ func TestValidateClusterRejectsBadFuelRails(t *testing.T) {
 		{"side names a tank rather than an edge", badSide},
 		{"no bars at all", noBars},
 		{"too many bars", tooManyBars},
-		{"capacity with no path", noCapacityPath},
+		{"label too long", longLabel},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}, ""); msg == "" {
@@ -3273,24 +3254,19 @@ func TestValidateClusterRejectsBadFuelRails(t *testing.T) {
 }
 
 /*
-Both paths per bar, not just the level.
+Both readings per bar, not just the level.
 
-Missing the capacity path is the subtler of the two failures: the bars still
-draw and only the litres and the total are dashes, which reads as a units
-problem rather than a subscription one.
+Missing the capacity is the subtler of the two failures: the bars still draw and
+only the litres and the total are dashes, which reads as a units problem rather
+than a subscription one.
 */
 func TestGaugeBoundPathsIncludesFuelLevelsAndCapacities(t *testing.T) {
-	dashboardPagesMu.Lock()
-	previous := dashboardPagesState
-	dashboardPagesState = map[string]*dashboardPageData{
-		"a": {ID: "a", Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", clusterWithFuel())}},
-	}
-	dashboardPagesMu.Unlock()
-	t.Cleanup(func() {
-		dashboardPagesMu.Lock()
-		dashboardPagesState = previous
-		dashboardPagesMu.Unlock()
-	})
+	fwd := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
+	aft := newTileItem(t, "Port aft fuel", "tanks.fuel.4", "")
+	config := clusterWithFuel()
+	config.EquipmentID = ""
+	config.Fuel.Bars[0].TankID, config.Fuel.Bars[1].TankID = fwd, aft
+	withPages(t, clusterWidget("cluster:abcd1234", config))
 
 	paths := gaugeBoundPaths()
 	for _, want := range []string{
@@ -3327,17 +3303,7 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 	raw := `{
 	  "side": "right",
 	  "totalLabel": "Aboard",
-	  "bars": [{
-	    "level": {
-	      "path": "tanks.fuel.2.currentLevel", "label": "Fwd", "display": "bar",
-	      "quantity": "ratio", "unit": "percent", "decimals": 0, "min": 0, "max": 100,
-	      "zones": [{"from": 0, "to": 15, "state": "warn"}]
-	    },
-	    "capacity": {
-	      "path": "tanks.fuel.2.capacity", "display": "numeric",
-	      "quantity": "volume", "unit": "L"
-	    }
-	  }]
+	  "bars": [{"tankId": "tank-2", "label": "Fwd"}]
 	}`
 	var rail dashboardClusterFuelRail
 	if err := json.Unmarshal([]byte(raw), &rail); err != nil {
@@ -3368,19 +3334,11 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 	if len(got.Bars) != 1 {
 		t.Fatalf("expected one bar, got %d", len(got.Bars))
 	}
-	if got.Bars[0].Level.Path != "tanks.fuel.2.currentLevel" {
-		t.Errorf("level path did not survive: %q", got.Bars[0].Level.Path)
+	if got.Bars[0].TankID != "tank-2" || got.Bars[0].Label != "Fwd" {
+		t.Errorf("the bar's tank and label did not survive: %+v", got.Bars[0])
 	}
-	// The one most likely to be forgotten, and the one whose absence looks
-	// like a units bug rather than a persistence bug.
-	if got.Bars[0].Capacity.Path != "tanks.fuel.2.capacity" {
-		t.Errorf("capacity path did not survive: %q", got.Bars[0].Capacity.Path)
-	}
-	if got.Bars[0].Capacity.Quantity != "volume" || got.Bars[0].Capacity.Unit != "L" {
-		t.Errorf("capacity units did not survive: %q/%q", got.Bars[0].Capacity.Quantity, got.Bars[0].Capacity.Unit)
-	}
-	if len(got.Bars[0].Level.Zones) != 1 {
-		t.Errorf("level zones did not survive: %v", got.Bars[0].Level.Zones)
+	if reloaded.Widgets[0].Cluster.EquipmentID != "item-port" {
+		t.Errorf("the cluster's equipment did not survive: %q", reloaded.Widgets[0].Cluster.EquipmentID)
 	}
 }
 

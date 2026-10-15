@@ -148,6 +148,7 @@ func invalidateSourceItems() {
 	sourceItemsCache.items = nil
 	sourceItemsCache.at = time.Time{}
 	sourceItemsCache.mu.Unlock()
+	invalidateEquipmentRefs()
 }
 
 // listSourceItems is every item that owns a SignalK source, sorted by group
