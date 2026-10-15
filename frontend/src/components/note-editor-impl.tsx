@@ -51,6 +51,7 @@ import {
 } from '@/lib/note-editor-config'
 import { insertDictatedText } from '@/lib/note-editor-dictation'
 import { insertUploadedPhotos, type UploadedPhoto } from '@/lib/note-editor-image-insert'
+import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { resolveNoteHref } from '@/lib/note-links'
 import { cn } from '@/lib/utils'
 
@@ -512,6 +513,7 @@ export const NoteEditorBody = forwardRef<NoteEditorHandle, NoteEditorBodyProps>(
 export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEditorProps) {
   const bodyRef = useRef<NoteEditorHandle>(null)
   const [dirty, setDirty] = useState(false)
+  useUnsavedWorkReport('note-editor', dirty)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const markDirty = useCallback(() => setDirty(true), [])

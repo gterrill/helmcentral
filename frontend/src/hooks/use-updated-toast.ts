@@ -1,42 +1,30 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 
-import { UPDATED_TO_KEY } from '@/hooks/use-version-reload'
+import type { AppVersion } from '@/hooks/use-app-version'
 import { releaseNotesUrl } from '@/lib/help-links'
+import { recordSeenVersion } from '@/lib/seen-version'
 
 const TOAST_DURATION_MS = 10_000
 
 /**
- * Tells the operator which version Helmcentral is now running after
- * useVersionReload reloaded the page on its own, so an update that happens
- * while nobody is watching is not silent. The marker is removed as it is read,
- * so the message shows once: a manual refresh, or React's second StrictMode
- * effect pass, finds nothing. A malformed marker is discarded without a toast.
+ * Tells the operator which version Helmcentral is now running when this
+ * browser last showed a different one, however the new page came about: the
+ * Reload button, a manual refresh, a new tab or a Home Screen relaunch. The
+ * comparison is against the version this browser remembers (see
+ * recordSeenVersion), and waits for the first successful health read.
  */
-export function useUpdatedToast(): void {
+export function useUpdatedToast(current: AppVersion | null): void {
+  const version = current?.version ?? null
   useEffect(() => {
-    let raw: string | null = null
-    try {
-      raw = sessionStorage.getItem(UPDATED_TO_KEY)
-      if (raw !== null) sessionStorage.removeItem(UPDATED_TO_KEY)
-    } catch (err) {
-      console.warn('Could not read the update marker', err)
-      return
-    }
-    if (raw === null) return
-
-    let to: unknown
-    try {
-      to = (JSON.parse(raw) as { to?: unknown }).to
-    } catch {
-      return
-    }
-    if (typeof to !== 'string' || to === '') return
+    if (version === null) return
+    const to = recordSeenVersion(version)
+    if (to === null) return
 
     const url = releaseNotesUrl(to)
     toast(`Helmcentral updated to ${to}`, {
       duration: TOAST_DURATION_MS,
       action: url ? { label: 'Release notes', onClick: () => window.open(url, '_blank', 'noopener') } : undefined,
     })
-  }, [])
+  }, [version])
 }

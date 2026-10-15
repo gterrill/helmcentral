@@ -27,6 +27,7 @@ import {
   type MaintenanceLogPartInput,
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
+import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { documentViewerHref } from '@/lib/document-citation'
 import { addMonthsISO, todayISO } from '@/lib/local-date'
 
@@ -222,6 +223,13 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
   const [completedRule, setCompletedRule] = useState<MaintenanceRule | null>(null)
 
   const { items } = useEquipment(rule !== null ? {} : null)
+
+  // Anything entered and not yet written to the log is unsaved work.
+  const blank = blankForm(rule?.current_hours)
+  const entered = rule !== null && completedEntry === null
+    && (newDueDate !== '' || form.hours !== blank.hours || form.description !== '' || form.who !== ''
+      || form.cost !== '' || form.currency !== '' || form.parts.length > 0 || form.performedAt !== blank.performedAt)
+  useUnsavedWorkReport('maintenance-complete', entered)
 
   useEffect(() => {
     if (rule) {
@@ -446,6 +454,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   const [dirty, setDirty] = useState(false)
 
   const { items } = useEquipment(open ? {} : null)
+  useUnsavedWorkReport('maintenance-entry', open && dirty)
 
   useEffect(() => {
     if (open) {

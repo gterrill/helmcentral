@@ -6,7 +6,7 @@
  * not part of the release versioning at all.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { resetAppVersionProbe } from '@/hooks/use-app-version'
 import { SidebarVersion } from '@/components/sidebar-version'
 import { GC_TIME_MS } from '@/lib/api-query'
@@ -143,5 +143,24 @@ describe('SidebarVersion', () => {
     const { container } = render(<SidebarVersion />)
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('says Update available and offers Reload until the page is reloaded', async () => {
+    stubHealth({ status: 'ok', version: 'v0.42.0', revision: 'deadbeef' })
+    const onReload = vi.fn()
+
+    render(<SidebarVersion updateAvailable onReload={onReload} />)
+
+    const button = await screen.findByRole('button', { name: 'Update available · Reload' })
+    fireEvent.click(button)
+    expect(onReload).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('sidebar-version')).toBeInTheDocument()
+  })
+
+  it('shows the plain version when no update is available', async () => {
+    stubHealth({ status: 'ok', version: 'v0.42.0', revision: 'deadbeef' })
+    render(<SidebarVersion updateAvailable={false} onReload={vi.fn()} />)
+    await screen.findByText('v0.42.0')
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })

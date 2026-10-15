@@ -211,6 +211,8 @@ import {
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
 import { UpdatedToast } from '@/components/updated-toast'
+import { ReloadConfirmDialog, UpdateNotices } from '@/components/update-notices'
+import { DisplayUpdatedNotice } from '@/components/display-updated-notice'
 import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId } from '@/lib/app-location'
 import { browserHistory, createAppRouter } from '@/lib/app-router'
 import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
@@ -445,20 +447,30 @@ function AppShell() {
   // composer (the /mate panel and the sheet over any page).
   const [matePanelHasDraft, setMatePanelHasDraft] = useState(false)
   const [mateSheetHasDraft, setMateSheetHasDraft] = useState(false)
-  // Reload when a new build has been deployed (checked on return to the
-  // page and hourly while it stays on screen), but never over unsaved work:
-  // a Settings, document or inventory edit, a stocktake scan or bin quick-add
-  // draft, or an unsent Mate message. The reload waits until the operator
-  // has saved, sent or left. Mounted at the App root, so the wall display
-  // and kiosk routes get it too. Settings, Document Details and the
-  // Inventory panel register a navigation guard while they hold unsaved
-  // work, so "any guard" is "unsaved work"; Mate drafts are deliberately
-  // unguarded (leaving a half-typed message is fine) and only count here.
-  // The sidebar's unsaved dot: Settings holds a guard exactly while it is dirty.
+  // A newer build than this page loaded with is checked for every five
+  // minutes and on return to the page. An attended screen is only told: the
+  // operator reloads from the toast or the sidebar line, and is asked first
+  // when something is unsaved. The wall display and a Home Screen dashboard
+  // have nobody to ask and reload by themselves (never over unsaved work).
+  // Settings, Document Details, the Inventory panel, note drafts and the
+  // maintenance log dialogs register a navigation guard while they hold
+  // unsaved work, so "any guard" is "unsaved work"; Mate drafts are
+  // deliberately unguarded (leaving a half-typed message is fine) and only
+  // count here. The sidebar's unsaved dot: Settings holds a guard exactly
+  // while it is dirty.
   const settingsDirty = useHasNavigationGuard('settings')
   const mateDraftRef = useRef(false)
   mateDraftRef.current = matePanelHasDraft || mateSheetHasDraft
-  useVersionReload({ hasUnsavedWork: () => router.hasGuards() || mateDraftRef.current })
+  const hasUnsavedWork = useCallback(() => router.hasGuards() || mateDraftRef.current, [router])
+  // Home Screen apps and the wall display are unattended; a dashboard in the
+  // browser's own full screen is not (a reload would drop out of it).
+  const unattendedRef = useRef(false)
+  const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false)
+  const versionWatch = useVersionReload({ hasUnsavedWork, unattended: () => unattendedRef.current })
+  const requestReload = useCallback(() => {
+    if (hasUnsavedWork()) setReloadConfirmOpen(true)
+    else window.location.reload()
+  }, [hasUnsavedWork])
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
@@ -472,6 +484,7 @@ function AppShell() {
   // has it in scope. isDisplay depends only on activePanel, which is already
   // set by this point, so nothing about moving it changes what it means.
   const isDisplay = activePanel === 'display'
+  unattendedRef.current = isDisplay || (runningFromHomeScreen() && activePanel === null && !fullscreen.isFullscreen)
   // Full screen at the helm means the operator is watching, so the screen
   // shouldn't sleep. A Home Screen app on iPad or iPhone has no full screen
   // but is already free of browser bars, so its dashboard holds the lock
@@ -2592,12 +2605,15 @@ function AppShell() {
         alarms={alarms}
         preview={displayOptions.preview}
         overlay={
-          <DisplayRemoteToast
-            announcementId={remoteAnnouncementId}
-            pageName={activePage?.name ?? ''}
-            position={displayRotation.position}
-            paused={displayRotation.paused}
-          />
+          <>
+            <DisplayRemoteToast
+              announcementId={remoteAnnouncementId}
+              pageName={activePage?.name ?? ''}
+              position={displayRotation.position}
+              paused={displayRotation.paused}
+            />
+            <DisplayUpdatedNotice current={versionWatch.current} />
+          </>
         }
       >
         {pagesError && pages.length === 0 ? (
@@ -2704,7 +2720,7 @@ function AppShell() {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarVersion />
+          <SidebarVersion updateAvailable={versionWatch.available !== null} onReload={requestReload} />
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
@@ -3107,7 +3123,13 @@ function AppShell() {
       )}
 
       <Toaster isDarkTheme={isDarkTheme} />
-      <UpdatedToast />
+      <UpdatedToast current={versionWatch.current} />
+      <UpdateNotices watch={versionWatch} requestReload={requestReload} />
+      <ReloadConfirmDialog
+        open={reloadConfirmOpen}
+        onCancel={() => setReloadConfirmOpen(false)}
+        onConfirm={() => window.location.reload()}
+      />
     </SidebarProvider>
   )
 }

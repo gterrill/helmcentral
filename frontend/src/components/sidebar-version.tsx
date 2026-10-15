@@ -12,7 +12,14 @@ import { releaseNotesUrl } from '@/lib/help-links'
  * fallback policy in AGENTS.md. A release tag links to that release's notes;
  * dev and between-release builds have none, so they stay plain text.
  */
-export function SidebarVersion() {
+interface SidebarVersionProps {
+  /** A newer build has been deployed than the one this page is running. */
+  updateAvailable?: boolean
+  /** Reload to the new build; asks first when there is unsaved work. */
+  onReload?: () => void
+}
+
+export function SidebarVersion({ updateAvailable = false, onReload }: SidebarVersionProps = {}) {
   const { build, loading, error } = useAppVersion()
 
   if (loading) return null
@@ -25,6 +32,20 @@ export function SidebarVersion() {
   const className =
     'truncate px-2 pb-1 text-center font-mono text-xs leading-none text-muted-foreground group-data-[collapsible=icon]:hidden'
   const notesUrl = build ? releaseNotesUrl(build.version) : null
+
+  if (updateAvailable && onReload) {
+    return (
+      <div data-testid="sidebar-version" title={title} className={className}>
+        <button
+          type="button"
+          onClick={onReload}
+          className="max-w-full truncate rounded-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Update available · Reload
+        </button>
+      </div>
+    )
+  }
 
   if (notesUrl) {
     return (
