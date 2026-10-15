@@ -1,27 +1,8 @@
 import type { DeepPartial, SettingsPayload } from '@/hooks/use-settings-form'
-import {
-  titleCaseInstance,
-  type VesselAlternatorSettings,
-  type VesselElectricalSettings,
-  type VesselSolarSetting,
-  type VesselBatterySetting,
-  type VesselEngineSetting,
-  type VesselHouseBankSetting,
-} from '@/lib/vessel-settings'
+import { emptyVesselRoles, type VesselRoles } from '@/lib/vessel-settings'
 
 // Keep in step with defaultWebSearchModel in backend/assistant_web_search.go.
 export const defaultWebSearchModel = 'google/gemini-2.5-flash-lite'
-
-export const defaultTankLabelIds = [
-  'blackWater.1',
-  'blackWater.6',
-  'freshWater.0',
-  'freshWater.3',
-  'fuel.2',
-  'fuel.4',
-  'fuel.5',
-  'fuel.7',
-]
 
 export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
@@ -29,100 +10,9 @@ export type ScopeMethod = 'catenary' | 'ratio'
 
 export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-/** One editable engine row, keyed by SignalK propulsion instance in VesselDraft. */
-export interface VesselEngineRowDraft {
-  name: string
-  equipmentId: string
-  included: boolean
-}
-
-/**
- * The Vessel section's engines and house bank. Rows exist for every instance
- * the operator has touched, ticked or not, so a name typed against an unticked
- * engine survives ticking it; only ticked rows are saved.
- */
-export interface VesselDraft {
-  engineRows: Record<string, VesselEngineRowDraft>
-  houseBank: VesselHouseBankSetting | null
-  /** Operator names for battery instances, keyed by instance id. */
-  batteryNames: Record<string, string>
-  /** The port and starboard alternator instances; '' is not set. */
-  alternators: VesselAlternatorSettings
-  /** The generator, AC input, shore charger, inverter and voltage readout battery; '' is not set. */
-  electrical: VesselElectricalSettings
-  /** Operator names for solar controllers, keyed by instance id. */
-  solarNames: Record<string, string>
-}
-
-/** The solar names a draft saves: non-empty names only, in instance order. */
-export function vesselSolarFromDraft(vessel: VesselDraft): VesselSolarSetting[] {
-  return Object.keys(vessel.solarNames)
-    .filter((instance) => vessel.solarNames[instance].trim() !== '')
-    .sort()
-    .map((instance) => ({ instance, name: vessel.solarNames[instance].trim() }))
-}
-
-/** The battery names a draft saves: non-empty names only, in instance order. */
-export function vesselBatteriesFromDraft(vessel: VesselDraft): VesselBatterySetting[] {
-  return Object.keys(vessel.batteryNames)
-    .filter((instance) => vessel.batteryNames[instance].trim() !== '')
-    .sort()
-    .map((instance) => ({ instance, name: vessel.batteryNames[instance].trim() }))
-}
-
-/** The engines a draft saves: ticked rows only, in instance order, names defaulted. */
-export function vesselEnginesFromDraft(vessel: VesselDraft): VesselEngineSetting[] {
-  return Object.keys(vessel.engineRows)
-    .filter((instance) => vessel.engineRows[instance].included)
-    .sort()
-    .map((instance) => ({
-      instance,
-      name: vessel.engineRows[instance].name.trim() || titleCaseInstance(instance),
-      equipment_id: vessel.engineRows[instance].equipmentId,
-    }))
-}
-
-function houseBanksEqual(a: VesselHouseBankSetting | null, b: VesselHouseBankSetting | null): boolean {
+function rolesEqual(a: VesselRoles | null, b: VesselRoles | null): boolean {
   if (a === null || b === null) return a === b
-  return a.path === b.path
-    && a.equipment_id === b.equipment_id
-    && a.capacity_ah === b.capacity_ah
-    && a.cells === b.cells
-    && (a.warn_voltage ?? 0) === (b.warn_voltage ?? 0)
-    && (a.high_voltage ?? 0) === (b.high_voltage ?? 0)
-}
-
-// Equal when they would save the same thing: an edit to an unticked row, or
-// a name cleared back to its default, is not an unsaved change.
-function vesselDraftsEqual(a: VesselDraft | null, b: VesselDraft | null): boolean {
-  if (a === null || b === null) return a === b
-  const ea = vesselEnginesFromDraft(a)
-  const eb = vesselEnginesFromDraft(b)
-  if (ea.length !== eb.length) return false
-  for (let i = 0; i < ea.length; i++) {
-    if (ea[i].instance !== eb[i].instance || ea[i].name !== eb[i].name || ea[i].equipment_id !== eb[i].equipment_id) return false
-  }
-  const ba = vesselBatteriesFromDraft(a)
-  const bb = vesselBatteriesFromDraft(b)
-  if (ba.length !== bb.length) return false
-  for (let i = 0; i < ba.length; i++) {
-    if (ba[i].instance !== bb[i].instance || ba[i].name !== bb[i].name) return false
-  }
-  if (a.alternators.port_instance !== b.alternators.port_instance || a.alternators.starboard_instance !== b.alternators.starboard_instance) return false
-  const electricalA = a.electrical
-  const electricalB = b.electrical
-  if (electricalA.generator_instance !== electricalB.generator_instance
-    || electricalA.generator_ac_instance !== electricalB.generator_ac_instance
-    || electricalA.shore_charger_instance !== electricalB.shore_charger_instance
-    || electricalA.inverter_instance !== electricalB.inverter_instance
-    || electricalA.voltage_readout_battery !== electricalB.voltage_readout_battery) return false
-  const sa = vesselSolarFromDraft(a)
-  const sb = vesselSolarFromDraft(b)
-  if (sa.length !== sb.length) return false
-  for (let i = 0; i < sa.length; i++) {
-    if (sa[i].instance !== sb[i].instance || sa[i].name !== sb[i].name) return false
-  }
-  return houseBanksEqual(a.houseBank, b.houseBank)
+  return (Object.keys(emptyVesselRoles) as Array<keyof VesselRoles>).every((key) => a[key] === b[key])
 }
 
 /**
@@ -141,7 +31,6 @@ export interface RegularSettingsDraft {
   vesselPrefix: string
   boatModel: string
   distanceUnits: 'metric' | 'imperial'
-  tankLabels: Record<string, string>
   tideStationId: string
   tideStationName: string
   tideAutoStation: boolean
@@ -181,11 +70,11 @@ export interface RegularSettingsDraft {
   assistantWebSearch: boolean
   assistantWebSearchModel: string
   /**
-   * null until the server's vessel block has been read. It stays null if the
-   * settings fetch fell back without one, and the patch then omits `vessel`
+   * null until the server's roles block has been read. It stays null if the
+   * settings fetch fell back without one, and the patch then omits `roles`
    * so a save cannot wipe a setup this page never saw.
    */
-  vessel: VesselDraft | null
+  roles: VesselRoles | null
 }
 
 export const initialRegularSettingsDraft: RegularSettingsDraft = {
@@ -194,7 +83,6 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   vesselPrefix: '',
   boatModel: '',
   distanceUnits: 'metric',
-  tankLabels: Object.fromEntries(defaultTankLabelIds.map((id) => [id, ''])),
   tideStationId: '',
   tideStationName: '',
   tideAutoStation: false,
@@ -234,7 +122,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantWakeWord: false,
   assistantWebSearch: false,
   assistantWebSearchModel: defaultWebSearchModel,
-  vessel: null,
+  roles: null,
 }
 
 function normalizeModelPatterns(values: string[] | undefined): string[] {
@@ -254,7 +142,7 @@ function normalizeAssistantCostTier(value: string | undefined): AssistantCostTie
 
 /** Builds the draft's starting values from a freshly-fetched settings payload. */
 export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSettingsDraft {
-  const draft: RegularSettingsDraft = { ...initialRegularSettingsDraft, tankLabels: { ...initialRegularSettingsDraft.tankLabels } }
+  const draft: RegularSettingsDraft = { ...initialRegularSettingsDraft }
 
   if (settings.signalk?.address) draft.signalkAddress = settings.signalk.address
   if (typeof settings.signalk?.port === 'number') draft.signalkPort = String(settings.signalk.port)
@@ -263,9 +151,6 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.boat?.model === 'string') draft.boatModel = settings.boat.model
 
   if (settings.units === 'metric' || settings.units === 'imperial') draft.distanceUnits = settings.units
-  if (settings.ui?.tank_labels && typeof settings.ui.tank_labels === 'object') {
-    draft.tankLabels = { ...draft.tankLabels, ...settings.ui.tank_labels }
-  }
   if (typeof settings.ui?.tide_station_id === 'string') draft.tideStationId = settings.ui.tide_station_id
   if (typeof settings.ui?.tide_station_name === 'string') draft.tideStationName = settings.ui.tide_station_name
   if (typeof settings.ui?.tide_auto_station === 'boolean') draft.tideAutoStation = settings.ui.tide_auto_station
@@ -334,37 +219,7 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
   if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
 
-  if (settings.vessel) {
-    const engineRows: Record<string, VesselEngineRowDraft> = {}
-    for (const e of Array.isArray(settings.vessel.engines) ? settings.vessel.engines : []) {
-      engineRows[e.instance] = { name: e.name || titleCaseInstance(e.instance), equipmentId: e.equipment_id, included: true }
-    }
-    const batteryNames: Record<string, string> = {}
-    for (const b of Array.isArray(settings.vessel.batteries) ? settings.vessel.batteries : []) {
-      batteryNames[b.instance] = b.name
-    }
-    const solarNames: Record<string, string> = {}
-    for (const sc of Array.isArray(settings.vessel.solar) ? settings.vessel.solar : []) {
-      solarNames[sc.instance] = sc.name
-    }
-    draft.vessel = {
-      engineRows,
-      houseBank: settings.vessel.house_bank ?? null,
-      batteryNames,
-      alternators: {
-        port_instance: settings.vessel.alternators?.port_instance ?? '',
-        starboard_instance: settings.vessel.alternators?.starboard_instance ?? '',
-      },
-      electrical: {
-        generator_instance: settings.vessel.electrical?.generator_instance ?? '',
-        generator_ac_instance: settings.vessel.electrical?.generator_ac_instance ?? '',
-        shore_charger_instance: settings.vessel.electrical?.shore_charger_instance ?? '',
-        inverter_instance: settings.vessel.electrical?.inverter_instance ?? '',
-        voltage_readout_battery: settings.vessel.electrical?.voltage_readout_battery ?? '',
-      },
-      solarNames,
-    }
-  }
+  if (settings.roles) draft.roles = { ...emptyVesselRoles, ...settings.roles }
 
   return draft
 }
@@ -389,8 +244,6 @@ const parseNonNegativeNumber = (value: string, fallback: number) => {
  * field is edited and then changed back to its original value).
  */
 export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): boolean {
-  // Compare every top-level field; tankLabels is the one nested
-  // Record<string,string> field and needs its own key-by-key comparison.
   if (a.signalkAddress !== b.signalkAddress) return false
   if (a.signalkPort !== b.signalkPort) return false
   if (a.vesselPrefix !== b.vesselPrefix) return false
@@ -427,7 +280,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantWebSearch !== b.assistantWebSearch) return false
   if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
 
-  if (!vesselDraftsEqual(a.vessel, b.vessel)) return false
+  if (!rolesEqual(a.roles, b.roles)) return false
 
   if (a.assistantAllowedModels.length !== b.assistantAllowedModels.length) return false
   for (let i = 0; i < a.assistantAllowedModels.length; i++) {
@@ -436,17 +289,6 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantExcludedModels.length !== b.assistantExcludedModels.length) return false
   for (let i = 0; i < a.assistantExcludedModels.length; i++) {
     if (a.assistantExcludedModels[i] !== b.assistantExcludedModels[i]) return false
-  }
-
-  // Compare tankLabels: same keys and same value for each key
-  const aLabelsKeys = Object.keys(a.tankLabels).sort()
-  const bLabelsKeys = Object.keys(b.tankLabels).sort()
-  if (aLabelsKeys.length !== bLabelsKeys.length) return false
-  for (let i = 0; i < aLabelsKeys.length; i++) {
-    if (aLabelsKeys[i] !== bLabelsKeys[i]) return false
-  }
-  for (const key of aLabelsKeys) {
-    if (a.tankLabels[key] !== b.tankLabels[key]) return false
   }
 
   return true
@@ -474,7 +316,6 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     },
     units: draft.distanceUnits,
     ui: {
-      tank_labels: draft.tankLabels,
       tide_station_id: draft.tideStationId,
       tide_station_name: draft.tideStationName,
       tide_auto_station: draft.tideAutoStation,
@@ -521,9 +362,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       web_search: draft.assistantWebSearch,
       web_search_model: draft.assistantWebSearchModel.trim(),
     },
-    // Omitted while the vessel block was never read (see the draft field).
-    ...(draft.vessel === null
-      ? {}
-      : { vessel: { engines: vesselEnginesFromDraft(draft.vessel), house_bank: draft.vessel.houseBank, batteries: vesselBatteriesFromDraft(draft.vessel), alternators: draft.vessel.alternators, electrical: draft.vessel.electrical, solar: vesselSolarFromDraft(draft.vessel) } }),
+    // Omitted while the roles block was never read (see the draft field).
+    ...(draft.roles === null ? {} : { roles: draft.roles }),
   }
 }

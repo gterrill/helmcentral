@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
+import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 
@@ -18,12 +19,14 @@ function renderSection(overrides: Partial<RegularSettingsDraft> = {}) {
     const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, ...overrides })
     draftStates.push(draft)
     return (
-      <SecretsStatusProvider>
-        <SignalKConnectionSection
-          draft={draft}
-          onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
-        />
-      </SecretsStatusProvider>
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <SignalKConnectionSection
+            draft={draft}
+            onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>
     )
   }
 

@@ -34,7 +34,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { previewProfileChange, useMaintenanceLogEntries, useMaintenanceRules, type MaintenanceProfileChangePreview } from '@/hooks/use-maintenance'
 import { photoFilename, usePhotoStaging, type FailedPhotoUpload, type LocalPhoto } from '@/hooks/use-photo-staging'
-import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
 import { equipmentTagPath } from '@/lib/tag-url'
 import {
   BLANK_DRAFT,
@@ -56,6 +56,8 @@ import { documentIsImage, documentTypeBadge, formatDocumentTime } from '@/lib/do
 import { documentContentUrl, downloadDocument } from '@/lib/document-download'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { fetchNote, saveNote } from '@/lib/note-api'
+import { hourMeterSourceFor } from '@/lib/vessel-settings'
+import { EquipmentSourceSection } from '@/components/inventory/equipment-source-section'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft, everything else is
@@ -102,7 +104,11 @@ function draftFromItem(item: EquipmentItem): EquipmentInput {
     bin_id: item.bin_id,
     location_detail: item.location_detail,
     install_date: item.install_date,
-    hour_meter_path: item.hour_meter_path,
+    signalk_source: item.signalk_source,
+    capacity_ah: item.capacity_ah,
+    cells: item.cells,
+    warn_voltage: item.warn_voltage,
+    high_voltage: item.high_voltage,
     profile_id: item.profile_id,
     aliases: item.aliases,
     verified_aboard: item.verified_aboard,
@@ -133,7 +139,11 @@ function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
     && a.bin_id === b.bin_id
     && a.location_detail === b.location_detail
     && a.install_date === b.install_date
-    && a.hour_meter_path === b.hour_meter_path
+    && a.signalk_source === b.signalk_source
+    && a.capacity_ah === b.capacity_ah
+    && a.cells === b.cells
+    && a.warn_voltage === b.warn_voltage
+    && a.high_voltage === b.high_voltage
     && a.profile_id === b.profile_id
     && a.verified_aboard === b.verified_aboard
     && a.notes === b.notes
@@ -190,7 +200,7 @@ export function EquipmentEditor(
   const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
   const { profiles } = useEquipmentProfiles(true)
-  const { paths } = useSignalKPaths(true)
+  const { discovery } = useVesselDiscovery()
   // Code-review finding: the delete confirmation only ever said "This
   // removes the equipment record," giving no hint that deleting an item
   // cascades away every maintenance rule and service log entry against it
@@ -512,15 +522,6 @@ export function EquipmentEditor(
     }
     setPendingRemoves((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
   }
-
-  // Trap: SignalK publishes runTime under all sorts of prefixes
-  // (electrical.generator.0.runTime, propulsion.port.runTime...) - the one
-  // constant is the last segment, matched case-insensitively since some
-  // plugins spell it runtime.
-  const hourMeterPaths = useMemo(
-    () => paths.filter((p) => /^runtime$/i.test(p.path.split('.').pop() ?? '')),
-    [paths],
-  )
 
   // ── photo row (ADR 0127) ────────────────────────────────────────────────
   // Two independent sets of handlers below - one for a brand new draft
@@ -1219,24 +1220,29 @@ export function EquipmentEditor(
           </FormSection>
         )}
 
-        {/* An item has an hour meter or it doesn't. The stored `category`
-            (mechanical | general) is derived from it by the server and is
-            no longer a choice here (ADR 0142 §7). Shown for a new item too;
-            the rules/log block below needs a saved record. */}
+        <EquipmentSourceSection
+          id={id}
+          draft={draft}
+          setDraft={setDraft}
+          discovery={discovery}
+          savedProfileId={item?.profile_id ?? ''}
+          savedSource={item?.signalk_source ?? ''}
+          canWrite={canWrite}
+        />
+
+        {/* An item has an hour meter when its SignalK source carries one: an
+            engine's or a generator's runtime counter. The stored `category`
+            (mechanical | general) is derived from the source by the server and
+            is not a choice here. The rules/log block below needs a saved
+            record. */}
         <FormSection title="Maintenance">
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="equipment-hour-meter-path">Hour meter</FieldLabel>
-              <Input
-                id="equipment-hour-meter-path"
-                list="equipment-hour-meter-paths"
-                value={draft.hour_meter_path}
-                onChange={(e) => setDraft((p) => ({ ...p, hour_meter_path: e.target.value }))}
-              />
-              <datalist id="equipment-hour-meter-paths">
-                {hourMeterPaths.map((p) => <option key={p.path} value={p.path} />)}
-              </datalist>
-              <FieldDescription>Leave blank if this item has no hour meter. Rules counted in hours need one.</FieldDescription>
+              <FieldLabel htmlFor="equipment-hour-meter">Hour meter</FieldLabel>
+              <Input id="equipment-hour-meter" readOnly value={hourMeterSourceFor(draft.signalk_source) || 'Not reporting'} />
+              <FieldDescription>
+                Read from the item's SignalK source: an engine or a generator has one. Rules counted in hours need it.
+              </FieldDescription>
             </Field>
           </FieldGroup>
 
@@ -1244,7 +1250,7 @@ export function EquipmentEditor(
             <MaintenanceEquipmentBlock
               equipmentId={id}
               scheduleKey={item?.profile_id ?? ''}
-              hourMeterPath={draft.hour_meter_path}
+              hourMeterSource={hourMeterSourceFor(draft.signalk_source)}
               canWrite={canWrite}
             />
           )}

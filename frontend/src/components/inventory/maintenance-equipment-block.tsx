@@ -47,18 +47,18 @@ import {
 
 interface MaintenanceEquipmentBlockProps {
   equipmentId: string
-  hourMeterPath: string
+  hourMeterSource: string
   /** The item's saved profile id: when it changes the schedule is re-read,
    * since its profile jobs came from the old one. */
   scheduleKey?: string
   canWrite?: boolean
 }
 
-export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, scheduleKey = '', canWrite = true }: MaintenanceEquipmentBlockProps) {
+export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, scheduleKey = '', canWrite = true }: MaintenanceEquipmentBlockProps) {
   const { rules, removed, scheduleErrors, loading: rulesLoading, error: rulesError, refresh: refreshRules } = useMaintenanceRules({ equipment: equipmentId, includeStored: true })
   const { profiles } = useEquipmentProfiles(true)
   const { entries, loading: entriesLoading } = useMaintenanceLogEntries({ equipment: equipmentId })
-  const { resets } = useHourMeterResets(hourMeterPath ? equipmentId : null)
+  const { resets } = useHourMeterResets(hourMeterSource ? equipmentId : null)
 
   const seenScheduleKey = useRef(scheduleKey)
   useEffect(() => {
@@ -170,9 +170,9 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
           </Button>
         )}
       </div>
-      {hourMeterPath.trim() === '' && rules.some((rule) => rule.interval_hours !== null && !rule.not_applicable) && (
+      {hourMeterSource === '' && rules.some((rule) => rule.interval_hours !== null && !rule.not_applicable) && (
         <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-          Rules counted in hours can't count hours until an hour meter is set above.
+          Rules counted in hours can't count hours until this item is assigned an engine or generator source above.
         </p>
       )}
       {scheduleError && (
@@ -255,7 +255,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterPath, schedule
         )}
       </div>
 
-      {hourMeterPath && (
+      {hourMeterSource && (
         <div className="rounded-md border border-border p-3">
           <div className="flex items-center justify-between gap-2">
             <FieldLabel>Hour meter</FieldLabel>

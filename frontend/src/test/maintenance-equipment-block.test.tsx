@@ -48,14 +48,14 @@ describe('MaintenanceEquipmentBlock', () => {
 
   it('no longer offers Use profile schedule', async () => {
     mockSchedule({ rules: [makeProfileJob()] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="propulsion.main.runTime" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="propulsion.main.runTime" />)
     await screen.findByText('Engine oil and filter')
     expect(screen.queryByRole('button', { name: /use profile schedule/i })).not.toBeInTheDocument()
   })
 
   it('groups profile jobs under the profile name and hand rules under Added for this item', async () => {
     mockSchedule({ rules: [makeProfileJob(), makeRule({ id: 'hand-1', description: 'Wash the decks' })] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="propulsion.main.runTime" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="propulsion.main.runTime" />)
 
     expect(await screen.findByText('From profile: Cummins QSB 6.7')).toBeInTheDocument()
     expect(screen.getByText('Added for this item')).toBeInTheDocument()
@@ -65,7 +65,7 @@ describe('MaintenanceEquipmentBlock', () => {
 
   it('marks an overridden job and names what differs from the profile', async () => {
     mockSchedule({ rules: [makeProfileJob({ interval_hours: 100, overridden_fields: ['interval_hours'] })] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="x" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="x" />)
 
     const marker = await screen.findByText('Edited')
     expect(marker).toHaveAttribute('title', expect.stringMatching(/hours interval/i))
@@ -73,7 +73,7 @@ describe('MaintenanceEquipmentBlock', () => {
 
   it('shows Interval not set with an action that opens the job to set it', async () => {
     mockSchedule({ rules: [makeProfileJob({ interval_hours: null, interval_months: null, status: 'interval_not_set', profile_values: { description: 'Engine oil and filter', interval_hours: null, interval_months: null } })] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="x" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="x" />)
 
     expect(await screen.findByText('Interval not set')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Set interval for Engine oil and filter' }))
@@ -82,14 +82,14 @@ describe('MaintenanceEquipmentBlock', () => {
 
   it('mutes a job marked not applicable', async () => {
     mockSchedule({ rules: [makeProfileJob({ not_applicable: true, status: 'not_applicable', overridden_fields: ['not_applicable'] })] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="x" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="x" />)
     expect(await screen.findByText('Not applicable')).toBeInTheDocument()
   })
 
   it('keeps jobs that left the profile in a collapsed group with Delete', async () => {
     const gone = makeProfileJob({ id: 'job:eq-1:old', description: 'Old zinc check', removed_from_profile: true, status: 'ok' })
     mockSchedule({ removed: [gone] })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="x" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="x" />)
 
     const toggle = await screen.findByRole('button', { name: /No longer in the profile \(1\)/ })
     expect(screen.queryByText('Old zinc check')).not.toBeInTheDocument()
@@ -106,7 +106,7 @@ describe('MaintenanceEquipmentBlock', () => {
       rules: [makeRule({ id: 'hand-1', description: 'Wash the decks' })],
       schedule_errors: [{ equipment_id: 'eq-1', equipment_name: 'Main engine', profile_id: 'gone-profile', error: 'profile not found' }],
     })
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="x" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="x" />)
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(/profile is missing or invalid/i)
@@ -118,7 +118,7 @@ describe('MaintenanceEquipmentBlock', () => {
 
   it('says so when there are no rules', async () => {
     mockSchedule({})
-    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="" />)
+    render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="" />)
     await waitFor(() => expect(screen.getByText(/no maintenance rules/i)).toBeInTheDocument())
   })
 
@@ -138,22 +138,22 @@ describe('MaintenanceEquipmentBlock', () => {
 
     it('warns when a rule counts hours and the item has no hour meter', async () => {
       mockRules([makeRule({ interval_hours: 250, interval_months: null })])
-      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="" />)
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="" />)
       const warning = await screen.findByRole('status')
-      expect(warning).toHaveTextContent("can't count hours until an hour meter is set")
+      expect(warning).toHaveTextContent("can't count hours until this item is assigned an engine or generator source")
       expect(warning).toHaveClass('text-amber-700')
     })
 
     it('does not warn when the item has an hour meter', async () => {
       mockRules([makeRule({ interval_hours: 250 })])
-      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="propulsion.main.runTime" />)
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="propulsion.main.runTime" />)
       await screen.findByText('Engine oil and filter')
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
 
     it('does not warn when no rule has an hours interval', async () => {
       mockRules([makeRule({ interval_hours: null, interval_months: 12 })])
-      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterPath="" />)
+      render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="" />)
       await screen.findByText('Engine oil and filter')
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })

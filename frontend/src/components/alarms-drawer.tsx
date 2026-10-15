@@ -132,6 +132,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
     setDraft({
       enabled: rule.enabled,
       path: rule.path,
+      path_role: rule.path_role,
       label: rule.label,
       op: rule.op,
       value: rule.value,
@@ -601,9 +602,18 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
           <Input
             id="alarm-path"
             value={draft.path}
+            disabled={draft.path_role === 'house_bank_soc'}
             onChange={(e) => set('path', e.target.value)}
             placeholder="electrical.batteries.house.voltage"
           />
+          <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={draft.path_role === 'house_bank_soc'}
+              onChange={(e) => onChange({ ...draft, path_role: e.target.checked ? 'house_bank_soc' : undefined })}
+            />
+            Follow the house bank's state of charge
+          </label>
         </Field>
         <Field>
           <FieldLabel htmlFor="alarm-op">Condition</FieldLabel>

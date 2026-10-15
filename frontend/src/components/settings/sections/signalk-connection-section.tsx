@@ -5,6 +5,8 @@ import { FormSection, SettingsLayout } from '@/components/patterns'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
+import { SignalKDiscoverySection } from '@/components/settings/sections/signalk-discovery-section'
+import { SignalKRolesSection } from '@/components/settings/sections/signalk-roles-section'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
 import { apiRequest } from '@/lib/api-query'
@@ -132,7 +134,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
           </div>
 
           {/* Directly under the button that produces them. The section runs
-              long (credentials, then a tank label per sensor), so a banner at
+              long (credentials, then discovery and roles), so a banner at
               the bottom of the container is off-screen from the control the
               operator just clicked — feedback they have to go looking for is
               feedback they won't see. */}
@@ -189,21 +191,9 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
         />
       </FormSection>
 
-      <FormSection title="Labels">
-        <div className="grid grid-cols-1 gap-4">
-          {Object.keys(draft.tankLabels).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((id) => (
-            <Field key={id}>
-              <FieldLabel htmlFor={`tank-label-${id}`}>{`Tank Label ${id}`}</FieldLabel>
-              <Input
-                id={`tank-label-${id}`}
-                value={draft.tankLabels[id] ?? ''}
-                onChange={(e) => onChange({ tankLabels: { ...draft.tankLabels, [id]: e.target.value } })}
-                aria-label={`Tank label ${id}`}
-              />
-            </Field>
-          ))}
-        </div>
-      </FormSection>
+      <SignalKDiscoverySection />
+
+      <SignalKRolesSection draft={draft} onChange={onChange} />
     </SettingsLayout>
   )
 }
