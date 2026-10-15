@@ -13,6 +13,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Breaking
 
+- Choose your engines and your house bank in **Settings → Vessel** after
+  upgrading. Helmcentral no longer works out which engines you have, or which
+  battery is the house bank, from what the boat reports. Until you pick them,
+  the Alternators tile stays hidden, anchor auto-raise does nothing, Mate says
+  engines are not set up when asked for a passage estimate, and the Battery &
+  Power tile shows `--` for state of charge, voltage, current, power and
+  capacity, with no dawn figure. Tick your engines under **Engines** and pick
+  the bank under **Power**. If the bank's battery monitor does not report its
+  capacity, enter it under **Power** too, or the charge rate and the time to
+  full or empty read `--`.
+- State-of-charge band alarm rules must be on the house bank you chose. The
+  bands on the Battery & Power tile only read rules for that bank's state of
+  charge. If your rules are on another battery, edit their **SignalK path** in
+  the Alarms drawer to the chosen bank's state of charge (see Set battery
+  state-of-charge bands).
+- The `INFLUX_SOC_MEASUREMENT` setting is gone. The dawn projection and the
+  state-of-charge history now follow the house bank, so remove the variable
+  from your environment; it is ignored.
+
 - Choose your port and starboard alternators in **Settings → Vessel →
   Alternators** after upgrading. Until you do, the Alternators tile shows
   nothing, because Helmcentral no longer assumes which of the boat's alternator

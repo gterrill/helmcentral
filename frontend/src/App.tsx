@@ -119,7 +119,6 @@ import { collisionAlarmStatesByVessel, useAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
-import { DEFAULT_SOC_PATH } from '@/lib/soc-bands'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
@@ -1003,8 +1002,7 @@ function AppShell() {
     generatorManualStartTimer,
     generatorRunningByCondition,
     generatorRuntime,
-    engine0Rpm,
-    engine1Rpm,
+    enginesRunning,
     speedOverGroundKts,
     source: vesselStateSource,
     depthLastUpdateAgeS,
@@ -1028,7 +1026,6 @@ function AppShell() {
     deleteRule: deleteAlarmRule,
   } = useAlarmRules()
   const { projection: overnight } = useOvernightProjection()
-  const socBands = useSocBands(alarmRules, overnight?.socPath ?? DEFAULT_SOC_PATH)
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -1051,6 +1048,7 @@ function AppShell() {
   const {
     lastUpdateAgeS: electricalLastUpdateAgeS,
     batterySocPercent,
+    socPath,
     chargingCurrentA,
     chargingPowerW,
     solarOutputW,
@@ -1067,6 +1065,9 @@ function AppShell() {
     batteryRatePercentPerHour,
     timeToGoHours,
   } = useElectricalState()
+  // The bands follow the house bank's own path from the electrical state, so
+  // they do not wait on the dawn projection (which needs a position fix).
+  const socBands = useSocBands(alarmRules, socPath)
   const {
     currentW: solarCurrentW,
     todayKWh: solarTodayKWh,
@@ -1196,7 +1197,7 @@ function AppShell() {
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
   const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
-  const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
+  const isAlternatorTileVisible = enginesRunning === true
 
   const handleDropAnchorHere = () => {
     if (latitude === null || longitude === null) return

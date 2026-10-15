@@ -1,14 +1,5 @@
 import type { AlarmRule } from '@/hooks/use-alarm-rules'
 
-/**
- * Mirrors the backend's INFLUX_SOC_MEASUREMENT default (see the dawn
- * projection phase of the battery tile plan). A later phase reads the
- * pinned path from the backend rather than assuming this one, so every
- * function below takes socPath as a parameter and this constant is only
- * the value used until that wiring exists.
- */
-export const DEFAULT_SOC_PATH = 'electrical.batteries.0.capacity.stateOfCharge'
-
 /** State-of-charge alarm bands, in percent (0-100), or null when unset. */
 export interface SocBands {
   warnBelow: number | null

@@ -40,8 +40,8 @@ interface VesselState {
   generator_manual_start_timer: number
   generator_running_by_condition: string
   generator_runtime: number
-  engine_0_rpm: number
-  engine_1_rpm: number
+  /** null when no engine is set up in Vessel settings or none is reporting. */
+  engines_running: boolean | null
   depth_last_update_age_s: number
   position_last_update_age_s: number
   wind_last_update_age_s: number
@@ -107,8 +107,8 @@ export function useVesselState() {
   const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
   const [generatorRunningByCondition, setGeneratorRunningByCondition] = useState<string | null>(null)
   const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
-  const [engine0Rpm, setEngine0Rpm] = useState<number | null>(null)
-  const [engine1Rpm, setEngine1Rpm] = useState<number | null>(null)
+  // null: no engine is set up in Vessel settings, or none is reporting.
+  const [enginesRunning, setEnginesRunning] = useState<boolean | null>(null)
   // Which source the backend answered from ("signalk", "signalk-unreachable",
   // "backend-fallback"). Surfaced so the app can offer to go looking for a
   // server that has moved, rather than leaving the operator with silent tiles.
@@ -192,8 +192,7 @@ export function useVesselState() {
       setGeneratorManualStartTimer(typeof data.generator_manual_start_timer === 'number' ? data.generator_manual_start_timer : 0)
       setGeneratorRunningByCondition(typeof data.generator_running_by_condition === 'string' && data.generator_running_by_condition !== '' ? data.generator_running_by_condition : null)
       setGeneratorRuntime(typeof data.generator_runtime === 'number' && data.generator_runtime >= 0 ? data.generator_runtime : null)
-      setEngine0Rpm(typeof data.engine_0_rpm === 'number' && data.engine_0_rpm >= 0 ? data.engine_0_rpm : null)
-      setEngine1Rpm(typeof data.engine_1_rpm === 'number' && data.engine_1_rpm >= 0 ? data.engine_1_rpm : null)
+      setEnginesRunning(typeof data.engines_running === 'boolean' ? data.engines_running : null)
     }
 
     // The backend pushes vessel state as it changes (ADR 0037) instead of the
@@ -250,8 +249,7 @@ export function useVesselState() {
     generatorManualStartTimer,
     generatorRunningByCondition,
     generatorRuntime,
-    engine0Rpm,
-    engine1Rpm,
+    enginesRunning,
     source,
   }
 }

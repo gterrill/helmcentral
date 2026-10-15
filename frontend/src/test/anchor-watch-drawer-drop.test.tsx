@@ -71,8 +71,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorManualStartTimer: 0,
     generatorRunningByCondition: null,
     generatorRuntime: null,
-    engine0Rpm: -1,
-    engine1Rpm: 850,
+    enginesRunning: true,
     ...positionMock,
   }),
 }))

@@ -96,13 +96,23 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		err := errSignalKNoSelf
 		return criticalVesselState(state, err.Error()), err
 	}
-	return vesselStateFromTelemetry(t, state), nil
+
+	// The configured engines say which propulsion instances to read. An
+	// unreadable vessel block is logged and reads as no engines configured,
+	// so engine state is unknown rather than guessed.
+	var engines []vesselEngineSetting
+	vessel, vesselErr := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	noteVesselRead("vessel state", vesselErr, "vessel state: engines unreadable, engine state unknown: %v")
+	if vesselErr == nil {
+		engines = vessel.Engines
+	}
+	return vesselStateFromTelemetry(t, state, engines), nil
 }
 
 // vesselStateFromTelemetry fills state from our own boat's telemetry. The
 // -1 and "" sentinels vesselStateData still carries to the browser are
 // produced here, at the payload edge, from ok and AgeKnown (ADR 0178).
-func vesselStateFromTelemetry(t telemetryReader, state vesselStateData) vesselStateData {
+func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, engines []vesselEngineSetting) vesselStateData {
 	state.Name = strings.TrimSpace(firstString(t, "name", "design.name"))
 
 	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
@@ -151,16 +161,16 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData) vesselSt
 
 	position, hasPosition := t.Position()
 
-	state.Engine0RPM = readEngineRPM(t, []string{"0", "port", "main", "engine0", "engine-0"})
-	state.Engine1RPM = readEngineRPM(t, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
+	state.EnginesRunning = readEnginesRunning(t, engines)
 	validation := parseGNSSPositionValidation(t)
 	validation = applyGNSSHeuristics(validation, gnssObservedSample{
-		HasPosition:    hasPosition,
-		Latitude:       position.Latitude,
-		Longitude:      position.Longitude,
-		DepthMeters:    state.Depth,
-		Navigation:     state.Status,
-		EnginesRunning: (state.Engine0RPM > 0 && !math.IsInf(state.Engine0RPM, 0)) || (state.Engine1RPM > 0 && !math.IsInf(state.Engine1RPM, 0)),
+		HasPosition: hasPosition,
+		Latitude:    position.Latitude,
+		Longitude:   position.Longitude,
+		DepthMeters: state.Depth,
+		Navigation:  state.Status,
+		// Unknown (nil) reads as not running, so the jump check stays on.
+		EnginesRunning: state.EnginesRunning != nil && *state.EnginesRunning,
 		ObservedAt:     state.Datetime,
 		HasObservedAt:  hasGNSSDatetime,
 	}, time.Now().UTC())
@@ -328,28 +338,52 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData) vesselSt
 	return state
 }
 
-func readEngineRPM(t telemetryReader, aliases []string) float64 {
-	for _, alias := range aliases {
-		prefix := "propulsion." + alias
-		ts := firstNonEmptyString(
-			declaredTimestamp(t, prefix+".revolutions"),
-			declaredTimestamp(t, prefix+".rpm"),
-			declaredTimestamp(t, prefix),
-		)
-		if ts != "" && !isRecentTimestamp(ts, defaultRPMMaxAge) {
-			return -1
+// readEnginesRunning reports whether any configured engine is turning.
+// Only the instances the operator chose in Vessel settings are read, each
+// from propulsion.<id>.revolutions (Hz, so x60) or .rpm, and a reading older
+// than defaultRPMMaxAge is ignored without ending the search. The result is
+// nil when no engine is configured or none has a fresh reading: unknown is
+// not "stopped".
+func readEnginesRunning(t telemetryReader, engines []vesselEngineSetting) *bool {
+	reporting, running := false, false
+	for _, engine := range engines {
+		rpm, ok := readEngineRPM(t, engine.Instance)
+		if !ok {
+			continue
 		}
-
-		if v, ok := t.Number(prefix + ".revolutions"); ok && v.Value >= 0 {
-			return roundTo1(v.Value * 60)
-		}
-
-		if v, ok := t.Number(prefix + ".rpm"); ok && v.Value >= 0 {
-			return roundTo1(v.Value)
+		reporting = true
+		if rpm > 0 && !math.IsInf(rpm, 0) {
+			running = true
 		}
 	}
+	if !reporting {
+		return nil
+	}
+	return &running
+}
 
-	return -1
+// readEngineRPM reads one propulsion instance's RPM; ok is false when the
+// instance reports nothing or its reading is stale.
+func readEngineRPM(t telemetryReader, instance string) (float64, bool) {
+	if instance == "" {
+		return 0, false
+	}
+	prefix := "propulsion." + instance
+	ts := firstNonEmptyString(
+		declaredTimestamp(t, prefix+".revolutions"),
+		declaredTimestamp(t, prefix+".rpm"),
+		declaredTimestamp(t, prefix),
+	)
+	if ts != "" && !isRecentTimestamp(ts, defaultRPMMaxAge) {
+		return 0, false
+	}
+	if v, ok := t.Number(prefix + ".revolutions"); ok && v.Value >= 0 {
+		return roundTo1(v.Value * 60), true
+	}
+	if v, ok := t.Number(prefix + ".rpm"); ok && v.Value >= 0 {
+		return roundTo1(v.Value), true
+	}
+	return 0, false
 }
 
 func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
@@ -392,20 +426,20 @@ func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 	return drift, setDeg, driftImpactKts
 }
 
-func fetchSignalKElectricalState(alternators vesselAlternatorSettings) (electricalStateData, error) {
+func fetchSignalKElectricalState(vessel vesselSettings) (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	t := globalSignalKSnapshot.selfTelemetry()
 	if !t.HasSelf() {
 		return state, errSignalKNoSelf
 	}
-	return electricalStateFromTelemetry(t, state, alternators), nil
+	return electricalStateFromTelemetry(t, state, vessel), nil
 }
 
 // electricalStateFromTelemetry fills the Battery & Power tile's state. Its
 // unsigned fields keep -1 for unknown on the wire; the signed bank current
 // and power are nil (ADR 0178).
-func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, alternators vesselAlternatorSettings) electricalStateData {
+func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, vessel vesselSettings) electricalStateData {
 	datetimeString := firstString(t, "timestamp", "navigation.datetime")
 	if datetimeString != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
@@ -420,108 +454,57 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 	// single subtree-wide age meaningful here.
 	state.LastUpdateAge = subtreeAgeSeconds(t, "electrical", state.Datetime)
 
-	// Identify the main house battery before reading any values from it.
-	mainBattery, haveMain := lookupMainBattery(t)
+	// The bank figures all come from the house bank the operator chose in
+	// Vessel settings, never from a battery picked by what it reports. With
+	// no bank set they stay at their unknown values.
+	bank := vessel.houseBankPath()
+	var configuredCapacityAh float64
+	if vessel.HouseBank != nil {
+		configuredCapacityAh = vessel.HouseBank.CapacityAh
+	}
+	state.SocPath = vessel.houseBankSocPath()
 
-	soc, socOK := 0.0, false
-	if haveMain {
-		soc, socOK = leafNumber(t, mainBattery+".capacity.stateOfCharge")
-	}
-	if !socOK {
-		soc, socOK = firstNumber(t,
-			"electrical.batteries.house.capacity.stateOfCharge",
-			"electrical.batteries.service.capacity.stateOfCharge",
-		)
-	}
-	if !socOK {
-		soc, socOK = leafNumber(t, "electrical.chargers.276.capacity.stateOfCharge")
-	}
-	if !socOK {
-		soc, socOK = leafNumberFromAnyChild(t, "electrical.chargers", "capacity.stateOfCharge")
-	}
-	if socOK && soc >= 0 {
-		if soc <= 1 {
-			soc *= 100
+	batteryVoltage := -1.0
+	if bank != "" {
+		if soc, ok := leafNumber(t, bank+".capacity.stateOfCharge"); ok && soc >= 0 {
+			if soc <= 1 {
+				soc *= 100
+			}
+			state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
 		}
-		state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
-	}
 
-	batteryCapacityAh, capacityOK := firstNumber(t,
-		"electrical.batteries.house.capacity.nominal",
-		"electrical.batteries.service.capacity.nominal",
-		"electrical.batteries.house.capacity.total",
-		"electrical.batteries.service.capacity.total",
-	)
-	if !capacityOK {
-		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.nominal")
-	}
-	if !capacityOK {
-		batteryCapacityAh, capacityOK = leafNumberFromAnyChild(t, "electrical.batteries", "capacity.total")
-	}
-	if !capacityOK {
-		batteryCapacityAh = loadHouseBatteryCapacityAh(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	}
-	if batteryCapacityAh > 0 {
-		state.BatteryCapacityAh = roundTo1(batteryCapacityAh)
-	}
+		batteryCapacityAh, capacityOK := firstLeafNumber(t, bank+".capacity.nominal", bank+".capacity.total")
+		if !capacityOK || batteryCapacityAh <= 0 {
+			batteryCapacityAh = configuredCapacityAh
+		}
+		if batteryCapacityAh > 0 {
+			state.BatteryCapacityAh = roundTo1(batteryCapacityAh)
+		}
 
-	// Identify the main house battery: the one with valid SOC and highest absolute current.
-	batteryVoltage, voltageOK := 0.0, false
-	if haveMain {
-		batteryVoltage, voltageOK = leafNumber(t, mainBattery+".voltage")
-	}
-	if !voltageOK {
-		batteryVoltage, voltageOK = firstNumber(t,
-			"electrical.venus.batteryVoltage",
-			"electrical.batteries.house.voltage",
-			"electrical.batteries.service.voltage",
-		)
-	}
-	if !voltageOK {
-		batteryVoltage, voltageOK = leafNumberFromAnyChild(t, "electrical.batteries", "voltage")
-	}
-	if !voltageOK {
-		batteryVoltage = -1
+		if v, ok := leafNumber(t, bank+".voltage"); ok {
+			batteryVoltage = v
+		}
 	}
 
 	// Bank current and power are signed, so no number can stand for "unknown":
-	// they are left nil until a path actually reports one.
-	var current, power *float64
-	if haveMain {
-		if v, ok := leafNumber(t, mainBattery+".current"); ok {
-			current = &v
+	// they are left nil until the bank actually reports one.
+	if bank != "" {
+		if v, ok := leafNumber(t, bank+".current"); ok {
+			v = roundTo1(v)
+			state.ChargingCurrentA = &v
 		}
-	}
-	if current == nil {
-		if v, ok := firstNumber(t, "electrical.batteries.house.current", "electrical.batteries.service.current"); ok {
-			current = &v
+		if v, ok := leafNumber(t, bank+".power"); ok {
+			v = roundTo1(v)
+			state.ChargingPowerW = &v
+		} else if state.ChargingCurrentA != nil && batteryVoltage > 0 {
+			// Derived from the same bank's current and voltage.
+			v := roundTo1(*state.ChargingCurrentA * batteryVoltage)
+			state.ChargingPowerW = &v
 		}
-	}
-	if current != nil {
-		v := roundTo1(*current)
-		state.ChargingCurrentA = &v
-	}
-
-	if haveMain {
-		if v, ok := leafNumber(t, mainBattery+".power"); ok {
-			power = &v
+		if state.ChargingCurrentA == nil && state.ChargingPowerW != nil && batteryVoltage > 0 {
+			v := roundTo1(*state.ChargingPowerW / batteryVoltage)
+			state.ChargingCurrentA = &v
 		}
-	}
-	if power == nil {
-		if v, ok := firstNumber(t, "electrical.batteries.house.power", "electrical.batteries.service.power"); ok {
-			power = &v
-		}
-	}
-	if power != nil {
-		v := roundTo1(*power)
-		state.ChargingPowerW = &v
-	} else if state.ChargingCurrentA != nil && batteryVoltage > 0 {
-		v := roundTo1(*state.ChargingCurrentA * batteryVoltage)
-		state.ChargingPowerW = &v
-	}
-	if state.ChargingCurrentA == nil && state.ChargingPowerW != nil && batteryVoltage > 0 {
-		v := roundTo1(*state.ChargingPowerW / batteryVoltage)
-		state.ChargingCurrentA = &v
 	}
 
 	// venus.totalPanelPower is the Victron system aggregate; sum individual chargers as fallback.
@@ -579,8 +562,8 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 
 	// Alternators: port and starboard come from the operator's Vessel
 	// settings. A side that is not set reads as no data (-1).
-	state.Alternator0 = readAlternatorInstance(t, alternators.PortInstance)
-	state.Alternator1 = readAlternatorInstance(t, alternators.StarboardInstance)
+	state.Alternator0 = readAlternatorInstance(t, vessel.Alternators.PortInstance)
+	state.Alternator1 = readAlternatorInstance(t, vessel.Alternators.StarboardInstance)
 	state.Charger0 = readChargerInstance(t, "0")
 
 	return state
@@ -894,35 +877,6 @@ func sumLeafNumberOverChildren(t telemetryReader, parent, suffix string) (float6
 		}
 	}
 	return sum, found
-}
-
-// lookupMainBattery names the battery with valid SOC data and the highest
-// absolute current — i.e. the actively monitored house bank — as its path,
-// "electrical.batteries.<id>".
-func lookupMainBattery(t telemetryReader) (string, bool) {
-	best, found := "", false
-	bestAbsCurrent := -1.0
-
-	for _, id := range t.Children("electrical.batteries") {
-		path := "electrical.batteries." + id
-
-		soc, ok := leafNumber(t, path+".capacity.stateOfCharge")
-		if !ok || soc < 0 || soc > 1.01 {
-			continue
-		}
-
-		current, ok := leafNumber(t, path+".current")
-		if !ok {
-			continue
-		}
-
-		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
-			bestAbsCurrent = absCurrent
-			best, found = path, true
-		}
-	}
-
-	return best, found
 }
 
 // declaredTimestamp is the source timestamp the node at path declares on

@@ -400,13 +400,17 @@ func computeOvernight(
 	return result
 }
 
-// defaultSocMeasurement matches the alarm rule path this plan pins the SoC
-// bands to (Decision 7), so history, bands and the alarm rule all agree on
-// which battery instance the boat's "the bank" refers to.
-const defaultSocMeasurement = "electrical.batteries.0.capacity.stateOfCharge"
-
-func socMeasurementPath() string {
-	return trimEnvValue(getEnv("INFLUX_SOC_MEASUREMENT", defaultSocMeasurement))
+// socMeasurementPath is the state-of-charge path the overnight model reads
+// from history: the house bank the operator chose in Vessel settings, so the
+// history, the bands and the alarm rule all agree on which bank "the bank"
+// is. It is empty when no house bank is set, and an error when the vessel
+// block cannot be read.
+func socMeasurementPath() (string, error) {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return "", err
+	}
+	return vessel.houseBankSocPath(), nil
 }
 
 // defaultShoreMeasurement and defaultGeneratorMeasurement are the two
@@ -493,6 +497,9 @@ type overnightCache struct {
 	// moves about four minutes per degree of longitude, so a result is
 	// only reusable near where it was made; a passage invalidates it.
 	latKey, lonKey int
+	// The state-of-charge path the result was computed for: choosing another
+	// house bank must not be served the old bank's projection.
+	socKey string
 }
 
 var globalOvernightCache = &overnightCache{}
@@ -502,10 +509,10 @@ var globalOvernightCache = &overnightCache{}
 // last fifteen minutes, and the GNSS gate flapping in the meantime (it
 // suppresses the position while it waits for a stable fix) does not move
 // the sun.
-func (c *overnightCache) fresh(now time.Time) (overnightResult, bool) {
+func (c *overnightCache) fresh(now time.Time, socPath string) (overnightResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if now.Before(c.expiresAt) {
+	if now.Before(c.expiresAt) && c.socKey == socPath {
 		return c.result, true
 	}
 	return overnightResult{}, false
@@ -514,17 +521,17 @@ func (c *overnightCache) fresh(now time.Time) (overnightResult, bool) {
 // get returns the cached result if still fresh and computed near this
 // position, otherwise recomputes via compute and caches the new result for
 // overnightCacheTTL.
-func (c *overnightCache) get(now time.Time, lat, lon float64, compute func() overnightResult) overnightResult {
+func (c *overnightCache) get(now time.Time, lat, lon float64, socPath string, compute func() overnightResult) overnightResult {
 	latKey, lonKey := int(math.Round(lat)), int(math.Round(lon))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if now.Before(c.expiresAt) && c.latKey == latKey && c.lonKey == lonKey {
+	if now.Before(c.expiresAt) && c.latKey == latKey && c.lonKey == lonKey && c.socKey == socPath {
 		return c.result
 	}
 	result := compute()
 	c.result = result
 	c.expiresAt = now.Add(overnightCacheTTL)
-	c.latKey, c.lonKey = latKey, lonKey
+	c.latKey, c.lonKey, c.socKey = latKey, lonKey, socPath
 	return result
 }
 
@@ -554,7 +561,20 @@ func positionForSun(state vesselStateData) (lat, lon float64, ok bool) {
 // connection to SignalK.
 func electricalOvernightHandler(c echo.Context) error {
 	now := time.Now().UTC()
-	if cached, ok := globalOvernightCache.fresh(now); ok {
+
+	socPath, socErr := socMeasurementPath()
+	noteVesselRead("overnight", socErr, "overnight model: vessel settings unreadable, no projection: %v")
+	if socErr != nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "vessel settings unreadable; dawn projection needs the house bank",
+		})
+	}
+	if socPath == "" {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "no house bank is set in Vessel settings; dawn projection needs one",
+		})
+	}
+	if cached, ok := globalOvernightCache.fresh(now, socPath); ok {
 		return c.JSON(http.StatusOK, cached)
 	}
 
@@ -566,8 +586,8 @@ func electricalOvernightHandler(c echo.Context) error {
 		})
 	}
 
-	result := globalOvernightCache.get(now, lat, lon, func() overnightResult {
-		r := computeOvernight(now, lat, lon, socMeasurementPath(), dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
+	result := globalOvernightCache.get(now, lat, lon, socPath, func() overnightResult {
+		r := computeOvernight(now, lat, lon, socPath, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
 		if r.Basis == "history" {
 			log.Printf(
 				"overnight model: basis=history nights_used=%d scanned=%d excluded shore=%d generator=%d gap=%d rise=%d oldest=%s",

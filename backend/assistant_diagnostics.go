@@ -80,7 +80,7 @@ type signalKDiagnosticsSnapshot struct {
 
 // signalKDiagnosticsFromGlobalSnapshot is check_signalk_paths' production
 // dependency: globalSignalKSnapshot read fresh on every call, the same
-// "read the global, inject the function" idiom fuelRateInstancesFromSnapshot
+// "read the global, inject the function" idiom configuredEngineInstances
 // (assistant_tools.go) already uses for estimate_passage.
 func signalKDiagnosticsFromGlobalSnapshot(now time.Time) signalKDiagnosticsSnapshot {
 	connected, lastMessage := globalSignalKSnapshot.status()

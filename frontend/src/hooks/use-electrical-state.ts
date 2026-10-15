@@ -13,6 +13,8 @@ interface ElectricalState {
   datetime: string
   last_update_age_s: number
   battery_soc_percent: number
+  /** The house bank's state-of-charge path; absent when no bank is chosen. */
+  soc_path?: string
   battery_capacity_ah: number
   charging_current_a: number | null
   charging_power_w: number | null
@@ -51,6 +53,7 @@ function parseSigned(v: unknown): number | null {
 export function useElectricalState() {
   const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
   const [batterySocPercent, setBatterySocPercent] = useState<number | null>(null)
+  const [socPath, setSocPath] = useState<string | null>(null)
   const [chargingCurrentA, setChargingCurrentA] = useState<number | null>(null)
   const [chargingPowerW, setChargingPowerW] = useState<number | null>(null)
   const [solarOutputW, setSolarOutputW] = useState<number | null>(null)
@@ -79,6 +82,7 @@ export function useElectricalState() {
 
         setLastUpdateAgeS(parseAlt(data.last_update_age_s))
         setBatterySocPercent(nextBatterySocPercent)
+        setSocPath(typeof data.soc_path === 'string' && data.soc_path !== '' ? data.soc_path : null)
         setChargingCurrentA(parseSigned(data.charging_current_a))
         setChargingPowerW(parseSigned(data.charging_power_w))
         setSolarOutputW(typeof data.solar_output_w === 'number' && data.solar_output_w >= 0 ? data.solar_output_w : null)
@@ -136,6 +140,7 @@ export function useElectricalState() {
   return {
     lastUpdateAgeS,
     batterySocPercent,
+    socPath,
     chargingCurrentA,
     chargingPowerW,
     solarOutputW,

@@ -88,7 +88,8 @@ the tile can't end the watch.
 To have this happen on its own when you motor away, turn on **Auto-raise
 anchor watch when under way** under **Settings → Anchor Watch** (on a tablet or
 larger screen, the gear icon in the header opens this section directly while Anchor Watch is on
-screen). It is on by default and needs no further setup: it fires once the
+screen). It is on by default and needs your engines ticked under **Settings →
+Vessel**, so it knows when you are under power: it fires once the
 boat has been running under power, outside the circle and doing at least 3
 knots for 15 seconds straight, and idling out slower than that still needs
 Raise by hand.

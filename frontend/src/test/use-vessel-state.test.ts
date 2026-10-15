@@ -241,3 +241,31 @@ describe('useVesselState true wind fields', () => {
     expect(result.current.windDirectionTrueDeg).toBeNull()
   })
 })
+
+// Engines come from the operator's Vessel settings; the backend reports one
+// answer, "are any of them turning", and null when none is configured or none
+// is reporting.
+describe('useVesselState enginesRunning', () => {
+  it('is null before any tick', () => {
+    const { result } = renderHook(() => useVesselState())
+    expect(result.current.enginesRunning).toBeNull()
+  })
+
+  it.each([
+    [true, true],
+    [false, false],
+    [null, null],
+    [undefined, null],
+  ])('maps engines_running %s to %s', (wire, expected) => {
+    const { result } = renderHook(() => useVesselState())
+    emit({ ...basePayload, engines_running: wire })
+    expect(result.current.enginesRunning).toBe(expected)
+  })
+
+  it('no longer exposes per-engine RPM', () => {
+    const { result } = renderHook(() => useVesselState())
+    emit({ ...basePayload, engine_0_rpm: 900, engine_1_rpm: 900 })
+    expect(result.current).not.toHaveProperty('engine0Rpm')
+    expect(result.current).not.toHaveProperty('engine1Rpm')
+  })
+})

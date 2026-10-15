@@ -95,8 +95,9 @@ type vesselStateData struct {
 	GeneratorManualStartTimer   float64
 	GeneratorRunningByCondition string
 	GeneratorRuntime            float64
-	Engine0RPM                  float64
-	Engine1RPM                  float64
+	// EnginesRunning is nil when no engine is configured in Vessel settings
+	// or none has a fresh reading; the wire carries null.
+	EnginesRunning *bool
 }
 
 type depthTrendResponse struct {
@@ -179,8 +180,6 @@ func buildVesselStatePayload() map[string]any {
 		WindAngleTrueDeg:         -1,
 		WindAngleTrueRelativeDeg: -1,
 		WindDirectionTrueDeg:     -1,
-		Engine0RPM:               -1,
-		Engine1RPM:               -1,
 		// Unknown, not zero, when SignalK is unconfigured and this fallback
 		// literal never gets overwritten below.
 		DepthLastUpdateAge:    -1,
@@ -330,8 +329,7 @@ func buildVesselStatePayload() map[string]any {
 		"generator_manual_start_timer":   state.GeneratorManualStartTimer,
 		"generator_running_by_condition": state.GeneratorRunningByCondition,
 		"generator_runtime":              state.GeneratorRuntime,
-		"engine_0_rpm":                   state.Engine0RPM,
-		"engine_1_rpm":                   state.Engine1RPM,
+		"engines_running":                state.EnginesRunning,
 		"source":                         source,
 	}
 }

@@ -1,10 +1,13 @@
 # Set up your vessel
 
-Anomaly detection (frozen and impossible sensor readings, charging into a
-full house bank, twin engines pulling apart) needs to know which engines
-and which battery bank to watch before any of it runs. Nothing is
-pre-filled for your boat: every detector starts as "not set up" until you
-pick these from Settings.
+Helmcentral needs to know which engines and which battery bank are yours
+before it can show or watch them. The Alternators tile, the Battery & Power
+tile (including its dawn projection and state-of-charge bands), anchor
+auto-raise, Mate's passage estimates and anomaly detection (frozen and
+impossible sensor readings, charging into a full house bank, twin engines
+pulling apart) all read the engines and house bank you pick here. Nothing is
+pre-filled for your boat: until you pick them, those features show no data or
+stay off, rather than guessing from whatever the boat reports.
 
 ## Engines
 
@@ -28,6 +31,13 @@ The frozen-sensor check is ready once at least one engine is ticked. The
 engine-differential check (comparing engines against each other) needs at
 least two.
 
+The same list tells Helmcentral whether the engines are running. The
+Alternators tile appears when a ticked engine is turning, and anchor
+auto-raise only acts while one is. With no engine ticked, or none reporting,
+the tile stays hidden and auto-raise does nothing. Mate's passage estimates
+use these engines for fuel history, and say engines are not set up if you have
+ticked none.
+
 ## House bank
 
 1. Still under **Settings → Vessel**, find **Power**.
@@ -44,6 +54,13 @@ least two.
    own thresholds, multiplied out by your cell count. Fill either in only if
    your bank needs a different number than the profile gives.
 6. Choose **Save** in the bar across the top of the screen.
+
+This is the bank the Battery & Power tile reads for state of charge, voltage,
+current and power. If the bank reports its own nominal capacity, that figure is
+used; otherwise the capacity you entered here is. The overnight dawn projection
+and the state-of-charge bands follow the same bank. With no house bank picked,
+the tile shows `--` for those figures, and the bands and dawn figure are
+absent. See [Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
 
 ## Battery names
 

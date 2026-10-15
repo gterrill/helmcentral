@@ -124,11 +124,11 @@ describe('Settings -> Vessel and the Save bar', () => {
     await openVessel(onDirtyChange)
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
 
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
     expect(await saveBar().findByText('Unsaved changes')).toBeInTheDocument()
     expect(onDirtyChange).toHaveBeenLastCalledWith(true)
 
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
     await waitFor(() => expect(saveBar().queryByText('Unsaved changes')).not.toBeInTheDocument())
     expect(onDirtyChange).toHaveBeenLastCalledWith(false)
   })
@@ -145,7 +145,7 @@ describe('Settings -> Vessel and the Save bar', () => {
 
   it('Save sends the vessel block in the settings request and the particulars to their own endpoint', async () => {
     await openVessel()
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
     fireEvent.change(screen.getByLabelText('Flag'), { target: { value: 'Australia' } })
 
     fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
@@ -167,7 +167,7 @@ describe('Settings -> Vessel and the Save bar', () => {
 
   it('a particulars-only edit does not send particulars when nothing changed there', async () => {
     await openVessel()
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
 
     fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
 
@@ -177,7 +177,7 @@ describe('Settings -> Vessel and the Save bar', () => {
 
   it('Discard restores the engines and the particulars', async () => {
     await openVessel()
-    const starboard = screen.getByLabelText('Include starboard in anomaly detection')
+    const starboard = screen.getByLabelText('Include starboard as an engine')
     const flag = screen.getByLabelText('Flag') as HTMLInputElement
     fireEvent.click(starboard)
     fireEvent.change(flag, { target: { value: 'Australia' } })
@@ -185,7 +185,7 @@ describe('Settings -> Vessel and the Save bar', () => {
     fireEvent.click(await saveBar().findByRole('button', { name: 'Discard' }))
 
     await waitFor(() => expect(flag.value).toBe('Cook Islands'))
-    expect(screen.getByLabelText('Include starboard in anomaly detection')).not.toBeChecked()
+    expect(screen.getByLabelText('Include starboard as an engine')).not.toBeChecked()
     expect(saveBar().queryByText('Unsaved changes')).not.toBeInTheDocument()
     expect(saveSettingsMock).not.toHaveBeenCalled()
     expect(putCalls()).toHaveLength(0)
@@ -194,7 +194,7 @@ describe('Settings -> Vessel and the Save bar', () => {
   it('a particulars refusal shows in the bar and at the field, while the settings part still saved', async () => {
     particularsPut = () => ({ ok: false, status: 400, body: { field: 'year', message: 'year must be between 1800 and 2200' } })
     await openVessel()
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
     fireEvent.change(screen.getByLabelText('Year built'), { target: { value: '3000' } })
 
     fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
@@ -207,7 +207,7 @@ describe('Settings -> Vessel and the Save bar', () => {
     // only what is still unsaved: the engine stays ticked, the year goes back.
     fireEvent.click(saveBar().getByRole('button', { name: 'Discard' }))
     await waitFor(() => expect((screen.getByLabelText('Year built') as HTMLInputElement).value).toBe('2024'))
-    expect(screen.getByLabelText('Include starboard in anomaly detection')).toBeChecked()
+    expect(screen.getByLabelText('Include starboard as an engine')).toBeChecked()
   })
 })
 
@@ -218,7 +218,7 @@ describe('a vessel block the server could not read', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('bad engines')
-    expect(screen.queryByLabelText(/include .* in anomaly detection/i)).toBeNull()
+    expect(screen.queryByLabelText(/include .* as an engine/i)).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
     fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))

@@ -86,13 +86,11 @@ type assistantToolDeps struct {
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
 	// supply a canned series with no InfluxDB connection at all.
 	influxRange func(path string, start, stop time.Time, every string) ([]telemetryPoint, error)
-	// fuelRateInstances names the propulsion instances (e.g. "port",
-	// "starboard") this vessel's SignalK tree actually publishes a
-	// fuel.rate for, so estimate_passage never has to hardcode engine
-	// names. nil when the snapshot has none yet (no vessel tree, or a dev
-	// backend with no SignalK at all) - executeEstimatePassage falls back
-	// to a named pair and says so.
-	fuelRateInstances func() []string
+	// fuelRateInstances names the propulsion instances the operator chose
+	// in Vessel settings, so estimate_passage never guesses engine names.
+	// nil when none is configured - executeEstimatePassage then says
+	// engines are not set up.
+	fuelRateInstances func() ([]string, error)
 	// fuelAboardM3 is the vessel's current fuel volume (helmcentral.fuel.volume,
 	// ADR 0084 - the same derived path the Tanks tile reads), for
 	// estimate_passage's fuel margin. ok is false whenever the figure is
@@ -226,7 +224,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		},
 		routes:            assistantRouteSnapshot,
 		influxRange:       queryInfluxPathRange,
-		fuelRateInstances: fuelRateInstancesFromSnapshot,
+		fuelRateInstances: configuredEngineInstances(settingsPath),
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
 		help:              func() []helpPage { return globalHelp },
 		documents:         func() *documentStore { return globalDocumentStore },
@@ -264,26 +262,25 @@ func fuelAboardM3FromDerivedPaths() (float64, bool) {
 	return *value, true
 }
 
-// fuelRateInstancesFromSnapshot names every propulsion instance the live
-// SignalK tree publishes a fuel.rate for ("port", "starboard", or whatever
-// this vessel actually has), the same way fuelRatePaths (derived_paths.go)
-// already discovers those paths for the derived fuel-economy figures - no
-// configuration, no hardcoded engine count. Returns nil when the snapshot
-// has no self tree yet, which executeEstimatePassage treats as "unknown"
-// rather than "no engines".
-func fuelRateInstancesFromSnapshot() []string {
-	telemetry := globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC())
-	if !telemetry.HasSelf() {
-		return nil
-	}
-
-	var instances []string
-	for _, path := range fuelRatePaths(telemetry) {
-		if instance := propulsionEngineID(path); instance != "" {
-			instances = append(instances, instance)
+// configuredEngineInstances returns a reader of the propulsion instances the
+// operator chose in Vessel settings, in the order saved, from settingsPath.
+// It returns nil, nil when none is configured, which estimate_passage reports
+// as engines not being set up. An unreadable vessel block is an error, kept
+// distinct from not-configured.
+func configuredEngineInstances(settingsPath string) func() ([]string, error) {
+	return func() ([]string, error) {
+		vessel, err := loadVesselSettings(settingsPath)
+		if err != nil {
+			return nil, err
 		}
+		var instances []string
+		for _, engine := range vessel.Engines {
+			if engine.Instance != "" {
+				instances = append(instances, engine.Instance)
+			}
+		}
+		return instances, nil
 	}
-	return instances
 }
 
 // assistantRouteSnapshot copies the saved routes under routesMu's read lock

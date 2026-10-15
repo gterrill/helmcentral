@@ -117,39 +117,41 @@ func TestLoadVesselSettingsMalformedFailsFast(t *testing.T) {
 
 // --- House bank capacity: the 1440 default is gone -------------------------
 
-// TestLoadHouseBatteryCapacityAhReadsFromVesselHouseBank asserts capacity now
-// comes from vessel.house_bank.capacity_ah, not boat.house_battery_capacity_ah
-// (the plan's Breaking change: the operator re-enters it under Settings ->
+func capacityFromSettings(t *testing.T, body string) float64 {
+	t.Helper()
+	vessel, err := loadVesselSettings(writeVesselTestSettings(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := electricalStateFromTelemetry(fakeTelemetry{}, electricalStateData{BatteryCapacityAh: -1, BatterySocPercent: -1}, vessel)
+	return state.BatteryCapacityAh
+}
+
+// Capacity comes from vessel.house_bank.capacity_ah, not
+// boat.house_battery_capacity_ah (the operator re-enters it under Settings ->
 // Vessel -> Power).
-func TestLoadHouseBatteryCapacityAhReadsFromVesselHouseBank(t *testing.T) {
-	path := writeVesselTestSettings(t, `vessel:
+func TestHouseBankCapacityReadsFromVesselHouseBank(t *testing.T) {
+	got := capacityFromSettings(t, `vessel:
   house_bank:
     path: electrical.batteries.512
     capacity_ah: 600
 `)
-	if got := loadHouseBatteryCapacityAh(path); got != 600 {
-		t.Fatalf("loadHouseBatteryCapacityAh: got %v, want 600", got)
+	if got != 600 {
+		t.Fatalf("capacity: got %v, want 600", got)
 	}
 }
 
-// TestLoadHouseBatteryCapacityAhUnsetReturnsNegativeOne asserts an
-// unconfigured house bank reports "not set" (-1), never a guessed number --
-// this is the leak the plan calls out: defaultHouseBatteryCapacityAh no
-// longer exists anywhere in this codebase.
-func TestLoadHouseBatteryCapacityAhUnsetReturnsNegativeOne(t *testing.T) {
-	path := writeVesselTestSettings(t, "boat:\n  model: Test Boat\n")
-	if got := loadHouseBatteryCapacityAh(path); got != -1 {
-		t.Fatalf("loadHouseBatteryCapacityAh with no vessel.house_bank: got %v, want -1", got)
+// An unconfigured house bank reports "not set" (-1), never a guessed number.
+func TestHouseBankCapacityUnsetIsNegativeOne(t *testing.T) {
+	if got := capacityFromSettings(t, "boat:\n  model: Test Boat\n"); got != -1 {
+		t.Fatalf("capacity with no vessel.house_bank: got %v, want -1", got)
 	}
 }
 
-// TestLoadHouseBatteryCapacityAhIgnoresOldBoatField asserts the old
-// boat.house_battery_capacity_ah field, if still present from before the
-// upgrade, is no longer read at all -- it is genuinely moved, not merely
-// duplicated (AGENTS.md's "no speculative compat fallbacks").
-func TestLoadHouseBatteryCapacityAhIgnoresOldBoatField(t *testing.T) {
-	path := writeVesselTestSettings(t, "boat:\n  house_battery_capacity_ah: 1440\n")
-	if got := loadHouseBatteryCapacityAh(path); got != -1 {
-		t.Fatalf("loadHouseBatteryCapacityAh should ignore the old boat field: got %v, want -1", got)
+// The old boat.house_battery_capacity_ah field is no longer read at all
+// (AGENTS.md's "no speculative compat fallbacks").
+func TestHouseBankCapacityIgnoresOldBoatField(t *testing.T) {
+	if got := capacityFromSettings(t, "boat:\n  house_battery_capacity_ah: 1440\n"); got != -1 {
+		t.Fatalf("capacity should ignore the old boat field: got %v, want -1", got)
 	}
 }

@@ -1,14 +1,16 @@
 import { useMemo } from 'react'
 
 import type { AlarmRule } from '@/hooks/use-alarm-rules'
-import { DEFAULT_SOC_PATH, socBandsFromRules, type SocBands } from '@/lib/soc-bands'
+import { socBandsFromRules, type SocBands } from '@/lib/soc-bands'
 
 /**
  * Thin wrapper over socBandsFromRules: App already holds the one
  * useAlarmRules() fetch (see alarms-drawer.tsx), so this hook does no
  * fetching of its own - it just re-derives the bands whenever the rule
- * list changes.
+ * list changes. The path comes from the house bank chosen in Vessel settings.
  */
-export function useSocBands(rules: readonly AlarmRule[], socPath: string = DEFAULT_SOC_PATH): SocBands {
-  return useMemo(() => socBandsFromRules(rules, socPath), [rules, socPath])
+export function useSocBands(rules: readonly AlarmRule[], socPath: string | null | undefined): SocBands {
+  // The path is the house bank's state of charge from the backend. With no
+  // house bank chosen there is no path, and no bands.
+  return useMemo(() => (socPath ? socBandsFromRules(rules, socPath) : { warnBelow: null, alarmBelow: null }), [rules, socPath])
 }

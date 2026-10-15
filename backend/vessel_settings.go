@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,10 +19,8 @@ import (
 // block loads to the zero value (no engines, no house bank), which is the
 // plan's "not set up" state, not a guess. This is also where
 // defaultHouseBatteryCapacityAh's old fallback (Pikorua's 1440 Ah baked into
-// main.go) stops: loadHouseBatteryCapacityAh below now reads
-// vessel.house_bank.capacity_ah only, and reports -1 ("not set") when it is
-// unset, exactly like every other "-1 means unset" sentinel already used in
-// this file's neighbours (electricalStateData's own fields).
+// main.go) stops: the capacity comes from vessel.house_bank only, and the
+// electrical state reports -1 ("not set") when it is unset.
 
 // vesselSettings is the "vessel:" block, decoded independently of the large
 // settingsPayload struct in signalk.go (the same narrow-reader pattern
@@ -64,16 +64,6 @@ func validateVesselAlternators(a vesselAlternatorSettings) *settingsValidationEr
 		return &settingsValidationError{Field: "vessel.alternators.starboard_instance", Message: "port and starboard must be different alternators"}
 	}
 	return nil
-}
-
-// loadVesselAlternators reads the alternator instances the electrical state
-// is read from.
-func loadVesselAlternators() (vesselAlternatorSettings, error) {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	if err != nil {
-		return vesselAlternatorSettings{}, err
-	}
-	return vessel.Alternators, nil
 }
 
 // vesselBatterySetting names one electrical.batteries.<id> instance, e.g.
@@ -185,24 +175,50 @@ func vesselBlockMap(v vesselSettings) (map[string]any, error) {
 	return generic, nil
 }
 
-// loadHouseBatteryCapacityAh reads the configured house bank's capacity in
-// amp-hours, or -1 when no house bank is configured -- the same sentinel
-// electricalStateData.BatteryCapacityAh and its neighbours already use for
-// "not known". This used to fall back to boat.house_battery_capacity_ah and,
-// failing that, main.go's defaultHouseBatteryCapacityAh (Pikorua's own 1440
-// Ah bank baked into shipped code); both are gone. A malformed vessel block
-// is treated the same as unset here -- the caller (the overnight electrical
-// estimate) has no better answer than "not set" for either, and
-// loadVesselSettings's own error is for a caller that can act on it, not
-// this narrow float reader.
-func loadHouseBatteryCapacityAh(settingsPath string) float64 {
-	v, err := loadVesselSettings(settingsPath)
-	if err != nil {
-		log.Printf("vessel settings: house bank capacity unavailable: %v", err)
-		return -1
+// houseBankPath is the chosen house bank's SignalK path, trimmed, or "" when
+// no bank is set. Every reader of the bank goes through here.
+func (v vesselSettings) houseBankPath() string {
+	if v.HouseBank == nil {
+		return ""
 	}
-	if v.HouseBank == nil || v.HouseBank.CapacityAh <= 0 {
-		return -1
+	return strings.TrimSpace(v.HouseBank.Path)
+}
+
+// houseBankSocPath is the bank's state-of-charge path, or "" with no bank.
+func (v vesselSettings) houseBankSocPath() string {
+	bank := v.houseBankPath()
+	if bank == "" {
+		return ""
 	}
-	return v.HouseBank.CapacityAh
+	return bank + ".capacity.stateOfCharge"
+}
+
+// vesselReadLog remembers the last unreadable-vessel-block error per call
+// site, so a settings file that stays broken is logged once rather than on
+// every tick. A clean read forgets it, so the next failure is logged again.
+var vesselReadLog = struct {
+	mu   sync.Mutex
+	last map[string]string
+}{last: map[string]string{}}
+
+func resetVesselReadLog() {
+	vesselReadLog.mu.Lock()
+	defer vesselReadLog.mu.Unlock()
+	vesselReadLog.last = map[string]string{}
+}
+
+// noteVesselRead logs msg (with the error) when err differs from the last
+// one seen at site, and clears the site on a clean read.
+func noteVesselRead(site string, err error, format string) {
+	vesselReadLog.mu.Lock()
+	defer vesselReadLog.mu.Unlock()
+	if err == nil {
+		delete(vesselReadLog.last, site)
+		return
+	}
+	if vesselReadLog.last[site] == err.Error() {
+		return
+	}
+	vesselReadLog.last[site] = err.Error()
+	log.Printf(format, err)
 }

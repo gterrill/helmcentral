@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -601,6 +602,95 @@ func TestComputeOvernight_RealFixtureReachesHistory(t *testing.T) {
 
 // ── HTTP handler ─────────────────────────────────────────────────────────
 
+// defaultSocMeasurement is the SoC path most overnight fixtures use; the
+// handler itself takes the path from vessel.house_bank.
+const defaultSocMeasurement = "electrical.batteries.0.capacity.stateOfCharge"
+
+func TestSocMeasurementPathFollowsTheHouseBank(t *testing.T) {
+	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
+	got, err := socMeasurementPath()
+	if err != nil || got != "electrical.batteries.51.capacity.stateOfCharge" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+func TestSocMeasurementPathIsEmptyWithNoHouseBank(t *testing.T) {
+	useHouseBank(t, nil)
+	got, err := socMeasurementPath()
+	if err != nil || got != "" {
+		t.Fatalf("got %q, %v; want empty and no error", got, err)
+	}
+}
+
+func TestSocMeasurementPathIgnoresTheRetiredEnvVar(t *testing.T) {
+	useHouseBank(t, nil)
+	t.Setenv("INFLUX_SOC_MEASUREMENT", "electrical.batteries.0.capacity.stateOfCharge")
+	if got, _ := socMeasurementPath(); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestSocMeasurementPathFailsOnUnreadableSettings(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := socMeasurementPath(); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestElectricalOvernightHandler_NoHouseBankIs503WithNoSocPath(t *testing.T) {
+	useHouseBank(t, nil)
+	globalOvernightCache = &overnightCache{}
+	t.Cleanup(func() { globalOvernightCache = &overnightCache{} })
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/electrical/overnight", nil), rec)
+	if err := electricalOvernightHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := body["soc_path"]; has {
+		t.Fatalf("soc_path must be absent, got %v", body)
+	}
+	if !strings.Contains(body["error"], "house bank") {
+		t.Fatalf("error should name the house bank, got %q", body["error"])
+	}
+}
+
+func TestElectricalOvernightHandler_ChangingTheHouseBankDropsTheCachedResult(t *testing.T) {
+	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
+	globalOvernightCache = &overnightCache{
+		result:    overnightResult{SocPath: "electrical.batteries.0.capacity.stateOfCharge"},
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	t.Cleanup(func() { globalOvernightCache = &overnightCache{} })
+	origSnapshot := globalSignalKSnapshot
+	globalSignalKSnapshot = newSignalKSnapshot()
+	t.Cleanup(func() { globalSignalKSnapshot = origSnapshot })
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/electrical/overnight", nil), rec)
+	if err := electricalOvernightHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code == http.StatusOK {
+		t.Fatalf("served a result for the previous bank: %s", rec.Body.String())
+	}
+}
+
 func TestElectricalOvernightHandler_PositionUnavailableIs503(t *testing.T) {
 	// The GNSS validator is a package-level singleton with its own
 	// hysteresis state (gnss_validation.go) so a "position lost" reading
@@ -609,6 +699,8 @@ func TestElectricalOvernightHandler_PositionUnavailableIs503(t *testing.T) {
 	// resets it the same way (see signalk_test.go, tracks_test.go, etc.).
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
+	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
+	globalOvernightCache = &overnightCache{}
 
 	origSnapshot := globalSignalKSnapshot
 	globalSignalKSnapshot = newSignalKSnapshot() // no self context registered at all
@@ -662,19 +754,37 @@ func TestOvernightCache_KeyedOnWholeDegreePosition(t *testing.T) {
 	calls := 0
 	compute := func() overnightResult { calls++; return overnightResult{NightsUsed: calls} }
 
-	c.get(now, -20.109, 148.894, compute)
-	c.get(now.Add(time.Minute), -20.2, 148.7, compute) // same whole degrees: served from cache
+	c.get(now, -20.109, 148.894, "soc", compute)
+	c.get(now.Add(time.Minute), -20.2, 148.7, "soc", compute) // same whole degrees: served from cache
 	if calls != 1 {
 		t.Fatalf("expected one compute for two calls at the same whole-degree position, got %d", calls)
 	}
-	c.get(now.Add(2*time.Minute), -21.5, 148.7, compute) // a degree south: recompute
+	c.get(now.Add(2*time.Minute), -21.5, 148.7, "soc", compute) // a degree south: recompute
 	if calls != 2 {
 		t.Fatalf("expected a recompute after moving a whole degree, got %d computes", calls)
 	}
-	if _, ok := c.fresh(now.Add(3 * time.Minute)); !ok {
+	if _, ok := c.fresh(now.Add(3*time.Minute), "soc"); !ok {
 		t.Fatalf("a result computed a minute ago must be fresh regardless of position")
 	}
-	if _, ok := c.fresh(now.Add(overnightCacheTTL + 3*time.Minute)); ok {
+	if _, ok := c.fresh(now.Add(overnightCacheTTL+3*time.Minute), "soc"); ok {
 		t.Fatalf("an expired result must not be served as fresh")
+	}
+}
+
+// The state-of-charge path is part of the key beside the position, so a
+// result for a previously chosen bank is never served for the new one.
+func TestOvernightCache_KeyedOnSocPath(t *testing.T) {
+	c := &overnightCache{}
+	now := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	calls := 0
+	compute := func() overnightResult { calls++; return overnightResult{NightsUsed: calls} }
+
+	c.get(now, -20.1, 148.9, "bank-a", compute)
+	if _, ok := c.fresh(now.Add(time.Minute), "bank-b"); ok {
+		t.Fatalf("a result for bank-a must not be fresh for bank-b")
+	}
+	c.get(now.Add(time.Minute), -20.1, 148.9, "bank-b", compute)
+	if calls != 2 {
+		t.Fatalf("expected a recompute for the new bank, got %d computes", calls)
 	}
 }

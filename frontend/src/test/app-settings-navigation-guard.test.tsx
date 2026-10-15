@@ -46,7 +46,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
     generatorManualStart: false, generatorManualStartTimer: 0,
     generatorRunningByCondition: null, generatorRuntime: null,
-    engine0Rpm: null, engine1Rpm: null, gnssQualityIndicator: null, gnssHdop: null,
+    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
   }),
 }))

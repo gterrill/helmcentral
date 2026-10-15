@@ -227,8 +227,5 @@ var liveHouseBank = &houseBankCache{load: func(settingsPath string) (string, err
 	if err != nil {
 		return "", err
 	}
-	if vessel.HouseBank == nil {
-		return "", nil
-	}
-	return strings.TrimSpace(vessel.HouseBank.Path), nil
+	return vessel.houseBankPath(), nil
 }}

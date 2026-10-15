@@ -1582,7 +1582,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -1622,7 +1622,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -1912,7 +1912,7 @@ func TestFetchSignalKElectricalState_ReportsFreshestElectricalTimestamp(t *testi
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -1932,7 +1932,7 @@ func TestFetchSignalKElectricalState_AgeIsUnknownWithoutTimestamps(t *testing.T)
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(vesselAlternatorSettings{})
+	state, err := fetchSignalKElectricalState(vesselSettings{})
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}

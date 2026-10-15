@@ -18,13 +18,13 @@ const alternatorTree = `{"electrical":{"alternator":{
 	"12":{"current":{"value":28.5},"voltage":{"value":28.3},"temperature":{"value":325.15}}
 }}}`
 
-func configuredAlternators(t *testing.T) vesselAlternatorSettings {
+func configuredAlternators(t *testing.T) vesselSettings {
 	t.Helper()
-	alt, err := loadVesselAlternators()
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return alt
+	return vessel
 }
 
 func TestElectricalPayloadLogsAnUnreadableVesselBlockAndKeepsOtherFigures(t *testing.T) {
@@ -33,13 +33,14 @@ func TestElectricalPayloadLogsAnUnreadableVesselBlockAndKeepsOtherFigures(t *tes
 	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	resetVesselReadLog()
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	seedSelfTree(t, alternatorTree)
 
 	payload := buildElectricalStatePayload()
-	if !strings.Contains(buf.String(), "alternator instances unreadable") {
+	if !strings.Contains(buf.String(), "vessel settings unreadable") {
 		t.Fatalf("expected a log line, got %q", buf.String())
 	}
 	if payload["alternator_0_current_a"] != -1.0 {

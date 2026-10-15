@@ -24,13 +24,13 @@ func autoRaiseWatcherFor(enabled bool, anchor *anchorWatchData, sample func() (a
 }
 
 // qualifyingSample is a sample that satisfies every auto-raise condition:
-// fresh RPM on engine 0, a position 60m from a 20m-radius anchor (outside
+// engines running, a position 60m from a 20m-radius anchor (outside
 // radius+buffer), and 5kt SOG.
 func qualifyingSample() (autoRaiseSample, bool) {
 	return autoRaiseSample{
 		Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
 		PositionOK: true, GNSSCritical: false,
-		SOGKts: 5.0, Engine0RPM: 1200, Engine1RPM: -1,
+		SOGKts: 5.0, EnginesRunning: ptr(true),
 	}, true
 }
 
@@ -70,9 +70,12 @@ func TestAnchorAutoRaiseNeverFiresWhileBackingDown(t *testing.T) {
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
 			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
-			PositionOK: true, SOGKts: 1.5, Engine0RPM: 1200, Engine1RPM: -1,
+			PositionOK: true, SOGKts: 1.5, EnginesRunning: ptr(true),
 		}, true
-	}, func(time.Time) (bool, error) { t.Fatal("backing down (1.5kt SOG) must never auto-raise"); return false, nil })
+	}, func(time.Time) (bool, error) {
+		t.Fatal("backing down (1.5kt SOG) must never auto-raise")
+		return false, nil
+	})
 
 	tickEvery5s(t, watcher, 10)
 }
@@ -83,24 +86,36 @@ func TestAnchorAutoRaiseNeverFiresWithSOGUnavailable(t *testing.T) {
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
 			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
-			PositionOK: true, SOGKts: -1, Engine0RPM: 1200, Engine1RPM: -1,
+			PositionOK: true, SOGKts: -1, EnginesRunning: ptr(true),
 		}, true
 	}, func(time.Time) (bool, error) { t.Fatal("must not raise when SOG is unavailable"); return false, nil })
 
 	tickEvery5s(t, watcher, 10)
 }
 
-// Test 4: readEngineRPM's own sentinel (-1) covers both "no engine path"
-// and "the reading is older than defaultRPMMaxAge" - either way, no fresh
-// RPM evidence means no auto-raise.
+// Test 4: EnginesRunning is nil when no engine is configured or none is
+// reporting a fresh reading, and false when they report stopped. Neither is
+// evidence of motoring, so neither raises.
 func TestAnchorAutoRaiseNeverFiresWithStaleOrAbsentRPM(t *testing.T) {
 	anchor := anchorAt(-21.1113, 149.2276, 20)
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
 			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
-			PositionOK: true, SOGKts: 5.0, Engine0RPM: -1, Engine1RPM: -1,
+			PositionOK: true, SOGKts: 5.0, EnginesRunning: nil,
 		}, true
 	}, func(time.Time) (bool, error) { t.Fatal("must not raise with no fresh RPM evidence"); return false, nil })
+
+	tickEvery5s(t, watcher, 10)
+}
+
+func TestAnchorAutoRaiseNeverFiresWithEnginesStopped(t *testing.T) {
+	anchor := anchorAt(-21.1113, 149.2276, 20)
+	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
+		return autoRaiseSample{
+			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
+			PositionOK: true, SOGKts: 5.0, EnginesRunning: ptr(false),
+		}, true
+	}, func(time.Time) (bool, error) { t.Fatal("must not raise with engines stopped"); return false, nil })
 
 	tickEvery5s(t, watcher, 10)
 }
@@ -113,7 +128,7 @@ func TestAnchorAutoRaiseNeverFiresOnCriticalGNSS(t *testing.T) {
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
 			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
-			PositionOK: true, GNSSCritical: true, SOGKts: 5.0, Engine0RPM: 1200, Engine1RPM: -1,
+			PositionOK: true, GNSSCritical: true, SOGKts: 5.0, EnginesRunning: ptr(true),
 		}, true
 	}, func(time.Time) (bool, error) { t.Fatal("must not raise on a critical GNSS fix"); return false, nil })
 
@@ -127,9 +142,12 @@ func TestAnchorAutoRaiseNeverFiresOnSentinelPosition(t *testing.T) {
 	anchor := anchorAt(-21.1113, 149.2276, 20)
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
-			Lat: -1, Lon: -1, PositionOK: false, SOGKts: 5.0, Engine0RPM: 1200, Engine1RPM: -1,
+			Lat: -1, Lon: -1, PositionOK: false, SOGKts: 5.0, EnginesRunning: ptr(true),
 		}, true
-	}, func(time.Time) (bool, error) { t.Fatal("must not raise on the -1,-1 sentinel position"); return false, nil })
+	}, func(time.Time) (bool, error) {
+		t.Fatal("must not raise on the -1,-1 sentinel position")
+		return false, nil
+	})
 
 	tickEvery5s(t, watcher, 10)
 }
@@ -140,7 +158,10 @@ func TestAnchorAutoRaiseNeverFiresWhenSampleFetchFails(t *testing.T) {
 	anchor := anchorAt(-21.1113, 149.2276, 20)
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{}, false
-	}, func(time.Time) (bool, error) { t.Fatal("must not raise when the vessel-state read fails"); return false, nil })
+	}, func(time.Time) (bool, error) {
+		t.Fatal("must not raise when the vessel-state read fails")
+		return false, nil
+	})
 
 	tickEvery5s(t, watcher, 10)
 }
@@ -155,7 +176,7 @@ func TestAnchorAutoRaiseResetsTimerWhenAConditionDrops(t *testing.T) {
 	watcher := autoRaiseWatcherFor(true, anchor, func() (autoRaiseSample, bool) {
 		return autoRaiseSample{
 			Lat: metersNorth(-21.1113, 60), Lon: 149.2276,
-			PositionOK: true, SOGKts: sog, Engine0RPM: 1200, Engine1RPM: -1,
+			PositionOK: true, SOGKts: sog, EnginesRunning: ptr(true),
 		}, true
 	}, func(time.Time) (bool, error) { raises++; return true, nil })
 

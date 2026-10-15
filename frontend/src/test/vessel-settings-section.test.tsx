@@ -160,13 +160,13 @@ describe('Settings -> Vessel: Engines and Power', () => {
     renderSection()
 
     await screen.findByText('propulsion.port')
-    fireEvent.click(screen.getByLabelText('Include port in anomaly detection'))
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include port as an engine'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
 
     await waitFor(() => expect(pendingVessel().engines).toHaveLength(2))
     expect(pendingVessel().engines.map((e) => e.instance).sort()).toEqual(['port', 'starboard'])
 
-    fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
+    fireEvent.click(screen.getByLabelText('Include starboard as an engine'))
     await waitFor(() => expect(pendingVessel().engines.map((e) => e.instance)).toEqual(['port']))
   })
 
