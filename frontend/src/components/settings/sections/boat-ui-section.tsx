@@ -73,7 +73,7 @@ function detectorLine(label: string, status: { ready: boolean; missing?: string 
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{label}</span>
         {': '}
-        {ready ? 'Ready' : `Not set up${status?.missing ? ` — ${status.missing}` : ''}`}
+        {ready ? 'Ready' : `Not set up${status?.missing ? `. ${status.missing}` : ''}`}
       </span>
     </div>
   )
@@ -247,11 +247,24 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
     <>
       <FormSection
         title="Engines"
-        description="Tick every engine on the boat. The sensor checks, the Alternators tile, anchor auto-raise and Mate's passage estimates all use this list; with none ticked they treat engines as not set up. Each needs a linked inventory item so its equipment profile applies gauge zones and pack thresholds."
+        description={
+          <>
+            <p>
+              Each row is an engine the boat is reporting, or one you saved that has since gone quiet. Tick the
+              ones that are your engines, using the live rpm and temperature to tell them apart. Anchor auto-raise, the Alternators tile, the sensor checks and
+              Mate&apos;s passage estimates only look at ticked engines. With none ticked, they treat the boat as
+              having no engines set up.
+            </p>
+            <p className="mt-2">
+              Linking an equipment item is optional. Give the item an engine profile and Apply gauge zones adds a
+              gauge tile for that engine to your first dashboard page, with the profile&apos;s ranges marked.
+            </p>
+          </>
+        }
       >
         <div className="flex flex-col gap-2">
           {instances.length === 0 && (
-            <p className="text-sm text-muted-foreground">No propulsion instances published yet.</p>
+            <p className="text-sm text-muted-foreground">The boat has not reported any engines yet.</p>
           )}
           {instances.map((instance) => {
             const row: VesselEngineRowDraft = engineRows[instance] ?? { name: titleCaseInstance(instance), equipmentId: '', included: false }
@@ -271,7 +284,10 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
             )
           })}
         </div>
-        {detectorLine('Frozen/impossible sensor check', candidates.detectors.frozen)}
+        <div className="flex flex-col gap-2">
+          {detectorLine('Frozen/impossible sensor check', candidates.detectors.frozen)}
+          {detectorLine('Engine differential check', candidates.detectors.engines)}
+        </div>
       </FormSection>
 
       <FormSection
@@ -284,7 +300,6 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
           batteries={candidates.batteries}
         />
         {detectorLine('Full-bank charging check', candidates.detectors.battery)}
-        {detectorLine('Engine differential check', candidates.detectors.engines)}
       </FormSection>
 
       <FormSection
@@ -421,15 +436,15 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
   const [linkedProfileId, setLinkedProfileId] = useState('')
 
   return (
-    <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-md border border-border/60 bg-background/40 p-3 sm:grid-cols-[auto_1fr_1fr_auto]">
-      <div className="flex items-center gap-2 pt-1.5">
+    <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-md border border-border/60 bg-background/40 p-3 sm:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="flex min-w-0 items-center gap-2 pt-1.5">
         <Checkbox
           id={`engine-include-${instance}`}
           checked={row.included}
           onCheckedChange={(checked) => onToggle(checked === true)}
           aria-label={`Include ${instance} as an engine`}
         />
-        <FieldLabel htmlFor={`engine-include-${instance}`} className="text-xs text-muted-foreground">
+        <FieldLabel htmlFor={`engine-include-${instance}`} className="min-w-0 truncate text-xs text-muted-foreground">
           propulsion.{instance}
         </FieldLabel>
       </div>
@@ -443,20 +458,23 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
           aria-label={`Display name for ${instance}`}
         />
         <p className="mt-1 truncate text-xs text-muted-foreground tabular-nums">
-          {rpm === null ? '—' : `${Math.round(rpm)} rpm`} · {coolantC === null ? '—' : `${coolantC.toFixed(0)}°C`}
+          {rpm === null && coolantC === null
+            ? 'Not reporting'
+            : `${rpm === null ? '--' : `${Math.round(rpm)} rpm`} · ${coolantC === null ? '--' : `${coolantC.toFixed(0)}°C`}`}
         </p>
       </div>
 
-      <EquipmentProfileLinker
-        equipmentId={row.equipmentId}
-        onEquipmentIdChange={onEquipmentIdChange}
-        profileKind="engine"
-        defaultSystem="propulsion"
-        namePlaceholder={`${titleCaseInstance(instance)} engine`}
-        onLinkedItemChange={(item) => setLinkedProfileId(item?.profile_id ?? '')}
-      />
-
-      <div className="flex items-start pt-0.5">
+      <div className="flex min-w-0 flex-col items-start gap-1.5">
+        <div className="w-full min-w-0">
+          <EquipmentProfileLinker
+            equipmentId={row.equipmentId}
+            onEquipmentIdChange={onEquipmentIdChange}
+            profileKind="engine"
+            defaultSystem="propulsion"
+            namePlaceholder={`${titleCaseInstance(instance)} engine`}
+            onLinkedItemChange={(item) => setLinkedProfileId(item?.profile_id ?? '')}
+          />
+        </div>
         {linkedProfileId && (
           <Button type="button" size="sm" variant="outline" onClick={() => onApplyGaugeZones(linkedProfileId)}>
             Apply gauge zones
