@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -53,6 +54,14 @@ type vesselBatteryCandidate struct {
 	SoC          *float64 `json:"soc"`
 }
 
+// vesselAlternatorCandidate is one electrical.alternator.<instance> the boat
+// is currently publishing, with its live current so the operator can tell
+// which is which by the one that is charging.
+type vesselAlternatorCandidate struct {
+	Instance string   `json:"instance"`
+	Current  *float64 `json:"current"`
+}
+
 // vesselDetectorStatus is one detector's setup state for the Settings page:
 // Ready false always carries Missing, the single next thing the operator
 // needs to do ("Pick your house bank"), never a generic "not configured".
@@ -62,14 +71,16 @@ type vesselDetectorStatus struct {
 }
 
 type vesselCandidatesResponse struct {
-	Engines   []vesselEngineCandidate         `json:"engines"`
-	Batteries []vesselBatteryCandidate        `json:"batteries"`
-	Detectors map[string]vesselDetectorStatus `json:"detectors"`
+	Engines     []vesselEngineCandidate         `json:"engines"`
+	Batteries   []vesselBatteryCandidate        `json:"batteries"`
+	Alternators []vesselAlternatorCandidate     `json:"alternators"`
+	Detectors   map[string]vesselDetectorStatus `json:"detectors"`
 }
 
 var (
 	vesselCandidatePropulsionRe = regexp.MustCompile(`^propulsion\.([^.]+)\.`)
 	vesselCandidateBatteryRe    = regexp.MustCompile(`^electrical\.batteries\.([^.]+)\.`)
+	vesselCandidateAlternatorRe = regexp.MustCompile(`^electrical\.alternator\.([^.]+)\.`)
 )
 
 // vesselCandidates builds the whole GET /api/vessel/candidates response:
@@ -78,11 +89,16 @@ var (
 // -- signalk_discovery.go is the unrelated LAN scanner), plus each
 // detector's current setup status against vessel.
 func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCandidatesResponse {
-	paths := snapshot.liveSelfTelemetry(time.Now().UTC()).Paths()
+	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
+	paths := telemetry.Paths()
 
 	engineInstances := map[string]bool{}
 	batteryInstances := map[string]bool{}
+	alternatorInstances := map[string]bool{}
 	for _, p := range paths {
+		if m := vesselCandidateAlternatorRe.FindStringSubmatch(p.Path); m != nil {
+			alternatorInstances[m[1]] = true
+		}
 		if m := vesselCandidatePropulsionRe.FindStringSubmatch(p.Path); m != nil {
 			engineInstances[m[1]] = true
 		}
@@ -129,10 +145,22 @@ func vesselCandidates(snapshot *signalKSnapshot, vessel vesselSettings) vesselCa
 	}
 	sort.Slice(batteries, func(i, j int) bool { return batteries[i].Path < batteries[j].Path })
 
+	alternators := make([]vesselAlternatorCandidate, 0, len(alternatorInstances))
+	for instance := range alternatorInstances {
+		candidate := vesselAlternatorCandidate{Instance: instance}
+		if v, ok := telemetry.Number("electrical.alternator." + instance + ".current"); ok {
+			c := v.Value
+			candidate.Current = &c
+		}
+		alternators = append(alternators, candidate)
+	}
+	sort.Slice(alternators, func(i, j int) bool { return instanceLess(alternators[i].Instance, alternators[j].Instance) })
+
 	return vesselCandidatesResponse{
-		Engines:   engines,
-		Batteries: batteries,
-		Detectors: vesselDetectorStatuses(vessel),
+		Engines:     engines,
+		Batteries:   batteries,
+		Alternators: alternators,
+		Detectors:   vesselDetectorStatuses(vessel),
 	}
 }
 
@@ -173,4 +201,20 @@ func getVesselCandidatesHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read vessel settings"})
 	}
 	return c.JSON(http.StatusOK, vesselCandidates(globalSignalKSnapshot, vessel))
+}
+
+// instanceLess orders instance ids naturally: numeric ids by value (1, 2, 12),
+// anything else after them, as text.
+func instanceLess(a, b string) bool {
+	na, errA := strconv.Atoi(a)
+	nb, errB := strconv.Atoi(b)
+	switch {
+	case errA == nil && errB == nil:
+		return na < nb
+	case errA == nil:
+		return true
+	case errB == nil:
+		return false
+	}
+	return a < b
 }

@@ -405,6 +405,12 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		}
 	}
 
+	if next.Vessel != nil {
+		if invalid := validateVesselAlternators(next.Vessel.Alternators); invalid != nil {
+			return invalid
+		}
+	}
+
 	if next.Signalk.Address != current.Signalk.Address || next.Signalk.Port != current.Signalk.Port {
 		signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
 		vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
@@ -827,6 +833,8 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 			vessel.Engines = []vesselEngineSetting{}
 		}
 		vessel.Batteries = normalizeVesselBatteries(vessel.Batteries)
+		vessel.Alternators.PortInstance = strings.TrimSpace(vessel.Alternators.PortInstance)
+		vessel.Alternators.StarboardInstance = strings.TrimSpace(vessel.Alternators.StarboardInstance)
 		normalized.Vessel = &vessel
 	}
 

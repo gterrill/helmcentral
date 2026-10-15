@@ -16,7 +16,7 @@ import { apiRequest } from '@/lib/api-query'
 import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
 import { useVesselCandidates } from '@/hooks/use-vessel-candidates'
 import { newGaugeGroupWidgetId, type GaugeWidgetConfig } from '@/lib/dashboard-widgets'
-import { titleCaseInstance, type VesselBatteryCandidate, type VesselHouseBankSetting } from '@/lib/vessel-settings'
+import { titleCaseInstance, type VesselAlternatorCandidate, type VesselBatteryCandidate, type VesselHouseBankSetting } from '@/lib/vessel-settings'
 
 interface BoatUiSectionProps {
   draft: RegularSettingsDraft
@@ -275,6 +275,30 @@ function VesselEnginesAndPowerSection({ vessel, onChange }: VesselEnginesAndPowe
         </div>
       </FormSection>
 
+      <FormSection
+        title="Alternators"
+        description="Pick which alternator is port and which is starboard. The boat's instruments number them in their own order, so check the live current while an engine is charging. Leave a side as Not set if the boat does not have one."
+      >
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          <AlternatorPicker
+            label="Port alternator"
+            id="alternator-port"
+            value={vessel.alternators.port_instance}
+            other={vessel.alternators.starboard_instance}
+            candidates={candidates.alternators}
+            onChange={(port_instance) => onChange({ vessel: { ...vessel, alternators: { ...vessel.alternators, port_instance } } })}
+          />
+          <AlternatorPicker
+            label="Starboard alternator"
+            id="alternator-starboard"
+            value={vessel.alternators.starboard_instance}
+            other={vessel.alternators.port_instance}
+            candidates={candidates.alternators}
+            onChange={(starboard_instance) => onChange({ vessel: { ...vessel, alternators: { ...vessel.alternators, starboard_instance } } })}
+          />
+        </div>
+      </FormSection>
+
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
 
       <EngineProfileDialog
@@ -346,6 +370,42 @@ function EngineRow({ instance, row, rpm, coolantC, onToggle, onNameChange, onEqu
           </Button>
         )}
       </div>
+    </div>
+  )
+}
+
+interface AlternatorPickerProps {
+  label: string
+  id: string
+  value: string
+  /** The instance chosen for the other side; it cannot be picked here too. */
+  other: string
+  candidates: VesselAlternatorCandidate[]
+  onChange: (instance: string) => void
+}
+
+function AlternatorPicker({ label, id, value, other, candidates, onChange }: AlternatorPickerProps) {
+  // A saved instance the boat is no longer publishing stays selectable, so
+  // the operator sees what is stored rather than a silently blank choice.
+  const missing = value !== '' && !candidates.some((c) => c.instance === value)
+
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <select
+        id={id}
+        className="h-9 w-full min-w-0 rounded-md border bg-transparent px-3 text-sm tabular-nums"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Not set</option>
+        {candidates.map((c) => (
+          <option key={c.instance} value={c.instance} disabled={c.instance === other}>
+            {c.instance} · {c.current === null ? '--' : `${c.current.toFixed(1)} A`}
+          </option>
+        ))}
+        {missing && <option value={value}>{value} · not reporting</option>}
+      </select>
     </div>
   )
 }

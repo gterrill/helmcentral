@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
@@ -32,6 +33,47 @@ type vesselSettings struct {
 	// instances (sensor_names.go). An instance with no entry, or an empty
 	// name, simply has no operator name.
 	Batteries []vesselBatterySetting `yaml:"batteries" json:"batteries"`
+	// Alternators says which electrical.alternator.<id> instances are the
+	// port and starboard alternators. Empty means not set: that side has no
+	// data. There is no default, because the Victron GX numbers instances
+	// per installation.
+	Alternators vesselAlternatorSettings `yaml:"alternators" json:"alternators"`
+}
+
+// vesselAlternatorSettings holds the operator's port and starboard
+// alternator instance ids, as strings so "0" stays distinct from unset.
+type vesselAlternatorSettings struct {
+	PortInstance      string `yaml:"port_instance" json:"port_instance"`
+	StarboardInstance string `yaml:"starboard_instance" json:"starboard_instance"`
+}
+
+// alternatorInstanceIDRe is a plain SignalK instance id: no dots, slashes or
+// other path characters.
+var alternatorInstanceIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateVesselAlternators checks the saved alternator instances: each is a
+// plain id and the two differ when both are set.
+func validateVesselAlternators(a vesselAlternatorSettings) *settingsValidationError {
+	if a.PortInstance != "" && !alternatorInstanceIDRe.MatchString(a.PortInstance) {
+		return &settingsValidationError{Field: "vessel.alternators.port_instance", Message: "the port alternator must be an alternator instance id (letters, digits, _ or -)"}
+	}
+	if a.StarboardInstance != "" && !alternatorInstanceIDRe.MatchString(a.StarboardInstance) {
+		return &settingsValidationError{Field: "vessel.alternators.starboard_instance", Message: "the starboard alternator must be an alternator instance id (letters, digits, _ or -)"}
+	}
+	if a.PortInstance != "" && a.PortInstance == a.StarboardInstance {
+		return &settingsValidationError{Field: "vessel.alternators.starboard_instance", Message: "port and starboard must be different alternators"}
+	}
+	return nil
+}
+
+// loadVesselAlternators reads the alternator instances the electrical state
+// is read from.
+func loadVesselAlternators() (vesselAlternatorSettings, error) {
+	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return vesselAlternatorSettings{}, err
+	}
+	return vessel.Alternators, nil
 }
 
 // vesselBatterySetting names one electrical.batteries.<id> instance, e.g.

@@ -588,7 +588,7 @@ func discoveredEngineBatteryPaths(snapshot *signalKSnapshot) []string {
 // electrical.alternator.*.current, electrical.chargers.*.current and any
 // solar current, keyed by a human label -- evidence enrichment only, per
 // the plan's "discovered rather than configured".
-func discoverChargeSources(snapshot *signalKSnapshot) map[string]float64 {
+func discoverChargeSources(snapshot *signalKSnapshot, alternators vesselAlternatorSettings) map[string]float64 {
 	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
 	if !telemetry.HasSelf() {
 		return nil
@@ -599,7 +599,14 @@ func discoverChargeSources(snapshot *signalKSnapshot) map[string]float64 {
 		switch {
 		case strings.HasPrefix(p.Path, "electrical.alternator.") && strings.HasSuffix(p.Path, ".current"):
 			id := strings.TrimSuffix(strings.TrimPrefix(p.Path, "electrical.alternator."), ".current")
-			label = "alternator " + id
+			switch {
+			case alternators.PortInstance != "" && id == alternators.PortInstance:
+				label = "port alternator"
+			case alternators.StarboardInstance != "" && id == alternators.StarboardInstance:
+				label = "starboard alternator"
+			default:
+				label = "alternator " + id
+			}
 		case strings.HasPrefix(p.Path, "electrical.chargers.") && strings.HasSuffix(p.Path, ".current"):
 			id := strings.TrimSuffix(strings.TrimPrefix(p.Path, "electrical.chargers."), ".current")
 			label = "charger " + id
@@ -709,7 +716,7 @@ func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, val
 		// 60s): a trailing voltage history the caller's own goroutine holds
 		// across ticks (voltageHistoryTracker), not recomputed here.
 		DVdtPerMinute: voltageHistory.observe(voltage, now, voltageValid),
-		ChargeSources: discoverChargeSources(snapshot),
+		ChargeSources: discoverChargeSources(snapshot, vessel.Alternators),
 	}
 
 	result := fullBankChargingLevel(inputs, settings, valid)

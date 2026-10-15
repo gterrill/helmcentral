@@ -19,7 +19,7 @@ import {
 // through one mock, the same pattern equipment-editor.test.tsx uses for its
 // own multi-endpoint component.
 
-type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown; batteries: { instance: string; name: string }[] }
+type SavedVessel = { engines: { instance: string; name: string; equipment_id: string }[]; house_bank: unknown; batteries: { instance: string; name: string }[]; alternators: { port_instance: string; starboard_instance: string } }
 let latestDraft: RegularSettingsDraft
 // What the next Save would send as `vessel`.
 const pendingVessel = () => buildRegularSettingsPatch(latestDraft).vessel as unknown as SavedVessel
@@ -37,6 +37,7 @@ const profiles = [
   { id: 'battery-profile-1', name: 'Test Battery Profile', kind: 'battery', chemistry: 'LiFePO4', full_soc: { value: 0.98 }, charge_warn: { value: 3.55 }, charge_high: { value: 3.65 } },
 ]
 
+let savedPortInstance = ''
 const fetchMock = vi.fn()
 
 function stubFetch() {
@@ -56,6 +57,11 @@ function stubFetch() {
             { path: 'electrical.batteries.0', instance: '0', bus_name: 'Batrium-BMS (Victron profile)', charger_input: false, voltage: 27.2, current: 15.6, soc: 0.79 },
             { path: 'electrical.batteries.1', instance: '1', bus_name: 'BlueSolar Charger MPPT 100/50 re', charger_input: true, voltage: 76.7, current: 0, soc: null },
             { path: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, voltage: 27.21, current: 267.6, soc: 0.79 },
+          ],
+          alternators: [
+            { instance: '1', current: null },
+            { instance: '2', current: 31.5 },
+            { instance: '12', current: 28.5 },
           ],
           detectors: {
             frozen: { ready: false, missing: 'Tick at least one engine' },
@@ -110,13 +116,14 @@ function stubFetch() {
 
 beforeEach(() => {
   dashboardPage = { id: 'page-1', widgets: [] }
+  savedPortInstance = ''
   fetchMock.mockReset()
   stubFetch()
   vi.stubGlobal('fetch', fetchMock)
 })
 
 function SectionHarness() {
-  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [] } }))
+  const [draft, setDraft] = useState<RegularSettingsDraft>(() => hydrateDraftFromSettings({ vessel: { engines: [], house_bank: null, batteries: [], alternators: { port_instance: savedPortInstance, starboard_instance: '' } } }))
   latestDraft = draft
   return <BoatUiSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
 }
@@ -161,6 +168,40 @@ describe('Settings -> Vessel: Engines and Power', () => {
 
     fireEvent.click(screen.getByLabelText('Include starboard in anomaly detection'))
     await waitFor(() => expect(pendingVessel().engines.map((e) => e.instance)).toEqual(['port']))
+  })
+
+  it('lists the discovered alternator instances with live current, and Not set', async () => {
+    renderSection()
+
+    const port = await screen.findByLabelText('Port alternator')
+    expect(within(port).getByRole('option', { name: 'Not set' })).toBeInTheDocument()
+    expect(within(port).getByRole('option', { name: '2 · 31.5 A' })).toBeInTheDocument()
+    expect(within(port).getByRole('option', { name: '12 · 28.5 A' })).toBeInTheDocument()
+    expect(within(port).getByRole('option', { name: '1 · --' })).toBeInTheDocument()
+    expect((port as HTMLSelectElement).value).toBe('')
+    expect(pendingVessel().alternators).toEqual({ port_instance: '', starboard_instance: '' })
+  })
+
+  it('picking port and starboard carries both instances into what a save sends', async () => {
+    renderSection()
+
+    fireEvent.change(await screen.findByLabelText('Port alternator'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Starboard alternator'), { target: { value: '12' } })
+
+    await waitFor(() => expect(pendingVessel().alternators).toEqual({ port_instance: '2', starboard_instance: '12' }))
+    // The instance chosen for one side cannot be chosen for the other.
+    expect(within(screen.getByLabelText('Starboard alternator')).getByRole('option', { name: '2 · 31.5 A' })).toBeDisabled()
+  })
+
+  it('keeps a saved alternator the boat no longer reports, marked not reporting', async () => {
+    savedPortInstance = '7'
+    renderSection()
+
+    const port = await screen.findByLabelText('Port alternator')
+    expect((port as HTMLSelectElement).value).toBe('7')
+    expect(within(port).getByRole('option', { name: '7 · not reporting' })).toBeInTheDocument()
+    // A live instance with no current reads "--"; a vanished one says so.
+    expect(within(port).getByRole('option', { name: '1 · --' })).toBeInTheDocument()
   })
 
   it('has no Save button of its own: the page Save bar owns it', async () => {
