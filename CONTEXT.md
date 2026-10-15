@@ -60,3 +60,13 @@ departure to the last arrival, and it owns the nights at anchor in between,
 which is where generator hours, water made and battery figures come from.
 Cruises do not nest.
 _Avoid_: trip, voyage, season.
+
+## Data sources
+
+**Data source**: where Helmcentral's live vessel telemetry comes from: either a
+SignalK server or a gateway on the NMEA 2000 backbone, read directly.
+_Avoid_: feed, connection, backend.
+
+**Gateway**: the hardware that bridges the NMEA 2000 backbone to a computer,
+over USB or the network.
+_Avoid_: adapter, interface, dongle.
